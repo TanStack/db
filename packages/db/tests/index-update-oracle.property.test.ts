@@ -9,13 +9,18 @@ import { eq } from '../src/query/builder/functions.js'
 import { PropRef } from '../src/query/ir.js'
 import { mockSyncCollectionOptions } from './utils'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
+  oracleProperty,
+  oracleReplayRequested,
   oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
 } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
+import { expectExactIdentities } from './index-identity-oracle'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter'
 import { indexTypes, withCollectionCleanup } from './index-update-support'
 import type { BaseIndex } from '../src/indexes/base-index.js'
 
@@ -135,18 +140,28 @@ function expectIndexMatchesModel(
     .sort(([left], [right]) => left - right)
     .flatMap(([, keys]) => [...keys].sort())
 
-  expect(index.keyCount).toBe(rows.size)
+  oracleAssertion('expectIndexMatchesModel', () =>
+    expect(index.keyCount).toBe(rows.size),
+  )
   // Complete returned arrays preserve key multiplicity and comparator order
   // without requiring a particular bucket or ordered-storage representation.
-  expect(index.takeFromStart(rows.size + 1)).toEqual(orderedKeys)
-  expect(index.takeReversedFromEnd(rows.size + 1)).toEqual(
-    [...orderedKeys].reverse(),
+  oracleAssertion('expectIndexMatchesModel', () =>
+    expect(index.takeFromStart(rows.size + 1)).toEqual(orderedKeys),
+  )
+  oracleAssertion('expectIndexMatchesModel', () =>
+    expect(index.takeReversedFromEnd(rows.size + 1)).toEqual(
+      [...orderedKeys].reverse(),
+    ),
   )
 
   for (const value of probeValues) {
     const expected = groups.get(value) ?? new Set()
-    expect(index.equalityLookup(value)).toEqual(expected)
-    expect(index.lookup(`eq`, value)).toEqual(expected)
+    oracleAssertion('expectIndexMatchesModel', () =>
+      expect(index.equalityLookup(value)).toEqual(expected),
+    )
+    oracleAssertion('expectIndexMatchesModel', () =>
+      expect(index.lookup(`eq`, value)).toEqual(expected),
+    )
   }
 
   for (const boundary of rangeBoundaries) {
@@ -157,47 +172,47 @@ function expectIndexMatchesModel(
       [...rows].filter(([, value]) => value <= boundary).map(([key]) => key),
     )
 
-    expect(index.rangeQuery({ from: boundary })).toEqual(keysAtOrAbove)
-    expect(index.rangeQuery({ to: boundary })).toEqual(keysAtOrBelow)
+    oracleAssertion('expectIndexMatchesModel', () =>
+      expect(index.rangeQuery({ from: boundary })).toEqual(keysAtOrAbove),
+    )
+    oracleAssertion('expectIndexMatchesModel', () =>
+      expect(index.rangeQuery({ to: boundary })).toEqual(keysAtOrBelow),
+    )
     // The model has no lower predicate here. An inclusivity flag cannot
     // exclude the minimum when the caller supplied no lower bound.
-    expect(index.rangeQuery({ to: boundary, fromInclusive: false })).toEqual(
-      keysAtOrBelow,
+    oracleAssertion('expectIndexMatchesModel', () =>
+      expect(index.rangeQuery({ to: boundary, fromInclusive: false })).toEqual(
+        keysAtOrBelow,
+      ),
     )
     // Supplying the lower bound changes the model predicate. Keys at that
     // bound are excluded, while later keys through the upper bound remain.
-    expect(
-      index.rangeQuery({ from: boundary, to: 2, fromInclusive: false }),
-    ).toEqual(
-      new Set(
-        [...rows]
-          .filter(([, value]) => value > boundary && value <= 2)
-          .map(([key]) => key),
+    oracleAssertion('expectIndexMatchesModel', () =>
+      expect(
+        index.rangeQuery({ from: boundary, to: 2, fromInclusive: false }),
+      ).toEqual(
+        new Set(
+          [...rows]
+            .filter(([, value]) => value > boundary && value <= 2)
+            .map(([key]) => key),
+        ),
       ),
     )
-    expect(index.rangeQueryReversed({ from: boundary })).toEqual(keysAtOrBelow)
-    expect(index.rangeQueryReversed({ to: boundary })).toEqual(keysAtOrAbove)
+    oracleAssertion('expectIndexMatchesModel', () =>
+      expect(index.rangeQueryReversed({ from: boundary })).toEqual(
+        keysAtOrBelow,
+      ),
+    )
+    oracleAssertion('expectIndexMatchesModel', () =>
+      expect(index.rangeQueryReversed({ to: boundary })).toEqual(keysAtOrAbove),
+    )
   }
-  expect(index.rangeQueryReversed({})).toEqual(new Set(rows.keys()))
+  oracleAssertion('expectIndexMatchesModel', () =>
+    expect(index.rangeQueryReversed({})).toEqual(new Set(rows.keys())),
+  )
 }
 
 type GroupRow<T> = Readonly<{ key: string; value: T; groupId: number }>
-
-// groupId is a model-only label for values equal under the comparator. The
-// production index receives value objects and a comparator, not this label.
-// Handles preserve exact identity; expected memberships come only from live
-// descriptors. Keep retired handles so a stale bucket cannot leave the query set.
-function expectExactIdentities<T>(
-  index: Pick<BaseIndex<string>, `equalityLookup`>,
-  rows: ReadonlyArray<GroupRow<T>>,
-  identities: ReadonlyArray<T>,
-): void {
-  for (const value of identities) {
-    expect(index.equalityLookup(value)).toEqual(
-      new Set(rows.filter((row) => row.value === value).map((row) => row.key)),
-    )
-  }
-}
 
 function expectCustomGroups(
   index: BaseIndex<string>,
@@ -211,106 +226,129 @@ function expectCustomGroups(
       (left.key < right.key ? -1 : left.key > right.key ? 1 : 0),
   )
   const forward = ordered.map(({ key }) => key)
-  expect(index.keyCount).toBe(rows.length)
-  expect(index.takeFromStart(rows.length + 1)).toEqual(forward)
-  expect(index.takeReversedFromEnd(rows.length + 1)).toEqual(
-    [...forward].reverse(),
+  oracleAssertion('expectCustomGroups', () =>
+    expect(index.keyCount).toBe(rows.length),
+  )
+  oracleAssertion('expectCustomGroups', () =>
+    expect(index.takeFromStart(rows.length + 1)).toEqual(forward),
+  )
+  oracleAssertion('expectCustomGroups', () =>
+    expect(index.takeReversedFromEnd(rows.length + 1)).toEqual(
+      [...forward].reverse(),
+    ),
   )
   expectExactIdentities(index, rows, identities)
   for (const row of rows) {
-    expect(index.rangeQuery({ from: row.value, to: row.value })).toEqual(
-      new Set(
-        rows
-          .filter((candidate) => candidate.groupId === row.groupId)
-          .map(({ key }) => key),
+    oracleAssertion('expectCustomGroups', () =>
+      expect(index.rangeQuery({ from: row.value, to: row.value })).toEqual(
+        new Set(
+          rows
+            .filter((candidate) => candidate.groupId === row.groupId)
+            .map(({ key }) => key),
+        ),
       ),
     )
   }
 }
 
 describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
-  test.each([20260930, undefined])(
-    `matches a reference model across valid operation sequences (seed %s)`,
-    async (seed) => {
-      const parameters = {
-        ...(seed === undefined
-          ? oraclePropertyOptions(100, `index-update.reference-model`)
-          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
-        examples: [
-          [
-            [
-              { type: `put`, key: `0`, value: 1 },
-              { type: `build`, entries: [[`1`, -1]] },
-              { type: `put`, key: `1`, value: 2 },
-            ],
-          ],
-          [
-            [
-              { type: `put`, key: `0`, value: 0 },
-              { type: `put`, key: `1`, value: -0 },
-            ],
-          ],
-        ],
+  const runIndexReferenceModel = async (actions: Array<IndexAction>) => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    const rows = new Map<string, IndexValue>()
+
+    expectIndexMatchesModel(index, rows)
+    // Required replacement/continuation cuts precede the shrinkable tail.
+    const required: Array<IndexAction> = [
+      { type: `put`, key: `old`, value: -3 },
+      { type: `build`, entries: [[`new`, 1]] },
+      { type: `put`, key: `new`, value: 2 },
+      { type: `delete`, key: `new` },
+      { type: `put`, key: `old`, value: 3 },
+      { type: `build`, entries: [] },
+      { type: `put`, key: `old`, value: -2 },
+    ]
+    for (const action of [...required, ...actions]) {
+      if (action.type === `put`) {
+        if (rows.has(action.key)) {
+          index.update(
+            action.key,
+            { value: rows.get(action.key) },
+            { value: action.value },
+          )
+        } else {
+          index.add(action.key, { value: action.value })
+        }
+        rows.set(action.key, action.value)
+      } else if (action.type === `build`) {
+        // Duplicate generated keys are resolved in the input world, not by
+        // assuming any policy for invalid duplicate build entries.
+        const replacement = new Map(action.entries)
+        index.build([...replacement].map(([key, value]) => [key, { value }]))
+        rows.clear()
+        for (const [key, value] of replacement) rows.set(key, value)
+      } else if (rows.has(action.key)) {
+        index.remove(action.key, { value: rows.get(action.key) })
+        rows.delete(action.key)
       }
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(
-          fc.array(arbitraryAction, { minLength: 1, maxLength: 100 }),
-          async (actions) => {
-            const index = new IndexType(1, new PropRef([`value`]))
-            const rows = new Map<string, IndexValue>()
 
-            expectIndexMatchesModel(index, rows)
-            // Required replacement/continuation cuts precede the shrinkable tail.
-            const required: Array<IndexAction> = [
-              { type: `put`, key: `old`, value: -3 },
-              { type: `build`, entries: [[`new`, 1]] },
-              { type: `put`, key: `new`, value: 2 },
-              { type: `delete`, key: `new` },
-              { type: `put`, key: `old`, value: 3 },
-              { type: `build`, entries: [] },
-              { type: `put`, key: `old`, value: -2 },
-            ]
-            for (const action of [...required, ...actions]) {
-              if (action.type === `put`) {
-                if (rows.has(action.key)) {
-                  index.update(
-                    action.key,
-                    { value: rows.get(action.key) },
-                    { value: action.value },
-                  )
-                } else {
-                  index.add(action.key, { value: action.value })
-                }
-                rows.set(action.key, action.value)
-              } else if (action.type === `build`) {
-                // Duplicate generated keys are resolved in the input world, not by
-                // assuming any policy for invalid duplicate build entries.
-                const replacement = new Map(action.entries)
-                index.build(
-                  [...replacement].map(([key, value]) => [key, { value }]),
-                )
-                rows.clear()
-                for (const [key, value] of replacement) rows.set(key, value)
-              } else if (rows.has(action.key)) {
-                index.remove(action.key, { value: rows.get(action.key) })
-                rows.delete(action.key)
-              }
+      expectIndexMatchesModel(index, rows)
+    }
 
-              expectIndexMatchesModel(index, rows)
-            }
+    const rebuilt = new IndexType(2, new PropRef([`value`]))
+    rebuilt.build([...rows].map(([key, value]) => [key, { value }] as const))
+    expectIndexMatchesModel(rebuilt, rows)
+  }
 
-            const rebuilt = new IndexType(2, new PropRef([`value`]))
-            rebuilt.build(
-              [...rows].map(([key, value]) => [key, { value }] as const),
-            )
-            expectIndexMatchesModel(rebuilt, rows)
-          },
-        ),
-        parameters,
-      )
+  // These original examples use mapped string keys. Fast-check cannot
+  // reconstruct their map context for native fixed-history admission, so keep
+  // them as direct inputs to the same independent helper.
+  test.skipIf(oracleReplayRequested()).each([
+    {
+      name: `replacement continuation`,
+      history: [
+        { type: `put`, key: `0`, value: 1 },
+        { type: `build`, entries: [[`1`, -1]] },
+        { type: `put`, key: `1`, value: 2 },
+      ] satisfies Array<IndexAction>,
     },
-  )
+    {
+      name: `signed zero values`,
+      history: [
+        { type: `put`, key: `0`, value: 0 },
+        { type: `put`, key: `1`, value: -0 },
+      ] satisfies Array<IndexAction>,
+    },
+  ])(`refines the fixed reference history $name`, ({ history }) => {
+    oracleRoute(`fixed history`)
+    return runIndexReferenceModel(history)
+  })
+
+  oracleProperty({
+    id: `index-update.reference-model`,
+    law: {
+      statement: `Each direct index action refines an independent source Map across lookups, traversal and rebuild.`,
+      authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+      limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
+    },
+    // What this oracle owns: the gap report judges every function in basic-index.ts and
+    // btree-index.ts by this file's tests.
+    owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+    histories: {
+      arbitrary: fc.array(arbitraryAction, { minLength: 1, maxLength: 100 }),
+      runs: 100,
+      fixedSeeds: [20260930],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `index-update.reference-model`,
+        plan,
+        observe,
+        () => runIndexReferenceModel(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
   test.each([
     [`duplicate key`, `takeFromStart`, [`a`, `a`]],
     [`wrong reverse order`, `takeReversedFromEnd`, [`a`, `b`]],
@@ -514,14 +552,24 @@ function expectExactMembership<T>(
   // index's normalized keys or its ordering comparator. IN membership follows
   // from source-value membership in the operand list, including an empty list.
   const groups = groupKeysByValue(rows)
-  expect(index.keyCount).toBe(rows.size)
+  oracleAssertion('expectExactMembership', () =>
+    expect(index.keyCount).toBe(rows.size),
+  )
   const traversedKeys = index.takeFromStart(rows.size + 1)
-  expect(traversedKeys).toHaveLength(rows.size)
-  expect(new Set(traversedKeys)).toEqual(new Set(rows.keys()))
+  oracleAssertion('expectExactMembership', () =>
+    expect(traversedKeys).toHaveLength(rows.size),
+  )
+  oracleAssertion('expectExactMembership', () =>
+    expect(new Set(traversedKeys)).toEqual(new Set(rows.keys())),
+  )
   for (const value of exactProbes) {
     const expected = groups.get(value) ?? new Set<string>()
-    expect(index.equalityLookup(value)).toEqual(expected)
-    expect(index.lookup(`eq`, value)).toEqual(expected)
+    oracleAssertion('expectExactMembership', () =>
+      expect(index.equalityLookup(value)).toEqual(expected),
+    )
+    oracleAssertion('expectExactMembership', () =>
+      expect(index.lookup(`eq`, value)).toEqual(expected),
+    )
   }
   for (const values of inProbes) {
     const expected = new Set(
@@ -529,8 +577,12 @@ function expectExactMembership<T>(
         .filter(([, value]) => values.includes(value))
         .map(([key]) => key),
     )
-    expect(index.inArrayLookup([...values])).toEqual(expected)
-    expect(index.lookup(`in`, [...values])).toEqual(expected)
+    oracleAssertion('expectExactMembership', () =>
+      expect(index.inArrayLookup([...values])).toEqual(expected),
+    )
+    oracleAssertion('expectExactMembership', () =>
+      expect(index.lookup(`in`, [...values])).toEqual(expected),
+    )
   }
 }
 
@@ -603,29 +655,37 @@ function expectNullishOrderedReads(
   // The public arrays preserve both ordering and multiplicity. A set-only
   // check would miss a repeated undefined owner or a skipped peer.
   for (const n of [1, 3, 10]) {
-    expect(index.takeFromStart(n)).toEqual(
-      ordered.slice(0, n).map(({ key }) => key),
+    oracleAssertion('expectNullishOrderedReads', () =>
+      expect(index.takeFromStart(n)).toEqual(
+        ordered.slice(0, n).map(({ key }) => key),
+      ),
     )
-    expect(index.takeReversedFromEnd(n)).toEqual(
-      [...ordered]
-        .reverse()
-        .slice(0, n)
-        .map(({ key }) => key),
+    oracleAssertion('expectNullishOrderedReads', () =>
+      expect(index.takeReversedFromEnd(n)).toEqual(
+        [...ordered]
+          .reverse()
+          .slice(0, n)
+          .map(({ key }) => key),
+      ),
     )
     for (const cursor of nullishProbeValues) {
       const cursorPosition = nullishPosition(cursor)
-      expect(index.take(n, cursor)).toEqual(
-        ordered
-          .filter(({ value }) => nullishPosition(value) > cursorPosition)
-          .slice(0, n)
-          .map(({ key }) => key),
+      oracleAssertion('expectNullishOrderedReads', () =>
+        expect(index.take(n, cursor)).toEqual(
+          ordered
+            .filter(({ value }) => nullishPosition(value) > cursorPosition)
+            .slice(0, n)
+            .map(({ key }) => key),
+        ),
       )
-      expect(index.takeReversed(n, cursor)).toEqual(
-        [...ordered]
-          .reverse()
-          .filter(({ value }) => nullishPosition(value) < cursorPosition)
-          .slice(0, n)
-          .map(({ key }) => key),
+      oracleAssertion('expectNullishOrderedReads', () =>
+        expect(index.takeReversed(n, cursor)).toEqual(
+          [...ordered]
+            .reverse()
+            .filter(({ value }) => nullishPosition(value) < cursorPosition)
+            .slice(0, n)
+            .map(({ key }) => key),
+        ),
       )
     }
   }
@@ -663,7 +723,9 @@ function expectNullishOrderedReads(
         })
         .map(({ key }) => key),
     )
-    expect(index.rangeQuery(options)).toEqual(expected)
+    oracleAssertion('expectNullishOrderedReads', () =>
+      expect(index.rangeQuery(options)).toEqual(expected),
+    )
   }
 }
 
@@ -698,10 +760,7 @@ function applyNullishAction(
   expectNullishMembership(index, rows)
 }
 
-// What this oracle owns: the gap report judges every function in basic-index.ts and
-// btree-index.ts by this file's tests.
 declareOracle({
-  owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
   check: [
     expectIndexMatchesModel,
     expectCustomGroups,
@@ -909,30 +968,42 @@ describe.each(indexTypes)(
       })
     })
 
-    test.each([20261012, undefined])(
-      `refines nullish membership histories (seed %s)`,
-      async (seed) => {
-        const campaignParameters =
-          seed === undefined
-            ? oraclePropertyOptions(100, `index-update.nullish-membership`)
-            : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })
-        oracleRoute(oracleRouteOf(campaignParameters))
-        await fc.assert(
-          fc.asyncProperty(
-            fc.array(arbitraryNullishAction, { minLength: 1, maxLength: 40 }),
-            async (actions) => {
-              const index = new IndexType(1, new PropRef([`value`]))
-              const rows = new Map<string, NullishIndexValue>()
-              expectNullishMembership(index, rows)
-              for (const action of actions) {
-                applyNullishAction(index, rows, action)
-              }
-            },
-          ),
-          campaignParameters,
-        )
+    const runNullishMembership = async (actions: Array<NullishIndexAction>) => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      expectNullishMembership(index, rows)
+      for (const action of actions) {
+        applyNullishAction(index, rows, action)
+      }
+    }
+
+    oracleProperty({
+      id: `index-update.nullish-membership`,
+      law: {
+        statement: `Null and undefined preserve exact membership and ordered-read semantics after each direct index action.`,
+        authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+        limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
       },
-    )
+      owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+      histories: {
+        arbitrary: fc.array(arbitraryNullishAction, {
+          minLength: 1,
+          maxLength: 40,
+        }),
+        runs: 100,
+        fixedSeeds: [20261012],
+      },
+      resolve: (history) => ({ history }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(
+          `index-update.nullish-membership`,
+          plan,
+          observe,
+          () => runNullishMembership(plan.history),
+        ),
+      check: forwardAssertionJudgment,
+    })
 
     test(`rejects a skipped undefined-to-null update`, () => {
       oracleRoute(`calibration`)
@@ -1748,301 +1819,284 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   // independently of comparator position; a later update crosses groups.
   // The fixed [0, 1] history reconstructs these distinctions. Invalid comparator
   // results and inconsistent comparator order are outside these two grammars.
-  test.each([20260930, undefined])(
-    `preserves exact equality while ordered traversal retains every row (seed %s)`,
-    async (seed) => {
-      const runParameters = {
-        ...(seed === undefined
-          ? oraclePropertyOptions(100, `index-update.exact-identity`)
-          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
-        examples: [[[0, 1]]],
+  const runExactIdentityHistory = async (groupIds: Array<number>) => {
+    // The first representative must retire while its group survives. Group
+    // 5 is distinct from every generated group even after shrinking. Fresh
+    // arrays distinguish exact identity from comparator-equal numeric values.
+    const rows = [groupIds[0]!, groupIds[0]!, 5, ...groupIds.slice(1)].map(
+      (groupId, position) => ({
+        key: String(position),
+        value: [groupId],
+        groupId,
+      }),
+    )
+    const identities = rows.map((row) => row.value)
+    const index = new IndexType(1, new PropRef([`value`]))
+
+    const expectMatchesModel = (
+      subject: BaseIndex<string>,
+      currentRows: typeof rows,
+    ) => {
+      const groups = new Map<number, typeof rows>()
+      for (const row of currentRows) {
+        const group = groups.get(row.groupId) ?? []
+        group.push(row)
+        groups.set(row.groupId, group)
       }
-      oracleRoute(oracleRouteOf(runParameters))
-      await fc.assert(
-        fc.asyncProperty(
-          fc.array(fc.integer({ min: 0, max: 4 }), {
-            minLength: 2,
-            maxLength: 20,
-          }),
-          async (groupIds) => {
-            // The first representative must retire while its group survives. Group
-            // 5 is distinct from every generated group even after shrinking. Fresh
-            // arrays distinguish exact identity from comparator-equal numeric values.
-            const rows = [
-              groupIds[0]!,
-              groupIds[0]!,
-              5,
-              ...groupIds.slice(1),
-            ].map((groupId, position) => ({
-              key: String(position),
-              value: [groupId],
-              groupId,
-            }))
-            const identities = rows.map((row) => row.value)
-            const index = new IndexType(1, new PropRef([`value`]))
-
-            const expectMatchesModel = (
-              subject: BaseIndex<string>,
-              currentRows: typeof rows,
-            ) => {
-              const groups = new Map<number, typeof rows>()
-              for (const row of currentRows) {
-                const group = groups.get(row.groupId) ?? []
-                group.push(row)
-                groups.set(row.groupId, group)
-              }
-              const orderedGroups = [...groups.values()].sort(
-                (left, right) => left[0]!.groupId - right[0]!.groupId,
-              )
-              const forward = orderedGroups.flatMap((group) =>
-                group.map((row) => row.key).sort(),
-              )
-              const reversed = [...orderedGroups].reverse().flatMap((group) =>
-                group
-                  .map((row) => row.key)
-                  .sort()
-                  .reverse(),
-              )
-
-              expect(subject.keyCount).toBe(currentRows.length)
-              expectExactIdentities(subject, currentRows, identities)
-              expect(subject.takeFromStart(currentRows.length + 1)).toEqual(
-                forward,
-              )
-              expect(
-                subject.takeReversedFromEnd(currentRows.length + 1),
-              ).toEqual(reversed)
-              for (const row of currentRows) {
-                expect(subject.equalityLookup(row.value)).toEqual(
-                  new Set([row.key]),
-                )
-                expect(
-                  subject.rangeQuery({ from: row.value, to: row.value }),
-                ).toEqual(
-                  new Set(
-                    currentRows
-                      .filter((candidate) => candidate.groupId === row.groupId)
-                      .map((candidate) => candidate.key),
-                  ),
-                )
-              }
-            }
-
-            expectMatchesModel(index, [])
-            for (const row of rows) index.add(row.key, { value: row.value })
-            expectMatchesModel(index, rows)
-
-            const removed = rows.shift()!
-            expect(rows.some((row) => row.groupId === removed.groupId)).toBe(
-              true,
-            )
-            index.remove(removed.key, removed)
-            expectMatchesModel(index, rows)
-
-            const changed = rows[0]!
-            const previous = { ...changed }
-            changed.groupId = 99
-            changed.value = [99]
-            identities.push(changed.value)
-            index.update(changed.key, previous, changed)
-            expectMatchesModel(index, rows)
-
-            // Reuse both a removed identity and an identity retired by update.
-            for (const retired of [removed, previous]) {
-              const reused = { ...retired, key: `reused-${retired.key}` }
-              index.add(reused.key, { value: reused.value })
-              rows.push(reused)
-              expectMatchesModel(index, rows)
-            }
-
-            const rebuilt = new IndexType(2, new PropRef([`value`]))
-            rebuilt.build(rows.map((row) => [row.key, row]))
-            expectMatchesModel(rebuilt, rows)
-
-            const replacement = {
-              key: `replacement`,
-              groupId: 100,
-              value: [100],
-            }
-            identities.push(replacement.value)
-            index.build([[replacement.key, { value: replacement.value }]])
-            expectMatchesModel(index, [replacement])
-            index.update(replacement.key, replacement, removed)
-            const resumed = { ...removed, key: replacement.key }
-            expectMatchesModel(index, [resumed])
-            index.remove(resumed.key, resumed)
-            expectMatchesModel(index, [])
-            index.add(removed.key, removed)
-            expectMatchesModel(index, [removed])
-            index.build([])
-            expectMatchesModel(index, [])
-            index.add(previous.key, previous)
-            expectMatchesModel(index, [previous])
-          },
-        ),
-        runParameters,
+      const orderedGroups = [...groups.values()].sort(
+        (left, right) => left[0]!.groupId - right[0]!.groupId,
       )
-    },
-  )
+      const forward = orderedGroups.flatMap((group) =>
+        group.map((row) => row.key).sort(),
+      )
+      const reversed = [...orderedGroups].reverse().flatMap((group) =>
+        group
+          .map((row) => row.key)
+          .sort()
+          .reverse(),
+      )
 
-  test.each([20260930, undefined])(
-    `matches an independent custom-comparator model (seed %s)`,
-    async (seed) => {
-      const parameters = {
-        ...(seed === undefined
-          ? oraclePropertyOptions(100, `index-update.custom-comparator`)
-          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
-        examples: [[[0, 1]]],
+      oracleAssertion('expectMatchesModel', () =>
+        expect(subject.keyCount).toBe(currentRows.length),
+      )
+      expectExactIdentities(subject, currentRows, identities)
+      oracleAssertion('expectMatchesModel', () =>
+        expect(subject.takeFromStart(currentRows.length + 1)).toEqual(forward),
+      )
+      oracleAssertion('expectMatchesModel', () =>
+        expect(subject.takeReversedFromEnd(currentRows.length + 1)).toEqual(
+          reversed,
+        ),
+      )
+      for (const row of currentRows) {
+        oracleAssertion('expectMatchesModel', () =>
+          expect(subject.equalityLookup(row.value)).toEqual(new Set([row.key])),
+        )
+        oracleAssertion('expectMatchesModel', () =>
+          expect(
+            subject.rangeQuery({ from: row.value, to: row.value }),
+          ).toEqual(
+            new Set(
+              currentRows
+                .filter((candidate) => candidate.groupId === row.groupId)
+                .map((candidate) => candidate.key),
+            ),
+          ),
+        )
       }
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(
-          fc.array(fc.integer({ min: 0, max: 4 }), {
-            minLength: 2,
-            maxLength: 20,
-          }),
-          async (generatedGroups) => {
-            for (const reverseInsertion of [false, true]) {
-              const groupIds = [
-                generatedGroups[0]!,
-                generatedGroups[0]!,
-                5,
-                ...generatedGroups.slice(1),
-              ]
-              const rows = groupIds.map((groupId, position) =>
-                Object.freeze({
-                  key: String(position).padStart(2, `0`),
-                  value: { groupId, position },
-                  groupId,
-                }),
-              )
-              const identities = rows.map((row) => row.value)
-              const index = new IndexType(
-                1,
-                new PropRef([`value`]),
-                undefined,
-                {
-                  compareFn: (left, right) =>
-                    (left as { groupId: number }).groupId -
-                    (right as { groupId: number }).groupId,
-                },
-              )
+    }
 
-              expectCustomGroups(index, [], identities)
-              // Preserve forward insertion and challenge it with a real permutation:
-              // key 01 precedes 00 in the reverse run, but expected order stays lexical.
-              for (const row of reverseInsertion ? [...rows].reverse() : rows)
-                index.add(row.key, { value: row.value })
-              expectCustomGroups(index, rows, identities)
+    expectMatchesModel(index, [])
+    for (const row of rows) index.add(row.key, { value: row.value })
+    expectMatchesModel(index, rows)
 
-              const removed = rows.shift()!
-              expect(rows.some((row) => row.groupId === removed.groupId)).toBe(
-                true,
-              )
-              index.remove(removed.key, { value: removed.value })
-              expectCustomGroups(index, rows, identities)
+    const removed = rows.shift()!
+    oracleAssertion('runExactIdentityHistory', () =>
+      expect(rows.some((row) => row.groupId === removed.groupId)).toBe(true),
+    )
+    index.remove(removed.key, removed)
+    expectMatchesModel(index, rows)
 
-              const previous = rows[0]!
-              const equalGroup = Object.freeze({
-                key: previous.key,
-                groupId: previous.groupId,
-                value: {
-                  groupId: previous.groupId,
-                  position: previous.value.position,
-                },
-              })
-              identities.push(equalGroup.value)
-              index.update(
-                previous.key,
-                { value: previous.value },
-                { value: equalGroup.value },
-              )
-              rows[0] = equalGroup
-              expectCustomGroups(index, rows, identities)
+    const changed = rows[0]!
+    const previous = { ...changed }
+    changed.groupId = 99
+    changed.value = [99]
+    identities.push(changed.value)
+    index.update(changed.key, previous, changed)
+    expectMatchesModel(index, rows)
 
-              const changed = Object.freeze({
-                key: previous.key,
-                groupId: 99,
-                value: { groupId: 99, position: previous.value.position },
-              })
-              identities.push(changed.value)
-              index.update(
-                previous.key,
-                { value: equalGroup.value },
-                { value: changed.value },
-              )
-              rows[0] = changed
-              expectCustomGroups(index, rows, identities)
+    // Reuse both a removed identity and an identity retired by update.
+    for (const retired of [removed, previous]) {
+      const reused = { ...retired, key: `reused-${retired.key}` }
+      index.add(reused.key, { value: reused.value })
+      rows.push(reused)
+      expectMatchesModel(index, rows)
+    }
 
-              for (const [ordinal, retired] of [
-                removed,
-                previous,
-                equalGroup,
-              ].entries()) {
-                const reused = Object.freeze({
-                  ...retired,
-                  key: `reused-${ordinal}-${retired.key}`,
-                })
-                index.add(reused.key, { value: reused.value })
-                rows.push(reused)
-                expectCustomGroups(index, rows, identities)
-              }
+    const rebuilt = new IndexType(2, new PropRef([`value`]))
+    rebuilt.build(rows.map((row) => [row.key, row]))
+    expectMatchesModel(rebuilt, rows)
 
-              index.build([[changed.key, { value: changed.value }]])
-              expectCustomGroups(index, [changed], identities)
-              index.update(
-                changed.key,
-                { value: changed.value },
-                { value: removed.value },
-              )
-              const resumed = Object.freeze({ ...removed, key: changed.key })
-              expectCustomGroups(index, [resumed], identities)
-              index.remove(resumed.key, { value: resumed.value })
-              expectCustomGroups(index, [], identities)
-              index.add(removed.key, { value: removed.value })
-              expectCustomGroups(index, [removed], identities)
-              index.build([])
-              expectCustomGroups(index, [], identities)
-              index.add(previous.key, { value: previous.value })
-              expectCustomGroups(index, [previous], identities)
-            }
-          },
-        ),
-        parameters,
-      )
+    const replacement = {
+      key: `replacement`,
+      groupId: 100,
+      value: [100],
+    }
+    identities.push(replacement.value)
+    index.build([[replacement.key, { value: replacement.value }]])
+    expectMatchesModel(index, [replacement])
+    index.update(replacement.key, replacement, removed)
+    const resumed = { ...removed, key: replacement.key }
+    expectMatchesModel(index, [resumed])
+    index.remove(resumed.key, resumed)
+    expectMatchesModel(index, [])
+    index.add(removed.key, removed)
+    expectMatchesModel(index, [removed])
+    index.build([])
+    expectMatchesModel(index, [])
+    index.add(previous.key, previous)
+    expectMatchesModel(index, [previous])
+  }
+
+  oracleProperty({
+    id: `index-update.exact-identity`,
+    law: {
+      statement: `Comparator-equal values retain exact identity lookup membership through retirement, update and rebuild.`,
+      authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+      limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
     },
-  )
-})
-
-test(`retired-identity calibration shrinks and replays the same semantic failure`, () => {
-  oracleRoute(`calibration`)
-  const property = fc.property(
-    fc.array(fc.integer({ min: 0, max: 20 }), { minLength: 1, maxLength: 8 }),
-    (keys) => {
-      const identity = {}
-      expectExactIdentities(
-        { equalityLookup: () => new Set(keys.map(String)) },
-        [],
-        [identity],
-      )
+    owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+    histories: {
+      arbitrary: fc.array(fc.integer({ min: 0, max: 4 }), {
+        minLength: 2,
+        maxLength: 20,
+      }),
+      runs: 100,
+      fixedSeeds: [20260930],
+      fixed: [{ name: `distinct groups`, history: [0, 1] }],
     },
-  )
-  const failed = fc.check(property, { seed: 303108, numRuns: 1 })
-  expect(failed.failed).toBe(true)
-  expect(String(failed.errorInstance)).toMatch(/expected/)
-  expect(failed.counterexample).toEqual([[0]])
-  expect(failed.counterexamplePath).toBe(`0:0:0`)
-  if (failed.counterexamplePath === null)
-    throw new Error(`Missing calibration replay path`)
-  const replay = fc.check(property, {
-    seed: failed.seed,
-    path: failed.counterexamplePath,
-    numRuns: 1,
-    endOnFailure: true,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `index-update.exact-identity`,
+        plan,
+        observe,
+        () => runExactIdentityHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
   })
-  expect(replay.failed).toBe(true)
-  expect(String(replay.errorInstance)).toMatch(/expected/)
-  expect(replay.counterexample).toEqual(failed.counterexample)
+
+  const runCustomComparatorHistory = async (generatedGroups: Array<number>) => {
+    for (const reverseInsertion of [false, true]) {
+      const groupIds = [
+        generatedGroups[0]!,
+        generatedGroups[0]!,
+        5,
+        ...generatedGroups.slice(1),
+      ]
+      const rows = groupIds.map((groupId, position) =>
+        Object.freeze({
+          key: String(position).padStart(2, `0`),
+          value: { groupId, position },
+          groupId,
+        }),
+      )
+      const identities = rows.map((row) => row.value)
+      const index = new IndexType(1, new PropRef([`value`]), undefined, {
+        compareFn: (left, right) =>
+          (left as { groupId: number }).groupId -
+          (right as { groupId: number }).groupId,
+      })
+
+      expectCustomGroups(index, [], identities)
+      // Preserve forward insertion and challenge it with a real permutation:
+      // key 01 precedes 00 in the reverse run, but expected order stays lexical.
+      for (const row of reverseInsertion ? [...rows].reverse() : rows)
+        index.add(row.key, { value: row.value })
+      expectCustomGroups(index, rows, identities)
+
+      const removed = rows.shift()!
+      oracleAssertion('runCustomComparatorHistory', () =>
+        expect(rows.some((row) => row.groupId === removed.groupId)).toBe(true),
+      )
+      index.remove(removed.key, { value: removed.value })
+      expectCustomGroups(index, rows, identities)
+
+      const previous = rows[0]!
+      const equalGroup = Object.freeze({
+        key: previous.key,
+        groupId: previous.groupId,
+        value: {
+          groupId: previous.groupId,
+          position: previous.value.position,
+        },
+      })
+      identities.push(equalGroup.value)
+      index.update(
+        previous.key,
+        { value: previous.value },
+        { value: equalGroup.value },
+      )
+      rows[0] = equalGroup
+      expectCustomGroups(index, rows, identities)
+
+      const changed = Object.freeze({
+        key: previous.key,
+        groupId: 99,
+        value: { groupId: 99, position: previous.value.position },
+      })
+      identities.push(changed.value)
+      index.update(
+        previous.key,
+        { value: equalGroup.value },
+        { value: changed.value },
+      )
+      rows[0] = changed
+      expectCustomGroups(index, rows, identities)
+
+      for (const [ordinal, retired] of [
+        removed,
+        previous,
+        equalGroup,
+      ].entries()) {
+        const reused = Object.freeze({
+          ...retired,
+          key: `reused-${ordinal}-${retired.key}`,
+        })
+        index.add(reused.key, { value: reused.value })
+        rows.push(reused)
+        expectCustomGroups(index, rows, identities)
+      }
+
+      index.build([[changed.key, { value: changed.value }]])
+      expectCustomGroups(index, [changed], identities)
+      index.update(
+        changed.key,
+        { value: changed.value },
+        { value: removed.value },
+      )
+      const resumed = Object.freeze({ ...removed, key: changed.key })
+      expectCustomGroups(index, [resumed], identities)
+      index.remove(resumed.key, { value: resumed.value })
+      expectCustomGroups(index, [], identities)
+      index.add(removed.key, { value: removed.value })
+      expectCustomGroups(index, [removed], identities)
+      index.build([])
+      expectCustomGroups(index, [], identities)
+      index.add(previous.key, { value: previous.value })
+      expectCustomGroups(index, [previous], identities)
+    }
+  }
+
+  oracleProperty({
+    id: `index-update.custom-comparator`,
+    law: {
+      statement: `A custom comparator determines group order while live source identities determine exact membership.`,
+      authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
+      limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
+    },
+    owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
+    histories: {
+      arbitrary: fc.array(fc.integer({ min: 0, max: 4 }), {
+        minLength: 2,
+        maxLength: 20,
+      }),
+      runs: 100,
+      fixedSeeds: [20260930],
+      fixed: [{ name: `distinct groups`, history: [0, 1] }],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `index-update.custom-comparator`,
+        plan,
+        observe,
+        () => runCustomComparatorHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**

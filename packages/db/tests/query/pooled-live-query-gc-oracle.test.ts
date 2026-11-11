@@ -7,14 +7,13 @@ import { BaseQueryBuilder, Query } from '../../src/query/builder/index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { CollectionHasSubscribersError } from '../../src/errors.js'
+import { oracleProperty, oracleRoute } from '../oracle-config.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../oracle-config.js'
-import { createOracleReach } from '../oracle-reach.js'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
   captureMicrotaskErrors,
@@ -78,19 +77,19 @@ async function expectPooledReleaseMatchesCollection(
 ): Promise<void> {
   const expected = await releaseTime(compiled(gcTime, subscribe), 400)
   const actual = await releaseTime(pooled(gcTime, subscribe), 400)
-  if (expected === undefined) expect(actual).toBeUndefined()
+  if (expected === undefined)
+    oracleAssertion(`expectPooledReleaseMatchesCollection comparison 1`, () =>
+      expect(actual).toBeUndefined(),
+    )
   // The Collection releases its source one cleanup-queue tick after
   // its GC timer fires; the partition releases in the timer itself.
-  else expect([expected - 1, expected]).toContain(actual)
+  else
+    oracleAssertion(`expectPooledReleaseMatchesCollection comparison 2`, () =>
+      expect([expected - 1, expected]).toContain(actual),
+    )
 }
 
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/live-query-observer.ts#createLiveQueryObserver',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/pooled-live-query.ts#createPooledLiveQuery',
-  ],
   check: [
     expectPooledReleaseMatchesCollection,
     checkCallbackHistory,
@@ -165,7 +164,7 @@ async function checkCallbackHistory(
   path: CallbackPath,
   boundary: CallbackBoundary,
   history: CallbackHistory,
-  reach: ReturnType<typeof createOracleReach<string>>,
+  reach: { reach: (state: string) => void },
 ): Promise<void> {
   const expected = expectedCallbackHistory(history, boundary)
   const gate = createDeferred<void>()
@@ -228,7 +227,9 @@ async function checkCallbackHistory(
     }
     // Prime the public snapshot before cleanup; a missed notify must not be
     // repaired by the first read accidentally observing the source's status.
-    expect(observer.getSnapshot().status).toBe(`ready`)
+    oracleAssertion(`checkCallbackHistory comparison 3`, () =>
+      expect(observer.getSnapshot().status).toBe(`ready`),
+    )
   }
 
   await withOracleCleanup(async () => {
@@ -244,10 +245,19 @@ async function checkCallbackHistory(
 
     // First-return cut: only successful calls return ownership handles. Source
     // acquisition has resumed on both paths and remains until query release.
-    expect(failed.threw).toBe(boundary === `bootstrap` && history.throws)
-    if (failed.threw) expect(failed.error).toBe(failure)
-    expect(stops).toHaveLength(expected.returnedOwners)
-    expect(source.subscriberCount).toBe(1)
+    oracleAssertion(`checkCallbackHistory comparison 4`, () =>
+      expect(failed.threw).toBe(boundary === `bootstrap` && history.throws),
+    )
+    if (failed.threw)
+      oracleAssertion(`checkCallbackHistory comparison 5`, () =>
+        expect(failed.error).toBe(failure),
+      )
+    oracleAssertion(`checkCallbackHistory comparison 6`, () =>
+      expect(stops).toHaveLength(expected.returnedOwners),
+    )
+    oracleAssertion(`checkCallbackHistory comparison 7`, () =>
+      expect(source.subscriberCount).toBe(1),
+    )
     reach.reach(`first-return`)
 
     if (boundary === `cleanup`) {
@@ -259,45 +269,65 @@ async function checkCallbackHistory(
       )
       // Adapter cleanup is held. Every still-subscribed peer already owes its
       // terminal snapshot and callback at cleanup start, before settlement.
-      expect(source.status).toBe(`ready`)
+      oracleAssertion(`checkCallbackHistory comparison 8`, () =>
+        expect(source.status).toBe(`ready`),
+      )
       for (const observer of observers)
-        expect(
-          observer.getSnapshot().status,
+        oracleAssertion(
           `cleanup start: every admitted observer receives terminal status`,
-        ).toBe(expected.terminalStatus)
-      expect(notifications).toEqual(
-        observers.map(() => expected.terminalNotifications),
+          () =>
+            expect(
+              observer.getSnapshot().status,
+              `cleanup start: every admitted observer receives terminal status`,
+            ).toBe(expected.terminalStatus),
+        )
+      oracleAssertion(`checkCallbackHistory comparison 10`, () =>
+        expect(notifications).toEqual(
+          observers.map(() => expected.terminalNotifications),
+        ),
       )
       reach.reach(`cleanup-start`)
       gate.resolve()
       const result = await cleanupSettlement
       await vi.advanceTimersByTimeAsync(1)
       for (const observer of observers)
-        expect(observer.getSnapshot().status).toBe(expected.terminalStatus)
+        oracleAssertion(`checkCallbackHistory comparison 11`, () =>
+          expect(observer.getSnapshot().status).toBe(expected.terminalStatus),
+        )
       const reported = [
         ...uncaught.errors,
         ...(result.threw ? [result.error] : []),
       ]
-      expect(reported).toEqual(history.throws ? [failure] : [])
+      oracleAssertion(`checkCallbackHistory comparison 12`, () =>
+        expect(reported).toEqual(history.throws ? [failure] : []),
+      )
       reach.reach(`cleanup-settlement`)
     } else {
       // A failed bootstrap cannot poison a sibling's ownership. Release only
       // the possibly successful failure-site observer before the peer cut.
       for (const stop of stops) if (!peerStops.includes(stop)) stop()
       await vi.advanceTimersByTimeAsync(100)
-      expect(
-        source.subscriberCount,
+      oracleAssertion(
         `bootstrap release: only surviving peers retain source ownership`,
-      ).toBe(history.peers > 0 ? 1 : 0)
+        () =>
+          expect(
+            source.subscriberCount,
+            `bootstrap release: only surviving peers retain source ownership`,
+          ).toBe(history.peers > 0 ? 1 : 0),
+      )
     }
 
     for (const stop of stops) stop()
     for (const observer of observers) observer.dispose()
     await vi.advanceTimersByTimeAsync(100)
-    expect(
-      source.subscriberCount,
+    oracleAssertion(
       `final release: no failed or returned observer retains source ownership`,
-    ).toBe(expected.sourceAfterRelease)
+      () =>
+        expect(
+          source.subscriberCount,
+          `final release: no failed or returned observer retains source ownership`,
+        ).toBe(expected.sourceAfterRelease),
+    )
     reach.reach(`release`)
   }, [
     () => withOracleCleanup(() => {}, stops),
@@ -313,6 +343,115 @@ async function checkCallbackHistory(
   ])
 }
 
+type LateCleanupHistory = {
+  throws: boolean
+  cause: `error` | `undefined`
+  peers: number
+}
+const lateCleanupHistory: fc.Arbitrary<LateCleanupHistory> = fc.record({
+  throws: fc.boolean(),
+  cause: fc.constantFrom(`error` as const, `undefined` as const),
+  peers: fc.integer({ min: 1, max: 3 }),
+})
+async function runLateCleanupHistory(
+  history: LateCleanupHistory,
+  reached: (state: string) => void,
+): Promise<void> {
+  const gate = createDeferred<void>()
+  const source = createCollection<Row>({
+    getKey: (row) => row.id,
+    gcTime: 0,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return { cleanup: () => gate.promise }
+      },
+    },
+  })
+  source.startSyncImmediate()
+  let statusLeases = 0
+  let statusReleases = 0
+  const on = source.on.bind(source)
+  source.on = (event, listener) => {
+    const off = on(event, listener)
+    if (event !== `status:change`) return off
+    statusLeases++
+    let active = true
+    return () => {
+      statusReleases++
+      if (active) {
+        active = false
+        statusLeases--
+        off()
+      }
+    }
+  }
+  const builder = new Query().from({ r: source }).where(({ r }) => eq(r.g, `x`))
+  if (!(builder instanceof BaseQueryBuilder)) throw new Error(`not a builder`)
+  const view = createPooledLiveQuery(builder, { gcTime: 1 })!
+  const failure =
+    history.cause === `error` ? new Error(`status listener`) : undefined
+  const stops = Array.from({ length: history.peers }, () =>
+    view.on(`status:change`, () => {}),
+  )
+  stops.push(
+    view.on(`status:change`, () => {
+      if (history.throws) throw failure
+    }),
+  )
+  let subscription: ReturnType<typeof view.subscribeChanges> | undefined
+  try {
+    await vi.advanceTimersByTimeAsync(100)
+    oracleAssertion(`runLateCleanupHistory comparison 15`, () =>
+      expect(source.subscriberCount).toBe(0),
+    )
+    oracleAssertion(`partition released before cleanup`, () =>
+      expect(statusLeases, `partition released before cleanup`).toBe(0),
+    )
+    const pending = source.cleanup()
+    const releasesBeforeRegistration = statusReleases
+    let result: { threw: boolean; error?: unknown } = { threw: false }
+    try {
+      subscription = view.subscribeChanges(() => {})
+    } catch (error) {
+      result = { threw: true, error }
+    }
+    reached(history.throws ? `throw` : `return`)
+    if (history.cause === `undefined`) reached(`undefined-cause`)
+    oracleAssertion(`runLateCleanupHistory comparison 17`, () =>
+      expect(result.threw).toBe(history.throws),
+    )
+    if (history.throws)
+      oracleAssertion(`runLateCleanupHistory comparison 18`, () =>
+        expect(result.error).toBe(failure),
+      )
+    oracleAssertion(`failed/terminal registration owns no channel`, () =>
+      expect(statusLeases, `failed/terminal registration owns no channel`).toBe(
+        0,
+      ),
+    )
+    oracleAssertion(`one late channel needs one release invocation`, () =>
+      expect(
+        statusReleases - releasesBeforeRegistration,
+        `one late channel needs one release invocation`,
+      ).toBe(1),
+    )
+    oracleAssertion(`runLateCleanupHistory comparison 21`, () =>
+      expect(source.subscriberCount).toBe(0),
+    )
+    oracleAssertion(`runLateCleanupHistory comparison 22`, () =>
+      expect(view.status).toBe(`crashed`),
+    )
+    gate.resolve()
+    await pending
+  } finally {
+    stops.forEach((stop) => stop())
+    subscription?.unsubscribe()
+    gate.resolve()
+    await source.cleanup()
+  }
+}
+
 describe(`pooled live query gcTime`, () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
@@ -322,52 +461,79 @@ describe(`pooled live query gcTime`, () => {
       boundary === `bootstrap`
         ? `pooled-live-query.bootstrap-ownership`
         : `pooled-live-query.cleanup-peers`
-    const title =
-      boundary === `bootstrap`
-        ? `bootstrap ownership after callback failure`
-        : `cleanup status reaches every observer`
-    for (const path of [`ordinary`, `pooled`] as const) {
-      for (const campaign of [`fixed`, `random`] as const) {
-        it(`${title}: ${path} (${campaign})`, async () => {
-          const states = [
-            path,
-            `return`,
-            `throw`,
-            `healthy-peer`,
-            `no-peer`,
-            `throw-before-peer`,
-            `throw-after-peer`,
-            `undefined-cause`,
-            `first-return`,
-            `release`,
-            ...(boundary === `cleanup`
-              ? [`cleanup-start`, `cleanup-settlement`]
-              : []),
-          ]
-          const reach = createOracleReach(property, states)
-          try {
-            const parameters =
-              campaign === `fixed`
-                ? oracleFixedSeed(2229, { numRuns: oracleRuns(80) })
-                : oraclePropertyOptions(80, property)
-            oracleRoute(oracleRouteOf(parameters))
-            await fc.assert(
-              fc.asyncProperty(callbackHistory, async (history) => {
-                reach.beginHistory()
-                await checkCallbackHistory(path, boundary, history, reach)
-              }),
-              parameters,
-            )
-            reach.assertReached()
-          } finally {
-            console.info(
-              `${property} ${path} ${campaign}`,
-              Object.fromEntries(reach.counts()),
-            )
-          }
-        })
-      }
-    }
+    const common = [
+      `ordinary`,
+      `pooled`,
+      `first-return`,
+      `release`,
+      ...(boundary === `cleanup`
+        ? [`cleanup-start`, `cleanup-settlement`]
+        : []),
+    ]
+    const states = [
+      ...common,
+      `return`,
+      `throw`,
+      `healthy-peer`,
+      `no-peer`,
+      `throw-before-peer`,
+      `throw-after-peer`,
+      `undefined-cause`,
+    ]
+    oracleProperty({
+      id: property,
+      law: {
+        statement: `Observer callback failure transfers no unreturned ownership and preserves every healthy peer's terminal cleanup notification.`,
+        authority: `The observer ownership and ARCHITECTURE.md pooled substitution/cleanup laws stated above.`,
+        limits: `The unchanged bounded synchronous core bootstrap/cleanup callback grammar on ordinary and pooled receiving paths.`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/live-query-observer.ts#createLiveQueryObserver',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/pooled-live-query.ts#createPooledLiveQuery',
+      ],
+      histories: {
+        arbitrary: callbackHistory,
+        runs: 80,
+        fixedSeeds: [2229],
+        states,
+        constructed: [
+          {
+            name: `returned observer without peers`,
+            enters: [...common, `return`, `no-peer`],
+            build: (generated) => ({ ...generated, throws: false, peers: 0 }),
+          },
+          ...([`before`, `after`] as const).map((position) => ({
+            name: `throw ${position} healthy peers`,
+            enters: [
+              ...common,
+              `throw`,
+              `healthy-peer`,
+              `throw-${position}-peer`,
+              `undefined-cause`,
+            ],
+            build: (generated: CallbackHistory): CallbackHistory => ({
+              ...generated,
+              throws: true,
+              peers: Math.max(1, generated.peers),
+              position,
+              cause: `undefined`,
+            }),
+          })),
+        ],
+      },
+      resolve: (history) => ({ history }),
+      model: recordedAssertionJudgment,
+      driver: (plan: { history: CallbackHistory }, observe) =>
+        recordAssertionJudgment(property, plan, observe, async () => {
+          for (const path of [`ordinary`, `pooled`] as const)
+            await checkCallbackHistory(path, boundary, plan.history, {
+              reach: (state) => observe(`reach`, state),
+            })
+        }),
+      check: forwardAssertionJudgment,
+    })
   }
 
   /**
@@ -378,121 +544,49 @@ describe(`pooled live query gcTime`, () => {
    * Releasing the partition before cleanup is essential: a retained partition
    * receives cleanup at its original registration, not during registration.
    */
-  for (const campaign of [`fixed`, `random`] as const) {
-    it(`releases late cleanup registration channels (${campaign})`, async () => {
-      const reach = createOracleReach(`pooled-late-cleanup`, [
-        `return`,
-        `throw`,
-        `undefined-cause`,
-      ])
-      const parameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(2229, { numRuns: oracleRuns(40) })
-          : oraclePropertyOptions(40, `pooled-live-query.late-cleanup`)
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(
-          fc.record({
-            throws: fc.boolean(),
-            cause: fc.constantFrom(`error` as const, `undefined` as const),
-            peers: fc.integer({ min: 1, max: 3 }),
+  oracleProperty({
+    id: `pooled-live-query.late-cleanup`,
+    law: {
+      statement: `Late cleanup notification during registration releases its source status channel whether the application callback returns or throws.`,
+      authority: `The failed-construction ownership and synchronous late cleanup callback contract stated above.`,
+      limits: `The unchanged bounded pooled core registration grammar after partition release with controlled adapter cleanup.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/live-query-observer.ts#createLiveQueryObserver',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/pooled-live-query.ts#createPooledLiveQuery',
+    ],
+    histories: {
+      arbitrary: lateCleanupHistory,
+      runs: 40,
+      fixedSeeds: [2229],
+      states: [`return`, `throw`, `undefined-cause`],
+      constructed: [
+        {
+          name: `returned registration`,
+          enters: [`return`],
+          build: (generated) => ({ ...generated, throws: false }),
+        },
+        {
+          name: `undefined callback failure`,
+          enters: [`throw`, `undefined-cause`],
+          build: (generated): LateCleanupHistory => ({
+            ...generated,
+            throws: true,
+            cause: `undefined`,
           }),
-          async (history) => {
-            reach.beginHistory()
-            const gate = createDeferred<void>()
-            const source = createCollection<Row>({
-              getKey: (row) => row.id,
-              gcTime: 0,
-              sync: {
-                sync: ({ markReady }) => {
-                  markReady()
-                  return { cleanup: () => gate.promise }
-                },
-              },
-            })
-            source.startSyncImmediate()
-            let statusLeases = 0
-            let statusReleases = 0
-            const on = source.on.bind(source)
-            source.on = (event, listener) => {
-              const off = on(event, listener)
-              if (event !== `status:change`) return off
-              statusLeases++
-              let active = true
-              return () => {
-                statusReleases++
-                if (active) {
-                  active = false
-                  statusLeases--
-                  off()
-                }
-              }
-            }
-            const builder = new Query()
-              .from({ r: source })
-              .where(({ r }) => eq(r.g, `x`))
-            if (!(builder instanceof BaseQueryBuilder))
-              throw new Error(`not a builder`)
-            const view = createPooledLiveQuery(builder, { gcTime: 1 })!
-            const failure =
-              history.cause === `error`
-                ? new Error(`status listener`)
-                : undefined
-            const stops = Array.from({ length: history.peers }, () =>
-              view.on(`status:change`, () => {}),
-            )
-            stops.push(
-              view.on(`status:change`, () => {
-                if (history.throws) throw failure
-              }),
-            )
-            let subscription:
-              ReturnType<typeof view.subscribeChanges> | undefined
-            try {
-              await vi.advanceTimersByTimeAsync(100)
-              expect(source.subscriberCount).toBe(0)
-              expect(statusLeases, `partition released before cleanup`).toBe(0)
-              const pending = source.cleanup()
-              const releasesBeforeRegistration = statusReleases
-              let result: { threw: boolean; error?: unknown } = { threw: false }
-              try {
-                subscription = view.subscribeChanges(() => {})
-              } catch (error) {
-                result = { threw: true, error }
-              }
-              reach.reach(history.throws ? `throw` : `return`)
-              if (history.cause === `undefined`) reach.reach(`undefined-cause`)
-              expect(result.threw).toBe(history.throws)
-              if (history.throws) expect(result.error).toBe(failure)
-              expect(
-                statusLeases,
-                `failed/terminal registration owns no channel`,
-              ).toBe(0)
-              expect(
-                statusReleases - releasesBeforeRegistration,
-                `one late channel needs one release invocation`,
-              ).toBe(1)
-              expect(source.subscriberCount).toBe(0)
-              expect(view.status).toBe(`crashed`)
-              gate.resolve()
-              await pending
-            } finally {
-              stops.forEach((stop) => stop())
-              subscription?.unsubscribe()
-              gate.resolve()
-              await source.cleanup()
-            }
-          },
-        ),
-        parameters,
-      )
-      reach.assertReached()
-      console.info(
-        `pooled-late-cleanup ${campaign}`,
-        Object.fromEntries(reach.counts()),
-      )
-    })
-  }
+        },
+      ],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { history: LateCleanupHistory }, observe) =>
+      recordAssertionJudgment(`late cleanup ownership`, plan, observe, () =>
+        runLateCleanupHistory(plan.history, (state) => observe(`reach`, state)),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   for (const gcTime of [1, 100, 0, Number.POSITIVE_INFINITY]) {
     for (const subscribe of [true, false]) {
@@ -603,9 +697,7 @@ type CleanupTrace = Array<string>
 async function runCleanupHistory(
   path: CleanupPath,
   history: CleanupHistory,
-  reach?: ReturnType<
-    typeof createOracleReach<(typeof cleanupReachStates)[number]>
-  >,
+  reach?: { reach: (state: (typeof cleanupReachStates)[number]) => void },
 ): Promise<CleanupTrace> {
   const trace: CleanupTrace = []
   const source = createCollection(
@@ -675,8 +767,10 @@ async function runCleanupHistory(
       // cleanup fulfilled shows `cleaned-up` with no rows (law 14,
       // maintainer decision).
       if (entry.cleaned)
-        expect(shown, `${label} view ${index}: own cleanup`).toBe(
-          `cleaned-up []`,
+        oracleAssertion(`${label} view ${index}: own cleanup`, () =>
+          expect(shown, `${label} view ${index}: own cleanup`).toBe(
+            `cleaned-up []`,
+          ),
         )
       trace.push(`${label} view ${index}: ${shown}`)
     })
@@ -704,8 +798,10 @@ async function runCleanupHistory(
             ? `rejected: a live query reads it`
             : `rejected: ${String(error)}`,
       )
-    expect(outcome, `cleanup of view ${index}: model`).toBe(
-      rejects ? `rejected: a live query reads it` : `fulfilled`,
+    oracleAssertion(`cleanup of view ${index}: model`, () =>
+      expect(outcome, `cleanup of view ${index}: model`).toBe(
+        rejects ? `rejected: a live query reads it` : `fulfilled`,
+      ),
     )
     trace.push(`cleanup view ${index}: ${outcome}`)
     if (outcome !== `fulfilled`) {
@@ -763,7 +859,10 @@ async function expectPooledCleanupMatchesOrdinary(
   reach?: Parameters<typeof runCleanupHistory>[2],
 ): Promise<void> {
   const pooledTrace = await runCleanupHistory(`pooled`, history, reach)
-  expect(pooledTrace).toEqual(await runCleanupHistory(`ordinary`, history))
+  const ordinaryTrace = await runCleanupHistory(`ordinary`, history)
+  oracleAssertion(`expectPooledCleanupMatchesOrdinary comparison 25`, () =>
+    expect(pooledTrace).toEqual(ordinaryTrace),
+  )
 }
 
 describe(`pooled live query cleanup admission`, () => {
@@ -791,22 +890,47 @@ describe(`pooled live query cleanup admission`, () => {
     await expectPooledCleanupMatchesOrdinary(fixedHistory)
   })
 
-  for (const campaign of [`fixed`, `random`] as const) {
-    it(`matches a live-query Collection's cleanup admission (${campaign})`, async () => {
-      const reach = createOracleReach(property, cleanupReachStates)
-      const campaignParameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(2168, { numRuns: oracleRuns(80) })
-          : oraclePropertyOptions(80, property)
-      oracleRoute(oracleRouteOf(campaignParameters))
-      await fc.assert(
-        fc.asyncProperty(cleanupHistory, async (history) => {
-          reach.beginHistory()
-          await expectPooledCleanupMatchesOrdinary(history, reach)
+  oracleProperty({
+    id: property,
+    law: {
+      statement: `Rejected cleanup preserves a pooled view and its partition share; ending its reader permits cleanup, as for the equivalent ordinary Collection.`,
+      authority: `ARCHITECTURE.md law 14 and Pooled live queries, stated above.`,
+      limits: `The unchanged two/three-view, six-step synchronous core grammar with live-query readers and no framework schedules.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/live-query-observer.ts#createLiveQueryObserver',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/pooled-live-query.ts#createPooledLiveQuery',
+    ],
+    histories: {
+      arbitrary: cleanupHistory,
+      runs: 80,
+      fixedSeeds: [2168],
+      states: cleanupReachStates,
+      constructed: [
+        {
+          name: `rejected view survives sibling cleanup and is retried`,
+          enters: cleanupReachStates,
+          build: (generated): CleanupHistory => ({
+            views: [
+              { ...generated.views[0]!, reader: true, observed: false },
+              { ...generated.views[1]!, reader: false, observed: false },
+              ...generated.views.slice(2),
+            ],
+            steps: [...fixedHistory.steps, ...generated.steps.slice(0, 2)],
+          }),
+        },
+      ],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { history: CleanupHistory }, observe) =>
+      recordAssertionJudgment(property, plan, observe, () =>
+        expectPooledCleanupMatchesOrdinary(plan.history, {
+          reach: (state) => observe(`reach`, state),
         }),
-        campaignParameters,
-      )
-      reach.assertReached()
-    })
-  }
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

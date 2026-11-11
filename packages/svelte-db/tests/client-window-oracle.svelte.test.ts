@@ -4,6 +4,7 @@
  * readiness and fresh old-page readers. The independent sort/slice judgment
  * and history grammar are shared with React; this does not claim hydrate().
  */
+import { isDeepStrictEqual } from 'node:util'
 import {
   BTreeIndex,
   DbClient,
@@ -12,7 +13,7 @@ import {
 } from '@tanstack/db'
 import { flushSync } from 'svelte'
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { useLiveQuery } from '../src/useLiveQuery.svelte'
 import {
   checkWindowObservation,
@@ -25,17 +26,15 @@ import {
   clientWindowExamples as examples,
 } from '../../db/tests/conformance/client-window-history-oracle'
 import { ScenarioLifetime } from '../../db/tests/conformance/scenario-lifetime'
-import { createOracleReach } from '../../db/tests/oracle-reach'
-import { createOracleFailureFidelity } from '../../db/tests/oracle-failure-fidelity'
+import { OracleCheckpointFailure } from '../../db/tests/oracle-failure-fidelity'
+import { selectedRow } from '../../db/tests/conformance/result-laws'
 import {
   declareOracle,
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
+  oracleProperty,
+  pass,
+  violation,
 } from '../../db/tests/oracle-config'
+import type { Observation, Verdict } from '../../db/tests/oracle-config'
 import type {
   InitialQueryBuilder,
   LiveQueryCollectionUtils,
@@ -47,10 +46,10 @@ import type { ClientWindowHistory as History } from '../../db/tests/conformance/
 const states = clientWindowStates.filter(
   (state) => state !== `client scope switch`,
 )
-async function checkClientWindowHistory(
+async function recordClientWindowHistory(
   history: History,
   keyed: boolean,
-  reach: ReturnType<typeof createOracleReach<(typeof states)[number]>>,
+  observe: (checkpoint: string, value: unknown) => void,
 ) {
   const lifetime = new ScenarioLifetime()
   const unmounts: Array<() => void> = []
@@ -142,12 +141,12 @@ async function checkClientWindowHistory(
     const hook = mountPage(first)
     const firstRender = hook.initialView
     flushSync()
-    checkWindowObservation(
-      { rows: firstRender.data, collection: firstRender.collection },
-      { rows: expected(serverRows, first), retain: true },
+    let polling = false
+    observe(
       `first preloaded page render`,
+      recordWindow(firstRender.data, firstRender.collection),
     )
-    reach.reach(`first seed`)
+    observe(`reach`, `first seed`)
     const collection = hook.current().collection
     const compare = (
       rows: Array<WindowRow>,
@@ -155,34 +154,56 @@ async function checkClientWindowHistory(
       checkpoint: string,
       retain = true,
     ) => {
-      checkWindowObservation(
-        {
-          rows: hook.current().data,
-          collection: hook.current().collection,
-        },
-        { rows: expected(rows, page), previousCollection: collection, retain },
-        checkpoint,
-      )
-      checkWindowState(hook.current().state, expected(rows, page), checkpoint)
+      const current = hook.current()
+      if (polling) {
+        checkWindowObservation(
+          { rows: current.data, collection: current.collection },
+          {
+            rows: expected(rows, page),
+            previousCollection: collection,
+            retain,
+          },
+          checkpoint,
+        )
+        checkWindowState(current.state, expected(rows, page), checkpoint)
+      } else
+        observe(
+          checkpoint,
+          recordWindow(
+            current.data,
+            current.collection,
+            collection,
+            current.state,
+          ),
+        )
     }
     const peer = mountPage(first)
     flushSync()
     // Judge the existing peer's keyed view as well as its rows while the
     // transported seed is held and when the local snapshot takes over.
     const comparePeer = (rows: Array<WindowRow>, cut: string) => {
-      checkWindowObservation(
-        {
-          rows: peer.current().data,
-          collection: peer.current().collection,
-        },
-        {
-          rows: expected(rows, first),
-          previousCollection: collection,
-          retain: false,
-        },
-        cut,
-      )
-      checkWindowState(peer.current().state, expected(rows, first), cut)
+      const current = peer.current()
+      if (polling) {
+        checkWindowObservation(
+          { rows: current.data, collection: current.collection },
+          {
+            rows: expected(rows, first),
+            previousCollection: collection,
+            retain: false,
+          },
+          cut,
+        )
+        checkWindowState(current.state, expected(rows, first), cut)
+      } else
+        observe(
+          cut,
+          recordWindow(
+            current.data,
+            current.collection,
+            collection,
+            current.state,
+          ),
+        )
     }
     comparePeer(serverRows, `peer before move`)
     // Independent query inputs own distinct Collections. Moving one hook leaves
@@ -194,102 +215,291 @@ async function checkClientWindowHistory(
       `moved preloaded page before local readiness`,
       true,
     )
-    reach.reach(`moved seed`)
+    observe(`reach`, `moved seed`)
     comparePeer(serverRows, `peer while local readiness is held`)
-    reach.reach(`held peer keyed state`)
+    observe(`reach`, `held peer keyed state`)
     for (let index = 0; index < history.latePeers; index++) {
       const late = mountPage(first)
       flushSync()
-      checkWindowObservation(
-        { rows: late.current().data, collection: late.current().collection },
-        {
-          rows: expected(serverRows, first),
-          previousCollection: collection,
-          retain: false,
-        },
+      const current = late.current()
+      observe(
         `fresh old-page lookup after move before local readiness`,
+        recordWindow(
+          current.data,
+          current.collection,
+          collection,
+          current.state,
+        ),
       )
-      checkWindowState(
-        late.current().state,
-        expected(serverRows, first),
-        `fresh old-page keyed view`,
+      observe(
+        `fresh peer identity`,
+        current.collection !== peer.current().collection,
       )
-      expect(late.current().collection).not.toBe(peer.current().collection)
     }
-    reach.reach(`fresh old-page lookup`)
-    expect(ready, `browser sync started at commit`).toBeDefined()
+    observe(`reach`, `fresh old-page lookup`)
+    observe(`browser sync started`, ready !== undefined)
     ready!()
     flushSync()
     // Native flush does not settle the observer's queued readiness handoff.
     // Require the public local result within the bounded receiving cut.
-    await vi.waitFor(() => {
-      flushSync()
+    polling = true
+    try {
+      await vi.waitFor(() => {
+        flushSync()
+        compare(browserRows, next, `local handoff`)
+        comparePeer(browserRows, `peer after handoff`)
+      })
+    } finally {
+      polling = false
       compare(browserRows, next, `local handoff`)
       comparePeer(browserRows, `peer after handoff`)
-    })
-    reach.reach(`local handoff`)
+    }
+    observe(`reach`, `local handoff`)
     comparePeer(browserRows, `peer after handoff`)
-    reach.reach(`peer isolation`)
-    reach.reach(`local peer keyed state`)
+    observe(`reach`, `peer isolation`)
+    observe(`reach`, `local peer keyed state`)
     hook.move(first)
-    await vi.waitFor(() => {
-      flushSync()
+    polling = true
+    try {
+      await vi.waitFor(() => {
+        flushSync()
+        compare(browserRows, first, `return to first page`)
+      })
+    } finally {
+      polling = false
       compare(browserRows, first, `return to first page`)
-    })
-    reach.reach(`returned page`)
+    }
+    observe(`reach`, `returned page`)
     // Ordinary moves do not rewrite the server's immutable page records.
-    expect(JSON.parse(JSON.stringify(server.dehydrate()))).toEqual(transport)
+    observe(
+      `server transport unchanged`,
+      isDeepStrictEqual(
+        JSON.parse(JSON.stringify(server.dehydrate())),
+        transport,
+      ),
+    )
   })
 }
 
+type WindowFact = {
+  rows: unknown
+  collectionIsNull: boolean
+  sameCollection?: boolean
+  state?: Array<unknown>
+  hasState: boolean
+}
+// Copy exactly the selected-value surface the shared comparison reads. Preserve
+// collection identity as a relation instead of recording a non-data Collection.
+function recordWindow(
+  rows: unknown,
+  collection: unknown,
+  previous?: unknown,
+  state?: ReadonlyMap<unknown, unknown>,
+): WindowFact {
+  return {
+    rows: Array.isArray(rows) ? rows.map(selectedRow) : rows,
+    collectionIsNull: collection === null,
+    sameCollection:
+      previous === undefined ? undefined : collection === previous,
+    hasState: state !== undefined,
+    state:
+      state === undefined ? undefined : [...state.values()].map(selectedRow),
+  }
+}
+function assertionFailure(checkpoint: string, error: unknown): Verdict {
+  const cause = error instanceof OracleCheckpointFailure ? error.cause : error
+  if (!(cause instanceof Error) || cause.name !== `AssertionError`) throw error
+  return {
+    kind: `violation`,
+    checkpoint,
+    law: error instanceof OracleCheckpointFailure ? error.law : `client window`,
+    difference: cause.message,
+    cause: error,
+  }
+}
+function judgeWindow(
+  checkpoint: string,
+  value: unknown,
+  expected: Array<WindowRow>,
+  retain: boolean,
+  first = false,
+): Verdict {
+  const fact = value as WindowFact
+  const previous = {}
+  const collection = fact.collectionIsNull
+    ? null
+    : fact.sameCollection
+      ? previous
+      : {}
+  try {
+    checkWindowObservation(
+      { rows: fact.rows, collection },
+      {
+        rows: expected,
+        retain,
+        ...(first ? {} : { previousCollection: previous }),
+      },
+      checkpoint,
+    )
+    if (!first)
+      checkWindowState(
+        fact.hasState
+          ? new Map(fact.state!.map((row, index) => [index, row]))
+          : undefined,
+        expected,
+        checkpoint,
+      )
+    return pass
+  } catch (error) {
+    return assertionFailure(checkpoint, error)
+  }
+}
+function modelClientWindow(history: History) {
+  const first = { offset: history.offset, limit: history.width }
+  const next = {
+    offset: history.offset + history.jump,
+    limit: history.width + 1,
+  }
+  const rows = (local: boolean, page: typeof first) =>
+    windowRows(
+      Array.from({ length: history.count }, (_, rank) => ({
+        id: `${local ? `b` : `s`}${rank}`,
+        rank,
+      })),
+      { ...page, minimum: -1, descending: false, nestedLimit: history.count },
+      false,
+    ) as Array<WindowRow>
+  return {
+    [`first preloaded page render`]: {
+      rows: rows(false, first),
+      retain: true,
+      count: 1,
+    },
+    [`peer before move`]: { rows: rows(false, first), retain: false, count: 1 },
+    [`moved preloaded page before local readiness`]: {
+      rows: rows(false, next),
+      retain: true,
+      count: 1,
+    },
+    [`peer while local readiness is held`]: {
+      rows: rows(false, first),
+      retain: false,
+      count: 1,
+    },
+    [`fresh old-page lookup after move before local readiness`]: {
+      rows: rows(false, first),
+      retain: false,
+      count: history.latePeers,
+    },
+    [`local handoff`]: { rows: rows(true, next), retain: true, count: 1 },
+    [`peer after handoff`]: {
+      rows: rows(true, first),
+      retain: false,
+      count: 2,
+    },
+    [`return to first page`]: {
+      rows: rows(true, first),
+      retain: true,
+      count: 1,
+    },
+  }
+}
+function checkClientWindowHistory(
+  history: History,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof modelClientWindow>,
+): Verdict {
+  for (const { checkpoint, value } of trace) {
+    if (checkpoint === `reach`) continue
+    if (checkpoint in expected) {
+      const target = expected[checkpoint as keyof typeof expected]
+      const wrong = judgeWindow(
+        checkpoint,
+        value,
+        target.rows,
+        target.retain,
+        checkpoint === `first preloaded page render`,
+      )
+      if (wrong.kind === `violation`) return wrong
+    } else if (
+      [
+        `fresh peer identity`,
+        `browser sync started`,
+        `server transport unchanged`,
+      ].includes(checkpoint)
+    ) {
+      if (value !== true)
+        return violation(
+          checkpoint,
+          `expected the original identity/start/transport relation`,
+          `client window`,
+        )
+    } else
+      return violation(checkpoint, `unexpected observation`, `client window`)
+  }
+  for (const [checkpoint, target] of Object.entries(expected))
+    if (
+      trace.filter((entry) => entry.checkpoint === checkpoint).length !==
+      target.count
+    )
+      return violation(
+        checkpoint,
+        `expected every original comparison cut`,
+        `client window`,
+      )
+  for (const [checkpoint, count] of [
+    [`fresh peer identity`, history.latePeers],
+    [`browser sync started`, 1],
+    [`server transport unchanged`, 1],
+  ] as const)
+    if (
+      trace.filter((entry) => entry.checkpoint === checkpoint).length !== count
+    )
+      return violation(
+        checkpoint,
+        `expected every original relation`,
+        `client window`,
+      )
+  return pass
+}
 describe(`Svelte client page identity`, () => {
   for (const keyed of [false, true])
-    for (const campaign of [`fixed`, `fresh`] as const) {
-      const property = `svelte.client-window`
-      const test =
-        campaign === `fixed`
-          ? oracleReplayTest(it)
-          : oracleReplayTest(it, property)
-      test(`${keyed ? `keyed` : `derived`}/${campaign}`, async () => {
-        const reach = createOracleReach(
-          `${property}/${keyed}/${campaign}`,
+    describe(keyed ? `keyed` : `derived`, () =>
+      oracleProperty({
+        id: `svelte.client-window`,
+        law: {
+          statement: `Transported page seeds survive an outer window move until local readiness, independent peers retain their page, and returning to the first page follows local rows.`,
+          authority: `packages/db/tests/conformance/window-history-oracle.ts outer window contract and docs/guides/ssr.md transported page contract`,
+          limits: `Existing keyed/derived Svelte client-page grammar and native flushSync cuts; no client scope switch or hydrate() claim.`,
+        },
+        owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
+        histories: {
+          arbitrary: clientWindowArbitrary,
+          runs: 6,
+          fixedSeeds: [2345],
           states,
-          { fixedHistories: examples.length },
-        )
-        let index = 0
-        const fidelity = createOracleFailureFidelity<History>()
-        try {
-          const parameters =
-            campaign === `fixed`
-              ? oracleFixedSeed(2345, {
-                  numRuns: oracleRuns(6) + examples.length,
-                  examples,
-                })
-              : oraclePropertyOptions(6, property, { examples })
-          oracleRoute(oracleRouteOf(parameters))
-          await fidelity.assert(() =>
-            fc.assert(
-              fc.asyncProperty(clientWindowArbitrary, async (history) => {
-                reach.beginHistory({ fixed: index++ < examples.length })
-                await fidelity.run(history, () =>
-                  checkClientWindowHistory(history, keyed, reach),
-                )
-              }),
-              parameters,
-            ),
-          )
-          reach.assertReached()
-        } finally {
-          console.info(
-            `Svelte client window reach ${keyed}/${campaign}`,
-            Object.fromEntries(reach.counts()),
-          )
-        }
-      }, 30_000)
-    }
+          constructed: [
+            {
+              name: `complete page handoff`,
+              enters: states,
+              build: (history) => ({ ...history }),
+            },
+          ],
+          fixed: examples.map(([history], index) => ({
+            name: `client page ${index}`,
+            history,
+          })),
+        },
+        model: modelClientWindow,
+        driver: (history, observe) =>
+          recordClientWindowHistory(history, keyed, observe),
+        check: checkClientWindowHistory,
+        timeout: 30_000,
+      }),
+    )
 })
 declareOracle({
-  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
+  model: [modelClientWindow],
   check: [checkClientWindowHistory],
 })
 
@@ -333,9 +543,9 @@ const recoveryStates = [
   `changed-key body`,
   `changed-key deps`,
 ] as const
-async function checkRecovery(
+async function recordRecovery(
   history: RecoveryHistory,
-  reach: ReturnType<typeof createOracleReach<(typeof recoveryStates)[number]>>,
+  observe: (checkpoint: string, value: unknown) => void,
 ) {
   const lifetime = new ScenarioLifetime()
   let dispose: (() => void) | undefined
@@ -403,41 +613,40 @@ async function checkRecovery(
     key = 1
     flushSync()
     await settle()
-    const expected = (page: number) =>
-      windowRows(
-        rows,
-        {
-          offset: page,
-          limit: history.width,
-          minimum: -1,
-          descending: false,
-          nestedLimit: rows.length,
-        },
-        false,
-      )
-    const compare = (page: number, cut: string) => {
-      checkWindowObservation(
-        { rows: result.data, collection: result.collection },
-        { rows: expected(page), previousCollection: first, retain: true },
+    const compare = (_page: number, cut: string) => {
+      observe(
         cut,
+        recordWindow(result.data, result.collection, first, result.state),
       )
-      checkWindowState(result.state, expected(page), cut)
     }
     compare(history.offset, `Svelte committed declarative move`)
-    reach.reach(`committed move`)
+    observe(`reach`, `committed move`)
     await (result.collection.utils as LiveQueryCollectionUtils).setWindow({
       offset: history.imperative,
       limit: history.width,
     })
     await settle()
     compare(history.imperative, `imperative window before rejected input`)
-    reach.reach(`imperative move`)
+    observe(`reach`, `imperative move`)
     failed = true
     // Read the rejected lazy value twice, then run the throwing native effect.
-    expect(() => result.data).toThrow(failure)
-    expect(() => result.collection).toThrow(failure)
-    expect(() => flushSync()).toThrow(failure)
-    reach.reach(`rejected read`)
+    for (const [checkpoint, read] of [
+      [`rejected data`, () => result.data],
+      [`rejected collection`, () => result.collection],
+      [`rejected flush`, () => flushSync()],
+    ] as const) {
+      let rejection: { error: unknown } | undefined
+      try {
+        read()
+      } catch (error) {
+        rejection = { error }
+      }
+      observe(checkpoint, {
+        rejection,
+        expectedError: new Error(failure.message),
+      })
+    }
+    observe(`reach`, `rejected read`)
     failed = false
     if (history.proposal === `body`) offset = 9
     else dep = 9 - history.offset
@@ -445,49 +654,137 @@ async function checkRecovery(
     flushSync()
     await settle()
     compare(history.changeKey ? 9 : history.imperative, `recovered client key`)
-    reach.reach(
+    observe(
+      `reach`,
       history.changeKey ? `changed-key recovery` : `same-key recovery`,
     )
-    reach.reach(history.proposal)
-    reach.reach(
+    observe(`reach`, history.proposal)
+    observe(
+      `reach`,
       `${history.changeKey ? `changed-key` : `same-key`} ${history.proposal}`,
     )
   })
 }
-for (const campaign of [`fixed`, `fresh`] as const) {
-  const property = `svelte.client-window-recovery`
-  const test =
-    campaign === `fixed` ? oracleReplayTest(it) : oracleReplayTest(it, property)
-  test(`client key recovery/${campaign}`, async () => {
-    const reach = createOracleReach(`${property}/${campaign}`, recoveryStates)
-    const fidelity = createOracleFailureFidelity<RecoveryHistory>()
-    try {
-      const parameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(2348, { numRuns: oracleRuns(24) })
-          : oraclePropertyOptions(24, property)
-      oracleRoute(oracleRouteOf(parameters))
-      await fidelity.assert(() =>
-        fc.assert(
-          fc.asyncProperty(recoveryArbitrary, async (history) => {
-            for (const member of recoveryHistories(history)) {
-              reach.beginHistory()
-              await fidelity.run(member, () => checkRecovery(member, reach))
-            }
-          }),
-          parameters,
+
+function modelRecovery(
+  history: Omit<RecoveryHistory, `changeKey` | `proposal`>,
+) {
+  const rows: Array<WindowRow> = Array.from({ length: 12 }, (_, rank) => ({
+    id: String(rank),
+    rank,
+  }))
+  const at = (offset: number) =>
+    windowRows(
+      rows,
+      {
+        offset,
+        limit: history.width,
+        minimum: -1,
+        descending: false,
+        nestedLimit: rows.length,
+      },
+      false,
+    ) as Array<WindowRow>
+  return {
+    committed: at(history.offset),
+    imperative: at(history.imperative),
+    changed: at(9),
+  }
+}
+function checkRecovery(
+  history: Omit<RecoveryHistory, `changeKey` | `proposal`>,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof modelRecovery>,
+): Verdict {
+  for (const member of recoveryHistories(history)) {
+    const prefix = `${member.proposal}/${member.changeKey}/`
+    const cuts = trace
+      .filter(({ checkpoint }) => checkpoint.startsWith(prefix))
+      .map(({ checkpoint, value }) => ({
+        checkpoint: checkpoint.slice(prefix.length),
+        value,
+      }))
+    const targets: Record<string, Array<WindowRow>> = {
+      [`Svelte committed declarative move`]: expected.committed,
+      [`imperative window before rejected input`]: expected.imperative,
+      [`recovered client key`]: member.changeKey
+        ? expected.changed
+        : expected.imperative,
+    }
+    for (const { checkpoint, value } of cuts) {
+      if (checkpoint in targets) {
+        const wrong = judgeWindow(checkpoint, value, targets[checkpoint]!, true)
+        if (wrong.kind === `violation`) return wrong
+      } else {
+        try {
+          // Svelte appends its host frame to the authored Error's message.
+          // The old assertion compared with that same input Error after the
+          // read; retain its contemporaneous message rather than inventing a
+          // fresh unmodified expectation at the later native check.
+          const fact = value as {
+            rejection: { error: unknown } | undefined
+            expectedError: Error
+          }
+          expect(() => {
+            if (fact.rejection) throw fact.rejection.error
+          }).toThrow(fact.expectedError)
+        } catch (error) {
+          return assertionFailure(checkpoint, error)
+        }
+      }
+    }
+    for (const checkpoint of [
+      ...Object.keys(targets),
+      `rejected data`,
+      `rejected collection`,
+      `rejected flush`,
+    ])
+      if (cuts.filter((entry) => entry.checkpoint === checkpoint).length !== 1)
+        return violation(
+          checkpoint,
+          `expected every recovery family and cut`,
+          `client window recovery`,
+        )
+  }
+  return pass
+}
+oracleProperty({
+  id: `svelte.client-window-recovery`,
+  law: {
+    statement: `An unchanged explicit client key retains its authored input through rejected key reads and imperative window changes; a changed key admits the proposed query.`,
+    authority: `packages/db/tests/conformance/contract.ts query identity law and packages/db/tests/conformance/window-history-oracle.ts`,
+    limits: `Existing four body/dependency and same/changed-key recovery members per generated tuple at native Svelte flush/settlement cuts.`,
+  },
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
+  histories: {
+    arbitrary: recoveryArbitrary,
+    runs: 24,
+    fixedSeeds: [2348],
+    states: recoveryStates,
+    constructed: [
+      {
+        name: `complete recovery family`,
+        enters: recoveryStates,
+        build: (history) => ({ ...history }),
+      },
+    ],
+  },
+  model: modelRecovery,
+  driver: async (history, observe) => {
+    for (const member of recoveryHistories(history))
+      await recordRecovery(member, (checkpoint, value) =>
+        observe(
+          checkpoint === `reach`
+            ? checkpoint
+            : `${member.proposal}/${member.changeKey}/${checkpoint}`,
+          value,
         ),
       )
-      reach.assertReached()
-    } finally {
-      console.info(
-        `Svelte recovery reach/${campaign}`,
-        Object.fromEntries(reach.counts()),
-      )
-    }
-  })
-}
+  },
+  check: checkRecovery,
+})
 declareOracle({
   grammar: [recoveryArbitrary, recoveryHistories],
+  model: [modelRecovery],
   check: [checkRecovery],
 })

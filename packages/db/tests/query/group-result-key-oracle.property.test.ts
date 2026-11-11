@@ -399,7 +399,6 @@ function snapshotAt(trace: ReadonlyArray<Observation>, index: number) {
 }
 
 declareOracle({
-  owns: [`src/query/live-query-collection.ts#createLiveQueryCollection`],
   check: [judgeGroups],
   model: [expectedGroups],
 })
@@ -410,8 +409,8 @@ oracleProperty<History, Array<Array<[string, number]>>, Plan>({
     statement: `A grouped live-query Collection publishes one row per group, keyed by a string or a number whatever the group value; two groups never share a key, including a group value and a string that prints like it or a string in the reserved namespace; and a group that survives a synced change keeps its key, so the change publishes as an update of the same row.`,
     authority: `The TKey constraint of every Collection type and the InvalidKeyError for other keys; maintainer decision (2026-10-27) that the grouped key matches the declared key type rather than widening to nullish keys; packages/db/tests/query/group-result-key-oracle.property.test.ts (this file's opening prose).`,
     limits: `Dates, -0, objects, and multi-field groups belong to the aggregate select oracle; the mock sync source is a controlled provider, so the claim covers only the compiler's keying of the rows it supplies; key format is not fixed.`,
-    owner: `Grouped result keys`,
   },
+  owns: [`src/query/live-query-collection.ts#createLiveQueryCollection`],
   histories: {
     arbitrary: historyArbitrary,
     states: reachStates,

@@ -17,18 +17,13 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { test as fcTest } from '@fast-check/vitest'
-import { describe, expect, onTestFinished } from 'vitest'
+import { onTestFinished } from 'vitest'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
 import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/node-driver'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
+  expectedReload,
   fixedReloadHistories,
   inProcessSeams,
   observeReload,
@@ -40,9 +35,11 @@ import {
   exposeElectronSQLitePersistence,
 } from '../src'
 import { ElectronCollectionCoordinator } from '../src/electron-coordinator'
+import type { Observation, Verdict } from '../../db/tests/oracle-property'
 import type {
   ReloadHistory,
   ReloadHost,
+  ReloadObservation,
 } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
 import type { BetterSqlite3Database } from '@tanstack/node-db-sqlite-persistence'
 import type {
@@ -202,58 +199,111 @@ function electronHost(): ReloadHost {
   }
 }
 
-async function expectLawful(history: ReloadHistory) {
-  const observed = await observeReload(electronHost(), history)
-  const violations = reloadViolations(history, observed)
+// Keep the shared independent model and the host's declared topology. The
+// checker still applies every existing setup, budget, row, and ordering law.
+function model(history: ReloadHistory) {
+  return expectedReload(history, { adapterPerTab: false })
+}
+
+function check(
+  history: ReloadHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof model>,
+): Verdict {
+  const observed = trace.find((entry) => entry.checkpoint === `reload`)
+    ?.value as ReloadObservation | undefined
+  if (!observed)
+    return violation(
+      `reload`,
+      `reload observation is missing`,
+      `reload work and rows`,
+    )
+  const violations = reloadViolations(history, observed, expected)
   if (violations.length > 0 && process.env.RELOAD_ORACLE_DEBUG) {
     console.log(JSON.stringify(violations))
   }
-  expect(violations).toEqual([])
+  return violations.length === 0
+    ? pass
+    : violation(`reload`, violations.join(`; `), `reload work and rows`)
+}
+
+// The full SQL recorder includes generated cache/claim IDs, table-name hashes,
+// clock readings, and host statement interleavings. Their exact spelling and
+// timing are not reload laws. Judge the unchanged raw record with the shared
+// independent model and comparison at the same reload checkpoint, then expose
+// that complete judgment to the native runner. This preserves every existing
+// count, identity relation, ordering check, and bounded-settlement comparison
+// without making the determinism check compare incidental host details.
+async function driveReload(
+  history: ReloadHistory,
+  observe: (checkpoint: string, value: unknown) => void,
+): Promise<void> {
+  const observed = await observeReload(electronHost(), history)
+  observe(
+    `reload`,
+    check(history, [{ checkpoint: `reload`, value: observed }], model(history)),
+  )
+}
+
+function checkRecordedReload(
+  _history: ReloadHistory,
+  trace: ReadonlyArray<Observation>,
+  _expected: ReturnType<typeof model>,
+): Verdict {
+  return (
+    (trace.find((entry) => entry.checkpoint === `reload`)?.value as
+      Verdict | undefined) ??
+    violation(`reload`, `reload observation is missing`, `reload work and rows`)
+  )
 }
 
 declareOracle({
+  model: [model],
+  check: [check, checkRecordedReload],
+  grammar: [reloadHistoryArb],
+})
+
+oracleProperty({
+  id: `sqlite-reload.class.electron`,
+  law: {
+    statement: `A reload repairs missing setup and preserves lawful rows while performing only the setup, snapshot, registry, and election work allowed by the shared reload model.`,
+    authority: `The shared reload-class contract in db-sqlite-persistence-core/tests/reload-class-oracle.ts.`,
+    limits: `Electron receiving driver with the existing in-process host controls; no claim about real cross-process scheduling or physical OPFS.`,
+  },
   owns: [
     `src/main.ts#exposeElectronSQLitePersistence`,
     `src/renderer.ts#createElectronSQLitePersistence`,
     `src/electron-coordinator.ts`,
   ],
-  check: [expectLawful],
-  grammar: [reloadHistoryArb],
+  histories: {
+    arbitrary: reloadHistoryArb,
+    runs: 12,
+    fixedSeeds: [2205],
+  },
+  model,
+  driver: driveReload,
+  check: checkRecordedReload,
+  timeout: 300_000,
 })
 
-describe(`reload class oracle (Electron driver)`, () => {
-  fcTest.each(
-    fixedReloadHistories.map(([name, history]) => ({ name, history })),
-  )(
-    `keeps a reload free of avoidable work: $name`,
-    async ({ history }) => {
-      oracleRoute(`fixed history`)
-      await expectLawful(history)
-    },
-    30_000,
-  )
-
-  fcTest.prop(
-    [reloadHistoryArb],
-    oracleFixedSeed(2205, { numRuns: oracleRuns(12) }),
-  )(
-    `keeps generated reloads lawful (fixed seed)`,
-    (history) => {
-      oracleRoute(`fixed seed`)
-      return expectLawful(history)
-    },
-    300_000,
-  )
-
-  fcTest.prop(
-    [reloadHistoryArb],
-    oraclePropertyOptions(12, `sqlite-reload.class.electron`),
-  )(
-    `keeps generated reloads lawful (random or replayed)`,
-    (history) => {
-      oracleRoute(`random seed`)
-      return expectLawful(history)
-    },
-    300_000,
-  )
+// Retain the fixed host histories separately from the bounded random grammar.
+oracleProperty({
+  id: `sqlite-reload.class.electron-fixed`,
+  law: {
+    statement: `The retained host reload histories satisfy every existing setup, row, budget, and ordering comparison.`,
+    authority: `The shared reload-class contract in db-sqlite-persistence-core/tests/reload-class-oracle.ts.`,
+    limits: `The named fixed histories on this existing in-process receiving driver.`,
+  },
+  owns: [
+    `src/main.ts#exposeElectronSQLitePersistence`,
+    `src/renderer.ts#createElectronSQLitePersistence`,
+    `src/electron-coordinator.ts`,
+  ],
+  histories: fixedReloadHistories.map(([name, history]) => ({ name, history })),
+  label: (entry) => entry.name,
+  resolve: (entry) => entry.history,
+  model,
+  driver: driveReload,
+  check: checkRecordedReload,
+  timeout: 30_000,
 })

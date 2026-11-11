@@ -17,8 +17,19 @@ const config = defineConfig({
       // Vitest still type-checks them through the project's tsc run.
       exclude: [
         `**/node_modules/**`,
+        `tests/persisted-options.test.ts`,
+        `tests/reserved-commit-sqlite-adapter-oracle.test.ts`,
+        `tests/sqlite-boolean-arity-oracle.test.ts`,
+
         `tests/collection-setup-reopen-oracle.test.ts`,
+        `tests/shared-logical-scheduling-oracle.test.ts`,
+        `tests/persisted-reload-replacement-oracle.test.ts`,
+        `tests/persisted-readiness-oracle.test.ts`,
+        `tests/persisted-sync-problem-oracle.test.ts`,
+        `tests/sqlite-resume-snapshot-oracle.test.ts`,
         `tests/persisted-optimistic-history-oracle.property.test.ts`,
+        `tests/sync-metadata-missing-row.test.ts`,
+        `tests/sync-metadata-recovery.test.ts`,
       ],
     },
   },

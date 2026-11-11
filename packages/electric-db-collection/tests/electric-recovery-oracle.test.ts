@@ -1,17 +1,12 @@
 import { DatabaseSync } from 'node:sqlite'
 import { isDeepStrictEqual } from 'node:util'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { oracleFixedSeed, oracleRoute } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,
@@ -19,6 +14,10 @@ import {
 } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import { nodeSqliteDriver } from './electric-persistence-fixture'
+import {
+  checkExistingElectricComparison,
+  existingElectricComparison,
+} from './electric-property-oracle'
 import {
   attachRecoveryCleanupDiagnostics,
   change,
@@ -768,7 +767,6 @@ declareOracle({
     expectedReplacementRows,
   ],
   grammar: [publicationHistoryArbitrary],
-  owns: [`src/electric.ts#electricCollectionOptions`],
 })
 
 describe(`persisted Electric recovery laws`, () => {
@@ -901,28 +899,25 @@ describe(`persisted Electric recovery laws`, () => {
     )
   })
 
-  const publicationHistoryFixedSeed = oracleFixedSeed(1659, {
-    numRuns: oracleRuns(20),
+  oracleProperty({
+    id: `electric-recovery.publication-stream-convergence`,
+    law: {
+      statement: `Independent persistence publications and stream deltas agree with complete-row state.`,
+      authority: `The persisted-replica recovery law in this file's opening contract and assertPublicationHistory's independent snapshot judgment.`,
+      limits: `The unchanged controlled ShapeStream and SQLite fixture, bounded publication histories, and recorded public/durable cuts; no live HTTP or native-host claim.`,
+    },
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      arbitrary: publicationHistoryArbitrary,
+      runs: 20,
+      fixedSeeds: [1659],
+    },
+    ...existingElectricComparison(
+      `electric-recovery.publication-stream-convergence`,
+      assertPublicationHistory,
+    ),
+    check: checkExistingElectricComparison,
   })
-  fcTest.prop([publicationHistoryArbitrary], publicationHistoryFixedSeed)(
-    `independent persistence publications and stream deltas agree with complete-row state (fixed)`,
-    (commands) => {
-      oracleRoute(oracleRouteOf(publicationHistoryFixedSeed))
-      return assertPublicationHistory(commands)
-    },
-  )
-
-  const publicationHistoryCampaign = oraclePropertyOptions(
-    20,
-    `electric-recovery.publication-stream-convergence`,
-  )
-  fcTest.prop([publicationHistoryArbitrary], publicationHistoryCampaign)(
-    `independent persistence publications and stream deltas agree with complete-row state (random or replayed)`,
-    (commands) => {
-      oracleRoute(oracleRouteOf(publicationHistoryCampaign))
-      return assertPublicationHistory(commands)
-    },
-  )
 
   it.each(scenarios)(
     `$syncMode invalid resume replaces omitted cached rows: empty=$empty, hydration=$hydration callback`,

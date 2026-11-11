@@ -54,13 +54,29 @@
  * sqlite-persistence.bigint-roundtrip, or sqlite-persistence.bigint-rejection.
  * That property's random campaign replays only its recorded history; the fixed
  * campaigns and the other properties stand aside. A seed alone reseeds the
- * random campaigns. Per-axis grammar ablations and same-path SQL/compiler faults must
- * fail the expression-index property. The
+ * random campaigns. A matrix that lacks an axis fails every history's grammar
+ * check (assertGeneratedScenarioGrammar, run by the driver); a per-axis
+ * grammar calibration ablates each axis from the fixed matrix and requires
+ * that check to name it. Each axis's plausible wrong SQL answer is a native
+ * calibration that the unchanged comparison must reject at that axis: the
+ * check names the compared axis in the law (`sqlite-persistence.expression-index:
+ * <kind> axis`). Seed, run and path configuration, and the shrinking
+ * and same-path replay of a failure, belong to the @tanstack/oracles
+ * self-oracle, which owns those laws for every oracleProperty. The
  * retained fixed campaign reconstructs the known valid matrix. The bounds
  * above state its range; exact grammar checks reject missing, duplicate, and
  * unexpected axes as nearby invalid matrices. The focused overbroad and former
  * path-binding controls remain independent. In-memory SQLite teardown
  * retains the semantic failure if cleanup also fails.
+ *
+ * Native registration retains the data tuple before resolving its IR objects.
+ * The existing independent helpers and their authored comparison cuts remain
+ * unchanged; the assertion adapter passes their judgment to oracleProperty.
+ * Product campaigns use the native fixed/random/replay runner, and the SQL
+ * wrong answers are its calibrations. The raw fast-check controls that once
+ * checked SQL-fault shrinking, same-path replay and seed/run/path
+ * configuration are gone: the framework's self-oracle enforces them. Grammar
+ * ablation stays as a grammar calibration without fast-check campaigns.
  */
 import fc from 'fast-check'
 import { describe, expect, vi, it as vitestIt } from 'vitest'
@@ -72,12 +88,16 @@ import {
 } from '@tanstack/db-sqlite-persistence-core'
 import {
   oracleFixedSeed,
-  oraclePropertyOptions,
+  oracleProperty,
   oracleReplayTest,
   oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
 } from '../../db/tests/oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   Temporal,
@@ -101,6 +121,7 @@ import {
   sqliteScalarParameter,
   withFailurePreservingCleanup,
 } from './expression-index-support'
+import type { Observation, Verdict } from '../../db/tests/oracle-config.js'
 import type { TemporalFamily } from '../../db-sqlite-persistence-core/tests/temporal-value-oracle'
 import type {
   CapturedQuery,
@@ -140,36 +161,6 @@ const legalPathArbitrary = fc
     ),
   )
   .map(([root, tail]) => [root, ...tail])
-
-const EXPRESSION_INDEX_PROPERTY = `sqlite-persistence.expression-index`
-const BIGINT_ROUNDTRIP_PROPERTY = `sqlite-persistence.bigint-roundtrip`
-const BIGINT_REJECTION_PROPERTY = `sqlite-persistence.bigint-rejection`
-
-type GeneratedPropertyCampaign = {
-  name: `fixed` | `random`
-  parameters: ReturnType<typeof oraclePropertyOptions>
-}
-
-// The fixed campaign fixes its campaign seed and stands aside on every path replay. The
-// random campaign runs in ordinary and reseeded campaigns, and as the replay of
-// its property, where oraclePropertyOptions returns the recorded path.
-const fixedGeneratedCampaign: GeneratedPropertyCampaign = {
-  name: `fixed`,
-  parameters: oracleFixedSeed(DEFAULT_ORACLE_SEED, {
-    numRuns: oracleRuns(DEFAULT_ORACLE_RUNS),
-  }),
-}
-
-function randomGeneratedCampaign(property: string): GeneratedPropertyCampaign {
-  return {
-    name: `random`,
-    parameters: oraclePropertyOptions(DEFAULT_ORACLE_RUNS, property),
-  }
-}
-
-function generatedCampaignParameters(campaign: GeneratedPropertyCampaign) {
-  return { verbose: 2 as const, ...campaign.parameters }
-}
 
 function expectedKeysFromScan(
   rows: ReadonlyArray<ScanRow>,
@@ -221,246 +212,241 @@ const stringIndexCaseArbitrary = fc
   .tuple(legalPathArbitrary, fc.integer({ min: 0, max: 10_000 }))
   .map(([path, suffix]) => ({ path, target: `target-'${suffix}` }))
 
-const generatedScenarioMatrixArbitrary = fc
-  .tuple(
-    stringIndexCaseArbitrary,
-    numericIndexCaseArbitrary,
-    numericIndexCaseArbitrary,
-    numericIndexCaseArbitrary,
-    stringIndexCaseArbitrary,
-    numericIndexCaseArbitrary,
-    stringIndexCaseArbitrary,
-  )
-  .map(
-    ([
-      eqCase,
-      inCase,
-      batchedCase,
-      rangeCase,
-      andCase,
-      orderCase,
-      lowerCase,
-    ]) => {
-      const eqRows = [
-        {
-          key: `eq-match-a`,
-          value: createNestedRow(eqCase.path, eqCase.target),
-        },
-        {
-          key: `eq-different`,
-          value: createNestedRow(eqCase.path, `${eqCase.target}-other`),
-        },
-        {
-          key: `eq-match-b`,
-          value: createNestedRow(eqCase.path, eqCase.target),
-        },
-      ]
-      const batchedValues = Array.from({ length: 901 }, (_unused, index) =>
-        BigInt(batchedCase.target + index),
-      )
-      const lowerTarget = lowerCase.target.toLowerCase()
+const generatedScenarioMatrixArbitrary = fc.tuple(
+  stringIndexCaseArbitrary,
+  numericIndexCaseArbitrary,
+  numericIndexCaseArbitrary,
+  numericIndexCaseArbitrary,
+  stringIndexCaseArbitrary,
+  numericIndexCaseArbitrary,
+  stringIndexCaseArbitrary,
+)
 
-      return [
-        {
-          kind: `eq`,
-          label: `generated-eq`,
-          indexExpression: new IR.PropRef(eqCase.path),
-          where: new IR.Func<boolean>(`eq`, [
-            new IR.PropRef(eqCase.path),
-            new IR.Value(eqCase.target),
-          ]),
-          rows: eqRows,
-          expectedKeys: [`eq-match-a`, `eq-match-b`],
-          expectedPlan: `search`,
-        },
-        {
-          kind: `in`,
-          label: `generated-in`,
-          indexExpression: new IR.PropRef(inCase.path),
-          where: new IR.Func<boolean>(`in`, [
-            new IR.PropRef(inCase.path),
-            new IR.Value([BigInt(inCase.target - 1), BigInt(inCase.target)]),
-          ]),
-          rows: [
-            {
-              key: `in-lower`,
-              value: createNestedRow(inCase.path, BigInt(inCase.target - 1)),
-            },
-            {
-              key: `in-match`,
-              value: createNestedRow(inCase.path, BigInt(inCase.target)),
-            },
-            {
-              key: `in-higher`,
-              value: createNestedRow(inCase.path, BigInt(inCase.target + 1)),
-            },
-          ],
-          expectedKeys: [`in-lower`, `in-match`],
-          expectedPlan: `search`,
-        },
-        {
-          kind: `batched-in`,
-          label: `generated-batched-in`,
-          indexExpression: new IR.PropRef(batchedCase.path),
-          where: new IR.Func<boolean>(`in`, [
-            new IR.PropRef(batchedCase.path),
-            new IR.Value(batchedValues),
-          ]),
-          rows: [
-            {
-              key: `batch-first`,
-              value: createNestedRow(
-                batchedCase.path,
-                BigInt(batchedCase.target),
-              ),
-            },
-            {
-              key: `batch-last`,
-              value: createNestedRow(
-                batchedCase.path,
-                BigInt(batchedCase.target + 900),
-              ),
-            },
-            {
-              key: `batch-outside`,
-              value: createNestedRow(
-                batchedCase.path,
-                BigInt(batchedCase.target - 1),
-              ),
-            },
-          ],
-          expectedKeys: [`batch-first`, `batch-last`],
-          expectedPlan: `search`,
-        },
-        {
-          kind: `range`,
-          label: `generated-range`,
-          indexExpression: new IR.PropRef(rangeCase.path),
-          where: new IR.Func<boolean>(`gte`, [
-            new IR.PropRef(rangeCase.path),
-            new IR.Value(rangeCase.target),
-          ]),
-          rows: [
-            {
-              key: `range-lower`,
-              value: createNestedRow(rangeCase.path, rangeCase.target - 1),
-            },
-            {
-              key: `range-match`,
-              value: createNestedRow(rangeCase.path, rangeCase.target),
-            },
-            {
-              key: `range-higher`,
-              value: createNestedRow(rangeCase.path, rangeCase.target + 1),
-            },
-          ],
-          expectedKeys: [`range-higher`, `range-match`],
-          expectedPlan: `search`,
-        },
-        {
-          kind: `and`,
-          label: `generated-and`,
-          indexExpression: new IR.PropRef(andCase.path),
-          where: new IR.Func<boolean>(`and`, [
-            new IR.Func(`eq`, [
-              new IR.PropRef(andCase.path),
-              new IR.Value(andCase.target),
-            ]),
-            new IR.Func(`eq`, [
-              new IR.PropRef([`status`]),
-              new IR.Value(`active`),
-            ]),
-          ]),
-          rows: [
-            {
-              key: `and-match`,
-              value: {
-                ...createNestedRow(andCase.path, andCase.target),
-                status: `active`,
-              },
-            },
-            {
-              key: `and-inactive`,
-              value: {
-                ...createNestedRow(andCase.path, andCase.target),
-                status: `inactive`,
-              },
-            },
-            {
-              key: `and-different`,
-              value: {
-                ...createNestedRow(andCase.path, `${andCase.target}-other`),
-                status: `active`,
-              },
-            },
-          ],
-          expectedKeys: [`and-match`],
-          expectedPlan: `search`,
-        },
-        {
-          kind: `order-by`,
-          label: `generated-order-by`,
-          indexExpression: new IR.PropRef(orderCase.path),
-          orderBy: [
-            {
-              expression: new IR.PropRef(orderCase.path),
-              compareOptions: {
-                direction: `asc`,
-                nulls: `last`,
-              },
-            },
-          ],
-          preserveResultOrder: true,
-          rows: [
-            {
-              key: `order-high`,
-              value: createNestedRow(orderCase.path, orderCase.target + 1),
-            },
-            {
-              key: `order-low`,
-              value: createNestedRow(orderCase.path, orderCase.target - 1),
-            },
-            {
-              key: `order-middle`,
-              value: createNestedRow(orderCase.path, orderCase.target),
-            },
-          ],
-          expectedKeys: [`order-low`, `order-middle`, `order-high`],
-          expectedPlan: `ordered-scan`,
-        },
-        {
-          kind: `wrapped-lower`,
-          label: `generated-wrapped-lower`,
-          indexExpression: new IR.Func(`lower`, [
-            new IR.PropRef(lowerCase.path),
-          ]),
-          where: new IR.Func<boolean>(`eq`, [
-            new IR.Func(`lower`, [new IR.PropRef(lowerCase.path)]),
-            new IR.Value(lowerTarget),
-          ]),
-          rows: [
-            {
-              key: `lower-upper`,
-              value: createNestedRow(
-                lowerCase.path,
-                lowerCase.target.toUpperCase(),
-              ),
-            },
-            {
-              key: `lower-lower`,
-              value: createNestedRow(lowerCase.path, lowerTarget),
-            },
-            {
-              key: `lower-other`,
-              value: createNestedRow(lowerCase.path, `${lowerTarget}-other`),
-            },
-          ],
-          expectedKeys: [`lower-lower`, `lower-upper`],
-          expectedPlan: `search`,
-        },
-      ] satisfies Array<GeneratedExpressionIndexScenario>
+type GeneratedMatrixHistory =
+  typeof generatedScenarioMatrixArbitrary extends fc.Arbitrary<infer H>
+    ? H
+    : never
+
+function resolveGeneratedScenarioMatrix([
+  eqCase,
+  inCase,
+  batchedCase,
+  rangeCase,
+  andCase,
+  orderCase,
+  lowerCase,
+]: GeneratedMatrixHistory) {
+  const eqRows = [
+    {
+      key: `eq-match-a`,
+      value: createNestedRow(eqCase.path, eqCase.target),
     },
+    {
+      key: `eq-different`,
+      value: createNestedRow(eqCase.path, `${eqCase.target}-other`),
+    },
+    {
+      key: `eq-match-b`,
+      value: createNestedRow(eqCase.path, eqCase.target),
+    },
+  ]
+  const batchedValues = Array.from({ length: 901 }, (_unused, index) =>
+    BigInt(batchedCase.target + index),
   )
+  const lowerTarget = lowerCase.target.toLowerCase()
+
+  return [
+    {
+      kind: `eq`,
+      label: `generated-eq`,
+      indexExpression: new IR.PropRef(eqCase.path),
+      where: new IR.Func<boolean>(`eq`, [
+        new IR.PropRef(eqCase.path),
+        new IR.Value(eqCase.target),
+      ]),
+      rows: eqRows,
+      expectedKeys: [`eq-match-a`, `eq-match-b`],
+      expectedPlan: `search`,
+    },
+    {
+      kind: `in`,
+      label: `generated-in`,
+      indexExpression: new IR.PropRef(inCase.path),
+      where: new IR.Func<boolean>(`in`, [
+        new IR.PropRef(inCase.path),
+        new IR.Value([BigInt(inCase.target - 1), BigInt(inCase.target)]),
+      ]),
+      rows: [
+        {
+          key: `in-lower`,
+          value: createNestedRow(inCase.path, BigInt(inCase.target - 1)),
+        },
+        {
+          key: `in-match`,
+          value: createNestedRow(inCase.path, BigInt(inCase.target)),
+        },
+        {
+          key: `in-higher`,
+          value: createNestedRow(inCase.path, BigInt(inCase.target + 1)),
+        },
+      ],
+      expectedKeys: [`in-lower`, `in-match`],
+      expectedPlan: `search`,
+    },
+    {
+      kind: `batched-in`,
+      label: `generated-batched-in`,
+      indexExpression: new IR.PropRef(batchedCase.path),
+      where: new IR.Func<boolean>(`in`, [
+        new IR.PropRef(batchedCase.path),
+        new IR.Value(batchedValues),
+      ]),
+      rows: [
+        {
+          key: `batch-first`,
+          value: createNestedRow(batchedCase.path, BigInt(batchedCase.target)),
+        },
+        {
+          key: `batch-last`,
+          value: createNestedRow(
+            batchedCase.path,
+            BigInt(batchedCase.target + 900),
+          ),
+        },
+        {
+          key: `batch-outside`,
+          value: createNestedRow(
+            batchedCase.path,
+            BigInt(batchedCase.target - 1),
+          ),
+        },
+      ],
+      expectedKeys: [`batch-first`, `batch-last`],
+      expectedPlan: `search`,
+    },
+    {
+      kind: `range`,
+      label: `generated-range`,
+      indexExpression: new IR.PropRef(rangeCase.path),
+      where: new IR.Func<boolean>(`gte`, [
+        new IR.PropRef(rangeCase.path),
+        new IR.Value(rangeCase.target),
+      ]),
+      rows: [
+        {
+          key: `range-lower`,
+          value: createNestedRow(rangeCase.path, rangeCase.target - 1),
+        },
+        {
+          key: `range-match`,
+          value: createNestedRow(rangeCase.path, rangeCase.target),
+        },
+        {
+          key: `range-higher`,
+          value: createNestedRow(rangeCase.path, rangeCase.target + 1),
+        },
+      ],
+      expectedKeys: [`range-higher`, `range-match`],
+      expectedPlan: `search`,
+    },
+    {
+      kind: `and`,
+      label: `generated-and`,
+      indexExpression: new IR.PropRef(andCase.path),
+      where: new IR.Func<boolean>(`and`, [
+        new IR.Func(`eq`, [
+          new IR.PropRef(andCase.path),
+          new IR.Value(andCase.target),
+        ]),
+        new IR.Func(`eq`, [new IR.PropRef([`status`]), new IR.Value(`active`)]),
+      ]),
+      rows: [
+        {
+          key: `and-match`,
+          value: {
+            ...createNestedRow(andCase.path, andCase.target),
+            status: `active`,
+          },
+        },
+        {
+          key: `and-inactive`,
+          value: {
+            ...createNestedRow(andCase.path, andCase.target),
+            status: `inactive`,
+          },
+        },
+        {
+          key: `and-different`,
+          value: {
+            ...createNestedRow(andCase.path, `${andCase.target}-other`),
+            status: `active`,
+          },
+        },
+      ],
+      expectedKeys: [`and-match`],
+      expectedPlan: `search`,
+    },
+    {
+      kind: `order-by`,
+      label: `generated-order-by`,
+      indexExpression: new IR.PropRef(orderCase.path),
+      orderBy: [
+        {
+          expression: new IR.PropRef(orderCase.path),
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+          },
+        },
+      ],
+      preserveResultOrder: true,
+      rows: [
+        {
+          key: `order-high`,
+          value: createNestedRow(orderCase.path, orderCase.target + 1),
+        },
+        {
+          key: `order-low`,
+          value: createNestedRow(orderCase.path, orderCase.target - 1),
+        },
+        {
+          key: `order-middle`,
+          value: createNestedRow(orderCase.path, orderCase.target),
+        },
+      ],
+      expectedKeys: [`order-low`, `order-middle`, `order-high`],
+      expectedPlan: `ordered-scan`,
+    },
+    {
+      kind: `wrapped-lower`,
+      label: `generated-wrapped-lower`,
+      indexExpression: new IR.Func(`lower`, [new IR.PropRef(lowerCase.path)]),
+      where: new IR.Func<boolean>(`eq`, [
+        new IR.Func(`lower`, [new IR.PropRef(lowerCase.path)]),
+        new IR.Value(lowerTarget),
+      ]),
+      rows: [
+        {
+          key: `lower-upper`,
+          value: createNestedRow(
+            lowerCase.path,
+            lowerCase.target.toUpperCase(),
+          ),
+        },
+        {
+          key: `lower-lower`,
+          value: createNestedRow(lowerCase.path, lowerTarget),
+        },
+        {
+          key: `lower-other`,
+          value: createNestedRow(lowerCase.path, `${lowerTarget}-other`),
+        },
+      ],
+      expectedKeys: [`lower-lower`, `lower-upper`],
+      expectedPlan: `search`,
+    },
+  ] satisfies Array<GeneratedExpressionIndexScenario>
+}
 
 function assertGeneratedScenarioGrammar(
   scenarios: ReadonlyArray<GeneratedExpressionIndexScenario>,
@@ -590,87 +576,74 @@ function assertGeneratedScenarioObservation(
     2,
   )
 
-  expect(observation.adapterKeys, diagnostic).toEqual(scenario.expectedKeys)
-  expect(observation.directSqlKeys, diagnostic).toEqual(scenario.expectedKeys)
-  if (scenario.expectedPlan === `ordered-scan`) {
-    expect(
-      planUsesNamedIndexForOrdering(
-        observation.plan,
-        observation.tableName,
-        observation.indexName,
-      ),
-      diagnostic,
-    ).toBe(true)
-  } else {
-    expect(
-      planUsesNamedIndex(
-        observation.plan,
-        observation.tableName,
-        observation.indexName,
-      ),
-      diagnostic,
-    ).toBe(true)
-    expect(
-      planScansTable(observation.plan, observation.tableName),
-      diagnostic,
-    ).toBe(false)
-  }
-}
-
-type GeneratedScenarioPropertyOptions = {
-  ablateKind?: GeneratedScenarioKind
-  faultKind?: GeneratedScenarioKind
-  onScenario?: (kind: GeneratedScenarioKind) => void
-}
-
-function generatedScenarioProperty({
-  ablateKind,
-  faultKind,
-  onScenario,
-}: GeneratedScenarioPropertyOptions = {}) {
-  return fc.asyncProperty(generatedScenarioMatrixArbitrary, async (matrix) => {
-    const scenarios =
-      ablateKind === undefined
-        ? matrix
-        : matrix.filter(({ kind }) => kind !== ablateKind)
-    assertGeneratedScenarioGrammar(scenarios)
-
-    for (const scenario of scenarios) {
-      onScenario?.(scenario.kind)
-      const observation = await observeExpressionIndexScenario({
-        ...scenario,
-        ...(faultKind === scenario.kind
-          ? { transformQuery: mutateGeneratedScenarioQuery(scenario.kind) }
-          : {}),
-      })
-      assertGeneratedScenarioObservation(scenario, observation)
-    }
-  })
-}
-
-async function runGeneratedScenarioProperty(
-  campaign: GeneratedPropertyCampaign,
-) {
-  const reachedScenarios = new Set<GeneratedScenarioKind>()
-  const parameters = generatedCampaignParameters(campaign)
-  oracleRoute(oracleRouteOf(parameters))
-  const details = await fc.check(
-    generatedScenarioProperty({
-      onScenario: (kind) => reachedScenarios.add(kind),
-    }),
-    parameters,
+  oracleAssertion(diagnostic, () =>
+    expect(observation.adapterKeys, diagnostic).toEqual(scenario.expectedKeys),
   )
-
-  if (details.failed) {
-    throw new Error(
-      fc.defaultReportMessage(details) ??
-        `generated expression-index property failed without a report`,
+  oracleAssertion(diagnostic, () =>
+    expect(observation.directSqlKeys, diagnostic).toEqual(
+      scenario.expectedKeys,
+    ),
+  )
+  if (scenario.expectedPlan === `ordered-scan`) {
+    oracleAssertion(diagnostic, () =>
+      expect(
+        planUsesNamedIndexForOrdering(
+          observation.plan,
+          observation.tableName,
+          observation.indexName,
+        ),
+        diagnostic,
+      ).toBe(true),
+    )
+  } else {
+    oracleAssertion(diagnostic, () =>
+      expect(
+        planUsesNamedIndex(
+          observation.plan,
+          observation.tableName,
+          observation.indexName,
+        ),
+        diagnostic,
+      ).toBe(true),
+    )
+    oracleAssertion(diagnostic, () =>
+      expect(
+        planScansTable(observation.plan, observation.tableName),
+        diagnostic,
+      ).toBe(false),
     )
   }
-  expect([...reachedScenarios].sort()).toEqual(
-    [...GENERATED_SCENARIO_KINDS].sort(),
+}
+
+// Each original matrix contains every scenario kind. Retain its exact query
+// comparisons and record the existing all-kinds reach check for each matrix.
+// A calibration names `faultKind`: that axis's SQL is replaced by its plausible
+// wrong answer (GENERATED_SCENARIO_FAULTS) before the driver executes it.
+async function runGeneratedScenarioMatrix(
+  matrix: Array<GeneratedExpressionIndexScenario>,
+  observe: (checkpoint: string, value: unknown) => void,
+  faultKind?: GeneratedScenarioKind,
+) {
+  const reachedScenarios = new Set<GeneratedScenarioKind>()
+  assertGeneratedScenarioGrammar(matrix)
+  for (const scenario of matrix) {
+    reachedScenarios.add(scenario.kind)
+    const observation = await observeExpressionIndexScenario({
+      ...scenario,
+      ...(faultKind === scenario.kind
+        ? { transformQuery: mutateGeneratedScenarioQuery(scenario.kind) }
+        : {}),
+    })
+    assertGeneratedScenarioObservation(scenario, observation)
+    observe(`reach`, scenario.kind)
+  }
+  oracleAssertion(
+    `expect([...reachedScenarios].sort()).toEqual([...GENERATED_SCENARIO_KINDS].sort())`,
+    () =>
+      expect([...reachedScenarios].sort()).toEqual(
+        [...GENERATED_SCENARIO_KINDS].sort(),
+      ),
   )
-  return details
 }
 
 async function assertExpressionIndexHistory(
@@ -749,11 +722,17 @@ async function assertExpressionIndexHistory(
       testCase.target,
     )
 
-    expect(
-      expectedKeys,
+    oracleAssertion(
       `full-scan checkpoint must retain independently seeded values`,
-    ).toEqual(independentlySeededExpectedKeys)
-    expect(scannedRows).toHaveLength(seededRows.length)
+      () =>
+        expect(
+          expectedKeys,
+          `full-scan checkpoint must retain independently seeded values`,
+        ).toEqual(independentlySeededExpectedKeys),
+    )
+    oracleAssertion(`expect(scannedRows).toHaveLength(seededRows.length)`, () =>
+      expect(scannedRows).toHaveLength(seededRows.length),
+    )
 
     const indexedRows = await adapter.loadSubset(
       { kind: `eager`, collectionId: collectionId },
@@ -766,18 +745,25 @@ async function assertExpressionIndexHistory(
     )
     const indexedKeys = indexedRows.map((row) => String(row.key)).sort()
 
-    expect(
-      indexedKeys,
+    oracleAssertion(
       `indexed adapter results must equal the independent scan model`,
-    ).toEqual(expectedKeys)
+      () =>
+        expect(
+          indexedKeys,
+          `indexed adapter results must equal the independent scan model`,
+        ).toEqual(expectedKeys),
+    )
 
     if (!predicateQuery) {
       throw new Error(`predicate query checkpoint was not reached`)
     }
-    expect(
-      predicateQuery.params,
-      `the filter value must remain a bound parameter`,
-    ).toContain(sqliteScalarParameter(testCase.target))
+    const predicateParams = predicateQuery.params
+    oracleAssertion(`the filter value must remain a bound parameter`, () =>
+      expect(
+        predicateParams,
+        `the filter value must remain a bound parameter`,
+      ).toContain(sqliteScalarParameter(testCase.target)),
+    )
 
     const directSqlKeys = (
       baseDriver
@@ -787,10 +773,14 @@ async function assertExpressionIndexHistory(
     )
       .map((row) => String(decodePersistedStorageKey(row.key)))
       .sort()
-    expect(
-      directSqlKeys,
+    oracleAssertion(
       `captured SQL must produce the independent keys before in-memory filtering`,
-    ).toEqual(expectedKeys)
+      () =>
+        expect(
+          directSqlKeys,
+          `captured SQL must produce the independent keys before in-memory filtering`,
+        ).toEqual(expectedKeys),
+    )
 
     const registryRow = baseDriver
       .getDatabase()
@@ -836,8 +826,12 @@ async function assertExpressionIndexHistory(
     }
     const checkpointMessage = `predicate checkpoint must use only the matching expression index:\n${JSON.stringify(checkpoint, null, 2)}`
 
-    expect(checkpoint.usedNamedExpressionIndex, checkpointMessage).toBe(true)
-    expect(checkpoint.scannedCollectionTable, checkpointMessage).toBe(false)
+    oracleAssertion(checkpointMessage, () =>
+      expect(checkpoint.usedNamedExpressionIndex, checkpointMessage).toBe(true),
+    )
+    oracleAssertion(checkpointMessage, () =>
+      expect(checkpoint.scannedCollectionTable, checkpointMessage).toBe(false),
+    )
   }, [() => baseDriver.close()])
 }
 
@@ -908,334 +902,407 @@ function expectedNativePolarityKeys(
 }
 
 declareOracle({
-  owns: [`src/node-driver.ts`],
   check: [assertExpressionIndexHistory],
   model: [expectedKeysFromScan, expectedRangeKeys, expectedNativePolarityKeys],
   grammar: [generatedScenarioMatrixArbitrary],
 })
 
+// A generated-matrix comparison names its scenario's axis in its checkpoint
+// (the diagnostic JSON's `kind`). The check carries that axis into the law,
+// so a violation, and each wrong-answer calibration, names the faulted axis.
+const generatedMatrixLaw = `sqlite-persistence.expression-index`
+const generatedAxisLaw = (kind: GeneratedScenarioKind) =>
+  `${generatedMatrixLaw}: ${kind} axis`
+function comparedAxis(checkpoint: string): GeneratedScenarioKind | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(checkpoint)
+  } catch {
+    return undefined
+  }
+  const kind =
+    typeof parsed === `object` && parsed !== null && `kind` in parsed
+      ? parsed.kind
+      : undefined
+  return GENERATED_SCENARIO_KINDS.find((axis) => axis === kind)
+}
+function checkGeneratedMatrix(
+  plan: unknown,
+  trace: ReadonlyArray<Observation>,
+  judgment: Verdict,
+): Verdict {
+  const verdict = forwardAssertionJudgment(plan, trace, judgment)
+  if (verdict.kind !== `violation`) return verdict
+  const axis = comparedAxis(verdict.checkpoint)
+  return axis === undefined
+    ? verdict
+    : { ...verdict, law: generatedAxisLaw(axis) }
+}
+
 describe(`SQLite expression-index oracle`, () => {
-  const it = oracleReplayTest(vitestIt)
+  oracleProperty({
+    id: `sqlite-persistence.expression-index.large-number`,
+    law: {
+      statement: `SQLite candidates retain JavaScript Number/BigInt range matches across operand directions and unary wrappers, with named-index use on the existing selective orientation.`,
+      authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
+      limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
+    },
+    owns: [`src/node-driver.ts`],
+    histories: [{ name: `large Number range directions and wrappers` }],
 
-  it(`keeps large Number matches across BigInt range directions and boolean wrappers`, async () => {
-    oracleRoute(`case`)
-    const field = new IR.PropRef([`n`])
-    const cases = [
-      {
-        name: `positive`,
-        number: 1000000000000000100,
-        bound: 1000000000000000120n,
-      },
-      {
-        name: `negative`,
-        number: -1000000000000000100,
-        bound: -1000000000000000120n,
-      },
-    ] as const
-    const operators = [`gt`, `gte`, `lt`, `lte`] as const
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `sqlite-persistence.expression-index.large-number`,
+        plan,
+        observe,
+        () =>
+          (async () => {
+            const field = new IR.PropRef([`n`])
+            const cases = [
+              {
+                name: `positive`,
+                number: 1000000000000000100,
+                bound: 1000000000000000120n,
+              },
+              {
+                name: `negative`,
+                number: -1000000000000000100,
+                bound: -1000000000000000120n,
+              },
+            ] as const
+            const operators = [`gt`, `gte`, `lt`, `lte`] as const
 
-    for (const testCase of cases) {
-      const rows = [
-        { key: `rounded-number`, value: { n: testCase.number } },
-        { key: `exact-bigint`, value: { n: testCase.bound } },
-      ]
-      for (const operator of operators) {
-        for (const fieldOnLeft of [true, false]) {
-          const literal = new IR.Value(testCase.bound)
-          const predicate = new IR.Func<boolean>(
-            operator,
-            fieldOnLeft ? [field, literal] : [literal, field],
-          )
-          const expectedKeys = expectedRangeKeys(
-            rows,
-            operator,
-            fieldOnLeft,
-            testCase.bound,
-          )
-          for (const wrapper of [`direct`, `and`, `or`] as const) {
-            const observation = await observeExpressionIndexScenario({
-              label: `rounded-${testCase.name}-${operator}-${fieldOnLeft}-${wrapper}`,
-              indexExpression: field,
-              where:
-                wrapper === `direct`
-                  ? predicate
-                  : new IR.Func<boolean>(wrapper, [predicate]),
-              rows,
-            })
-            expect(observation.adapterKeys).toEqual(expectedKeys)
-            expect(observation.directSqlKeys).toEqual(
-              expect.arrayContaining(expectedKeys),
-            )
-            const greaterSide = fieldOnLeft
-              ? operator === `gt` || operator === `gte`
-              : operator === `lt` || operator === `lte`
-            if (greaterSide) {
-              expect(
-                planUsesNamedIndex(
-                  observation.plan,
-                  observation.tableName,
-                  observation.indexName,
-                ),
-                `${testCase.name}-${operator}-${fieldOnLeft}-${wrapper}: ${observation.plan.map((row) => row.detail).join(`; `)}`,
-              ).toBe(true)
+            for (const testCase of cases) {
+              const rows = [
+                { key: `rounded-number`, value: { n: testCase.number } },
+                { key: `exact-bigint`, value: { n: testCase.bound } },
+              ]
+              for (const operator of operators) {
+                for (const fieldOnLeft of [true, false]) {
+                  const literal = new IR.Value(testCase.bound)
+                  const predicate = new IR.Func<boolean>(
+                    operator,
+                    fieldOnLeft ? [field, literal] : [literal, field],
+                  )
+                  const expectedKeys = expectedRangeKeys(
+                    rows,
+                    operator,
+                    fieldOnLeft,
+                    testCase.bound,
+                  )
+                  for (const wrapper of [`direct`, `and`, `or`] as const) {
+                    const observation = await observeExpressionIndexScenario({
+                      label: `rounded-${testCase.name}-${operator}-${fieldOnLeft}-${wrapper}`,
+                      indexExpression: field,
+                      where:
+                        wrapper === `direct`
+                          ? predicate
+                          : new IR.Func<boolean>(wrapper, [predicate]),
+                      rows,
+                    })
+                    oracleAssertion(
+                      `expect(observation.adapterKeys).toEqual(expectedKeys)`,
+                      () =>
+                        expect(observation.adapterKeys).toEqual(expectedKeys),
+                    )
+                    oracleAssertion(
+                      `expect(observation.directSqlKeys).toEqual( expect.arrayContaining(expectedKeys), )`,
+                      () =>
+                        expect(observation.directSqlKeys).toEqual(
+                          expect.arrayContaining(expectedKeys),
+                        ),
+                    )
+                    const greaterSide = fieldOnLeft
+                      ? operator === `gt` || operator === `gte`
+                      : operator === `lt` || operator === `lte`
+                    if (greaterSide) {
+                      oracleAssertion(
+                        `${testCase.name}-${operator}-${fieldOnLeft}-${wrapper}: ${observation.plan.map((row) => row.detail).join(`; `)}`,
+                        () =>
+                          expect(
+                            planUsesNamedIndex(
+                              observation.plan,
+                              observation.tableName,
+                              observation.indexName,
+                            ),
+                            `${testCase.name}-${operator}-${fieldOnLeft}-${wrapper}: ${observation.plan.map((row) => row.detail).join(`; `)}`,
+                          ).toBe(true),
+                      )
+                    }
+                  }
+                }
+              }
             }
-          }
-        }
-      }
-    }
+          })(),
+      ),
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
   })
 
-  async function roundTripGeneratedBigInt(campaign: GeneratedPropertyCampaign) {
-    const campaignParameters = generatedCampaignParameters(campaign)
-    oracleRoute(oracleRouteOf(campaignParameters))
-    await fc.assert(
-      fc.asyncProperty(
-        fc.bigInt({ min: SQLITE_BIGINT_MIN, max: SQLITE_BIGINT_MAX }),
-        async (value) => {
-          const driver = new BetterSqlite3SQLiteDriver({
-            filename: `:memory:`,
-          })
-          const adapter = createSQLiteCorePersistenceAdapter({ driver })
-          const collectionId = `generated-bigint-in-range`
+  oracleProperty({
+    id: `sqlite-persistence.bigint-roundtrip`,
+    law: {
+      statement: `Signed-64-bit BigInts round-trip through the real adapter and equality reads preserve their exact stored value and matching key.`,
+      authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
+      limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
+    },
+    owns: [`src/node-driver.ts`],
+    histories: {
+      arbitrary: fc.bigInt({ min: SQLITE_BIGINT_MIN, max: SQLITE_BIGINT_MAX }),
+      runs: DEFAULT_ORACLE_RUNS,
+      fixedSeeds: [DEFAULT_ORACLE_SEED],
+    },
+    resolve: (value) => ({ value }),
 
-          await withFailurePreservingCleanup(async () => {
-            await adapter.applyCommittedTx(
-              { kind: `eager`, collectionId: collectionId },
-              {
-                txId: `seed-${value}`,
-                term: 1,
-                seq: 1,
-                rowVersion: 1,
-                mutations: [
-                  {
-                    type: `insert`,
-                    key: `match`,
-                    value: { nested: { count: value } },
-                  },
-                ],
-              },
-            )
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `sqlite-persistence.bigint-roundtrip`,
+        plan,
+        observe,
+        () =>
+          (async () => {
+            const { value } = plan
+            const driver = new BetterSqlite3SQLiteDriver({
+              filename: `:memory:`,
+            })
+            const adapter = createSQLiteCorePersistenceAdapter({ driver })
+            const collectionId = `generated-bigint-in-range`
 
-            const rows = await adapter.loadSubset(
-              { kind: `eager`, collectionId: collectionId },
-              {
-                where: new IR.Func(`eq`, [
-                  new IR.PropRef([`nested`, `count`]),
-                  new IR.Value(value),
-                ]),
-              },
-            )
-            expect(rows.map((row) => row.key)).toEqual([`match`])
-            expect(rows[0]?.value).toEqual({ nested: { count: value } })
-          }, [() => driver.close()])
-        },
+            await withFailurePreservingCleanup(async () => {
+              await adapter.applyCommittedTx(
+                { kind: `eager`, collectionId: collectionId },
+                {
+                  txId: `seed-${value}`,
+                  term: 1,
+                  seq: 1,
+                  rowVersion: 1,
+                  mutations: [
+                    {
+                      type: `insert`,
+                      key: `match`,
+                      value: { nested: { count: value } },
+                    },
+                  ],
+                },
+              )
+
+              const rows = await adapter.loadSubset(
+                { kind: `eager`, collectionId: collectionId },
+                {
+                  where: new IR.Func(`eq`, [
+                    new IR.PropRef([`nested`, `count`]),
+                    new IR.Value(value),
+                  ]),
+                },
+              )
+              oracleAssertion(
+                `expect(rows.map((row) => row.key)).toEqual(['match'])`,
+                () => expect(rows.map((row) => row.key)).toEqual([`match`]),
+              )
+              oracleAssertion(
+                `expect(rows[0]?.value).toEqual({ nested: { count: value } })`,
+                () =>
+                  expect(rows[0]?.value).toEqual({ nested: { count: value } }),
+              )
+            }, [() => driver.close()])
+          })(),
       ),
-      campaignParameters,
-    )
-  }
-  oracleReplayTest(vitestIt).each([fixedGeneratedCampaign])(
-    `round-trips generated signed-64-bit BigInts through the real adapter in the $name campaign`,
-    roundTripGeneratedBigInt,
-  )
-  oracleReplayTest(vitestIt, BIGINT_ROUNDTRIP_PROPERTY).each([
-    randomGeneratedCampaign(BIGINT_ROUNDTRIP_PROPERTY),
-  ])(
-    `round-trips generated signed-64-bit BigInts through the real adapter in the $name campaign`,
-    roundTripGeneratedBigInt,
-  )
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+  })
 
-  async function rejectGeneratedBigInt(campaign: GeneratedPropertyCampaign) {
-    const outOfRangeBigIntArbitrary = fc.oneof(
-      fc
-        .bigInt({ min: 1n, max: 1_000n })
-        .map((distance) => SQLITE_BIGINT_MIN - distance),
-      fc
-        .bigInt({ min: 1n, max: 1_000n })
-        .map((distance) => SQLITE_BIGINT_MAX + distance),
-    )
+  oracleProperty({
+    id: `sqlite-persistence.bigint-rejection`,
+    law: {
+      statement: `BigInts immediately outside the signed SQLite integer range reject with the documented range error.`,
+      authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
+      limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
+    },
+    owns: [`src/node-driver.ts`],
+    histories: {
+      arbitrary: fc.oneof(
+        fc
+          .bigInt({ min: 1n, max: 1_000n })
+          .map((distance) => SQLITE_BIGINT_MIN - distance),
+        fc
+          .bigInt({ min: 1n, max: 1_000n })
+          .map((distance) => SQLITE_BIGINT_MAX + distance),
+      ),
+      runs: DEFAULT_ORACLE_RUNS,
+      fixedSeeds: [DEFAULT_ORACLE_SEED],
+    },
+    resolve: (value) => ({ value }),
 
-    const runParameters = generatedCampaignParameters(campaign)
-    oracleRoute(oracleRouteOf(runParameters))
-    await fc.assert(
-      fc.asyncProperty(outOfRangeBigIntArbitrary, async (value) => {
-        const driver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
-        const adapter = createSQLiteCorePersistenceAdapter({ driver })
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `sqlite-persistence.bigint-rejection`,
+        plan,
+        observe,
+        () =>
+          (async () => {
+            const { value } = plan
+            const driver = new BetterSqlite3SQLiteDriver({
+              filename: `:memory:`,
+            })
+            const adapter = createSQLiteCorePersistenceAdapter({ driver })
 
-        await withFailurePreservingCleanup(async () => {
-          await expect(
-            adapter.applyCommittedTx(
-              {
-                kind: `eager`,
-                collectionId: `generated-bigint-out-of-range`,
-              },
-              {
-                txId: `reject-${value}`,
-                term: 1,
-                seq: 1,
-                rowVersion: 1,
-                mutations: [
-                  {
-                    type: `insert`,
-                    key: `rejected`,
-                    value: { nested: { count: value } },
-                  },
-                ],
-              },
-            ),
-          ).rejects.toThrow(bigintRangeError(value))
-        }, [() => driver.close()])
-      }),
-      runParameters,
-    )
-  }
-  oracleReplayTest(vitestIt).each([fixedGeneratedCampaign])(
-    `rejects generated BigInts immediately outside the signed range in the $name campaign`,
-    rejectGeneratedBigInt,
-  )
-  oracleReplayTest(vitestIt, BIGINT_REJECTION_PROPERTY).each([
-    randomGeneratedCampaign(BIGINT_REJECTION_PROPERTY),
-  ])(
-    `rejects generated BigInts immediately outside the signed range in the $name campaign`,
-    rejectGeneratedBigInt,
-  )
+            await withFailurePreservingCleanup(async () => {
+              await oracleAssertion(
+                `expect( adapter.applyCommittedTx( { kind: 'eager', collectionId: 'generated-bigint-out-of-range', },`,
+                () =>
+                  expect(
+                    adapter.applyCommittedTx(
+                      {
+                        kind: `eager`,
+                        collectionId: `generated-bigint-out-of-range`,
+                      },
+                      {
+                        txId: `reject-${value}`,
+                        term: 1,
+                        seq: 1,
+                        rowVersion: 1,
+                        mutations: [
+                          {
+                            type: `insert`,
+                            key: `rejected`,
+                            value: { nested: { count: value } },
+                          },
+                        ],
+                      },
+                    ),
+                  ).rejects.toThrow(bigintRangeError(value)),
+              )
+            }, [() => driver.close()])
+          })(),
+      ),
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+  })
 
-  it(`uses the expression index for the fixed filter witness`, async () => {
-    oracleRoute(`fixed history`)
-    await assertExpressionIndexHistory(
+  oracleProperty({
+    id: `sqlite-persistence.expression-index.fixed-filter`,
+    law: {
+      statement: `Indexed equality agrees with the independent full-scan model, binds the filter value, and uses the matching named expression index.`,
+      authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
+      limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
+    },
+    owns: [`src/node-driver.ts`],
+    histories: [
       {
         path: [`threadId`],
         target: `thread-'1`,
         distractors: [`thread-2`, `thread-3`],
-      },
-      `fixed-thread-filter`,
-    )
+      } satisfies OracleCase,
+    ],
+
+    driver: (plan: OracleCase, observe) =>
+      recordAssertionJudgment(
+        `sqlite-persistence.expression-index.fixed-filter`,
+        plan,
+        observe,
+        () => assertExpressionIndexHistory(plan, `fixed-thread-filter`),
+      ),
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
   })
 
-  async function reachGeneratedExpressionIndex(
-    campaign: GeneratedPropertyCampaign,
-  ) {
-    oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
-    const details = await runGeneratedScenarioProperty(campaign)
-    const parameters = generatedCampaignParameters(campaign)
+  oracleProperty({
+    id: `sqlite-persistence.expression-index`,
+    law: {
+      statement: `Every generated matrix retains all seven query axes, their exact candidate and public keys, promised ordering, and required named-index plans.`,
+      authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
+      limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
+    },
+    owns: [`src/node-driver.ts`],
+    histories: {
+      arbitrary: generatedScenarioMatrixArbitrary,
+      runs: DEFAULT_ORACLE_RUNS,
+      fixedSeeds: [DEFAULT_ORACLE_SEED],
+      measured: GENERATED_SCENARIO_KINDS,
+    },
+    resolve: resolveGeneratedScenarioMatrix,
 
-    expect(details.numRuns).toBe(campaign.parameters.numRuns)
-    expect(`seed` in parameters).toBe(campaign.parameters.seed !== undefined)
-    expect(`path` in parameters).toBe(campaign.parameters.path !== undefined)
-    if (campaign.parameters.seed !== undefined) {
-      expect(details.seed).toBe(campaign.parameters.seed)
-    }
-    if (campaign.parameters.path !== undefined) {
-      expect(details.runConfiguration.path).toBe(campaign.parameters.path)
-    }
-    expect(details.seed).toEqual(expect.any(Number))
-  }
-  oracleReplayTest(vitestIt).each([fixedGeneratedCampaign])(
-    `reaches every declared generated expression-index scenario in the $name campaign`,
-    reachGeneratedExpressionIndex,
-  )
-  oracleReplayTest(vitestIt, EXPRESSION_INDEX_PROPERTY).each([
-    randomGeneratedCampaign(EXPRESSION_INDEX_PROPERTY),
-  ])(
-    `reaches every declared generated expression-index scenario in the $name campaign`,
-    reachGeneratedExpressionIndex,
-  )
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `sqlite-persistence.expression-index`,
+        plan,
+        observe,
+        () => runGeneratedScenarioMatrix(plan, observe),
+      ),
+    model: recordedAssertionJudgment,
+    check: checkGeneratedMatrix,
+    // Each axis's plausible wrong SQL answer must fail the unchanged
+    // comparison at that axis (moved from the raw wrong-answer control, which
+    // also required the failure to name the faulted kind; the framework's
+    // self-oracle owns the shrink-and-replay fidelity that control checked).
+    calibrations: GENERATED_SCENARIO_FAULTS.map(({ kind, wrongAnswer }) => ({
+      name: `${kind}: ${wrongAnswer}`,
+      law: generatedAxisLaw(kind),
+      driver: (
+        plan: Array<GeneratedExpressionIndexScenario>,
+        observe: (checkpoint: string, value: unknown) => void,
+      ) =>
+        recordAssertionJudgment(
+          `sqlite-persistence.expression-index`,
+          plan,
+          observe,
+          () => runGeneratedScenarioMatrix(plan, observe, kind),
+        ),
+    })),
+  })
 
   const generatedControlTest = oracleReplayTest(vitestIt)
-
-  generatedControlTest.each(GENERATED_SCENARIO_KINDS)(
-    `rejects the generated grammar when the %s axis is ablated`,
-    async (kind) => {
-      oracleRoute(`calibration`)
-      const details = await fc.check(
-        generatedScenarioProperty({ ablateKind: kind }),
-        oracleFixedSeed(DEFAULT_ORACLE_SEED, { numRuns: 1, verbose: 2 }),
-      )
-      const evidence = JSON.stringify({
-        seed: details.seed,
-        path: details.counterexamplePath,
-        error: String(details.errorInstance),
-      })
-
-      expect(details.failed, evidence).toBe(true)
-      expect(details.seed, evidence).toBe(DEFAULT_ORACLE_SEED)
-      expect(details.counterexamplePath, evidence).not.toBeNull()
-      expect(String(details.errorInstance), evidence).toContain(
-        `missing=${kind}`,
-      )
-    },
-  )
 
   generatedControlTest(
     `reconstructs the retained generated grammar and rejects a nearby duplicate axis`,
     () => {
       oracleRoute(`calibration`)
       const [matrix] = fc.sample(
-        generatedScenarioMatrixArbitrary,
+        generatedScenarioMatrixArbitrary.map(resolveGeneratedScenarioMatrix),
         oracleFixedSeed(DEFAULT_ORACLE_SEED, { numRuns: 1 }),
       )
       if (!matrix) throw new Error(`fixed grammar witness was not generated`)
       assertGeneratedScenarioGrammar(matrix)
-      expect(GENERATED_SCENARIO_FAULTS.map(({ kind }) => kind)).toEqual(
-        GENERATED_SCENARIO_KINDS,
+      oracleAssertion(
+        `expect(GENERATED_SCENARIO_FAULTS.map(({ kind }) => kind)).toEqual( GENERATED_SCENARIO_KINDS, )`,
+        () =>
+          expect(GENERATED_SCENARIO_FAULTS.map(({ kind }) => kind)).toEqual(
+            GENERATED_SCENARIO_KINDS,
+          ),
       )
       const equalityScenario = matrix[0]
       if (!equalityScenario) {
         throw new Error(`fixed grammar witness omitted equality`)
       }
-      expect(() =>
-        assertGeneratedScenarioGrammar([...matrix, equalityScenario]),
-      ).toThrow(`duplicate=eq`)
+      oracleAssertion(
+        `expect(() => assertGeneratedScenarioGrammar([...matrix, equalityScenario]), ).toThrow('duplicate=eq'`,
+        () =>
+          expect(() =>
+            assertGeneratedScenarioGrammar([...matrix, equalityScenario]),
+          ).toThrow(`duplicate=eq`),
+      )
     },
   )
 
-  generatedControlTest.each(GENERATED_SCENARIO_FAULTS)(
-    `rejects the plausible $wrongAnswer for the $kind axis`,
-    async ({ kind }) => {
+  // Grammar calibration: ablating any one axis from the fixed matrix fails
+  // the grammar check that every native history runs, naming that axis.
+  generatedControlTest.each(GENERATED_SCENARIO_KINDS)(
+    `rejects the generated grammar when the %s axis is ablated`,
+    (kind) => {
       oracleRoute(`calibration`)
-      const details = await fc.check(
-        generatedScenarioProperty({ faultKind: kind }),
-        oracleFixedSeed(DEFAULT_ORACLE_SEED, { numRuns: 1, verbose: 2 }),
+      const [matrix] = fc.sample(
+        generatedScenarioMatrixArbitrary.map(resolveGeneratedScenarioMatrix),
+        oracleFixedSeed(DEFAULT_ORACLE_SEED, { numRuns: 1 }),
       )
-      const evidence = JSON.stringify({
-        seed: details.seed,
-        path: details.counterexamplePath,
-        error: String(details.errorInstance),
-      })
-
-      expect(details.failed, evidence).toBe(true)
-      expect(details.seed, evidence).toBe(DEFAULT_ORACLE_SEED)
-      expect(details.counterexamplePath, evidence).not.toBeNull()
-      expect(String(details.errorInstance ?? ``), evidence).not.toContain(
-        `did not reach`,
-      )
-      expect(String(details.errorInstance), evidence).toContain(
-        `"kind": "${kind}"`,
-      )
-
-      if (details.counterexamplePath === null) {
-        throw new Error(`${kind} wrong-answer control did not shrink to a path`)
-      }
-      const replay = await fc.check(
-        generatedScenarioProperty({ faultKind: kind }),
-        {
-          seed: details.seed,
-          path: details.counterexamplePath,
-          numRuns: 1,
-          verbose: 2,
-        },
-      )
-      const replayEvidence = JSON.stringify({
-        seed: replay.seed,
-        requestedPath: details.counterexamplePath,
-        replayPath: replay.counterexamplePath,
-        error: String(replay.errorInstance),
-      })
-      expect(replay.failed, replayEvidence).toBe(true)
-      expect(String(replay.errorInstance ?? ``), replayEvidence).not.toContain(
-        `did not reach`,
-      )
-      expect(String(replay.errorInstance), replayEvidence).toContain(
-        `"kind": "${kind}"`,
+      if (!matrix) throw new Error(`fixed grammar witness was not generated`)
+      oracleAssertion(
+        `expect(() => assertGeneratedScenarioGrammar(ablated)).toThrow('missing=${kind}')`,
+        () =>
+          expect(() =>
+            assertGeneratedScenarioGrammar(
+              matrix.filter((scenario) => scenario.kind !== kind),
+            ),
+          ).toThrow(`missing=${kind}`),
       )
     },
   )
@@ -1244,227 +1311,328 @@ describe(`SQLite expression-index oracle`, () => {
 // Native values add a bounded rank/text dimension to this SQL/plan owner.
 // The common model is independent; this driver observes real SQL before cleanup.
 describe(`Temporal expression-index refinement`, () => {
-  const it = oracleReplayTest(vitestIt)
-  it.each(temporalFamilies)(
-    `uses native keys and identity for $kind / $name`,
-    async (family) => {
-      oracleRoute(`case`)
-      vi.stubGlobal(`Temporal`, Temporal)
-      try {
-        for (const query of temporalQueryCases(family)) {
-          const result = await observeExpressionIndexScenario({
-            label: `${family.name}-${query.name}`,
-            indexExpression: new IR.PropRef([`stamp`]),
-            where: query.where,
-            rows: family.texts.map((_, i) => ({
-              key: `row-${i}`,
-              value: {
-                stamp: temporalValue(family, i),
-                target: temporalValue(family, 1),
-              },
-            })),
-          })
-          expect(result.adapterKeys, query.name).toEqual(query.expectedKeys)
-          expect(result.directSqlKeys, query.name).toEqual(query.expectedKeys)
-          if (query.name === `in` || query.name === `batched-in`)
-            expect(result.predicateQuery.params).toHaveLength(1)
-          if (
-            [
-              `eq`,
-              `in`,
-              `batched-in`,
-              `gt`,
-              `gte`,
-              `lt`,
-              `lte`,
-              `and`,
-            ].includes(query.name)
-          ) {
-            expect(
-              planUsesNamedIndex(
-                result.plan,
-                result.tableName,
-                result.indexName,
-              ),
-              query.name,
-            ).toBe(true)
-            expect(
-              planScansTable(result.plan, result.tableName),
-              query.name,
-            ).toBe(false)
-          }
-        }
-      } finally {
-        vi.unstubAllGlobals()
-      }
+  oracleProperty({
+    id: `sqlite-persistence.expression-index.native-identity`,
+    law: {
+      statement: `Native rank and identity fixtures retain their exact candidate and public keys and their supported named-index plans.`,
+      authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
+      limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
-  )
+    owns: [`src/node-driver.ts`],
+    histories: temporalFamilies,
+
+    label: (family) => `${family.kind}/${family.name}`,
+    driver: (plan: TemporalFamily, observe) =>
+      recordAssertionJudgment(
+        `sqlite-persistence.expression-index.native-identity`,
+        plan,
+        observe,
+        () =>
+          (async () => {
+            vi.stubGlobal(`Temporal`, Temporal)
+            try {
+              for (const query of temporalQueryCases(plan)) {
+                const result = await observeExpressionIndexScenario({
+                  label: `${plan.name}-${query.name}`,
+                  indexExpression: new IR.PropRef([`stamp`]),
+                  where: query.where,
+                  rows: plan.texts.map((_, i) => ({
+                    key: `row-${i}`,
+                    value: {
+                      stamp: temporalValue(plan, i),
+                      target: temporalValue(plan, 1),
+                    },
+                  })),
+                })
+                oracleAssertion(query.name, () =>
+                  expect(result.adapterKeys, query.name).toEqual(
+                    query.expectedKeys,
+                  ),
+                )
+                oracleAssertion(query.name, () =>
+                  expect(result.directSqlKeys, query.name).toEqual(
+                    query.expectedKeys,
+                  ),
+                )
+                if (query.name === `in` || query.name === `batched-in`)
+                  oracleAssertion(
+                    `expect(result.predicateQuery.params).toHaveLength(1)`,
+                    () => expect(result.predicateQuery.params).toHaveLength(1),
+                  )
+                if (
+                  [
+                    `eq`,
+                    `in`,
+                    `batched-in`,
+                    `gt`,
+                    `gte`,
+                    `lt`,
+                    `lte`,
+                    `and`,
+                  ].includes(query.name)
+                ) {
+                  oracleAssertion(query.name, () =>
+                    expect(
+                      planUsesNamedIndex(
+                        result.plan,
+                        result.tableName,
+                        result.indexName,
+                      ),
+                      query.name,
+                    ).toBe(true),
+                  )
+                  oracleAssertion(query.name, () =>
+                    expect(
+                      planScansTable(result.plan, result.tableName),
+                      query.name,
+                    ).toBe(false),
+                  )
+                }
+              }
+            } finally {
+              vi.unstubAllGlobals()
+            }
+          })(),
+      ),
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+  })
 
   // Independent fixture rank/text rules also judge mixed-domain candidates.
   // SQL may retain extras, but NOT must never invert an approximate prefilter.
-  it.each(temporalFamilies)(
-    `retains mixed-domain matches under native predicate polarity / $name`,
-    async (family) => {
-      oracleRoute(`case`)
-      vi.stubGlobal(`Temporal`, Temporal)
-      try {
-        const ref = new IR.PropRef([`stamp`])
-        const literal = new IR.Value(temporalValue(family, 1))
-        const nativeRows = family.texts.map((_, i) => ({
-          key: `row-${i}`,
-          value: { stamp: temporalValue(family, i) },
-        }))
-        const nullableRows = [
-          ...nativeRows,
-          { key: `nan`, value: { stamp: NaN } },
-          { key: `null`, value: { stamp: null } },
-          { key: `missing`, value: {} },
-        ]
-        for (const operator of [`gt`, `gte`, `lt`, `lte`] as const) {
-          for (const reverse of [false, true]) {
-            for (const negate of [false, true]) {
-              const comparison = new IR.Func<boolean>(
-                operator,
-                reverse ? [literal, ref] : [ref, literal],
+  oracleProperty({
+    id: `sqlite-persistence.expression-index.native-polarity`,
+    law: {
+      statement: `Native predicates retain the independent mixed-domain matches and preserve residual filtering, fallback, scalar identity and field-pair behavior.`,
+      authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
+      limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
+    },
+    owns: [`src/node-driver.ts`],
+    histories: temporalFamilies,
+
+    label: (family) => `${family.kind}/${family.name}`,
+    driver: (plan: TemporalFamily, observe) =>
+      recordAssertionJudgment(
+        `sqlite-persistence.expression-index.native-polarity`,
+        plan,
+        observe,
+        () =>
+          (async () => {
+            vi.stubGlobal(`Temporal`, Temporal)
+            try {
+              const ref = new IR.PropRef([`stamp`])
+              const literal = new IR.Value(temporalValue(plan, 1))
+              const nativeRows = plan.texts.map((_, i) => ({
+                key: `row-${i}`,
+                value: { stamp: temporalValue(plan, i) },
+              }))
+              const nullableRows = [
+                ...nativeRows,
+                { key: `nan`, value: { stamp: NaN } },
+                { key: `null`, value: { stamp: null } },
+                { key: `missing`, value: {} },
+              ]
+              for (const operator of [`gt`, `gte`, `lt`, `lte`] as const) {
+                for (const reverse of [false, true]) {
+                  for (const negate of [false, true]) {
+                    const comparison = new IR.Func<boolean>(
+                      operator,
+                      reverse ? [literal, ref] : [ref, literal],
+                    )
+                    const where = negate
+                      ? new IR.Func<boolean>(`not`, [comparison])
+                      : comparison
+                    const expectedKeys = expectedNativePolarityKeys(
+                      plan,
+                      nullableRows,
+                      operator,
+                      reverse,
+                      negate,
+                    )
+                    const result = await observeExpressionIndexScenario({
+                      label: `native-polarity`,
+                      indexExpression: ref,
+                      where,
+                      rows: nullableRows,
+                    })
+                    oracleAssertion(`${operator}/${reverse}/${negate}`, () =>
+                      expect(
+                        result.adapterKeys,
+                        `${operator}/${reverse}/${negate}`,
+                      ).toEqual(expectedKeys),
+                    )
+                    oracleAssertion(
+                      `expect(result.directSqlKeys).toEqual( expect.arrayContaining(expectedKeys), )`,
+                      () =>
+                        expect(result.directSqlKeys).toEqual(
+                          expect.arrayContaining(expectedKeys),
+                        ),
+                    )
+                  }
+                }
+              }
+              const otherKind =
+                plan.kind === `Instant`
+                  ? Temporal.PlainDate.from(`2026-01-02`)
+                  : Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+              const rows = [
+                ...nullableRows,
+                ...[
+                  otherKind,
+                  0,
+                  false,
+                  new Date(0),
+                  `10000000000000000000001`,
+                  `${plan.kind === `Instant` ? `Temporal.Instant` : `Temporal.PlainDate`}:${plan.texts[1]}`,
+                  `\u0000tanstack-db:temporal:Temporal.${plan.kind}:${plan.texts[1]}`,
+                ].map((stamp, i) => ({ key: `other-${i}`, value: { stamp } })),
+              ]
+              for (const operator of [`eq`, `in`] as const) {
+                const comparison = new IR.Func<boolean>(operator, [
+                  ref,
+                  operator === `eq`
+                    ? literal
+                    : new IR.Value([temporalValue(plan, 1)]),
+                ])
+                for (const negate of [false, true]) {
+                  const where = negate
+                    ? new IR.Func<boolean>(`not`, [comparison])
+                    : comparison
+                  const expectedKeys = rows
+                    .filter(
+                      (row) =>
+                        ![`null`, `missing`].includes(row.key) &&
+                        (row.key === `row-1`) !== negate,
+                    )
+                    .map((row) => row.key)
+                    .sort()
+                  const result = await observeExpressionIndexScenario({
+                    label: `native-equality-polarity`,
+                    indexExpression: ref,
+                    where,
+                    rows,
+                  })
+                  oracleAssertion(
+                    `expect(result.adapterKeys).toEqual(expectedKeys)`,
+                    () => expect(result.adapterKeys).toEqual(expectedKeys),
+                  )
+                  oracleAssertion(
+                    `expect(result.directSqlKeys).toEqual( expect.arrayContaining(expectedKeys), )`,
+                    () =>
+                      expect(result.directSqlKeys).toEqual(
+                        expect.arrayContaining(expectedKeys),
+                      ),
+                  )
+                }
+              }
+              // A string can equal a native SQL order key without equaling the native
+              // value. The scalar candidate uses one binding and residual cleanup owns
+              // that distinction; persisted Boolean expressions still retain identity.
+              const orderKey = `10000000000000000000001`
+              const stringEquality = new IR.Func<boolean>(`eq`, [
+                ref,
+                new IR.Value(orderKey),
+              ])
+              const scalar = await observeExpressionIndexScenario({
+                label: `string-native-order-key`,
+                indexExpression: stringEquality,
+                where: stringEquality,
+                rows,
+                observeIndexValues: true,
+              })
+              oracleAssertion(
+                `expect(scalar.adapterKeys).toEqual(['other-4'])`,
+                () => expect(scalar.adapterKeys).toEqual([`other-4`]),
               )
-              const where = negate
-                ? new IR.Func<boolean>(`not`, [comparison])
-                : comparison
-              const expectedKeys = expectedNativePolarityKeys(
-                family,
-                nullableRows,
-                operator,
-                reverse,
-                negate,
+              oracleAssertion(
+                `expect(scalar.directSqlKeys).toEqual( expect.arrayContaining(['other-4']), )`,
+                () =>
+                  expect(scalar.directSqlKeys).toEqual(
+                    expect.arrayContaining([`other-4`]),
+                  ),
               )
-              const result = await observeExpressionIndexScenario({
-                label: `native-polarity`,
-                indexExpression: ref,
-                where,
+              oracleAssertion(
+                `expect(scalar.predicateQuery.params).toEqual([orderKey])`,
+                () => expect(scalar.predicateQuery.params).toEqual([orderKey]),
+              )
+              oracleAssertion(
+                `expect( scalar.indexValues ?.filter((row) => row.value === 1) .map((row) => row.key), ).toEqual(['ot`,
+                () =>
+                  expect(
+                    scalar.indexValues
+                      ?.filter((row) => row.value === 1)
+                      .map((row) => row.key),
+                  ).toEqual([`other-4`]),
+              )
+
+              const selected = new IR.Func(`coalesce`, [ref, literal])
+              const equality = new IR.Func<boolean>(`eq`, [selected, literal])
+              const fallback = await observeExpressionIndexScenario({
+                label: `native-coalesce-negation`,
+                indexExpression: selected,
+                where: new IR.Func<boolean>(`not`, [equality]),
                 rows: nullableRows,
               })
-              expect(
-                result.adapterKeys,
-                `${operator}/${reverse}/${negate}`,
-              ).toEqual(expectedKeys)
-              expect(result.directSqlKeys).toEqual(
-                expect.arrayContaining(expectedKeys),
+              oracleAssertion(
+                `expect(fallback.adapterKeys).toEqual(['nan', 'row-0', 'row-2'])`,
+                () =>
+                  expect(fallback.adapterKeys).toEqual([
+                    `nan`,
+                    `row-0`,
+                    `row-2`,
+                  ]),
               )
+              oracleAssertion(
+                `expect(fallback.predicateQuery.sql).not.toContain(' WHERE ')`,
+                () =>
+                  expect(fallback.predicateQuery.sql).not.toContain(` WHERE `),
+              )
+              const paired = await observeExpressionIndexScenario({
+                label: `native-field-pairs`,
+                indexExpression: ref,
+                where: new IR.Func<boolean>(`eq`, [
+                  ref,
+                  new IR.PropRef([`target`]),
+                ]),
+                rows: [
+                  {
+                    key: `native`,
+                    value: {
+                      stamp: temporalValue(plan, 1),
+                      target: temporalValue(plan, 1),
+                    },
+                  },
+                  {
+                    key: `different`,
+                    value: {
+                      stamp: temporalValue(plan, 0),
+                      target: temporalValue(plan, 1),
+                    },
+                  },
+                  {
+                    key: `date-number`,
+                    value: { stamp: new Date(0), target: 0 },
+                  },
+                ],
+              })
+              oracleAssertion(
+                `expect(paired.adapterKeys).toEqual(['date-number', 'native'])`,
+                () =>
+                  expect(paired.adapterKeys).toEqual([`date-number`, `native`]),
+              )
+              oracleAssertion(
+                `expect(paired.directSqlKeys).toEqual( expect.arrayContaining(paired.adapterKeys), )`,
+                () =>
+                  expect(paired.directSqlKeys).toEqual(
+                    expect.arrayContaining(paired.adapterKeys),
+                  ),
+              )
+            } finally {
+              vi.unstubAllGlobals()
             }
-          }
-        }
-        const otherKind =
-          family.kind === `Instant`
-            ? Temporal.PlainDate.from(`2026-01-02`)
-            : Temporal.Instant.from(`2026-01-02T00:00:00Z`)
-        const rows = [
-          ...nullableRows,
-          ...[
-            otherKind,
-            0,
-            false,
-            new Date(0),
-            `10000000000000000000001`,
-            `${family.kind === `Instant` ? `Temporal.Instant` : `Temporal.PlainDate`}:${family.texts[1]}`,
-            `\u0000tanstack-db:temporal:Temporal.${family.kind}:${family.texts[1]}`,
-          ].map((stamp, i) => ({ key: `other-${i}`, value: { stamp } })),
-        ]
-        for (const operator of [`eq`, `in`] as const) {
-          const comparison = new IR.Func<boolean>(operator, [
-            ref,
-            operator === `eq`
-              ? literal
-              : new IR.Value([temporalValue(family, 1)]),
-          ])
-          for (const negate of [false, true]) {
-            const where = negate
-              ? new IR.Func<boolean>(`not`, [comparison])
-              : comparison
-            const expectedKeys = rows
-              .filter(
-                (row) =>
-                  ![`null`, `missing`].includes(row.key) &&
-                  (row.key === `row-1`) !== negate,
-              )
-              .map((row) => row.key)
-              .sort()
-            const result = await observeExpressionIndexScenario({
-              label: `native-equality-polarity`,
-              indexExpression: ref,
-              where,
-              rows,
-            })
-            expect(result.adapterKeys).toEqual(expectedKeys)
-            expect(result.directSqlKeys).toEqual(
-              expect.arrayContaining(expectedKeys),
-            )
-          }
-        }
-        // A string can equal a native SQL order key without equaling the native
-        // value. The scalar candidate uses one binding and residual cleanup owns
-        // that distinction; persisted Boolean expressions still retain identity.
-        const orderKey = `10000000000000000000001`
-        const stringEquality = new IR.Func<boolean>(`eq`, [
-          ref,
-          new IR.Value(orderKey),
-        ])
-        const scalar = await observeExpressionIndexScenario({
-          label: `string-native-order-key`,
-          indexExpression: stringEquality,
-          where: stringEquality,
-          rows,
-          observeIndexValues: true,
-        })
-        expect(scalar.adapterKeys).toEqual([`other-4`])
-        expect(scalar.directSqlKeys).toEqual(
-          expect.arrayContaining([`other-4`]),
-        )
-        expect(scalar.predicateQuery.params).toEqual([orderKey])
-        expect(
-          scalar.indexValues
-            ?.filter((row) => row.value === 1)
-            .map((row) => row.key),
-        ).toEqual([`other-4`])
-
-        const selected = new IR.Func(`coalesce`, [ref, literal])
-        const equality = new IR.Func<boolean>(`eq`, [selected, literal])
-        const fallback = await observeExpressionIndexScenario({
-          label: `native-coalesce-negation`,
-          indexExpression: selected,
-          where: new IR.Func<boolean>(`not`, [equality]),
-          rows: nullableRows,
-        })
-        expect(fallback.adapterKeys).toEqual([`nan`, `row-0`, `row-2`])
-        expect(fallback.predicateQuery.sql).not.toContain(` WHERE `)
-        const paired = await observeExpressionIndexScenario({
-          label: `native-field-pairs`,
-          indexExpression: ref,
-          where: new IR.Func<boolean>(`eq`, [ref, new IR.PropRef([`target`])]),
-          rows: [
-            {
-              key: `native`,
-              value: {
-                stamp: temporalValue(family, 1),
-                target: temporalValue(family, 1),
-              },
-            },
-            {
-              key: `different`,
-              value: {
-                stamp: temporalValue(family, 0),
-                target: temporalValue(family, 1),
-              },
-            },
-            { key: `date-number`, value: { stamp: new Date(0), target: 0 } },
-          ],
-        })
-        expect(paired.adapterKeys).toEqual([`date-number`, `native`])
-        expect(paired.directSqlKeys).toEqual(
-          expect.arrayContaining(paired.adapterKeys),
-        )
-      } finally {
-        vi.unstubAllGlobals()
-      }
-    },
-  )
+          })(),
+      ),
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+  })
 })

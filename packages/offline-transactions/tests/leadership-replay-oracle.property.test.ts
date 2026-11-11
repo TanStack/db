@@ -1,14 +1,12 @@
+import { isDeepStrictEqual } from 'node:util'
 import { createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import { OfflineExecutor } from '../src/OfflineExecutor'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
-import {
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-} from '../../db/tests/oracle-config'
+import { oracleRoute } from '../../db/tests/oracle-config'
+import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   FakeStorageAdapter,
@@ -22,7 +20,7 @@ import {
   cleanupOfflineOracle,
   useControlledClock,
 } from './oracle-lifecycle'
-import { oracleCampaignOptions, readOfflineOracleConfig } from './oracle-config'
+import type { Observation, Verdict } from '../../db/tests/oracle-property'
 import type { OfflineTransaction } from '../src/types'
 
 /**
@@ -156,211 +154,109 @@ const DELAYED_READ_PROPERTY = `offline.leadership.delayed-read`
 const STARTUP_PROPERTY = `offline.leadership.startup`
 const STALE_READ_PROPERTY = `offline.leadership.stale-read`
 const STORAGE_FAILURE_PROPERTY = `offline.leadership.storage-failure`
-const serialWorkOracle = readOfflineOracleConfig({
-  property: SERIAL_WORK_PROPERTY,
-  defaultRuns: 20,
-})
-const leadershipReportOracle = readOfflineOracleConfig({
-  property: REPORT_PROPERTY,
-  defaultRuns: 40,
-})
-const delayedReadOracle = readOfflineOracleConfig({
-  property: DELAYED_READ_PROPERTY,
-  defaultRuns: 30,
-})
-const startupOracle = readOfflineOracleConfig({
-  property: STARTUP_PROPERTY,
-  defaultRuns: 10,
-})
-const staleReadOracle = readOfflineOracleConfig({
-  property: STALE_READ_PROPERTY,
-  defaultRuns: 20,
-})
-const storageFailureOracle = readOfflineOracleConfig({
-  property: STORAGE_FAILURE_PROPERTY,
-  defaultRuns: 10,
-})
 
-// The stale-read campaign compares each delivered read with the ledger fold,
-// the model. The append-only judgment fixes the fold's own result.
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
+// These are the existing relational expectations: disposed executors have no
+// admitted work, stopped executors retain unissued IDs, and repeated reports
+// preserve one issued mutation. Native checks compare each original cut.
+const leadershipLaw = {
+  authority: `OfflineExecutor leadership and disposal; TransactionExecutor serial scheduling; OutboxManager durability`,
+  limits: `Controlled in-memory storage and one executor owner at a time; no exactly-once network claim across independent leaders.`,
+}
+function replayData(value: unknown): unknown {
+  if (value instanceof Date) return { date: value.getTime() }
+  if (Array.isArray(value)) return value.map(replayData)
+  if (value !== null && typeof value === `object`)
+    return Object.fromEntries(
+      Object.entries(value).map(([key, field]) => [key, replayData(field)]),
+    )
+  return value
+}
+function sameReplaySnapshot(actual: unknown, before: unknown): boolean {
+  // Storage snapshots are plain string dictionaries; this is the existing
+  // unchanged-storage relation, not an independent wire-format prediction.
+  return isDeepStrictEqual(actual, before)
+}
+function checkLeadershipTrace(
+  trace: ReadonlyArray<Observation>,
+  expected: Readonly<Record<string, unknown>>,
+): Verdict {
+  for (const observation of trace) {
+    const verdict = differs(
+      observation.checkpoint,
+      `leadership replay`,
+      observation.value,
+      expected[observation.checkpoint],
+    )
+    if (verdict) return verdict
+  }
+  return (
+    differs(
+      `complete leadership history`,
+      `leadership replay`,
+      trace.length,
+      Object.keys(expected).length,
+    ) ?? pass
+  )
+}
+function storedCalls(count: number, payload: string) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `stored-${index}`,
+    key: `key-${index}`,
+    metadata: { payload },
+  }))
+}
 declareOracle({
-  owns: [
-    `src/OfflineExecutor.ts#startOfflineExecutor`,
-    `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
-    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
-  ],
-  check: [checkStaleRead],
+  check: [checkLeadershipTrace],
   model: [foldReplayLedger],
 })
 
-const startupCases = (seed: number | undefined) =>
-  [`construction`, `leadership`, `outbox read`, `retry hook`].map(
-    (boundary) => ({
-      boundary,
-      seed,
-    }),
-  )
-
-// The fixed campaign stands aside during any path replay. The random campaign runs in
-// ordinary and reseeded campaigns, and it is the replay of STARTUP_PROPERTY.
-async function checkStartup({
-  boundary,
-  seed,
-}: ReturnType<typeof startupCases>[number]): Promise<void> {
-  const parameters = oracleCampaignOptions(startupOracle, seed)
-  oracleRoute(oracleRouteOf(parameters))
-  await fc.assert(
-    fc.asyncProperty(fc.integer({ min: 1, max: 4 }), async (count) => {
-      const pending = gate()
-      const entered = gate()
-      let reading = false
-      class Storage extends FakeStorageAdapter {
-        override async keys() {
-          if (reading && boundary === `outbox read`) {
-            entered.resolve()
-            await pending.promise
-          }
-          return super.keys()
-        }
-      }
-      const storage = new Storage()
-      const outbox = new OutboxManager(storage, {})
-      for (let index = 0; index < count; index++)
-        await outbox.add({
-          id: `startup-${index}`,
-          mutationFnName: `syncData`,
-          mutations: [],
-          keys: [],
-          idempotencyKey: `key-${index}`,
-          createdAt: new Date(index),
-          retryCount: 0,
-          nextAttemptAt: 0,
-          version: 1,
-        })
-      const snapshot = storage.snapshot()
-      const callbacks = new Set<(leader: boolean) => void>()
-      let leader = false
-      let requests = 0
-      const restore = vi.spyOn(
-        OfflineExecutor.prototype,
-        `registerRestorationTransaction`,
-      )
-      reading = true
-      const env = createTestOfflineEnvironment({
-        storage,
-        config: {
-          beforeRetry: (transactions) => {
-            if (boundary === `retry hook`) env.executor.dispose()
-            return transactions
-          },
-          leaderElection: {
-            requestLeadership: async () => {
-              requests++
-              if (boundary === `leadership`) {
-                entered.resolve()
-                await pending.promise
-              }
-              leader = true
-              return true
-            },
-            releaseLeadership: () => {
-              leader = false
-            },
-            isLeader: () => leader,
-            onLeadershipChange: (callback) => {
-              callbacks.add(callback)
-              return () => {
-                callbacks.delete(callback)
-              }
-            },
-          },
-        },
-      })
-      let hasPrimaryFailure = false
-      try {
-        if (boundary === `leadership` || boundary === `outbox read`)
-          await atOracleCheckpoint(
-            entered.promise,
-            `startup reached ${boundary}`,
-          )
-        if (boundary !== `retry hook`) env.executor.dispose()
-        pending.resolve()
-        await atOracleCheckpoint(
-          env.executor.waitForInit(),
-          `disposed startup completed`,
-        )
-        await turn()
-        expect(env.mutationCalls).toEqual([])
-        expect(env.executor.isOfflineEnabled).toBe(false)
-        expect(callbacks.size).toBe(0)
-        expect(env.executor.getPendingCount()).toBe(0)
-        expect(leader).toBe(false)
-        expect(restore).not.toHaveBeenCalled()
-        expect(storage.snapshot()).toEqual(snapshot)
-        if (boundary === `construction`) expect(requests).toBe(0)
-      } catch (error) {
-        hasPrimaryFailure = true
-        throw error
-      } finally {
-        pending.resolve()
-        restore.mockRestore()
-        await cleanupOfflineOracle(
-          [
-            () => env.executor.dispose(),
-            () => env.executor.waitForInit(),
-            () => env.collection.cleanup(),
-          ],
-          hasPrimaryFailure,
-        )
-      }
-    }),
-    parameters,
-  )
-}
-
-oracleReplayTest(it).each(startupCases(20260918))(
-  `does not revive a disposed executor after $boundary (seed $seed)`,
-  checkStartup,
-)
-oracleReplayTest(it, STARTUP_PROPERTY).each(startupCases(undefined))(
-  `does not revive a disposed executor after $boundary (seed $seed)`,
-  checkStartup,
-)
-
-const serialWorkCases = (seed: number | undefined) =>
-  [`loss`, `dispose`].flatMap((stop) =>
-    [`provider`, `acknowledgment`, `retry`].map((boundary) => ({
-      stop,
-      boundary,
-      seed,
-    })),
-  )
-
-// The fixed campaign stands aside during any path replay. The random campaign runs in
-// ordinary and reseeded campaigns, and it is the replay of SERIAL_WORK_PROPERTY.
-async function checkSerialWork({
-  stop,
-  boundary,
-  seed,
-}: ReturnType<typeof serialWorkCases>[number]): Promise<void> {
-  const campaignParameters = oracleCampaignOptions(serialWorkOracle, seed)
-  oracleRoute(oracleRouteOf(campaignParameters))
-  await fc.assert(
-    fc.asyncProperty(
-      fc.integer({ min: 2, max: 5 }),
-      fc.string({ maxLength: 20 }),
-      async (count, payload) => {
-        const executions = vi.spyOn(TransactionExecutor.prototype, `executeAll`)
+describe.each([`construction`, `leadership`, `outbox read`, `retry hook`])(
+  `disposed startup at %s`,
+  (boundary) => {
+    oracleProperty({
+      id: STARTUP_PROPERTY,
+      law: {
+        ...leadershipLaw,
+        statement: `A disposed executor cannot revive during construction, election, replay read or retry hook; its durable rows remain unchanged.`,
+      },
+      owns: [
+        `src/OfflineExecutor.ts#startOfflineExecutor`,
+        `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
+        `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+      ],
+      histories: {
+        arbitrary: fc.integer({ min: 1, max: 4 }),
+        runs: 10,
+        fixedSeeds: [20260918],
+      },
+      model: () => ({
+        calls: [],
+        enabled: false,
+        callbacks: 0,
+        pending: 0,
+        leader: false,
+        restorations: 0,
+        'storage-preserved': true,
+        ...(boundary === `construction` ? { 'leadership-requests': 0 } : {}),
+      }),
+      driver: async (count, observe) => {
+        const pending = gate()
         const entered = gate()
-        const provider = gate()
-        const acknowledgment = gate()
-        const acknowledging = gate()
-        const transactions: Array<OfflineTransaction> = Array.from(
-          { length: count },
-          (_, index) => ({
-            id: `stored-${index}`,
+        let reading = false
+        class Storage extends FakeStorageAdapter {
+          override async keys() {
+            if (reading && boundary === `outbox read`) {
+              entered.resolve()
+              await pending.promise
+            }
+            return super.keys()
+          }
+        }
+        const storage = new Storage()
+        const outbox = new OutboxManager(storage, {})
+        for (let index = 0; index < count; index++)
+          await outbox.add({
+            id: `startup-${index}`,
             mutationFnName: `syncData`,
             mutations: [],
             keys: [],
@@ -369,209 +265,391 @@ async function checkSerialWork({
             retryCount: 0,
             nextAttemptAt: 0,
             version: 1,
-            metadata: { payload },
-          }),
+          })
+        const snapshot = storage.snapshot()
+        const callbacks = new Set<(leader: boolean) => void>()
+        let leader = false
+        let requests = 0
+        const restore = vi.spyOn(
+          OfflineExecutor.prototype,
+          `registerRestorationTransaction`,
         )
-        class Storage extends FakeStorageAdapter {
-          override async delete(key: string) {
-            if (boundary === `acknowledgment`) {
-              acknowledging.resolve()
-              await acknowledgment.promise
-            }
-            return super.delete(key)
-          }
-        }
-        const storage = new Storage()
-        const outbox = new OutboxManager(storage, {})
-        for (const transaction of transactions) await outbox.add(transaction)
-        const calls: Array<{ id: string; key: string; metadata: unknown }> = []
+        reading = true
         const env = createTestOfflineEnvironment({
           storage,
-          config: { jitter: false },
-          mutationFn: async ({ transaction, idempotencyKey, attempt }) => {
-            calls.push({
-              id: transaction.id,
-              key: idempotencyKey,
-              metadata: transaction.metadata,
-            })
-            entered.resolve()
-            await provider.promise
-            if (
-              boundary === `retry` &&
-              attempt === 1 &&
-              transaction.id === `stored-0`
-            )
-              throw new Error(`transient provider failure`)
+          config: {
+            beforeRetry: (transactions) => {
+              if (boundary === `retry hook`) env.executor.dispose()
+              return transactions
+            },
+            leaderElection: {
+              requestLeadership: async () => {
+                requests++
+                if (boundary === `leadership`) {
+                  entered.resolve()
+                  await pending.promise
+                }
+                leader = true
+                return true
+              },
+              releaseLeadership: () => {
+                leader = false
+              },
+              isLeader: () => leader,
+              onLeadershipChange: (callback) => {
+                callbacks.add(callback)
+                return () => {
+                  callbacks.delete(callback)
+                }
+              },
+            },
           },
         })
-        const completions = transactions.map(({ id }) => {
-          const observed: { state: `pending` | `fulfilled` | `rejected` } = {
-            state: `pending`,
-          }
-          void env.executor.waitForTransactionCompletion(id).then(
-            () => {
-              observed.state = `fulfilled`
-            },
-            () => {
-              observed.state = `rejected`
-            },
-          )
-          return observed
-        })
-        let replacement:
-          ReturnType<typeof createTestOfflineEnvironment> | undefined
-        const expectedCall = ({
-          id,
-          idempotencyKey,
-          metadata,
-        }: OfflineTransaction) => ({ id, key: idempotencyKey, metadata })
         let hasPrimaryFailure = false
         try {
-          await env.executor.waitForInit()
-          await entered.promise
-          expect(calls).toEqual(transactions.slice(0, 1).map(expectedCall))
-          if (boundary !== `provider`) {
-            provider.resolve()
-            if (boundary === `acknowledgment`) await acknowledging.promise
-            await vi.advanceTimersByTimeAsync(0)
-          }
-          if (stop === `loss`) env.leader.setLeader(false)
-          else env.executor.dispose()
-          provider.resolve()
-          acknowledgment.resolve()
-          const executionCount = executions.mock.calls.length
-          await vi.advanceTimersByTimeAsync(2000)
-          expect(executions).toHaveBeenCalledTimes(executionCount)
-          env.executor.getOnlineDetector().notifyOnline()
-          await vi.advanceTimersByTimeAsync(0)
-
-          // Only the issued call may finish. Queue length, timers or final rows
-          // alone cannot tell whether a former owner made extra remote requests.
-          expect(calls).toEqual(transactions.slice(0, 1).map(expectedCall))
-          expect(env.executor.isOfflineEnabled).toBe(false)
-          expect(completions.map(({ state }) => state)).toEqual(
-            transactions.map((_, index) =>
-              boundary !== `retry` && index === 0 ? `fulfilled` : `pending`,
-            ),
+          if (boundary === `leadership` || boundary === `outbox read`)
+            await atOracleCheckpoint(
+              entered.promise,
+              `startup reached ${boundary}`,
+            )
+          if (boundary !== `retry hook`) env.executor.dispose()
+          pending.resolve()
+          await atOracleCheckpoint(
+            env.executor.waitForInit(),
+            `disposed startup completed`,
           )
-          const retained =
-            boundary === `retry` ? transactions : transactions.slice(1)
-          expect(
-            (await outbox.getAll()).map(({ id, idempotencyKey, metadata }) => ({
-              id,
-              idempotencyKey,
-              metadata,
-            })),
-          ).toEqual(
-            retained.map(({ id, idempotencyKey, metadata }) => ({
-              id,
-              idempotencyKey,
-              metadata,
-            })),
+          await turn()
+          observe(
+            `calls`,
+            env.mutationCalls.map(({ transaction }) => transaction.id),
           )
-
-          if (stop === `loss`) env.leader.setLeader(true)
-          else {
-            replacement = createTestOfflineEnvironment({
-              storage,
-              mutationFn: ({ transaction, idempotencyKey }) => {
-                calls.push({
-                  id: transaction.id,
-                  key: idempotencyKey,
-                  metadata: transaction.metadata,
-                })
-                return Promise.resolve()
-              },
-            })
-            await replacement.executor.waitForInit()
-            // Disposed executors cannot be revived by a later elector report.
-            env.leader.setLeader(true)
-          }
-          await vi.advanceTimersByTimeAsync(0)
-          expect(calls).toEqual([
-            ...transactions.slice(0, 1).map(expectedCall),
-            ...retained.map(expectedCall),
-          ])
-          expect(await outbox.getAll()).toEqual([])
-          if (stop === `loss`)
-            expect(
-              completions.every(({ state }) => state === `fulfilled`),
-            ).toBe(true)
+          observe(`enabled`, env.executor.isOfflineEnabled)
+          observe(`callbacks`, callbacks.size)
+          observe(`pending`, env.executor.getPendingCount())
+          observe(`leader`, leader)
+          observe(`restorations`, restore.mock.calls.length)
+          observe(
+            `storage-preserved`,
+            sameReplaySnapshot(storage.snapshot(), snapshot),
+          )
+          if (boundary === `construction`)
+            observe(`leadership-requests`, requests)
         } catch (error) {
           hasPrimaryFailure = true
           throw error
         } finally {
-          provider.resolve()
-          acknowledgment.resolve()
-          executions.mockRestore()
+          pending.resolve()
+          restore.mockRestore()
           await cleanupOfflineOracle(
             [
               () => env.executor.dispose(),
-              () => replacement?.executor.dispose(),
+              () => env.executor.waitForInit(),
               () => env.collection.cleanup(),
-              () => replacement?.collection.cleanup(),
             ],
             hasPrimaryFailure,
           )
         }
       },
-    ),
-    campaignParameters,
-  )
-}
-
-oracleReplayTest(it).each(serialWorkCases(20260917))(
-  `retains serial work after $stop at $boundary (seed $seed)`,
-  checkSerialWork,
-)
-oracleReplayTest(it, SERIAL_WORK_PROPERTY).each(serialWorkCases(undefined))(
-  `retains serial work after $stop at $boundary (seed $seed)`,
-  checkSerialWork,
+      check: (_count, trace, expected) => checkLeadershipTrace(trace, expected),
+    })
+  },
 )
 
-// Repeated reports and reacquisition must not readmit work already in flight.
-// Use the real serializer and executor: an invalid storage key would let a
-// zero-execution trace falsely satisfy an at-most-once assertion.
-const reportCases = (seed: number | undefined) =>
-  [`provider`, `acknowledgment`].map((boundary) => ({ boundary, seed }))
-
-// The fixed campaign stands aside during any path replay. The random campaign runs in
-// ordinary and reseeded campaigns, and it is the replay of REPORT_PROPERTY.
-async function checkReport({
-  boundary,
-  seed,
-}: ReturnType<typeof reportCases>[number]): Promise<void> {
-  const runParameters = {
-    ...oracleCampaignOptions(leadershipReportOracle, seed),
-    examples: [
-      [
-        {
-          pendingReports: 1,
-          settledReports: 1,
-          separateTurns: true,
-          regainLeadership: true,
-          value: `payload`,
-        },
-      ],
+describe.each(
+  [`loss`, `dispose`].flatMap((stop) =>
+    [`provider`, `acknowledgment`, `retry`].map((boundary) => ({
+      stop,
+      boundary,
+    })),
+  ),
+)(`serial work after $stop at $boundary`, ({ stop, boundary }) => {
+  oracleProperty({
+    id: SERIAL_WORK_PROPERTY,
+    law: {
+      ...leadershipLaw,
+      statement: `Leadership loss or disposal permits only the issued call to settle; retained serial work resumes once under its next owner.`,
+    },
+    owns: [
+      `src/OfflineExecutor.ts#startOfflineExecutor`,
+      `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
+      `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
     ],
-  }
-  oracleRoute(oracleRouteOf(runParameters))
-  await fc.assert(
-    fc.asyncProperty(
-      fc.record({
-        pendingReports: fc.integer({ min: 0, max: 5 }),
-        settledReports: fc.integer({ min: 0, max: 5 }),
-        separateTurns: fc.boolean(),
-        regainLeadership: fc.boolean(),
-        value: fc.string({ maxLength: 20 }),
-      }),
-      async ({
-        pendingReports,
-        settledReports,
-        separateTurns,
-        regainLeadership,
-        value,
-      }) => {
+    histories: {
+      arbitrary: fc.tuple(
+        fc.integer({ min: 2, max: 5 }),
+        fc.string({ maxLength: 20 }),
+      ),
+      runs: 20,
+      fixedSeeds: [20260917],
+    },
+    model: ([count, payload]) => {
+      const calls = storedCalls(count, payload)
+      const issued = calls.slice(0, 1)
+      const retained = boundary === `retry` ? calls : calls.slice(1)
+      return {
+        'issued-0': issued,
+        'execution-growth': 0,
+        'issued-1': issued,
+        enabled: false,
+        'completion-states': calls.map((_, index) =>
+          boundary !== `retry` && index === 0 ? `fulfilled` : `pending`,
+        ),
+        retained: retained.map(({ id, key, metadata }) => ({
+          id,
+          idempotencyKey: key,
+          metadata,
+        })),
+        'resumed-calls': [...issued, ...retained],
+        remaining: [],
+        ...(stop === `loss` ? { 'all-completed': true } : {}),
+      }
+    },
+    driver: async ([count, payload], observe) => {
+      const executions = vi.spyOn(TransactionExecutor.prototype, `executeAll`)
+      const entered = gate()
+      const provider = gate()
+      const acknowledgment = gate()
+      const acknowledging = gate()
+      const transactions: Array<OfflineTransaction> = Array.from(
+        { length: count },
+        (_, index) => ({
+          id: `stored-${index}`,
+          mutationFnName: `syncData`,
+          mutations: [],
+          keys: [],
+          idempotencyKey: `key-${index}`,
+          createdAt: new Date(index),
+          retryCount: 0,
+          nextAttemptAt: 0,
+          version: 1,
+          metadata: { payload },
+        }),
+      )
+      class Storage extends FakeStorageAdapter {
+        override async delete(key: string) {
+          if (boundary === `acknowledgment`) {
+            acknowledging.resolve()
+            await acknowledgment.promise
+          }
+          return super.delete(key)
+        }
+      }
+      const storage = new Storage()
+      const outbox = new OutboxManager(storage, {})
+      for (const transaction of transactions) await outbox.add(transaction)
+      const calls: Array<{ id: string; key: string; metadata: unknown }> = []
+      const env = createTestOfflineEnvironment({
+        storage,
+        config: { jitter: false },
+        mutationFn: async ({ transaction, idempotencyKey, attempt }) => {
+          calls.push({
+            id: transaction.id,
+            key: idempotencyKey,
+            metadata: transaction.metadata,
+          })
+          entered.resolve()
+          await provider.promise
+          if (
+            boundary === `retry` &&
+            attempt === 1 &&
+            transaction.id === `stored-0`
+          )
+            throw new Error(`transient provider failure`)
+        },
+      })
+      const completions = transactions.map(({ id }) => {
+        const observed: { state: `pending` | `fulfilled` | `rejected` } = {
+          state: `pending`,
+        }
+        void env.executor.waitForTransactionCompletion(id).then(
+          () => {
+            observed.state = `fulfilled`
+          },
+          () => {
+            observed.state = `rejected`
+          },
+        )
+        return observed
+      })
+      let replacement:
+        ReturnType<typeof createTestOfflineEnvironment> | undefined
+      let issuedCut = 0
+      let hasPrimaryFailure = false
+      try {
+        await env.executor.waitForInit()
+        await entered.promise
+        observe(
+          `issued-${issuedCut++}`,
+          calls.map((call) => ({
+            ...call,
+            metadata: structuredClone(call.metadata),
+          })),
+        )
+        if (boundary !== `provider`) {
+          provider.resolve()
+          if (boundary === `acknowledgment`) await acknowledging.promise
+          await vi.advanceTimersByTimeAsync(0)
+        }
+        if (stop === `loss`) env.leader.setLeader(false)
+        else env.executor.dispose()
+        provider.resolve()
+        acknowledgment.resolve()
+        const executionCount = executions.mock.calls.length
+        await vi.advanceTimersByTimeAsync(2000)
+        observe(
+          `execution-growth`,
+          executions.mock.calls.length - executionCount,
+        )
+        env.executor.getOnlineDetector().notifyOnline()
+        await vi.advanceTimersByTimeAsync(0)
+
+        // Only the issued call may finish. Queue length, timers or final rows
+        // alone cannot tell whether a former owner made extra remote requests.
+        observe(
+          `issued-${issuedCut++}`,
+          calls.map((call) => ({
+            ...call,
+            metadata: structuredClone(call.metadata),
+          })),
+        )
+        observe(`enabled`, env.executor.isOfflineEnabled)
+        observe(
+          `completion-states`,
+          completions.map(({ state }) => state),
+        )
+        observe(
+          `retained`,
+          (await outbox.getAll()).map(({ id, idempotencyKey, metadata }) => ({
+            id,
+            idempotencyKey,
+            metadata,
+          })),
+        )
+
+        if (stop === `loss`) env.leader.setLeader(true)
+        else {
+          replacement = createTestOfflineEnvironment({
+            storage,
+            mutationFn: ({ transaction, idempotencyKey }) => {
+              calls.push({
+                id: transaction.id,
+                key: idempotencyKey,
+                metadata: transaction.metadata,
+              })
+              return Promise.resolve()
+            },
+          })
+          await replacement.executor.waitForInit()
+          // Disposed executors cannot be revived by a later elector report.
+          env.leader.setLeader(true)
+        }
+        await vi.advanceTimersByTimeAsync(0)
+        observe(
+          `resumed-calls`,
+          calls.map((call) => ({
+            ...call,
+            metadata: structuredClone(call.metadata),
+          })),
+        )
+        observe(
+          `remaining`,
+          (await outbox.getAll()).map(({ id }) => id),
+        )
+        if (stop === `loss`)
+          observe(
+            `all-completed`,
+            completions.every(({ state }) => state === `fulfilled`),
+          )
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        provider.resolve()
+        acknowledgment.resolve()
+        executions.mockRestore()
+        await cleanupOfflineOracle(
+          [
+            () => env.executor.dispose(),
+            () => replacement?.executor.dispose(),
+            () => env.collection.cleanup(),
+            () => replacement?.collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+    check: (_history, trace, expected) => checkLeadershipTrace(trace, expected),
+  })
+})
+
+const reportArbitrary = fc.record({
+  pendingReports: fc.integer({ min: 0, max: 5 }),
+  settledReports: fc.integer({ min: 0, max: 5 }),
+  separateTurns: fc.boolean(),
+  regainLeadership: fc.boolean(),
+  value: fc.string({ maxLength: 20 }),
+})
+describe.each([`provider`, `acknowledgment`])(
+  `repeated reports at %s`,
+  (boundary) => {
+    oracleProperty({
+      id: REPORT_PROPERTY,
+      law: {
+        ...leadershipLaw,
+        statement: `Repeated leadership reports and reacquisition cannot replay an issued or durably removed ID twice.`,
+      },
+      owns: [
+        `src/OfflineExecutor.ts#startOfflineExecutor`,
+        `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
+        `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+      ],
+      histories: {
+        arbitrary: reportArbitrary,
+        runs: 40,
+        fixedSeeds: [20260912],
+        fixed: [
+          {
+            name: `one repeated report through a leadership regain`,
+            history: {
+              pendingReports: 1,
+              settledReports: 1,
+              separateTurns: true,
+              regainLeadership: true,
+              value: `payload`,
+            },
+          },
+        ],
+      },
+      model: ({ value }) => {
+        const row = {
+          id: `row`,
+          value,
+          completed: false,
+          updatedAt: { date: 1700000000123 },
+        }
+        const calls = [{ id: `valid`, key: `once`, row }]
+        return {
+          'calls-0': calls,
+          'callbacks-0': 1,
+          'calls-1': calls,
+          completion: `fulfilled`,
+          'callbacks-1': 1,
+          'calls-2': calls,
+          remaining: [],
+          'server-row': row,
+          'collection-row': row,
+        }
+      },
+      driver: async (
+        {
+          pendingReports,
+          settledReports,
+          separateTurns,
+          regainLeadership,
+          value,
+        },
+        observe,
+      ) => {
         const request = gate()
         const entered = gate()
         const release = gate()
@@ -638,9 +716,9 @@ async function checkReport({
           mutationFn: async () => {},
         })
         const rolledBack = transaction.when('settled').catch(() => undefined)
-        const expected = [{ id: `valid`, key: `once`, row }]
+        let reportCut = 0
         const report = async (count: number) => {
-          expect(callbacks.size).toBe(1)
+          observe(`callbacks-${reportCut++}`, callbacks.size)
           for (let i = 0; i < count; i++) {
             if (regainLeadership)
               for (const callback of callbacks) callback(false)
@@ -649,6 +727,7 @@ async function checkReport({
           }
           await turn()
         }
+        let callsCut = 0
         let hasPrimaryFailure = false
         try {
           transaction.mutate(() => env.collection.insert(row))
@@ -674,7 +753,7 @@ async function checkReport({
             env.executor.waitForInit(),
             `replay initialized`,
           )
-          expect(calls).toEqual(expected)
+          observe(`calls-${callsCut++}`, replayData(calls))
           if (boundary === `acknowledgment`) {
             release.resolve()
             await atOracleCheckpoint(
@@ -683,18 +762,32 @@ async function checkReport({
             )
           }
           await report(pendingReports)
-          expect(calls).toEqual(expected)
+          observe(`calls-${callsCut++}`, replayData(calls))
           release.resolve()
           acknowledgment.resolve()
-          expect(await atOracleCheckpoint(completion, `replay completed`)).toBe(
-            `fulfilled`,
+          observe(
+            `completion`,
+            await atOracleCheckpoint(completion, `replay completed`),
           )
           await report(settledReports)
-          expect(calls).toEqual(expected)
-          expect(await env.executor.peekOutbox()).toEqual([])
-          expect(env.serverState.get(`row`)).toEqual(row)
+          observe(`calls-${callsCut++}`, replayData(calls))
+          observe(
+            `remaining`,
+            (await env.executor.peekOutbox()).map(({ id }) => id),
+          )
+          observe(`server-row`, replayData(env.serverState.get(`row`)))
           // Collection reads also expose virtual row metadata.
-          expect(env.collection.get(`row`)).toMatchObject(row)
+          observe(
+            `collection-row`,
+            replayData(
+              Object.fromEntries(
+                (Object.keys(row) as Array<keyof typeof row>).map((key) => [
+                  key,
+                  env.collection.get(`row`)?.[key],
+                ]),
+              ),
+            ),
+          )
         } catch (error) {
           hasPrimaryFailure = true
           throw error
@@ -718,113 +811,147 @@ async function checkReport({
           )
         }
       },
-    ),
-    runParameters,
-  )
-}
-
-oracleReplayTest(it).each(reportCases(20260912))(
-  `preserves replay under repeated reports and leadership regain at $boundary (seed $seed)`,
-  checkReport,
-)
-oracleReplayTest(it, REPORT_PROPERTY).each(reportCases(undefined))(
-  `preserves replay under repeated reports and leadership regain at $boundary (seed $seed)`,
-  checkReport,
+      check: (_history, trace, expected) =>
+        checkLeadershipTrace(trace, expected),
+    })
+  },
 )
 
-// The fixed campaign stands aside during any path replay. The random campaign runs in
-// ordinary and reseeded campaigns, and it is the replay of STALE_READ_PROPERTY.
-async function checkStaleRead(seed: number | undefined): Promise<void> {
-  const parameters = {
-    ...oracleCampaignOptions(staleReadOracle, seed),
-    examples: [[{ count: 3, removedPrefix: 1 }]],
-  }
-  oracleRoute(oracleRouteOf(parameters))
-  await fc.assert(
-    fc.asyncProperty(
-      fc.record({
-        count: fc.integer({ min: 2, max: 6 }),
-        removedPrefix: fc.integer({ min: 1, max: 5 }),
-      }),
-      async ({ count, removedPrefix }) => {
-        const captured = gate()
-        const delivery = gate()
-        let hold = true
-        let capturedSnapshot: Array<string> = []
-        class Storage extends FakeStorageAdapter {
-          override async keys() {
-            const keys = await super.keys()
-            capturedSnapshot = [...keys]
-            return keys
-          }
-          override async get(key: string) {
-            const value = await super.get(key)
-            if (hold && key === `tx:stored-0`) {
-              captured.resolve()
-              await delivery.promise
-            }
-            return value
-          }
-        }
-        const storage = new Storage()
-        const outbox = new OutboxManager(storage, {})
-        const transactions = Array.from({ length: count }, (_, index) =>
-          storedTransaction(`stored-${index}`),
-        )
-        const ledger: Array<ReplayLedgerEvent> = []
-        for (const transaction of transactions) {
-          await outbox.add(transaction)
-          ledger.push({ type: `stored`, id: transaction.id })
-        }
-        const reading = outbox.getAll()
-        let hasPrimaryFailure = false
-        try {
-          await atOracleCheckpoint(captured.promise, `stale replay captured`)
-          ledger.push({
-            type: `read-captured`,
-            ids: capturedSnapshot.map((key) => key.slice(`tx:`.length)),
-          })
-          const removed = transactions.slice(
-            0,
-            Math.min(count - 1, removedPrefix),
-          )
-          await outbox.removeMany(removed.map(({ id }) => id))
-          for (const transaction of removed) {
-            ledger.push({ type: `durably-removed`, id: transaction.id })
-          }
-          hold = false
-          delivery.resolve()
-          ledger.push({ type: `read-delivered` })
-
-          const expected = foldReplayLedger(ledger)
-          const delivered = await atOracleCheckpoint(
-            reading,
-            `stale replay delivered`,
-          )
-          expect(delivered.map(({ id }) => id)).toEqual(expected.unfinished)
-          expect(expected.staleCapture).not.toEqual(expected.unfinished)
-        } catch (error) {
-          hasPrimaryFailure = true
-          throw error
-        } finally {
-          hold = false
-          delivery.resolve()
-          await cleanupOfflineOracle([() => reading], hasPrimaryFailure)
-        }
+oracleProperty({
+  id: STALE_READ_PROPERTY,
+  law: {
+    ...leadershipLaw,
+    statement: `A stale captured outbox read cannot re-admit IDs that were durably removed before delivery.`,
+  },
+  owns: [
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
+  histories: {
+    arbitrary: fc.record({
+      count: fc.integer({ min: 2, max: 6 }),
+      removedPrefix: fc.integer({ min: 1, max: 5 }),
+    }),
+    runs: 20,
+    fixedSeeds: [20260923],
+    fixed: [
+      {
+        name: `remove the captured first ID`,
+        history: { count: 3, removedPrefix: 1 },
       },
-    ),
-    parameters,
-  )
-}
+    ],
+  },
+  model: ({ count, removedPrefix }) => {
+    const ids = Array.from({ length: count }, (_, index) => `stored-${index}`)
+    return foldReplayLedger([
+      ...ids.map((id) => ({ type: `stored` as const, id })),
+      { type: `read-captured` as const, ids },
+      ...ids
+        .slice(0, Math.min(count - 1, removedPrefix))
+        .map((id) => ({ type: `durably-removed` as const, id })),
+      { type: `read-delivered` as const },
+    ])
+  },
+  driver: async ({ count, removedPrefix }, observe) => {
+    const captured = gate()
+    const delivery = gate()
+    let hold = true
+    let capturedSnapshot: Array<string> = []
+    class Storage extends FakeStorageAdapter {
+      override async keys() {
+        const keys = await super.keys()
+        capturedSnapshot = [...keys]
+        return keys
+      }
+      override async get(key: string) {
+        const value = await super.get(key)
+        if (hold && key === `tx:stored-0`) {
+          captured.resolve()
+          await delivery.promise
+        }
+        return value
+      }
+    }
+    const storage = new Storage()
+    const outbox = new OutboxManager(storage, {})
+    const transactions = Array.from({ length: count }, (_, index) =>
+      storedTransaction(`stored-${index}`),
+    )
+    const ledger: Array<ReplayLedgerEvent> = []
+    for (const transaction of transactions) {
+      await outbox.add(transaction)
+      ledger.push({ type: `stored`, id: transaction.id })
+    }
+    const reading = outbox.getAll()
+    let hasPrimaryFailure = false
+    try {
+      await atOracleCheckpoint(captured.promise, `stale replay captured`)
+      ledger.push({
+        type: `read-captured`,
+        ids: capturedSnapshot.map((key) => key.slice(`tx:`.length)),
+      })
+      const removed = transactions.slice(0, Math.min(count - 1, removedPrefix))
+      await outbox.removeMany(removed.map(({ id }) => id))
+      for (const transaction of removed) {
+        ledger.push({ type: `durably-removed`, id: transaction.id })
+      }
+      hold = false
+      delivery.resolve()
+      ledger.push({ type: `read-delivered` })
 
-oracleReplayTest(it).each([20260923])(
-  `filters every durably removed transaction from a generated stale replay read (seed %s)`,
-  checkStaleRead,
-)
-oracleReplayTest(it, STALE_READ_PROPERTY).each([undefined])(
-  `filters every durably removed transaction from a generated stale replay read (seed %s)`,
-  checkStaleRead,
-)
+      const delivered = await atOracleCheckpoint(
+        reading,
+        `stale replay delivered`,
+      )
+      observe(
+        `delivered`,
+        delivered.map(({ id }) => id),
+      )
+      observe(`captured`, foldReplayLedger(ledger).staleCapture)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      hold = false
+      delivery.resolve()
+      await cleanupOfflineOracle([() => reading], hasPrimaryFailure)
+    }
+  },
+  check: (_history, trace, expected) => {
+    let checked = 0
+    for (const observation of trace) {
+      if (observation.checkpoint === `delivered`) {
+        const verdict = differs(
+          `delivered`,
+          `durable replay ledger`,
+          observation.value,
+          expected.unfinished,
+        )
+        if (verdict) return verdict
+      } else {
+        try {
+          expect(observation.value).not.toEqual(expected.unfinished)
+        } catch (error) {
+          if (!(error instanceof Error) || error.name !== `AssertionError`)
+            throw error
+          return {
+            kind: `violation`,
+            checkpoint: `captured`,
+            law: `durable replay ledger`,
+            difference: error.message,
+            cause: error,
+          }
+        }
+      }
+      checked++
+    }
+    return (
+      differs(`complete stale read`, `durable replay ledger`, checked, 2) ??
+      pass
+    )
+  },
+})
 
 it(`append-only replay judgment rejects stale admission after durable removal`, () => {
   oracleRoute(`case`)
@@ -841,254 +968,269 @@ it(`append-only replay judgment rejects stale admission after durable removal`, 
   expect(expected.staleCapture).not.toEqual(expected.unfinished)
 })
 
-// A replay scan can capture A, then block on another storage read until A's
-// successful deletion. Pending-only dedupe no longer remembers A at admission.
-// Peers admitted only through this scan must still execute exactly once.
-// The fixed campaign stands aside during any path replay. The random campaign runs in
-// ordinary and reseeded campaigns, and it is the replay of DELAYED_READ_PROPERTY.
-async function checkDelayedRead(seed: number | undefined): Promise<void> {
-  const parameters = {
-    ...oracleCampaignOptions(delayedReadOracle, seed),
-    examples: [
-      [
-        {
+const delayedReadArbitrary = fc.record({
+  peers: fc.integer({ min: 1, max: 4 }),
+  scans: fc.integer({ min: 1, max: 3 }),
+  afterAcknowledgment: fc.boolean(),
+  payload: fc.string({ maxLength: 12 }),
+})
+oracleProperty({
+  id: DELAYED_READ_PROPERTY,
+  law: {
+    ...leadershipLaw,
+    statement: `Delayed replay scans admit every unfinished peer exactly once and never restore already acknowledged work.`,
+  },
+  owns: [
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
+  histories: {
+    arbitrary: delayedReadArbitrary,
+    runs: 30,
+    fixedSeeds: [20260919],
+    fixed: [
+      {
+        name: `deliver a scan after acknowledgment`,
+        history: {
           peers: 1,
           scans: 1,
           afterAcknowledgment: true,
           payload: `witness`,
         },
-      ],
-      [
-        {
+      },
+      {
+        name: `deliver a scan before acknowledgment`,
+        history: {
           peers: 1,
           scans: 1,
           afterAcknowledgment: false,
           payload: `control`,
         },
-      ],
+      },
     ],
-  }
-  oracleRoute(oracleRouteOf(parameters))
-  await fc.assert(
-    fc.asyncProperty(
-      fc.record({
-        peers: fc.integer({ min: 1, max: 4 }),
-        scans: fc.integer({ min: 1, max: 3 }),
-        afterAcknowledgment: fc.boolean(),
-        payload: fc.string({ maxLength: 12 }),
+  },
+  model: ({ peers, scans, afterAcknowledgment, payload }) => ({
+    captures: scans,
+    ...(afterAcknowledgment
+      ? { 'active-removed': true, 'active-calls': [`active`] }
+      : {}),
+    calls: [
+      `active`,
+      ...Array.from({ length: peers }, (_, index) => `peer-${index}`),
+    ].map((id) => ({ id, key: `${id}/once`, metadata: { payload } })),
+    storage: {},
+    pending: 0,
+  }),
+  driver: async ({ peers, scans, afterAcknowledgment, payload }, observe) => {
+    const entered = gate()
+    const provider = gate()
+    const captured = gate()
+    const delivery = gate()
+    let hold = false
+    let captures = 0
+    class Storage extends FakeStorageAdapter {
+      override async get(key: string) {
+        const value = await super.get(key)
+        if (hold && key === `tx:peer-0`) {
+          if (++captures === scans) captured.resolve()
+          await delivery.promise
+        }
+        return value
+      }
+    }
+    const storage = new Storage()
+    const outbox = new OutboxManager(storage, {})
+    const transactions: Array<OfflineTransaction> = [
+      `active`,
+      ...Array.from({ length: peers }, (_, index) => `peer-${index}`),
+    ].map((id, index) => ({
+      id,
+      mutationFnName: `syncData`,
+      mutations: [],
+      keys: [],
+      idempotencyKey: `${id}/once`,
+      createdAt: new Date(index),
+      retryCount: 0,
+      nextAttemptAt: 0,
+      version: 1,
+      metadata: { payload },
+    }))
+    await outbox.add(transactions[0]!)
+    const loads = vi.spyOn(
+      TransactionExecutor.prototype,
+      `loadPendingTransactions`,
+    )
+    const executions = vi.spyOn(TransactionExecutor.prototype, `executeAll`)
+    const env = createTestOfflineEnvironment({
+      storage,
+      mutationFn: async ({ transaction }) => {
+        if (transaction.id === `active`) {
+          entered.resolve()
+          await provider.promise
+        }
+      },
+    })
+    const outcomes = transactions.map(({ id }) =>
+      env.executor.waitForTransactionCompletion(id),
+    )
+    // Observe rejection now, even if a preceding reach assertion fails.
+    for (const outcome of outcomes) void outcome.catch(() => {})
+    let hasPrimaryFailure = false
+    try {
+      await atOracleCheckpoint(env.executor.waitForInit(), `initial replay`)
+      await atOracleCheckpoint(entered.promise, `provider entered`)
+      for (const transaction of transactions.slice(1))
+        await outbox.add(transaction)
+      hold = true
+      const reads: Array<Promise<void>> = []
+      for (let index = 0; index < scans; index++) {
+        env.leader.setLeader(false)
+        env.leader.setLeader(true)
+        reads.push(loads.mock.results.at(-1)!.value)
+      }
+      await atOracleCheckpoint(
+        captured.promise,
+        `all reads captured active row`,
+      )
+      observe(`captures`, captures)
+      if (afterAcknowledgment) {
+        provider.resolve()
+        await atOracleCheckpoint(outcomes[0]!, `active row acknowledged`)
+        observe(`active-removed`, (await outbox.get(`active`)) === null)
+        observe(
+          `active-calls`,
+          env.mutationCalls.map((call) => call.transaction.id),
+        )
+      }
+      hold = false
+      delivery.resolve()
+      await atOracleCheckpoint(Promise.all(reads), `replay reads delivered`)
+      provider.resolve()
+      await atOracleCheckpoint(Promise.all(outcomes), `all callers completed`)
+      await atOracleCheckpoint(
+        executions.mock.results.at(-1)!.value,
+        `replay drained`,
+      )
+      observe(
+        `calls`,
+        env.mutationCalls.map(({ transaction, idempotencyKey }) => ({
+          id: transaction.id,
+          key: idempotencyKey,
+          metadata: transaction.metadata,
+        })),
+      )
+      observe(`storage`, storage.snapshot())
+      observe(`pending`, env.executor.getPendingCount())
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      hold = false
+      provider.resolve()
+      delivery.resolve()
+      await cleanupOfflineOracle(
+        [
+          () => env.executor.dispose(),
+          () => env.collection.cleanup(),
+          () => {
+            loads.mockRestore()
+            executions.mockRestore()
+          },
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  },
+  check: (_history, trace, expected) => checkLeadershipTrace(trace, expected),
+})
+
+describe.each([`keys`, `get`])(
+  `storage initialization failure in %s`,
+  (operation) => {
+    oracleProperty({
+      id: STORAGE_FAILURE_PROPERTY,
+      law: {
+        ...leadershipLaw,
+        statement: `An outbox read failure rejects initialization with the same error without running or losing stored work.`,
+      },
+      owns: [
+        `src/OfflineExecutor.ts#startOfflineExecutor`,
+        `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
+        `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+      ],
+      histories: {
+        arbitrary: fc.integer({ min: 1, max: 3 }),
+        runs: 10,
+        fixedSeeds: [20260916],
+      },
+      model: () => ({
+        'initialization-error-identity': true,
+        calls: [],
+        'storage-preserved': true,
       }),
-      async ({ peers, scans, afterAcknowledgment, payload }) => {
-        const entered = gate()
-        const provider = gate()
-        const captured = gate()
-        const delivery = gate()
-        let hold = false
-        let captures = 0
+      driver: async (count, observe) => {
+        const error = new Error(`stored work unavailable`)
         class Storage extends FakeStorageAdapter {
+          override async keys() {
+            if (operation === `keys`) throw error
+            return super.keys()
+          }
           override async get(key: string) {
-            const value = await super.get(key)
-            if (hold && key === `tx:peer-0`) {
-              if (++captures === scans) captured.resolve()
-              await delivery.promise
-            }
-            return value
+            if (operation === `get`) throw error
+            return super.get(key)
           }
         }
         const storage = new Storage()
         const outbox = new OutboxManager(storage, {})
-        const transactions: Array<OfflineTransaction> = [
-          `active`,
-          ...Array.from({ length: peers }, (_, index) => `peer-${index}`),
-        ].map((id, index) => ({
-          id,
-          mutationFnName: `syncData`,
-          mutations: [],
-          keys: [],
-          idempotencyKey: `${id}/once`,
-          createdAt: new Date(index),
-          retryCount: 0,
-          nextAttemptAt: 0,
-          version: 1,
-          metadata: { payload },
-        }))
-        await outbox.add(transactions[0]!)
-        const loads = vi.spyOn(
-          TransactionExecutor.prototype,
-          `loadPendingTransactions`,
-        )
-        const executions = vi.spyOn(TransactionExecutor.prototype, `executeAll`)
-        const env = createTestOfflineEnvironment({
-          storage,
-          mutationFn: async ({ transaction }) => {
-            if (transaction.id === `active`) {
-              entered.resolve()
-              await provider.promise
-            }
-          },
-        })
-        const outcomes = transactions.map(({ id }) =>
-          env.executor.waitForTransactionCompletion(id),
-        )
-        // Observe rejection now, even if a preceding reach assertion fails.
-        for (const outcome of outcomes) void outcome.catch(() => {})
+        for (let index = 0; index < count; index++)
+          await outbox.add({
+            id: `stored-${index}`,
+            mutationFnName: `syncData`,
+            mutations: [],
+            keys: [],
+            idempotencyKey: `key-${index}`,
+            createdAt: new Date(index),
+            retryCount: 0,
+            nextAttemptAt: 0,
+            version: 1,
+          })
+        const before = storage.snapshot()
+        const env = createTestOfflineEnvironment({ storage })
         let hasPrimaryFailure = false
         try {
-          await atOracleCheckpoint(env.executor.waitForInit(), `initial replay`)
-          await atOracleCheckpoint(entered.promise, `provider entered`)
-          for (const transaction of transactions.slice(1))
-            await outbox.add(transaction)
-          hold = true
-          const reads: Array<Promise<void>> = []
-          for (let index = 0; index < scans; index++) {
-            env.leader.setLeader(false)
-            env.leader.setLeader(true)
-            reads.push(loads.mock.results.at(-1)!.value)
+          let initializationError: unknown
+          try {
+            await atOracleCheckpoint(
+              env.executor.waitForInit(),
+              `failed storage initialization`,
+            )
+          } catch (failure) {
+            initializationError = failure
           }
-          await atOracleCheckpoint(
-            captured.promise,
-            `all reads captured active row`,
+          observe(
+            `initialization-error-identity`,
+            initializationError === error,
           )
-          expect(captures).toBe(scans)
-          if (afterAcknowledgment) {
-            provider.resolve()
-            await atOracleCheckpoint(outcomes[0]!, `active row acknowledged`)
-            expect(await outbox.get(`active`)).toBeNull()
-            expect(
-              env.mutationCalls.map((call) => call.transaction.id),
-            ).toEqual([`active`])
-          }
-          hold = false
-          delivery.resolve()
-          await atOracleCheckpoint(Promise.all(reads), `replay reads delivered`)
-          provider.resolve()
-          await atOracleCheckpoint(
-            Promise.all(outcomes),
-            `all callers completed`,
+          observe(
+            `calls`,
+            env.mutationCalls.map(({ transaction }) => transaction.id),
           )
-          await atOracleCheckpoint(
-            executions.mock.results.at(-1)!.value,
-            `replay drained`,
+          observe(
+            `storage-preserved`,
+            sameReplaySnapshot(storage.snapshot(), before),
           )
-          expect(
-            env.mutationCalls.map(({ transaction, idempotencyKey }) => ({
-              id: transaction.id,
-              key: idempotencyKey,
-              metadata: transaction.metadata,
-            })),
-          ).toEqual(
-            transactions.map(({ id, idempotencyKey, metadata }) => ({
-              id,
-              key: idempotencyKey,
-              metadata,
-            })),
-          )
-          expect(storage.snapshot()).toEqual({})
-          expect(env.executor.getPendingCount()).toBe(0)
-        } catch (error) {
+        } catch (failure) {
           hasPrimaryFailure = true
-          throw error
+          throw failure
         } finally {
-          hold = false
-          provider.resolve()
-          delivery.resolve()
           await cleanupOfflineOracle(
-            [
-              () => env.executor.dispose(),
-              () => env.collection.cleanup(),
-              () => {
-                loads.mockRestore()
-                executions.mockRestore()
-              },
-            ],
+            [() => env.executor.dispose(), () => env.collection.cleanup()],
             hasPrimaryFailure,
           )
         }
       },
-    ),
-    parameters,
-  )
-}
-
-oracleReplayTest(it).each([20260919])(
-  `admits only unfinished work from delayed replay reads (seed %s)`,
-  checkDelayedRead,
-)
-oracleReplayTest(it, DELAYED_READ_PROPERTY).each([undefined])(
-  `admits only unfinished work from delayed replay reads (seed %s)`,
-  checkDelayedRead,
-)
-
-const storageFailureCases = (seed: number | undefined) =>
-  [`keys`, `get`].map((operation) => ({ operation, seed }))
-
-// The fixed campaign stands aside during any path replay. The random campaign runs in
-// ordinary and reseeded campaigns, and it is the replay of STORAGE_FAILURE_PROPERTY.
-async function checkStorageFailure({
-  operation,
-  seed,
-}: ReturnType<typeof storageFailureCases>[number]): Promise<void> {
-  const parameters = oracleCampaignOptions(storageFailureOracle, seed)
-  oracleRoute(oracleRouteOf(parameters))
-  await fc.assert(
-    fc.asyncProperty(fc.integer({ min: 1, max: 3 }), async (count) => {
-      const error = new Error(`stored work unavailable`)
-      class Storage extends FakeStorageAdapter {
-        override async keys() {
-          if (operation === `keys`) throw error
-          return super.keys()
-        }
-        override async get(key: string) {
-          if (operation === `get`) throw error
-          return super.get(key)
-        }
-      }
-      const storage = new Storage()
-      const outbox = new OutboxManager(storage, {})
-      for (let index = 0; index < count; index++)
-        await outbox.add({
-          id: `stored-${index}`,
-          mutationFnName: `syncData`,
-          mutations: [],
-          keys: [],
-          idempotencyKey: `key-${index}`,
-          createdAt: new Date(index),
-          retryCount: 0,
-          nextAttemptAt: 0,
-          version: 1,
-        })
-      const before = storage.snapshot()
-      const env = createTestOfflineEnvironment({ storage })
-      let hasPrimaryFailure = false
-      try {
-        await expect(
-          atOracleCheckpoint(
-            env.executor.waitForInit(),
-            `failed storage initialization`,
-          ),
-        ).rejects.toBe(error)
-        expect(env.mutationCalls).toEqual([])
-        expect(storage.snapshot()).toEqual(before)
-      } catch (failure) {
-        hasPrimaryFailure = true
-        throw failure
-      } finally {
-        await cleanupOfflineOracle(
-          [() => env.executor.dispose(), () => env.collection.cleanup()],
-          hasPrimaryFailure,
-        )
-      }
-    }),
-    parameters,
-  )
-}
-
-oracleReplayTest(it).each(storageFailureCases(20260916))(
-  `rejects initialization when storage $operation fails without losing records (seed $seed)`,
-  checkStorageFailure,
-)
-oracleReplayTest(it, STORAGE_FAILURE_PROPERTY).each(
-  storageFailureCases(undefined),
-)(
-  `rejects initialization when storage $operation fails without losing records (seed $seed)`,
-  checkStorageFailure,
+      check: (_count, trace, expected) => checkLeadershipTrace(trace, expected),
+    })
+  },
 )

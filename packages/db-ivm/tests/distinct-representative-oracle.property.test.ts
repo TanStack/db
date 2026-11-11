@@ -9,43 +9,41 @@
  * Limits: immutable fixture selections, four colliding members plus an anchor,
  * eight slots and twelve random tail worlds; no external source scheduling.
  */
-import { fc } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { D2 } from '../src/d2.js'
 import { hash } from '../src/hashing/hash.js'
 import { distinct } from '../src/operators/distinct.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
-import { createOracleReach } from '../../db/tests/oracle-reach.js'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config.js'
+import { oracleReplayTest } from '../../db/tests/oracle-config.js'
+import { oracleProperty } from '../../db/tests/oracle-property.js'
 import {
   DISTINCT_BUCKET_REACH_STATES,
   checkDistinctRepresentatives,
-  distinctBucketHistory,
   distinctBucketReachStates,
+  distinctBucketRecipe,
   distinctCollisionFamily,
+  resolveDistinctBucketRecipe,
 } from './distinct-incrementalization-oracle.js'
+import {
+  checkDistinctCampaign,
+  driveDistinctChecked,
+} from './distinct-property-oracle.js'
+import type {
+  GeneratedHistories,
+  OraclePropertyOptions,
+} from '../../db/tests/oracle-property.js'
 import type {
   DistinctBucketHistory,
+  DistinctBucketRecipe,
   DistinctBucketRow,
 } from './distinct-incrementalization-oracle.js'
 import type { Weighted } from './incrementalization-law-oracle.js'
 
-const PROPERTY = `ivm.distinct-representatives`
 const family = distinctCollisionFamily(hash)
 
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
 declareOracle({
-  owns: [`src/operators/distinct.ts#distinct`],
   check: [checkDistinctRepresentatives],
-  grammar: [distinctBucketHistory],
+  grammar: [distinctBucketRecipe],
 })
 
 function drive(worlds: DistinctBucketHistory, split: boolean) {
@@ -102,35 +100,99 @@ function drive(worlds: DistinctBucketHistory, split: boolean) {
   return freshEqualSelections
 }
 
-for (const split of [false, true])
-  for (const campaign of [`fixed`, `random`] as const)
-    oracleReplayTest(it, ...(campaign === `random` ? [PROPERTY] : []))(
-      `conserves full representative contributions, split=${split} (${campaign})`,
-      () => {
-        const reach = createOracleReach(PROPERTY, [
-          ...DISTINCT_BUCKET_REACH_STATES,
-          `fresh equal selections`,
-        ])
-        const parameters =
-          campaign === `fixed`
-            ? oracleFixedSeed(2309, { numRuns: oracleRuns(100) })
-            : oraclePropertyOptions(100, PROPERTY)
-        oracleRoute(oracleRouteOf(parameters))
-        fc.assert(
-          fc.property(distinctBucketHistory, (worlds) => {
-            reach.beginHistory()
-            if (drive(worlds, split)) reach.reach(`fresh equal selections`)
-            for (const state of distinctBucketReachStates(worlds))
-              reach.reach(state)
-          }),
-          parameters,
-        )
-        reach.assertReached()
-        process.stdout.write(
-          `distinct representatives split=${split} ${campaign} reach ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-        )
+const states = [...DISTINCT_BUCKET_REACH_STATES, `fresh equal selections`]
+type Plan = {
+  worlds: DistinctBucketHistory
+  requiredStates: ReadonlyArray<string>
+}
+type CellOptions = Omit<
+  OraclePropertyOptions<DistinctBucketRecipe, ReadonlyArray<string>, Plan>,
+  `id` | `histories`
+> & {
+  histories: Omit<
+    GeneratedHistories<DistinctBucketRecipe>,
+    `runs` | `fixedSeeds`
+  >
+}
+
+function representativeOptions(split: boolean): CellOptions {
+  // Preserve the original permutation/copies/tail grammar. Fresh equal
+  // selections is recorded only after the actual selector executes twice.
+  const constructionStates = new WeakMap<
+    DistinctBucketRecipe,
+    ReadonlyArray<string>
+  >()
+  return {
+    law: {
+      statement: `The full accumulated distinct output has exactly one unit contribution for each supported selection, no negative residues, distinct simultaneous keys, and only historically introduced source payloads.`,
+      authority: `docs/guides/live-queries.md#distinct; packages/db/src/query/live/ARCHITECTURE.md, Weighted relations and public keys; 2026-10-30 distinct provenance review.`,
+      limits: `Four immutable native-collision selections plus an anchor; variants 0..3, at most eight slots and twelve random suffix worlds. Representative choice and cross-build key stability remain unspecified; no external source scheduling.`,
+    },
+    histories: {
+      arbitrary: distinctBucketRecipe,
+      states,
+      constructed: [
+        {
+          name: `full representative support cycle`,
+          enters: states,
+          build: (generated) => {
+            const recipe = structuredClone(generated)
+            constructionStates.set(recipe, states)
+            return recipe
+          },
+        },
+      ],
+    },
+    resolve: (recipe) => ({
+      worlds: resolveDistinctBucketRecipe(recipe),
+      requiredStates: constructionStates.get(recipe) ?? [],
+    }),
+    model: (plan) => plan.requiredStates,
+    driver: ({ worlds }, observe) => {
+      const freshEqualSelections = driveDistinctChecked(
+        () => drive(worlds, split),
+        observe,
+      )
+      if (freshEqualSelections) observe(`reach`, `fresh equal selections`)
+      for (const state of distinctBucketReachStates(worlds))
+        observe(`reach`, state)
+    },
+    check: checkDistinctCampaign,
+    calibrations: [
+      {
+        name: `omits a constructed state`,
+        law: `constructed reach`,
+        corrupt: (trace, plan) => {
+          const state = plan.requiredStates[0]
+          return state === undefined
+            ? undefined
+            : trace.filter(
+                (entry) =>
+                  entry.checkpoint !== `reach` || entry.value !== state,
+              )
+        },
       },
-    )
+    ],
+  }
+}
+
+const cell0 = representativeOptions(false)
+oracleProperty({
+  ...cell0,
+  check: checkDistinctCampaign,
+  id: `ivm.distinct-representatives`,
+  owns: [`src/operators/distinct.ts#distinct`],
+  histories: { ...cell0.histories, runs: 100, fixedSeeds: [2309] },
+})
+
+const cell1 = representativeOptions(true)
+oracleProperty({
+  ...cell1,
+  check: checkDistinctCampaign,
+  id: `ivm.distinct-representatives-unit-split`,
+  owns: [`src/operators/distinct.ts#distinct`],
+  histories: { ...cell1.histories, runs: 100, fixedSeeds: [2309] },
+})
 
 // Small replay of differing unselected fields through the same driver and
 // comparison as the generated campaign; no hand-authored expected answer.

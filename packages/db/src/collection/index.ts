@@ -444,12 +444,12 @@ export class CollectionImpl<
    * @throws Error if sync config is missing
    */
   constructor(config: CollectionImplConfig<TOutput, TKey, TUtils, TSchema>) {
-    // eslint-disable-next-line
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!config) {
       throw new CollectionRequiresConfigError()
     }
 
-    // eslint-disable-next-line
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!config.sync) {
       throw new CollectionRequiresSyncConfigError()
     }

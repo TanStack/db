@@ -1132,6 +1132,12 @@ type ExpectedCollection = {
   terms: number
 }
 
+// Each eager tab reads its rows once, and each restart reads them once more.
+// Query startup receivers share this work judgment rather than restating it.
+export function expectedEagerRowScans(tabs: number, restarts: number): number {
+  return tabs + restarts
+}
+
 export function expectedReload(
   history: ReloadHistory,
   topology: { adapterPerTab: boolean } = { adapterPerTab: true },
@@ -1189,7 +1195,10 @@ export function expectedReload(
             ? tabsOnThisGeneration
             : 1,
         // Each tab reads an eager Collection's rows once; a restart rereads.
-        rowScans: eager && !disposed ? tabs + (restarted ? 1 : 0) : undefined,
+        rowScans:
+          eager && !disposed
+            ? expectedEagerRowScans(tabs, restarted ? 1 : 0)
+            : undefined,
         // A held snapshot may or may not run after its tab closes.
         snapshots: disposed
           ? undefined
@@ -1209,9 +1218,9 @@ export function expectedReload(
 export function reloadViolations(
   history: ReloadHistory,
   observed: ReloadObservation,
+  expected = expectedReload(history, observed),
 ): Array<string> {
   const violations: Array<string> = []
-  const expected = expectedReload(history, observed)
   const { ids, storageIds, log, reloadLog } = observed
   const count = (
     entries: ReadonlyArray<Logged>,
@@ -1684,4 +1693,7 @@ export const fixedReloadHistories: ReadonlyArray<[string, ReloadHistory]> = [
 
 // Owns nothing: this module holds the model and check only. The production
 // path is driven by the browser and Electron reload-class tests, which declare their own owned entries, which declares the owned entry.
-declareOracle({ check: [reloadViolations], model: [expectedReload] })
+declareOracle({
+  check: [reloadViolations],
+  model: [expectedReload, expectedEagerRowScans],
+})

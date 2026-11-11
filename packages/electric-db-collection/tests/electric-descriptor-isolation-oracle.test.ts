@@ -1,17 +1,15 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  checkExistingElectricComparison,
+  existingElectricComparison,
+} from './electric-property-oracle'
 import { atCheckpoint } from './electric-oracle-lifecycle'
 import {
   expectWholeTagRecovery,
@@ -436,28 +434,21 @@ fixedCase.each([
 // TANSTACK_DB_ORACLE_PROPERTY=electric.persisted-tag-history
 // TANSTACK_DB_ORACLE_SEED=<seed> TANSTACK_DB_ORACLE_PATH=<path>
 // pnpm exec vitest run tests/electric-descriptor-isolation-oracle.test.ts
-const tagHistoryFixedSeed = oracleFixedSeed(42712, { numRuns: oracleRuns(10) })
-oracleReplayTest(fcTest).prop([tagHistory], tagHistoryFixedSeed)(
-  `persisted tag histories preserve membership across warm and cold restart (fixed)`,
-  (history) => {
-    oracleRoute(oracleRouteOf(tagHistoryFixedSeed))
-    return runTagHistory(history)
+oracleProperty({
+  id: `electric.persisted-tag-history`,
+  law: {
+    statement: `Compatible warm resumes retain tag membership; fresh source snapshots rebuild it across warm and cold restart.`,
+    authority: `The independent tag-set law and persisted recovery contract stated above runTagHistory.`,
+    limits: `Controlled ShapeStream boundary, unmanaged full-source recovery, and the existing bounded tag/edit histories.`,
   },
-)
-const tagHistoryCampaign = oraclePropertyOptions(
-  10,
-  `electric.persisted-tag-history`,
-)
-oracleReplayTest(fcTest, `electric.persisted-tag-history`).prop(
-  [tagHistory],
-  tagHistoryCampaign,
-)(
-  `persisted tag histories preserve membership across warm and cold restart (random)`,
-  (history) => {
-    oracleRoute(oracleRouteOf(tagHistoryCampaign))
-    return runTagHistory(history)
-  },
-)
+  owns: [`src/electric.ts#electricCollectionOptions`],
+  histories: { arbitrary: tagHistory, runs: 10, fixedSeeds: [42712] },
+  ...existingElectricComparison(
+    `electric.persisted-tag-history`,
+    runTagHistory,
+  ),
+  check: checkExistingElectricComparison,
+})
 
 beforeEach(() => {
   resetElectricDescriptorHarness()
@@ -620,30 +611,23 @@ async function runOwnerHistory(history: {
   }
 }
 
-const ownerHistoryFixedSeed = oracleFixedSeed(42711, {
-  numRuns: oracleRuns(12),
+// The old fixed campaign used 12 histories and the random campaign used 20.
+// Both native campaigns use 20 so registration parity does not lower either.
+oracleProperty({
+  id: `electric.bound-descriptor-history`,
+  law: {
+    statement: `Collections derived from one Electric descriptor keep independent row updates, subscription ownership, and cleanup.`,
+    authority: `The descriptor ownership contract and independent expected-row array in runOwnerHistory.`,
+    limits: `The existing original, spread, and materialized descriptor forms over the controlled SDK callback boundary.`,
+  },
+  owns: [`src/electric.ts#electricCollectionOptions`],
+  histories: { arbitrary: ownerHistory, runs: 20, fixedSeeds: [42711] },
+  ...existingElectricComparison(
+    `electric.bound-descriptor-history`,
+    runOwnerHistory,
+  ),
+  check: checkExistingElectricComparison,
 })
-oracleReplayTest(fcTest).prop([ownerHistory], ownerHistoryFixedSeed)(
-  `config derivation preserves independent owner histories (fixed)`,
-  (history) => {
-    oracleRoute(oracleRouteOf(ownerHistoryFixedSeed))
-    return runOwnerHistory(history)
-  },
-)
-const ownerHistoryCampaign = oraclePropertyOptions(
-  20,
-  `electric.bound-descriptor-history`,
-)
-oracleReplayTest(fcTest, `electric.bound-descriptor-history`).prop(
-  [ownerHistory],
-  ownerHistoryCampaign,
-)(
-  `config derivation preserves independent owner histories (random)`,
-  (history) => {
-    oracleRoute(oracleRouteOf(ownerHistoryCampaign))
-    return runOwnerHistory(history)
-  },
-)
 
 // The Electric descriptor may be reused across independent persisted wrappers.
 // The wrappers may address the same or different durable Collection IDs; that
@@ -654,5 +638,4 @@ oracleReplayTest(fcTest, `electric.bound-descriptor-history`).prop(
 
 declareOracle({
   check: [runTagHistory, runOwnerHistory],
-  owns: [`src/electric.ts#electricCollectionOptions`],
 })

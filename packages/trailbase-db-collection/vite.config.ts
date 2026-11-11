@@ -4,6 +4,8 @@ import packageJson from './package.json'
 
 const config = defineConfig({
   test: {
+    // Keep the framework's Vitest API in this package's active worker.
+    server: { deps: { inline: [`@tanstack/oracles`] } },
     name: packageJson.name,
     dir: `./tests`,
     environment: `jsdom`,

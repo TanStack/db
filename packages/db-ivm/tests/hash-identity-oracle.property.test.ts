@@ -1,6 +1,6 @@
 import { Temporal } from 'temporal-polyfill'
 import { describe, expect, it as vitestIt } from 'vitest'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import {
   equalHashValues,
   hash,
@@ -8,14 +8,17 @@ import {
 } from '../src/hashing/hash.js'
 import {
   oracleFixedSeed,
-  oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import {
+  differs,
+  oracleProperty,
+  pass,
+} from '../../db/tests/oracle-property.js'
 import { colliding } from './hash-collision-support.js'
+import type { Observation, Verdict } from '../../db/tests/oracle-property.js'
 
 /**
  * # Which values share D2 value identity?
@@ -743,9 +746,16 @@ const MODULES: ReadonlyArray<Module> = [
   },
 ]
 
-function expectPair(
-  pair: Pair,
-  seeds: [number, number],
+type PairPlan = { pair: Pair; seeds: [number, number] }
+type Observe = (checkpoint: string, value: unknown) => void
+
+function expectedPair({ pair }: PairPlan): boolean {
+  return identity(pair.left) === identity(pair.right)
+}
+
+function drivePair(
+  { pair, seeds }: PairPlan,
+  observe: Observe,
   modules: ReadonlyArray<Module> = MODULES,
 ): void {
   const expected = identity(pair.left) === identity(pair.right)
@@ -753,33 +763,123 @@ function expectPair(
   const right = realize(pair.right, seeds[1])
   for (const module of modules) {
     const context = `${module.name}, ${pair.mutation}: ${identity(pair.left)} vs ${identity(pair.right)}`
-    expect(module.equalHashValues(left, right), `equality, ${context}`).toBe(
-      expected,
-    )
-    expect(module.equalHashValues(right, left), `symmetry, ${context}`).toBe(
-      expected,
-    )
+    observe(`equality, ${context}`, {
+      kind: `equality`,
+      actual: module.equalHashValues(left, right),
+    })
+    observe(`symmetry, ${context}`, {
+      kind: `equality`,
+      actual: module.equalHashValues(right, left),
+    })
     if (expected)
-      expect(module.hash(left), `hash, ${context}`).toBe(module.hash(right))
+      observe(`hash, ${context}`, {
+        kind: `hash consequence`,
+        actual: Object.is(module.hash(left), module.hash(right)),
+      })
   }
 }
 
-function expectCyclicPair({ spec, changed, seeds }: CyclicPair): void {
+function checkPair(
+  _plan: PairPlan,
+  trace: ReadonlyArray<Observation>,
+  expected: boolean,
+): Verdict {
+  for (const { checkpoint, value } of trace) {
+    const actual = value as { kind: string; actual: unknown }
+    const mismatch = differs(
+      checkpoint,
+      actual.kind,
+      actual.actual,
+      actual.kind === `equality` ? expected : true,
+    )
+    if (mismatch) return mismatch
+  }
+  return pass
+}
+
+function expectPair(
+  pair: Pair,
+  seeds: [number, number],
+  modules: ReadonlyArray<Module> = MODULES,
+): void {
+  const plan = { pair, seeds }
+  const trace: Array<Observation> = []
+  drivePair(
+    plan,
+    (checkpoint, value) => trace.push({ checkpoint, value }),
+    modules,
+  )
+  const verdict = checkPair(plan, trace, expectedPair(plan))
+  if (verdict.kind === `violation`)
+    expect(verdict.values?.actual, verdict.difference).toBe(
+      verdict.values?.expected,
+    )
+}
+
+function driveCyclicPair(
+  { spec, changed, seeds }: CyclicPair,
+  observe: Observe,
+): void {
   const left = realize(spec, seeds[0])
   const same = realize(spec, seeds[1])
   const other = realize(changed, seeds[1])
   for (const module of MODULES) {
-    expect(module.equalHashValues(left, same), `${module.name} equality`).toBe(
-      true,
-    )
-    expect(
-      module.equalHashValues(left, other),
-      `${module.name} inequality`,
-    ).toBe(false)
-    expect(() => module.hash(left)).toThrow(
-      new TypeError(`Cannot hash cyclic structural values`),
-    )
+    observe(`${module.name} equality`, {
+      kind: `equality`,
+      actual: module.equalHashValues(left, same),
+    })
+    observe(`${module.name} inequality`, {
+      kind: `inequality`,
+      actual: module.equalHashValues(left, other),
+    })
+    // A thrown TypeError is an observation promised by this cyclic-value law.
+    // Only this hash call is captured; realization and equality errors escape.
+    let rejection = false
+    try {
+      module.hash(left)
+    } catch (error) {
+      rejection =
+        error instanceof TypeError &&
+        error.message === `Cannot hash cyclic structural values`
+    }
+    observe(`${module.name} cycle rejection`, {
+      kind: `cycle rejection`,
+      actual: rejection,
+    })
   }
+}
+
+function expectedCyclicPair() {
+  return { equality: true, inequality: false, [`cycle rejection`]: true }
+}
+function checkCyclicPair(
+  _plan: CyclicPair,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof expectedCyclicPair>,
+): Verdict {
+  for (const { checkpoint, value } of trace) {
+    const actual = value as { kind: keyof typeof expected; actual: unknown }
+    const mismatch = differs(
+      checkpoint,
+      actual.kind,
+      actual.actual,
+      expected[actual.kind],
+    )
+    if (mismatch) return mismatch
+  }
+  return pass
+}
+
+function expectCyclicPair(plan: CyclicPair): void {
+  const trace: Array<Observation> = []
+  driveCyclicPair(plan, (checkpoint, value) =>
+    trace.push({ checkpoint, value }),
+  )
+  const verdict = checkCyclicPair(plan, trace, expectedCyclicPair())
+  if (verdict.kind === `violation`)
+    expect(verdict.values?.actual, verdict.difference).toBe(
+      verdict.values?.expected,
+    )
 }
 
 // The model is `identity` (and its encoding `canon`): equal identities must
@@ -787,14 +887,9 @@ function expectCyclicPair({ spec, changed, seeds }: CyclicPair): void {
 // What this oracle owns: the gap report judges these entries, and their
 // reference trees within the package, by this file's tests.
 declareOracle({
-  owns: [
-    `src/hashing/hash.ts#hash`,
-    `src/hashing/hash.ts#equalHashValues`,
-    `src/hashing/hash.ts#registerOpaqueHash`,
-  ],
-  check: [expectPair, expectCyclicPair],
-  model: [identity, canon],
-  grammar: [pairArb],
+  check: [expectPair, expectCyclicPair, checkPair, checkCyclicPair],
+  model: [identity, canon, expectedPair, expectedCyclicPair],
+  grammar: [pairArb, cyclicArb],
 })
 
 // ---------------------------------------------------------------------------
@@ -804,49 +899,52 @@ declareOracle({
 // alone reseeds the random campaigns.
 
 const FIXED_SEED = 2026930
-const PAIR_IDENTITY = `ivm.hash-identity`
-const CYCLIC_IDENTITY = `ivm.hash-identity-cycles`
 
 const it = oracleReplayTest(vitestIt)
 
 describe(`hash identity oracle`, () => {
-  it(`matches the identity model across generated value pairs (${FIXED_SEED})`, () => {
-    const parameters = oracleFixedSeed(FIXED_SEED, { numRuns: oracleRuns(300) })
-    oracleRoute(oracleRouteOf(parameters))
-    fc.assert(
-      fc.property(pairArb, fc.nat(), fc.nat(), (pair, left, right) =>
-        expectPair(pair, [left, right]),
-      ),
-      parameters,
-    )
-  })
-  const pairCampaign = oraclePropertyOptions(300, PAIR_IDENTITY)
-  oracleReplayTest(fcTest, PAIR_IDENTITY).prop(
-    [pairArb, fc.nat(), fc.nat()],
-    pairCampaign,
-  )(
-    `matches the identity model across generated value pairs (random)`,
-    (pair, left, right) => {
-      oracleRoute(oracleRouteOf(pairCampaign))
-      expectPair(pair, [left, right])
+  oracleProperty({
+    id: `ivm.hash-identity`,
+    law: {
+      statement: `D2 equality is symmetric and agrees with independent value identity; equal identities have equal hashes under native and colliding-marker modules.`,
+      authority: `The existing nine value-identity rules documented above.`,
+      limits: `The original bounded recursive value-spec grammar, mutations and realization seeds; collision freedom is not promised.`,
     },
-  )
-
-  it(`matches constructed verdicts across generated cyclic values (${FIXED_SEED})`, () => {
-    const campaignParameters = oracleFixedSeed(FIXED_SEED, {
-      numRuns: oracleRuns(300),
-    })
-    oracleRoute(oracleRouteOf(campaignParameters))
-    fc.assert(fc.property(cyclicArb, expectCyclicPair), campaignParameters)
-  })
-  const cyclicCampaign = oraclePropertyOptions(300, CYCLIC_IDENTITY)
-  oracleReplayTest(fcTest, CYCLIC_IDENTITY).prop([cyclicArb], cyclicCampaign)(
-    `matches constructed verdicts across generated cyclic values (random)`,
-    (value: CyclicPair) => {
-      oracleRoute(oracleRouteOf(cyclicCampaign))
-      expectCyclicPair(value)
+    owns: [
+      `src/hashing/hash.ts#hash`,
+      `src/hashing/hash.ts#equalHashValues`,
+      `src/hashing/hash.ts#registerOpaqueHash`,
+    ],
+    histories: {
+      arbitrary: fc.tuple(pairArb, fc.nat(), fc.nat()),
+      runs: 300,
+      fixedSeeds: [2026930],
     },
-  )
+    resolve: ([pair, left, right]) => ({
+      pair,
+      seeds: [left, right] as [number, number],
+    }),
+    model: expectedPair,
+    driver: drivePair,
+    check: checkPair,
+  })
+  oracleProperty({
+    id: `ivm.hash-identity-cycles`,
+    law: {
+      statement: `Constructed equal cyclic values compare equal, the changed cyclic value differs, and hashing rejects with the existing cyclic-structural-value TypeError.`,
+      authority: `The existing cyclic value-identity contract documented above.`,
+      limits: `The original array/Map/Set/object cyclic spec and leaf-replacement grammar; no arbitrary graph-shape claim is added.`,
+    },
+    owns: [
+      `src/hashing/hash.ts#hash`,
+      `src/hashing/hash.ts#equalHashValues`,
+      `src/hashing/hash.ts#registerOpaqueHash`,
+    ],
+    histories: { arbitrary: cyclicArb, runs: 300, fixedSeeds: [2026930] },
+    model: expectedCyclicPair,
+    driver: driveCyclicPair,
+    check: checkCyclicPair,
+  })
 
   // Positive execution witness: the fixed campaign reaches every value kind
   // and every mutation, with both verdicts.

@@ -13,6 +13,7 @@
  */
 import { fc } from '@fast-check/vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { OracleComparisonMismatch } from './incrementalization-law-oracle.js'
 import type { Weighted } from './incrementalization-law-oracle.js'
 
 export type DistinctValue = { id: string; value: number }
@@ -58,33 +59,43 @@ export function distinctReachStates(history: DistinctHistory) {
 // Class numbers are model-only labels for fixture-defined unequal values.
 // World slots become unique source keys in the Collection receiving driver.
 // Repeated labels represent equal selections with independent source support.
-export const distinctHistory = fc
-  .tuple(
-    fc.boolean(),
-    fc.boolean(),
-    fc.integer({ min: 2, max: 4 }),
-    fc.array(fc.array(fc.integer({ min: 0, max: 2 }), { maxLength: 8 }), {
-      maxLength: 12,
-    }),
-  )
-  .map(([reverse, together, copies, tail]): DistinctHistory => {
-    const a = reverse ? 1 : 0
-    const b = reverse ? 0 : 1
-    return [
-      [],
-      ...(together ? [] : [[a]]),
-      [a, b, 2],
-      [...Array<number>(copies).fill(a), b, 2],
-      [a, b, 2],
-      [b, 2],
-      [a, b, 2],
-      [b, a, 2],
-      ...tail,
-      [],
-      [a, b, 2],
-      [],
-    ]
-  })
+export type DistinctRecipe = [boolean, boolean, number, Array<Array<number>>]
+export const distinctRecipe = fc.tuple(
+  fc.boolean(),
+  fc.boolean(),
+  fc.integer({ min: 2, max: 4 }),
+  fc.array(fc.array(fc.integer({ min: 0, max: 2 }), { maxLength: 8 }), {
+    maxLength: 12,
+  }),
+)
+
+// Resolution keeps the original forward support cycle. The recipe, rather
+// than its mapped history, is the shrinkable native history domain.
+export function resolveDistinctRecipe([
+  reverse,
+  together,
+  copies,
+  tail,
+]: DistinctRecipe): DistinctHistory {
+  const a = reverse ? 1 : 0
+  const b = reverse ? 0 : 1
+  return [
+    [],
+    ...(together ? [] : [[a]]),
+    [a, b, 2],
+    [...Array<number>(copies).fill(a), b, 2],
+    [a, b, 2],
+    [b, 2],
+    [a, b, 2],
+    [b, a, 2],
+    ...tail,
+    [],
+    [a, b, 2],
+    [],
+  ]
+}
+
+export const distinctHistory = distinctRecipe.map(resolveDistinctRecipe)
 
 // Birthday-search actual digests, with no hash replacement. The original
 // report's pair is tried first, then up to 500,000 records. Failure to find a
@@ -147,9 +158,13 @@ export function checkDistinctSnapshot(
   )
   const observed = actual.map(distinctValueIdentity)
   if (JSON.stringify(observed.sort()) !== JSON.stringify(expected.sort()))
-    throw new Error(
+    throw new OracleComparisonMismatch(
       `distinct snapshot diverged at checkpoint ${checkpoint}: ` +
         `expected ${JSON.stringify(expected)}, actual ${JSON.stringify(observed)}`,
+      `distinct snapshot`,
+      String(checkpoint),
+      observed,
+      expected,
     )
 }
 
@@ -172,42 +187,56 @@ declareOracle({
  */
 export type DistinctBucketRow = { member: number; variant: number }
 export type DistinctBucketHistory = Array<Array<DistinctBucketRow>>
-export const distinctBucketHistory = fc
-  .tuple(
-    fc.shuffledSubarray([0, 1, 2, 3], { minLength: 4, maxLength: 4 }),
-    fc.integer({ min: 2, max: 4 }),
+export type DistinctBucketRecipe = [
+  Array<number>,
+  number,
+  DistinctBucketHistory,
+]
+export const distinctBucketRecipe = fc.tuple(
+  fc.shuffledSubarray([0, 1, 2, 3], { minLength: 4, maxLength: 4 }),
+  fc.integer({ min: 2, max: 4 }),
+  fc.array(
     fc.array(
-      fc.array(
-        fc.record({
-          member: fc.integer({ min: 0, max: 4 }),
-          variant: fc.integer({ min: 0, max: 3 }),
-        }),
-        { maxLength: 8 },
-      ),
-      { maxLength: 12 },
+      fc.record({
+        member: fc.integer({ min: 0, max: 4 }),
+        variant: fc.integer({ min: 0, max: 3 }),
+      }),
+      { maxLength: 8 },
     ),
-  )
-  .map(([order, copies, tail]): DistinctBucketHistory => {
-    const [a, b, c, d] = order as [number, number, number, number]
-    const row = (member: number, variant = 0) => ({ member, variant })
-    return [
-      [],
-      [row(a), row(b)],
-      [
-        ...Array.from({ length: copies }, (_, variant) => row(a, variant)),
-        row(b),
-      ],
-      [row(a, 1), row(b)],
-      [row(b)],
-      [row(b), row(c)],
-      [row(b), row(c), row(d)],
-      [row(a), row(b), row(c), row(d)],
-      ...tail,
-      [],
-      [row(a, 2), row(b, 3)],
-      [],
-    ]
-  })
+    { maxLength: 12 },
+  ),
+)
+
+// Keep the generated permutation, duplicate count and tail unchanged.
+export function resolveDistinctBucketRecipe([
+  order,
+  copies,
+  tail,
+]: DistinctBucketRecipe): DistinctBucketHistory {
+  const [a, b, c, d] = order as [number, number, number, number]
+  const row = (member: number, variant = 0) => ({ member, variant })
+  return [
+    [],
+    [row(a), row(b)],
+    [
+      ...Array.from({ length: copies }, (_, variant) => row(a, variant)),
+      row(b),
+    ],
+    [row(a, 1), row(b)],
+    [row(b)],
+    [row(b), row(c)],
+    [row(b), row(c), row(d)],
+    [row(a), row(b), row(c), row(d)],
+    ...tail,
+    [],
+    [row(a, 2), row(b, 3)],
+    [],
+  ]
+}
+
+export const distinctBucketHistory = distinctBucketRecipe.map(
+  resolveDistinctBucketRecipe,
+)
 
 export const DISTINCT_BUCKET_REACH_STATES = [
   `unequal unselected payloads`,
@@ -323,8 +352,12 @@ export function checkDistinctRepresentatives(
     new Set(rows.map(({ key }) => key)).size !== rows.length ||
     JSON.stringify(observed) !== JSON.stringify(expected)
   )
-    throw new Error(
+    throw new OracleComparisonMismatch(
       `distinct representative contribution diverged at ${checkpoint}: ${JSON.stringify({ expected, rows })}`,
+      `distinct representative contribution`,
+      checkpoint,
+      rows,
+      expected,
     )
 }
 

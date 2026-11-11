@@ -1,16 +1,14 @@
-import { describe, expect, it } from 'vitest'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { ReverseIndex } from '../src/indexes/reverse-index.js'
 import { PropRef } from '../src/query/ir.js'
-import {
-  oracleFixedSeed,
-  oracleRandomParameters,
-  oracleRoute,
-  oracleRouteOf,
-  readOracleRunConfig,
-} from './oracle-config.js'
+import { differs, oracleProperty, pass, violation } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import type {
+  ConstructedHistory,
+  Observation,
+  Verdict,
+} from './oracle-config.js'
 
 /**
  * # Does a reversed index read in its query's order, in bounded work?
@@ -126,13 +124,58 @@ type ReadCase = {
   rejected: Array<number>
 }
 
-function checkRead({ options, entries, n, cursor, rejected }: ReadCase) {
+// Construction requirements are test-only provenance, not index state.
+const constructionRequirements = new WeakMap<ReadCase, ReadonlyArray<string>>()
+
+// The pinned framework checks only seeded construction identities. Associate
+// every generated and shrunk output with its obligation as well. Fresh objects
+// keep builders distinct without changing the legal read grammar.
+function requireConstructionReach(
+  constructions: ReadonlyArray<ConstructedHistory<ReadCase>>,
+): ReadonlyArray<ConstructedHistory<ReadCase>> {
+  return constructions.map((construction) => ({
+    ...construction,
+    build: (history: ReadCase) => {
+      const built = { ...construction.build(history) }
+      constructionRequirements.set(built, [...construction.enters])
+      return built
+    },
+  }))
+}
+
+// The model predicts the query stream and bounds only the work the contract
+// promises. The shared check also enforces each construction's entry claims
+// against the driver's observations, including fresh generated constructions.
+function modelRead(history: ReadCase) {
+  const { options, entries, n, cursor, rejected } = history
+  const order = modelOrder(entries, options)
+  const stream = cursor ? after(order, cursor.from, options) : order
+  return {
+    ...expectedRead(stream, n, new Set(rejected)),
+    requiredStates: constructionRequirements.get(history) ?? [],
+  }
+}
+
+type ReadObservation = {
+  keys: Array<number>
+  calls: number
+  mostNullishCalls: number
+}
+
+// Read through the actual public index reader. Count calls before applying the
+// filter, so rejection cannot hide extra work. The read-return cut owns both
+// the keys and callback counts.
+function driveRead(
+  { options, entries, n, cursor, rejected }: ReadCase,
+  observe: (checkpoint: string, value: unknown) => void,
+): void {
   const reader = makeReader(entries, options)
   const rejectedKeys = new Set(rejected)
   const nullishKeys = new Set(
     entries.filter(([, value]) => value == null).map(([key]) => key),
   )
   let calls = 0
+  let rejectedCalls = 0
   const nullishCalls = new Map<number, number>()
   const filter = (key: number) => {
     if (nullishKeys.has(key)) {
@@ -140,20 +183,81 @@ function checkRead({ options, entries, n, cursor, rejected }: ReadCase) {
     } else {
       calls++
     }
+    if (rejectedKeys.has(key)) rejectedCalls++
     return !rejectedKeys.has(key)
   }
-  const order = modelOrder(entries, options)
-  const stream = cursor ? after(order, cursor.from, options) : order
-  const expected = expectedRead(stream, n, rejectedKeys)
-  const actual = cursor
+  const keys = cursor
     ? reader.take(n, cursor.from, filter)
     : reader.takeFromStart(n, filter)
-  expect(actual, `keys`).toEqual(expected.keys)
-  expect(calls, `non-null filter calls`).toBeLessThanOrEqual(expected.calls)
-  expect(
-    Math.max(0, ...nullishCalls.values()),
-    `filter calls on one nullish key`,
-  ).toBeLessThanOrEqual(1)
+  observe(`read returned`, {
+    keys,
+    calls,
+    mostNullishCalls: Math.max(0, ...nullishCalls.values()),
+  } satisfies ReadObservation)
+  observe(`reach`, `${options.direction} index, nulls ${options.nulls}`)
+  observe(`reach`, cursor ? `cursor read` : `start read`)
+  if (cursor && cursor.from == null) {
+    observe(`reach`, `nullish cursor`)
+    if (options.nulls === `first` && n > 0)
+      observe(`reach`, `nullish cursor before values`)
+  }
+  if (cursor && cursor.from != null) observe(`reach`, `numeric cursor`)
+  if (n === 0) observe(`reach`, `zero read`)
+  if (rejectedCalls > 0) observe(`reach`, `filter rejection`)
+  if (
+    entries.some(([, value]) => value == null) &&
+    entries.some(([, value]) => value != null)
+  )
+    observe(`reach`, `mixed value groups`)
+}
+
+// The same named judgment serves generated histories and the large fixed
+// replays. Preserve each upper bound separately from exact row order.
+function checkRead(
+  _history: ReadCase,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof modelRead>,
+): Verdict {
+  for (const { checkpoint, value } of trace) {
+    if (checkpoint !== `read returned`) continue
+    const actual = value as ReadObservation
+    const result =
+      differs(checkpoint, `order`, actual.keys, expected.keys) ??
+      differs(
+        checkpoint,
+        `non-null work`,
+        actual.calls <= expected.calls,
+        true,
+        `${actual.calls} non-null filter calls exceed ${expected.calls}`,
+      ) ??
+      differs(
+        checkpoint,
+        `nullish work`,
+        actual.mostNullishCalls <= 1,
+        true,
+        `${actual.mostNullishCalls} filter calls on one nullish key exceed 1`,
+      ) ??
+      pass
+    if (result.kind === `violation`) return result
+    const reached = new Set(
+      trace
+        .filter((entry) => entry.checkpoint === `reach`)
+        .map((entry) => entry.value),
+    )
+    const missing = expected.requiredStates.filter(
+      (state) => !reached.has(state),
+    )
+    // This completion check must not outrank a driver failure after its read.
+    // An unrecorded checkpoint preserves that failure as the primary error.
+    return missing.length === 0
+      ? pass
+      : violation(
+          `constructed states`,
+          `constructed history did not enter ${missing.join(`, `)}`,
+          `constructed reach`,
+        )
+  }
+  return violation(`read returned`, `the reader did not return`, `order`)
 }
 
 const value: fc.Arbitrary<Value> = fc.oneof(
@@ -167,68 +271,224 @@ const readCase: fc.Arbitrary<ReadCase> = fc.record({
     direction: fc.constantFrom(`asc` as const, `desc` as const),
     nulls: fc.constantFrom(`first` as const, `last` as const),
   }),
-  entries: fc
-    .uniqueArray(fc.integer({ min: 0, max: 15 }), { maxLength: 12 })
-    .chain((keys) =>
-      fc.tuple(...keys.map((key) => fc.tuple(fc.constant(key), value))),
-    )
-    .map((pairs) => pairs as Array<Entry>),
+  // Key uniqueness expresses the same language without a dependent chain.
+  // Its membership check can then validate and shrink constructed histories.
+  entries: fc.uniqueArray(fc.tuple(fc.integer({ min: 0, max: 15 }), value), {
+    maxLength: 12,
+    selector: ([key]) => key,
+  }),
   n: fc.integer({ min: 0, max: 6 }),
   cursor: fc.option(fc.record({ from: value }), { nil: undefined }),
   rejected: fc.uniqueArray(fc.integer({ min: 0, max: 15 }), { maxLength: 6 }),
 })
 
-// What this oracle owns: the gap report judges every function in
-// reverse-index.ts by this file's tests.
 declareOracle({
-  owns: [`src/indexes/reverse-index.ts`],
   check: [checkRead],
-  model: [modelOrder, after, expectedRead],
+  model: [modelOrder, after, expectedRead, modelRead],
+  grammar: [readCase],
 })
 
-describe(`reversed index reads`, () => {
-  const { multiplier, ...replay } = readOracleRunConfig()
-  const runs = 200 * multiplier
-
-  it.each([`first`, `last`] as const)(
-    `reads 50 keys among 5,000 nullish keys with nulls %s in bounded non-null work`,
-    (nulls) => {
-      oracleRoute(`case`)
-      const entries: Array<Entry> = Array.from({ length: 10_000 }, (_, key) => [
+// The four large regressions have a separate finite grammar. They retain the
+// same model, driver, and named judgments, and supply no generated reach.
+oracleProperty({
+  id: `reverse-index.large-reads`,
+  law: {
+    statement: `A reversed index preserves exact query order and bounded non-null filter work when a read crosses a large nullish group.`,
+    authority: `The IndexReader.take/takeFromStart and query-aware null-placement contract stated above.`,
+    limits: `Four finite histories: ascending physical index, both null placements, 10,000 rows with 5,000 nullish keys, n=50, from the start or cursor 5001.`,
+  },
+  // What this oracle owns: the gap report judges every function in
+  // reverse-index.ts by this file's tests.
+  owns: [`src/indexes/reverse-index.ts`],
+  histories: ([`first`, `last`] as const).flatMap((nulls) =>
+    [undefined, { from: 5001 }].map((cursor): ReadCase => ({
+      options: { direction: `asc`, nulls },
+      entries: Array.from({ length: 10_000 }, (_, key) => [
         key,
         key % 2 === 0 ? null : key,
-      ])
-      for (const cursor of [undefined, { from: 5001 }]) {
-        checkRead({
-          options: { direction: `asc`, nulls },
-          entries,
-          n: 50,
-          cursor,
-          rejected: [],
-        })
-      }
-    },
-  )
+      ]),
+      n: 50,
+      cursor,
+      rejected: [],
+    })),
+  ),
+  label: ({ options, cursor }) =>
+    `50 keys among 5,000 nullish keys, nulls ${options.nulls}, ${cursor ? `cursor` : `start`}`,
+  model: modelRead,
+  driver: driveRead,
+  check: checkRead,
+})
 
-  const readCaseFixedSeed = oracleFixedSeed(2045, { numRuns: runs })
-  fcTest.prop([readCase], readCaseFixedSeed)(
-    `matches the query order in bounded work for a fixed seed`,
-    (read) => {
-      oracleRoute(oracleRouteOf(readCaseFixedSeed))
-      checkRead(read)
-    },
-  )
+// Randomized constructions force each query direction/null placement, both
+// entry points, both cursor kinds, an empty requested prefix, and a rejected
+// key. All builders stay inside the original 12-row grammar; fixed large
+// regressions do not satisfy these states.
+function mixedGroups(history: ReadCase): ReadCase {
+  const first = history.rejected[0] ?? history.n
+  const second = (first + 1) % 16
+  return {
+    ...history,
+    entries: [
+      [first, null],
+      [second, history.n % 5],
+      ...history.entries
+        .filter(([key]) => key !== first && key !== second)
+        .slice(0, 10),
+    ],
+  }
+}
 
-  const readCaseCampaign = oracleRandomParameters(
-    runs,
-    replay,
-    `reverse-index.reads`,
-  )
-  fcTest.prop([readCase], readCaseCampaign)(
-    `matches the query order in bounded work for a random or replayed seed`,
-    (read) => {
-      oracleRoute(oracleRouteOf(readCaseCampaign))
-      checkRead(read)
+oracleProperty({
+  id: `reverse-index.reads`,
+  law: {
+    statement: `A reversed index returns the query's ordered prefix or strict cursor suffix and bounds filter calls to the accepted non-null prefix plus one call per nullish key.`,
+    authority: `IndexReader.take/takeFromStart and findIndexForField's query-aware null placement; the ordered-acquisition coverage owner.`,
+    limits: `Generated keys 0..15, values null/undefined/0..4, 0..12 rows, n=0..6; large fixed replays use a separate bounded domain. The query-aware reader, not legacy reversal or a custom index's capability admission.`,
+  },
+  owns: [`src/indexes/reverse-index.ts`],
+  histories: {
+    arbitrary: readCase,
+    runs: 200,
+    fixedSeeds: [2045],
+    states: [
+      `asc index, nulls first`,
+      `asc index, nulls last`,
+      `desc index, nulls first`,
+      `desc index, nulls last`,
+      `start read`,
+      `cursor read`,
+      `nullish cursor`,
+      `nullish cursor before values`,
+      `numeric cursor`,
+      `zero read`,
+      `filter rejection`,
+      `mixed value groups`,
+    ],
+    constructed: requireConstructionReach([
+      {
+        name: `nullish cursor continues into values`,
+        enters: [
+          `cursor read`,
+          `nullish cursor`,
+          `nullish cursor before values`,
+        ],
+        build: (history): ReadCase => ({
+          ...mixedGroups(history),
+          options: { ...history.options, nulls: `first` },
+          cursor: { from: null },
+          n: Math.max(1, history.n),
+        }),
+      },
+      ...([`asc`, `desc`] as const).flatMap((direction) =>
+        ([`first`, `last`] as const).map((nulls) => ({
+          name: `${direction} index with nulls ${nulls}`,
+          enters: [
+            `${direction} index, nulls ${nulls}`,
+            `start read`,
+            `mixed value groups`,
+          ],
+          build: (history: ReadCase): ReadCase => ({
+            ...mixedGroups(history),
+            options: { direction, nulls },
+            cursor: undefined,
+            n: Math.max(1, history.n),
+          }),
+        })),
+      ),
+      {
+        name: `nullish cursor`,
+        enters: [`cursor read`, `nullish cursor`],
+        build: (history) => ({ ...history, cursor: { from: null } }),
+      },
+      {
+        name: `numeric cursor`,
+        enters: [`cursor read`, `numeric cursor`],
+        build: (history) => ({ ...history, cursor: { from: history.n % 5 } }),
+      },
+      {
+        name: `zero read`,
+        enters: [`zero read`],
+        build: (history) => ({ ...history, n: 0 }),
+      },
+      {
+        name: `filter rejection`,
+        enters: [`start read`, `filter rejection`, `mixed value groups`],
+        build: (history) => {
+          const mixed = mixedGroups(history)
+          return {
+            ...mixed,
+            cursor: undefined,
+            n: Math.max(1, mixed.n),
+            rejected: mixed.entries.map(([key]) => key).slice(0, 6),
+            entries: mixed.entries.slice(0, 6),
+          }
+        },
+      },
+    ]),
+  },
+  model: modelRead,
+  driver: driveRead,
+  check: checkRead,
+  calibrations: [
+    {
+      name: `omits a constructed state's observation`,
+      law: `constructed reach`,
+      corrupt: (trace, history) => {
+        const state = modelRead(history).requiredStates[0]
+        return state === undefined
+          ? undefined
+          : trace.filter(
+              (entry) => entry.checkpoint !== `reach` || entry.value !== state,
+            )
+      },
     },
-  )
+    {
+      name: `returns an unaccepted key`,
+      law: `order`,
+      corrupt: (trace) =>
+        trace.map((entry) => {
+          if (entry.checkpoint !== `read returned`) return entry
+          const actual = entry.value as ReadObservation
+          return { ...entry, value: { ...actual, keys: [...actual.keys, -1] } }
+        }),
+    },
+    {
+      name: `too many non-null filter calls`,
+      law: `non-null work`,
+      corrupt: (trace, history) =>
+        trace.map((entry) =>
+          entry.checkpoint === `read returned`
+            ? {
+                ...entry,
+                value: {
+                  ...(entry.value as ReadObservation),
+                  calls: modelRead(history).calls + 1,
+                },
+              }
+            : entry,
+        ),
+    },
+    {
+      name: `repeats a nullish filter call`,
+      law: `nullish work`,
+      corrupt: (trace) =>
+        trace.some(
+          ({ checkpoint, value: observation }) =>
+            checkpoint === `read returned` &&
+            (observation as ReadObservation).mostNullishCalls > 0,
+        )
+          ? trace.map((entry) =>
+              entry.checkpoint === `read returned`
+                ? {
+                    ...entry,
+                    value: {
+                      ...(entry.value as ReadObservation),
+                      mostNullishCalls: 2,
+                    },
+                  }
+                : entry,
+            )
+          : undefined,
+    },
+  ],
 })

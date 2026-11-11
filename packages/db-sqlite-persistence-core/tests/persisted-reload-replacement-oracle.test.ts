@@ -1,9 +1,12 @@
 import { createCollection } from '@tanstack/db'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, vi } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import { persistedCollectionOptions } from '../src/index.js'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
+import type {
+  Observation as OracleObservation,
+  Verdict,
+} from '../../db/tests/oracle-property'
 import type { PersistenceAdapter } from '../src/index.js'
 import type { SyncConfig } from '@tanstack/db'
 
@@ -207,108 +210,137 @@ function writeFullState(params: Params, final: Final) {
   params.commit()
 }
 
-describe(`persisted reload replacement oracle`, () => {
-  const reach = createOracleReach(
-    `persisted-reload-replacement.history`,
-    reachStates,
-  )
-  let historiesRan = 0
-  afterAll(() => {
-    if (historiesRan === histories.length) reach.assertReached()
-  })
-
-  it.each(
-    histories.map(
-      (history) =>
-        [`${history.phase}: ${steps(history).join(` > `)}`, history] as const,
-    ),
-  )(`%s`, async (name, history) => {
-    oracleRoute(`case`)
-    const store = storingAdapter()
-    const runs: Array<Params> = []
-    const collection = createCollection(
-      persistedCollectionOptions<Row, string>({
-        id: `reload-replacement ${name}`,
-        getKey: (row) => row.id,
-        persistence: { adapter: store.adapter },
-        sync: {
-          sync: (params) => {
-            runs.push(params)
-          },
-        },
-      }),
-    )
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-    const reloadState = { completed: false }
-    reach.beginHistory()
-    try {
-      void collection.preload().catch(() => undefined)
-      await settle()
-      if (history.phase === `reload`) {
-        // The first run's snapshot of the durable rows makes it ready.
-        runs[0]!.begin({ snapshot: true })
-        for (const row of DURABLE)
-          runs[0]!.write({ type: `insert`, value: row })
-        runs[0]!.commit()
-        runs[0]!.markReady()
-        await settle()
-        void collection.reload().then(() => (reloadState.completed = true))
-        await settle()
-      }
-      const run = runs.at(-1)!
-      const model = expected(history)
-      for (const [index, step] of steps(history).entries()) {
-        if (step === `write`) {
-          run.begin()
-          run.write({ type: `update`, value: DIRECT })
-          run.commit()
-        } else if (step === `metadata`) {
-          run.begin()
-          run.metadata!.collection.set(`cursor`, index)
-          run.commit()
-        } else if (step === `ready`) run.markReady()
-        else writeFullState(run, step)
-        await settle()
-        if (
-          history.phase === `reload` &&
-          (step === `write` || step === `metadata`)
-        )
-          reach.reach(`an unmarked commit during a reload`)
-        if (step === `snapshot`)
-          reach.reach(
-            history.phase === `reload`
-              ? `a snapshot during a reload`
-              : `a snapshot during a first load`,
-          )
-        if (step === `truncate-not-ready` && history.phase === `first-load`)
-          reach.reach(`a truncate that keeps the Collection loading`)
-        expect(
-          {
-            rows: rowsOf(collection.toArray),
-            status: collection.status,
-            reload:
-              history.phase === `reload`
-                ? reloadState.completed
-                  ? `completed`
-                  : `pending`
-                : `none`,
-          },
-          `${name}: after ${step}`,
-        ).toEqual(model[index])
-      }
-      expect(rowsOf(store.rows.values()), `${name}: durable rows`).toEqual(
-        model.at(-1)!.rows,
-      )
-      historiesRan++
-    } finally {
-      consoleError.mockRestore()
-      await collection.cleanup().catch(() => undefined)
+const reachedStates = new Set<string>()
+let historiesRan = 0
+afterAll(() => {
+  if (historiesRan === histories.length) {
+    for (const state of reachStates) {
+      if (!reachedStates.has(state))
+        throw new Error(`persisted-reload-replacement.history missed ${state}`)
     }
-  })
+  }
+})
+
+async function drive(
+  history: History,
+  observe: (checkpoint: string, value: unknown) => void,
+) {
+  const name = `${history.phase}: ${steps(history).join(` > `)}`
+  const store = storingAdapter()
+  const runs: Array<Params> = []
+  const collection = createCollection(
+    persistedCollectionOptions<Row, string>({
+      id: `reload-replacement ${name}`,
+      getKey: (row) => row.id,
+      persistence: { adapter: store.adapter },
+      sync: {
+        sync: (params) => {
+          runs.push(params)
+        },
+      },
+    }),
+  )
+  const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const reloadState = { completed: false }
+  try {
+    void collection.preload().catch(() => undefined)
+    await settle()
+    if (history.phase === `reload`) {
+      // The first run's snapshot of the durable rows makes it ready.
+      runs[0]!.begin({ snapshot: true })
+      for (const row of DURABLE) runs[0]!.write({ type: `insert`, value: row })
+      runs[0]!.commit()
+      runs[0]!.markReady()
+      await settle()
+      void collection.reload().then(() => (reloadState.completed = true))
+      await settle()
+    }
+    const run = runs.at(-1)!
+    for (const [index, step] of steps(history).entries()) {
+      if (step === `write`) {
+        run.begin()
+        run.write({ type: `update`, value: DIRECT })
+        run.commit()
+      } else if (step === `metadata`) {
+        run.begin()
+        run.metadata!.collection.set(`cursor`, index)
+        run.commit()
+      } else if (step === `ready`) run.markReady()
+      else writeFullState(run, step)
+      await settle()
+      if (
+        history.phase === `reload` &&
+        (step === `write` || step === `metadata`)
+      )
+        reachedStates.add(`an unmarked commit during a reload`)
+      if (step === `snapshot`)
+        reachedStates.add(
+          history.phase === `reload`
+            ? `a snapshot during a reload`
+            : `a snapshot during a first load`,
+        )
+      if (step === `truncate-not-ready` && history.phase === `first-load`)
+        reachedStates.add(`a truncate that keeps the Collection loading`)
+      observe(`step-${index}`, {
+        rows: rowsOf(collection.toArray),
+        status: collection.status,
+        reload:
+          history.phase === `reload`
+            ? reloadState.completed
+              ? `completed`
+              : `pending`
+            : `none`,
+      })
+    }
+    observe(`durable rows`, rowsOf(store.rows.values()))
+    historiesRan++
+  } finally {
+    consoleError.mockRestore()
+    await collection.cleanup().catch(() => undefined)
+  }
+}
+
+function check(
+  history: History,
+  trace: ReadonlyArray<OracleObservation>,
+  model: ReturnType<typeof expected>,
+): Verdict {
+  for (const [index, step] of steps(history).entries()) {
+    const result = differs(
+      `after ${step}`,
+      `replacement forwarding`,
+      trace.find((entry) => entry.checkpoint === `step-${index}`)?.value,
+      model[index],
+    )
+    if (result) return result
+  }
+  return (
+    differs(
+      `durable rows`,
+      `durable replacement`,
+      trace.find((entry) => entry.checkpoint === `durable rows`)?.value,
+      model.at(-1)!.rows,
+    ) ?? pass
+  )
+}
+
+oracleProperty({
+  id: `persisted-reload-replacement.history`,
+  law: {
+    statement: `Only source snapshot or truncate declarations replace rows; wrapper bookkeeping does not complete reload, and durable rows match public rows after settlement.`,
+    authority: `Maintainer decisions F19 and F18/F6 and the persisted wrapper forwarding contract.`,
+    limits: `Eager Collections and a controlled in-memory persistence adapter; no on-demand replay or cross-tab delivery.`,
+  },
+  owns: [`src/persisted.ts`, `src/sqlite-core-adapter.ts`],
+  histories,
+  label: (history) => `${history.phase}: ${steps(history).join(` > `)}`,
+  model: expected,
+  driver: drive,
+  check,
 })
 
 declareOracle({
-  owns: [`src/persisted.ts`, `src/sqlite-core-adapter.ts`],
   model: [expected],
+  check: [check],
   grammar: [histories],
 })

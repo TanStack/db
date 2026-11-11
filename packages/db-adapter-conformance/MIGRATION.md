@@ -14,32 +14,32 @@ reviewed change.
 
 ## Oracle families
 
-| Family                                | Status                                    | Laws                                                                                                                 |
-| ------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Eager live source                     | Built (`src/eager-live-source-oracle.ts`) | READY-2/3/4/8/10, HEALTH-1/2/5, PUB-1/2/3/5/7/9, FID-1/4, LIFE-2/5/10, EVID-1/2/3, RETRY-1 (eager), RECON-1, RENEW-1 |
-| Mutations and confirmation            | Needed                                    | MUT-1/2/4/5/7/10/13, FID-5                                                                                           |
-| On-demand loading                     | Needed                                    | DEM-1 to DEM-23, MAP-1 to MAP-4                                                                                      |
-| Reload and retry                      | Needed                                    | RELOAD-1 to RELOAD-5; RETRY-1 and HEALTH-2 beyond the eager source's retried failures                                |
-| Client cache and refetch              | Needed                                    | CACHE-1 to CACHE-8, REF-1 to REF-7, DIR-1 to DIR-5                                                                   |
-| Source shapes                         | Needed                                    | RESET-1, RESUME-1 to RESUME-3, PROG-1, MEMB-1/2, PAGE-1 to PAGE-3, OWN-1/2, META-1                                   |
-| Local and shared stores               | Needed                                    | SELF-1 to SELF-3, STORE-1 to STORE-4, PEER-1                                                                         |
-| Persistence wrapper and storage hosts | Needed                                    | `P-*`, `S-*`                                                                                                         |
+| Family                                | Status                                                                             | Laws                                                                                                                 |
+| ------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Eager live source                     | Built (`src/eager-live-source-oracle.ts`)                                          | READY-2/3/4/8/10, HEALTH-1/2/5, PUB-1/2/3/5/7/9, FID-1/4, LIFE-2/5/10, EVID-1/2/3, RETRY-1 (eager), RECON-1, RENEW-1 |
+| Mutations and confirmation            | Needed                                                                             | MUT-1/2/4/5/7/10/13, FID-5                                                                                           |
+| On-demand loading                     | Needed                                                                             | DEM-1 to DEM-23, MAP-1 to MAP-4                                                                                      |
+| Reload and retry                      | Needed                                                                             | RELOAD-1 to RELOAD-5; RETRY-1 and HEALTH-2 beyond the eager source's retried failures                                |
+| Client cache and refetch              | Needed                                                                             | CACHE-1 to CACHE-8, REF-1 to REF-7, DIR-1 to DIR-5                                                                   |
+| Source shapes                         | Needed                                                                             | RESET-1, RESUME-1 to RESUME-3, PROG-1, MEMB-1/2, PAGE-1 to PAGE-3, OWN-1/2, META-1                                   |
+| Local and shared stores               | Needed                                                                             | SELF-1 to SELF-3, STORE-1 to STORE-4, PEER-1                                                                         |
+| Persistence wrapper and storage hosts | Startup replacement built (`tests/persisted-startup-oracle.ts`); other laws needed | `P-*`, `S-*`                                                                                                         |
 
 ## Adapters
 
-| Adapter           | Families that apply (section A)                                                       | Driver status                                                                                                                                                                                                                                                                                                       |
-| ----------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Neon Realtime     | eager live source, mutations                                                          | Eager: RED (READY-4, HEALTH-1, and LIFE-10 behind them); adapter update pending                                                                                                                                                                                                                                     |
-| Electric          | eager live source, mutations, on-demand, source shapes, reload and retry, persistence | Eager: GREEN (2026-10-30) after three fixes, per-batch commits, typed Postgres columns, over the installed client. Driver `electric-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.electric`. Other families: not started                                              |
-| PowerSync         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-30) after a fix, per-batch commits, over real local SQLite. Driver `powersync-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.powersync`. Mutations, on-demand: not started                                                                       |
-| RxDB              | eager live source, mutations                                                          | Eager: GREEN (2026-10-29) after a fix, per-change commits, `listen-before-fetch`. Driver `rxdb-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.rxdb`. Mutations: not started                                                                                            |
-| TrailBase         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-29), per-change commits. Driver `trailbase-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.trailbase`; declares `duplicate-key-delivery` and `source-failure-after-ready`. Mutations, on-demand: not started                                      |
-| Convex            | eager live source, mutations, on-demand, source shapes                                | Eager: GREEN (2026-11-02) after a fix, per-batch commits, complete results, over the real Convex JavaScript client and a controlled WebSocket. Driver `convex-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.convex`. Mutations, on-demand, source shapes: not started |
-| query-db          | client cache and refetch, on-demand, mutations, reload and retry, persistence         | Not started; not a push source, so the eager family does not apply                                                                                                                                                                                                                                                  |
-| local-only        | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                                                                         |
-| localStorage      | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                                                                         |
-| Persisted wrapper | persistence wrapper                                                                   | Not started                                                                                                                                                                                                                                                                                                         |
-| Storage hosts (8) | storage hosts                                                                         | Not started                                                                                                                                                                                                                                                                                                         |
+| Adapter           | Families that apply (section A)                                                       | Driver status                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Neon Realtime     | eager live source, mutations                                                          | Eager: RED (READY-4, HEALTH-1, and LIFE-10 behind them); adapter update pending                                                                                                                                                                                                                                                                                                                               |
+| Electric          | eager live source, mutations, on-demand, source shapes, reload and retry, persistence | Eager: GREEN (2026-10-30) after three fixes, per-batch commits, typed Postgres columns, over the installed client. Driver `electric-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.electric`. Other families: not started                                                                                                                                        |
+| PowerSync         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-30) after a fix, per-batch commits, over real local SQLite. Driver `powersync-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.powersync`. Mutations, on-demand: not started                                                                                                                                                                 |
+| RxDB              | eager live source, mutations                                                          | Eager: GREEN (2026-10-29) after a fix, per-change commits, `listen-before-fetch`. Driver `rxdb-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.rxdb`. Mutations: not started                                                                                                                                                                                      |
+| TrailBase         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-29), per-change commits. Driver `trailbase-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.trailbase`; declares `duplicate-key-delivery` and `source-failure-after-ready`. Mutations, on-demand: not started                                                                                                                                |
+| Convex            | eager live source, mutations, on-demand, source shapes, persistence                   | Eager: GREEN (2026-11-02) after a fix, per-batch commits, complete results, over the real Convex JavaScript client and a controlled WebSocket. Driver `convex-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.convex`. Persistence startup: GREEN (2026-11-09), complete snapshots, controlled/Node SQLite/OPFS. Mutations, on-demand, source shapes: not started |
+| query-db          | client cache and refetch, on-demand, mutations, reload and retry, persistence         | Persistence startup: GREEN (2026-11-09), all five origins, scoped peers, controlled/Node SQLite/OPFS. Other families not started; not a push source, so the eager family does not apply                                                                                                                                                                                                                       |
+| local-only        | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                                                                                                                                                                   |
+| localStorage      | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Persisted wrapper | persistence wrapper                                                                   | Startup replacement: GREEN through Query, Convex, Electric, TrailBase, RxDB and PowerSync on controlled persistence, Node SQLite and Chromium worker/OPFS. RxDB/PowerSync also receive startup work and hydration lifecycle laws; other laws retain their owners                                                                                                                                              |
+| Storage hosts (8) | storage hosts                                                                         | Startup receivers: core SQLite on Node and Browser worker/OPFS; remaining host/path laws not started                                                                                                                                                                                                                                                                                                          |
 
 ## Suggested order
 
@@ -499,3 +499,54 @@ error/sync-give-up, accept]`). Fix: remember that give-up and fail the
     replay, or skip the check on the React path, are rejected. A fixed-seed
     campaign now runs the React client.
   - **Size:** convex-db-collection +26 gzip bytes for LIFE-10.
+
+- **2026-11-09, shared persistence startup, Query and Convex.** Maintainer
+  decision: move persisted startup replacement to the shared persistence family.
+  The bare eager family retains complete replacement, but does not generate a
+  persisted restore. Scope ownership remains a specialized Query law.
+  - **Migration parity:** Query's eight fixed histories, five response origins,
+    peer axis, both fetched-response schedules, exact owner comparisons,
+    startup public/durable checks before refetch, refetch-fulfillment check,
+    durable/reopen checks, and one-full-row-read law all move unchanged to the
+    shared composition. Fixed/random budgets stay 80 per host. The existing
+    `query.startup-ownership` replay ID stays registered at its new receiver.
+    The duplicate Query startup model/runner and former OPFS files are removed;
+    unrelated Query ownership and persisted-direct-write laws stay.
+  - **Receiving paths:** controlled storage and real Node SQLite for both
+    adapters; actual Chromium worker/OPFS for eight Query plus four Convex
+    histories. Convex uses its existing real SDK/socket driver, not a fake sync
+    adapter. Its collection-wide scope has no independent peer owners.
+  - **RED/mutants:** original Query source: 18 failures / 3 passes including
+    calibration on Node, seven startup violations in the OPFS Query histories.
+    Convex without its first-result truncate: 12 failures / 1 calibration pass
+    on Node, four startup violations on OPFS. These are comparison failures;
+    no setup failure or timeout is counted. This closes the previously recorded
+    no-truncate survivor at the persisted startup boundary.
+  - **GREEN:** both new receiving suites pass; all 12 OPFS histories pass.
+    Current Convex needs no production change. The existing Query production
+    repair is unchanged.
+  - **Remaining work:** other persisted adapters have no receiving driver yet.
+    This property does not cover on-demand persistence, reload, concurrent
+    writers, failed I/O, arbitrary metadata or the rest of `P-*`/`S-*`.
+
+- **2026-11-10, persisted startup receiving audit.** The maintainer required
+  checking every applicable published source adapter. Electric, TrailBase,
+  RxDB and PowerSync now receive the same shared startup law and composition.
+  - **RED before production:** both Node hosts reject the original RxDB,
+    PowerSync and TrailBase implementations (32 failed comparisons total).
+    Actual worker/OPFS rejects 10 startup snapshots, including a real browser
+    PowerSync source. Electric and Convex pass without production changes.
+  - **Repairs:** RxDB and PowerSync select snapshots when a persistence
+    capability is present, including before its rows restore; their prior
+    unwrapped conditions remain. TrailBase hydrates before the complete eager
+    list's omission sweep while retaining its event fence and cancellation check.
+  - **GREEN:** 80 histories in each fixed/random campaign per adapter and Node
+    host, with separate enforced reach. All six pass 86 checks, comprising
+    1,920 generated histories, 56 fixed histories and six checker calibrations.
+    All 28 OPFS histories pass. Every new replay ID has two successful guarded
+    witnesses, one per Node host. Existing run budgets are unchanged.
+  - **Limits:** fresh complete source results, no mutation during initial
+    fetch, one wrapper persistence instance and the shared three-key domain.
+    Electric resume, deployed TrailBase service delivery, remote RxDB/PowerSync
+    replication, on-demand windows and concurrent writers retain other owners.
+    See the [versioned amendment](../../docs/contributing/oracle-reviews/2026-11-10-persisted-startup-adapters.md).

@@ -26,12 +26,15 @@ import { join } from 'node:path'
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import {
-  oracleFixedSeed,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+  oracleAssertion,
+  rejectAt,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import {
+  browserReplayAlias,
+  registerBrowserProperty,
+} from './browser-property-registration-oracle'
 import {
   SHARED_DRIVER_FAIRNESS_BOUND,
   createPersistFirstFaultObservation,
@@ -42,7 +45,6 @@ import {
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
 import {
   FIXED_SEED,
-  createFairnessPropertyModes,
   readFairnessCalibration,
   readFairnessReplayConfig,
 } from './shared-driver-fairness-config'
@@ -76,8 +78,12 @@ function checkAt(law: string, checkpoint: string, assertion: () => void): void {
   }
 }
 
-const fairnessPropertyModes = createFairnessPropertyModes(
-  readFairnessReplayConfig(),
+const fairnessReplay = readFairnessReplayConfig()
+browserReplayAlias(
+  fairnessReplay && {
+    property: 'browser.shared-driver-fairness',
+    ...fairnessReplay,
+  },
 )
 const fairnessCalibration = readFairnessCalibration()
 
@@ -187,13 +193,16 @@ function throwFirstViolation(
     SHARED_DRIVER_FAIRNESS_BOUND,
   ).find(({ law }) => laws(law))
   if (!violation) return
-  throw new FairnessOracleFailure(
-    violation.law,
+  rejectAt(
     violation.checkpoint,
-    new Error(
-      `shared-driver fairness mismatch: expected ${JSON.stringify(violation.expected)}, ` +
-        `got ${JSON.stringify(violation.actual)}; ` +
-        `cleanup diagnostics: ${JSON.stringify(observation.cleanupFailures)}`,
+    new FairnessOracleFailure(
+      violation.law,
+      violation.checkpoint,
+      new Error(
+        `shared-driver fairness mismatch: expected ${JSON.stringify(violation.expected)}, ` +
+          `got ${JSON.stringify(violation.actual)}; ` +
+          `cleanup diagnostics: ${JSON.stringify(observation.cleanupFailures)}`,
+      ),
     ),
   )
 }
@@ -209,7 +218,9 @@ function expectFairObservation(
 ): void {
   throwFirstViolation(observation, () => true)
   checkAt(`driver cleanup`, `after observation`, () =>
-    expect(observation.cleanupFailures).toEqual([]),
+    oracleAssertion('expectFairObservation', () =>
+      expect(observation.cleanupFailures).toEqual([]),
+    ),
   )
 }
 
@@ -312,31 +323,28 @@ function recordGeneratedFailure(error: unknown, history: string): void {
   })
 }
 
-const generatedFairnessProperty = fc.asyncProperty(
-  generatedHistoryArbitrary,
-  async ({
-    hydrateCount,
-    persistCount,
-    mutationsPerPersist,
-    orderedKinds,
-    replayHistory,
-  }) => {
-    generatedPropertyExecutions++
-    const observationId =
-      `generated-h${hydrateCount}-p${persistCount}-m${mutationsPerPersist}-` +
-      replayHistory.replaceAll(`,`, `-`)
-    try {
-      await withNodeScenario(
-        createScenario(observationId, orderedKinds, mutationsPerPersist),
-        expectFairObservation,
-        fairnessCalibration,
-      )
-    } catch (error) {
-      recordGeneratedFailure(error, replayHistory)
-      throw error
-    }
-  },
-)
+const runGeneratedFairnessHistory = async ({
+  hydrateCount,
+  persistCount,
+  mutationsPerPersist,
+  orderedKinds,
+  replayHistory,
+}: GeneratedFairnessHistory) => {
+  generatedPropertyExecutions++
+  const observationId =
+    `generated-h${hydrateCount}-p${persistCount}-m${mutationsPerPersist}-` +
+    replayHistory.replaceAll(`,`, `-`)
+  try {
+    await withNodeScenario(
+      createScenario(observationId, orderedKinds, mutationsPerPersist),
+      expectFairObservation,
+      fairnessCalibration,
+    )
+  } catch (error) {
+    recordGeneratedFailure(error, replayHistory)
+    throw error
+  }
+}
 
 describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
   it(`reconstructs the known persist-first witness, covers range marginals, and rejects a nearby invalid storm`, async () => {
@@ -527,50 +535,46 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
     })
   })
 
-  it.each(fairnessPropertyModes)(
-    `bounds persist completions for generated ordered cold-hydrate/persist histories in $label mode`,
-    async (mode) => {
-      const parameters = {
-        numRuns: oracleRuns(GENERATED_RUNS),
-        verbose: 2 as const,
-        ...(mode.seed === undefined ? {} : oracleFixedSeed(mode.seed)),
-        ...(mode.path === undefined ? {} : { path: mode.path }),
-      }
-      oracleRoute(oracleRouteOf(parameters))
-      const executionsBefore = generatedPropertyExecutions
-      const failuresBefore = generatedFailureRecords.length
-      const result = await fc.check(generatedFairnessProperty, parameters)
-      if (result.failed) {
-        const failures = generatedFailureRecords.slice(failuresBefore)
-        const original = failures[0]
-        const reduced = failures.at(-1)
-        const sameViolation =
-          original !== undefined &&
-          reduced !== undefined &&
-          original.law !== `unclassified driver or setup failure` &&
-          original.law === reduced.law &&
-          original.checkpoint === reduced.checkpoint
-        const reductionOutcome =
-          result.numShrinks === 0
-            ? `no reduction`
-            : sameViolation
-              ? `same law and checkpoint`
-              : `different failure or unreached checkpoint`
-        throw new Error(
-          `shared-driver fairness property failed in ${mode.label} mode; ` +
-            `seed=${result.seed}, shrink path=${result.counterexamplePath ?? `none`}; ` +
-            `original=${JSON.stringify(original ?? null)}; ` +
-            `reduced=${JSON.stringify(reduced ?? null)}; ` +
-            `reduction outcome=${reductionOutcome}`,
-          { cause: result.errorInstance },
-        )
-      }
-      expect(generatedPropertyExecutions).toBeGreaterThan(executionsBefore)
-    },
-    // Each campaign runs 12 SQLite histories; parallel CI adds I/O contention.
-    // The fairness law above measures logical completions, not elapsed time.
-    30_000,
-  )
+  {
+    let executionsBefore = 0
+    registerBrowserProperty(
+      generatedHistoryArbitrary,
+      {
+        id: 'browser.shared-driver-fairness',
+        runs: GENERATED_RUNS,
+        fixedSeed: FIXED_SEED,
+        beforeCampaign: () => {
+          executionsBefore = generatedPropertyExecutions
+          generatedFailureRecords.length = 0
+        },
+        failedCampaign: () => {
+          const original = generatedFailureRecords[0]
+          const reduced = generatedFailureRecords.at(-1)
+          console.info(`shared-driver fairness original and reduced failure`, {
+            original,
+            reduced,
+            sameViolation:
+              original !== undefined &&
+              reduced !== undefined &&
+              original.law !== `unclassified driver or setup failure` &&
+              original.law === reduced.law &&
+              original.checkpoint === reduced.checkpoint,
+          })
+          // The native runner reports the campaign seed, shrink count and path.
+        },
+        afterCampaign: () => {
+          oracleAssertion('shared-driver-fairness', () =>
+            expect(generatedPropertyExecutions).toBeGreaterThan(
+              executionsBefore,
+            ),
+          )
+        },
+      },
+      `bounds persist completions for generated ordered cold-hydrate/persist histories`,
+      runGeneratedFairnessHistory,
+      30_000,
+    )
+  }
 
   // An election barrier waits between two queued hydrates while persists are
   // queued. It waits for the work queued before it (persist-0 and hydrate-0)

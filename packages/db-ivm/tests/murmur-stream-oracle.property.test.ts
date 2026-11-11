@@ -1,7 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, expect, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
-import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config.js'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign.js'
+import {
+  differs,
+  oracleProperty,
+  pass,
+} from '../../db/tests/oracle-property.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 /**
@@ -92,41 +95,44 @@ function expectDigestsMatchReference(
 ): void {
   expect(digests(Stream, chunks)).toEqual(digests(Model, chunks))
 }
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
 declareOracle({
+  check: [expectDigestsMatchReference],
+})
+
+oracleProperty({
+  id: `ivm.murmur-stream`,
+  law: {
+    statement: `Every prefix digest agrees with the earlier byte-at-a-time stream over the same framed bytes.`,
+    authority: `Existing byte-framing contract documented above; ReferenceByteStream.`,
+    limits: `One to eight string, number or bigint chunks; no symbol identity or independent murmur3 block/finalizer proof.`,
+  },
+  // What this oracle owns: the gap report judges these entries, and their
+  // reference trees within the package, by this file's tests.
   owns: [
     `src/hashing/murmur.ts#MurmurHashStream.update`,
     `src/hashing/murmur.ts#MurmurHashStream.digest`,
   ],
-  check: [expectDigestsMatchReference],
-})
-
-describe(`MurmurHashStream`, () => {
-  // A fixed-seed campaign, then a random one, each registering its route,
-  // so a failure on the fixed seed is a reproducible verdict.
-  it(`digests every chunk sequence as the byte-at-a-time stream does`, () =>
-    runOracleCampaign(`IVM_MURMUR_STREAM`, [], (_reach, parameters) => {
-      fc.assert(
-        fc.property(
-          fc.array(chunk, { minLength: 1, maxLength: 8 }),
-          (chunks) => {
-            expect(digests(Current, chunks)).toEqual(digests(Reference, chunks))
-          },
-        ),
-        { numRuns: oracleRuns(2000), ...parameters },
-      )
-    }))
-
-  it.each([
-    [`two bytes, after a one-code-unit string`, [`x`, 1.5, -0, `yz`]],
-    [`one byte, after a one-byte bigint`, [7n, 1.5, `ab`, 2 ** 40]],
-    [`three bytes, after a three-byte bigint`, [0x123456n, 2.5, `cd`, -1]],
-  ] as Array<[string, Array<Chunk>]>)(
-    `digests the words that follow a block offset of %s`,
-    (_, chunks) => {
-      oracleRoute(`case`)
-      expectDigestsMatchReference(Current, Reference, chunks)
-    },
-  )
+  histories: {
+    arbitrary: fc.array(chunk, { minLength: 1, maxLength: 8 }),
+    runs: 2000,
+    fixedSeeds: [20261022],
+    fixed: [
+      { name: `two bytes after one code unit`, history: [`x`, 1.5, -0, `yz`] },
+      {
+        name: `one byte after a one-byte bigint`,
+        history: [7n, 1.5, `ab`, 2 ** 40],
+      },
+      {
+        name: `three bytes after a three-byte bigint`,
+        history: [0x123456n, 2.5, `cd`, -1],
+      },
+    ],
+  },
+  model: (chunks) => digests(Reference, chunks),
+  driver: (chunks, observe) => {
+    observe(`prefix digests`, digests(Current, chunks))
+  },
+  check: (_chunks, trace, expected) =>
+    differs(`prefix digests`, `byte framing`, trace[0]?.value, expected) ??
+    pass,
 })

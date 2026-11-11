@@ -1,5 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
+import { oracleAssertion } from '../oracle-assertion-adapter.js'
 import {
   createLiveQueryCollection,
   eq,
@@ -7,14 +8,9 @@ import {
 } from '../../src/query/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { runTrace } from '../trace-runner.js'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../oracle-config.js'
+import { oracleRoute } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
+import { registerIncludesProperty } from './includes-registration-oracle.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import { cleanupQuery } from './includes-query-shape-support.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
@@ -71,7 +67,9 @@ function stripVirtualProperties(value: unknown): unknown {
 }
 
 function assertRowsEqual(observed: unknown, expected: unknown): undefined {
-  expect(observed).toEqual(expected)
+  oracleAssertion('includes query-shape-oracle comparison 75', () =>
+    expect(observed).toEqual(expected),
+  )
   return undefined
 }
 
@@ -466,30 +464,18 @@ declareOracle({
 })
 
 function campaigns(fixedSeed: number, property: string) {
-  // Grammar controls: the fixed 1-child history reconstructs final retirement,
-  // while counts 2–5 keep a surviving contributor. Equal route keys are the
-  // control; distinct order and part IDs expose the wrong-alias result.
-  // Removing null or route updates loses empty-value or reactivation behavior.
-  // IDs vary only within positive integer equality domains; no numeric
-  // threshold is claimed. Drivers reject absent-child and absent-order actions.
   return [
-    {
-      name: `fixed`,
-      options: oracleFixedSeed(fixedSeed, { numRuns: oracleRuns(12) }),
-    },
-    {
-      name: `random or replayed`,
-      options: oraclePropertyOptions(12, property),
-    },
+    { name: `fixed and random`, options: { runs: 12, property, fixedSeed } },
   ]
 }
 
 describe(`includes query-shape recompute oracle`, () => {
   for (const campaign of campaigns(1703, `includes-query-shape.multiplicity`)) {
-    fcTest.prop([fc.integer({ min: 2, max: 5 })], campaign.options)(
+    registerIncludesProperty(
+      [fc.integer({ min: 2, max: 5 })],
+      campaign.options,
       `deleting one joined contributor preserves remaining multiplicity (${campaign.name})`,
       async (childCount) => {
-        oracleRoute(oracleRouteOf(campaign.options))
         await runTrace({
           steps: [1],
           driver: createMultiplicityDriver(childCount),
@@ -532,7 +518,7 @@ describe(`includes query-shape recompute oracle`, () => {
   )
 
   for (const campaign of campaigns(1704, `includes-query-shape.correlation`)) {
-    fcTest.prop(
+    registerIncludesProperty(
       [
         fc.record({
           correlationId: fc.integer({ min: 1, max: 100 }),
@@ -540,10 +526,8 @@ describe(`includes query-shape recompute oracle`, () => {
         }),
       ],
       campaign.options,
-    )(
       `materialization follows correlation through a joined alias (${campaign.name})`,
       async ({ correlationId, productionId }) => {
-        oracleRoute(oracleRouteOf(campaign.options))
         await runTrace({
           steps: [],
           driver: createCorrelationDriver(
@@ -606,10 +590,11 @@ describe(`includes query-shape recompute oracle`, () => {
   )
 
   for (const campaign of campaigns(1706, `includes-query-shape.nullable`)) {
-    fcTest.prop([fc.integer({ min: 1, max: 100 })], campaign.options)(
+    registerIncludesProperty(
+      [fc.integer({ min: 1, max: 100 })],
+      campaign.options,
       `findOne maps a null correlation key to undefined (${campaign.name})`,
       async (postId) => {
-        oracleRoute(oracleRouteOf(campaign.options))
         await runTrace({
           steps: [],
           driver: createNullableDriver([], [{ id: postId, authorId: null }]),

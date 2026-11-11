@@ -1,22 +1,16 @@
-import { fc } from '@fast-check/vitest'
-import { describe, it } from 'vitest'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { describe } from 'vitest'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   checkEagerLiveSourceHistory,
   eagerLiveSourceHistoryArb,
   eagerLiveSourceModel,
-  eagerLiveSourceProperty,
-  reachStatesFor,
 } from '../../db-adapter-conformance/src'
+import {
+  checkEagerLiveSourceObservations,
+  eagerLiveSourceHistories,
+  eagerLiveSourceOracle,
+} from '../../db-adapter-conformance/tests/eager-live-source-property-oracle'
 import { electricConformanceDriver } from './conformance-driver'
 
 /**
@@ -38,68 +32,44 @@ import { electricConformanceDriver } from './conformance-driver'
  * claim about an Electric server needs a receiving witness against it.
  */
 
-const property = `adapter-conformance.eager-live-source.electric`
-const driver = electricConformanceDriver()
-const historyArb = eagerLiveSourceHistoryArb(driver)
-// At 400 histories, four seeds reached every declared state at least 15
-// times; the rarest is a reported outage in a later sync run.
-const runs = 400
-// A campaign takes about 35 seconds.
-const campaignTimeoutMs = 120_000
+describe(`eager live-source conformance: electric`, () => {
+  const property = `adapter-conformance.eager-live-source.electric`
+  const driver = electricConformanceDriver()
+  const historyArb = eagerLiveSourceHistoryArb(driver)
+  const runs = 400
+  const campaignTimeoutMs = 120_000
 
-async function campaign(
-  options: fc.Parameters<[unknown]>,
-  checked = driver,
-  name = property,
-) {
-  const reach = createOracleReach(name, reachStatesFor(checked), {
-    minimum: 5,
+  oracleProperty({
+    id: property,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    ...eagerLiveSourceOracle(driver),
+    check: checkEagerLiveSourceObservations,
+    histories: {
+      ...eagerLiveSourceHistories(driver),
+      runs,
+      fixedSeeds: [2118],
+    },
+    timeout: campaignTimeoutMs,
   })
-  oracleRoute(oracleRouteOf(options))
-  await fc.assert(eagerLiveSourceProperty(checked, reach), options)
-  return reach
-}
 
-describe(`eager live-source conformance: Electric`, () => {
-  oracleReplayTest(it)(
-    `conforms on a fixed-seed campaign`,
-    async () => {
-      const reach = await campaign(
-        oracleFixedSeed(2118, { numRuns: oracleRuns(runs) }),
-      )
-      reach.assertReached()
+  // Exercise the adapter's default configuration without an app onError too.
+  const noOnError = electricConformanceDriver({ appOnError: false })
+  oracleProperty({
+    id: `${property}.no-on-error`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    ...eagerLiveSourceOracle(noOnError),
+    check: checkEagerLiveSourceObservations,
+    histories: {
+      ...eagerLiveSourceHistories(noOnError),
+      runs,
+      fixedSeeds: [2118],
     },
-    campaignTimeoutMs,
-  )
+    timeout: campaignTimeoutMs,
+  })
 
-  oracleReplayTest(it, property)(
-    `conforms on a random campaign or a replayed seed`,
-    async () => {
-      const reach = await campaign(oraclePropertyOptions(runs, property))
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-
-  // Electric's default configuration: no app `onError`, so the adapter
-  // gives up on every failure the client does not retry and logs it.
-  oracleReplayTest(it)(
-    `conforms without an app onError on a fixed-seed campaign`,
-    async () => {
-      const reach = await campaign(
-        oracleFixedSeed(2118, { numRuns: oracleRuns(runs) }),
-        electricConformanceDriver({ appOnError: false }),
-        `${property}.no-on-error`,
-      )
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-})
-
-declareOracle({
-  owns: [`src/electric.ts#electricCollectionOptions`],
-  check: [checkEagerLiveSourceHistory, eagerLiveSourceProperty],
-  model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-  grammar: [historyArb],
+  declareOracle({
+    check: [checkEagerLiveSourceHistory],
+    model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
+    grammar: [historyArb],
+  })
 })

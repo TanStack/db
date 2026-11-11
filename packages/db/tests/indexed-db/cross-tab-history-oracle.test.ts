@@ -13,22 +13,21 @@
  * choice within their stated two-operation scope. This is not exhaustive native
  * scheduling, arbitrary optimistic overlap, or a same-key conflict policy.
  */
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { fc } from '@fast-check/vitest'
-import { expect, it, vi } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
+  oracleProperty,
   oracleReplayRequested,
-  oracleReplaySkips,
   oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
 } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration'
-import { runCampaign } from './campaign'
+import { nativeCampaignReceipt } from '../native-campaign-receipt'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from '../oracle-assertion-adapter'
+import { campaignFailure, createCampaignRecorder } from './campaign'
 import { runTransportHistory } from './cross-tab-driver'
 import {
   CrossTabModel,
@@ -38,14 +37,6 @@ import {
   assertStatuses,
 } from './cross-tab-oracle'
 import type { TransportStep } from './cross-tab-driver'
-
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexed-db.ts#createIndexedDB',
-    'src/indexed-db.ts#indexedDBCollectionOptions',
-  ],
-})
 
 const kinds = [
   'write',
@@ -77,8 +68,14 @@ const action = (
 ): TransportStep => ({ kind, tab, key, value: 2, optional: true })
 const stores = stress ? [0, 0, 1, 0, 1] : [0, 0, 1]
 
-async function campaign(numRuns: number, seed?: number, path?: string) {
-  await runCampaign(
+// A recorder belongs to one native test. Its unchanged shrink predicate keeps
+// the original law, checkpoint and every premise the first failure reached.
+const crossTabProperty = `indexeddb.cross-tab-history`
+let recorder: ReturnType<typeof createCampaignRecorder<Array<TransportStep>>>
+let replayCalls = 0
+beforeEach(() => {
+  replayCalls = 0
+  recorder = createCampaignRecorder(
     'transport',
     history,
     async (steps, receipt) => {
@@ -90,32 +87,51 @@ async function campaign(numRuns: number, seed?: number, path?: string) {
           'registered campaign calibration',
         )
     },
-    { runs: numRuns, seed, path },
   )
-}
-
-// A path replay of this property runs only the fresh campaign, from the
-// recorded seed and path. A seed without a path reseeds the fresh campaign.
-const crossTabProperty = `indexeddb.cross-tab-history`
-
-it.skipIf(oracleReplayRequested())(
-  'refines independent per-Collection snapshots with fixed histories',
-  () => {
-    oracleRoute(`fixed seed`)
-    return campaign(oracleRuns(runs), 11792026)
-  },
-  120_000,
+})
+nativeCampaignReceipt<Array<TransportStep>>((result) =>
+  recorder.complete(result, {
+    runs: result.runConfiguration.numRuns ?? runs,
+    ...(oracleReplayRequested() ? { path: result.runConfiguration.path } : {}),
+  }),
 )
-it.skipIf(oracleReplaySkips(crossTabProperty))(
-  'refines independent per-Collection snapshots with fresh histories',
-  () => {
-    const parameters = oraclePropertyOptions(runs, crossTabProperty)
-    oracleRoute(oracleRouteOf(parameters))
-    const { numRuns, seed, path } = parameters
-    return campaign(numRuns, seed, path)
+oracleProperty({
+  id: crossTabProperty,
+  timeout: 120_000,
+  law: {
+    statement:
+      'Each cross-tab publication refines one coherent history of whole effects at its existing public row, event and status checkpoints.',
+    authority:
+      'The independent per-Collection model and public IndexedDB contract in cross-tab-oracle.ts.',
+    limits:
+      'The unchanged bounded controlled Channel and fake-indexeddb histories; native scheduling, arbitrary optimistic overlap and same-key conflict policy remain outside this owner.',
   },
-  120_000,
-)
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+  ],
+  histories: { arbitrary: history, runs, fixedSeeds: [11792026] },
+  resolve: (steps) => ({ history: steps }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(crossTabProperty, plan, observe, async () => {
+      if (oracleReplayRequested() && replayCalls++ > 0) return
+      try {
+        await recorder.run(plan.history)
+      } catch (error) {
+        // The recorder rethrows only the same failed law/checkpoint with the
+        // first history's full premise set; preserve every other attempt in its report.
+        rejectAt(
+          campaignFailure(error).checkpoint,
+          error instanceof Error
+            ? error
+            : new Error(String(error), { cause: error }),
+        )
+      }
+    }),
+  check: forwardAssertionJudgment,
+})
 
 it('reconstructs every action and overlapping receiver reads', async () => {
   oracleRoute(`fixed history`)
@@ -234,35 +250,6 @@ it('rejects repaired partial publications and malformed raw deltas', () => {
   ).toThrow('failure replay')
 })
 
-it('replays a generated intentional mismatch at its original law and checkpoint', () => {
-  oracleRoute(`calibration`)
-  const property = fc.property(fc.integer({ min: 1, max: 20 }), (value) =>
-    assertSnapshot(
-      [{ id: value, name: 'wrong' }],
-      [{ id: value, name: 'right' }],
-      'replay calibration',
-    ),
-  )
-  const original = fc.check(property, { seed: 1179 })
-  expect(original.failed).toBe(true)
-  const replay = fc.check(property, {
-    seed: original.seed,
-    path: original.counterexamplePath ?? undefined,
-    endOnFailure: true,
-  })
-  assertReplay({
-    inputReconstructed:
-      JSON.stringify(original.counterexample) ===
-      JSON.stringify(replay.counterexample),
-    premiseReached: replay.numRuns > 0,
-    sameFailure:
-      replay.failed &&
-      String(String(replay.errorInstance)).includes(
-        'public rows at replay calibration',
-      ),
-  })
-})
-
 it('rejects wrong raw event keys before folding including duplicate malformed inserts', () => {
   oracleRoute(`calibration`)
   const row = { id: 1, name: 'accepted value' }
@@ -299,85 +286,4 @@ it('rejects wrong raw event keys before folding including duplicate malformed in
       'update key identity',
     ),
   ).toThrow('event semantics')
-})
-
-it('replays only the selected history after the original failure is repaired', async () => {
-  // This shrink path has a later sibling. fast-check check() continues into
-  // that sibling when the selected counterexample passes, despite numRuns: 1.
-  const arbitrary = fc.integer({ min: 0, max: 100 })
-  const parameters = oracleFixedSeed(11792027, { numRuns: 30 })
-  oracleRoute(oracleRouteOf(parameters))
-  const original = fc.check(
-    fc.property(arbitrary, (value) => value < 10),
-    parameters,
-  )
-  expect(original.counterexample).toEqual([10])
-  expect(original.counterexamplePath).toBe('0:1:0:0:1')
-  const observed: Array<number> = []
-  await runCampaign(
-    'repaired-replay-control',
-    arbitrary,
-    (value) => {
-      observed.push(value)
-      return Promise.resolve()
-    },
-    { runs: 30, seed: original.seed, path: original.counterexamplePath! },
-  )
-  expect(observed).toEqual([10])
-})
-
-it('preserves campaign outcomes and reports without revision metadata', async () => {
-  oracleRoute(`fixed seed`)
-  // Revision lookup is diagnostic. It cannot turn passing histories red or
-  // replace the original failed law. Both results must retain their reports.
-  const directory = await mkdtemp(join(tmpdir(), 'indexeddb-no-git-'))
-  vi.stubEnv('GIT_DIR', directory)
-  try {
-    for (const fails of [false, true]) {
-      const name = `revision-control-${crypto.randomUUID()}`
-      const outcome = runCampaign(
-        name,
-        fc.constant(0),
-        () => {
-          if (fails)
-            assertSnapshot(
-              [{ id: 0, name: 'wrong' }],
-              [],
-              'revision calibration',
-            )
-          return Promise.resolve()
-        },
-        { runs: 1, seed: 1179 },
-      )
-      if (fails)
-        await expect(outcome).rejects.toThrow(
-          'public rows at revision calibration',
-        )
-      else await outcome
-      const reports = (await readdir('test-results/oracles')).filter((file) =>
-        file.startsWith(name),
-      )
-      expect(reports).toHaveLength(1)
-      const report: unknown = JSON.parse(
-        await readFile(join('test-results/oracles', reports[0]!), 'utf8'),
-      )
-      expect(report).toMatchObject({
-        head: 'unknown',
-        headError: expect.any(String),
-        failed: fails,
-      })
-      if (fails)
-        expect(report).toMatchObject({
-          original: { law: 'public rows', checkpoint: 'revision calibration' },
-          reproduction: {
-            inputReconstructed: true,
-            premiseReached: true,
-            sameFailure: true,
-          },
-        })
-    }
-  } finally {
-    vi.unstubAllEnvs()
-    await rm(directory, { recursive: true, force: true })
-  }
 })

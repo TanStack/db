@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/trailbase-db-collection",
-  "version": "1.0.0-rc.1.4",
+  "version": "1.0.0-rc.1.5",
   "description": "TrailBase collection for TanStack DB",
   "author": "Sebastian Jeltsch",
   "license": "MIT",
@@ -21,7 +21,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest --run",
-    "test:oracles": "vitest run tests/lifecycle-oracle.property.test.ts",
+    "test:oracles": "vitest run tests/lifecycle-oracle.property.test.ts tests/eager-live-source-conformance-oracle.property.test.ts tests/persisted-startup-conformance-oracle.property.test.ts",
     "test:e2e": "vitest --run --config vitest.e2e.config.ts"
   },
   "type": "module",

@@ -3,14 +3,14 @@ import * as fc from 'fast-check'
 import { createCollection } from '../src/collection/index.js'
 import { createTransaction } from '../src/transactions.js'
 import { DuplicateTransactionIdError } from '../src/errors.js'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from './oracle-config.js'
+import { oracleProperty, oracleRoute } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import {
   captureCreatedTransactions,
   mockSyncCollectionOptionsNoInitialState,
@@ -329,23 +329,33 @@ function expectErrorShape(
   mutationError?: Error,
 ): void {
   if (mutationError) {
-    expect(result.ok, `${label}: mutation error reported`).toBe(false)
+    oracleAssertion(`${label}: mutation error reported`, () =>
+      expect(result.ok, `${label}: mutation error reported`).toBe(false),
+    )
     if (!result.ok)
-      expect(result.error, `${label}: mutation error rethrown`).toBe(
-        mutationError,
+      oracleAssertion(`${label}: mutation error rethrown`, () =>
+        expect(result.error, `${label}: mutation error rethrown`).toBe(
+          mutationError,
+        ),
       )
     return
   }
   if (raised.length === 0) {
-    expect(result.ok, `${label}: no settlement error`).toBe(true)
+    oracleAssertion(`${label}: no settlement error`, () =>
+      expect(result.ok, `${label}: no settlement error`).toBe(true),
+    )
     return
   }
-  expect(result.ok, `${label}: settlement error reported`).toBe(false)
+  oracleAssertion(`${label}: settlement error reported`, () =>
+    expect(result.ok, `${label}: settlement error reported`).toBe(false),
+  )
   if (result.ok) return
-  expect(
-    raised.includes(result.error as Error),
-    `${label}: one subscriber error rethrown as is`,
-  ).toBe(true)
+  oracleAssertion(`${label}: one subscriber error rethrown as is`, () =>
+    expect(
+      raised.includes(result.error as Error),
+      `${label}: one subscriber error rethrown as is`,
+    ).toBe(true),
+  )
 }
 
 async function makeCollection(id: string) {
@@ -455,10 +465,12 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
     }
     targets.forEach((on, position) => {
       if (JSON.stringify(rows(on)) !== before[position])
-        expect(
-          calls.get(on) ?? 0,
-          `${label}: the throwing subscriber on ${on} ran`,
-        ).toBeGreaterThan(0)
+        oracleAssertion(`${label}: the throwing subscriber on ${on} ran`, () =>
+          expect(
+            calls.get(on) ?? 0,
+            `${label}: the throwing subscriber on ${on} ran`,
+          ).toBeGreaterThan(0),
+        )
     })
     return { result, raised }
   }
@@ -474,11 +486,15 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
       const expected = new Set(
         model.tracked(on).map((index) => driven[index]!.tx),
       )
-      expect(
-        tracked.size === expected.size &&
-          [...tracked].every((tx) => expected.has(tx as never)),
+      oracleAssertion(
         `${label}: ${on} tracks exactly the unsettled owners`,
-      ).toBe(true)
+        () =>
+          expect(
+            tracked.size === expected.size &&
+              [...tracked].every((tx) => expected.has(tx as never)),
+            `${label}: ${on} tracks exactly the unsettled owners`,
+          ).toBe(true),
+      )
     }
   }
 
@@ -487,26 +503,42 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
     for (const on of [`A`, `B`] as const) {
       const { collection } = collections[on]
       for (const key of [1, 2] as const) {
-        expect(collection.get(key)?.v, `${label}: ${on} row ${key}`).toBe(
-          model.row(on, key),
+        oracleAssertion(`${label}: ${on} row ${key}`, () =>
+          expect(collection.get(key)?.v, `${label}: ${on} row ${key}`).toBe(
+            model.row(on, key),
+          ),
         )
       }
-      expect(collection.has(9), `${label}: ${on} merged-away row`).toBe(false)
-      expect(collection.has(3), `${label}: ${on} direct insert`).toBe(false)
+      oracleAssertion(`${label}: ${on} merged-away row`, () =>
+        expect(collection.has(9), `${label}: ${on} merged-away row`).toBe(
+          false,
+        ),
+      )
+      oracleAssertion(`${label}: ${on} direct insert`, () =>
+        expect(collection.has(3), `${label}: ${on} direct insert`).toBe(false),
+      )
       const { mirror } = collections[on]
       for (const key of [1, 2, 3, 9] as const)
-        expect(mirror.get(key), `${label}: ${on} mirror of row ${key}`).toBe(
-          collection.get(key)?.v,
+        oracleAssertion(`${label}: ${on} mirror of row ${key}`, () =>
+          expect(mirror.get(key), `${label}: ${on} mirror of row ${key}`).toBe(
+            collection.get(key)?.v,
+          ),
         )
     }
     for (const [index, entry] of driven.entries()) {
       const settled = !model.unsettled(model.transactions[index]!)
-      expect(entry.settled, `${label}: tx ${index} settlement`).toBe(settled)
+      oracleAssertion(`${label}: tx ${index} settlement`, () =>
+        expect(entry.settled, `${label}: tx ${index} settlement`).toBe(settled),
+      )
       if (settled)
-        expect(
-          entry.tx.collections.size,
+        oracleAssertion(
           `${label}: settled tx ${index} tracks no Collection`,
-        ).toBe(0)
+          () =>
+            expect(
+              entry.tx.collections.size,
+              `${label}: settled tx ${index} tracks no Collection`,
+            ).toBe(0),
+        )
     }
   }
 
@@ -584,28 +616,43 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
         const rejected =
           current.throws && (current.op !== `delete` || current.seen)
         if (rejected) {
-          expect(
-            raised.length,
-            `${label}: throwing subscriber ran`,
-          ).toBeGreaterThan(0)
-          expect(result.ok, `${label}: direct write rejected`).toBe(false)
+          oracleAssertion(`${label}: throwing subscriber ran`, () =>
+            expect(
+              raised.length,
+              `${label}: throwing subscriber ran`,
+            ).toBeGreaterThan(0),
+          )
+          oracleAssertion(`${label}: direct write rejected`, () =>
+            expect(result.ok, `${label}: direct write rejected`).toBe(false),
+          )
         }
         if (current.throws && !rejected)
-          expect(result.ok, `${label}: direct delete succeeds`).toBe(true)
+          oracleAssertion(`${label}: direct delete succeeds`, () =>
+            expect(result.ok, `${label}: direct delete succeeds`).toBe(true),
+          )
         else expectErrorShape(`${label} direct write`, result, raised)
         // A rejected write rolls back before its handler; an accepted one
         // reaches its handler exactly once.
-        expect(
-          collections[current.on].handled.calls - handledBefore,
-          `${label}: handler calls`,
-        ).toBe(rejected ? 0 : 1)
-        expect(created.length, `${label}: one direct transaction`).toBe(1)
+        oracleAssertion(`${label}: handler calls`, () =>
+          expect(
+            collections[current.on].handled.calls - handledBefore,
+            `${label}: handler calls`,
+          ).toBe(rejected ? 0 : 1),
+        )
+        oracleAssertion(`${label}: one direct transaction`, () =>
+          expect(created.length, `${label}: one direct transaction`).toBe(1),
+        )
         for (const tx of created) {
-          expect(tx.state, `${label}: direct transaction settled`).toBe(
-            rejected ? `failed` : `completed`,
+          oracleAssertion(`${label}: direct transaction settled`, () =>
+            expect(tx.state, `${label}: direct transaction settled`).toBe(
+              rejected ? `failed` : `completed`,
+            ),
           )
-          expect(settled.has(tx), `${label}: direct transaction settled`).toBe(
-            true,
+          oracleAssertion(`${label}: direct transaction settled`, () =>
+            expect(
+              settled.has(tx),
+              `${label}: direct transaction settled`,
+            ).toBe(true),
           )
         }
       } else {
@@ -655,17 +702,23 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
           }
           if (model.duplicate(index, current.on)) {
             // A second unsettled transaction with a tracked id changes nothing.
-            expect(thrown, `${label}: duplicate id rejected`).toBeInstanceOf(
-              DuplicateTransactionIdError,
+            oracleAssertion(`${label}: duplicate id rejected`, () =>
+              expect(thrown, `${label}: duplicate id rejected`).toBeInstanceOf(
+                DuplicateTransactionIdError,
+              ),
             )
             continue
           }
           if (current.type === `mutateThrows`) {
-            expect(thrown, `${label}: callback error rethrown`).toBe(
-              callbackError,
+            oracleAssertion(`${label}: callback error rethrown`, () =>
+              expect(thrown, `${label}: callback error rethrown`).toBe(
+                callbackError,
+              ),
             )
           } else {
-            expect(thrown, `${label}: mutate succeeds`).toBeUndefined()
+            oracleAssertion(`${label}: mutate succeeds`, () =>
+              expect(thrown, `${label}: mutate succeeds`).toBeUndefined(),
+            )
           }
           modelTx.owners.add(current.on)
           if (current.type === `edit`)
@@ -748,32 +801,32 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
 
 const history = fc.array(step, { minLength: 1, maxLength: 24 })
 
-// What this oracle owns: the gap report judges the transaction's settlement
-// and the Collection's tracking of it, by this file's tests.
 declareOracle({
-  owns: [`src/transactions.ts`, `src/collection/state.ts`],
   check: [runHistory],
   model: [OwnershipModel],
 })
 
 describe(`settled transactions leave every Collection that tracked them`, () => {
-  it(`generated histories with a fixed seed`, async () => {
-    const parameters = oracleFixedSeed(2080, { numRuns: oracleRuns(200) })
-    oracleRoute(oracleRouteOf(parameters))
-    await fc.assert(
-      fc.asyncProperty(history, (steps) => runHistory(steps)),
-      parameters,
-    )
-  }, 300_000)
-
-  it(`generated histories with a random or replayed seed`, async () => {
-    const campaignParameters = oraclePropertyOptions(200, PROPERTY)
-    oracleRoute(oracleRouteOf(campaignParameters))
-    await fc.assert(
-      fc.asyncProperty(history, (steps) => runHistory(steps)),
-      campaignParameters,
-    )
-  }, 300_000)
+  oracleProperty({
+    id: PROPERTY,
+    law: {
+      statement: `A settled transaction leaves every Collection that tracked it, drops its optimistic rows, and settles its public promise despite subscriber failures.`,
+      authority: `Transaction settlement and Collection ownership contracts stated above`,
+      limits: `Two Collections, four manual transactions, bounded legal mutations and settlement; excludes queued sync holds, offline restoration and mid-history cleanup.`,
+    },
+    // What this oracle owns: the gap report judges the transaction's settlement
+    // and the Collection's tracking of it, by this file's tests.
+    owns: [`src/transactions.ts`, `src/collection/state.ts`],
+    histories: { arbitrary: history, runs: 200, fixedSeeds: [2080] },
+    resolve: (steps) => ({ steps }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`transaction ownership`, plan, observe, () =>
+        runHistory(plan.steps),
+      ),
+    check: forwardAssertionJudgment,
+    timeout: 300_000,
+  })
 
   it(`fixed history: a subscriber throws during an asynchronous success and failure settlement`, async () => {
     oracleRoute(`fixed history`)

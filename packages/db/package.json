@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/db",
-  "version": "1.0.0-rc.1.4",
+  "version": "1.0.0-rc.1.5",
   "description": "A reactive client store for building super fast apps on sync",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -64,7 +64,7 @@
   "devDependencies": {
     "@playwright/test": "^1.65.0",
     "@tanstack/config": "^0.22.2",
-    "@tanstack/oracles": "https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@fe532f4",
+    "@tanstack/oracles": "https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@d1b508a",
     "@vitest/coverage-istanbul": "^5.1.0",
     "arktype": "^2.2.9",
     "fake-indexeddb": "^6.2.8",

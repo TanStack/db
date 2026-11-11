@@ -9,7 +9,6 @@ import {
   violation,
   withinTurns,
 } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import {
   captureUnhandledRejections,
@@ -18,16 +17,10 @@ import {
 import type { Observation } from '../../db/tests/oracle-property'
 import type { OnlineDetector } from '../src/types'
 import type { TestItem } from './harness'
-
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
-  owns: [
-    `src/OfflineExecutor.ts#startOfflineExecutor`,
-    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
-    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
-  ],
-})
+import './interruption-handoff-oracle'
+import './settled-id-window-oracle'
+import './executor-api-oracle'
+import './executor-lifecycle-oracle'
 
 /**
  * # Does an interruption at any point keep each offline transaction's
@@ -75,9 +68,12 @@ declareOracle({
  * - `once`: every admitted ID reaches the provider exactly once across both
  *   executors, and calls follow commit order.
  * - `settlement`: after leadership returns or the detector goes online, every
- *   admitted commit settles with its provider outcome. After disposal, the
- *   old executor's waiter may stay pending (disposal ends it), but a settled
- *   commit must still match its outcome.
+ *   admitted commit settles with its provider outcome. After disposal,
+ *   this driver's successor uses fresh Collections, so the old waiter may
+ *   stay pending, but a settled commit must still match its outcome. The
+ *   imported handoff grammar requires caller settlement and optimistic
+ *   preservation when the successor retains every configured Collection under
+ *   its original registry key; ancillary overlap cannot bridge fresh objects.
  * - `durability`: when a commit fulfils, its row is already gone from
  *   storage, and after recovery the outbox is empty.
  * - `unhandled`: no rejection escapes as an unhandled process rejection.
@@ -488,8 +484,20 @@ oracleProperty({
     statement: `Leadership loss, going offline, or disposal at any point of the commit pipeline keeps each offline transaction's admission, fencing, exactly-once provider call in commit order, settlement with its provider outcome, and durable ownership, with no unhandled rejection.`,
     authority: `the offline-transactions README, and the settlement and leadership oracles`,
     limits: `Disjoint keys (sibling rollback is the settlement oracle's); one to three transactions; fake storage over one store; no overlapping old and new executors, since exactly-once execution across independent leaders is not promised.`,
-    owner: `Offline execution`,
   },
+  // What this oracle owns: the gap report judges these entries, and their
+  // reference trees within the package, by this file's tests.
+  owns: [
+    `src/OfflineExecutor.ts`,
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineAction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForTransactionCompletion`,
+    `src/OfflineExecutor.ts#OfflineExecutor.resolveTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.rejectTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.registerRestorationTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
   histories: {
     arbitrary: history,
     measured: landingStates,

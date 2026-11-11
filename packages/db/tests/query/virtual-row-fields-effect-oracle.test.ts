@@ -55,7 +55,6 @@ import { Query, coalesce, eq } from '../../src/query/index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { createTransaction } from '../../src/transactions.js'
 import { declareOracle } from '../oracle-declaration.js'
-import { createOracleReach } from '../oracle-reach.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
 import { oracleRoute } from '../oracle-config.js'
 import { expectedSourceMetadata } from './virtual-row-fields-source-oracle.js'
@@ -392,29 +391,41 @@ function requiredEffectCuts(history: History): Array<string> {
     `final-drain`,
   ]
 }
-const effectMetadataReach = createOracleReach(
-  `effect explicit source metadata`,
-  effectMetadataHistories.flatMap((history) =>
-    [`batch`, `named`].flatMap((channel) =>
-      requiredEffectCuts(history).map(
-        (cut) => `${historyId(history)}/${channel}/${cut}`,
+// Each finite history has one numeric token. A state keeps that token once,
+// so repeated observations preserve the original per-history checkpoint count.
+const effectMetadataHistoriesByState = new Map<string, Set<number>>(
+  effectMetadataHistories
+    .flatMap((history) =>
+      [`batch`, `named`].flatMap((channel) =>
+        requiredEffectCuts(history).map(
+          (cut) => `${historyId(history)}/${channel}/${cut}`,
+        ),
       ),
-    ),
-  ),
-  // This exhaustive grammar has no seed/path replay. An unrelated replay
-  // environment must not exempt its required finite campaigns from reach.
-  { replaying: false },
+    )
+    .map((state) => [state, new Set<number>()]),
 )
+let effectMetadataHistory = 0
 const effectPassedCuts = new Map<string, number>()
 let enteredEffectHistories = 0
 afterAll(() => {
   // A checker-only selector enters no production history. Once any native
   // history runs, every finite campaign still owes its complete declared reach.
-  if (enteredEffectHistories > 0) effectMetadataReach.assertReached()
+  if (enteredEffectHistories > 0)
+    expect(
+      [...effectMetadataHistoriesByState].filter(
+        ([, histories]) => histories.size < 1,
+      ),
+      `effect explicit source metadata`,
+    ).toEqual([])
   if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
     console.info(
       `effect metadata reach`,
-      Object.fromEntries(effectMetadataReach.counts()),
+      Object.fromEntries(
+        [...effectMetadataHistoriesByState].map(([state, histories]) => [
+          state,
+          histories.size,
+        ]),
+      ),
       `passed comparisons`,
       Object.fromEntries(effectPassedCuts),
     )
@@ -579,12 +590,16 @@ test.each(effectMetadataHistories)(
   async (history) => {
     oracleRoute(`case`)
     enteredEffectHistories++
-    effectMetadataReach.beginHistory()
+    effectMetadataHistory++
     const path = pathOf(history)
     const id = historyId(history)
     const reach = (cut: string) => {
-      effectMetadataReach.reach(`${id}/batch/${cut}`)
-      effectMetadataReach.reach(`${id}/named/${cut}`)
+      effectMetadataHistoriesByState
+        .get(`${id}/batch/${cut}`)!
+        .add(effectMetadataHistory)
+      effectMetadataHistoriesByState
+        .get(`${id}/named/${cut}`)!
+        .add(effectMetadataHistory)
     }
     const leftMain: SourceRow = {
       id: history.kind === `union` ? 1 : `a`,
@@ -1060,20 +1075,32 @@ function boundaryId(history: (typeof boundaryHistories)[number]) {
   return `${history.representation}/${history.kind}/${history.present}/${history.grouped}`
 }
 const boundaryCuts = [`initial`, `sequence`, `absent`, `reentry`, `next-use`]
-const boundaryReach = createOracleReach(
-  `Effect membership independent of projection equality`,
-  boundaryHistories.flatMap((history) =>
-    boundaryCuts.map((cut) => `${boundaryId(history)}/${cut}`),
-  ),
-  { replaying: false },
+const boundaryHistoriesByState = new Map<string, Set<number>>(
+  boundaryHistories
+    .flatMap((history) =>
+      boundaryCuts.map((cut) => `${boundaryId(history)}/${cut}`),
+    )
+    .map((state) => [state, new Set<number>()]),
 )
+let boundaryHistory = 0
 let enteredBoundary = false
 afterAll(() => {
-  if (enteredBoundary) boundaryReach.assertReached()
+  if (enteredBoundary)
+    expect(
+      [...boundaryHistoriesByState].filter(
+        ([, histories]) => histories.size < 1,
+      ),
+      `Effect membership independent of projection equality`,
+    ).toEqual([])
   if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
     console.info(
       `Effect membership reach`,
-      Object.fromEntries(boundaryReach.counts()),
+      Object.fromEntries(
+        [...boundaryHistoriesByState].map(([state, histories]) => [
+          state,
+          histories.size,
+        ]),
+      ),
     )
 })
 function boundaryModelRows(
@@ -1123,7 +1150,7 @@ test.each(boundaryHistories)(
   async (history) => {
     oracleRoute(`case`)
     enteredBoundary = true
-    boundaryReach.beginHistory()
+    boundaryHistory++
     const main: SourceRow = {
       id: `a`,
       parentId: `unused`,
@@ -1190,7 +1217,10 @@ test.each(boundaryHistories)(
       before = after
       checkedBatch = ledger.batches.length
       checkedNamed = ledger.named.length
-      if (name) boundaryReach.reach(`${boundaryId(history)}/${name}`)
+      if (name)
+        boundaryHistoriesByState
+          .get(`${boundaryId(history)}/${name}`)!
+          .add(boundaryHistory)
     }
     // The model applies the authored source operation directly. Production
     // receives the same operation through public sync writes and scheduling.

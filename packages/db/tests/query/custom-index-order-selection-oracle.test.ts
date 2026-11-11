@@ -36,7 +36,6 @@ import {
 } from '../../src/query/live-query-collection.js'
 import { PropRef } from '../../src/query/ir.js'
 import { declareOracle } from '../oracle-declaration.js'
-import { createOracleReach } from '../oracle-reach.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 import {
   expectIndexingAdmission,
@@ -44,7 +43,13 @@ import {
   expectedIndexing,
   indexConfigurations,
 } from '../conformance/indexing-config-oracle.js'
-import { oracleRoute } from '../oracle-config.js'
+import { oracleProperty, oracleRoute } from '../oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 
@@ -69,17 +74,12 @@ function expectedRankWindowIds(): Array<number> {
 
 // Each public window must equal the model's prediction for the same rows.
 function expectRankWindow(actualIds: unknown): void {
-  expect(actualIds).toEqual(expectedRankWindowIds())
+  oracleAssertion(`expectRankWindow comparison 1`, () =>
+    expect(actualIds).toEqual(expectedRankWindowIds()),
+  )
 }
 
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/basic-index.ts',
-    'src/indexes/btree-index.ts',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/live-query-collection.ts#liveQueryCollectionOptions',
-  ],
   check: [
     expectRankWindow,
     expectMaterializedWindow,
@@ -336,7 +336,9 @@ function expectedMaterializedIndexes(settings: IndexSettings) {
   }
 }
 function expectMaterializedIndexes(count: number, settings: IndexSettings) {
-  expect(count).toBe(expectedMaterializedIndexes(settings).count)
+  oracleAssertion(`expectMaterializedIndexes comparison 2`, () =>
+    expect(count).toBe(expectedMaterializedIndexes(settings).count),
+  )
 }
 
 // Full recomputation uses only the projected values and the declared null
@@ -366,134 +368,192 @@ function expectMaterializedWindow(
   nulls: `first` | `last`,
   optimized = true,
 ) {
-  expect(actual).toEqual(
-    optimized ? expectedMaterializedWindow(values, field, nulls) : undefined,
+  oracleAssertion(`expectMaterializedWindow comparison 3`, () =>
+    expect(actual).toEqual(
+      optimized ? expectedMaterializedWindow(values, field, nulls) : undefined,
+    ),
   )
 }
 
-it.each(configurations)(
-  `applies output indexing: $path, mode=$autoIndex, constructor=$defaultIndexType.name`,
-  async (settings) => {
-    oracleRoute(`case`)
-    const expected = expectedIndexing(settings)
-    const reach = createOracleReach(
-      `live-query.output-indexing.${settings.path}`,
-      [expected.rejects ? `rejected` : `output-read`],
-    )
-    reach.beginHistory()
-    const sourceRows: Array<MaterializedRow> = [
-      { id: 1, rank: 30, score: 10 },
-      { id: 2, rank: null, score: 30 },
-      { id: 3, rank: 10, score: null },
-    ]
-    const source = createCollection(
-      mockSyncCollectionOptions<MaterializedRow>({
-        id: `output-indexing-${settings.path}-${settings.autoIndex}-${settings.defaultIndexType?.name}`,
-        getKey: (row) => row.id,
-        initialData: sourceRows.map((row) => ({ ...row })),
-        autoIndex: `eager`,
-        defaultIndexType: BasicIndex,
-      }),
-    )
-    const config = {
-      ...settings,
-      query: (q: InitialQueryBuilder) =>
-        q.from({ row: source }).fn.select(({ row }) => ({
-          id: row.id,
-          rank: row.rank === null ? null : -row.rank,
-          score: row.score,
-        })),
+async function runMaterializedIndexHistory(
+  settings: (typeof configurations)[number],
+  reached: (state: string) => void,
+): Promise<void> {
+  const expected = expectedIndexing(settings)
+  const sourceRows: Array<MaterializedRow> = [
+    { id: 1, rank: 30, score: 10 },
+    { id: 2, rank: null, score: 30 },
+    { id: 3, rank: 10, score: null },
+  ]
+  const source = createCollection(
+    mockSyncCollectionOptions<MaterializedRow>({
+      id: `output-indexing-${settings.path}-${settings.autoIndex}-${settings.defaultIndexType?.name}`,
+      getKey: (row) => row.id,
+      initialData: sourceRows.map((row) => ({ ...row })),
+      autoIndex: `eager`,
+      defaultIndexType: BasicIndex,
+    }),
+  )
+  const config = {
+    ...settings,
+    query: (q: InitialQueryBuilder) =>
+      q.from({ row: source }).fn.select(({ row }) => ({
+        id: row.id,
+        rank: row.rank === null ? null : -row.rank,
+        score: row.score,
+      })),
+  }
+  const create = () =>
+    settings.path === `direct`
+      ? createLiveQueryCollection(config)
+      : createCollection(liveQueryCollectionOptions(config))
+  let cached: ReturnType<typeof create> | undefined
+  await withOracleCleanup(async () => {
+    await source.preload()
+    const initialSourceIndexes = source.indexes.size
+    const admission: { rejected: boolean; error?: unknown } = {
+      rejected: false,
     }
-    const create = () =>
-      settings.path === `direct`
-        ? createLiveQueryCollection(config)
-        : createCollection(liveQueryCollectionOptions(config))
-    let cached: ReturnType<typeof create> | undefined
-    await withOracleCleanup(async () => {
-      await source.preload()
-      const initialSourceIndexes = source.indexes.size
-      const admission: { rejected: boolean; error?: unknown } = {
-        rejected: false,
-      }
-      try {
-        cached = create()
-      } catch (error) {
-        admission.rejected = true
-        admission.error = error
-      }
-      expectIndexingAdmission(admission, settings)
-      if (expected.rejects) {
-        reach.reach(`rejected`)
-      } else {
-        await cached!.preload()
-        expectIndexingConfiguration(cached!, settings)
-        for (const updated of [false, true]) {
-          if (updated) {
-            sourceRows[0] = { id: 1, rank: 5, score: 5 }
-            source.utils.begin()
-            source.utils.write({ type: `update`, value: { ...sourceRows[0] } })
-            source.utils.commit()
-          }
-          const values = sourceRows.map((row) => ({
-            ...row,
-            rank: row.rank === null ? null : -row.rank,
-          }))
-          for (const [field, nulls] of orderedReads) {
-            const page = createLiveQueryCollection((q) =>
-              q
-                .from({ row: cached! })
-                .orderBy(({ row }) => row[field], {
-                  direction: `asc`,
-                  nulls,
-                })
-                .limit(2),
-            )
-            await withOracleCleanup(async () => {
-              await page.preload()
-              expectMaterializedWindow(
-                page.toArray.map((row) => row.id),
-                values,
-                field,
+    try {
+      cached = create()
+    } catch (error) {
+      admission.rejected = true
+      admission.error = error
+    }
+    oracleAssertion(`output indexing admission`, () =>
+      expectIndexingAdmission(admission, settings),
+    )
+    if (expected.rejects) {
+      reached(`rejected`)
+    } else {
+      await cached!.preload()
+      oracleAssertion(`output indexing configuration`, () =>
+        expectIndexingConfiguration(cached!, settings),
+      )
+      for (const updated of [false, true]) {
+        if (updated) {
+          sourceRows[0] = { id: 1, rank: 5, score: 5 }
+          source.utils.begin()
+          source.utils.write({ type: `update`, value: { ...sourceRows[0] } })
+          source.utils.commit()
+        }
+        const values = sourceRows.map((row) => ({
+          ...row,
+          rank: row.rank === null ? null : -row.rank,
+        }))
+        for (const [field, nulls] of orderedReads) {
+          const page = createLiveQueryCollection((q) =>
+            q
+              .from({ row: cached! })
+              .orderBy(({ row }) => row[field], {
+                direction: `asc`,
                 nulls,
-              )
-              const optimized = cached!.currentStateAsChanges({
-                orderBy: [
-                  {
-                    expression: new PropRef([field]),
-                    compareOptions: { direction: `asc`, nulls },
-                  },
-                ],
-                limit: 2,
-                optimizedOnly: true,
               })
-              expectMaterializedWindow(
-                optimized?.map((change) => change.value.id),
-                values,
-                field,
-                nulls,
-                expectedMaterializedIndexes(settings).optimized,
-              )
-              reach.reach(`output-read`)
-            }, [() => page.cleanup()])
-          }
-        }
-        expectMaterializedIndexes(cached!.indexes.size, settings)
-        // A constructor alone must remain useful for an explicit manual index.
-        if (!expected.automaticIndexes && settings.defaultIndexType) {
-          const index = cached!.createIndex((row) => row.rank)
-          expect(index).toBeInstanceOf(settings.defaultIndexType)
-        }
-        for (const index of cached!.indexes.values()) {
-          expect(index).toBeInstanceOf(settings.defaultIndexType!)
+              .limit(2),
+          )
+          await withOracleCleanup(async () => {
+            await page.preload()
+            expectMaterializedWindow(
+              page.toArray.map((row) => row.id),
+              values,
+              field,
+              nulls,
+            )
+            const optimized = cached!.currentStateAsChanges({
+              orderBy: [
+                {
+                  expression: new PropRef([field]),
+                  compareOptions: { direction: `asc`, nulls },
+                },
+              ],
+              limit: 2,
+              optimizedOnly: true,
+            })
+            expectMaterializedWindow(
+              optimized?.map((change) => change.value.id),
+              values,
+              field,
+              nulls,
+              expectedMaterializedIndexes(settings).optimized,
+            )
+            reached(`output-read`)
+          }, [() => page.cleanup()])
         }
       }
-      expect(source.config.autoIndex).toBe(`eager`)
-      expect(source.config.defaultIndexType).toBe(BasicIndex)
-      expect(source.indexes.size).toBe(initialSourceIndexes)
-    }, [() => cached?.cleanup(), () => source.cleanup()])
-    reach.assertReached()
+      expectMaterializedIndexes(cached!.indexes.size, settings)
+      // A constructor alone must remain useful for an explicit manual index.
+      if (!expected.automaticIndexes && settings.defaultIndexType) {
+        const index = cached!.createIndex((row) => row.rank)
+        oracleAssertion(`runMaterializedIndexHistory comparison 4`, () =>
+          expect(index).toBeInstanceOf(settings.defaultIndexType),
+        )
+      }
+      for (const index of cached!.indexes.values()) {
+        oracleAssertion(`runMaterializedIndexHistory comparison 5`, () =>
+          expect(index).toBeInstanceOf(settings.defaultIndexType!),
+        )
+      }
+    }
+    oracleAssertion(`runMaterializedIndexHistory comparison 6`, () =>
+      expect(source.config.autoIndex).toBe(`eager`),
+    )
+    oracleAssertion(`runMaterializedIndexHistory comparison 7`, () =>
+      expect(source.config.defaultIndexType).toBe(BasicIndex),
+    )
+    oracleAssertion(`runMaterializedIndexHistory comparison 8`, () =>
+      expect(source.indexes.size).toBe(initialSourceIndexes),
+    )
+  }, [() => cached?.cleanup(), () => source.cleanup()])
+}
+
+// Constructor identities stay in the resolved production plan. Enumerated
+// histories name the exact position in the existing mode/constructor/path
+// grammar, preserving its order and all eighteen combinations as plain data.
+oracleProperty({
+  id: `live-query.output-indexing`,
+  law: {
+    statement: `Explicit output indexing settings govern admission, optimized ordering, index construction and reuse without changing source settings.`,
+    authority: `The Collection indexing contract and the maintainer decision for issue 2292 stated above.`,
+    limits: `The unchanged eighteen finite mode/constructor/construction combinations, projected rank/score reads and one source update.`,
   },
-)
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/basic-index.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/live-query-collection.ts#liveQueryCollectionOptions',
+  ],
+  histories: configurations.map((_settings, configuration) => ({
+    configuration,
+  })),
+  label: ({ configuration }) => {
+    const settings = configurations[configuration]!
+    return `${settings.path}/${settings.autoIndex ?? `default`}/${settings.defaultIndexType?.name ?? `none`}`
+  },
+  resolve: ({ configuration }) => ({
+    settings: configurations[configuration]!,
+  }),
+  model: recordedAssertionJudgment,
+  driver: (plan: { settings: (typeof configurations)[number] }, observe) =>
+    recordAssertionJudgment(
+      `output live-query indexing`,
+      plan,
+      observe,
+      async () => {
+        const reached = new Set<string>()
+        await runMaterializedIndexHistory(plan.settings, (state) =>
+          reached.add(state),
+        )
+        const state = expectedIndexing(plan.settings).rejects
+          ? `rejected`
+          : `output-read`
+        oracleAssertion(`output indexing reached ${state}`, () =>
+          expect(reached.has(state)).toBe(true),
+        )
+      },
+    ),
+  check: forwardAssertionJudgment,
+})
 
 // Calibrate the policy comparisons independently of a production path: an
 // extra index and the opposite optimized-read availability must be rejected.

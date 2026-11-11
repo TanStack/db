@@ -1,6 +1,7 @@
 import { setImmediate as yieldToRunner } from 'node:timers/promises'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it } from 'vitest'
+import { oracleAssertion } from '../oracle-assertion-adapter.js'
 import {
   createLiveQueryCollection,
   eq,
@@ -11,15 +12,11 @@ import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { runTrace } from '../trace-runner.js'
-import {
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  readOracleRunConfig,
-} from '../oracle-config.js'
+import { oracleRoute } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
+import { registerIncludesProperty } from './includes-registration-oracle.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { SyncConfig } from '../../src/types.js'
@@ -310,40 +307,50 @@ const publicationProjection: TraceProjection<
     }
   },
   assertEqual: (observed, expected) => {
-    expect(observed.q1).toEqual(expected.q1)
-    expect(observed.q2).toEqual(expected.q2)
+    oracleAssertion('includes publication-oracle comparison 314', () =>
+      expect(observed.q1).toEqual(expected.q1),
+    )
+    oracleAssertion('includes publication-oracle comparison 315', () =>
+      expect(observed.q2).toEqual(expected.q2),
+    )
     if (observed.callbackReachStart !== undefined) {
       for (const layer of [`q1`, `q2`] as const) {
-        expect(
-          observed.callbacks
-            .slice(observed.callbackReachStart)
-            .some((callback) => callback.layer === layer),
-        ).toBe(true)
+        oracleAssertion('includes publication-oracle comparison 318', () =>
+          expect(
+            observed.callbacks
+              .slice(observed.callbackReachStart)
+              .some((callback) => callback.layer === layer),
+          ).toBe(true),
+        )
       }
     }
     // Each layer's own callback must be coherent. This makes no claim that
     // Q2 has already advanced while Q1's earlier callback is running.
     for (const callback of observed.callbacks) {
-      expect(callback.rows).toEqual(callback.expected)
+      oracleAssertion('includes publication-oracle comparison 328', () =>
+        expect(callback.rows).toEqual(callback.expected),
+      )
       // This grammar retains one parent key. A subscription's first delivery
       // inserts it; later callbacks update it from that layer's last delivery.
       // The stream starts empty even when the Collection already has a row.
       const previous = callback.previousDeliveredRows[0]
-      expect(
-        callback.changes.map(({ type, key, value, previousValue }) => ({
-          type,
-          key,
-          value,
-          previousValue,
-        })),
-      ).toEqual([
-        {
-          type: previous ? `update` : `insert`,
-          key: initialParent.id,
-          value: callback.expected[0],
-          previousValue: previous,
-        },
-      ])
+      oracleAssertion('includes publication-oracle comparison 333', () =>
+        expect(
+          callback.changes.map(({ type, key, value, previousValue }) => ({
+            type,
+            key,
+            value,
+            previousValue,
+          })),
+        ).toEqual([
+          {
+            type: previous ? `update` : `insert`,
+            key: initialParent.id,
+            value: callback.expected[0],
+            previousValue: previous,
+          },
+        ]),
+      )
     }
     return undefined
   },
@@ -604,18 +611,12 @@ const q1Shapes = [`direct`, `joined`] as const
 // Both ordinary campaigns use the same arbitrary, driver, comparison, and
 // budget. A seed/path request runs only its directly replayed campaign.
 const fixedPublicationSeed = 1813
-function publicationCampaigns(baseRuns: number, property: string) {
-  const replay = readOracleRunConfig()
-  if (replay.replayPath !== undefined && replay.replayProperty !== property)
-    return []
-  const options = oraclePropertyOptions(baseRuns, property)
-  if (replay.campaignSeed !== undefined) return [{ name: `replay`, options }]
+function publicationCampaigns(runs: number, property: string) {
   return [
     {
-      name: `fixed seed ${fixedPublicationSeed}`,
-      options: { ...options, seed: fixedPublicationSeed },
+      name: `fixed and random`,
+      options: { runs, property, fixedSeed: fixedPublicationSeed },
     },
-    { name: `random seed`, options },
   ]
 }
 
@@ -805,10 +806,11 @@ describe(`layered-query publication oracle`, () => {
         12,
         `includes-publication.parent-scalar.${q1Shape}.${q2Shape}`,
       )) {
-        fcTest.prop([changedValueArbitrary], campaign.options)(
+        registerIncludesProperty(
+          [changedValueArbitrary],
+          campaign.options,
           `publishes parent scalar updates through a ${q1Shape} Q1 and ${q2Shape} Q2 (${campaign.name})`,
           async (value) => {
-            oracleRoute(oracleRouteOf(campaign.options))
             await expectPublicationMatches(
               { type: `parentScalar`, value },
               q1Shape,
@@ -822,13 +824,11 @@ describe(`layered-query publication oracle`, () => {
         12,
         `includes-publication.parent-then-child.${q1Shape}.${q2Shape}`,
       )) {
-        fcTest.prop(
+        registerIncludesProperty(
           [changedValueArbitrary, changedChildValueArbitrary],
           campaign.options,
-        )(
           `recovers a ${q1Shape} Q1 and ${q2Shape} Q2 after a child update (${campaign.name})`,
           async (parentValue, childValue) => {
-            oracleRoute(oracleRouteOf(campaign.options))
             await expectPublicationMatches(
               { type: `parentThenChild`, parentValue, childValue },
               q1Shape,
@@ -842,10 +842,11 @@ describe(`layered-query publication oracle`, () => {
         16,
         `includes-publication.optimistic-before-confirm.${q1Shape}.${q2Shape}`,
       )) {
-        fcTest.prop([changedValueArbitrary], campaign.options)(
+        registerIncludesProperty(
+          [changedValueArbitrary],
+          campaign.options,
           `publishes optimistic state before and after confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2 (${campaign.name})`,
           async (value) => {
-            oracleRoute(oracleRouteOf(campaign.options))
             await expectPublicationMatches(
               { type: `optimisticConfirm`, value },
               q1Shape,
@@ -897,10 +898,11 @@ describe(`layered-query publication oracle`, () => {
     100,
     `includes-publication.child-scalar`,
   )) {
-    fcTest.prop([changedChildValueArbitrary], campaign.options)(
+    registerIncludesProperty(
+      [changedChildValueArbitrary],
+      campaign.options,
       `publishes child-only scalar updates through both layers (${campaign.name})`,
       async (value) => {
-        oracleRoute(oracleRouteOf(campaign.options))
         await expectPublicationMatches({ type: `childScalar`, value })
       },
     )
@@ -910,10 +912,11 @@ describe(`layered-query publication oracle`, () => {
     100,
     `includes-publication.parent-route`,
   )) {
-    fcTest.prop([fc.constantFrom(20, 30)], campaign.options)(
+    registerIncludesProperty(
+      [fc.constantFrom(20, 30)],
+      campaign.options,
       `compares route transitions at both query layers (${campaign.name})`,
       async (group) => {
-        oracleRoute(oracleRouteOf(campaign.options))
         await expectPublicationMatches({ type: `parentRoute`, group })
       },
     )
@@ -923,7 +926,7 @@ describe(`layered-query publication oracle`, () => {
     100,
     `includes-publication.atomic-parent-replacement`,
   )) {
-    fcTest.prop(
+    registerIncludesProperty(
       [
         fc.record({
           group: fc.constantFrom(10, 20, 30),
@@ -931,10 +934,8 @@ describe(`layered-query publication oracle`, () => {
         }),
       ],
       campaign.options,
-    )(
       `compares atomic parent replacements at both query layers (${campaign.name})`,
       async (row) => {
-        oracleRoute(oracleRouteOf(campaign.options))
         await expectPublicationMatches({ type: `atomicReplace`, ...row })
       },
     )
@@ -944,10 +945,11 @@ describe(`layered-query publication oracle`, () => {
     100,
     `includes-publication.optimistic-rollback`,
   )) {
-    fcTest.prop([changedValueArbitrary], campaign.options)(
+    registerIncludesProperty(
+      [changedValueArbitrary],
+      campaign.options,
       `publishes restored state after optimistic rollback (${campaign.name})`,
       async (value) => {
-        oracleRoute(oracleRouteOf(campaign.options))
         await expectPublicationMatches({
           type: `optimisticRollback`,
           value,

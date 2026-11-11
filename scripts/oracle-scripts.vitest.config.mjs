@@ -7,7 +7,8 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     root: dirname(fileURLToPath(import.meta.url)),
-    include: [`*.property.test.js`],
+    include: [`*.property.test.js`, `release-judgment.test.js`],
+    server: { deps: { inline: [`@tanstack/oracles`] } },
     environment: `node`,
     coverage: { enabled: false },
   },

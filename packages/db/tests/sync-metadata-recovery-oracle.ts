@@ -40,20 +40,24 @@ export type RecoverySchedule = {
 
 // Each generated batch includes all 18 schedules. Payloads and the initial
 // seed's metadata vary without making the timing premise probabilistic.
-export const recoverySchedulesArbitrary = fc
-  .integer({ min: -100, max: 100 })
-  .map((value): Array<RecoverySchedule> =>
-    [false, true].flatMap((bare) =>
-      recoveryPhases.flatMap((phase) =>
-        recoveryInterruptions.map((interruption) => ({
-          phase,
-          interruption,
-          bare,
-          value,
-        })),
-      ),
+export const recoveryValueArbitrary = fc.integer({ min: -100, max: 100 })
+
+/** All 18 schedules of one batch, carrying one payload value. */
+export function recoverySchedulesOf(value: number): Array<RecoverySchedule> {
+  return [false, true].flatMap((bare) =>
+    recoveryPhases.flatMap((phase) =>
+      recoveryInterruptions.map((interruption) => ({
+        phase,
+        interruption,
+        bare,
+        value,
+      })),
     ),
   )
+}
+
+export const recoverySchedulesArbitrary =
+  recoveryValueArbitrary.map(recoverySchedulesOf)
 
 export type RecoveryDriver = SessionDriver & {
   holdRecovery: (phase: RecoveryPhase) => {
@@ -66,6 +70,16 @@ export type RecoveryDriver = SessionDriver & {
     applied: Promise<void>
   }
   stopSource: () => Promise<void>
+}
+
+/**
+ * A held or completed cut whose source reads, recovery events, recovery
+ * inputs or durable metadata differ from the session model: the law's own
+ * failure. Any other error from a schedule is a setup, timing or cleanup
+ * failure and keeps its own identity.
+ */
+export class RecoveryComparisonError extends Error {
+  override name = `RecoveryComparisonError`
 }
 
 /**
@@ -92,7 +106,8 @@ export async function runRecoverySchedule(
       expected,
       driver.observe(),
     )
-    if (mismatch) throw new Error(`${cut}: ${JSON.stringify(mismatch)}`)
+    if (mismatch)
+      throw new RecoveryComparisonError(`${cut}: ${JSON.stringify(mismatch)}`)
   }
   const history: Array<SessionAction> = [
     { type: `seed`, key: 1, bare: schedule.bare },
@@ -160,7 +175,7 @@ export async function runRecoverySchedule(
     if (
       JSON.stringify(driver.recoveryEvents()) !== JSON.stringify(expectedEvents)
     )
-      throw new Error(
+      throw new RecoveryComparisonError(
         `the recovery hold did not preserve its response/read/application prefix`,
       )
     checkSource(`held ${schedule.phase}`)
@@ -205,9 +220,13 @@ export async function runRecoverySchedule(
     )
     const inputs = driver.takeRecoveryInputs?.() ?? []
     if (schedule.interruption !== `cleanup` && inputs.length === 0)
-      throw new Error(`completed recovery supplied no storage input`)
+      throw new RecoveryComparisonError(
+        `completed recovery supplied no storage input`,
+      )
     if (schedule.interruption === `cleanup` && inputs.length !== 0)
-      throw new Error(`an invalidated sync run supplied a recovery input`)
+      throw new RecoveryComparisonError(
+        `an invalidated sync run supplied a recovery input`,
+      )
     const expected = model.storedRowMetadata()
     const actual = driver.storedRowMetadata?.()
     if (JSON.stringify(expected) !== JSON.stringify(actual)) {
@@ -218,7 +237,7 @@ export async function runRecoverySchedule(
         expected,
         actual,
       }
-      throw new Error(JSON.stringify(mismatch))
+      throw new RecoveryComparisonError(JSON.stringify(mismatch))
     }
     outcome = {
       checkpoints,
@@ -258,6 +277,10 @@ export async function runRecoverySchedule(
 }
 
 declareOracle({
-  grammar: [recoverySchedulesArbitrary],
+  grammar: [
+    recoveryValueArbitrary,
+    recoverySchedulesOf,
+    recoverySchedulesArbitrary,
+  ],
   check: [runRecoverySchedule],
 })

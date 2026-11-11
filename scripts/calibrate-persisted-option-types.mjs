@@ -274,7 +274,7 @@ source = source.replace(
   `const callbacks: Array<{name: string; fn: () => Promise<void>; timeout: number}> = [];
 const it = Object.assign((name: string, fn: () => Promise<void>, timeout: number) => callbacks.push({name, fn, timeout}), {skip: () => {}});`,
 )
-for (const name of [`oracle-config`, `oracle-reach`]) {
+for (const name of [`oracle-config`]) {
   source = source.replace(
     `'../../db/tests/${name}.js'`,
     JSON.stringify(resolve(root, `packages/db/tests/${name}.ts`)),

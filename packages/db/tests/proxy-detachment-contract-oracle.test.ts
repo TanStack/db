@@ -19,13 +19,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { withChangeTracking } from '../src/proxy.js'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from './oracle-config.js'
+import { oracleProperty, oracleRoute } from './oracle-config.js'
 import {
   cycleContainer,
   cycleKinds,
@@ -37,43 +31,99 @@ import {
   storedDataRow,
   storedRow,
 } from './proxy-detachment-fixture.js'
-import { declareOracle } from './oracle-declaration.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import type { CycleRow } from './proxy-detachment-fixture.js'
 
-// What this oracle owns: the gap report judges the draft-to-stored-row copy in
-// proxy.ts by this file's tests. The fixture helpers declare the checks.
-declareOracle({ owns: [`src/proxy.ts`] })
+function runOrdinaryFieldCopies(count: number): void {
+  const row = Object.fromEntries(
+    Array.from({ length: count }, (_, i) => [`field${i}`, i]),
+  )
+  const define = vi.spyOn(Object, `defineProperty`)
+  let changes: Record<string | symbol, unknown>
+  let writes: number
+  try {
+    changes = withChangeTracking(row, (draft) => {
+      draft.field0 = 42
+    })
+    writes = define.mock.calls.filter(([, key]) =>
+      String(key).startsWith(`field`),
+    ).length
+  } finally {
+    define.mockRestore()
+  }
+  oracleAssertion('runOrdinaryFieldCopies', () =>
+    expect(changes).toEqual({ field0: 42 }),
+  )
+  oracleAssertion('runOrdinaryFieldCopies', () => expect(row.field0).toBe(0))
+  oracleAssertion('runOrdinaryFieldCopies', () => expect(writes).toBe(0))
+}
+
+type JsonDataKeyHistory = [
+  `__proto__` | `constructor` | `toString` | `ordinary`,
+  number,
+  boolean,
+]
+function runJsonDataKeyHistory([key, value, nested]: JsonDataKeyHistory): void {
+  const object = Object.fromEntries([[key, { value }]])
+  const payload = nested ? { nested: [object] } : object
+  const expected = structuredClone(payload)
+  const original = { payload: { before: true } as object }
+  const changes = withChangeTracking(original, (draft) => {
+    draft.payload = payload
+  })
+  // JSON data can own a non-function "constructor" field. Do not
+  // let the assertion library mistake that field for a class tag.
+  oracleAssertion(`detached JSON payload`, () =>
+    expectDetachedPayloadJson(changes.payload, expected),
+  )
+  const saved = nested
+    ? (changes.payload as { nested: Array<object> }).nested[0]!
+    : changes.payload!
+  oracleAssertion('runJsonDataKeyHistory', () =>
+    expect(Object.hasOwn(saved, key)).toBe(true),
+  )
+  oracleAssertion('runJsonDataKeyHistory', () =>
+    expect(Object.getPrototypeOf(saved)).toBe(Object.prototype),
+  )
+  object[key]!.value++
+  oracleAssertion(`detached JSON payload`, () =>
+    expectDetachedPayloadJson(changes.payload, expected),
+  )
+  oracleAssertion('runJsonDataKeyHistory', () =>
+    expect(original).toEqual({ payload: { before: true } }),
+  )
+}
 
 describe(`Mutation result detachment`, () => {
   // For any number of ordinary fields, one write changes only that field and
   // defines no property descriptors: a generated law over the field count.
-  it(`copies ordinary fields without descriptor writes`, () => {
-    const parameters = oracleFixedSeed(20260914, { numRuns: 40 })
-    oracleRoute(oracleRouteOf(parameters))
-    fc.assert(
-      fc.property(fc.integer({ min: 1, max: 40 }), (count) => {
-        const row = Object.fromEntries(
-          Array.from({ length: count }, (_, i) => [`field${i}`, i]),
-        )
-        const define = vi.spyOn(Object, `defineProperty`)
-        let changes: Record<string | symbol, unknown>
-        let writes: number
-        try {
-          changes = withChangeTracking(row, (draft) => {
-            draft.field0 = 42
-          })
-          writes = define.mock.calls.filter(([, key]) =>
-            String(key).startsWith(`field`),
-          ).length
-        } finally {
-          define.mockRestore()
-        }
-        expect(changes).toEqual({ field0: 42 })
-        expect(row.field0).toBe(0)
-        expect(writes).toBe(0)
-      }),
-      parameters,
-    )
+  oracleProperty({
+    id: `proxy.ordinary-field-copies`,
+    law: {
+      statement: `Changing one ordinary field copies that field without changing the original row or defining descriptors for its ordinary fields.`,
+      authority: `src/proxy.ts draft-to-detached-row contract stated above`,
+      limits: `The existing generated count of 1 through 40 ordinary numeric fields and one field0 assignment.`,
+    },
+    // What this oracle owns: the gap report judges the draft-to-stored-row copy in
+    // proxy.ts by this file's tests. The fixture helpers declare the checks.
+    owns: [`src/proxy.ts`],
+    histories: {
+      arbitrary: fc.integer({ min: 1, max: 40 }),
+      runs: 40,
+      fixedSeeds: [20260914],
+    },
+    resolve: (count) => ({ count }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`ordinary field copies`, plan, observe, () =>
+        runOrdinaryFieldCopies(plan.count),
+      ),
+    check: forwardAssertionJudgment,
   })
 
   it.each([`value`, `__proto__`, `constructor`, `toString`])(
@@ -187,46 +237,38 @@ describe(`Mutation result detachment`, () => {
   // Driver and checkpoint: compare the change patch after the callback and
   // the public Collection row after update() publishes and persists it.
 
-  it.each([20260914, undefined])(
-    `preserves JSON data keys on assignment seed=%s`,
-    (seed) => {
-      const campaignParameters = {
-        ...(seed === undefined
-          ? oraclePropertyOptions(100, `proxy.json-data-keys`)
-          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
-        examples: [[`__proto__`, 1, false]],
-      }
-      oracleRoute(oracleRouteOf(campaignParameters))
-      fc.assert(
-        fc.property(
-          fc.constantFrom(`__proto__`, `constructor`, `toString`, `ordinary`),
-          fc.integer(),
-          fc.boolean(),
-          (key, value, nested) => {
-            const object = Object.fromEntries([[key, { value }]])
-            const payload = nested ? { nested: [object] } : object
-            const expected = structuredClone(payload)
-            const original = { payload: { before: true } as object }
-            const changes = withChangeTracking(original, (draft) => {
-              draft.payload = payload
-            })
-            // JSON data can own a non-function "constructor" field. Do not
-            // let the assertion library mistake that field for a class tag.
-            expectDetachedPayloadJson(changes.payload, expected)
-            const saved = nested
-              ? (changes.payload as { nested: Array<object> }).nested[0]!
-              : changes.payload!
-            expect(Object.hasOwn(saved, key)).toBe(true)
-            expect(Object.getPrototypeOf(saved)).toBe(Object.prototype)
-            object[key]!.value++
-            expectDetachedPayloadJson(changes.payload, expected)
-            expect(original).toEqual({ payload: { before: true } })
-          },
-        ),
-        campaignParameters,
-      )
+  oracleProperty({
+    id: `proxy.json-data-keys`,
+    law: {
+      statement: `Assigned JSON data retains its authored own keys and prototype and detaches later caller changes.`,
+      authority: `src/proxy.ts draft-to-stored-row value boundary contract stated above`,
+      limits: `The existing four-key, integer-value and nested-or-direct JSON grammar; native cycles and binary containers remain fixed shared-check histories.`,
     },
-  )
+    owns: [`src/proxy.ts`],
+    histories: {
+      arbitrary: fc.tuple(
+        fc.constantFrom(`__proto__`, `constructor`, `toString`, `ordinary`),
+        fc.integer(),
+        fc.boolean(),
+      ),
+      runs: 100,
+      fixedSeeds: [20260914],
+      fixed: [
+        {
+          name: `own __proto__ assignment`,
+          history: [`__proto__`, 1, false] satisfies JsonDataKeyHistory,
+        },
+      ],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`JSON data key detachment`, plan, observe, () =>
+        runJsonDataKeyHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
   it.each(
     cycleKinds.flatMap((kind) =>
       [`before`, `after`].map((edit) => ({ kind, edit })),

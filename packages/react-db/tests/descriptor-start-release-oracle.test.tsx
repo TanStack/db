@@ -16,24 +16,30 @@ import {
   descriptorStartHistories,
   expectedDescriptorStart,
 } from '../../db/tests/descriptor-start-release-oracle'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import {
+  differs,
+  oracleProperty,
+  oracleRoute,
+  pass,
+  violation,
+} from '../../db/tests/oracle-config'
 import { descriptorStartFixture } from '../../db/tests/descriptor-start-release-support'
 import { withOracleCleanup } from '../../db/tests/utils'
+import type { Observation, Verdict } from '../../db/tests/oracle-config'
 import type { DescriptorStartHistory } from '../../db/tests/descriptor-start-release-oracle'
 
 const hooks = [`live`, `infinite`, `suspense`] as const
-async function checkHistory(
+const descriptorProperties = {
+  live: `react.descriptor-start-release.live`,
+  infinite: `react.descriptor-start-release.infinite`,
+  suspense: `react.descriptor-start-release.suspense`,
+} as const
+async function recordHistory(
   history: DescriptorStartHistory,
   hook: (typeof hooks)[number],
+  record: (checkpoint: string, value: unknown) => void,
 ) {
-  const reach = createOracleReach(`React descriptor starts ${hook}`, [
-    `rejected`,
-    `read`,
-    `cleaned`,
-  ])
-  reach.beginHistory()
   const fixture = descriptorStartFixture(history, `React`)
   const { client, query, id, failure, startErrors, factories, observe } =
     fixture
@@ -56,42 +62,96 @@ async function checkHistory(
     } catch (error) {
       rejection = error
     }
-    expect(rejection).toBe(failure)
-    expect(factories).toEqual(
-      expectedDescriptorStart(history, `rejected`).factories,
-    )
+    record(`preparation error`, rejection === failure)
+    record(`acquired factories`, [...factories])
     fixture.retain()
-    expect(fixture.failures()).toBeGreaterThan(0)
-    checkDescriptorStart(observe(), history, `rejected`)
-    reach.reach(`rejected`)
+    record(`failed factory visited`, fixture.failures() > 0)
+    record(`rejected`, observe())
     for (const [index, row] of fixture.collections().entries()) {
       try {
         row.startSyncImmediate()
       } catch (error) {
-        expect(error).toBe(startErrors[index])
+        record(`start error`, error === startErrors[index])
       }
     }
-    checkDescriptorStart(observe(), history, `read`)
-    reach.reach(`read`)
+    record(`read`, observe())
     cleanup()
     await client.cleanup()
-    checkDescriptorStart(observe(), history, `cleaned`)
-    reach.reach(`cleaned`)
-    reach.assertReached()
+    record(`cleaned`, observe())
   }, [() => cleanup(), () => client.cleanup()])
 }
 
-it.each(
-  descriptorStartHistories.flatMap((history) =>
-    hooks.map((hook) => ({ history, hook })),
-  ),
-)(
-  `releases independent descriptor starts in React: %j`,
-  ({ history, hook }) => {
-    oracleRoute(`case`)
-    return checkHistory(history, hook)
-  },
-)
+// This receiving model keeps the shared resource law at the same three cuts.
+// Error identity is recorded as a relation because generated traces contain no
+// runtime resource references. Every old comparison is judged before completeness.
+const cuts = [`rejected`, `read`, `cleaned`] as const
+function checkRecordedHistory(
+  history: DescriptorStartHistory,
+  trace: ReadonlyArray<Observation>,
+): Verdict {
+  for (const { checkpoint, value } of trace) {
+    if (cuts.includes(checkpoint as (typeof cuts)[number])) {
+      try {
+        checkDescriptorStart(
+          value as ReturnType<typeof expectedDescriptorStart>,
+          history,
+          checkpoint as (typeof cuts)[number],
+        )
+      } catch (error) {
+        return violation(
+          checkpoint,
+          String(error),
+          `descriptor resource release`,
+        )
+      }
+    } else {
+      const wrong = differs(
+        checkpoint,
+        `descriptor preparation`,
+        value,
+        checkpoint === `acquired factories`
+          ? expectedDescriptorStart(history, `rejected`).factories
+          : true,
+      )
+      if (wrong) return wrong
+    }
+  }
+  for (const checkpoint of [
+    `preparation error`,
+    `acquired factories`,
+    `failed factory visited`,
+    ...cuts,
+  ]) {
+    if (trace.filter((entry) => entry.checkpoint === checkpoint).length !== 1)
+      return violation(
+        checkpoint,
+        `expected one observation`,
+        `descriptor preparation`,
+      )
+  }
+  return pass
+}
+
+for (const hook of hooks) {
+  oracleProperty({
+    id: descriptorProperties[hook],
+    law: {
+      statement: `Failed descriptor preparation preserves its error and releases each acquired source independently; demand starts lazy sources and cleanup releases each healthy resource once.`,
+      authority: `docs/guides/ssr.md descriptor cleanup contract; packages/db/tests/descriptor-start-release-oracle.ts`,
+      limits: `The unchanged finite zero-through-three-source factory and sync-failure grammar, received through real React live, infinite and Suspense hooks; no provider shutdown or concurrent scheduler claim.`,
+    },
+    owns: [
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
+    histories: descriptorStartHistories,
+    model: (history) =>
+      cuts.map((cut) => expectedDescriptorStart(history, cut)),
+    driver: (history, record) => recordHistory(history, hook, record),
+    check: checkRecordedHistory,
+  })
+}
 
 it.each([
   `blocked-peer`,
@@ -111,12 +171,7 @@ it.each([
 })
 
 declareOracle({
-  owns: [
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
-  check: [checkDescriptorStart],
+  check: [checkDescriptorStart, checkRecordedHistory],
   model: [expectedDescriptorStart],
   grammar: [descriptorStartHistories],
 })

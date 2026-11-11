@@ -61,11 +61,11 @@ importers:
         specifier: 0.3.4
         version: 0.3.4(@typescript-eslint/utils@8.72.1(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@tanstack/eslint-plugin-oracles':
-        specifier: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@fe532f4
-        version: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@fe532f4(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
+        specifier: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@d1b508a
+        version: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@d1b508a(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@tanstack/oracles':
-        specifier: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@fe532f4
-        version: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@fe532f4(fast-check@4.10.2)(typescript@5.9.3)(vitest@5.1.0)
+        specifier: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@d1b508a
+        version: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@d1b508a(fast-check@4.10.2)(vitest@5.1.0)
       '@tanstack/typedoc-config':
         specifier: 0.3.5
         version: 0.3.5(typescript@5.9.3)
@@ -175,10 +175,10 @@ importers:
         specifier: ^20.3.35
         version: 20.3.35(@angular/common@20.3.35(@angular/core@20.3.35(@angular/compiler@20.3.35)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.35(@angular/compiler@20.3.35)(rxjs@7.8.2)(zone.js@0.15.1))(@angular/platform-browser@20.3.35(@angular/common@20.3.35(@angular/core@20.3.35(@angular/compiler@20.3.35)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.35(@angular/compiler@20.3.35)(rxjs@7.8.2)(zone.js@0.15.1)))(rxjs@7.8.2)
       '@tanstack/angular-db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/angular-db
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/db
       rxjs:
         specifier: ^7.8.2
@@ -215,19 +215,19 @@ importers:
   examples/electron/offline-first:
     dependencies:
       '@tanstack/electron-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/electron-db-sqlite-persistence
       '@tanstack/node-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/node-db-sqlite-persistence
       '@tanstack/offline-transactions':
-        specifier: ^1.2.0
+        specifier: ^1.2.1
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.5.1
+        specifier: ^1.5.2
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.107.1
@@ -306,19 +306,19 @@ importers:
         specifier: 11.4.1
         version: 11.4.1(react-native@0.79.6(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.0.0))
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/db
       '@tanstack/offline-transactions':
-        specifier: ^1.2.0
+        specifier: ^1.2.1
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.5.1
+        specifier: ^1.5.2
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/react-db
       '@tanstack/react-native-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/react-native-db-sqlite-persistence
       '@tanstack/react-query':
         specifier: ^5.107.1
@@ -403,19 +403,19 @@ importers:
         specifier: 11.4.1
         version: 11.4.1(react-native@0.79.6(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.0.0))
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/db
       '@tanstack/electric-db-collection':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/electric-db-collection
       '@tanstack/offline-transactions':
-        specifier: ^1.2.0
+        specifier: ^1.2.1
         version: link:../../../packages/offline-transactions
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/react-db
       '@tanstack/react-native-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/react-native-db-sqlite-persistence
       '@tanstack/react-query':
         specifier: ^5.107.1
@@ -491,10 +491,10 @@ importers:
         specifier: ^5.107.1
         version: 5.107.1
       '@tanstack/query-db-collection':
-        specifier: ^1.5.1
+        specifier: ^1.5.2
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/react-db
       react:
         specifier: ^19.3.1
@@ -543,10 +543,10 @@ importers:
   examples/react/next-ssr-e2e:
     dependencies:
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/react-db
       next:
         specifier: ^16.4.5
@@ -577,19 +577,19 @@ importers:
   examples/react/offline-transactions:
     dependencies:
       '@tanstack/browser-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/browser-db-sqlite-persistence
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/db
       '@tanstack/offline-transactions':
-        specifier: ^1.2.0
+        specifier: ^1.2.1
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.5.1
+        specifier: ^1.5.2
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.107.1
@@ -647,10 +647,10 @@ importers:
   examples/react/paced-mutations-demo:
     dependencies:
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/react-db
       mitt:
         specifier: ^3.0.1
@@ -687,10 +687,10 @@ importers:
         specifier: ^5.107.1
         version: 5.107.1
       '@tanstack/query-db-collection':
-        specifier: ^1.5.1
+        specifier: ^1.5.2
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.170.46
@@ -820,7 +820,7 @@ importers:
   examples/react/start-ssr-e2e:
     dependencies:
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.170.46
@@ -866,16 +866,16 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.107.1
         version: 5.107.1
       '@tanstack/query-db-collection':
-        specifier: ^1.5.1
+        specifier: ^1.5.2
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.170.46
@@ -884,7 +884,7 @@ importers:
         specifier: ^1.169.5
         version: 1.169.5(esbuild@0.28.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.18)(vite@8.3.6(@types/node@25.2.2)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.6(@types/node@25.2.2)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(webpack@5.112.2(esbuild@0.28.2))
       '@tanstack/trailbase-db-collection':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.6
@@ -987,16 +987,16 @@ importers:
   examples/solid/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.107.1
         version: 5.107.1
       '@tanstack/query-db-collection':
-        specifier: ^1.5.1
+        specifier: ^1.5.2
         version: link:../../../packages/query-db-collection
       '@tanstack/solid-db':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/solid-db
       '@tanstack/solid-router':
         specifier: ^1.170.43
@@ -1005,7 +1005,7 @@ importers:
         specifier: ^1.169.5
         version: 1.169.5(@tanstack/react-router@1.170.46(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.64.12)(solid-js@1.9.18)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.18)(vite@8.3.6(@types/node@25.2.2)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.6(@types/node@25.2.2)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(webpack@5.112.2(esbuild@0.28.2))
       '@tanstack/trailbase-db-collection':
-        specifier: ^1.0.0-rc.1.4
+        specifier: ^1.0.0-rc.1.5
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.6
@@ -1313,8 +1313,8 @@ importers:
         specifier: ^0.22.2
         version: 0.22.2(@types/node@25.2.2)(@typescript-eslint/utils@8.72.1(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.5(jiti@2.7.0))(rollup@4.64.12)(typescript@5.9.3)(vite@8.3.6(@types/node@25.2.2)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
       '@tanstack/oracles':
-        specifier: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@fe532f4
-        version: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@fe532f4(fast-check@4.10.2)(typescript@5.9.3)(vitest@5.1.0)
+        specifier: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@d1b508a
+        version: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@d1b508a(fast-check@4.10.2)(vitest@5.1.0)
       '@vitest/coverage-istanbul':
         specifier: ^5.1.0
         version: 5.1.0(vitest@5.1.0)
@@ -1584,6 +1584,9 @@ importers:
       '@powersync/node':
         specifier: 0.21.0
         version: 0.21.0(@powersync/common@2.5.0)(better-sqlite3@12.11.1)
+      '@powersync/web':
+        specifier: 2.6.0
+        version: 2.6.0(@powersync/common@2.5.0)(@powersync/shared-internals@1.5.0(@powersync/common@2.5.0))
       '@types/debug':
         specifier: ^4.1.13
         version: 4.1.13
@@ -4692,6 +4695,9 @@ packages:
   '@journeyapps/wa-sqlite@1.7.2':
     resolution: {integrity: sha512-EVRMzqHtHgJBFcTGOgQ5/YlxrYFSXLFFztC5yo6+jQx2mqFR+a1kkLV4IirquiBzIonjmYXfBtvZ26fmI8r9Nw==}
 
+  '@journeyapps/wa-sqlite@2.0.10':
+    resolution: {integrity: sha512-6Wo5ZijOc4/6M9u+MDsJdW8zDCdrct/p+7LcG7S7CT5YKu42j6lshMfUvgtGYMaZeuH7rpQHULZupPTQFqbS0w==}
+
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
 
@@ -5377,6 +5383,18 @@ packages:
     resolution: {integrity: sha512-EiYxTbqbD6lfpDERLyECBsORDfrrgLSf4nmQ35Ug4cUNKFBwO4tGPZaquGeXbr4O+uJk0QFE/f6+33MLCDurIA==}
     peerDependencies:
       '@powersync/common': 2.0.0
+
+  '@powersync/shared-internals@1.5.0':
+    resolution: {integrity: sha512-dIaMenW6gJNyKzD93d4X4CiBtJxyJ63pvK2CYGjqBtVqubGBt9d+jg6V6JTKw4VLPjFCZh7/zrXMV34wl7kzGw==}
+    peerDependencies:
+      '@powersync/common': ^2.5.0
+
+  '@powersync/web@2.6.0':
+    resolution: {integrity: sha512-/B8u/sPHyNiPH1bj+vOfN/9sHlbp9lwQGtS6BHJJjqWlhBaUxzh4xQMydyQcS6puHaDXzddpOlkZIvTLOTLMnw==}
+    hasBin: true
+    peerDependencies:
+      '@powersync/common': ^2.5.0
+      '@powersync/shared-internals': ^1.5.0
 
   '@publint/pack@0.1.7':
     resolution: {integrity: sha512-4EDEmvxWtgsCnnVeBvtFIFZtUhPPt1+bA9JrSwU4Sa//6oKtzCSlGGXYJr44OD9aGISymbieJ4mCKHUygUDU+g==}
@@ -6305,8 +6323,8 @@ packages:
     peerDependencies:
       eslint: ^8.0.0 || ^9.0.0
 
-  '@tanstack/eslint-plugin-oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@fe532f4':
-    resolution: {integrity: sha512-WuZU126k0oY02IrtEVKn23HnebBXyTB09NJgARGApfsXZuDxDp9lXQhXpB8Dr4YWNLSWeJX+c2pDZl0hoIvw9Q==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@fe532f4}
+  '@tanstack/eslint-plugin-oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@d1b508a':
+    resolution: {integrity: sha512-qjW5wQbicLQTID6iILaEn632NuTI+l58ZMRDTv4+EFlLOJe2NWG2CTrk3tyq1vVVkxOuTTfiJ+4dBqya3gAD+g==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@d1b508a}
     version: 0.0.0
     engines: {node: '>=20'}
     peerDependencies:
@@ -6316,18 +6334,14 @@ packages:
     resolution: {integrity: sha512-w1+YvwmTkwt5n8yUqEH3IWZ9DsmorCZW/EQ3KYHnqEgIkOZpH54NvW6/Epq3Dzb8H0ifIeYX8PExvrNLIH5FIA==}
     engines: {node: '>=20.19'}
 
-  '@tanstack/oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@fe532f4':
-    resolution: {integrity: sha512-UiTG7bH19Jm+NPzP1JQU2ROofw8fqbfS2hG3gczbe0DXtt3h7r6U6LqTpZkadmA/o6vBsjdYuAcbG4f4XP41ZA==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@fe532f4}
+  '@tanstack/oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@d1b508a':
+    resolution: {integrity: sha512-i+D+r7zcr1yHsrp8GzLYrbJ4F+Nxg+gfPQO42XcRJQfgBdHyoHW1YywFinC6RD2uyaWqhFgBhTmuvl2Rf0qOPA==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@d1b508a}
     version: 0.0.0
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
       fast-check: ^4.0.0
-      typescript: '>=5.0.0'
       vitest: ^4.1.0 || ^5.0.0
-    peerDependenciesMeta:
-      typescript:
-        optional: true
 
   '@tanstack/pacer-lite@0.3.0':
     resolution: {integrity: sha512-+YeHKWX5Zd1Irga2smwAolGtzOcf8VVYhM2QI5XEA5TN58iKKufTjhvrbTCEgLLglR1ynHMGVT/l4m5PkwOdaw==}
@@ -16892,6 +16906,8 @@ snapshots:
 
   '@journeyapps/wa-sqlite@1.7.2': {}
 
+  '@journeyapps/wa-sqlite@2.0.10': {}
+
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
@@ -17469,6 +17485,18 @@ snapshots:
   '@powersync/shared-internals@1.1.1(@powersync/common@2.5.0)':
     dependencies:
       '@powersync/common': 2.5.0
+
+  '@powersync/shared-internals@1.5.0(@powersync/common@2.5.0)':
+    dependencies:
+      '@powersync/common': 2.5.0
+
+  '@powersync/web@2.6.0(@powersync/common@2.5.0)(@powersync/shared-internals@1.5.0(@powersync/common@2.5.0))':
+    dependencies:
+      '@journeyapps/wa-sqlite': 2.0.10
+      '@powersync/common': 2.5.0
+      '@powersync/shared-internals': 1.5.0(@powersync/common@2.5.0)
+      comlink: 4.4.2
+      commander: 12.1.0
 
   '@publint/pack@0.1.7':
     dependencies:
@@ -18578,7 +18606,7 @@ snapshots:
       - supports-color
       - typescript
 
-  '@tanstack/eslint-plugin-oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@fe532f4(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)':
+  '@tanstack/eslint-plugin-oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@d1b508a(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)':
     dependencies:
       '@typescript-eslint/parser': 8.72.1(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       eslint: 9.39.5(jiti@2.7.0)
@@ -18588,12 +18616,11 @@ snapshots:
 
   '@tanstack/history@1.162.5': {}
 
-  '@tanstack/oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@fe532f4(fast-check@4.10.2)(typescript@5.9.3)(vitest@5.1.0)':
+  '@tanstack/oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@d1b508a(fast-check@4.10.2)(vitest@5.1.0)':
     dependencies:
       fast-check: 4.10.2
-      vitest: 5.1.0(@types/node@25.2.2)(@vitest/coverage-istanbul@5.1.0)(@vitest/ui@5.1.0)(jsdom@27.4.0)(vite@8.3.6(@types/node@25.2.2)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
-    optionalDependencies:
       typescript: 5.9.3
+      vitest: 5.1.0(@types/node@25.2.2)(@vitest/coverage-istanbul@5.1.0)(@vitest/ui@5.1.0)(jsdom@27.4.0)(vite@8.3.6(@types/node@25.2.2)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
   '@tanstack/pacer-lite@0.3.0': {}
 

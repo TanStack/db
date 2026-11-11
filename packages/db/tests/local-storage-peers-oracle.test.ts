@@ -45,7 +45,6 @@ import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
 import { createHost } from './local-storage-peer-fixtures'
 import { withHistoryCleanup } from './optimistic-history-oracle'
-import { declareOracle } from './oracle-declaration'
 import { oracleProperty, pass, violation } from './oracle-property'
 
 // -- Histories ------------------------------------------------------------------
@@ -512,18 +511,14 @@ const describeAction = (action: Action) => {
 // src/local-storage.ts by this file's generated same-tab and cross-tab peer
 // histories.
 
-declareOracle({
-  owns: [`src/local-storage.ts`],
-})
-
 oracleProperty({
   id: `local-storage.peers`,
   law: {
     statement: `Collections sharing a LocalStorage key agree with storage: stored rows follow each write applied to the current snapshot; same-tab peers show stored rows once a write or clearStorage() settles, except their own pending optimistic rows; a write makes every Collection in its tab read storage; another tab shows a row the first tab changed once its storage event arrives.`,
     authority: `LocalStorage guide, "Synchronization" (same-tab peers, pending optimistic rows, clearStorage, preserved peer rows, storage events); glossary "accepted sync transaction" (held while an optimistic transaction persists); maintainer decision D43, 2026-11-02 (a write reads storage for its tab)`,
     limits: `Up to three actions; numeric values; one held write by A; automatic, manual, handler, and custom-parser write paths and clearStorage() from any Collection; no write races, startup errors, storage faults, reload, or cleanup.`,
-    owner: `LocalStorage Collection`,
   },
+  owns: [`src/local-storage.ts`],
   histories: enumerate(),
   label: (history) => history.map(describeAction).join(` `),
   model: expectedResult,
