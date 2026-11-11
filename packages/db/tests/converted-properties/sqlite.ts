@@ -34,6 +34,14 @@ export const properties: ReadonlyArray<string> = [
   `sqlite-ordinary.idempotent-position`,
   `sqlite-ordinary.late-bookkeeping-fault`,
   `sqlite-ordinary.later-row-write-fault`,
+  `browser-coordinator.subset-wire`,
+  `browser-coordinator.subset-ack`,
+  `browser-coordinator.collection-scoped-lease`,
+  `browser-coordinator.remote-lease-takeover`,
+  `browser-coordinator.adapter-isolation`,
+  `browser-coordinator.fresh-init`,
+  `browser-coordinator.write-ownership`,
+  `browser-coordinator.real-tab-follower`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -77,5 +85,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `sqlite-ordinary`,
     `native-values write-history-fixed independent-work-fixed fixed-cases metadata-discarding-writer low-call-replacement idempotent-position late-bookkeeping-fault later-row-write-fault`,
     `db-sqlite-persistence-core/tests/ordinary-transaction-work-oracle.ts`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/per-collection-coordinator-oracle.test.ts`,
+    `browser-coordinator`,
+    `subset-wire subset-ack collection-scoped-lease remote-lease-takeover adapter-isolation fresh-init write-ownership real-tab-follower`,
   ],
 ]
