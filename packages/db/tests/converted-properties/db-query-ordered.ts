@@ -121,6 +121,9 @@ const otherProperties: ReadonlyArray<string> = [
   `subquery-user-value.ordered-find-one`,
   `subquery-user-value.materialized-find-one`,
   `query-identity.compound-join`,
+  `ir-identity.output-denotation-fixed`,
+  `ir-identity.operator-code-outcome`,
+  `ir-identity.operator-code-wide`,
 ]
 const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
@@ -282,6 +285,21 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/identity-output-shape-oracle.test.ts`,
     `query-identity`,
     `compound-join`,
+  ],
+  [
+    `db/tests/query/ir-stable-identity-oracle.test.ts`,
+    `ir-identity`,
+    `output-denotation-fixed`,
+  ],
+  [
+    `db/tests/query/ir-stable-identity-oracle.test.ts`,
+    `ir-identity`,
+    `operator-code-outcome`,
+  ],
+  [
+    `db/tests/query/ir-stable-identity-oracle.test.ts`,
+    `ir-identity`,
+    `operator-code-wide`,
   ],
 ]
 
