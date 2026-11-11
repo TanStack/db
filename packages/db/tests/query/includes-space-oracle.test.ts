@@ -56,7 +56,10 @@ async function judgeReachableFacades(rootCount: number): Promise<void> {
       expectedFacadeCount(rootCount),
     )
     expect(
-      [...adapters].reduce((n, adapter) => n + countEntries(adapter.entries), 0),
+      [...adapters].reduce(
+        (n, adapter) => n + countEntries(adapter.entries),
+        0,
+      ),
     ).toBe(expectedFacadeCount(rootCount))
     expect(
       [...adapters].reduce(
