@@ -41,8 +41,8 @@
  * The mock sync source is a controlled provider; this oracle claims only the
  * compiler's keying of the rows it supplies, not any real adapter's behavior.
  */
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterAll, describe, expect, it } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { describe, expect, it } from 'vitest'
 import {
   Query,
   createLiveQueryCollection,
@@ -53,16 +53,17 @@ import {
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
+  oracleProperty,
   oracleReplayRequested,
-  oracleReplayTest,
   oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
 } from '../oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import { declareOracle } from '../oracle-declaration.js'
-import { createOracleReach } from '../oracle-reach.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 import { expectedSourceMetadata } from './virtual-row-fields-source-oracle.js'
 import type { QueryBuilder } from '../../src/query/builder/index.js'
@@ -246,10 +247,14 @@ async function runHistory(history: History): Promise<void> {
     const published = live.toArray
       .map((row) => describePair({ l: row.l, r: row.r }))
       .sort()
-    expect(published, checkpoint).toEqual(
-      expectedPairs(history.join, leftRows, rightRows),
+    oracleAssertion(checkpoint, () =>
+      expect(published, checkpoint).toEqual(
+        expectedPairs(history.join, leftRows, rightRows),
+      ),
     )
-    expect(live.size, `${checkpoint} key count`).toBe(published.length)
+    oracleAssertion(`${checkpoint} key count`, () =>
+      expect(live.size, `${checkpoint} key count`).toBe(published.length),
+    )
   }
   await withOracleCleanup(async () => {
     await live.preload()
@@ -298,27 +303,31 @@ describe(`joined result key oracle`, () => {
         return runHistory(history)
       })
     }
-
-    const historyFixedSeed = oracleFixedSeed(44_501_962, {
-      numRuns: oracleRuns(80),
-    })
-    fcTest.prop([historyArbitrary], historyFixedSeed)(
-      `publishes one row per joined pair (fixed)`,
-      (history) => {
-        oracleRoute(oracleRouteOf(historyFixedSeed))
-        return runHistory(history)
-      },
-    )
   }
 
-  const historyCampaign = oraclePropertyOptions(80, property)
-  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
-    `publishes one row per joined pair (random)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(historyCampaign))
-      return runHistory(history)
+  oracleProperty({
+    id: property,
+    law: {
+      statement: `Each joined source pair retains a distinct public row and key after preload and synced group changes.`,
+      authority: `docs/guides/live-queries.md, Joins and getKey, and the established key contract above.`,
+      limits: `The unchanged bounded two-source inner, left and full join grammar with up to three synced group changes.`,
+      owner: `Joined result keys`,
     },
-  )
+    histories: {
+      arbitrary: historyArbitrary,
+      runs: 80,
+      fixedSeeds: [44501962],
+      states: [],
+      constructed: [],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { history: History }, observe) =>
+      recordAssertionJudgment(property, plan, observe, () =>
+        runHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -442,15 +451,6 @@ const selectionState = (
   cut: string,
 ) =>
   `${history.join}/${history.selected}/${history.composition}/${history.shape}/${history.collision}/${history.customKey}/${receiver}/${cut}`
-const selectionReach = createOracleReach(
-  selectionProperty,
-  selectionExamples.flatMap((history) =>
-    selectionReceivers.flatMap((receiver) =>
-      selectionCuts.map((cut) => selectionState(history, receiver, cut)),
-    ),
-  ),
-)
-
 // A plain nested-loop join supplies occurrences; selecting a source changes
 // its value, never the number of those occurrences. No compiler key encoder
 // participates. The public key's format remains implementation freedom.
@@ -547,11 +547,16 @@ function checkSelections(
     : (actual as ReadonlyArray<readonly [Key, Record<string, unknown>]>).map(
         ([key, row]) => {
           check(() => {
-            expect(typeof key === `string` || typeof key === `number`).toBe(
-              true,
+            oracleAssertion(`checkSelections comparison 3`, () =>
+              expect(typeof key === `string` || typeof key === `number`).toBe(
+                true,
+              ),
             )
-            expect(row.$key, `published key equals Collection entry key`).toBe(
-              key,
+            oracleAssertion(`published key equals Collection entry key`, () =>
+              expect(
+                row.$key,
+                `published key equals Collection entry key`,
+              ).toBe(key),
             )
           })
           const { $key: _key, ...value } = row
@@ -563,8 +568,10 @@ function checkSelections(
       ([key]) => key,
     )
     check(() =>
-      expect(new Set(keys).size, `distinct joined occurrence keys`).toBe(
-        expected.length,
+      oracleAssertion(`distinct joined occurrence keys`, () =>
+        expect(new Set(keys).size, `distinct joined occurrence keys`).toBe(
+          expected.length,
+        ),
       ),
     )
   }
@@ -575,15 +582,21 @@ function checkSelections(
     }
     return describeRow(a).localeCompare(describeRow(b))
   }
-  check(() => expect([...rows].sort(order)).toEqual([...expected].sort(order)))
+  check(() =>
+    oracleAssertion(`checkSelections comparison 6`, () =>
+      expect([...rows].sort(order)).toEqual([...expected].sort(order)),
+    ),
+  )
   if (failures.length)
     throw new AggregateError(failures, `Joined selection refinement`, {
       cause: failures[0],
     })
 }
 
-async function runSelectionHistory(history: SelectionHistory): Promise<void> {
-  selectionReach.beginHistory()
+async function runSelectionHistory(
+  history: SelectionHistory,
+  observeCheckpoint: (state: string) => void = () => {},
+): Promise<void> {
   const makeRows = (keys: ReadonlyArray<Key>, unmatched: number) =>
     keys.map((id, index) => ({
       id,
@@ -674,7 +687,7 @@ async function runSelectionHistory(history: SelectionHistory): Promise<void> {
   const check = (cut: (typeof selectionCuts)[number]) => {
     const parent = nested.toArray[0]!
     for (const receiver of selectionReceivers) {
-      selectionReach.reach(selectionState(history, receiver, cut))
+      observeCheckpoint(selectionState(history, receiver, cut))
       try {
         const inline = receiver === `array` || receiver === `materialized`
         if (!inline) {
@@ -683,10 +696,14 @@ async function runSelectionHistory(history: SelectionHistory): Promise<void> {
             .sort()
           if (cut === `initial`) initialKeys.set(receiver, keys)
           else if (cut !== `unmatched`)
-            expect(
-              keys,
+            oracleAssertion(
               `${receiver}/${cut} same pairs keep their keys`,
-            ).toEqual(initialKeys.get(receiver))
+              () =>
+                expect(
+                  keys,
+                  `${receiver}/${cut} same pairs keep their keys`,
+                ).toEqual(initialKeys.get(receiver)),
+            )
         }
         checkSelections(
           receiver === `root`
@@ -740,7 +757,9 @@ async function runSelectionHistory(history: SelectionHistory): Promise<void> {
       finishMutation = async () => {}
       await mutation.when(`settled`)
     }
-    expect(source.get(selectedKey)!.$hasPendingWrites).toBe(true)
+    oracleAssertion(`runSelectionHistory comparison 8`, () =>
+      expect(source.get(selectedKey)!.$hasPendingWrites).toBe(true),
+    )
     check(`held`)
     const peer = history.selected === `left` ? right : left
     const movePeers = (group: number) => {
@@ -791,39 +810,60 @@ declareOracle({
   check: [checkSelections, runSelectionHistory],
   grammar: [selectionForms, selectionHistoryArbitrary],
 })
-afterAll(() => {
-  selectionReach.assertReached()
-  if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
-    process.stdout.write(
-      `${JSON.stringify({ property: selectionProperty, reach: Object.fromEntries(selectionReach.counts()) })}\n`,
-    )
-})
-describe(`whole-source joined occurrences`, () => {
-  if (!oracleReplayRequested()) {
-    it.each(selectionExamples)(
-      `preserves every selected occurrence: %j`,
-      (history) => {
-        oracleRoute(`case`)
-        return runSelectionHistory(history)
-      },
-    )
-    const selectionHistoryFixedSeed = oracleFixedSeed(15_811_743, {
-      numRuns: oracleRuns(80),
-    })
-    fcTest.prop([selectionHistoryArbitrary], selectionHistoryFixedSeed)(
-      `preserves selected occurrences (fixed)`,
-      (history) => {
-        oracleRoute(oracleRouteOf(selectionHistoryFixedSeed))
-        return runSelectionHistory(history)
-      },
-    )
+// The old aggregate ledger counted each form/receiver/cut reached by the finite
+// matrix. The native finite property preserves every form. Each history checks
+// its own receiver/cut product at the same production boundaries, so all 4,608
+// original matrix cells remain required without repeating the full matrix in
+// every generated history.
+async function judgeSelectionHistory(history: SelectionHistory): Promise<void> {
+  const reached = new Set<string>()
+  await runSelectionHistory(history, (state) => reached.add(state))
+  for (const receiver of selectionReceivers) {
+    for (const cut of selectionCuts) {
+      const state = selectionState(history, receiver, cut)
+      oracleAssertion(`joined selection checkpoint ${state}`, () =>
+        expect(reached.has(state), state).toBe(true),
+      )
+    }
   }
-  const selectionHistoryCampaign = oraclePropertyOptions(80, selectionProperty)
-  oracleReplayTest(fcTest, selectionProperty).prop(
-    [selectionHistoryArbitrary],
-    selectionHistoryCampaign,
-  )(`preserves selected occurrences (random)`, (history) => {
-    oracleRoute(oracleRouteOf(selectionHistoryCampaign))
-    return runSelectionHistory(history)
-  })
+}
+
+const selectionLaw = {
+  statement: `Whole-source selections preserve joined occurrences, public key identity and source attribution at each receiving cut.`,
+  authority: `docs/guides/live-queries.md, Joins/getKey, and the November 5 metadata decision stated above.`,
+  limits: `The unchanged direct/QueryRef, selection and custom-key forms across root, facade and inline receivers with one held optimistic mutation.`,
+  owner: `Whole-source joined occurrences`,
+}
+const driveSelectionHistory = (
+  plan: { history: SelectionHistory },
+  observe: Parameters<typeof recordAssertionJudgment>[2],
+) =>
+  recordAssertionJudgment(selectionProperty, plan, observe, () =>
+    judgeSelectionHistory(plan.history),
+  )
+
+oracleProperty({
+  id: `join-result-key.whole-source-matrix`,
+  law: selectionLaw,
+  histories: selectionExamples,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: driveSelectionHistory,
+  check: forwardAssertionJudgment,
+})
+
+oracleProperty({
+  id: selectionProperty,
+  law: selectionLaw,
+  histories: {
+    arbitrary: selectionHistoryArbitrary,
+    runs: 80,
+    fixedSeeds: [15811743],
+    states: [],
+    constructed: [],
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: driveSelectionHistory,
+  check: forwardAssertionJudgment,
 })

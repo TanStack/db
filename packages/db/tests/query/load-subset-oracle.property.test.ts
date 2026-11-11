@@ -1,15 +1,20 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import { createDeferred } from '../../src/deferred.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
+import {
   oracleFixedSeed,
-  oracleRandomParameters,
+  oracleProperty,
+  oracleReplayRequested,
   oracleRoute,
-  oracleRouteOf,
-  readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
@@ -106,7 +111,9 @@ function assertCompletedExactDemandTrace(
   let expectedStart: LoadSubsetOptions | undefined
   const dedupe = new DeduplicatedLoadSubset({
     loadSubset: (options) => {
-      expect(options).toEqual(expectedStart)
+      oracleAssertion(`assertCompletedExactDemandTrace comparison 1`, () =>
+        expect(options).toEqual(expectedStart),
+      )
       starts++
       return true
     },
@@ -117,8 +124,12 @@ function assertCompletedExactDemandTrace(
     expectedStart = toLoadSubsetOptions(demand)
     const result = dedupe.loadSubset(expectedStart)
     const fingerprint = exactDemandFingerprint(demand)
-    expect(result).toBe(true)
-    expect(starts - startsBefore).toBe(completed.has(fingerprint) ? 0 : 1)
+    oracleAssertion(`assertCompletedExactDemandTrace comparison 2`, () =>
+      expect(result).toBe(true),
+    )
+    oracleAssertion(`assertCompletedExactDemandTrace comparison 3`, () =>
+      expect(starts - startsBefore).toBe(completed.has(fingerprint) ? 0 : 1),
+    )
     completed.add(fingerprint)
   }
 }
@@ -150,10 +161,16 @@ async function assertConcurrentExactDemandTrace({
     }
     const existing = promisesByDemand.get(fingerprint)
     if (existing) {
-      expect(transports).toHaveLength(startsBefore)
-      expect(result).toBe(existing)
+      oracleAssertion(`assertConcurrentExactDemandTrace comparison 4`, () =>
+        expect(transports).toHaveLength(startsBefore),
+      )
+      oracleAssertion(`assertConcurrentExactDemandTrace comparison 5`, () =>
+        expect(result).toBe(existing),
+      )
     } else {
-      expect(transports).toHaveLength(startsBefore + 1)
+      oracleAssertion(`assertConcurrentExactDemandTrace comparison 6`, () =>
+        expect(transports).toHaveLength(startsBefore + 1),
+      )
       promisesByDemand.set(fingerprint, result)
     }
     return result
@@ -163,20 +180,32 @@ async function assertConcurrentExactDemandTrace({
   const settlement =
     settlementOrder === `forward` ? transports : [...transports].reverse()
   for (const transport of settlement) transport.deferred.resolve()
-  expect((await observed).every(({ status }) => status === `fulfilled`)).toBe(
-    true,
+  const settledCallers = await observed
+  oracleAssertion(`assertConcurrentExactDemandTrace comparison 7`, () =>
+    expect(settledCallers.every(({ status }) => status === `fulfilled`)).toBe(
+      true,
+    ),
   )
 
   const startsAfterSettlement = transports.length
   for (const demand of trace) {
-    expect(dedupe.loadSubset(toLoadSubsetOptions(demand))).toBe(true)
+    const completedResult = dedupe.loadSubset(toLoadSubsetOptions(demand))
+    oracleAssertion(`assertConcurrentExactDemandTrace comparison 8`, () =>
+      expect(completedResult).toBe(true),
+    )
   }
-  expect(transports).toHaveLength(startsAfterSettlement)
+  oracleAssertion(`assertConcurrentExactDemandTrace comparison 9`, () =>
+    expect(transports).toHaveLength(startsAfterSettlement),
+  )
 
   dedupe.reset()
   const restarted = dedupe.loadSubset(toLoadSubsetOptions(trace[0]!))
-  expect(restarted).toBeInstanceOf(Promise)
-  expect(transports).toHaveLength(startsAfterSettlement + 1)
+  oracleAssertion(`assertConcurrentExactDemandTrace comparison 10`, () =>
+    expect(restarted).toBeInstanceOf(Promise),
+  )
+  oracleAssertion(`assertConcurrentExactDemandTrace comparison 11`, () =>
+    expect(transports).toHaveLength(startsAfterSettlement + 1),
+  )
   transports.at(-1)!.deferred.resolve()
   await restarted
 }
@@ -229,17 +258,27 @@ async function expectExactWaitersShareRejection({
           ),
         )
         callers.push(result)
-        expect(result).toBeInstanceOf(Promise)
-        expect(result).toBe(callers[0])
-        expect(transports).toHaveLength(attempt + 1)
+        oracleAssertion(`expectExactWaitersShareRejection comparison 12`, () =>
+          expect(result).toBeInstanceOf(Promise),
+        )
+        oracleAssertion(`expectExactWaitersShareRejection comparison 13`, () =>
+          expect(result).toBe(callers[0]),
+        )
+        oracleAssertion(`expectExactWaitersShareRejection comparison 14`, () =>
+          expect(transports).toHaveLength(attempt + 1),
+        )
       }
-      expect(callers[0]).not.toBe(previous)
+      oracleAssertion(`expectExactWaitersShareRejection comparison 15`, () =>
+        expect(callers[0]).not.toBe(previous),
+      )
       previous = callers[0]
       const outcomes = Promise.allSettled(callers)
       observed.push(outcomes)
       await Promise.resolve()
       await Promise.resolve()
-      expect(settlements).toEqual([])
+      oracleAssertion(`expectExactWaitersShareRejection comparison 16`, () =>
+        expect(settlements).toEqual([]),
+      )
 
       const transport = transports[attempt]!
       if (attempt < failures) {
@@ -247,32 +286,47 @@ async function expectExactWaitersShareRejection({
           failureKind === `error` ? new Error(`transport failed`) : undefined
         transport.reject(failure)
         for (const outcome of await outcomes) {
-          expect(outcome.status).toBe(`rejected`)
+          oracleAssertion(
+            `expectExactWaitersShareRejection comparison 17`,
+            () => expect(outcome.status).toBe(`rejected`),
+          )
           if (outcome.status === `rejected`)
-            expect(outcome.reason).toBe(failure)
+            oracleAssertion(
+              `expectExactWaitersShareRejection comparison 18`,
+              () => expect(outcome.reason).toBe(failure),
+            )
         }
-        expect(settlements).toEqual(Array(waiters).fill(`rejected`))
+        oracleAssertion(`expectExactWaitersShareRejection comparison 19`, () =>
+          expect(settlements).toEqual(Array(waiters).fill(`rejected`)),
+        )
       } else {
         transport.resolve()
-        expect(await outcomes).toEqual(
-          Array.from({ length: waiters }, () => ({
-            status: `fulfilled`,
-            value: undefined,
-          })),
+        const completedOutcomes = await outcomes
+        oracleAssertion(`expectExactWaitersShareRejection comparison 20`, () =>
+          expect(completedOutcomes).toEqual(
+            Array.from({ length: waiters }, () => ({
+              status: `fulfilled`,
+              value: undefined,
+            })),
+          ),
         )
-        expect(settlements).toEqual(Array(waiters).fill(`fulfilled`))
+        oracleAssertion(`expectExactWaitersShareRejection comparison 21`, () =>
+          expect(settlements).toEqual(Array(waiters).fill(`fulfilled`)),
+        )
       }
     }
-    expect(dedupe.loadSubset(toLoadSubsetOptions(demand))).toBe(true)
-    expect(transports).toHaveLength(failures + 1)
+    const completedResult = dedupe.loadSubset(toLoadSubsetOptions(demand))
+    oracleAssertion(`expectExactWaitersShareRejection comparison 22`, () =>
+      expect(completedResult).toBe(true),
+    )
+    oracleAssertion(`expectExactWaitersShareRejection comparison 23`, () =>
+      expect(transports).toHaveLength(failures + 1),
+    )
   } finally {
     for (const transport of transports) transport.resolve()
     await Promise.all(observed)
   }
 }
-
-const { multiplier, ...replay } = readOracleRunConfig()
-const exactScenarioRuns = 40 * multiplier
 
 // The checks are the drivers that run one history and compare it with the
 // demand-identity model: a completed demand starts once, and only identical
@@ -339,59 +393,58 @@ describe(`exact loadSubset demand oracle`, () => {
     expect(new Set(demands.map(({ offset }) => offset)).size).toBeGreaterThan(1)
   })
 
-  const exactDemandTraceFixedSeed = oracleFixedSeed(1657, {
-    numRuns: exactScenarioRuns,
+  // All three native registrations retain the existing independent helpers.
+  // Assertion judgments stay at their original cuts; data-only traces carry
+  // their verdict kinds while the adapter retains exact diagnostic objects.
+  oracleProperty({
+    id: `load-subset.exact-completion`,
+    law: {
+      statement: `Every completed exact demand starts once and distinct demands start independently.`,
+      authority: `ARCHITECTURE.md Demand grouping and ownership; the exact-demand law above.`,
+      limits: `The unchanged bounded exact-demand trace grammar without abort signals; no broader coverage or row ownership claim.`,
+      owner: `Exact demand completion`,
+    },
+    histories: {
+      arbitrary: exactDemandTraceArbitrary,
+      runs: 40,
+      fixedSeeds: [1657],
+      states: [],
+      constructed: [],
+    },
+    resolve: (trace) => ({ trace }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { trace: ReadonlyArray<ExactDemand> }, observe) =>
+      recordAssertionJudgment(
+        `load-subset.exact-completion`,
+        plan,
+        observe,
+        () => assertCompletedExactDemandTrace(plan.trace),
+      ),
+    check: forwardAssertionJudgment,
   })
-  fcTest.prop([exactDemandTraceArbitrary], exactDemandTraceFixedSeed)(
-    `starts each completed exact demand once for a fixed seed`,
-    (...args: Parameters<typeof assertCompletedExactDemandTrace>) => {
-      oracleRoute(oracleRouteOf(exactDemandTraceFixedSeed))
-      return assertCompletedExactDemandTrace(...args)
+  oracleProperty({
+    id: `load-subset.exact-inflight`,
+    law: {
+      statement: `Only identical in-flight demands share a transport and the same promise, in either settlement order.`,
+      authority: `ARCHITECTURE.md Demand grouping and ownership; the exact-demand law above.`,
+      limits: `The unchanged concurrent exact-demand grammar, with forward/reverse settlement and reset, without independent cancellation.`,
+      owner: `Exact demand in-flight sharing`,
     },
-  )
-
-  const exactDemandTraceCampaign = oracleRandomParameters(
-    exactScenarioRuns,
-    replay,
-    `load-subset.exact-completion`,
-  )
-  fcTest.prop([exactDemandTraceArbitrary], exactDemandTraceCampaign)(
-    `starts each completed exact demand once for a random or replayed seed`,
-    (...args: Parameters<typeof assertCompletedExactDemandTrace>) => {
-      oracleRoute(oracleRouteOf(exactDemandTraceCampaign))
-      return assertCompletedExactDemandTrace(...args)
+    histories: {
+      arbitrary: concurrentExactScenarioArbitrary,
+      runs: 40,
+      fixedSeeds: [1661],
+      states: [],
+      constructed: [],
     },
-  )
-
-  const concurrentExactScenarioFixedSeed = oracleFixedSeed(1661, {
-    numRuns: exactScenarioRuns,
+    resolve: (scenario) => ({ scenario }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { scenario: ConcurrentExactScenario }, observe) =>
+      recordAssertionJudgment(`load-subset.exact-inflight`, plan, observe, () =>
+        assertConcurrentExactDemandTrace(plan.scenario),
+      ),
+    check: forwardAssertionJudgment,
   })
-  fcTest.prop(
-    [concurrentExactScenarioArbitrary],
-    concurrentExactScenarioFixedSeed,
-  )(
-    `shares only identical in-flight demands for a fixed seed`,
-    (...args: Parameters<typeof assertConcurrentExactDemandTrace>) => {
-      oracleRoute(oracleRouteOf(concurrentExactScenarioFixedSeed))
-      return assertConcurrentExactDemandTrace(...args)
-    },
-  )
-
-  const concurrentExactScenarioCampaign = oracleRandomParameters(
-    exactScenarioRuns,
-    replay,
-    `load-subset.exact-inflight`,
-  )
-  fcTest.prop(
-    [concurrentExactScenarioArbitrary],
-    concurrentExactScenarioCampaign,
-  )(
-    `shares only identical in-flight demands for a random or replayed seed`,
-    (...args: Parameters<typeof assertConcurrentExactDemandTrace>) => {
-      oracleRoute(oracleRouteOf(concurrentExactScenarioCampaign))
-      return assertConcurrentExactDemandTrace(...args)
-    },
-  )
 
   it(`reports one rejection to every exact waiter and then retries`, async () => {
     oracleRoute(`fixed history`)
@@ -412,54 +465,52 @@ describe(`exact loadSubset demand oracle`, () => {
     })
   })
 
-  const rejectedWaiterScenarioFixedSeed = oracleFixedSeed<
-    fc.Parameters<Parameters<typeof expectExactWaitersShareRejection>>
-  >(703027, {
-    numRuns: exactScenarioRuns,
-    examples: [
-      [
-        {
-          demand: {
-            values: [1, 2],
-            orderField: `rank`,
-            direction: `asc`,
-            nulls: `last`,
-            stringSort: `lexical`,
-            offset: 0,
-            limit: 2,
-            cursorBoundary: undefined,
-          },
-          failures: 3,
-          waiters: 4,
-          failureKind: `undefined`,
+  // This was the fixed-seed campaign's explicit example. It still runs the
+  // same helper once, separately from the unchanged generated campaign.
+  if (!oracleReplayRequested()) {
+    it(`retries an undefined rejection through a fresh successful acquisition`, () => {
+      oracleRoute(`fixed history`)
+      return expectExactWaitersShareRejection({
+        demand: {
+          values: [1, 2],
+          orderField: `rank`,
+          direction: `asc`,
+          nulls: `last`,
+          stringSort: `lexical`,
+          offset: 0,
+          limit: 2,
+          cursorBoundary: undefined,
         },
-      ],
-    ],
+        failures: 3,
+        waiters: 4,
+        failureKind: `undefined`,
+      })
+    })
+  }
+  oracleProperty({
+    id: `load-subset.rejected-waiter`,
+    law: {
+      statement: `Every exact waiter receives the same rejection and each later attempt starts fresh work until success is cached.`,
+      authority: `ARCHITECTURE.md Demand grouping and ownership; the rejection and retry law above.`,
+      limits: `The unchanged one-to-three failures with two-to-four waiters and Error/undefined rejection values; no applied-settlement claim.`,
+      owner: `Exact demand waiter rejection`,
+    },
+    histories: {
+      arbitrary: rejectedWaiterScenarioArbitrary,
+      runs: 40,
+      fixedSeeds: [703027],
+      states: [],
+      constructed: [],
+    },
+    resolve: (scenario) => ({ scenario }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { scenario: RejectedWaiterScenario }, observe) =>
+      recordAssertionJudgment(
+        `load-subset.rejected-waiter`,
+        plan,
+        observe,
+        () => expectExactWaitersShareRejection(plan.scenario),
+      ),
+    check: forwardAssertionJudgment,
   })
-  fcTest.prop(
-    [rejectedWaiterScenarioArbitrary],
-    rejectedWaiterScenarioFixedSeed,
-  )(
-    `retries failed exact demand histories through fresh success for a fixed seed`,
-    (...args: Parameters<typeof expectExactWaitersShareRejection>) => {
-      oracleRoute(oracleRouteOf(rejectedWaiterScenarioFixedSeed))
-      return expectExactWaitersShareRejection(...args)
-    },
-  )
-
-  const rejectedWaiterScenarioCampaign = oracleRandomParameters(
-    exactScenarioRuns,
-    replay,
-    `load-subset.rejected-waiter`,
-  )
-  fcTest.prop(
-    [rejectedWaiterScenarioArbitrary],
-    rejectedWaiterScenarioCampaign,
-  )(
-    `retries failed exact demand histories through fresh success for a random or replayed seed`,
-    (...args: Parameters<typeof expectExactWaitersShareRejection>) => {
-      oracleRoute(oracleRouteOf(rejectedWaiterScenarioCampaign))
-      return expectExactWaitersShareRejection(...args)
-    },
-  )
 })

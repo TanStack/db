@@ -919,36 +919,20 @@ declareOracle({
 })
 // Each named helper keeps its independent settlement model and assertions at
 // the original cuts; native registration changes only campaign mechanics.
-function registerExistingHistory<T>(
+const lifecycleLaw = {
+  statement: `The existing settlement ledger and terminal-state model judge each original observation, error, and resource-ownership checkpoint.`,
+  authority: `The OPFS opener lifecycle and worker protocol contract stated above.`,
+  limits: `The existing bounded controlled-Worker histories; no physical OPFS, bfcache, or native handle claim.`,
+  owner: `SQLite persistence`,
+}
+function registerFixedHistory<T>(
   id: string,
-  arbitrary: fc.Arbitrary<T>,
-  runs: number,
-  seed: number,
   examples: ReadonlyArray<readonly [T]>,
   judge: (history: T) => Promise<void>,
-  fixedId: string,
 ) {
-  const law = {
-    statement: `The existing settlement ledger and terminal-state model judge each original observation, error, and resource-ownership checkpoint.`,
-    authority: `The OPFS opener lifecycle and worker protocol contract stated above.`,
-    limits: `The existing bounded controlled-Worker histories; no physical OPFS, bfcache, or native handle claim.`,
-    owner: `SQLite persistence`,
-  }
   oracleProperty({
     id,
-    law,
-    histories: { arbitrary, runs, fixedSeeds: [seed] },
-    resolve: (history) => ({ history }),
-    model: recordedAssertionJudgment,
-    driver: (plan, observe) =>
-      recordAssertionJudgment(`OPFS lifecycle`, plan, observe, () =>
-        judge(plan.history),
-      ),
-    check: forwardAssertionJudgment,
-  })
-  oracleProperty({
-    id: fixedId,
-    law,
+    law: lifecycleLaw,
     histories: examples.map(([history], index) => ({ history, index })),
     label: (entry) => String(entry.index),
     resolve: (entry) => ({ history: entry.history }),
@@ -960,48 +944,84 @@ function registerExistingHistory<T>(
     check: forwardAssertionJudgment,
   })
 }
-registerExistingHistory(
-  `opfs.page-lifecycle`,
-  pagehideHistory,
-  48,
-  1844,
+oracleProperty({
+  id: `opfs.page-lifecycle`,
+  law: lifecycleLaw,
+  histories: { arbitrary: pagehideHistory, runs: 48, fixedSeeds: [1844] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`OPFS lifecycle`, plan, observe, () =>
+      runPagehideHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+registerFixedHistory(
+  `opfs.page-lifecycle-fixed`,
   pagehideExamples,
   runPagehideHistory,
-  `opfs.page-lifecycle-fixed`,
 )
-registerExistingHistory(
-  `opfs.mixed-execute`,
-  mixedExecuteHistory,
-  32,
-  1845,
+oracleProperty({
+  id: `opfs.mixed-execute`,
+  law: lifecycleLaw,
+  histories: { arbitrary: mixedExecuteHistory, runs: 32, fixedSeeds: [1845] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`OPFS lifecycle`, plan, observe, () =>
+      runMixedExecuteHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+registerFixedHistory(
+  `opfs.mixed-execute-fixed`,
   mixedExamples,
   runMixedExecuteHistory,
-  `opfs.mixed-execute-fixed`,
 )
-registerExistingHistory(
-  `opfs.terminal-event`,
-  terminalEventHistory,
-  24,
-  1847,
+oracleProperty({
+  id: `opfs.terminal-event`,
+  law: lifecycleLaw,
+  histories: { arbitrary: terminalEventHistory, runs: 24, fixedSeeds: [1847] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`OPFS lifecycle`, plan, observe, () =>
+      runTerminalEventHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+registerFixedHistory(
+  `opfs.terminal-event-fixed`,
   terminalEventExamples,
   runTerminalEventHistory,
-  `opfs.terminal-event-fixed`,
 )
-registerExistingHistory(
-  `opfs.close`,
-  closeHistory,
-  32,
-  1848,
-  closeExamples,
-  runCloseHistory,
-  `opfs.close-fixed`,
-)
-registerExistingHistory(
-  `opfs.failure-cleanup`,
-  failureHistory,
-  18,
-  1846,
+oracleProperty({
+  id: `opfs.close`,
+  law: lifecycleLaw,
+  histories: { arbitrary: closeHistory, runs: 32, fixedSeeds: [1848] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`OPFS lifecycle`, plan, observe, () =>
+      runCloseHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+registerFixedHistory(`opfs.close-fixed`, closeExamples, runCloseHistory)
+oracleProperty({
+  id: `opfs.failure-cleanup`,
+  law: lifecycleLaw,
+  histories: { arbitrary: failureHistory, runs: 18, fixedSeeds: [1846] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`OPFS lifecycle`, plan, observe, () =>
+      runFailureHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+registerFixedHistory(
+  `opfs.failure-cleanup-fixed`,
   failureExamples,
   runFailureHistory,
-  `opfs.failure-cleanup-fixed`,
 )

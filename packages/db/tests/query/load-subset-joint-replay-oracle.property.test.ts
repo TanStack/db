@@ -27,15 +27,20 @@
  * two full filtered owners, no joined/includes graph or throwing callbacks.
  */
 import fc from 'fast-check'
-import { expect, it } from 'vitest'
+import { expect } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
-import { runOracleCampaign } from '../oracle-campaign.js'
-import { oracleRoute, oracleRuns } from '../oracle-config'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
+import { oracleProperty } from '../oracle-config.js'
 import { flushPromises, withOracleCleanup } from '../utils.js'
-import { declareOracle } from '../oracle-declaration'
+import { declareOracle } from '../oracle-declaration.js'
 import type {
   LoadSubsetOptions,
   SyncAppliedReceipt,
@@ -262,10 +267,14 @@ async function runHistory(h: Scenario) {
         publications.get(owner)!.push(observed)
         if (currentAttempt > 0) {
           try {
-            expect(
-              observed,
+            oracleAssertion(
               `joint replay publication ${owner} during ${action}`,
-            ).toEqual(model.visible.get(owner))
+              () =>
+                expect(
+                  observed,
+                  `joint replay publication ${owner} during ${action}`,
+                ).toEqual(model.visible.get(owner)),
+            )
           } catch (error) {
             failures.push(error)
           }
@@ -296,12 +305,16 @@ async function runHistory(h: Scenario) {
   const checkpoint = async (label: string) => {
     await flushPromises()
     if (failures.length) throw failures[0]
-    expect(normalize(main.toArray), `joint replay ${label}: main`).toEqual(
-      model.visible.get(`main`),
+    oracleAssertion(`joint replay ${label}: main`, () =>
+      expect(normalize(main.toArray), `joint replay ${label}: main`).toEqual(
+        model.visible.get(`main`),
+      ),
     )
     if (model.owners.has(`peer`))
-      expect(normalize(peer.toArray), `joint replay ${label}: peer`).toEqual(
-        model.visible.get(`peer`),
+      oracleAssertion(`joint replay ${label}: peer`, () =>
+        expect(normalize(peer.toArray), `joint replay ${label}: peer`).toEqual(
+          model.visible.get(`peer`),
+        ),
       )
   }
   const start = async () => {
@@ -351,40 +364,68 @@ async function runHistory(h: Scenario) {
   }
   await withOracleCleanup(async () => {
     await Promise.all([main.preload(), peer.preload()])
-    expect(normalize(main.toArray)).toEqual(normalize(rows(1)))
-    expect(normalize(peer.toArray)).toEqual(normalize(rows(1)))
+    oracleAssertion(`runHistory comparison 4`, () =>
+      expect(normalize(main.toArray)).toEqual(normalize(rows(1))),
+    )
+    oracleAssertion(`runHistory comparison 5`, () =>
+      expect(normalize(peer.toArray)).toEqual(normalize(rows(1))),
+    )
     await start() // A provider promise remains pending after its abort.
     await start() // B is authoritative; A no longer gates publication.
-    expect(loads.filter((load) => load.attempt === 1)).toHaveLength(2)
-    expect(loads.filter((load) => load.attempt === 2)).toHaveLength(2)
-    expect(
-      loads
-        .filter((load) => load.attempt === 1)
-        .every((load) => load.options.signal?.aborted),
-    ).toBe(true)
+    oracleAssertion(`runHistory comparison 6`, () =>
+      expect(loads.filter((load) => load.attempt === 1)).toHaveLength(2),
+    )
+    oracleAssertion(`runHistory comparison 7`, () =>
+      expect(loads.filter((load) => load.attempt === 2)).toHaveLength(2),
+    )
+    oracleAssertion(`runHistory comparison 8`, () =>
+      expect(
+        loads
+          .filter((load) => load.attempt === 1)
+          .every((load) => load.options.signal?.aborted),
+      ).toBe(true),
+    )
     hold()
     const heldReceipt = accept(3)
-    expect(heldReceipt).toBeInstanceOf(Promise)
+    oracleAssertion(`runHistory comparison 9`, () =>
+      expect(heldReceipt).toBeInstanceOf(Promise),
+    )
     for (const load of loads.filter((candidate) => candidate.attempt === 2))
       load.outcome.resolve(false)
     await checkpoint(`accepted held replacement`)
-    expect(
-      loads.filter((load) => load.attempt === 2).every((load) => !load.settled),
-    ).toBe(true)
+    oracleAssertion(`runHistory comparison 10`, () =>
+      expect(
+        loads
+          .filter((load) => load.attempt === 2)
+          .every((load) => !load.settled),
+      ).toBe(true),
+    )
     reaches.add(`overlap-with-held-receipt`)
     await release()
     await checkpoint(`newest settles before older`)
-    expect(
-      loads.filter((load) => load.attempt === 2).every((load) => load.settled),
-    ).toBe(true)
-    expect(
-      loads.filter((load) => load.attempt === 1).every((load) => !load.settled),
-    ).toBe(true)
-    expect(normalize(main.toArray)).toEqual(normalize(rows(3)))
+    oracleAssertion(`runHistory comparison 11`, () =>
+      expect(
+        loads
+          .filter((load) => load.attempt === 2)
+          .every((load) => load.settled),
+      ).toBe(true),
+    )
+    oracleAssertion(`runHistory comparison 12`, () =>
+      expect(
+        loads
+          .filter((load) => load.attempt === 1)
+          .every((load) => !load.settled),
+      ).toBe(true),
+    )
+    oracleAssertion(`runHistory comparison 13`, () =>
+      expect(normalize(main.toArray)).toEqual(normalize(rows(3))),
+    )
     reaches.add(`newest-done-older-aborted`)
     await settle(1, false)
     await checkpoint(`all overlapping work settled`)
-    expect(normalize(main.toArray)).toEqual(normalize(rows(3)))
+    oracleAssertion(`runHistory comparison 14`, () =>
+      expect(normalize(main.toArray)).toEqual(normalize(rows(3))),
+    )
 
     await start()
     accept(4)
@@ -393,7 +434,9 @@ async function runHistory(h: Scenario) {
     for (let i = 0; i < h.ordinaryWrites; i++) {
       accept(5 + i)
       await checkpoint(`ordinary write after failure ${i}`)
-      expect(publications.get(`main`)!).toHaveLength(failurePublications)
+      oracleAssertion(`runHistory comparison 15`, () =>
+        expect(publications.get(`main`)!).toHaveLength(failurePublications),
+      )
     }
     reaches.add(`failure-keeps-ordinary-writes-private`)
     await start()
@@ -411,7 +454,9 @@ async function runHistory(h: Scenario) {
     )!
     survivor.outcome.resolve(false)
     await checkpoint(`surviving owner succeeds`)
-    expect(normalize(main.toArray)).toEqual(normalize(rows(10)))
+    oracleAssertion(`runHistory comparison 16`, () =>
+      expect(normalize(main.toArray)).toEqual(normalize(rows(10))),
+    )
     reaches.add(`retired-peer-does-not-block-retry`)
 
     await start()
@@ -421,9 +466,14 @@ async function runHistory(h: Scenario) {
     model.cleanup()
     // Internal teardown retains the crash boundary. Public cleanup refuses
     // this active dependent under architecture law 14.
-    await expect(source.cleanup()).rejects.toThrow(`dependent(s) read it`)
+    const refusedCleanup = source.cleanup()
+    await oracleAssertion(`runHistory comparison 17`, () =>
+      expect(refusedCleanup).rejects.toThrow(`dependent(s) read it`),
+    )
     await source._lifecycle.cleanup()
-    expect(main.status).toBe(`crashed`)
+    oracleAssertion(`runHistory comparison 18`, () =>
+      expect(main.status).toBe(`crashed`),
+    )
     await release()
     // Old completions and their errors may release resources but cannot revive
     // the terminal graph. A fresh dependent belongs to the restarted sync run.
@@ -433,9 +483,15 @@ async function runHistory(h: Scenario) {
     activeQueries.push(fresh)
     await fresh.preload()
     await checkpoint(`cleanup and restarted source`)
-    expect(normalize(main.toArray)).toEqual(normalize(rows(10)))
-    expect(main.status).toBe(`crashed`)
-    expect(normalize(fresh.toArray)).toEqual(normalize(rows(20)))
+    oracleAssertion(`runHistory comparison 19`, () =>
+      expect(normalize(main.toArray)).toEqual(normalize(rows(10))),
+    )
+    oracleAssertion(`runHistory comparison 20`, () =>
+      expect(main.status).toBe(`crashed`),
+    )
+    oracleAssertion(`runHistory comparison 21`, () =>
+      expect(normalize(fresh.toArray)).toEqual(normalize(rows(20))),
+    )
     reaches.add(`cleanup-holds-old-graph-terminal`)
   }, [
     async () => {
@@ -452,35 +508,50 @@ async function runHistory(h: Scenario) {
   return reaches
 }
 
-it(`composes overlapping replay receipts, failure, surviving ownership and restart`, async () => {
-  oracleRoute(`random seed`)
-  await runOracleCampaign(
-    `JOINT_REPLAY_ORACLE`,
-    [
-      `overlap-with-held-receipt`,
-      `newest-done-older-aborted`,
-      `failure-keeps-ordinary-writes-private`,
-      `retired-peer-does-not-block-retry`,
-      `cleanup-holds-old-graph-terminal`,
-    ] as const,
-    (reach, parameters) =>
-      fc.assert(
-        fc.asyncProperty(scenario, async (h) => {
-          reach.beginHistory()
-          const observed = await runHistory(h)
-          for (const state of [
-            `overlap-with-held-receipt`,
-            `newest-done-older-aborted`,
-            `failure-keeps-ordinary-writes-private`,
-            `retired-peer-does-not-block-retry`,
-            `cleanup-holds-old-graph-terminal`,
-          ] as const) {
-            expect(observed.has(state)).toBe(true)
-            reach.reach(state)
-          }
-        }),
-        { numRuns: oracleRuns(35), ...parameters },
-      ),
-    { fixedSeed: 20261027 },
-  )
-}, 60000)
+// Every generated scenario already contains these five phases. The identity
+// builder keeps its generated values and schedule choices unchanged. Reach is
+// recorded only after the original production helper reaches each checkpoint.
+const states = [
+  `overlap-with-held-receipt`,
+  `newest-done-older-aborted`,
+  `failure-keeps-ordinary-writes-private`,
+  `retired-peer-does-not-block-retry`,
+  `cleanup-holds-old-graph-terminal`,
+] as const
+const property = `load-subset.joint-replay`
+oracleProperty({
+  id: property,
+  law: {
+    statement: `Current replay participants and accepted receipts gate publication; obsolete work, retired peers, and old graphs cannot control its replacement.`,
+    authority: `ARCHITECTURE.md Replay participants and failure, laws 7, 9 and 14, and the established joint-replay contract above.`,
+    limits: `The unchanged bounded single-source, two-owner grammar, without joined/includes graphs or throwing callbacks.`,
+    owner: `Joint replay publication`,
+  },
+  histories: {
+    arbitrary: scenario,
+    runs: 35,
+    fixedSeeds: [20261027],
+    states,
+    constructed: [
+      {
+        name: `joint replay phases`,
+        enters: states,
+        build: (generated) => generated,
+      },
+    ],
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan: { history: Scenario }, observe) =>
+    recordAssertionJudgment(property, plan, observe, async () => {
+      const observed = await runHistory(plan.history)
+      for (const state of states) {
+        oracleAssertion(`joint replay reached ${state}`, () =>
+          expect(observed.has(state)).toBe(true),
+        )
+        observe(`reach`, state)
+      }
+    }),
+  check: forwardAssertionJudgment,
+  timeout: 60000,
+})

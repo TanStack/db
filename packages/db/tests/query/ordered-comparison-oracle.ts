@@ -10,6 +10,12 @@ import type { Observation, Verdict } from '../oracle-property.js'
 const comparisons = new WeakMap<object, string>()
 const failures = new WeakMap<object, unknown>()
 
+/** Forward an explicitly authored judgment error without changing its identity. */
+export function rejectAt(checkpoint: string, error: Error): never {
+  comparisons.set(error, checkpoint)
+  throw error
+}
+
 function comparisonFailed(checkpoint: string, error: unknown): never {
   if (error instanceof Error && error.name === `AssertionError`)
     comparisons.set(error, checkpoint)

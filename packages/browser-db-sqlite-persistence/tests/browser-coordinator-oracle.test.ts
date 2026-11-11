@@ -1,3 +1,7 @@
+import fc from 'fast-check'
+import { afterEach, beforeEach, describe, expect, vi } from 'vitest'
+import { oracleAssertion } from '../../db/tests/oracle-assertion-adapter'
+import { registerBrowserProperty } from './browser-property-registration-oracle'
 /**
  * # Which Browser coordinator outcomes are safe to acknowledge?
  *
@@ -52,13 +56,6 @@
  * them is tracked in TanStack/db#2264. This file keeps the generated histories.
  */
 
-import fc from 'fast-check'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  oracleFixedSeed,
-  oracleRoute,
-  oracleRouteOf,
-} from '../../db/tests/oracle-config'
 import {
   bindTransportControls,
   cleanupGlobals,
@@ -124,22 +121,23 @@ describe(`BrowserCollectionCoordinator`, () => {
     cleanupGlobals()
   })
   describe(`RPC - applyLocalMutations`, () => {
-    it(`preserves one durable mutation result across generated response-delivery histories`, async () => {
-      vi.useFakeTimers()
+    {
       let run = 0
-      try {
-        const parameters = oracleFixedSeed(1868, {
-          numRuns: 12,
-          endOnFailure: true,
-        })
-        oracleRoute(oracleRouteOf(parameters))
-        await fc.assert(
-          fc.asyncProperty(
-            fc.record({
-              mutationCount: fc.integer({ min: 1, max: 4 }),
-              dropFirstSuccess: fc.boolean(),
-            }),
-            async ({ mutationCount, dropFirstSuccess }) => {
+      registerBrowserProperty(
+        fc.record({
+          mutationCount: fc.integer({ min: 1, max: 4 }),
+          dropFirstSuccess: fc.boolean(),
+        }),
+        {
+          id: 'browser-coordinator.mutation-delivery',
+          runs: 12,
+          fixedSeed: 1868,
+        },
+        `preserves one durable mutation result across generated response-delivery histories`,
+        async (history) => {
+          vi.useFakeTimers()
+          try {
+            await (async ({ mutationCount, dropFirstSuccess }) => {
               run++
               const collectionId = `delivery-history-${run}`
               const adapter = createStubAdapter()
@@ -201,13 +199,17 @@ describe(`BrowserCollectionCoordinator`, () => {
                 }
 
                 const response = await responsePromise
-                expect(response).toMatchObject({
-                  ok: true,
-                  acceptedMutationIds: mutations.map(
-                    (mutation) => mutation.mutationId,
-                  ),
-                })
-                expect(adapter.appliedTxs).toHaveLength(1)
+                oracleAssertion('browser-coordinator', () =>
+                  expect(response).toMatchObject({
+                    ok: true,
+                    acceptedMutationIds: mutations.map(
+                      (mutation) => mutation.mutationId,
+                    ),
+                  }),
+                )
+                oracleAssertion('browser-coordinator', () =>
+                  expect(adapter.appliedTxs).toHaveLength(1),
+                )
               } finally {
                 dropNextMessageWhen = undefined
                 follower.dispose()
@@ -216,38 +218,38 @@ describe(`BrowserCollectionCoordinator`, () => {
                   await Promise.resolve()
                 }
               }
-            },
-          ),
-          parameters,
-        )
-      } finally {
-        vi.useRealTimers()
-      }
-    })
+            })(history)
+          } finally {
+            vi.useRealTimers()
+          }
+        },
+      )
+    }
   })
 
   describe(`RPC - ensurePersistedIndex`, () => {
-    it(`routes generated collection and RPC histories through their owning adapter`, async () => {
+    {
       let run = 0
-      const parameters = oracleFixedSeed(1868, {
-        numRuns: 18,
-        endOnFailure: true,
-      })
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(
-          fc.integer({ min: 2, max: 4 }).chain((collectionCount) =>
-            fc.record({
-              collectionCount: fc.constant(collectionCount),
-              registrationOrder: fc.shuffledSubarray(
-                Array.from({ length: collectionCount }, (_, index) => index),
-                { minLength: collectionCount, maxLength: collectionCount },
-              ),
-              targetIndex: fc.integer({ min: 0, max: collectionCount - 1 }),
-              rpcKind: fc.constantFrom(`index`, `pull`, `mutation`),
-            }),
-          ),
-          async ({
+      registerBrowserProperty(
+        fc.integer({ min: 2, max: 4 }).chain((collectionCount) =>
+          fc.record({
+            collectionCount: fc.constant(collectionCount),
+            registrationOrder: fc.shuffledSubarray(
+              Array.from({ length: collectionCount }, (_, index) => index),
+              { minLength: collectionCount, maxLength: collectionCount },
+            ),
+            targetIndex: fc.integer({ min: 0, max: collectionCount - 1 }),
+            rpcKind: fc.constantFrom(`index`, `pull`, `mutation`),
+          }),
+        ),
+        {
+          id: 'browser-coordinator.adapter-routing',
+          runs: 18,
+          fixedSeed: 1868,
+        },
+        `routes generated collection and RPC histories through their owning adapter`,
+        async (history) => {
+          await (async ({
             collectionCount,
             registrationOrder,
             targetIndex,
@@ -294,7 +296,9 @@ describe(`BrowserCollectionCoordinator`, () => {
               leader.subscribe(targetCollectionId, () => {})
               await leadershipReadPromise
               await vi.waitFor(() =>
-                expect(leader.isLeader(targetCollectionId)).toBe(true),
+                oracleAssertion('browser-coordinator', () =>
+                  expect(leader.isLeader(targetCollectionId)).toBe(true),
+                ),
               )
               follower.subscribe(targetCollectionId, () => {})
 
@@ -318,7 +322,9 @@ describe(`BrowserCollectionCoordinator`, () => {
                     },
                   ],
                 )
-                expect(response.ok).toBe(true)
+                oracleAssertion('browser-coordinator', () =>
+                  expect(response.ok).toBe(true),
+                )
               }
 
               adapters.forEach((adapter, index) => {
@@ -328,7 +334,9 @@ describe(`BrowserCollectionCoordinator`, () => {
                     : rpcKind === `pull`
                       ? pullCalls[index]!.mock.calls.length
                       : adapter.appliedTxs.length
-                expect(callCount).toBe(index === targetIndex ? 1 : 0)
+                oracleAssertion('browser-coordinator', () =>
+                  expect(callCount).toBe(index === targetIndex ? 1 : 0),
+                )
               })
             } finally {
               follower.dispose()
@@ -337,34 +345,30 @@ describe(`BrowserCollectionCoordinator`, () => {
                 await Promise.resolve()
               }
             }
-          },
-        ),
-        parameters,
+          })(history)
+        },
       )
-    })
+    }
   })
 
   describe(`dispose`, () => {
-    it(`makes disposal terminal across generated RPC kinds and lifecycle phases`, async () => {
-      vi.useFakeTimers()
+    {
       let run = 0
-      try {
-        const campaignParameters = oracleFixedSeed(1868, {
-          numRuns: 18,
-          endOnFailure: true,
-        })
-        oracleRoute(oracleRouteOf(campaignParameters))
-        await fc.assert(
-          fc.asyncProperty(
-            fc.record({
-              rpcKind: fc.constantFrom(`index`, `pull`, `mutation`),
-              disposePhase: fc.constantFrom(
-                `before-request`,
-                `pending`,
-                `retry-delay`,
-              ),
-            }),
-            async ({ rpcKind, disposePhase }) => {
+      registerBrowserProperty(
+        fc.record({
+          rpcKind: fc.constantFrom(`index`, `pull`, `mutation`),
+          disposePhase: fc.constantFrom(
+            `before-request`,
+            `pending`,
+            `retry-delay`,
+          ),
+        }),
+        { id: 'browser-coordinator.disposal', runs: 18, fixedSeed: 1868 },
+        `makes disposal terminal across generated RPC kinds and lifecycle phases`,
+        async (history) => {
+          vi.useFakeTimers()
+          try {
+            await (async ({ rpcKind, disposePhase }) => {
               run++
               const collectionId = `dispose-history-${run}`
               const adapter = createStubAdapter()
@@ -443,9 +447,13 @@ describe(`BrowserCollectionCoordinator`, () => {
                   follower.dispose()
                 }
 
-                await expect(settled).resolves.toBe(`rejected`)
-                expect(requestPosts).toBe(
-                  disposePhase === `before-request` ? 0 : 1,
+                await oracleAssertion('browser-coordinator', () =>
+                  expect(settled).resolves.toBe(`rejected`),
+                )
+                oracleAssertion('browser-coordinator', () =>
+                  expect(requestPosts).toBe(
+                    disposePhase === `before-request` ? 0 : 1,
+                  ),
                 )
               } finally {
                 observePostedMessage = undefined
@@ -456,36 +464,36 @@ describe(`BrowserCollectionCoordinator`, () => {
                   await Promise.resolve()
                 }
               }
-            },
-          ),
-          campaignParameters,
-        )
-      } finally {
-        vi.useRealTimers()
-      }
-    })
+            })(history)
+          } finally {
+            vi.useRealTimers()
+          }
+        },
+      )
+    }
   })
 
   describe(`collection and retry-result retention`, () => {
-    it(`releases generated collection-owned state after the last subscriber`, async () => {
+    {
       let run = 0
-      const campaignParameters = oracleFixedSeed(1868, {
-        numRuns: 12,
-        endOnFailure: true,
-      })
-      oracleRoute(oracleRouteOf(campaignParameters))
-      await fc.assert(
-        fc.asyncProperty(
-          fc.integer({ min: 1, max: 4 }).chain((collectionCount) =>
-            fc.record({
-              collectionCount: fc.constant(collectionCount),
-              releaseOrder: fc.shuffledSubarray(
-                Array.from({ length: collectionCount }, (_, index) => index),
-                { minLength: collectionCount, maxLength: collectionCount },
-              ),
-            }),
-          ),
-          async ({ collectionCount, releaseOrder }) => {
+      registerBrowserProperty(
+        fc.integer({ min: 1, max: 4 }).chain((collectionCount) =>
+          fc.record({
+            collectionCount: fc.constant(collectionCount),
+            releaseOrder: fc.shuffledSubarray(
+              Array.from({ length: collectionCount }, (_, index) => index),
+              { minLength: collectionCount, maxLength: collectionCount },
+            ),
+          }),
+        ),
+        {
+          id: 'browser-coordinator.collection-release',
+          runs: 12,
+          fixedSeed: 1868,
+        },
+        `releases generated collection-owned state after the last subscriber`,
+        async (history) => {
+          await (async ({ collectionCount, releaseOrder }) => {
             run++
             const coordinator = createCoordinator()
             const collectionIds = Array.from(
@@ -523,50 +531,54 @@ describe(`BrowserCollectionCoordinator`, () => {
             try {
               await allReady.promise
               observePostedMessage = undefined
-              expect(
-                inspectCoordinator(coordinator).collectionAdapters.size,
-              ).toBe(collectionCount)
+              oracleAssertion('browser-coordinator', () =>
+                expect(
+                  inspectCoordinator(coordinator).collectionAdapters.size,
+                ).toBe(collectionCount),
+              )
 
               let remaining = collectionCount
               for (const releasedIndex of releaseOrder) {
                 releases[releasedIndex]!()
                 remaining--
-                expect({
-                  adapters:
-                    inspectCoordinator(coordinator).collectionAdapters.size,
-                  collections: inspectCoordinator(coordinator).collections.size,
-                }).toEqual({
-                  adapters: remaining,
-                  collections: remaining,
-                })
+                oracleAssertion('browser-coordinator', () =>
+                  expect({
+                    adapters:
+                      inspectCoordinator(coordinator).collectionAdapters.size,
+                    collections:
+                      inspectCoordinator(coordinator).collections.size,
+                  }).toEqual({
+                    adapters: remaining,
+                    collections: remaining,
+                  }),
+                )
               }
             } finally {
               observePostedMessage = undefined
               for (const release of releases) release()
               coordinator.dispose()
             }
-          },
-        ),
-        campaignParameters,
+          })(history)
+        },
       )
-    })
-
-    it(`bounds generated retry-result histories by retention and collection lifecycle`, async () => {
-      vi.useFakeTimers()
+    }
+    {
       let run = 0
-      try {
-        const runParameters = oracleFixedSeed(1868, {
-          numRuns: 12,
-          endOnFailure: true,
-        })
-        oracleRoute(oracleRouteOf(runParameters))
-        await fc.assert(
-          fc.asyncProperty(
-            fc.record({
-              mutationCount: fc.integer({ min: 1, max: 4 }),
-              terminal: fc.constantFrom(`retention`, `unsubscribe`, `dispose`),
-            }),
-            async ({ mutationCount, terminal }) => {
+      registerBrowserProperty(
+        fc.record({
+          mutationCount: fc.integer({ min: 1, max: 4 }),
+          terminal: fc.constantFrom(`retention`, `unsubscribe`, `dispose`),
+        }),
+        {
+          id: 'browser-coordinator.retry-retention',
+          runs: 12,
+          fixedSeed: 1868,
+        },
+        `bounds generated retry-result histories by retention and collection lifecycle`,
+        async (history) => {
+          vi.useFakeTimers()
+          try {
+            await (async ({ mutationCount, terminal }) => {
               run++
               vi.setSystemTime(0)
               const adapter = createStubAdapter()
@@ -600,9 +612,11 @@ describe(`BrowserCollectionCoordinator`, () => {
                     },
                   ])
                 }
-                expect(
-                  inspectCoordinator(coordinator).appliedEnvelopes.size,
-                ).toBe(mutationCount)
+                oracleAssertion('browser-coordinator', () =>
+                  expect(
+                    inspectCoordinator(coordinator).appliedEnvelopes.size,
+                  ).toBe(mutationCount),
+                )
 
                 if (terminal === `retention`) {
                   await vi.advanceTimersByTimeAsync(60_000)
@@ -612,22 +626,23 @@ describe(`BrowserCollectionCoordinator`, () => {
                   coordinator.dispose()
                 }
 
-                expect(
-                  inspectCoordinator(coordinator).appliedEnvelopes.size,
-                ).toBe(0)
+                oracleAssertion('browser-coordinator', () =>
+                  expect(
+                    inspectCoordinator(coordinator).appliedEnvelopes.size,
+                  ).toBe(0),
+                )
               } finally {
                 observePostedMessage = undefined
                 release()
                 coordinator.dispose()
                 vi.clearAllTimers()
               }
-            },
-          ),
-          runParameters,
-        )
-      } finally {
-        vi.useRealTimers()
-      }
-    })
+            })(history)
+          } finally {
+            vi.useRealTimers()
+          }
+        },
+      )
+    }
   })
 })

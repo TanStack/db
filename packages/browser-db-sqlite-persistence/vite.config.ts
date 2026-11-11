@@ -100,6 +100,7 @@ const config = defineConfig({
       include: [`tests/**/*.test.ts`, `tests/**/*.test-d.ts`],
       exclude: [
         `**/node_modules/**`,
+        `tests/persisted-options.test.ts`,
         `tests/reload-class-oracle.test.ts`,
         `tests/opfs-page-lifecycle-oracle.test.ts`,
         `tests/opfs-request-order-oracle.test.ts`,

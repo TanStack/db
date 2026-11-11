@@ -1,4 +1,4 @@
-// Compatibility self-tests from TanStack/oracles at fe532f4.
+// Compatibility examples for the vendored TanStack/oracles fe532f4 ledger.
 import { describe, expect, it } from 'vitest'
 import { createOracleReach } from './oracle-reach.js'
 

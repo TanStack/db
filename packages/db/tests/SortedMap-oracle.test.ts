@@ -1,18 +1,16 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect } from 'vitest'
 import fc from 'fast-check'
 import { SortedMap } from '../src/SortedMap'
+import { oracleProperty, oracleReplayRequested } from './oracle-config'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from './oracle-config'
-import { createOracleReach } from './oracle-reach'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter'
 import { declareOracle } from './oracle-declaration'
 import { expectMap, expectView, modelOrder } from './sorted-map-support'
-import type { ModelKey, Row } from './sorted-map-support'
+import type { ModelKey, Order, Row } from './sorted-map-support'
 
 /**
  * SortedMap is the ordered map behind Collection state: synced rows, ordered
@@ -152,10 +150,61 @@ type ReachState =
   | `placed-row-changed-then-written`
   | `deferred-row-changed-before-restore`
 
-type HistoryReach = Pick<
-  ReturnType<typeof createOracleReach<ReachState>>,
-  `beginHistory` | `reach`
->
+type HistoryReach = {
+  beginHistory: () => void
+  reach: (state: ReachState) => void
+}
+type Observe = (checkpoint: string, value: unknown) => void
+const orders = [`key`, `ascending`, `descending`] as const
+const properties = {
+  key: `sorted-map.key`,
+  ascending: `sorted-map.ascending`,
+  descending: `sorted-map.descending`,
+} as const
+function statesFor(order: Order): Array<ReachState> {
+  return [
+    `deferred-burst-observed`,
+    `entry-yielded-after-pruning`,
+    `placed-nan-key-written`,
+    ...(order === `key`
+      ? []
+      : ([
+          `restore-bound-below-order-size`,
+          `placed-row-changed-then-written`,
+          `deferred-row-changed-before-restore`,
+        ] as const)),
+  ]
+}
+function historyReach(
+  states: ReadonlyArray<ReachState>,
+  counts: Map<ReachState, number>,
+  observe: Observe = () => {},
+): HistoryReach {
+  let entered = new Set<ReachState>()
+  return {
+    beginHistory: () => {
+      entered = new Set()
+    },
+    reach: (state) => {
+      if (!states.includes(state))
+        throw new Error(`undeclared SortedMap reach: ${state}`)
+      if (entered.has(state)) return
+      entered.add(state)
+      counts.set(state, (counts.get(state) ?? 0) + 1)
+      observe(`reach`, state)
+    },
+  }
+}
+function assertMinimum(
+  counts: ReadonlyMap<ReachState, number>,
+  states: ReadonlyArray<ReachState>,
+) {
+  const missed = states.filter((state) => (counts.get(state) ?? 0) < 5)
+  if (missed.length > 0)
+    throw new Error(
+      `SortedMap required reach: ${missed.map((state) => `${state} (${counts.get(state) ?? 0})`).join(`, `)}`,
+    )
+}
 
 function runHistory(
   actions: ReadonlyArray<Action>,
@@ -206,10 +255,14 @@ function runHistory(
         reach.reach(`restore-bound-below-order-size`)
       comparatorCalls = 0
       void [...actual.keys()]
-      expect(comparatorCalls).toBeLessThanOrEqual(bound)
+      oracleAssertion(`existing SortedMap comparison`, () =>
+        expect(comparatorCalls).toBeLessThanOrEqual(bound),
+      )
     }
     restored()
-    expectMap(actual, model, order, orderPromised)
+    oracleAssertion(`existing SortedMap comparison`, () =>
+      expectMap(actual, model, order, orderPromised),
+    )
     // Credit the state after the restoring comparison actually enforced order,
     // never merely because a mutation once ran before some later clear.
     if (observesDeferredChange)
@@ -233,8 +286,10 @@ function runHistory(
       reach.reach(`placed-nan-key-written`)
     if (action.kind === `set`) {
       written(key)
-      expect(actual.set(key, { rank: action.value }, action.deferOrder)).toBe(
-        actual,
+      oracleAssertion(`existing SortedMap comparison`, () =>
+        expect(actual.set(key, { rank: action.value }, action.deferOrder)).toBe(
+          actual,
+        ),
       )
       model.set(key, action.value)
       if (action.deferOrder) {
@@ -242,7 +297,9 @@ function runHistory(
       } else restored()
     } else if (action.kind === `delete`) {
       written(key)
-      expect(actual.delete(key, action.deferOrder)).toBe(model.delete(key))
+      oracleAssertion(`existing SortedMap comparison`, () =>
+        expect(actual.delete(key, action.deferOrder)).toBe(model.delete(key)),
+      )
       if (action.deferOrder) deferred.add(key)
       else restored()
     } else if (action.kind === `mutate`) {
@@ -287,11 +344,15 @@ function runHistory(
         if (pruned) reach.reach(`entry-yielded-after-pruning`)
         yielded.push([entryKey, row.rank])
         if ((row.rank - action.value) % 2 === 0) {
-          expect(actual.delete(entryKey, true)).toBe(true)
+          oracleAssertion(`existing SortedMap comparison`, () =>
+            expect(actual.delete(entryKey, true)).toBe(true),
+          )
           pruned = true
         }
       }
-      expectView(yielded, expected, orderPromised)
+      oracleAssertion(`existing SortedMap comparison`, () =>
+        expectView(yielded, expected, orderPromised),
+      )
       if (observesDeferredChange)
         reach.reach(`deferred-row-changed-before-restore`)
       // Iteration restored the order before the deletes.
@@ -311,9 +372,15 @@ function runHistory(
       // No slot survives clear, so order is promised again.
       orderPromised = true
     }
-    expect(actual.size).toBe(model.size)
-    expect(actual.has(key)).toBe(model.has(key))
-    expect(actual.get(key)?.rank).toBe(model.get(key))
+    oracleAssertion(`existing SortedMap comparison`, () =>
+      expect(actual.size).toBe(model.size),
+    )
+    oracleAssertion(`existing SortedMap comparison`, () =>
+      expect(actual.has(key)).toBe(model.has(key)),
+    )
+    oracleAssertion(`existing SortedMap comparison`, () =>
+      expect(actual.get(key)?.rank).toBe(model.get(key)),
+    )
     if (
       action.kind === `clear` ||
       ((action.kind === `set` || action.kind === `delete`) &&
@@ -360,85 +427,149 @@ declareOracle({
   grammar: [withDeferredChange],
 })
 
-describe.each([`key`, `ascending`, `descending`] as const)(
-  `SortedMap %s history`,
-  (order) => {
-    const property = {
-      key: `sorted-map.key`,
-      ascending: `sorted-map.ascending`,
-      descending: `sorted-map.descending`,
-    }[order]
-    const comparatorStates =
-      order === `key`
-        ? []
-        : ([
-            `restore-bound-below-order-size`,
-            `placed-row-changed-then-written`,
-            `deferred-row-changed-before-restore`,
-          ] as const)
-    it.each([20260912, undefined])(
-      `agrees with full recomputation (seed %s)`,
-      async (seed) => {
-        const reach = createOracleReach(
-          property,
-          [
-            `deferred-burst-observed`,
-            `entry-yielded-after-pruning`,
-            `placed-nan-key-written`,
-            ...comparatorStates,
-          ],
-          { minimum: 5 },
+// Native campaigns keep their own ledgers. Their original four examples run
+// through the unchanged helper before that campaign's generated histories, so
+// each campaign supplies its own evidence for the original minimum of five.
+const campaignCounts = new Map<string, Map<ReachState, number>>()
+beforeEach(({ task }) => {
+  const order = orders.find(
+    (candidate) => properties[candidate] === task.suite?.name,
+  )
+  if (
+    order === undefined ||
+    !(task.name.startsWith(`fixed seed `) || task.name === `random seed`)
+  )
+    return
+  const counts = new Map<ReachState, number>(
+    statesFor(order).map((state) => [state, 0]),
+  )
+  campaignCounts.set(expect.getState().currentTestName!, counts)
+  if (!oracleReplayRequested())
+    for (const history of fixedHistories)
+      runHistory(history, order, historyReach(statesFor(order), counts))
+})
+afterEach(({ task }) => {
+  const order = orders.find(
+    (candidate) => properties[candidate] === task.suite?.name,
+  )
+  const counts = campaignCounts.get(expect.getState().currentTestName!)
+  if (order === undefined || counts === undefined || oracleReplayRequested())
+    return
+  if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
+    console.log(properties[order], task.name, [...counts])
+  assertMinimum(counts, statesFor(order))
+})
+
+const generatedActions: fc.Arbitrary<Array<Action>> = fc
+  .array(
+    fc.record({
+      kind: fc.constantFrom<Action[`kind`]>(
+        `set`,
+        `set`,
+        `set`,
+        `delete`,
+        `delete`,
+        `delete`,
+        `clear`,
+        `burst`,
+        `prune`,
+        `mutate`,
+        `mutate`,
+      ),
+      key: fc.oneof(
+        { arbitrary: fc.integer({ min: -3, max: 3 }), weight: 6 },
+        { arbitrary: fc.constant(Number.NaN), weight: 2 },
+      ),
+      value: fc.integer({ min: -3, max: 3 }),
+      deferOrder: fc.boolean(),
+      observe: fc.boolean(),
+    }),
+    { minLength: 6, maxLength: 40 },
+  )
+  .map(withDeferredChange)
+
+const sortedLaw = {
+  statement: `SortedMap refines native Map ownership and full-sort views, including deferred work bounds and current row values at the promised cuts.`,
+  authority: `Collection state callers and maintainer SortedMap contract recorded in docs/contributing/oracle-coverage.md.`,
+  limits: `The unchanged contract, input grammar, order downgrade and observations described above.`,
+  owner: `Small structures and test mechanics`,
+}
+function sortedMechanism(order: Order) {
+  return {
+    law: sortedLaw,
+    resolve: (actions: Array<Action>) => ({ actions }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { actions: Array<Action> }, observe: Observe) =>
+      recordAssertionJudgment(`SortedMap refinement`, plan, observe, () => {
+        const counts =
+          campaignCounts.get(expect.getState().currentTestName!) ??
+          new Map<ReachState, number>()
+        runHistory(
+          plan.actions,
+          order,
+          historyReach(statesFor(order), counts, observe),
         )
-        const parameters = {
-          ...(seed === undefined
-            ? oraclePropertyOptions(100, property)
-            : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
-          examples: fixedHistories.map((history) => [history]),
-        }
-        oracleRoute(oracleRouteOf(parameters))
-        await fc.assert(
-          fc.asyncProperty(
-            fc
-              .array(
-                fc.record({
-                  kind: fc.constantFrom<Action[`kind`]>(
-                    `set`,
-                    `set`,
-                    `set`,
-                    `delete`,
-                    `delete`,
-                    `delete`,
-                    `clear`,
-                    `burst`,
-                    `prune`,
-                    `mutate`,
-                    `mutate`,
-                  ),
-                  key: fc.oneof(
-                    { arbitrary: fc.integer({ min: -3, max: 3 }), weight: 6 },
-                    { arbitrary: fc.constant(Number.NaN), weight: 2 },
-                  ),
-                  value: fc.integer({ min: -3, max: 3 }),
-                  deferOrder: fc.boolean(),
-                  observe: fc.boolean(),
-                }),
-                { minLength: 6, maxLength: 40 },
-              )
-              .map(withDeferredChange),
-            (actions) => {
-              runHistory(actions, order, reach)
-              return Promise.resolve()
-            },
-          ),
-          parameters,
-        )
-        if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
-          console.log(property, seed ?? `random`, [...reach.counts()])
-        reach.assertReached()
-      },
-    )
+      }),
+    check: forwardAssertionJudgment,
+  }
+}
+
+oracleProperty({
+  ...sortedMechanism(`key`),
+  id: `sorted-map.key`,
+  histories: {
+    arbitrary: generatedActions,
+    runs: 100,
+    fixedSeeds: [20260912],
+    measured: statesFor(`key`),
   },
-)
+})
+oracleProperty({
+  ...sortedMechanism(`ascending`),
+  id: `sorted-map.ascending`,
+  histories: {
+    arbitrary: generatedActions,
+    runs: 100,
+    fixedSeeds: [20260912],
+    measured: statesFor(`ascending`),
+  },
+})
+oracleProperty({
+  ...sortedMechanism(`descending`),
+  id: `sorted-map.descending`,
+  histories: {
+    arbitrary: generatedActions,
+    runs: 100,
+    fixedSeeds: [20260912],
+    measured: statesFor(`descending`),
+  },
+})
+
+// The written examples lie outside the mapped random source. Native enumeration
+// replays each exact input directly, without pretending it has a shrink context.
+oracleProperty({
+  id: `sorted-map.regressions`,
+  law: sortedLaw,
+  histories: orders.flatMap((order) =>
+    fixedHistories.map((actions, index) => ({ order, actions, index })),
+  ),
+  label: ({ order, index }) => `${order} regression ${index}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`SortedMap refinement`, plan, observe, () =>
+      runHistory(
+        plan.history.actions,
+        plan.history.order,
+        historyReach(
+          statesFor(plan.history.order),
+          new Map<ReachState, number>(),
+          observe,
+        ),
+      ),
+    ),
+  check: forwardAssertionJudgment,
+})
 
 /**
  * These grammar ablations replay the shared production driver and Map/full-sort
@@ -452,91 +583,108 @@ describe.each([`key`, `ascending`, `descending`] as const)(
  * ablation must fail that same reach obligation; it is a missing-premise control,
  * not a rejection of wrong production output.
  */
-describe.each([`ascending`, `descending`] as const)(
-  `SortedMap %s deferred-change reach calibration`,
-  (order) => {
-    oracleReplayTest(it).each([
-      `observed`,
-      `omitted observation`,
-      `empty history`,
-      `equal rank`,
-      `returned rank`,
-      `overwrite`,
-      `delete`,
-      `eager restore`,
-      `unpromised order`,
-      `prune observation`,
-    ] as const)(`credits only a restoring comparison: %s`, (control) => {
-      oracleRoute(`calibration`)
-      const state = `deferred-row-changed-before-restore`
-      const reach = createOracleReach<ReachState>(
-        `sorted-map.${order}.${control}`,
-        [state],
-        { minimum: 5, replaying: false },
+const controls = [
+  `observed`,
+  `omitted observation`,
+  `empty history`,
+  `equal rank`,
+  `returned rank`,
+  `overwrite`,
+  `delete`,
+  `eager restore`,
+  `unpromised order`,
+  `prune observation`,
+] as const
+function checkReachControl(
+  order: `ascending` | `descending`,
+  control: (typeof controls)[number],
+  observe: Observe,
+) {
+  const state = `deferred-row-changed-before-restore`
+  const counts = new Map<ReachState, number>([[state, 0]])
+  const reach = historyReach([state], counts, observe)
+  const watchedReach: HistoryReach = {
+    beginHistory: reach.beginHistory,
+    reach: (reached) => {
+      if (reached === state) reach.reach(reached)
+    },
+  }
+  for (const key of [-3, -2, -1, 0, 1, 2, 3, Number.NaN]) {
+    for (const value of [-3, 3]) {
+      const prefix = withDeferredChange([fixedStep(`set`, key, value)]).slice(
+        0,
+        3,
       )
-      const watchedReach: HistoryReach = {
-        beginHistory: reach.beginHistory,
-        reach: (reached) => {
-          if (reached === state) reach.reach(reached)
-        },
-      }
-      for (const key of [-3, -2, -1, 0, 1, 2, 3, Number.NaN]) {
-        for (const value of [-3, 3]) {
-          const prefix = withDeferredChange([
-            fixedStep(`set`, key, value),
-          ]).slice(0, 3)
-          const target = prefix[1]!
-          const mutation = prefix[2]!
-          const held = { ...mutation, observe: false }
-          const peer = prefix[0]!
-          let actions: Array<Action>
-          switch (control) {
-            case `observed`:
-              actions = prefix
-              break
-            case `prune observation`:
-              actions = [...prefix.slice(0, 2), held, fixedStep(`prune`, 0)]
-              break
-            case `unpromised order`:
-              actions = [
-                ...prefix.slice(0, 2),
-                fixedStep(`mutate`, peer.key, 1),
-                mutation,
-              ]
-              break
-            case `empty history`:
-              actions = withDeferredChange([])
-              break
-            default: {
-              const after =
-                control === `returned rank`
-                  ? fixedStep(`mutate`, target.key, target.value, true, true)
-                  : control === `overwrite`
-                    ? fixedStep(`set`, target.key, 2, true, true)
-                    : control === `delete`
-                      ? fixedStep(`delete`, target.key, 0, true, true)
-                      : control === `eager restore`
-                        ? fixedStep(`set`, peer.key, 0)
-                        : fixedStep(`clear`, 0)
-              actions = [
-                ...prefix.slice(0, 2),
-                control === `equal rank`
-                  ? { ...mutation, value: target.value }
-                  : held,
-                after,
-              ]
-            }
-          }
-          runHistory(actions, order, watchedReach)
+      const target = prefix[1]!
+      const mutation = prefix[2]!
+      const held = { ...mutation, observe: false }
+      const peer = prefix[0]!
+      let actions: Array<Action>
+      switch (control) {
+        case `observed`:
+          actions = prefix
+          break
+        case `prune observation`:
+          actions = [...prefix.slice(0, 2), held, fixedStep(`prune`, 0)]
+          break
+        case `unpromised order`:
+          actions = [
+            ...prefix.slice(0, 2),
+            fixedStep(`mutate`, peer.key, 1),
+            mutation,
+          ]
+          break
+        case `empty history`:
+          actions = withDeferredChange([])
+          break
+        default: {
+          const after =
+            control === `returned rank`
+              ? fixedStep(`mutate`, target.key, target.value, true, true)
+              : control === `overwrite`
+                ? fixedStep(`set`, target.key, 2, true, true)
+                : control === `delete`
+                  ? fixedStep(`delete`, target.key, 0, true, true)
+                  : control === `eager restore`
+                    ? fixedStep(`set`, peer.key, 0)
+                    : fixedStep(`clear`, 0)
+          actions = [
+            ...prefix.slice(0, 2),
+            control === `equal rank`
+              ? { ...mutation, value: target.value }
+              : held,
+            after,
+          ]
         }
       }
-      if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
-        console.log(`sorted-map.${order}.${control}`, [...reach.counts()])
-      if (control === `observed` || control === `prune observation`) {
-        reach.assertReached()
-      } else {
-        expect(() => reach.assertReached()).toThrow(`${state} (0)`)
-      }
-    })
+      runHistory(actions, order, watchedReach)
+    }
+  }
+  if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
+    console.log(`sorted-map.${order}.${control}`, [...counts])
+  if (control === `observed` || control === `prune observation`) {
+    assertMinimum(counts, [state])
+  } else {
+    oracleAssertion(`existing SortedMap comparison`, () =>
+      expect(() => assertMinimum(counts, [state])).toThrow(`${state} (0)`),
+    )
+  }
+}
+oracleProperty({
+  id: `sorted-map.reach-calibration`,
+  law: {
+    ...sortedLaw,
+    statement: `Only a still-present changed deferred row at a promised restoring comparison earns its declared reach.`,
   },
-)
+  histories: ([`ascending`, `descending`] as const).flatMap((order) =>
+    controls.map((control) => ({ order, control })),
+  ),
+  label: ({ order, control }) => `${order}: ${control}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`SortedMap reach attribution`, plan, observe, () =>
+      checkReachControl(plan.history.order, plan.history.control, observe),
+    ),
+  check: forwardAssertionJudgment,
+})

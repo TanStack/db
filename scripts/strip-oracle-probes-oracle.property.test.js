@@ -59,15 +59,14 @@ import oraclePlugin from '@tanstack/eslint-plugin-oracles'
 import { transform } from 'esbuild'
 import fc from 'fast-check'
 import ts from 'typescript'
-import { afterAll, describe, expect, it } from 'vitest'
-import { declareOracle } from '../packages/db/tests/oracle-declaration.js'
+import { afterAll, expect } from 'vitest'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRuns,
-  withOracleFixedHistories,
+  differs,
+  oracleProperty,
+  oracleReplayRequested,
+  pass,
+  violation,
 } from '../packages/db/tests/oracle-config.js'
-import { createOracleReach } from '../packages/db/tests/oracle-reach.js'
 import { stripOracleProbes } from './strip-oracle-probes.mjs'
 
 const PROPERTY = `scripts.strip-oracle-probes`
@@ -561,91 +560,150 @@ async function strippedObservation(text, hostProcess) {
 // -- 4. Comparison ------------------------------------------------------------
 
 function compareOutcome(expected, reference, observed) {
-  // The reference never calls the probe, whatever the program.
-  expect(reference.probes).toEqual([])
+  if (reference === undefined)
+    return violation(
+      `reference`,
+      `the driver did not record the reference`,
+      `probe stripping`,
+    )
+  if (observed === undefined)
+    return violation(
+      `stripped`,
+      `the driver did not record the stripped program`,
+      `probe stripping`,
+    )
+  const equal = (checkpoint, actual, wanted) =>
+    differs(checkpoint, `probe stripping`, actual, wanted)
+  const probes = equal(`reference probes`, reference.probes, [])
+  if (probes) return probes
   if (expected.refuse) {
-    expect(
-      observed.refusal,
-      `the stripper must refuse this program`,
-    ).toBeTypeOf(`string`)
-    expect(observed.refusal).toMatch(/probing|__oracleProbe/)
-    return
+    if (typeof observed.refusal !== `string`)
+      return violation(
+        `refusal`,
+        `the stripper must refuse this program`,
+        `probe stripping`,
+      )
+    return /probing|__oracleProbe/.test(observed.refusal)
+      ? pass
+      : violation(
+          `refusal`,
+          `the refusal must identify the guard or probe`,
+          `probe stripping`,
+        )
   }
-  expect(observed.refusal, `the stripper refused a program it must keep`).toBe(
-    undefined,
+  return (
+    equal(`admission`, observed.refusal, undefined) ??
+    equal(`stripped probes`, observed.probes, []) ??
+    equal(`trace`, observed.trace, reference.trace) ??
+    equal(`error`, observed.error, reference.error) ??
+    equal(`identifiers`, observed.identifiers, {
+      probing: expected.probingTokens,
+      __oracleProbe: 0,
+      process: 0,
+    }) ??
+    pass
   )
-  expect(observed.probes).toEqual([])
-  expect(observed.trace).toEqual(reference.trace)
-  expect(observed.error).toEqual(reference.error)
-  expect(observed.identifiers).toEqual({
-    probing: expected.probingTokens,
-    __oracleProbe: 0,
-    process: 0,
-  })
 }
 
 const tally = { accepted: 0, rejected: 0, refused: 0 }
+const counts = new Map(STATES.map((state) => [state, 0]))
+const fixedEntered = new Set()
 
-async function checkProgram(spec) {
-  const text = programText(spec)
-  const admitted = ruleAccepts(text)
-  expect(
-    admitted,
-    `the admission model and the probe-form rule disagree on:\n${text}`,
-  ).toBe(predictAdmission(spec))
-  if (!admitted) {
-    expect(spec.fixed, `a constructed history must be admitted:\n${text}`).toBe(
-      false,
-    )
-    tally.rejected++
-    return
+// Keep random generation and shrinking exactly as before. Written regression
+// inputs differ only in the bookkeeping flag that requires their admission.
+class ProgramWithRegressionMembership extends fc.Arbitrary {
+  generate(...args) {
+    return programArbitrary.generate(...args)
   }
-  reach.beginHistory({ fixed: spec.fixed === true })
-  for (const state of reachedStates(spec)) reach.reach(state)
-  tally.accepted++
-  const expected = predictOutcome(spec)
-  if (expected.refuse) tally.refused++
-  const reference = await referenceObservation(text, spec.hostProcess)
-  const observed = await strippedObservation(text, spec.hostProcess)
-  compareOutcome(expected, reference, observed)
+  shrink(...args) {
+    return programArbitrary.shrink(...args)
+  }
+  canShrinkWithoutContext(spec) {
+    return (
+      typeof spec?.fixed === `boolean` &&
+      programArbitrary.canShrinkWithoutContext({ ...spec, fixed: false })
+    )
+  }
 }
 
-// fast-check passes each example as an argument tuple.
-const constructedExamples = () => constructedPrograms().map((spec) => [spec])
-
-const reach = createOracleReach(PROPERTY, STATES, {
-  minimum: 2,
-  fixedHistories: constructedPrograms().length,
-})
-
-declareOracle({
-  model: [predictAdmission, predictOutcome],
-  check: [compareOutcome],
-  grammar: [programArbitrary, constructedPrograms],
-})
-
-describe(`production stripping of the probe form`, () => {
-  it(`fixed-seed campaign`, async () => {
-    const parameters = oracleFixedSeed(FIXED_SEED, {
-      numRuns: oracleRuns(BASE_RUNS),
-    })
-    await fc.assert(
-      fc.asyncProperty(programArbitrary, checkProgram),
-      withOracleFixedHistories(parameters, constructedExamples()),
-    )
-  }, 600_000)
-  it(`random-seed campaign`, async () => {
-    const parameters = oraclePropertyOptions(BASE_RUNS, PROPERTY)
-    await fc.assert(
-      fc.asyncProperty(programArbitrary, checkProgram),
-      withOracleFixedHistories(parameters, constructedExamples()),
-    )
-  }, 600_000)
-  afterAll(() => {
-    if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT) {
-      console.log(`ADMISSION`, JSON.stringify(tally))
-      console.log(`REACH`, JSON.stringify([...reach.counts()]))
+oracleProperty({
+  id: PROPERTY,
+  law: {
+    statement: `Probe stripping retains production behavior and no guard or probe references, or refuses a program whose promised result cannot be kept.`,
+    authority: `Maintainer decision 2026-11-09; @tanstack/eslint-plugin-oracles probe-form contract.`,
+    limits: `The unchanged one-function program grammar, admission boundary, and observations described above.`,
+    owner: `Small structures and test mechanics`,
+  },
+  histories: {
+    arbitrary: new ProgramWithRegressionMembership(),
+    runs: BASE_RUNS,
+    fixedSeeds: [FIXED_SEED],
+    measured: STATES,
+    // The old fixed and random campaigns each executed the same regressions.
+    // Preserve both executions beside their unchanged random budgets.
+    fixed: [`fixed campaign`, `random campaign`].flatMap((campaign) =>
+      constructedPrograms().map((history, index) => ({
+        name: `${campaign} regression ${index}`,
+        history,
+        enters: reachedStates(history),
+      })),
+    ),
+  },
+  model: (spec) => ({
+    admitted: predictAdmission(spec),
+    outcome: predictOutcome(spec),
+  }),
+  driver: async (spec, observe) => {
+    const text = programText(spec)
+    const admitted = ruleAccepts(text)
+    observe(`rule admission`, admitted)
+    const counted = !expect.getState().currentTestName.endsWith(`determinism`)
+    if (!admitted) {
+      if (counted) tally.rejected++
+      return
     }
-    reach.assertReached()
-  })
+    for (const state of new Set(reachedStates(spec))) {
+      observe(`reach`, state)
+      if (counted) {
+        counts.set(state, counts.get(state) + 1)
+        if (spec.fixed) fixedEntered.add(state)
+      }
+    }
+    if (counted) {
+      tally.accepted++
+      if (predictOutcome(spec).refuse) tally.refused++
+    }
+    observe(`reference`, await referenceObservation(text, spec.hostProcess))
+    observe(`stripped`, await strippedObservation(text, spec.hostProcess))
+  },
+  check: (spec, trace, expected) => {
+    const at = (checkpoint) =>
+      trace.find((entry) => entry.checkpoint === checkpoint)?.value
+    const admitted = at(`rule admission`)
+    const admission = differs(
+      `rule admission`,
+      `probe admission`,
+      admitted,
+      expected.admitted,
+    )
+    if (admission) return admission
+    if (!admitted)
+      return (
+        differs(`regression admission`, `probe admission`, spec.fixed, false) ??
+        pass
+      )
+    return compareOutcome(expected.outcome, at(`reference`), at(`stripped`))
+  },
+  timeout: 600_000,
+})
+
+afterAll(() => {
+  if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT) {
+    console.log(`ADMISSION`, JSON.stringify(tally))
+    console.log(`REACH`, JSON.stringify([...counts]))
+  }
+  if (!oracleReplayRequested()) {
+    expect([...counts].filter(([, count]) => count < 2)).toEqual([])
+    expect(STATES.filter((state) => !fixedEntered.has(state))).toEqual([])
+  }
 })

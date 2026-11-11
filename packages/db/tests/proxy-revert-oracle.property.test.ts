@@ -1,16 +1,10 @@
 import { describe, expect, it as vitestIt } from 'vitest'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { createChangeProxy } from '../src/proxy'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from './oracle-config'
+import { oracleFixedSeed, oracleReplayTest, oracleRoute } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
-import { createOracleReach } from './oracle-reach'
+import { oracleProperty, pass } from './oracle-property'
+import type { Observation, Verdict } from './oracle-property'
 
 /**
  * # Which draft writes count as changes, and which count as reverts?
@@ -772,16 +766,39 @@ function readSpec(value: unknown, like: Spec | undefined): string {
   }
 }
 
-function expectHistory({ original, ops }: History): void {
-  const row = realizeRoot(original)
-  const before = realizeRoot(original)
-  const { proxy, getChanges } = createChangeProxy(row)
+type HistoryObservation = {
+  keys: Array<string>
+  reported: Record<Field, boolean>
+  changes: Record<Field, string>
+  deleted: Record<Field, boolean>
+  draft: Record<Field, string>
+  original: Record<Field, string>
+  before: Record<Field, string>
+}
+
+// This is the existing transition model, separated from its production driver.
+// The observer encodes each rich value through the same readSpec projection
+// used by the original comparison; no Date, draft, class, or symbol is a trace.
+function historyExpectation({ original, ops }: History) {
   let state: Root = { ...original }
   const written = new Set<Field>()
   for (const generated of ops) {
     const op = resolve(state, original, generated)
     if (op === undefined || !applicable(state, original, op)) continue
     written.add(op.field)
+    state = step(state, original, op)
+  }
+  return { state, written, expected: expectedChanges(original, state) }
+}
+
+function driveHistory({ original, ops }: History): HistoryObservation {
+  const row = realizeRoot(original)
+  const before = realizeRoot(original)
+  const { proxy, getChanges } = createChangeProxy(row)
+  let state: Root = { ...original }
+  for (const generated of ops) {
+    const op = resolve(state, original, generated)
+    if (op === undefined || !applicable(state, original, op)) continue
     if (op.op === `revert`) {
       if (original[op.field] === undefined) delete proxy[op.field]
       else
@@ -790,52 +807,124 @@ function expectHistory({ original, ops }: History): void {
     state = step(state, original, op)
   }
 
-  const expected = expectedChanges(original, state)
   const changes = getChanges() as Record<string, unknown>
+  const fields = (read: (field: Field) => string): Record<Field, string> =>
+    Object.fromEntries(FIELDS.map((field) => [field, read(field)])) as Record<
+      Field,
+      string
+    >
+  return {
+    keys: Object.keys(changes),
+    reported: Object.fromEntries(
+      FIELDS.map((field) => [field, field in changes]),
+    ) as Record<Field, boolean>,
+    changes: fields((field) =>
+      field in changes
+        ? readSpec(changes[field], state[field])
+        : `not reported`,
+    ),
+    deleted: Object.fromEntries(
+      FIELDS.map((field) => [field, changes[field] === undefined]),
+    ) as Record<Field, boolean>,
+    draft: fields((field) => readSpec(proxy[field], state[field])),
+    original: fields((field) => readSpec(row[field], original[field])),
+    before: fields((field) => readSpec(before[field], original[field])),
+  }
+}
+
+function expectHistoryObservation(
+  { original, ops }: History,
+  observed: HistoryObservation,
+  { state, written, expected } = historyExpectation({ original, ops }),
+): void {
   const context = JSON.stringify({
     original: Object.fromEntries(FIELDS.map((f) => [f, canon(original[f])])),
     ops,
   })
   for (const field of expected.keys())
-    expect(field in changes, `change of ${field} reported, ${context}`).toBe(
-      true,
-    )
+    expect(
+      observed.reported[field],
+      `change of ${field} reported, ${context}`,
+    ).toBe(true)
   // An extra report is permitted only for a written key, with its final value.
   expect(
-    Object.keys(changes).filter(
+    observed.keys.filter(
       (key) => !(FIELDS as ReadonlyArray<string>).includes(key),
     ),
     `keys outside the row reported, ${context}`,
   ).toEqual([])
   for (const field of FIELDS) {
-    if (!(field in changes) || expected.has(field)) continue
+    if (!observed.reported[field] || expected.has(field)) continue
     expect(written.has(field), `unwritten ${field} reported, ${context}`).toBe(
       true,
     )
     expect(
-      readSpec(changes[field], state[field]),
+      observed.changes[field],
       `extra report of ${field}, ${context}`,
     ).toBe(encode(state[field]))
   }
   for (const [field, spec] of expected) {
     if (spec === undefined)
-      expect(changes[field], `deleted ${field}, ${context}`).toBeUndefined()
+      expect(observed.deleted[field], `deleted ${field}, ${context}`).toBe(true)
     else
-      expect(
-        readSpec(changes[field], spec),
-        `change of ${field}, ${context}`,
-      ).toBe(encode(spec))
+      expect(observed.changes[field], `change of ${field}, ${context}`).toBe(
+        encode(spec),
+      )
   }
   for (const field of FIELDS)
-    expect(
-      readSpec(proxy[field], state[field]),
-      `draft ${field}, ${context}`,
-    ).toBe(encode(state[field]))
+    expect(observed.draft[field], `draft ${field}, ${context}`).toBe(
+      encode(state[field]),
+    )
   for (const field of FIELDS)
     expect(
-      readSpec(row[field], original[field]),
+      observed.original[field],
       `original ${field} unchanged, ${context}`,
-    ).toBe(readSpec(before[field], original[field]))
+    ).toBe(observed.before[field])
+}
+
+function expectHistory(history: History): void {
+  expectHistoryObservation(history, driveHistory(history))
+}
+
+function checkHistory(
+  history: History,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof historyExpectation>,
+): Verdict {
+  try {
+    const final = trace.find((entry) => entry.checkpoint === `final`)
+    expect(final, `final draft observation`).toBeDefined()
+    expectHistoryObservation(
+      history,
+      final!.value as HistoryObservation,
+      expected,
+    )
+    return pass
+  } catch (error) {
+    if (!(error instanceof Error) || error.name !== `AssertionError`)
+      throw error
+    return {
+      kind: `violation`,
+      law: `draft revert`,
+      checkpoint: `final`,
+      difference: error.message,
+      cause: error,
+    }
+  }
+}
+
+function historyDriver(
+  history: History,
+  observe: (checkpoint: string, value: unknown) => void,
+): void {
+  observe(`final`, driveHistory(history))
+}
+
+const revertLaw = {
+  statement: `Draft reads, changes, and original-row isolation agree with the existing independent draft-equality transition model after the final write.`,
+  authority: `The nine draft-equality rules and maintainer decisions documented above.`,
+  limits: `The existing assignment, deletion, nested, iterator, typed-array, URL, class, and revert grammars; no new values or paths are introduced.`,
+  owner: `Drafts and native values`,
 }
 
 // ---------------------------------------------------------------------------
@@ -854,118 +943,96 @@ const SIGNED_ZERO = `proxy.revert-signed-zero`
 
 const it = oracleReplayTest(vitestIt)
 
-// A random campaign registers the route of its parameters inside each
-// generated predicate.
-const randomPredicate =
-  <TArgs extends Array<unknown>>(
-    parameters: Parameters<typeof oracleRouteOf>[0],
-    check: (...args: TArgs) => void,
-  ) =>
-  (...args: TArgs): void => {
-    oracleRoute(oracleRouteOf(parameters))
-    check(...args)
-  }
-
 describe(`draft revert oracle`, () => {
   // These six fixed histories reconstruct the scalar false-green witness and
   // its nested/Float64 neighbors in both directions. They use the generated
   // campaign's model, draft driver and final getChanges/draft/isolation check.
-  const zeroExamples: Array<[SignedZeroInput]> = signedZeroPaths.flatMap(
-    (path) =>
-      [false, true].map((negative): [SignedZeroInput] => [
-        { path, negative, field: `f`, key: `a`, width: 1, index: 0 },
-      ]),
+  const zeroExamples: Array<SignedZeroInput> = signedZeroPaths.flatMap((path) =>
+    [false, true].map((negative) => ({
+      path,
+      negative,
+      field: `f`,
+      key: `a`,
+      width: 1,
+      index: 0,
+    })),
   )
-  for (const campaign of [`fixed`, `random`] as const)
-    oracleReplayTest(vitestIt, ...(campaign === `fixed` ? [] : [SIGNED_ZERO]))(
-      `preserves sign-only writes through each draft path (${campaign})`,
-      () => {
-        const reach = createOracleReach(SIGNED_ZERO, signedZeroPaths, {
-          fixedHistories: zeroExamples.length,
-        })
-        let histories = 0
-        const parameters = {
-          ...oraclePropertyOptions(100, SIGNED_ZERO, {
-            examples: zeroExamples,
-          }),
-          ...(campaign === `fixed` ? oracleFixedSeed(FIXED_SEED) : {}),
-        }
-        oracleRoute(oracleRouteOf(parameters))
-        fc.assert(
-          fc.property(signedZeroArb, (input) => {
-            reach.beginHistory({ fixed: histories++ < zeroExamples.length })
-            expectHistory(signedZeroHistory(input))
-            reach.reach(input.path)
-          }),
-          parameters,
-        )
-        reach.assertReached()
-        process.stdout.write(
-          `draft signed-zero ${campaign}: ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-        )
-      },
-    )
-
-  it(`matches the model across generated write histories (${FIXED_SEED})`, () => {
-    const campaignParameters = oracleFixedSeed(FIXED_SEED, {
-      numRuns: oracleRuns(400),
-    })
-    oracleRoute(oracleRouteOf(campaignParameters))
-    fc.assert(fc.property(historyArb, expectHistory), campaignParameters)
+  oracleProperty({
+    id: SIGNED_ZERO,
+    law: revertLaw,
+    histories: {
+      arbitrary: signedZeroArb,
+      runs: 100,
+      fixedSeeds: [FIXED_SEED],
+      states: signedZeroPaths,
+      constructed: signedZeroPaths.map((path) => ({
+        name: path,
+        enters: [path],
+        build: (history: SignedZeroInput) => ({ ...history, path }),
+      })),
+      fixed: zeroExamples.map((history) => ({
+        name: `${history.path}/${history.negative}`,
+        history,
+        enters: [history.path],
+      })),
+    },
+    resolve: (input) => ({ input, history: signedZeroHistory(input) }),
+    model: ({ history }) => historyExpectation(history),
+    driver: ({ input, history }, observe) => {
+      historyDriver(history, observe)
+      observe(`reach`, input.path)
+    },
+    check: ({ history }, trace, expected) =>
+      checkHistory(history, trace, expected),
   })
-  const historyCampaign = oraclePropertyOptions(400, WRITE_HISTORY)
-  oracleReplayTest(fcTest, WRITE_HISTORY).prop([historyArb], historyCampaign)(
-    `matches the model across generated write histories (random)`,
-    randomPredicate(historyCampaign, expectHistory),
-  )
 
-  it(`matches the model across generated nested round trips (${FIXED_SEED})`, () => {
-    const runParameters = oracleFixedSeed(FIXED_SEED, {
-      numRuns: oracleRuns(200),
-    })
-    oracleRoute(oracleRouteOf(runParameters))
-    fc.assert(fc.property(nestedRoundTripArb, expectHistory), runParameters)
+  oracleProperty({
+    id: WRITE_HISTORY,
+    law: revertLaw,
+    histories: { arbitrary: historyArb, runs: 400, fixedSeeds: [FIXED_SEED] },
+    model: historyExpectation,
+    driver: historyDriver,
+    check: checkHistory,
   })
-  const nestedRoundTripCampaign = oraclePropertyOptions(200, NESTED_ROUND_TRIPS)
-  oracleReplayTest(fcTest, NESTED_ROUND_TRIPS).prop(
-    [nestedRoundTripArb],
-    nestedRoundTripCampaign,
-  )(
-    `matches the model across generated nested round trips (random)`,
-    randomPredicate(nestedRoundTripCampaign, expectHistory),
-  )
 
-  it(`matches the model across generated URL and keyless writes (${FIXED_SEED})`, () => {
-    const parameters = oracleFixedSeed(FIXED_SEED, {
-      numRuns: oracleRuns(200),
-    })
-    oracleRoute(oracleRouteOf(parameters))
-    fc.assert(fc.property(classWriteArb, expectHistory), parameters)
+  oracleProperty({
+    id: NESTED_ROUND_TRIPS,
+    law: revertLaw,
+    histories: {
+      arbitrary: nestedRoundTripArb,
+      runs: 200,
+      fixedSeeds: [FIXED_SEED],
+    },
+    model: historyExpectation,
+    driver: historyDriver,
+    check: checkHistory,
   })
-  const classWriteCampaign = oraclePropertyOptions(200, CLASS_WRITES)
-  oracleReplayTest(fcTest, CLASS_WRITES).prop(
-    [classWriteArb],
-    classWriteCampaign,
-  )(
-    `matches the model across generated URL and keyless writes (random)`,
-    randomPredicate(classWriteCampaign, expectHistory),
-  )
 
-  it(`matches the model across generated partial reverts (${FIXED_SEED})`, () => {
-    const parameters = oracleFixedSeed(FIXED_SEED, {
-      numRuns: oracleRuns(200),
-    })
-    oracleRoute(oracleRouteOf(parameters))
-    fc.assert(fc.property(partialRevertArb, expectHistory), parameters)
+  oracleProperty({
+    id: CLASS_WRITES,
+    law: revertLaw,
+    histories: {
+      arbitrary: classWriteArb,
+      runs: 200,
+      fixedSeeds: [FIXED_SEED],
+    },
+    model: historyExpectation,
+    driver: historyDriver,
+    check: checkHistory,
   })
-  const partialRevertCampaign = oraclePropertyOptions(200, PARTIAL_REVERTS)
-  oracleReplayTest(fcTest, PARTIAL_REVERTS).prop(
-    [partialRevertArb],
-    partialRevertCampaign,
-  )(
-    `matches the model across generated partial reverts (random)`,
-    randomPredicate(partialRevertCampaign, expectHistory),
-  )
+
+  oracleProperty({
+    id: PARTIAL_REVERTS,
+    law: revertLaw,
+    histories: {
+      arbitrary: partialRevertArb,
+      runs: 200,
+      fixedSeeds: [FIXED_SEED],
+    },
+    model: historyExpectation,
+    driver: historyDriver,
+    check: checkHistory,
+  })
 
   // Positive execution witness: the fixed campaign reaches each operation, a
   // partial revert (some change survives one revert), a full revert, and a
@@ -1516,8 +1583,9 @@ function driveNative(history: NativeHistory): {
 function expectNativeResult(
   history: NativeHistory,
   { changes, read }: ReturnType<typeof driveNative>,
+  expected = nativeModel(history),
 ): void {
-  const { row: final, wroteF } = nativeModel(history)
+  const { row: final, wroteF } = expected
   const context = JSON.stringify(history)
   expect(read, `draft reads the final row, ${context}`).toEqual(final)
   const xChanged = final.x !== history.original.x
@@ -1544,8 +1612,13 @@ function expectNativeHistory(history: NativeHistory): void {
 // report, and its native mutator writes, in proxy.ts by this file's tests.
 declareOracle({
   owns: [`src/proxy.ts`],
-  check: [expectHistory, expectNativeResult],
-  model: [numberToken, step, expectedChanges, nativeModel],
+  check: [
+    expectHistory,
+    expectHistoryObservation,
+    checkHistory,
+    expectNativeResult,
+  ],
+  model: [numberToken, step, expectedChanges, historyExpectation, nativeModel],
   grammar: [signedZeroArb, signedZeroHistory, nativeHistoryArb],
 })
 
@@ -1574,21 +1647,43 @@ describe(`draft revert oracle: native mutators mixed with assignments`, () => {
     }
   })
 
-  it(`matches the model across generated native histories (${FIXED_SEED})`, () => {
-    const parameters = oracleFixedSeed(FIXED_SEED, {
-      numRuns: oracleRuns(400),
-    })
-    oracleRoute(oracleRouteOf(parameters))
-    fc.assert(fc.property(nativeHistoryArb, expectNativeHistory), parameters)
+  oracleProperty({
+    id: NATIVE_HISTORIES,
+    law: {
+      ...revertLaw,
+      statement: `Array mutators, assignments, and detached handles preserve the existing final row and permitted change-report law.`,
+      limits: `The existing bounded numeric native-history grammar; Map and Set mutators are not mixed with assignments.`,
+    },
+    histories: {
+      arbitrary: nativeHistoryArb,
+      runs: 400,
+      fixedSeeds: [FIXED_SEED],
+    },
+    model: nativeModel,
+    driver: (history, observe) => observe(`final`, driveNative(history)),
+    check: (history, trace, expected) => {
+      try {
+        const final = trace.find((entry) => entry.checkpoint === `final`)
+        expect(final, `final native draft observation`).toBeDefined()
+        expectNativeResult(
+          history,
+          final!.value as ReturnType<typeof driveNative>,
+          expected,
+        )
+        return pass
+      } catch (error) {
+        if (!(error instanceof Error) || error.name !== `AssertionError`)
+          throw error
+        return {
+          kind: `violation`,
+          law: `native draft revert`,
+          checkpoint: `final`,
+          difference: error.message,
+          cause: error,
+        }
+      }
+    },
   })
-  const nativeHistoryCampaign = oraclePropertyOptions(400, NATIVE_HISTORIES)
-  oracleReplayTest(fcTest, NATIVE_HISTORIES).prop(
-    [nativeHistoryArb],
-    nativeHistoryCampaign,
-  )(
-    `matches the model across generated native histories (random)`,
-    randomPredicate(nativeHistoryCampaign, expectNativeHistory),
-  )
 
   // Positive execution witness: the fixed campaign reaches a native write
   // that an assignment then replaces, and a mutator through a detached handle.

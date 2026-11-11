@@ -2205,7 +2205,9 @@ cover binary range ordering, all JavaScript value kinds, or general Collection
 publication histories.
 
 The [comparison oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/comparison-oracle.property.test.ts)
-owns the transferred same-realm NaN and invalid-Date default-order cases,
+uses the shared grammars and independent checks in
+`packages/db/tests/comparison-laws-oracle.ts` and owns the transferred
+same-realm NaN and invalid-Date default-order cases,
 plus ordinary PlainDate calendar and ZonedDateTime instant order. Its
 independent supplied values predict direct comparator signs and ties. The
 [round 5](oracle-reviews/comparison-unit-retirement-round-5.md) and
@@ -4375,7 +4377,7 @@ commit `fe532f4` in `packages/db/tests/oracle-reach.ts` and
 `packages/db/tests/oracle-campaign.ts`. Their generated self-oracle is again
 `packages/db/tests/declared-reach-oracle.property.test.ts`
 (`oracle.declared-reach`), with the compatibility examples in
-`oracle-reach.test.ts` and `oracle-campaign.test.ts`. The generated model,
+`legacy-reach.test.ts` and `legacy-campaign.test.ts`. The generated model,
 ledger grammar, comparisons, and 200-run budget are preserved; its imports and
 environment names use DB's configuration. These files judge the transitional
 helpers only. The current framework's `oracleProperty` laws and constructed
@@ -7012,9 +7014,15 @@ unrepaired until the full oracle campaign completes. Strict local shims provide
 command metadata and retain raw requests; real npm HTTP, tarballs, installed
 consumers and Actions remain separate receiving work under O13/O22.
 
-Canonical release replays use the shared property registry/manifest and a new
-finite comparison witness; setup is not recorded as a completed comparison,
-and primary/writer/cleanup failures remain distinct. The older standalone
+Release receivers use native `oracleProperty` enumeration. The shared manifest
+marks `scripts.release-version`, `scripts.release-seed-failure`,
+`scripts.publish-command`, and `scripts.publish-http` as enumerated campaigns.
+Replay an exact case with its complete stable Vitest title, including the JSON
+history, under `scripts/oracle-scripts.vitest.config.mjs`; native enumeration
+replaces the earlier release-only PROPERTY/SEED/PATH index bridge. Every original
+finite case and comparison cut remains. Authored assertion failures retain their
+original error, while setup and cleanup failures remain driver errors.
+The older standalone
 `recordOracleReplay` comment promises never to throw, but a real RunDetails plus
 a directory channel throws EISDIR (P03). Its owner is the guarded replay/
 standalone recorder checks in `packages/db/tests/oracle-replay.test.ts`; the

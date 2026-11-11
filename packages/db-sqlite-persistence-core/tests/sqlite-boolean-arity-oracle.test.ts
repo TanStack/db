@@ -1,17 +1,14 @@
 // @vitest-environment node
 import { fc } from '@fast-check/vitest'
-import { expect, it } from 'vitest'
+import { expect } from 'vitest'
 import { IR } from '@tanstack/db'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-  recordOracleReplay,
-} from '../../db/tests/oracle-config'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { SQLiteCorePersistenceAdapter } from '../src'
 import { CountingDriver } from './sqlite-boolean-arity-support'
 import type { Read } from './sqlite-boolean-arity-support'
@@ -390,362 +387,383 @@ function brief(failure: Failure | undefined) {
 
 // A path replay of this property runs its random campaign only. A seed without
 // a path reseeds that campaign.
-const booleanArityProperty = `sqlite-persistence.boolean-arity`
 
-oracleReplayTest(it, booleanArityProperty)(
-  'refines boolean arity and SQL row work across generated SQLite loads',
-  async () => {
-    const driver = new CountingDriver()
-    const adapter = new SQLiteCorePersistenceAdapter({ driver })
+async function judgeBooleanHistory(history: Model | undefined) {
+  const driver = new CountingDriver()
+  const adapter = new SQLiteCorePersistenceAdapter({ driver })
 
-    async function check(model: Model): Promise<Array<Failure>> {
+  async function check(model: Model): Promise<Array<Failure>> {
+    driver.reads = []
+    const result = await adapter.loadSubset(
+      { kind: `eager`, collectionId: 'boolean-arity' },
+      {
+        where: toIR(model),
+      },
+    )
+    const actual = result.map((row) => String(row.key)).sort()
+    const expected = expectedKeys(model)
+    const read = driver.reads[0]
+    if (driver.reads.length !== 1 || !read) {
+      throw new Error(
+        `ordinary load must make one Collection SELECT; got ${driver.reads.length}`,
+      )
+    }
+    const fail = (law: Failure['law']): Failure => ({
+      law,
+      checkpoint: 'loadSubset-return',
+      model,
+      expected,
+      actual,
+      read,
+    })
+    const failures: Array<Failure> = []
+    if (JSON.stringify(actual) !== JSON.stringify(expected))
+      failures.push(fail('public'))
+    if (
+      canPush(model) &&
+      expected.length < fixture.length &&
+      (!read.sql.includes(' WHERE ') || read.rawRows !== expected.length)
+    ) {
+      failures.push(fail('work'))
+    }
+    if (
+      model.kind === 'and' &&
+      model.children.length === 0 &&
+      (!read.sql.includes(' WHERE ') || read.parameters !== 0)
+    ) {
+      failures.push(fail('compile'))
+    }
+    if (read.rawRows < expected.length || read.rawRows > fixture.length)
+      failures.push(fail('candidate'))
+    return failures
+  }
+
+  async function runOracle(): Promise<void> {
+    await adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: 'boolean-arity' },
+      {
+        txId: 'seed',
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: fixture.map((row) => ({
+          type: 'insert' as const,
+          key: row.id,
+          value: structuredClone(row),
+        })),
+      },
+    )
+    if (history !== undefined) {
+      await oracleAssertion('existing comparison at 452', async () =>
+        expect(await check(history)).toEqual([]),
+      )
+      return
+    }
+    driver.reads = []
+    const baseline = await adapter.loadSubset(
+      { kind: `eager`, collectionId: 'boolean-arity' },
+      {},
+    )
+    oracleAssertion('existing comparison at 460', () =>
+      expect(baseline).toHaveLength(fixture.length),
+    )
+    oracleAssertion('existing comparison at 461', () =>
+      expect(driver.reads).toHaveLength(1),
+    )
+    oracleAssertion('existing comparison at 462', () =>
+      expect(driver.reads[0]?.rawRows).toBe(fixture.length),
+    )
+    oracleAssertion('existing comparison at 463', () =>
+      expect(driver.reads[0]?.sql).not.toContain(' WHERE '),
+    )
+
+    const failures: Array<Failure> = []
+    for (const model of matrix()) failures.push(...(await check(model)))
+    driver.reads = []
+    const emptyIn = await adapter.loadSubset(
+      { kind: `eager`, collectionId: 'boolean-arity' },
+      {
+        where: toIR(atom('in-empty')),
+      },
+    )
+    oracleAssertion('existing comparison at 474', () =>
+      expect(emptyIn).toHaveLength(0),
+    )
+    oracleAssertion('existing comparison at 475', () =>
+      expect(driver.reads).toHaveLength(1),
+    )
+    oracleAssertion('existing comparison at 476', () =>
+      expect(driver.reads[0]?.rawRows).toBe(0),
+    )
+    oracleAssertion('existing comparison at 477', () =>
+      expect(driver.reads[0]?.sql).toContain(' WHERE '),
+    )
+
+    // The cursor receiver forms two new AND nodes around the base predicate.
+    // A root-only arity repair would leave this nested empty-OR work unbounded.
+    driver.reads = []
+    const cursorRows = await adapter.loadSubset(
+      { kind: `eager`, collectionId: 'boolean-arity' },
+      {
+        where: toIR(op('or')),
+        orderBy: [
+          {
+            expression: new IR.PropRef(['id']),
+            compareOptions: { direction: 'asc', nulls: 'last' },
+          },
+        ],
+        limit: 2,
+        cursor: {
+          whereCurrent: toIR(atom('first')),
+          whereFrom: new IR.Func('gt', [
+            new IR.PropRef(['id']),
+            new IR.Value('row-1'),
+          ]),
+        },
+      },
+    )
+    const cursorReads = driver.reads.slice()
+    const cursorWorkFailed =
+      cursorRows.length !== 0 ||
+      cursorReads.length !== 2 ||
+      cursorReads.some(
+        (read) => !read.sql.includes(' WHERE ') || read.rawRows !== 0,
+      )
+
+    const directFailures: Array<Failure> = []
+    for (const name of [
+      'ilike-unicode-exact',
+      'ilike-unicode-prefix',
+      'ilike-ascii-prefix',
+      'gt-positive',
+      'eq-lone-surrogate',
+      'not-is-undefined',
+      'not-is-null',
+      'like-emoji-two',
+    ] as const) {
+      directFailures.push(...(await check(atom(name))))
+    }
+
+    await oracleAssertion('existing comparison at 524', async () =>
+      expect(await check(op('and', atom('unsupported-function')))).toEqual([]),
+    )
+    await oracleAssertion('existing comparison at 525', async () =>
+      expect(await check(op('or', atom('unsupported-path')))).toEqual([]),
+    )
+
+    const mixedAnd = op('and', atom('first'), atom('gt-positive'))
+    async function observeMixedAnd(model: Model = mixedAnd) {
       driver.reads = []
-      const result = await adapter.loadSubset(
+      const rows = await adapter.loadSubset(
         { kind: `eager`, collectionId: 'boolean-arity' },
         {
           where: toIR(model),
         },
       )
-      const actual = result.map((row) => String(row.key)).sort()
-      const expected = expectedKeys(model)
-      const read = driver.reads[0]
-      if (driver.reads.length !== 1 || !read) {
-        throw new Error(
-          `ordinary load must make one Collection SELECT; got ${driver.reads.length}`,
-        )
-      }
-      const fail = (law: Failure['law']): Failure => ({
-        law,
-        checkpoint: 'loadSubset-return',
-        model,
-        expected,
-        actual,
-        read,
-      })
-      const failures: Array<Failure> = []
-      if (JSON.stringify(actual) !== JSON.stringify(expected))
-        failures.push(fail('public'))
-      if (
-        canPush(model) &&
-        expected.length < fixture.length &&
-        (!read.sql.includes(' WHERE ') || read.rawRows !== expected.length)
-      ) {
-        failures.push(fail('work'))
-      }
-      if (
-        model.kind === 'and' &&
-        model.children.length === 0 &&
-        (!read.sql.includes(' WHERE ') || read.parameters !== 0)
-      ) {
-        failures.push(fail('compile'))
-      }
-      if (read.rawRows < expected.length || read.rawRows > fixture.length)
-        failures.push(fail('candidate'))
-      return failures
-    }
-
-    async function campaign(parameters: {
-      numRuns: number
-      seed?: number
-      path?: string
-    }) {
-      let original: Failure | undefined
-      const property = fc.asyncProperty(modelArb, async (model) => {
-        const failures = await check(model)
-        if (failures.length === 0) return
-        const originalLaw = original?.law
-        const sameLaw = originalLaw
-          ? failures.find((failure) => failure.law === originalLaw)
-          : failures[0]
-        if (!sameLaw) return
-        original ??= sameLaw
-        throw new Error(JSON.stringify(brief(sameLaw)))
-      })
-      oracleRoute(oracleRouteOf(parameters))
-      const result = await fc.check(property, parameters)
-      recordOracleReplay(booleanArityProperty, result)
-      const reducedFailures = result.counterexample
-        ? await check(result.counterexample[0])
-        : []
-      const reduced = reducedFailures.find(
-        (failure) => failure.law === original?.law,
-      )
-      if (result.failed && original && !reduced) {
-        throw new Error(`shrinking lost the ${original.law} law`)
-      }
       return {
-        failed: result.failed,
-        seed: result.seed,
-        path: result.counterexamplePath,
-        counterexample: result.counterexample,
-        original: brief(original),
-        reduced: brief(reduced),
+        keys: rows.map((row) => String(row.key)).sort(),
+        read: driver.reads[0],
       }
     }
+    const mixed = await observeMixedAnd()
+    oracleAssertion('existing comparison at 542', () =>
+      expect(mixed.keys).toEqual(['row-1']),
+    ) // NaN compares above zero in core.
+    oracleAssertion('existing comparison at 543', () =>
+      expect(mixed.read?.sql).toContain(' WHERE '),
+    )
+    oracleAssertion('existing comparison at 544', () =>
+      expect(mixed.read?.rawRows).toBe(1),
+    ) // Certified id equality is selective.
 
-    async function runOracle(): Promise<void> {
-      await adapter.applyCommittedTx(
-        { kind: `eager`, collectionId: 'boolean-arity' },
-        {
-          txId: 'seed',
-          term: 1,
-          seq: 1,
-          rowVersion: 1,
-          mutations: fixture.map((row) => ({
-            type: 'insert' as const,
-            key: row.id,
-            value: structuredClone(row),
-          })),
-        },
-      )
-      // A path replay of this property runs only its random campaign.
-      if (oracleReplayRequested()) {
-        const replay = await campaign(
-          oraclePropertyOptions(150, booleanArityProperty),
-        )
-        if (replay.failed)
-          throw new Error(
-            `direct boolean-arity replay RED: ${JSON.stringify(replay)}`,
-          )
-        return
-      }
-
-      driver.reads = []
-      const baseline = await adapter.loadSubset(
-        { kind: `eager`, collectionId: 'boolean-arity' },
-        {},
-      )
-      expect(baseline).toHaveLength(fixture.length)
-      expect(driver.reads).toHaveLength(1)
-      expect(driver.reads[0]?.rawRows).toBe(fixture.length)
-      expect(driver.reads[0]?.sql).not.toContain(' WHERE ')
-
-      const failures: Array<Failure> = []
-      for (const model of matrix()) failures.push(...(await check(model)))
-      const fixed = await campaign(
-        oracleFixedSeed(1994, { numRuns: oracleRuns(150) }),
-      )
-      const random = await campaign(
-        oraclePropertyOptions(150, booleanArityProperty),
-      )
-
-      driver.reads = []
-      const emptyIn = await adapter.loadSubset(
-        { kind: `eager`, collectionId: 'boolean-arity' },
-        {
-          where: toIR(atom('in-empty')),
-        },
-      )
-      expect(emptyIn).toHaveLength(0)
-      expect(driver.reads).toHaveLength(1)
-      expect(driver.reads[0]?.rawRows).toBe(0)
-      expect(driver.reads[0]?.sql).toContain(' WHERE ')
-
-      // The cursor receiver forms two new AND nodes around the base predicate.
-      // A root-only arity repair would leave this nested empty-OR work unbounded.
-      driver.reads = []
-      const cursorRows = await adapter.loadSubset(
-        { kind: `eager`, collectionId: 'boolean-arity' },
-        {
-          where: toIR(op('or')),
-          orderBy: [
-            {
-              expression: new IR.PropRef(['id']),
-              compareOptions: { direction: 'asc', nulls: 'last' },
-            },
-          ],
-          limit: 2,
-          cursor: {
-            whereCurrent: toIR(atom('first')),
-            whereFrom: new IR.Func('gt', [
-              new IR.PropRef(['id']),
-              new IR.Value('row-1'),
-            ]),
-          },
-        },
-      )
-      const cursorReads = driver.reads.slice()
-      const cursorWorkFailed =
-        cursorRows.length !== 0 ||
-        cursorReads.length !== 2 ||
-        cursorReads.some(
-          (read) => !read.sql.includes(' WHERE ') || read.rawRows !== 0,
-        )
-
-      const directFailures: Array<Failure> = []
-      for (const name of [
-        'ilike-unicode-exact',
-        'ilike-unicode-prefix',
-        'ilike-ascii-prefix',
-        'gt-positive',
-        'eq-lone-surrogate',
-        'not-is-undefined',
-        'not-is-null',
-        'like-emoji-two',
-      ] as const) {
-        directFailures.push(...(await check(atom(name))))
-      }
-
-      expect(await check(op('and', atom('unsupported-function')))).toEqual([])
-      expect(await check(op('or', atom('unsupported-path')))).toEqual([])
-
-      const mixedAnd = op('and', atom('first'), atom('gt-positive'))
-      async function observeMixedAnd(model: Model = mixedAnd) {
-        driver.reads = []
-        const rows = await adapter.loadSubset(
-          { kind: `eager`, collectionId: 'boolean-arity' },
-          {
-            where: toIR(model),
-          },
-        )
-        return {
-          keys: rows.map((row) => String(row.key)).sort(),
-          read: driver.reads[0],
-        }
-      }
-      const mixed = await observeMixedAnd()
-      expect(mixed.keys).toEqual(['row-1']) // NaN compares above zero in core.
-      expect(mixed.read?.sql).toContain(' WHERE ')
-      expect(mixed.read?.rawRows).toBe(1) // Certified id equality is selective.
-
-      for (const model of [
-        op('and', atom('gt-positive'), atom('first')),
-        op('and', op('and', atom('first'), atom('gt-positive'))),
-        op(
-          'and',
-          atom('first'),
-          op('or', atom('ilike-unicode-exact'), atom('false')),
-        ),
-        op('and', atom('first'), atom('not-is-null')),
-      ]) {
-        const observation = await observeMixedAnd(model)
-        expect(observation.keys).toEqual(expectedKeys(model))
-        expect(observation.read?.sql).toContain(' WHERE ')
-        expect(observation.read?.rawRows).toBe(1)
-      }
-
-      driver.mutantDropWhere = true
-      const droppedConjunct = await observeMixedAnd()
-      driver.mutantDropWhere = false
-      expect(droppedConjunct.keys).toEqual(mixed.keys)
-      expect(droppedConjunct.read?.rawRows).toBe(fixture.length)
-      expect(droppedConjunct.read?.rawRows).not.toBe(mixed.read?.rawRows)
-
-      // A legal nested predicate should require work proportional to its depth.
-      // Reading each node's `args` is a deterministic proxy for compiler visits.
-      let argumentReads = 0
-      let nested: IR.BasicExpression = new IR.Value(true)
-      const depth = 80
-      for (let index = 0; index < depth; index++) {
-        const child: IR.BasicExpression = nested
-        const node: IR.Func = new IR.Func('and', [child])
-        Object.defineProperty(node, 'args', {
-          get() {
-            argumentReads++
-            return [child]
-          },
-        })
-        nested = node
-      }
-      const nestedRows = await adapter.loadSubset(
-        { kind: `eager`, collectionId: 'boolean-arity' },
-        {
-          where: nested,
-        },
-      )
-      expect(nestedRows).toHaveLength(fixture.length)
-      expect(argumentReads).toBeLessThanOrEqual(depth * 10)
-
-      driver.mutantPushUnsafeOr = true
-      const unsafeOr = await check(
+    for (const model of [
+      op('and', atom('gt-positive'), atom('first')),
+      op('and', op('and', atom('first'), atom('gt-positive'))),
+      op(
+        'and',
+        atom('first'),
         op('or', atom('ilike-unicode-exact'), atom('false')),
+      ),
+      op('and', atom('first'), atom('not-is-null')),
+    ]) {
+      const observation = await observeMixedAnd(model)
+      oracleAssertion('existing comparison at 557', () =>
+        expect(observation.keys).toEqual(expectedKeys(model)),
       )
-      driver.mutantPushUnsafeOr = false
-      expect(unsafeOr.map((failure) => failure.law)).toContain('public')
+      oracleAssertion('existing comparison at 558', () =>
+        expect(observation.read?.sql).toContain(' WHERE '),
+      )
+      oracleAssertion('existing comparison at 559', () =>
+        expect(observation.read?.rawRows).toBe(1),
+      )
+    }
+
+    driver.mutantDropWhere = true
+    const droppedConjunct = await observeMixedAnd()
+    driver.mutantDropWhere = false
+    oracleAssertion('existing comparison at 565', () =>
+      expect(droppedConjunct.keys).toEqual(mixed.keys),
+    )
+    oracleAssertion('existing comparison at 566', () =>
+      expect(droppedConjunct.read?.rawRows).toBe(fixture.length),
+    )
+    oracleAssertion('existing comparison at 567', () =>
+      expect(droppedConjunct.read?.rawRows).not.toBe(mixed.read?.rawRows),
+    )
+
+    // A legal nested predicate should require work proportional to its depth.
+    // Reading each node's `args` is a deterministic proxy for compiler visits.
+    let argumentReads = 0
+    let nested: IR.BasicExpression = new IR.Value(true)
+    const depth = 80
+    for (let index = 0; index < depth; index++) {
+      const child: IR.BasicExpression = nested
+      const node: IR.Func = new IR.Func('and', [child])
+      Object.defineProperty(node, 'args', {
+        get() {
+          argumentReads++
+          return [child]
+        },
+      })
+      nested = node
+    }
+    const nestedRows = await adapter.loadSubset(
+      { kind: `eager`, collectionId: 'boolean-arity' },
+      {
+        where: nested,
+      },
+    )
+    oracleAssertion('existing comparison at 591', () =>
+      expect(nestedRows).toHaveLength(fixture.length),
+    )
+    oracleAssertion('existing comparison at 592', () =>
+      expect(argumentReads).toBeLessThanOrEqual(depth * 10),
+    )
+
+    driver.mutantPushUnsafeOr = true
+    const unsafeOr = await check(
+      op('or', atom('ilike-unicode-exact'), atom('false')),
+    )
+    driver.mutantPushUnsafeOr = false
+    oracleAssertion('existing comparison at 599', () =>
+      expect(unsafeOr.map((failure) => failure.law)).toContain('public'),
+    )
+    oracleAssertion('existing comparison at 600', () =>
       expect(
         unsafeOr.find((failure) => failure.law === 'public')?.read.sql,
-      ).toContain(' WHERE ')
+      ).toContain(' WHERE '),
+    )
 
-      driver.mutantUnaryValue = 'x'
+    driver.mutantUnaryValue = 'x'
+    await oracleAssertion('existing comparison at 605', async () =>
       expect(
         (await check(op('and', atom('word')))).map((failure) => failure.law),
-      ).toContain('public')
-      driver.mutantUnaryValue = 1
-      const blindOr = await check(op('or', atom('one')))
-      driver.mutantUnaryValue = undefined
-      driver.mutantDropWhere = true
+      ).toContain('public'),
+    )
+    driver.mutantUnaryValue = 1
+    const blindOr = await check(op('or', atom('one')))
+    driver.mutantUnaryValue = undefined
+    driver.mutantDropWhere = true
+    await oracleAssertion('existing comparison at 612', async () =>
       expect(
         (await check(op('and', atom('first'), atom('true')))).map(
           (failure) => failure.law,
         ),
-      ).toContain('work')
-      driver.mutantDropWhere = false
+      ).toContain('work'),
+    )
+    driver.mutantDropWhere = false
 
-      if (
-        failures.length ||
-        directFailures.length ||
-        fixed.failed ||
-        random.failed ||
-        cursorWorkFailed
-      ) {
-        const count = (law: Failure['law']) =>
-          failures.filter((failure) => failure.law === law).length
-        throw new Error(
-          `Boolean-arity oracle RED on current SQLite adapter: ` +
-            JSON.stringify({
-              cases: matrix().length,
-              failures: {
-                public: count('public'),
-                work: count('work'),
-                compile: count('compile'),
-                candidate: count('candidate'),
-              },
-              examples: failures
-                .filter((failure) =>
-                  ['public', 'work', 'compile'].includes(failure.law),
-                )
-                .slice(0, 5)
-                .map(brief),
-              direct: directFailures.map(brief),
-              fixed,
-              random,
-              cursorWorkFailed,
-              cursorReads,
-              blindOrOutcome:
-                blindOr.length === 0
-                  ? 'survived: JS post-filter removed SQL over-selection'
-                  : 'assertion failure',
-            }),
-        )
-      }
-    }
-
-    let primary: unknown
-    let failed = false
-    try {
-      await runOracle()
-    } catch (error) {
-      failed = true
-      primary = error
-    }
-
-    let cleanupError: unknown
-    let cleanupFailed = false
-    try {
-      driver.db.close()
-    } catch (error) {
-      cleanupFailed = true
-      cleanupError = error
-    }
-
-    if (failed && cleanupFailed) {
-      throw new AggregateError(
-        [primary, cleanupError],
-        'SQLite oracle and cleanup failed',
-        { cause: primary },
+    if (failures.length || directFailures.length || cursorWorkFailed) {
+      const count = (law: Failure['law']) =>
+        failures.filter((failure) => failure.law === law).length
+      throw new Error(
+        `Boolean-arity oracle RED on current SQLite adapter: ` +
+          JSON.stringify({
+            cases: matrix().length,
+            failures: {
+              public: count('public'),
+              work: count('work'),
+              compile: count('compile'),
+              candidate: count('candidate'),
+            },
+            examples: failures
+              .filter((failure) =>
+                ['public', 'work', 'compile'].includes(failure.law),
+              )
+              .slice(0, 5)
+              .map(brief),
+            direct: directFailures.map(brief),
+            cursorWorkFailed,
+            cursorReads,
+            blindOrOutcome:
+              blindOr.length === 0
+                ? 'survived: JS post-filter removed SQL over-selection'
+                : 'assertion failure',
+          }),
       )
     }
-    if (failed) throw primary
-    if (cleanupFailed) throw cleanupError
+  }
+
+  let primary: unknown
+  let failed = false
+  try {
+    await runOracle()
+  } catch (error) {
+    failed = true
+    primary = error
+  }
+
+  let cleanupError: unknown
+  let cleanupFailed = false
+  try {
+    driver.db.close()
+  } catch (error) {
+    cleanupFailed = true
+    cleanupError = error
+  }
+
+  if (failed && cleanupFailed) {
+    throw new AggregateError(
+      [primary, cleanupError],
+      'SQLite oracle and cleanup failed',
+      { cause: primary },
+    )
+  }
+  if (failed) throw primary
+  if (cleanupFailed) throw cleanupError
+}
+oracleProperty({
+  id: `sqlite-persistence.boolean-arity`,
+  law: {
+    statement: `The retained independent SQLite model judges the existing legal histories at every original observation checkpoint.`,
+    authority: `The existing contract and authority stated beside this oracle's model.`,
+    limits: `The existing bounded SQLite histories, production paths, and observations; no expanded coverage claim.`,
+    owner: `SQLite persistence`,
   },
-)
+  histories: { arbitrary: modelArb, runs: 150, fixedSeeds: [1994] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`existing SQLite judgment`, plan, observe, () =>
+      judgeBooleanHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+oracleProperty({
+  id: `sqlite-persistence.boolean-arity-fixed`,
+  law: {
+    statement: `The retained independent SQLite model judges the existing legal histories at every original observation checkpoint.`,
+    authority: `The existing contract and authority stated beside this oracle's model.`,
+    limits: `The existing bounded SQLite histories, production paths, and observations; no expanded coverage claim.`,
+    owner: `SQLite persistence`,
+  },
+  histories: [{}],
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`existing SQLite judgment`, plan, observe, () =>
+      judgeBooleanHistory(undefined),
+    ),
+  check: forwardAssertionJudgment,
+  timeout: 120_000,
+})
