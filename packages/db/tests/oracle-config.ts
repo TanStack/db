@@ -317,6 +317,8 @@ const staticOracleProperties = [
   `query-db.refetch-ordered-prefix`,
   `query-db.refetch-held-page-end`,
   `query-db.refetch-held-report`,
+  `query-db.reload-housekeeping`,
+  `query-db.failing-queries`,
   `ordered-loader.request-authority`,
   `ordered-loader.unproven-report`,
   `ordered-loader.replay-continuation`,
