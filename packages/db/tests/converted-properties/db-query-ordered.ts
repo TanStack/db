@@ -120,6 +120,7 @@ const otherProperties: ReadonlyArray<string> = [
   `subquery-user-value.flat-aggregate-join`,
   `subquery-user-value.ordered-find-one`,
   `subquery-user-value.materialized-find-one`,
+  `query-identity.compound-join`,
 ]
 const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
@@ -276,6 +277,11 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/subquery-user-value-oracle.test.ts`,
     `subquery-user-value`,
     `materialized-find-one`,
+  ],
+  [
+    `db/tests/query/identity-output-shape-oracle.test.ts`,
+    `query-identity`,
+    `compound-join`,
   ],
 ]
 
