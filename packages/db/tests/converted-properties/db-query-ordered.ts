@@ -6,8 +6,52 @@
 import type { ConvertedOwnerGroup } from './index.js'
 
 // pagination-oracle.property.test.ts
-const paginationProperties: ReadonlyArray<string> = []
-const paginationOwners: ReadonlyArray<ConvertedOwnerGroup> = []
+const paginationProperties: ReadonlyArray<string> = [
+  `pagination.async-cursor-fixed`,
+  `pagination.boundary-refinement-failure`,
+  `pagination.capped-prefix-repair`,
+  `pagination.custom-collation`,
+  `pagination.failed-window-replay`,
+  `pagination.filtered-bounded-repair`,
+  `pagination.foreign-local-boundary`,
+  `pagination.inherited-locale`,
+  `pagination.invalid-date-ties`,
+  `pagination.linear-row-volume`,
+  `pagination.locale-initial-window`,
+  `pagination.multi-order-fixed`,
+  `pagination.nan-key-tie`,
+  `pagination.null-placement-refinement`,
+  `pagination.optimistic-prefix-refill`,
+  `pagination.optimistic-provider-coverage`,
+  `pagination.ordered-window-fixed`,
+  `pagination.pending-history-fixed`,
+  `pagination.pending-mutation-calibration`,
+  `pagination.pending-mutation-fixed`,
+  `pagination.post-cleanup-calibration`,
+  `pagination.provider-tie-expansion`,
+  `pagination.reference-initial-window`,
+  `pagination.rejected-cursor-retry`,
+  `pagination.rejected-first-prefix`,
+  `pagination.sse-boundary-refinement`,
+  `pagination.sse-prefix-refresh`,
+  `pagination.underfilled-bounded-repair`,
+  `pagination.window-transition-fixed`,
+  `pagination.zero-window-local-prefix`,
+  `pagination.limit-admission-fixed`,
+]
+const paginationOwners: ReadonlyArray<ConvertedOwnerGroup> = [
+  [
+    `db/tests/query/pagination-oracle.property.test.ts`,
+    `pagination`,
+    `async-cursor-fixed boundary-refinement-failure capped-prefix-repair custom-collation failed-window-replay filtered-bounded-repair foreign-local-boundary inherited-locale invalid-date-ties linear-row-volume locale-initial-window multi-order-fixed nan-key-tie null-placement-refinement optimistic-prefix-refill optimistic-provider-coverage ordered-window-fixed pending-history-fixed pending-mutation-calibration pending-mutation-fixed post-cleanup-calibration provider-tie-expansion reference-initial-window rejected-cursor-retry rejected-first-prefix sse-boundary-refinement sse-prefix-refresh underfilled-bounded-repair window-transition-fixed zero-window-local-prefix`,
+  ],
+  [
+    `db/tests/query/pagination-oracle.property.test.ts`,
+    `pagination`,
+    `limit-admission-fixed`,
+    `db/tests/query/limit-admission-oracle.ts`,
+  ],
+]
 
 // ordered-work-oracle.property.test.ts
 const orderedWorkProperties: ReadonlyArray<string> = []
@@ -38,6 +82,7 @@ const otherProperties: ReadonlyArray<string> = [
   `custom-index-order.rank-window`,
   `custom-index-order.later-eligible`,
   `custom-index-order.eager-reader`,
+  `aggregate.select-fixed`,
 ]
 const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
@@ -119,6 +164,11 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/custom-index-order-selection-oracle.test.ts`,
     `custom-index-order`,
     `eager-reader`,
+  ],
+  [
+    `db/tests/query/aggregate-select-oracle.property.test.ts`,
+    `aggregate`,
+    `select-fixed`,
   ],
 ]
 
