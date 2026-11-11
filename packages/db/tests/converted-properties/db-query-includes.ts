@@ -17,6 +17,9 @@ export const properties: ReadonlyArray<string> = [
   `includes-optimistic.failed-cleanup`,
   `includes-optimistic.apply-checkpoint`,
   `includes-optimistic.immediate-route`,
+  `includes-cross-formulation.grouped-equality`,
+  `includes-cross-formulation.equivalence-fixed`,
+  `includes-cross-formulation.ordered-window-cases`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -44,5 +47,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/includes-optimistic-oracle.property.test.ts`,
     `includes-optimistic`,
     `held-repair sibling-delivery failed-cleanup apply-checkpoint immediate-route`,
+  ],
+  [
+    `db/tests/query/includes-cross-formulation-oracle.property.test.ts`,
+    `includes-cross-formulation`,
+    `grouped-equality equivalence-fixed ordered-window-cases`,
   ],
 ]
