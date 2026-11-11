@@ -5,6 +5,23 @@
 // files and deletes this directory.
 import type { ConvertedOwnerGroup } from './index.js'
 
+// The framework drivers that register the shared window-history oracle, with
+// the test file that registers each (the same list as the replay manifest's
+// window-history owners).
+const windowHistoryDrivers = [
+  [`react`, `react-db/tests/conformance.test.tsx`],
+  [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
+  [`react-DbClient`, `react-db/tests/conformance.test.tsx`],
+  [`react-Suspense`, `react-db/tests/conformance.test.tsx`],
+  [`react-Suspense-DbClient`, `react-db/tests/conformance.test.tsx`],
+  [`preact`, `preact-db/tests/conformance.test.ts`],
+  [`vue`, `vue-db/tests/conformance.test.ts`],
+  [`solid`, `solid-db/tests/conformance.test.tsx`],
+  [`angular`, `angular-db/tests/conformance.test.ts`],
+  [`svelte`, `svelte-db/tests/conformance.svelte.test.ts`],
+  [`svelte-DbClient`, `svelte-db/tests/conformance.svelte.test.ts`],
+] as const
+
 export const properties: ReadonlyArray<string> = [
   // indexes and comparison
   // transactions and mutations
@@ -28,6 +45,9 @@ export const properties: ReadonlyArray<string> = [
   `proxy.revert-fixed-histories`,
   `proxy.revert-native-fixed-histories`,
   `flat-change-tracking.pinned`,
+  ...windowHistoryDrivers.map(
+    ([driver]) => `framework.${driver}.window-history-fixed`,
+  ),
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -65,4 +85,13 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `flat-change-tracking`,
     `pinned`,
   ],
+  ...windowHistoryDrivers.map(
+    ([driver, owner]) =>
+      [
+        owner,
+        `framework.${driver}`,
+        `window-history-fixed`,
+        `db/tests/conformance/window-history-oracle.ts`,
+      ] as const,
+  ),
 ]
