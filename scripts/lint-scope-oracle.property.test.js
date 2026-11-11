@@ -25,6 +25,16 @@
  * checkout, such as a scratch copy, is never one of the launch checkout's
  * changed files.
  *
+ * A worktree with no `node_modules` of its own, nested in an installed launch
+ * checkout, resolves its packages by walking up to the launch checkout's
+ * `node_modules`. It lints with the launch checkout's plugin, and every form
+ * says so: one line, `oracle lint used the plugin installed at <location>,
+ * outside <checkout>`, names the plugin's package directory and the session
+ * checkout. A command-line run writes the line to stderr and keeps its exit
+ * status, so the line alone does not fail it. A hook adds the line to its
+ * report, or, with no report, hands it to the agent and exits 0, as a skip
+ * does. A checkout whose own plugin loads prints no such line.
+ *
  * The lint needs the checkout's installed dependencies: ESLint, its TypeScript
  * parser, and the plugin. When the session checkout cannot resolve them, as in
  * a fresh worktree before `pnpm install`, or cannot load them, as after a
@@ -60,7 +70,9 @@
  * should never just crash"): the hooks skip with one line and exit 0, and the
  * command-line forms fail with the same line so that CI stays strict. The
  * review of that change asked that a hook's line reach the agent, and that a
- * partial install skip as a missing one does. The harnesses' hook
+ * partial install skip as a missing one does. The outer-plugin rule is the
+ * maintainer's decision of 2026-11-11 ("using outer checkout's plugin seems
+ * fine"): lint with the launch checkout's rule and say so. The harnesses' hook
  * documentation fixes each format's channel to the agent.
  *
  * Limits. The grammar draws up to three oracle files, two or three support
@@ -97,12 +109,12 @@
  * breaks only the session checkout's plugin: its entry file, its subpath rule
  * module, a package that it imports, or its entry file's text. A broken ESLint
  * or parser, a missing dependency deeper in the tree, and a stop hook input
- * with `stop_hook_active` are not drawn. A worktree without its own install
- * under a launch checkout that has one resolves the launch checkout's packages
- * by walking up, and so lints with the launch checkout's plugin; it is not
- * drawn, and it is an open limit in the coverage map. Without a full install,
- * the import graph does not matter, so those histories enter no selection
- * state.
+ * with `stop_hook_active` are not drawn. A worktree session under an installed
+ * launch checkout has its own copy of the plugin or none; with none, ESLint,
+ * the parser, and the plugin all come from the launch checkout. A launch
+ * checkout's plugin linked from outside every checkout is not drawn. Without a
+ * full install, the import graph does not matter, so those histories enter no
+ * selection state.
  *
  * Structure:
  *   1. The grammar draws a module graph, the edited and untracked modules, and
@@ -114,8 +126,9 @@
  *      named scope, and its edit-hook and stop-hook forms. A crashed CLI is a
  *      failure, not an empty selection.
  *   4. The comparison checks that each observed selection equals the prediction,
- *      and that every report came from the session checkout's own installed
- *      rule.
+ *      that every report came from the session checkout's own installed rule,
+ *      or from the launch checkout's when the worktree has none, and that
+ *      exactly those runs name the plugin's location.
  *   5. Reach counts the graph states that the campaign enters, and the
  *      campaigns run the same predicate with a fixed seed and a random seed.
  */
@@ -309,6 +322,13 @@ const skeletonArbitrary = fc.record({
       arbitrary: fc.constant(kind),
     })),
   ),
+  // Whether a worktree session has its own copy of the plugin, or none, so
+  // that it resolves the launch checkout's by walking up. Drawn last, so the
+  // fields above keep their draws.
+  worktreeInstall: fc.oneof(
+    { weight: 3, arbitrary: fc.constant(`own`) },
+    { weight: 1, arbitrary: fc.constant(`none`) },
+  ),
 })
 
 function programOf({ shape, ...skeleton }) {
@@ -387,6 +407,12 @@ const constructions = [
     ...skeleton,
     dependencies: kind,
   })),
+  (skeleton) => ({
+    ...skeleton,
+    session: `worktree`,
+    dependencies: `installed`,
+    worktreeInstall: `none`,
+  }),
 ]
 
 const shapes = {
@@ -580,6 +606,13 @@ function buildProgram(skeleton) {
     scratch: skeleton.scratch,
     lockfile: skeleton.lockfile,
     dependencies: skeleton.dependencies,
+    // An installed launch checkout under a worktree that has no install of
+    // its own. A launch session has no outer checkout, and a missing or broken
+    // install is drawn only in the session checkout.
+    outerInstall:
+      skeleton.session === `worktree` &&
+      skeleton.dependencies === `installed` &&
+      skeleton.worktreeInstall === `none`,
     edges,
     reexports,
     modules,
@@ -660,10 +693,24 @@ function predictSelected(program, edited) {
 // checkout's branch changed the plugin. The launch checkout's copy is unmarked
 // in a worktree session, so a report that the launch checkout's rule makes for
 // a worktree carries no mark. A settings edit installs nothing.
+//
+// A worktree with no install of its own has no copy to mark: the branch's
+// lockfile edit installed nothing there, and the launch checkout's rule
+// lints it (maintainer decision, 2026-11-11). Every form then names where
+// that plugin is: the launch checkout's `node_modules`, outside the session
+// checkout. No other history names a location.
 
 /** Whether the session checkout's reports carry the edited rule's mark. */
 function predictRuleMarked(program) {
-  return isPluginEdit(program.ruleEdited)
+  return isPluginEdit(program.ruleEdited) && !program.outerInstall
+}
+
+const NOTICE_PREFIX = `oracle lint used the plugin installed at `
+const NOTICE_LINE = `${NOTICE_PREFIX}<launch>/${PLUGIN}, outside <checkout>`
+
+/** The lines that name an outer plugin's location, in each form's response. */
+function predictNotices(program) {
+  return program.outerInstall ? [NOTICE_LINE] : []
 }
 
 // Without a full install, no form lints, and none crashes. A missing or
@@ -992,16 +1039,17 @@ function repositoryOf(program) {
   gitIn(launch, `add`, `-A`)
   gitIn(launch, `commit`, `-q`, `-m`, `base`)
   // A worktree nested in the launch checkout finds these packages by walking
-  // up from its own files. Each checkout has its own installed plugin. A
-  // missing install leaves both checkouts without packages; a broken install
-  // breaks the session checkout's plugin after the install.
+  // up from its own files. Each checkout has its own installed plugin, unless
+  // the worktree draws none. A missing install leaves both checkouts without
+  // packages; a broken install breaks the session checkout's plugin after the
+  // install.
   const missing = program.dependencies === `missing`
   if (!missing) installDependencies(launch)
   let checkout = launch
   if (program.session === `worktree`) {
     gitIn(launch, `worktree`, `add`, `-q`, `-b`, `feature`, WORKTREE)
     checkout = join(launch, WORKTREE)
-    if (!missing) installPlugin(checkout)
+    if (!missing && !program.outerInstall) installPlugin(checkout)
   }
   if (missing && resolvesFrom(checkout, `eslint`))
     throw new Error(
@@ -1038,7 +1086,8 @@ function repositoryOf(program) {
     )
   if (
     program.dependencies === `installed` &&
-    isPluginEdit(program.ruleEdited)
+    isPluginEdit(program.ruleEdited) &&
+    !program.outerInstall
   ) {
     // The new lockfile installs a changed plugin in the session checkout.
     const rule = join(checkout, RULE_SOURCE)
@@ -1077,22 +1126,46 @@ function reportedOracles(lines) {
 }
 
 /**
- * Runs a copy of the CLI from `cwd` and returns what it reported. In text
- * format the CLI exits 0 with no output, or 1 with report lines on stderr. As a
- * Claude hook it exits 0 with no output, or 2 with a report on stderr.
- * Anything else, such as a crash, which exits 1 with a stack trace, fails.
+ * Runs a copy of the CLI from `cwd` and returns what it reported, with the
+ * lines that name a plugin's location as `notices`, the checkouts' paths
+ * written as in `runRaw`. In text format the CLI exits 0 with no report, or 1
+ * with report lines on stderr. As a Claude hook it exits 0 with no output, or
+ * 2 with a report on stderr. A notice can join either: on stderr, or, from a
+ * hook with no report, as the exit-0 JSON that hands it to the agent. Anything
+ * else, such as a crash, which exits 1 with a stack trace, fails.
  */
-function runCli(cwd, script, args, input) {
+function runCli(cwd, script, args, input, { launch, checkout }) {
   const result = spawnSync(process.execPath, [script, ...args], {
     cwd,
     encoding: `utf8`,
     input,
   })
-  const lines = result.stderr.split(`\n`).filter(Boolean)
+  const named = (line) =>
+    line.split(checkout).join(`<checkout>`).split(launch).join(`<launch>`)
+  const isNotice = (line) => line.startsWith(NOTICE_PREFIX)
+  const all = result.stderr.split(`\n`).filter(Boolean)
+  const lines = all.filter((line) => !isNotice(line))
+  const notices = all.filter(isNotice)
   const hook = args.includes(`--format=claude`)
   const reported = hook ? 2 : 1
+  let { stdout } = result
+  if (hook && result.status === 0 && stdout !== ``) {
+    // A hook that has only a notice hands it to the agent on its channel.
+    const event = args.includes(`--event=stop`) ? `stop` : `edit`
+    const value = stdoutValue(stdout)
+    const text = value?.reason ?? value?.hookSpecificOutput?.additionalContext
+    if (
+      typeof text === `string` &&
+      JSON.stringify(value) ===
+        JSON.stringify(agentChannel(`claude`, event, text)) &&
+      text.split(`\n`).every(isNotice)
+    ) {
+      notices.push(...text.split(`\n`))
+      stdout = ``
+    }
+  }
   const valid =
-    result.stdout === `` &&
+    stdout === `` &&
     (result.status === 0
       ? lines.length === 0
       : result.status === reported &&
@@ -1102,9 +1175,11 @@ function runCli(cwd, script, args, input) {
               (line) => lintLine.test(line) || budgetLine.test(line),
             )))
   if (!valid) {
-    throw new Error(`cli failed (exit ${result.status}):\n${result.stderr}`)
+    throw new Error(
+      `cli failed (exit ${result.status}):\n${result.stdout}${result.stderr}`,
+    )
   }
-  return reportedOracles(lines)
+  return { ...reportedOracles(lines), notices: notices.map(named) }
 }
 
 /**
@@ -1207,16 +1282,19 @@ function observedSelections(program) {
     const scopes = editedByScope(program)
     const own = join(checkout, `scripts`, `agent-lint-feedback.mjs`)
     const launchScript = join(launch, `scripts`, `agent-lint-feedback.mjs`)
-    const changed = runCli(checkout, own, [`--format=text`])
+    const changed = runCli(checkout, own, [`--format=text`], ``, repository)
     // lint-staged runs the named scope once per nonempty chunk of staged
     // files; without files the script runs its changed scope instead.
     const named =
       scopes.named.length === 0
         ? undefined
-        : runCli(checkout, own, [
-            `--format=text`,
-            ...scopes.named.map((name) => pathOf(name)),
-          ])
+        : runCli(
+            checkout,
+            own,
+            [`--format=text`, ...scopes.named.map((name) => pathOf(name))],
+            ``,
+            repository,
+          )
     const hook = runCli(
       launch,
       launchScript,
@@ -1225,12 +1303,14 @@ function observedSelections(program) {
         cwd: checkout,
         tool_input: { file_path: pathOf(program.hookTarget) },
       }),
+      repository,
     )
     const stop = runCli(
       launch,
       launchScript,
       [`--format=claude`, `--event=stop`],
       JSON.stringify({ cwd: checkout }),
+      repository,
     )
     return { changed, named, hook, stop }
   } finally {
@@ -1243,7 +1323,9 @@ function observedSelections(program) {
 // Each observed selection must equal the model's prediction for its scope, as
 // sorted basenames. The check reports the first oracle file that the script
 // linted or missed, so a failure names the oracle file whose lint scope
-// diverged.
+// diverged. Then its rule source must be the predicted one, and its location
+// lines must equal the predicted ones: a missing line hides an outer plugin
+// from the agent, and an extra one names a plugin that is the checkout's own.
 
 /** Each observation equals the model's prediction, as sorted basenames. */
 function compareSelected(observed, expected) {
@@ -1263,6 +1345,11 @@ function compareRuleSource(marks, marked) {
       [],
     ) ?? pass
   )
+}
+
+/** A run names the plugin's location exactly when the model predicts it. */
+function comparePluginLocation(notices, expected) {
+  return differs(`plugin location`, `outer plugin`, notices, expected) ?? pass
 }
 
 // -- 5. Reach -----------------------------------------------------------------
@@ -1302,6 +1389,9 @@ function compareRuleSource(marks, marked) {
 //     launch checkout's script.
 //   worktree-own-rule: the worktree's branch changed the plugin, so its reports
 //     must come from its own installed copy.
+//   worktree-outer-plugin: the worktree has no install of its own under an
+//     installed launch checkout, so it lints with the launch checkout's plugin
+//     and names its location.
 //   scratch-directory: a launch session's checkout holds a scratch directory
 //     under `.worktrees/`.
 //   missing-dependencies-launch, missing-dependencies-worktree: the checkouts
@@ -1341,6 +1431,7 @@ const STATES = [
   `hook-rule`,
   `worktree-session`,
   `worktree-own-rule`,
+  `worktree-outer-plugin`,
   `scratch-directory`,
   `missing-dependencies-launch`,
   `missing-dependencies-worktree`,
@@ -1468,7 +1559,8 @@ function recordStates(program, observe) {
     states.add(`hook-production-boundary`)
   if (program.session === `worktree`) {
     states.add(`worktree-session`)
-    if (isPluginEdit(program.ruleEdited)) states.add(`worktree-own-rule`)
+    if (program.outerInstall) states.add(`worktree-outer-plugin`)
+    else if (isPluginEdit(program.ruleEdited)) states.add(`worktree-own-rule`)
   } else if (program.scratch) {
     states.add(`scratch-directory`)
   }
@@ -1527,13 +1619,14 @@ const constructedStates = [
   `missing-dependencies-launch`,
   `missing-dependencies-worktree`,
   ...BROKEN_INSTALLS.map((kind) => `${kind}-install`),
+  `worktree-outer-plugin`,
 ]
 
 oracleProperty({
   id: PROPERTY,
   law: {
-    statement: `Every oracle whose lint judgment can change is selected, and each report uses the session checkout's installed rule. Without a full install, every form produces one line that names the checkout, or the load error: a hook exits 0 and hands it to the agent, and a command-line run writes it to stderr and exits nonzero.`,
-    authority: `AGENTS.md: Lint feedback while you work and Name oracle files for discovery; maintainer issue 2280; review 2378 B1-10; maintainer decision 2026-11-10 that the hook never crashes; the harnesses' hook output documentation.`,
+    statement: `Every oracle whose lint judgment can change is selected, and each report uses the session checkout's installed rule, or, for a worktree with no install of its own, the launch checkout's rule with one line that names its location. Without a full install, every form produces one line that names the checkout, or the load error: a hook exits 0 and hands it to the agent, and a command-line run writes it to stderr and exits nonzero.`,
+    authority: `AGENTS.md: Lint feedback while you work and Name oracle files for discovery; maintainer issue 2280; review 2378 B1-10; maintainer decision 2026-11-10 that the hook never crashes; maintainer decision 2026-11-11 to lint with the outer checkout's plugin and say so; the harnesses' hook output documentation.`,
     limits: `The bounded import, checkout, hook, lockfile, and install language described above.`,
   },
   histories: {
@@ -1555,6 +1648,7 @@ oracleProperty({
     const scopes = editedByScope(program)
     return {
       marked: predictRuleMarked(program),
+      notices: predictNotices(program),
       selections: Object.fromEntries(
         [`changed`, `named`, `hook`, `stop`].map((scope) => [
           scope,
@@ -1609,6 +1703,11 @@ oracleProperty({
       if (selection.kind !== `pass`) return selection
       const source = compareRuleSource(observed[scope].marks, expected.marked)
       if (source.kind !== `pass`) return source
+      const location = comparePluginLocation(
+        observed[scope].notices,
+        expected.notices,
+      )
+      if (location.kind !== `pass`) return location
     }
     return pass
   },

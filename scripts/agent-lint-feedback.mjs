@@ -40,6 +40,13 @@
  * copy runs instead, so a branch is linted by its own rule, as CI lints it.
  * Without `cwd`, the checkout is the one that holds this script.
  *
+ * A worktree with no `node_modules` of its own resolves its packages by
+ * walking up to an outer checkout's, so the outer checkout's plugin lints it.
+ * The maintainer accepted that on 2026-11-11, so every form says so: one line
+ * names the plugin's package directory and the checkout that it is outside.
+ * The line alone fails no command-line run, and a hook hands it to the agent
+ * with its report, or alone.
+ *
  * The lint needs the checkout's installed dependencies, which a fresh worktree
  * does not have. This script loads them with dynamic imports and catches a
  * failure, so it never crashes on a missing or partial install: it reports one
@@ -50,7 +57,7 @@
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { oracleLintSettings } from './oracle-lint-settings.mjs'
@@ -120,7 +127,16 @@ async function loadLint() {
       // The run-budget module imports the parser too.
       import(`./check-oracle-run-counts.mjs`),
     ])
+    // The real path of the plugin that loaded.
+    const pluginDirectory = dirname(
+      fileURLToPath(
+        import.meta.resolve(`@tanstack/eslint-plugin-oracles/package.json`),
+      ),
+    )
     return {
+      outerPlugin: relative(root, pluginDirectory).startsWith(`..`)
+        ? `oracle lint used the plugin installed at ${pluginDirectory}, outside ${root}`
+        : ``,
       tsParser: parser.default,
       ESLint: eslint.ESLint,
       oraclePlugin: plugin.default,
@@ -146,6 +162,7 @@ const {
   isOracleFile,
   loweredRunBudgetsBetween,
   mergeBase,
+  outerPlugin,
   unavailable,
 } = delegate ? {} : await loadLint()
 
@@ -384,22 +401,24 @@ function reportText(results) {
 }
 
 /**
- * Writes the report in the harness's format. A command-line run writes it to
- * stderr and exits 1. A hook hands it to the agent: a post-edit report reaches
- * the model beside the tool result, and a stop report makes the agent take
- * another turn. A run that could not lint (`scope` is `unavailable`) reports
- * its one line the same way, except that every hook exits 0.
+ * Writes the report in the harness's format, after the line that names an
+ * outer plugin, if any. A command-line run writes them to stderr, and exits 1
+ * when there is a report. A hook hands them to the agent: a post-edit report
+ * reaches the model beside the tool result, and a stop report makes the agent
+ * take another turn. A run that could not lint (`scope` is `unavailable`)
+ * reports its one line the same way, and so does a run whose only line names
+ * the plugin, except that every hook exits 0.
  */
-function respond(report, input, scope) {
+function respond(report, input, scope, notice) {
+  const withNotice = (text) => [notice, text].filter(Boolean).join(`\n`)
   if (!isHook) {
-    if (report !== ``) {
-      process.stderr.write(`${report}\n`)
-      process.exitCode = 1
-    }
+    if (withNotice(report) !== ``)
+      process.stderr.write(`${withNotice(report)}\n`)
+    if (report !== ``) process.exitCode = 1
     return
   }
-  if (scope === `unavailable`) {
-    tellAgent(report, input, false)
+  if (scope === `unavailable` || report === ``) {
+    tellAgent(withNotice(report), input, false)
     return
   }
   const header =
@@ -407,9 +426,9 @@ function respond(report, input, scope) {
       ? `Oracle lint reports for the file you edited, and the oracle files that depend on it:`
       : `Oracle lint reports in this branch's changed files. Fix them before finishing:`
   tellAgent(
-    report === ``
-      ? ``
-      : `${header}\n${report}\nSee "How oracle work is scored" in AGENTS.md.`,
+    withNotice(
+      `${header}\n${report}\nSee "How oracle work is scored" in AGENTS.md.`,
+    ),
     input,
     true,
   )
@@ -504,5 +523,5 @@ if (delegate) {
   ]
     .filter(Boolean)
     .join(`\n`)
-  respond(report, input, scope)
+  respond(report, input, scope, outerPlugin)
 }

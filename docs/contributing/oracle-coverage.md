@@ -4372,24 +4372,23 @@ module, imports a package that is not installed, or has a cut-off entry file.
 It does not draw a broken ESLint or parser, a missing dependency deeper in the
 tree, or a stop hook input with `stop_hook_active`.
 
-Open limit of `scripts.lint-scope` (reachable, older than the missing-install
-rule; owner: `scripts/lint-scope-oracle.property.test.js`; needs a maintainer
-decision). A worktree under `.worktrees/` with no `node_modules` of its own,
-inside an installed launch checkout, resolves ESLint, the parser, and the
-plugin by walking up to the launch checkout's `node_modules`. So it lints with
-the launch checkout's plugin, not the one its own lockfile pins, which breaks
-this oracle's law that each report uses the session checkout's installed rule.
-Trace (reproduced 2026-11-11): commit a launch checkout with the script and an
-undeclared oracle file, install it with a plugin whose `no-unit-test` message
-carries a mark, add `.worktrees/wt` with `git worktree add` and no install, edit
-the oracle file there, and run `node scripts/agent-lint-feedback.mjs` in the
-worktree. It exits 1 with a report that carries the launch checkout's mark. The
-grammar does not draw this state: every installed worktree history copies the
-plugin into the worktree, and the missing-install histories leave the launch
-checkout uninstalled too. Needed witness: a worktree-install dimension (own or
-none) under an installed launch checkout, with the decided law. The two
-candidate laws are to skip as not installed, or to lint with the launch
-checkout's rule and say so.
+The outer-plugin rule closes a former open limit of `scripts.lint-scope`
+(maintainer decision, 2026-11-11: "using outer checkout's plugin seems fine").
+A worktree under `.worktrees/` with no `node_modules` of its own, inside an
+installed launch checkout, resolves ESLint, the parser, and the plugin by
+walking up to the launch checkout's `node_modules`. It lints with the launch
+checkout's plugin, not the one its own lockfile pins, and every form says so
+in one line: `oracle lint used the plugin installed at <location>, outside
+<checkout>`. A command-line run writes the line to stderr and keeps its exit
+status. A hook puts the line before its report, or, with no report, hands it
+to the agent and exits 0, as a skip does; at a stop, that asks for one more
+turn. A worktree-install dimension (own or none) draws this state under an
+installed launch checkout, and a construction in each campaign enters it
+(`worktree-outer-plugin`). The model predicts the launch checkout's unmarked
+rule for such a worktree, even when its branch changed the plugin, and the
+line in every form. A checkout whose own plugin loads must print no such
+line. It does not draw a launch checkout whose plugin is linked from outside
+every checkout.
 
 It does not draw `.js` support modules or drivers,
 although the rule now resolves a `.js` test module when no TypeScript source
