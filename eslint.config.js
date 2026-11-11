@@ -58,4 +58,22 @@ export default [
   { settings: oracleLintSettings },
   oraclePlugin.configs.recommended,
   oraclePlugin.configs.production,
+  // Witnesses for runtimes that are not Vitest on Node (maintainer decision,
+  // 2026-11-11). These shared suites also run inside the Capacitor and Tauri
+  // WebView apps, which bundle them and cannot load the framework's Node-only
+  // main entry, so they keep their plain tests and are not oracle files. Every
+  // other oracle rule still applies to them.
+  {
+    name: `db/collection-e2e-witnesses`,
+    files: [`packages/db-collection-e2e/src/suites/*-witness.suite.ts`],
+    plugins: { oracle: oraclePlugin },
+    linterOptions: { noInlineConfig: true },
+    rules: {
+      'oracle/no-disabled': `error`,
+      'oracle/no-oracle-disable': `error`,
+      'oracle/oracle-property-only': `error`,
+      'oracle/pure-model': `error`,
+      'oracle/replayable-seed': `error`,
+    },
+  },
 ]

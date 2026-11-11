@@ -6,10 +6,10 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { createLiveQueryCollection, eq } from '@tanstack/db'
-import {
-  declareOracle,
-  oracleRoute,
-} from '../../../db/tests/oracle-declaration.js'
+// The browser-safe route entry: these suites also run inside the Capacitor
+// and Tauri WebView apps, which cannot load the framework's Node-only main
+// entry, so this witness keeps its routes without oracleProperty.
+import { oracleRoute } from '@tanstack/oracles/declaration'
 import {
   assertAllItemsMatch,
   assertCollectionSize,
@@ -1556,4 +1556,3 @@ export function createPaginationTestSuite(
 // but no consumer declares `owns` either, so the gap report counts none of
 // this suite's kills. The coverage map records this as a follow-up under
 // "Shared e2e suites".
-declareOracle({ check: [withPaginationHistory], model: [createWindowOracle] })

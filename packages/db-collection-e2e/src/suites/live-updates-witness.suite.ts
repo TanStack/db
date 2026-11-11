@@ -1,15 +1,15 @@
 /** Reactive backend updates with complete owned rows and unchanged-peer frames. */
 import { describe, expect, it, vi } from 'vitest'
 import { createLiveQueryCollection } from '@tanstack/db'
+// The browser-safe route entry: these suites also run inside the Capacitor
+// and Tauri WebView apps, which cannot load the framework's Node-only main
+// entry, so this witness keeps its routes without oracleProperty.
+import { oracleRoute } from '@tanstack/oracles/declaration'
 import { waitForQueryData } from '../utils/helpers'
 import {
   expectNotificationHistory,
   expectNotificationsStopped,
 } from '../utils/notification-laws-oracle'
-import {
-  declareOracle,
-  oracleRoute,
-} from '../../../db/tests/oracle-declaration.js'
 import {
   captureUserRows,
   userFixture,
@@ -138,6 +138,3 @@ export function createLiveUpdatesTestSuite(
 // but no consumer declares `owns` either, so the gap report counts none of
 // this suite's kills. The coverage map records this as a follow-up under
 // "Shared e2e suites".
-declareOracle({
-  check: [expectNotificationHistory, expectNotificationsStopped],
-})
