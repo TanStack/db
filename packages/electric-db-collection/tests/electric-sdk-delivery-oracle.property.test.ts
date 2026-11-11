@@ -16,7 +16,11 @@ import {
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  oracleProperty,
+  violation as oracleViolation,
+  pass,
+} from '../../db/tests/oracle-property'
 import {
   checkExistingElectricComparison,
   existingElectricComparison,
@@ -42,6 +46,7 @@ import {
   managedTagPersistence,
   storageTargetId,
 } from './electric-persistence-fixture'
+import type { Observation } from '../../db/tests/oracle-property'
 import type { TestRow } from './electric-persistence-fixture'
 import type { Item, Request } from './electric-sdk-delivery-support'
 import type { ElectricCollectionUtils } from '../src/electric'
@@ -162,7 +167,8 @@ const campaignTimeoutMs = oracleRuns(30_000)
 
 // Native campaign tests retain the old campaign-local shrink predicate and
 // minimum-one census. Fixed calibration tests reset this bookkeeping too, but
-// do not acquire campaign reach obligations. No random history is rewritten.
+// do not acquire campaign reach obligations. Snapshot constructions below
+// additionally enforce every required state on each generated construction.
 const resumeViolations: Array<ReturnType<typeof sameViolation>> = []
 beforeEach(() => {
   snapshotViolation.reset()
@@ -316,7 +322,12 @@ async function checkSnapshots(
   cleanupFailure?: Error,
   setupFault?: { primary: Error; cleanup?: Error },
   retries: SubsetRetries = { failures: [], extraLoads: 0 },
+  observeState?: (state: SnapshotReachState) => void,
 ) {
+  const reached = (state: SnapshotReachState) => {
+    snapshotObservedStates.add(state)
+    observeState?.(state)
+  }
   const http = controlledHttp()
   // Live attempts the app's fetchClient still throws on, and every failed
   // live attempt the provider made, in order.
@@ -434,13 +445,7 @@ async function checkSnapshots(
         (_, i) => width + 1 + i,
       ),
     ]
-    // Each load pauses the live request; five pause it past the threshold.
-    if (lowerBounds.length >= 5)
-      snapshotObservedStates.add(`live-pauses-past-threshold`)
     for (const [index, lowerBound] of lowerBounds.entries()) {
-      if ((retries.failures[index] ?? 0) >= 5) {
-        snapshotObservedStates.add(`subset-attempts-past-threshold`)
-      }
       // Distinct predicates prevent request deduplication; the second response
       // overlaps prior rows and changes their payload, and the last is empty.
       if (index === 1) for (const item of source) item.name += `-changed`
@@ -461,6 +466,8 @@ async function checkSnapshots(
         (error: unknown) => ({ ok: false as const, error }),
       )
       let request = await atCheckpoint(http.take(true), `snapshot request`)
+      // The fifth distinct snapshot request confirms five live pauses.
+      if (index >= 4) reached(`live-pauses-past-threshold`)
       // A subset request's attempts that the client retries belong to that
       // request, not to the source: the source node shows no problem
       // (glossary, request error), however many fail in a row.
@@ -474,6 +481,7 @@ async function checkSnapshots(
           http.take(true),
           `retried snapshot request`,
         )
+        if (attempt >= 4) reached(`subset-attempts-past-threshold`)
         sourceHealth(`snapshot ${index} attempt ${attempt} source health`)
       }
       expect(
@@ -541,15 +549,15 @@ async function checkSnapshots(
         }
         // The outage follows the attempts the provider made, not the plan.
         outage = made.length >= 5
-        if (outage) snapshotObservedStates.add(`live-outage`)
+        if (outage) reached(`live-outage`)
         if (outage && made.slice(0, 5).includes(`throw`)) {
-          snapshotObservedStates.add(`live-outage-with-synchronous-throws`)
+          reached(`live-outage-with-synchronous-throws`)
         }
         if (outage && made[0] === `throw`) {
-          snapshotObservedStates.add(`live-outage-led-by-throw`)
+          reached(`live-outage-led-by-throw`)
         }
         if (made[4] === `throw`) {
-          snapshotObservedStates.add(`live-outage-crossed-by-throw`)
+          reached(`live-outage-crossed-by-throw`)
         }
         sourceHealth(`source health after live attempts`)
       }
@@ -646,7 +654,7 @@ async function checkSnapshots(
       (await acceptedAfterImport())[1],
       `exported txid evidence once the restarted run is ready`,
     ).toBe(true)
-    snapshotObservedStates.add(`retired-evidence-after-restart`)
+    reached(`retired-evidence-after-restart`)
   }, [
     { label: `snapshot collection`, release: () => collection.cleanup() },
     {
@@ -707,6 +715,91 @@ const snapshotHistoryArbitrary = fc.tuple(
     }),
   }),
 )
+type SnapshotHistory = [number, string, SubsetRetries]
+const snapshotConstructionStates = new WeakMap<
+  SnapshotHistory,
+  ReadonlyArray<string>
+>()
+const snapshotReachedByHistory = new WeakMap<
+  SnapshotHistory,
+  Set<SnapshotReachState>
+>()
+
+// Preserve width, payload and optional retries. Splice only the premises for
+// the existing census: five subset retries, five pauses, and live failures
+// whose first and fifth attempts throw. The middle attempts and suffix still
+// vary. Every construction is a fresh tuple inside the arbitrary's bounds.
+// Without this splice, seed 361651584 misses an outage crossed by a throw.
+function constructSnapshotHistory([
+  width,
+  name,
+  retries,
+]: SnapshotHistory): SnapshotHistory {
+  const history: SnapshotHistory = [
+    width,
+    name,
+    {
+      failures: [
+        Math.max(5, retries.failures[0] ?? 0),
+        ...retries.failures.slice(1),
+      ],
+      extraLoads: Math.max(2, retries.extraLoads),
+      live: [
+        `throw`,
+        ...Array.from({ length: 3 }, (_, i) => retries.live?.[i + 1] ?? `http`),
+        `throw`,
+        ...(retries.live?.slice(5) ?? []),
+      ],
+    },
+  ]
+  snapshotConstructionStates.set(history, snapshotStates)
+  return history
+}
+
+const snapshotComparison = existingElectricComparison(
+  `electric.sdk-snapshot-delivery`,
+  (history: SnapshotHistory) => {
+    const [width, name, retries] = history
+    return retainSdkViolation(snapshotViolation, { width, name, retries }, () =>
+      checkSnapshots(
+        width,
+        name,
+        replayFault === `snapshot-rows`,
+        undefined,
+        undefined,
+        retries,
+        (state) => snapshotReachedByHistory.get(history)?.add(state),
+      ),
+    )
+  },
+)
+
+// The pinned framework checks seed-derived constructions. This check also
+// enforces the same obligations for fresh constructions in generated runs.
+// Product mismatches remain primary; missing reach cannot replace their law.
+function checkSnapshotConstruction(
+  plan: { history: SnapshotHistory },
+  trace: ReadonlyArray<Observation>,
+  judgment: ReturnType<typeof snapshotComparison.model>,
+) {
+  if (judgment.kind !== `pass`) return judgment
+  const reached = new Set(
+    trace
+      .filter(({ checkpoint }) => checkpoint === `reach`)
+      .map(({ value }) => value),
+  )
+  const missing = (snapshotConstructionStates.get(plan.history) ?? []).filter(
+    (state) => !reached.has(state),
+  )
+  return missing.length
+    ? oracleViolation(
+        `constructed states`,
+        `constructed history did not enter ${missing.join(`, `)}`,
+        `constructed reach`,
+      )
+    : pass
+}
+
 oracleProperty({
   id: `electric.sdk-snapshot-delivery`,
   law: {
@@ -717,24 +810,39 @@ oracleProperty({
   owns: [`src/electric.ts#electricCollectionOptions`],
   histories: {
     arbitrary: snapshotHistoryArbitrary,
+    states: snapshotStates,
+    constructed: [
+      {
+        name: `subset retries, live pauses, throw-led and throw-crossed outage, restart`,
+        enters: snapshotStates,
+        build: constructSnapshotHistory,
+      },
+    ],
     runs: 40,
     fixedSeeds: [20260917],
   },
-  ...existingElectricComparison(
-    `electric.sdk-snapshot-delivery`,
-    ([width, name, retries]: [number, string, SubsetRetries]) =>
-      retainSdkViolation(snapshotViolation, { width, name, retries }, () =>
-        checkSnapshots(
-          width,
-          name,
-          replayFault === `snapshot-rows`,
-          undefined,
-          undefined,
-          retries,
-        ),
-      ),
-  ),
-  check: checkExistingElectricComparison,
+  ...snapshotComparison,
+  driver: async (plan, observe) => {
+    const reached = new Set<SnapshotReachState>()
+    snapshotReachedByHistory.set(plan.history, reached)
+    await snapshotComparison.driver(plan, observe)
+    for (const state of reached) observe(`reach`, state)
+  },
+  check: checkSnapshotConstruction,
+  calibrations: snapshotStates.map((state) => ({
+    name: `omits constructed ${state}`,
+    law: `constructed reach`,
+    corrupt: (
+      trace: ReadonlyArray<Observation>,
+      plan: { history: SnapshotHistory },
+    ) =>
+      snapshotConstructionStates.has(plan.history)
+        ? trace.filter(
+            ({ checkpoint, value }) =>
+              checkpoint !== `reach` || value !== state,
+          )
+        : undefined,
+  })),
   timeout: campaignTimeoutMs,
 })
 
