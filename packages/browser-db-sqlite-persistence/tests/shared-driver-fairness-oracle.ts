@@ -1,4 +1,3 @@
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 /**
  * # When does a cold hydrate get a turn on a shared SQLite driver?
  *
@@ -967,10 +966,3 @@ export async function observeSharedDriverFairness(
 
 // Owns nothing: this module holds the model and check only. The production
 // path is driven by shared-driver-fairness-oracle.test.ts, which declares the owned entry.
-declareOracle({
-  check: [
-    findSharedDriverFairnessViolation,
-    findSharedDriverFairnessLawViolations,
-  ],
-  model: [createFairnessReference],
-})

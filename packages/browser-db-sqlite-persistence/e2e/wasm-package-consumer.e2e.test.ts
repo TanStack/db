@@ -3,7 +3,7 @@
  * Packaged-consumer checks for the separate WASM asset. A consumer app installs
  * the built package and runs under a Vite dev server, a dev server with a
  * custom cache directory, and a production preview. The open outcome oracle in
- * `opfs-open-outcome-oracle.e2e.test.ts` owns how an open settles when its
+ * `opfs-open-outcome-witness.e2e.test.ts` owns how an open settles when its
  * steps fail or are interrupted; these tests own the build output, the export
  * map, and opening from page shapes that the oracle's driver does not create.
  */

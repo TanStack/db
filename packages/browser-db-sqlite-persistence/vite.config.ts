@@ -115,6 +115,7 @@ const config = defineConfig({
         `tests/reload-class-oracle.test.ts`,
         `tests/opfs-page-lifecycle-oracle.test.ts`,
         `tests/opfs-request-order-oracle.test.ts`,
+        `tests/opfs-worker-diagnostics-oracle.test.ts`,
       ],
     },
   },

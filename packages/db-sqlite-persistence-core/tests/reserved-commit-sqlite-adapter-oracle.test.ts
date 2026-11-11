@@ -41,7 +41,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { createCollection } from '@tanstack/db'
 import { afterEach, describe, expect } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
   SQLiteCorePersistenceAdapter,
@@ -489,11 +488,6 @@ describe('reserved commits across real-adapter hydrations', () => {
       }).toEqual(expected.observation),
     )
   }
-  declareOracle({
-    check: [runAdapterHistory],
-    model: [expectedAdapterOutcome],
-    grammar: [adapterHistories],
-  })
   oracleProperty({
     id: `sqlite.reserved-commit-hydration`,
     law: {

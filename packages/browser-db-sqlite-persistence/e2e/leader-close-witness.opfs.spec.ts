@@ -20,7 +20,6 @@
  * detector for this no-pruning fixture, not a permanent storage contract.
  */
 import { expect, test } from '@playwright/test'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleRoute } from '../../db/tests/oracle-config'
 import { observe, openProbe } from './leader-close-probe'
 import type { BrowserContext, Page } from '@playwright/test'
@@ -343,12 +342,6 @@ async function runHistory(
   if (primaryFailure) throw primaryFailure
   expect(cleanupFailures).toEqual([])
 }
-
-declareOracle({
-  owns: [`src/browser-coordinator.ts`],
-  check: [runHistory],
-  model: [expectedHistory],
-})
 
 test(`surviving OPFS source Collection accepts work after an idle leader tab closes`, async ({
   context,

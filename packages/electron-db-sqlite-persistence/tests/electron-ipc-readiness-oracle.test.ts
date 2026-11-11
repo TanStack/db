@@ -1,11 +1,15 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { describe, expect, onTestFinished, vi } from 'vitest'
 import { persistedCollectionOptions } from '@tanstack/db-sqlite-persistence-core'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { oracleProperty } from '../../db/tests/oracle-property.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter.js'
 import {
   IR,
   createCollection,
@@ -398,24 +402,34 @@ async function compareIpcReadinessHistory(
   )
 }
 
-declareOracle({
-  owns: [
-    `src/renderer.ts#createElectronSQLitePersistence`,
-    `src/electron-coordinator.ts`,
-  ],
-  check: [compareIpcReadinessHistory],
-  model: [expectedCheckpoints],
-})
-
+// Each enumerated history runs through compareIpcReadinessHistory, which
+// compares the observed checkpoints with expectedCheckpoints. The adapter
+// transports that judgment.
+const ipcReadinessLaw = `Electron renderer initial readiness`
 describe(`Electron renderer initial readiness follows the composed load`, () => {
-  it.each(ipcReadinessHistories)(
-    `matches the model: $renderer renderer, hydration $hydration, then $next`,
-    async (history) => {
-      oracleRoute(`case`)
-      await compareIpcReadinessHistory(history)
+  oracleProperty({
+    id: `electron.ipc-readiness`,
+    law: {
+      statement: `A renderer's live query over an on-demand persisted Collection shows, while the IPC loadSubset reply is held, after it, and after the upstream load settles, what the readiness model predicts from the persisted rows and each step's outcome.`,
+      authority: `ARCHITECTURE.md law 10 (a settled loadSubset is the readiness evidence) and law 7 (a successful load settles only after its rows are visible).`,
+      limits: `The eight renderer, hydration, and next-step histories, for a renderer without a coordinator; only the loadSubset reply of the IPC transport is controlled.`,
     },
-    historyTimeout,
-  )
+    owns: [
+      `src/renderer.ts#createElectronSQLitePersistence`,
+      `src/electron-coordinator.ts`,
+    ],
+    histories: ipcReadinessHistories,
+    label: ({ renderer, hydration, next }) =>
+      `matches the model: ${renderer} renderer, hydration ${hydration}, then ${next}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(ipcReadinessLaw, plan, observe, () =>
+        compareIpcReadinessHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+    timeout: historyTimeout,
+  })
 })
 
 /**
@@ -634,25 +648,39 @@ async function compareCoordinatedRendererHistory(
   )
 }
 
-declareOracle({
-  check: [compareCoordinatedRendererHistory],
-  model: [expectedCoordinatedRenderer],
-})
-
+// Each enumerated history runs through compareCoordinatedRendererHistory,
+// which compares the follower's checkpoints with expectedCoordinatedRenderer.
+const coordinatedRendererLaw = `Electron follower renderer settlement`
+const coordinatedRendererHistories: Array<CoordinatedRendererHistory> = (
+  [`ok`, `fails`] as const
+).flatMap((apply) =>
+  ([`live-query`, `load`] as const).map((consumer) => ({
+    apply,
+    consumer,
+  })),
+)
 describe(`Electron follower renderer settles with its owner's rows`, () => {
-  it.each(
-    ([`ok`, `fails`] as const).flatMap((apply) =>
-      ([`live-query`, `load`] as const).map((consumer) => ({
-        apply,
-        consumer,
-      })),
-    ),
-  )(
-    `matches the model: apply $apply, consumer $consumer`,
-    async (history) => {
-      oracleRoute(`case`)
-      await compareCoordinatedRendererHistory(history)
+  oracleProperty({
+    id: `electron.follower-settlement`,
+    law: {
+      statement: `A follower renderer's load, and its query's first ready, settle only once the owner's rows are visible in the follower, and they reject, crashing the follower source, when applying the owner's commit fails there.`,
+      authority: `ARCHITECTURE.md law 7, for a follower renderer that routes its demand to the owner.`,
+      limits: `The four apply-outcome and consumer histories, with two renderers over one main process and SQLite file; queued placement and the Query Collection source across real tabs belong to the browser per-collection oracle.`,
     },
-    isElectronFullE2EEnabled() ? 180_000 : 20_000,
-  )
+    owns: [
+      `src/renderer.ts#createElectronSQLitePersistence`,
+      `src/electron-coordinator.ts`,
+    ],
+    histories: coordinatedRendererHistories,
+    label: ({ apply, consumer }) =>
+      `matches the model: apply ${apply}, consumer ${consumer}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(coordinatedRendererLaw, plan, observe, () =>
+        compareCoordinatedRendererHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+    timeout: isElectronFullE2EEnabled() ? 180_000 : 20_000,
+  })
 })

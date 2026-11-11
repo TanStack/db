@@ -6,7 +6,6 @@ import {
   pass,
   violation,
 } from '../../db/tests/oracle-property.js'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import type { PersistedTx, SQLiteDriver } from '../src'
 import type { Observation as TraceEntry } from '../../db/tests/oracle-property.js'
 
@@ -474,11 +473,6 @@ function checkReopen(
       : pass)
   )
 }
-
-declareOracle({
-  check: [checkReopen],
-  model: [setupModel],
-})
 
 oracleProperty({
   id: `sqlite-persistence.setup-reopen`,

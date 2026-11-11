@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { queryStartupHistories } from '../../query-db-collection/tests/persisted-startup-driver'
 import {
   persistedStartupBatchHistories,
@@ -36,7 +35,6 @@ function checkStartupConformance(result: StartupConformanceResult) {
   expect(result.artifacts).toEqual([])
   expect(result.results.flatMap(({ violations }) => violations)).toEqual([])
 }
-declareOracle({ check: [checkStartupConformance] })
 test(`complete source results replace persisted rows across OPFS startup`, async ({
   page,
 }) => {

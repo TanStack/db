@@ -1,5 +1,4 @@
 import { afterEach, beforeEach } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   differs,
   oracleProperty,
@@ -569,9 +568,4 @@ oracleProperty<Aliases, Expected>({
   check: (aliases, trace, expected) =>
     judge(aliases, trace, expected, `statement`),
   calibrations: [...calibrations, constructionReachCalibration],
-})
-
-declareOracle({
-  model: [aliasQueryCase],
-  grammar: [writeResultAliasesArbitrary, statementResultAliasesArbitrary],
 })

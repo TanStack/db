@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, vi } from 'vitest'
 import {
   BTreeIndex,
   IR,
@@ -12,8 +12,12 @@ import {
   SQLiteCorePersistenceAdapter,
   persistedCollectionOptions,
 } from '../src/index.js'
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { createSerializedNodeSqliteDriver as createDriver } from './helpers/node-sqlite-driver.js'
 import {
   drain,
@@ -27,6 +31,23 @@ import {
   withMacrotaskReads,
 } from './helpers/demand-coverage-driver.js'
 import { coverageViolations } from './persisted-demand-coverage-model-oracle.js'
+import {
+  A1,
+  A2,
+  ALL_CELLS,
+  SESSION_1_ROWS,
+  SESSION_2_ANSWER,
+  cellName,
+  expectedTrace,
+  firstMismatch,
+  rowLabels,
+} from './persisted-demand-coverage-cells-model-oracle.js'
+import type {
+  Cell,
+  CoverageHistory,
+  Observation,
+  Trace,
+} from './persisted-demand-coverage-cells-model-oracle.js'
 import type { Row, Upstream } from './helpers/demand-coverage-driver.js'
 import type {
   CoverageReach,
@@ -198,295 +219,11 @@ import type { SQLiteDriver } from '../src/index.js'
 // of D hydrates and records coverage. A truncate clears hydrated demand, so
 // that load must hydrate, and the wrapper rejects a source transaction that
 // crosses a hydration cycle (`InvalidPersistedCollectionConfigError`).
+//
+// The histories, rows, observations and checkpoints, independent model,
+// refinement check, and cells of Part 1 live in
+// persisted-demand-coverage-cells-model-oracle.ts.
 // ---------------------------------------------------------------------------
-
-const COVERAGE_HISTORIES = [
-  `not-requested`,
-  `failed`,
-  `overlapping-demand`,
-  `other-window`,
-  `other-order`,
-  `durable-write-failed`,
-  `settled-empty`,
-  `settled`,
-  `truncated`,
-  `truncated-in-flight`,
-  `recovered-in-flight`,
-  `recovering-in-flight`,
-  `settled-then-row-deleted`,
-] as const
-type CoverageHistory = (typeof COVERAGE_HISTORIES)[number]
-
-const UPSTREAM_SCHEDULES = [
-  `pending`,
-  `fails-at-once`,
-  `fails-early`,
-  `answers-early`,
-  `answers-late`,
-  `answers-empty-late`,
-  `fails-late`,
-] as const
-type UpstreamSchedule = (typeof UPSTREAM_SCHEDULES)[number]
-
-const WAITS = [0, 1000] as const
-type Wait = (typeof WAITS)[number]
-
-type Cell = {
-  history: CoverageHistory
-  waitMs: Wait
-  upstream: UpstreamSchedule
-}
-
-const A1: Row = { id: `a1`, group: `a`, rank: 1, value: `v1` }
-const A2: Row = { id: `a2`, group: `a`, rank: 2, value: `v1` }
-
-const SESSION_1_ROWS: Record<CoverageHistory, ReadonlyArray<Row>> = {
-  'not-requested': [],
-  failed: [],
-  'overlapping-demand': [A1],
-  'other-window': [A1],
-  'other-order': [A1, A2],
-  // The upstream answer was A1 and A2, but no row became durable.
-  'durable-write-failed': [],
-  'settled-empty': [],
-  settled: [A1, A2],
-  truncated: [],
-  'truncated-in-flight': [],
-  'recovered-in-flight': [],
-  'recovering-in-flight': [],
-  'settled-then-row-deleted': [A2],
-}
-
-// Session 2's upstream answer updates a1 and adds a3. It omits a2; an
-// on-demand load reports rows, not deletions, so a2 stays.
-const SESSION_2_ANSWER: ReadonlyArray<Row> = [
-  { id: `a1`, group: `a`, rank: 1, value: `v2` },
-  { id: `a3`, group: `a`, rank: 3, value: `v2` },
-]
-
-// ---------------------------------------------------------------------------
-// Observations and checkpoints
-//
-// The query reads only D, so its initial-query readiness is D's load
-// settlement. The model therefore predicts three public facts together:
-// `query.status`, the state of the session-2 `preload()` promise, and, when
-// ready, the exact rows. Rows are not compared while loading; this law does
-// not govern partial results before settlement.
-//
-// Checkpoints, in order:
-//
-// - `restored`: the upstream load has started and microtasks have drained,
-//   before fake time advances. The persisted subset restore has had every
-//   chance to publish. A slower publication fails the ready cells here; it
-//   cannot pass them.
-// - `afterEarlyEvent`: after an early upstream answer or failure.
-// - `beforeDeadline`: fake time is 1 ms before the wait passes.
-// - `afterDeadline`: fake time has reached the wait.
-// - `afterLateEvent`: after a late upstream answer or failure.
-// ---------------------------------------------------------------------------
-
-type Observation = {
-  queryStatus: `loading` | `ready` | `error`
-  preload: `pending` | `resolved` | `rejected`
-  rows?: ReadonlyArray<string>
-}
-
-type Trace = {
-  restored: Observation
-  afterEarlyEvent: Observation
-  beforeDeadline: Observation
-  afterDeadline: Observation
-  afterLateEvent: Observation
-}
-
-const CHECKPOINTS = [
-  `restored`,
-  `afterEarlyEvent`,
-  `beforeDeadline`,
-  `afterDeadline`,
-  `afterLateEvent`,
-] as const satisfies ReadonlyArray<keyof Trace>
-
-function rowLabels(rows: Iterable<Row>): Array<string> {
-  return Array.from(rows, (row) => `${row.id}:${row.value}`).sort()
-}
-
-// ---------------------------------------------------------------------------
-// Independent model
-//
-// The model keeps four facts: whether D is covered, the rows visible to D,
-// whether D's load has settled, and whether it failed. Coverage comes from
-// the session-1 history label alone; the model never inspects SQLite or the
-// wrapper. Each fact changes a later observation:
-//
-// - coverage decides whether the wait or an upstream failure settles D;
-// - visible rows are the exact rows at settlement and after a later answer;
-// - settlement separates `ready` from `loading`;
-// - failure separates `error` from `loading` for an unsettled demand.
-//
-// Vocabulary (ORC-009): `covered` is persisted demand coverage; the initial
-// visible rows are the persisted subset restore; `settled` is D's load
-// settlement, observed through initial-query readiness and `preload()`.
-//
-// `Design` lets the calibration below express plausible wrong designs as
-// variants of the same rule. The law is `LAW`.
-// ---------------------------------------------------------------------------
-
-type Design = {
-  name: string
-  isCovered: (history: CoverageHistory) => boolean
-  // `false` settles a covered demand at restore, ignoring the wait.
-  honorsWait: boolean
-  // Fraction of the wait after which a covered demand settles.
-  deadlineFraction: number
-  // A covered demand settles when its upstream load fails.
-  failureSettlesCovered: boolean
-  // Upstream rows still publish after a settlement from SQLite.
-  upstreamContinues: boolean
-  // A later upstream failure leaves a settled demand ready.
-  settlementSurvivesFailure: boolean
-  // Settles before the persisted subset restore publishes its rows.
-  settlesBeforeRestore: boolean
-}
-
-const LAW: Design = {
-  name: `persisted demand coverage`,
-  isCovered: (history) => history === `settled` || history === `settled-empty`,
-  honorsWait: true,
-  deadlineFraction: 1,
-  failureSettlesCovered: true,
-  upstreamContinues: true,
-  settlementSurvivesFailure: true,
-  settlesBeforeRestore: false,
-}
-
-function expectedTrace(cell: Cell, design: Design = LAW): Trace {
-  const covered = design.isCovered(cell.history)
-  const visible = new Map(
-    SESSION_1_ROWS[cell.history].map((row) => [row.id, row]),
-  )
-  const state = {
-    settled: false,
-    settledFromSqlite: false,
-    failed: false,
-    // Set only by the wrong design that settles before the restore publishes.
-    rowsAtEarlySettle: undefined as Array<string> | undefined,
-  }
-
-  const observe = (): Observation => {
-    if (state.failed) return { queryStatus: `error`, preload: `rejected` }
-    if (!state.settled) return { queryStatus: `loading`, preload: `pending` }
-    return {
-      queryStatus: `ready`,
-      preload: `resolved`,
-      rows: state.rowsAtEarlySettle ?? rowLabels(visible.values()),
-    }
-  }
-  const settleFromSqlite = () => {
-    if (state.settled || state.failed) return
-    state.settled = true
-    state.settledFromSqlite = true
-  }
-  const answer = (rows: ReadonlyArray<Row>) => {
-    if (state.failed) return
-    if (state.settledFromSqlite && !design.upstreamContinues) return
-    for (const row of rows) visible.set(row.id, row)
-    state.rowsAtEarlySettle = undefined
-    state.settled = true
-  }
-  const fail = () => {
-    if (state.failed) return
-    if (!state.settled) {
-      if (covered && design.failureSettlesCovered) settleFromSqlite()
-      else state.failed = true
-    } else if (!design.settlementSurvivesFailure) {
-      state.failed = true
-    }
-  }
-
-  // restored (t = 0)
-  if (covered && (cell.waitMs === 0 || !design.honorsWait)) settleFromSqlite()
-  if (cell.upstream === `fails-at-once`) fail()
-  if (design.settlesBeforeRestore && covered) state.rowsAtEarlySettle = []
-  const restored = observe()
-
-  // early event (t = 0)
-  if (cell.upstream === `answers-early`) answer(SESSION_2_ANSWER)
-  if (cell.upstream === `fails-early`) fail()
-  const afterEarlyEvent = observe()
-
-  // t = wait - 1
-  if (
-    covered &&
-    cell.waitMs > 0 &&
-    design.deadlineFraction * cell.waitMs <= cell.waitMs - 1
-  ) {
-    settleFromSqlite()
-  }
-  const beforeDeadline = cell.waitMs === 0 ? afterEarlyEvent : observe()
-
-  // t = wait
-  if (covered) settleFromSqlite()
-  const afterDeadline = observe()
-
-  // late event
-  if (cell.upstream === `answers-late`) answer(SESSION_2_ANSWER)
-  if (cell.upstream === `answers-empty-late`) answer([])
-  if (cell.upstream === `fails-late`) fail()
-  const afterLateEvent = observe()
-
-  return {
-    restored,
-    afterEarlyEvent,
-    beforeDeadline,
-    afterDeadline,
-    afterLateEvent,
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Refinement check
-//
-// Production refines the model when every checkpoint agrees on status,
-// preload state, and, when the model is ready, the exact sorted rows. The
-// recorder keeps duplicates and order, so the comparison can reject both.
-// ---------------------------------------------------------------------------
-
-function sameObservation(expected: Observation, actual: Observation): boolean {
-  if (expected.queryStatus !== actual.queryStatus) return false
-  if (expected.preload !== actual.preload) return false
-  if (expected.rows === undefined) return true
-  return (
-    actual.rows !== undefined &&
-    actual.rows.length === expected.rows.length &&
-    expected.rows.every((row, index) => actual.rows![index] === row)
-  )
-}
-
-function firstMismatch(
-  expected: Trace,
-  actual: Partial<Trace>,
-):
-  | { checkpoint: keyof Trace; expected: Observation; actual?: Observation }
-  | undefined {
-  for (const checkpoint of CHECKPOINTS) {
-    const observed = actual[checkpoint]
-    if (!observed || !sameObservation(expected[checkpoint], observed)) {
-      return { checkpoint, expected: expected[checkpoint], actual: observed }
-    }
-  }
-  return undefined
-}
-
-const ALL_CELLS: ReadonlyArray<Cell> = COVERAGE_HISTORIES.flatMap((history) =>
-  WAITS.flatMap((waitMs) =>
-    UPSTREAM_SCHEDULES.map((upstream) => ({ history, waitMs, upstream })),
-  ),
-)
-
-function cellName(cell: Cell): string {
-  return `${cell.history}, wait ${cell.waitMs} ms, upstream ${cell.upstream}`
-}
 
 // ---------------------------------------------------------------------------
 // Production driver
@@ -2379,365 +2116,323 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-declareOracle({
-  owns: [`src/persisted.ts`],
-  check: [coverageViolations, firstMismatch, sameObservation],
-  model: [expectedTrace],
-  grammar: [ALL_CELLS],
-})
+// Each block below runs its production driver and applies its existing
+// judgment: Part 1's trace model through firstMismatch, and Parts 2 to 4's
+// shared model through judge (coverageViolations). The adapter transports that
+// judgment to oracleProperty.
+const demandCoverageLaw = {
+  statement: `An opted-in persisted wrapper over an on-demand source settles a demand's load from SQLite only when its persisted subset restore has published, the exact demand has persisted demand coverage in the current cache generation with at least the rows it held then, and the wait has passed or the upstream load failed; otherwise the load waits for its upstream load.`,
+  authority: `Issue #2102 item 1, docs/contributing/oracle-reviews/2026-10-20-on-demand-network-first-law.md, the persisted-wrapper paragraph in packages/db/src/query/live/ARCHITECTURE.md, and the maintainer decision of 2026-10-26.`,
+}
+
+// Part 1: production's trace of one cell agrees with the model at every
+// checkpoint.
+async function refineCell(cell: Cell): Promise<void> {
+  quietConsole()
+  const actual = await runCell(cell)
+  expect(firstMismatch(expectedTrace(cell), actual)).toBeUndefined()
+}
+
+// Part 2: each load of a covered demand gets its own wait, and coverage
+// survives release.
+async function judgeLifecycle(): Promise<void> {
+  quietConsole()
+  const records = await runLifecycle()
+  judge(records)
+  // Checker calibration: a deadline measured from the sync run would show
+  // query 2 ready at 1000 ms. The judgment must reject that observation.
+  const at1000 = records[LIFECYCLE_CHECKPOINTS.indexOf(1000)]!
+  const early = {
+    ...at1000,
+    queries: {
+      ...at1000.queries,
+      query2: {
+        ...at1000.queries.query2!,
+        observed: { status: `ready`, rows: [`a1`, `a2`] },
+      },
+    },
+  } satisfies CoverageRecord
+  expect(coverageViolations(early)).toHaveLength(1)
+}
+
+// Part 3: joined queries, by history and shape.
+const joinedCases = [
+  ...([`flat`, `nested`, `two-readers`] as const).flatMap(
+    (shape: JoinedShape) =>
+      ([`covered by the same joined query`, `never requested`] as const).map(
+        (history: ChildHistory) => [history, shape] as const,
+      ),
+  ),
+  // The inner-only history differs from full coverage only when the query
+  // reaches C through two live queries.
+  [`covered by the inner query only`, `two-readers`] as const,
+] as const
+
+async function judgeJoined([
+  history,
+  shape,
+]: (typeof joinedCases)[number]): Promise<void> {
+  quietConsole()
+  const records = await runJoined(history, shape)
+  judge(records)
+  // Checker calibration: an opt-in that permits fallback alone would
+  // release a never-requested demand. The judgment must reject it.
+  if (history === `never requested`) {
+    const last = records[records.length - 1]!
+    const released = {
+      ...last,
+      queries: {
+        joined: {
+          ...last.queries.joined!,
+          observed: { status: `ready`, rows: [] },
+        },
+      },
+    } satisfies CoverageRecord
+    expect(coverageViolations(released)).toHaveLength(1)
+  }
+}
+
+// Part 2b: resets in the same session. Each row names its driver.
+const sessionResets = [
+  [`a rotation`, () => runSessionReset(`rotation`)],
+  [`a rotation of an empty demand`, () => runSessionReset(`rotation`, [])],
+  [`a refetch`, () => runSessionReset(`refetch`)],
+  [`a refetch of an empty demand`, () => runSessionReset(`refetch`, [])],
+  [`a load after scoped recovery reloaded the demand`, runRecoveryReload],
+  [`a truncate inside the source's load call`, runTruncateInsideLoad],
+  [`a schema reset`, runSchemaReset],
+  [
+    `a cache claim that expires before the coverage record`,
+    runClaimExpiredBeforeRecord,
+  ],
+  [
+    `a cache claim that expires before the coverage check`,
+    () => runClaimExpiredBeforeCheck(),
+  ],
+  [
+    `a cache claim that expires before an empty demand's coverage check`,
+    () => runClaimExpiredBeforeCheck([]),
+  ],
+] as const
+const sessionResetRuns = new Map<string, () => Promise<Array<CoverageRecord>>>(
+  sessionResets,
+)
+
+// Part 2c: coverage bookkeeping. Each row names its driver.
+const bookkeepingCases = [
+  [`a coverage read that fails after the load`, runCoverageReadFailsAfterLoad],
+  [`a coverage check read that fails`, runCoverageReadFailsDuringCheck],
+  [`a synchronous answer`, () => runSynchronousAnswer([A1, A2], `nothing`)],
+  [
+    `a synchronous answer, then a deletion`,
+    () => runSynchronousAnswer([A1, A2], `delete`),
+  ],
+  [
+    `an empty synchronous answer, then a truncate during its coverage read`,
+    () => runSynchronousAnswer([], `truncate`),
+  ],
+  [
+    `an unordered demand that loses a row and gains another`,
+    runUnorderedRowReplaced,
+  ],
+  [
+    `a truncate during an empty load's coverage read`,
+    runTruncateDuringCoverageRead,
+  ],
+  [
+    `a coverage read that outlasts the wait`,
+    () => runHeldPastTheWait(`coverage read`),
+  ],
+  [
+    `a cache-claim renewal that outlasts the wait`,
+    () => runHeldPastTheWait(`claim renewal`),
+  ],
+] as const
+const bookkeepingRuns = new Map<string, () => Promise<Array<CoverageRecord>>>(
+  bookkeepingCases,
+)
+
+// Part 4: the window moves offline to page 2 by whether session 1 loaded it
+// and whether the rank is indexed.
+const nextPageCases = [
+  [true, true],
+  [true, false],
+  [false, true],
+  [false, false],
+] as const
 
 describe(`persisted demand coverage oracle`, () => {
-  // -------------------------------------------------------------------------
-  // Calibration: the comparison rejects wrong answers, and each block
-  // distinguishes its law from plausible wrong designs at a named case
-  // (ORC-006, ORC-013). These checks judge the models and comparisons;
-  // production mutants run separately against an implementation.
-  // -------------------------------------------------------------------------
-
-  it(`rejects wrong observations at a checkpoint`, () => {
-    oracleRoute(`calibration`)
-    const ready = {
-      queryStatus: `ready`,
-      preload: `resolved`,
-      rows: [`a1:v1`, `a2:v1`],
-    } as const
-    expect(sameObservation(ready, ready)).toBe(true)
-    expect(sameObservation(ready, { ...ready, rows: [`a1:v1`] })).toBe(false)
-    expect(sameObservation(ready, { ...ready, rows: [`a2:v1`, `a1:v1`] })).toBe(
-      false,
-    )
-    expect(sameObservation(ready, { ...ready, rows: [`a1:v1`, `a1:v1`] })).toBe(
-      false,
-    )
-    expect(sameObservation(ready, { ...ready, preload: `pending` })).toBe(false)
-    expect(
-      sameObservation(ready, { queryStatus: `loading`, preload: `pending` }),
-    ).toBe(false)
-    expect(
-      sameObservation(
-        { queryStatus: `loading`, preload: `pending` },
-        { queryStatus: `ready`, preload: `resolved`, rows: [] },
-      ),
-    ).toBe(false)
-  })
-
-  const wrongDesigns: ReadonlyArray<{ design: Design; witness: Cell }> = [
-    {
-      design: { ...LAW, name: `any local read counts`, isCovered: () => true },
-      witness: { history: `not-requested`, waitMs: 0, upstream: `pending` },
-    },
-    {
-      design: {
-        ...LAW,
-        name: `nonempty rows count`,
-        isCovered: (history) => SESSION_1_ROWS[history].length > 0,
-      },
-      witness: { history: `settled-empty`, waitMs: 0, upstream: `pending` },
-    },
-    {
-      // A Collection-wide flag set by any settled load, or rows that match D.
-      design: {
-        ...LAW,
-        name: `coverage per Collection`,
-        isCovered: (history) =>
-          history !== `not-requested` && history !== `failed`,
-      },
-      witness: {
-        history: `overlapping-demand`,
-        waitMs: 0,
-        upstream: `pending`,
-      },
-    },
-    {
-      design: {
-        ...LAW,
-        name: `coverage keyed by filter only`,
-        isCovered: (history) =>
-          LAW.isCovered(history) ||
-          history === `other-window` ||
-          history === `other-order`,
-      },
-      witness: { history: `other-window`, waitMs: 0, upstream: `pending` },
-    },
-    {
-      // Honors limit but drops `orderBy` from the key.
-      design: {
-        ...LAW,
-        name: `coverage ignores order`,
-        isCovered: (history) =>
-          LAW.isCovered(history) || history === `other-order`,
-      },
-      witness: { history: `other-order`, waitMs: 0, upstream: `pending` },
-    },
-    {
-      design: {
-        ...LAW,
-        name: `coverage written before the rows commit`,
-        isCovered: (history) =>
-          LAW.isCovered(history) || history === `durable-write-failed`,
-      },
-      witness: {
-        history: `durable-write-failed`,
-        waitMs: 0,
-        upstream: `pending`,
-      },
-    },
-    {
-      design: {
-        ...LAW,
-        name: `coverage survives truncate`,
-        isCovered: (history) =>
-          LAW.isCovered(history) || history === `truncated`,
-      },
-      witness: { history: `truncated`, waitMs: 0, upstream: `pending` },
-    },
-    {
-      design: {
-        ...LAW,
-        name: `any settled load records coverage`,
-        isCovered: (history) =>
-          LAW.isCovered(history) ||
-          history === `truncated-in-flight` ||
-          history === `recovered-in-flight`,
-      },
-      witness: {
-        history: `truncated-in-flight`,
-        waitMs: 0,
-        upstream: `pending`,
-      },
-    },
-    {
-      design: {
-        ...LAW,
-        name: `coverage ignores rows deleted after it settled`,
-        isCovered: (history) =>
-          LAW.isCovered(history) || history === `settled-then-row-deleted`,
-      },
-      witness: {
-        history: `settled-then-row-deleted`,
-        waitMs: 0,
-        upstream: `pending`,
-      },
-    },
-    {
-      design: { ...LAW, name: `wait ignored`, honorsWait: false },
-      witness: { history: `settled`, waitMs: 1000, upstream: `pending` },
-    },
-    {
-      design: { ...LAW, name: `half deadline`, deadlineFraction: 0.5 },
-      witness: { history: `settled`, waitMs: 1000, upstream: `pending` },
-    },
-    {
-      design: {
-        ...LAW,
-        name: `failure errors a covered demand`,
-        failureSettlesCovered: false,
-      },
-      witness: { history: `settled`, waitMs: 1000, upstream: `fails-early` },
-    },
-    {
-      design: {
-        ...LAW,
-        name: `upstream aborted after SQLite`,
-        upstreamContinues: false,
-      },
-      witness: { history: `settled`, waitMs: 0, upstream: `answers-late` },
-    },
-    {
-      design: {
-        ...LAW,
-        name: `late failure undoes a settlement`,
-        settlementSurvivesFailure: false,
-      },
-      witness: { history: `settled`, waitMs: 0, upstream: `fails-late` },
-    },
-    {
-      design: {
-        ...LAW,
-        name: `settles before restore`,
-        settlesBeforeRestore: true,
-      },
-      witness: { history: `settled`, waitMs: 0, upstream: `pending` },
-    },
-  ]
-
-  it.each(wrongDesigns.map((entry) => [entry.design.name, entry] as const))(
-    `distinguishes the law from the wrong design: %s`,
-    (_name, { design, witness }) => {
-      oracleRoute(`calibration`)
-      expect(ALL_CELLS).toContainEqual(witness)
-      expect(
-        firstMismatch(expectedTrace(witness), expectedTrace(witness, design)),
-      ).toBeDefined()
-    },
-  )
-
-  it(`enumerates every declared cell once`, () => {
-    oracleRoute(`case`)
-    const names = ALL_CELLS.map(cellName)
-    expect(new Set(names).size).toBe(names.length)
-    expect(names).toHaveLength(
-      COVERAGE_HISTORIES.length * WAITS.length * UPSTREAM_SCHEDULES.length,
-    )
-  })
-
   // -------------------------------------------------------------------------
   // Refinement against production.
   // -------------------------------------------------------------------------
 
-  it.each(ALL_CELLS.map((cell) => [cellName(cell), cell] as const))(
-    `refines the model: %s`,
-    async (_name, cell) => {
-      oracleRoute(`case`)
-      quietConsole()
-      const actual = await runCell(cell)
-      expect(firstMismatch(expectedTrace(cell), actual)).toBeUndefined()
+  oracleProperty({
+    id: `persisted-demand-coverage.cell`,
+    law: {
+      ...demandCoverageLaw,
+      limits: `Part 1's bounded cells: every session-1 coverage history, wait, and upstream schedule, judged by the trace model at five checkpoints.`,
     },
-  )
+    owns: [`src/persisted.ts`],
+    histories: ALL_CELLS,
+    label: (cell) => `refines the model: ${cellName(cell)}`,
+    resolve: (cell) => ({ cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`demand coverage cell`, plan, observe, () =>
+        refineCell(plan.cell),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   // -------------------------------------------------------------------------
   // Parts 2 to 4: fixed histories judged by the shared model.
   // -------------------------------------------------------------------------
 
-  it(`gives each load of a covered demand its own wait and keeps coverage across release`, async () => {
-    oracleRoute(`fixed history`)
-    quietConsole()
-    const records = await runLifecycle()
-    judge(records)
-    // Checker calibration: a deadline measured from the sync run would show
-    // query 2 ready at 1000 ms. The judgment must reject that observation.
-    const at1000 = records[LIFECYCLE_CHECKPOINTS.indexOf(1000)]!
-    const early = {
-      ...at1000,
-      queries: {
-        ...at1000.queries,
-        query2: {
-          ...at1000.queries.query2!,
-          observed: { status: `ready`, rows: [`a1`, `a2`] },
-        },
+  oracleProperty({
+    id: `persisted-demand-coverage.lifecycle`,
+    law: {
+      ...demandCoverageLaw,
+      limits: `Part 2's fixed load lifecycle in one session, with its checker calibration of an early deadline.`,
+    },
+    owns: [`src/persisted.ts`],
+    histories: [
+      {
+        name: `gives each load of a covered demand its own wait and keeps coverage across release`,
       },
-    } satisfies CoverageRecord
-    expect(coverageViolations(early)).toHaveLength(1)
+    ],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`demand coverage lifecycle`, plan, observe, () =>
+        judgeLifecycle(),
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  it.each([
-    ...([`flat`, `nested`, `two-readers`] as const).flatMap(
-      (shape: JoinedShape) =>
-        ([`covered by the same joined query`, `never requested`] as const).map(
-          (history: ChildHistory) => [history, shape] as const,
-        ),
-    ),
-    // The inner-only history differs from full coverage only when the query
-    // reaches C through two live queries.
-    [`covered by the inner query only`, `two-readers`] as const,
-  ])(
-    `makes a joined query ready only when its on-demand demands settle: %s, %s`,
-    async (history, shape) => {
-      oracleRoute(`case`)
-      quietConsole()
-      const records = await runJoined(history, shape)
-      judge(records)
-      // Checker calibration: an opt-in that permits fallback alone would
-      // release a never-requested demand. The judgment must reject it.
-      if (history === `never requested`) {
-        const last = records[records.length - 1]!
-        const released = {
-          ...last,
-          queries: {
-            joined: {
-              ...last.queries.joined!,
-              observed: { status: `ready`, rows: [] },
-            },
-          },
-        } satisfies CoverageRecord
-        expect(coverageViolations(released)).toHaveLength(1)
-      }
+  oracleProperty({
+    id: `persisted-demand-coverage.joined`,
+    law: {
+      ...demandCoverageLaw,
+      limits: `Part 3's joined histories and shapes, with the checker calibration of a never-requested demand released by fallback.`,
     },
-  )
-
-  it.each([
-    [`a rotation`, () => runSessionReset(`rotation`)],
-    [`a rotation of an empty demand`, () => runSessionReset(`rotation`, [])],
-    [`a refetch`, () => runSessionReset(`refetch`)],
-    [`a refetch of an empty demand`, () => runSessionReset(`refetch`, [])],
-    [`a load after scoped recovery reloaded the demand`, runRecoveryReload],
-    [`a truncate inside the source's load call`, runTruncateInsideLoad],
-    [`a schema reset`, runSchemaReset],
-    [
-      `a cache claim that expires before the coverage record`,
-      runClaimExpiredBeforeRecord,
-    ],
-    [
-      `a cache claim that expires before the coverage check`,
-      () => runClaimExpiredBeforeCheck(),
-    ],
-    [
-      `a cache claim that expires before an empty demand's coverage check`,
-      () => runClaimExpiredBeforeCheck([]),
-    ],
-  ] as const)(`judges a reset in the same session: %s`, async (_name, run) => {
-    oracleRoute(`case`)
-    quietConsole()
-    judge(await run())
+    owns: [`src/persisted.ts`],
+    histories: joinedCases.map(([history, shape]) => ({ history, shape })),
+    label: ({ history, shape }) =>
+      `makes a joined query ready only when its on-demand demands settle: ${history}, ${shape}`,
+    resolve: ({ history, shape }) => ({
+      joinedCase: [history, shape] as const,
+    }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`demand coverage joined`, plan, observe, () =>
+        judgeJoined(plan.joinedCase),
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  it.each([
-    [
-      `a coverage read that fails after the load`,
-      runCoverageReadFailsAfterLoad,
-    ],
-    [`a coverage check read that fails`, runCoverageReadFailsDuringCheck],
-    [`a synchronous answer`, () => runSynchronousAnswer([A1, A2], `nothing`)],
-    [
-      `a synchronous answer, then a deletion`,
-      () => runSynchronousAnswer([A1, A2], `delete`),
-    ],
-    [
-      `an empty synchronous answer, then a truncate during its coverage read`,
-      () => runSynchronousAnswer([], `truncate`),
-    ],
-    [
-      `an unordered demand that loses a row and gains another`,
-      runUnorderedRowReplaced,
-    ],
-    [
-      `a truncate during an empty load's coverage read`,
-      runTruncateDuringCoverageRead,
-    ],
-    [
-      `a coverage read that outlasts the wait`,
-      () => runHeldPastTheWait(`coverage read`),
-    ],
-    [
-      `a cache-claim renewal that outlasts the wait`,
-      () => runHeldPastTheWait(`claim renewal`),
-    ],
-  ] as const)(`judges coverage bookkeeping: %s`, async (_name, run) => {
-    oracleRoute(`case`)
-    quietConsole()
-    judge(await run())
+  oracleProperty({
+    id: `persisted-demand-coverage.session-reset`,
+    law: {
+      ...demandCoverageLaw,
+      limits: `Part 2b's fixed resets in the same session: rotation, refetch, scoped recovery, a truncate inside the load call, a schema reset, and cache-claim expiry.`,
+    },
+    owns: [`src/persisted.ts`],
+    histories: sessionResets.map(([name]) => name),
+    label: (name) => `judges a reset in the same session: ${name}`,
+    resolve: (name) => ({ run: sessionResetRuns.get(name)! }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `demand coverage reset`,
+        plan,
+        observe,
+        async () => {
+          quietConsole()
+          judge(await plan.run())
+        },
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  it.each(Object.keys(WINDOW_HISTORIES) as Array<WindowHistory>)(
-    `settles an ordered window from SQLite only while its demands are covered: %s`,
-    async (history) => {
-      oracleRoute(`case`)
-      quietConsole()
-      judge(await runWindow(history))
+  oracleProperty({
+    id: `persisted-demand-coverage.bookkeeping`,
+    law: {
+      ...demandCoverageLaw,
+      limits: `Part 2c's fixed coverage bookkeeping histories: failed coverage reads, synchronous answers, row replacement, a truncate during a coverage read, and reads that outlast the wait.`,
     },
-  )
+    owns: [`src/persisted.ts`],
+    histories: bookkeepingCases.map(([name]) => name),
+    label: (name) => `judges coverage bookkeeping: ${name}`,
+    resolve: (name) => ({ run: bookkeepingRuns.get(name)! }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `demand coverage bookkeeping`,
+        plan,
+        observe,
+        async () => {
+          quietConsole()
+          judge(await plan.run())
+        },
+      ),
+    check: forwardAssertionJudgment,
+  })
 
-  it.each([
-    [true, true],
-    [true, false],
-    [false, true],
-    [false, false],
-  ] as const)(
-    `moves a window offline to a page only when that page is covered (session 1 loaded page 2: %s, indexed: %s)`,
-    async (session1LoadsPageTwo, indexed) => {
-      oracleRoute(`case`)
-      quietConsole()
-      judge(await runNextPage(session1LoadsPageTwo, indexed))
+  oracleProperty({
+    id: `persisted-demand-coverage.window`,
+    law: {
+      ...demandCoverageLaw,
+      limits: `Part 4's fixed ordered-window histories.`,
     },
-  )
+    owns: [`src/persisted.ts`],
+    histories: Object.keys(WINDOW_HISTORIES) as Array<WindowHistory>,
+    label: (history) =>
+      `settles an ordered window from SQLite only while its demands are covered: ${history}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `demand coverage window`,
+        plan,
+        observe,
+        async () => {
+          quietConsole()
+          judge(await runWindow(plan.history))
+        },
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `persisted-demand-coverage.next-page`,
+    law: {
+      ...demandCoverageLaw,
+      limits: `Part 4's move of a window offline to page 2, by whether session 1 loaded page 2 and whether the rank is indexed.`,
+    },
+    owns: [`src/persisted.ts`],
+    histories: nextPageCases.map(([session1LoadsPageTwo, indexed]) => ({
+      session1LoadsPageTwo,
+      indexed,
+    })),
+    label: ({ session1LoadsPageTwo, indexed }) =>
+      `moves a window offline to a page only when that page is covered (session 1 loaded page 2: ${session1LoadsPageTwo}, indexed: ${indexed})`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `demand coverage next page`,
+        plan,
+        observe,
+        async () => {
+          quietConsole()
+          judge(
+            await runNextPage(
+              plan.history.session1LoadsPageTwo,
+              plan.history.indexed,
+            ),
+          )
+        },
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

@@ -20,7 +20,6 @@ import { join } from 'node:path'
 import BetterSqlite3 from 'better-sqlite3'
 import { onTestFinished } from 'vitest'
 import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   expectedReload,
   fixedReloadHistories,
@@ -171,12 +170,6 @@ function checkRecordedReload(
     violation(`reload`, `reload observation is missing`, `reload work and rows`)
   )
 }
-
-declareOracle({
-  model: [model],
-  check: [check, checkRecordedReload],
-  grammar: [reloadHistoryArb],
-})
 
 oracleProperty({
   id: `sqlite-reload.class`,

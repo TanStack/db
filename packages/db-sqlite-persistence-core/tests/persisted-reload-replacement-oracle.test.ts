@@ -1,6 +1,5 @@
 import { createCollection } from '@tanstack/db'
 import { afterAll, vi } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { persistedCollectionOptions } from '../src/index.js'
 import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
 import type {
@@ -337,10 +336,4 @@ oracleProperty({
   model: expected,
   driver: drive,
   check,
-})
-
-declareOracle({
-  model: [expected],
-  check: [check],
-  grammar: [histories],
 })

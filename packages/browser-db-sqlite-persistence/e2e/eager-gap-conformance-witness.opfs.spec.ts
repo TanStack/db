@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { precedenceHistories } from '../../query-db-collection/tests/persisted-precedence-oracle'
 import {
   cachedPeerClaimHistories,
@@ -31,7 +30,6 @@ function checkEagerGapReceiving(result: EagerGapResult) {
   expect(result.results.flatMap((r) => r.violations)).toEqual([])
   expect(result.artifacts).toEqual([])
 }
-declareOracle({ check: [checkEagerGapReceiving] })
 test(`persisted precedence, retired hydration, and unwrapped reload obey their owners in Chromium`, async ({
   page,
 }) => {

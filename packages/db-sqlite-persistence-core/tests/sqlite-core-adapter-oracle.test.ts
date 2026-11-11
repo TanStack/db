@@ -26,13 +26,11 @@ import {
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   bigintBoundary,
   chunkBoundary,
   dual,
   escapedStringCase,
-  expectedBindingRows,
   legalSpec,
   mixed,
   nested,
@@ -45,11 +43,6 @@ import type {
   SQLiteCoreAdapterHarnessFactory,
   Todo,
 } from './sqlite-core-adapter-support'
-
-declareOracle({
-  check: [expectResetResumeLaw, violation],
-  model: [expectedResetResumeMetadata, expectedBindingRows],
-})
 
 type ResetResumeHistory = {
   fromSchemaVersion: number

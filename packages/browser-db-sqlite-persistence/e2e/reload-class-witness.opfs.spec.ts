@@ -6,7 +6,6 @@
  * stays distinct from a law violation.
  */
 import { expect, test } from '@playwright/test'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleRoute } from '../../db/tests/oracle-config'
 import type { ReloadClassResult } from './reload-class.opfs'
 
@@ -23,11 +22,6 @@ function expectReloadClassLawsHold(
       .map(({ name, violations }) => ({ name, violations })),
   ).toEqual([])
 }
-
-declareOracle({
-  owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
-  check: [expectReloadClassLawsHold],
-})
 
 test(`real Chromium OPFS reload is free of avoidable work ahead of its reads`, async ({
   page,

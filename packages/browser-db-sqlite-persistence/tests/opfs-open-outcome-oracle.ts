@@ -35,7 +35,6 @@
  * than the WASM response belong to the OPFS page lifecycle oracle.
  */
 import { expect } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 
 /*
  * ## History grammar
@@ -286,8 +285,3 @@ export function describeHistory(history: OpenHistory): string {
 // driver's observation with that prediction. The grammar generates the histories.
 // Owns nothing: this module holds the model and check only. The production
 // path is driven by opfs-open-outcome-oracle.test.ts, which declares the owned entry.
-declareOracle({
-  check: [expectOpenOutcome],
-  model: [expectedOpenOutcome],
-  grammar: [openHistories],
-})
