@@ -15,6 +15,80 @@ const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
   [
+    `query-db-collection/tests/scope-omission-reacquisition-oracle.test.ts`,
+    `query`,
+    `scope-omission-reacquisition`,
+    `query-db-collection/tests/scope-omission-reacquisition-oracle.ts`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/query-scope-omission-oracle.browser.test.ts`,
+    `query`,
+    `scope-omission-reacquisition.chromium-opfs`,
+    `query-db-collection/tests/scope-omission-reacquisition-oracle.ts`,
+  ],
+  [
+    `rxdb-db-collection/tests/persisted-baseline-lifecycle-oracle.test.ts`,
+    `adapter-conformance.persisted-baseline-lifecycle.rxdb`,
+    `controlled node-sqlite`,
+  ],
+  [
+    `powersync-db-collection/tests/persisted-baseline-lifecycle-oracle.test.ts`,
+    `adapter-conformance.persisted-baseline-lifecycle.powersync`,
+    `controlled node-sqlite`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/persisted-baseline-lifecycle-oracle.test.ts`,
+    `adapter-conformance.persisted-baseline-lifecycle`,
+    `rxdb.chromium-opfs powersync.chromium-opfs`,
+  ],
+  [
+    `query-db-collection/tests/persisted-rejected-write-cutoff-oracle.test.ts`,
+    `query`,
+    `persisted-rejected-write-cutoff`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/query-rejected-write-cutoff-oracle.browser.test.ts`,
+    `query`,
+    `persisted-rejected-write-cutoff.chromium-opfs`,
+  ],
+  [
+    `query-db-collection/tests/persisted-direct-ownership-oracle.test.ts`,
+    `query`,
+    `persisted-direct-ownership`,
+    `query-db-collection/tests/persisted-direct-ownership-oracle.ts`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/query-persisted-direct-ownership-oracle.browser.test.ts`,
+    `query`,
+    `persisted-direct-ownership.chromium-opfs`,
+  ],
+  [
+    `query-db-collection/tests/immediate-eager-materialization-oracle.test.ts`,
+    `query`,
+    `immediate-eager-materialization`,
+    `query-db-collection/tests/immediate-eager-materialization-oracle.ts`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/query-immediate-cache-oracle.browser.test.ts`,
+    `query`,
+    `immediate-eager-materialization.chromium-opfs`,
+  ],
+  [
+    `trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
+    `trailbase.lifecycle`,
+    `boundaries`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/trailbase-hydration-oracle.test.ts`,
+    `trailbase.lifecycle.persisted-hydration`,
+    `chromium-opfs`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/trailbase-eager-live-source-oracle.test.ts`,
+    `adapter-conformance.eager-live-source.trailbase`,
+    `chromium`,
+  ],
+  [
     `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
     `persistence`,
     `crossed-leadership-index`,
@@ -567,8 +641,60 @@ const ownerGroups: ReadonlyArray<
   [
     `trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
     `trailbase`,
-    `lifecycle`,
+    `lifecycle lifecycle.persisted-hydration.controlled lifecycle.persisted-hydration.node-sqlite`,
   ],
+  [
+    `query-db-collection/tests/ownership-lifecycle.oracle.test.ts`,
+    `query-db.ownership`,
+    `reacquisition published-owners direct-lifetime direct-order overlap`,
+  ],
+  [
+    `query-db-collection/tests/ownership-settlement.oracle.test.ts`,
+    `query-db.ownership`,
+    `application-failure handler-failure empty-result reentrant-receipt invalid-result deferred-result deferred-cleanup recovered-result eager-recovery retained-invalid overlapping-deferral independent-result`,
+  ],
+  [
+    `query-db-collection/tests/ownership-bottom.oracle.test.ts`,
+    `query-db.ownership`,
+    `older-fetch-merge retained-empty-work cold-owner-work superseded-result`,
+  ],
+  [
+    `query-db-collection/tests/ownership-upper.oracle.test.ts`,
+    `query-db.ownership`,
+    `explicit-refetch refresh-overlap handler-identity work`,
+  ],
+  [
+    `query-db-collection/tests/ownership-confirmation.oracle.test.ts`,
+    `query-db.ownership`,
+    `mutation-confirmation post-handler`,
+  ],
+  [
+    `query-db-collection/tests/persisted-precedence-oracle.test.ts`,
+    `query`,
+    `persisted-write-precedence`,
+  ],
+  [
+    `query-db-collection/tests/retained-scoped-hydration-oracle.test.ts`,
+    `query`,
+    `retained-scoped-hydration cached-peer-claim`,
+  ],
+  ...[`rxdb`, `powersync`].map(
+    (adapter) =>
+      [
+        `${adapter}-db-collection/tests/eager-reload-conformance-oracle.property.test.ts`,
+        `adapter.${adapter}`,
+        `eager-reload`,
+      ] as const,
+  ),
+  ...[`rxdb`, `powersync`].map(
+    (adapter) =>
+      [
+        `${adapter}-db-collection/tests/persisted-capability-conformance-oracle.test.ts`,
+        `adapter.${adapter}.capability`,
+        `controlled node-sqlite`,
+        `db-adapter-conformance/tests/persisted-capability-oracle-suite.ts`,
+      ] as const,
+  ),
   [
     `electric-db-collection/tests/electric-descriptor-isolation-oracle.test.ts`,
     `electric`,
@@ -756,6 +882,24 @@ const ownerGroups: ReadonlyArray<
   ],
   // Owners of properties that a module names and a host file runs carry
   // that module as the fourth element.
+  ...[`electric`, `trailbase`, `rxdb`, `powersync`].map(
+    (adapter) =>
+      [
+        `${adapter}-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts`,
+        `adapter.${adapter}`,
+        `persisted-startup`,
+      ] as const,
+  ),
+  [
+    `convex-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts`,
+    `adapter.convex`,
+    `persisted-startup`,
+  ],
+  [
+    `query-db-collection/tests/persisted-startup-conformance-oracle.test.ts`,
+    `query`,
+    `startup-ownership`,
+  ],
   [
     `query-db-collection/tests/cursor-pagination.no-peek.test.ts`,
     `cursor-pagination`,
@@ -1457,6 +1601,46 @@ const replayTestNames = new Map([
       [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
   ),
   [
+    `query-db.ownership.mutation-confirmation`,
+    `query-db\\.ownership\\.mutation-confirmation.*random seed`,
+  ],
+  [
+    `query-db.ownership.post-handler`,
+    `query-db\\.ownership\\.post-handler.*random seed`,
+  ],
+  [
+    `query.persisted-write-precedence`,
+    `query\\.persisted-write-precedence.*random seed`,
+  ],
+  [
+    `query.retained-scoped-hydration`,
+    `query\\.retained-scoped-hydration.*random seed`,
+  ],
+  [`query.cached-peer-claim`, `query\\.cached-peer-claim.*random seed`],
+  ...[`controlled`, `node-sqlite`].map(
+    (host) =>
+      [
+        `trailbase.lifecycle.persisted-hydration.${host}`,
+        `retires generated persisted hydration through ${host} with random seed`,
+      ] as const,
+  ),
+  ...[`rxdb`, `powersync`].map(
+    (adapter) =>
+      [
+        `adapter.${adapter}.eager-reload`,
+        `adapter\\.${adapter}\\.eager-reload.*random seed`,
+      ] as const,
+  ),
+  ...[
+    `query.startup-ownership`,
+    ...[`convex`, `electric`, `trailbase`, `rxdb`, `powersync`].map(
+      (adapter) => `adapter.${adapter}.persisted-startup`,
+    ),
+  ].map(
+    (property) =>
+      [property, `${property.replaceAll(`.`, `\\.`)}.*random seed`] as const,
+  ),
+  [
     `sqlite-persistence.expression-index`,
     `sqlite-persistence\\.expression-index > random seed`,
   ],
@@ -1690,6 +1874,37 @@ const reseededProperties = new Set<string>()
 // Keep their literal registry names here; the owner groups still supply their
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
+  ...[`rxdb`, `powersync`].flatMap((adapter) =>
+    [`controlled`, `node-sqlite`].map(
+      (host) => `adapter.${adapter}.capability.${host}`,
+    ),
+  ),
+  `trailbase.lifecycle.boundaries`,
+  `query-db.ownership.reacquisition`,
+  `query-db.ownership.published-owners`,
+  `query-db.ownership.direct-lifetime`,
+  `query-db.ownership.direct-order`,
+  `query-db.ownership.overlap`,
+  `query-db.ownership.application-failure`,
+  `query-db.ownership.handler-failure`,
+  `query-db.ownership.empty-result`,
+  `query-db.ownership.reentrant-receipt`,
+  `query-db.ownership.invalid-result`,
+  `query-db.ownership.deferred-result`,
+  `query-db.ownership.deferred-cleanup`,
+  `query-db.ownership.recovered-result`,
+  `query-db.ownership.eager-recovery`,
+  `query-db.ownership.retained-invalid`,
+  `query-db.ownership.overlapping-deferral`,
+  `query-db.ownership.independent-result`,
+  `query-db.ownership.older-fetch-merge`,
+  `query-db.ownership.retained-empty-work`,
+  `query-db.ownership.cold-owner-work`,
+  `query-db.ownership.superseded-result`,
+  `query-db.ownership.explicit-refetch`,
+  `query-db.ownership.refresh-overlap`,
+  `query-db.ownership.handler-identity`,
+  `query-db.ownership.work`,
   `sqlite-persistence.expression-index.large-number`,
   `sqlite-persistence.expression-index.fixed-filter`,
   `sqlite-persistence.expression-index.native-identity`,
@@ -1774,6 +1989,8 @@ const nativeReactProperties = new Set([
 ])
 
 function directReplayTestName(property: string): string | undefined {
+  if (property.startsWith(`adapter-conformance.persisted-baseline-lifecycle.`))
+    return `${property.replaceAll(`.`, `\\.`)}.*random seed`
   if (
     property.startsWith(`browser-coordinator.`) ||
     [
@@ -1805,6 +2022,28 @@ function directReplayTestName(property: string): string | undefined {
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
   if (enumeratedProperties.has(property))
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
+  if (
+    [
+      `query.persisted-direct-ownership`,
+      `query.persisted-direct-ownership.chromium-opfs`,
+      `query.immediate-eager-materialization`,
+      `query.immediate-eager-materialization.chromium-opfs`,
+      `query.persisted-rejected-write-cutoff`,
+      `query.persisted-rejected-write-cutoff.chromium-opfs`,
+      `query.scope-omission-reacquisition`,
+      `query.scope-omission-reacquisition.chromium-opfs`,
+      `trailbase.lifecycle`,
+      `trailbase.page-event`,
+      `trailbase.lifecycle.persisted-hydration.controlled`,
+      `trailbase.lifecycle.persisted-hydration.node-sqlite`,
+      `trailbase.lifecycle.persisted-hydration.chromium-opfs`,
+      `adapter-conformance.eager-live-source.trailbase`,
+      `adapter-conformance.eager-live-source.trailbase.chromium`,
+      `adapter-conformance.eager-live-source.powersync`,
+      `adapter-conformance.eager-live-source.rxdb`,
+    ].includes(property)
+  )
+    return `${property.replaceAll(`.`, `\\.`)}.*random seed`
   if (property.startsWith(`pagination.limit-admission-`))
     return `${property.replaceAll(`.`, `\\.`)} > random seed`
   if (property.startsWith(`framework.`)) {
@@ -1856,6 +2095,34 @@ const outsideReplayConfigs = new Map([
  * runs only under its own config.
  */
 const ownerReplayConfigs = new Map([
+  [
+    `packages/browser-db-sqlite-persistence/e2e/query-scope-omission-oracle.browser.test.ts`,
+    `vitest.adapter-oracles.config.ts`,
+  ],
+  [
+    `packages/browser-db-sqlite-persistence/tests/persisted-baseline-lifecycle-oracle.test.ts`,
+    `vitest.adapter-oracles.config.ts`,
+  ],
+  [
+    `packages/browser-db-sqlite-persistence/e2e/query-rejected-write-cutoff-oracle.browser.test.ts`,
+    `vitest.adapter-oracles.config.ts`,
+  ],
+  [
+    `packages/browser-db-sqlite-persistence/e2e/query-persisted-direct-ownership-oracle.browser.test.ts`,
+    `vitest.adapter-oracles.config.ts`,
+  ],
+  [
+    `packages/browser-db-sqlite-persistence/e2e/query-immediate-cache-oracle.browser.test.ts`,
+    `vitest.adapter-oracles.config.ts`,
+  ],
+  [
+    `packages/browser-db-sqlite-persistence/tests/trailbase-hydration-oracle.test.ts`,
+    `vitest.adapter-oracles.config.ts`,
+  ],
+  [
+    `packages/browser-db-sqlite-persistence/tests/trailbase-eager-live-source-oracle.test.ts`,
+    `vitest.adapter-oracles.config.ts`,
+  ],
   [
     `packages/convex-db-collection/e2e/backend-oracle.test.ts`,
     `vitest.e2e.config.ts`,

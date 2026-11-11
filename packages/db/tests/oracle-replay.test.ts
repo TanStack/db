@@ -622,6 +622,17 @@ describe(`named oracle replay manifest`, () => {
             `windowHistoryProperty(driver, \`${family}\`)`,
           )
       } else if (
+        entry.property ===
+        `adapter-conformance.eager-live-source.trailbase.chromium`
+      ) {
+        // This receiving owner declares its complete property ID and passes it
+        // to the shared registration, rather than deriving a variant suffix.
+        expect(entry.file).toBe(
+          `packages/browser-db-sqlite-persistence/tests/trailbase-eager-live-source-oracle.test.ts`,
+        )
+        expect(source).toContain(`const property = \`${entry.property}\``)
+        expect(source).toMatch(/registerTrailBaseEager\(\s*\{\s*property,/u)
+      } else if (
         entry.property.startsWith(`adapter-conformance.eager-live-source.`)
       ) {
         const prefix = `adapter-conformance.eager-live-source.`
@@ -667,6 +678,36 @@ describe(`named oracle replay manifest`, () => {
         )
         expect(source).toContain(
           'electric.sdk-resume-checkpoint.${tagged}.${consumer}.${emptySecond}.${delivery}',
+        )
+      } else if (
+        /^adapter\.(rxdb|powersync)\.capability\.(controlled|node-sqlite)$/.test(
+          entry.property,
+        )
+      ) {
+        const [, adapter, , host] = entry.property.split(`.`)
+        expect([`rxdb`, `powersync`]).toContain(adapter)
+        expect([`controlled`, `node-sqlite`]).toContain(host)
+        expect(source).toContain('id: `adapter.${name}.capability.${host}`')
+        expect(source).toContain(
+          'for (const host of [`controlled`, `node-sqlite`] as const)',
+        )
+        const receivingSource = readFileSync(
+          resolve(repositoryDirectory, entry.file),
+          `utf8`,
+        )
+        expect(receivingSource).toContain(
+          `registerCapabilityConformance(\`${adapter}\`,`,
+        )
+      } else if (
+        /^trailbase\.lifecycle\.persisted-hydration\.(controlled|node-sqlite)$/.test(
+          entry.property,
+        )
+      ) {
+        expect(source).toContain(
+          '`trailbase.lifecycle.persisted-hydration.${host}`',
+        )
+        expect(source).toContain(
+          'for (const host of [`controlled`, `node-sqlite`] as const)',
         )
       } else if (entry.property.startsWith(`react.ssr-effects-`)) {
         const [runtime, ...parts] = entry.property
