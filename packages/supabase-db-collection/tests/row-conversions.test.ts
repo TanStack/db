@@ -59,9 +59,20 @@ function makeServer(rows: Array<EventRecord>) {
       return Promise.resolve(json(rows, `0-${rows.length - 1}/${rows.length}`))
     }
     const body = JSON.parse(String(init?.body ?? '{}'))
-    writes.push({ method, search: new URL(String(input)).search, body })
-    // PATCH and POST return the stored row, as `Prefer: return=representation`
-    // asks: bigints as JSON numbers, with a column the server filled in.
+    const search = new URL(String(input)).search
+    writes.push({ method, search, body })
+    if (method === 'PATCH') {
+      // PATCH writes only the columns in its body to the stored row and returns
+      // the whole row, as `Prefer: return=representation` asks.
+      const id = Number(
+        new URLSearchParams(search).get('id')?.replace('eq.', ''),
+      )
+      const stored = rows.find((row) => row.id === id)!
+      Object.assign(stored, body, { id })
+      return Promise.resolve(json(stored))
+    }
+    // POST returns the stored row, as `Prefer: return=representation` asks:
+    // bigints as JSON numbers, with a column the server filled in.
     return Promise.resolve(
       json({ ...body, id: Number(body.id ?? 1), endsAt: body.endsAt ?? null }),
     )
@@ -185,7 +196,7 @@ describe('parse and serialize', () => {
     })
   })
 
-  test('an update matches the row by its serialized key and sends serialized columns', async () => {
+  test('an update matches the row by its serialized key and sends only the changed columns, serialized', async () => {
     const { collection, writes } = makeEvents([
       {
         id: 7,
@@ -206,16 +217,34 @@ describe('parse and serialize', () => {
       {
         method: 'PATCH',
         search: '?id=eq.7&select=*',
-        body: {
-          id: '7',
-          title: 'Relaunch',
-          startsAt: '2024-05-06T07:08:09.123Z',
-          endsAt: '2024-05-07T07:08:09.123Z',
-          tags: ['a', 'b'],
-        },
+        body: { title: 'Relaunch' },
       },
     ])
-    expect(collection.get('7')?.title).toBe('Relaunch')
+    expect(collection.get('7')).toMatchObject({
+      title: 'Relaunch',
+      startsAt: new Date(START),
+      tags: new Set(['a', 'b']),
+    })
+  })
+
+  test('an update keeps the server values of the columns it did not change', async () => {
+    const rows: Array<EventRecord> = [
+      { id: 7, title: 'Launch', startsAt: START, endsAt: END, tags: ['a'] },
+    ]
+    const { collection, writes } = makeEvents(rows)
+    await collection.preload()
+    // Another client moves the end time after this collection read the row.
+    const LATER = '2024-05-08T07:08:09.123+00:00'
+    rows[0]!.endsAt = LATER
+
+    const tx = collection.update('7', (draft) => {
+      draft.title = 'Relaunch'
+    })
+    await tx.when('settled')
+
+    expect(writes.map((write) => write.body)).toEqual([{ title: 'Relaunch' }])
+    expect(rows[0]!.endsAt).toBe(LATER)
+    expect(collection.get('7')?.endsAt).toEqual(new Date(LATER))
   })
 
   test('a delete matches the row by its serialized key', async () => {

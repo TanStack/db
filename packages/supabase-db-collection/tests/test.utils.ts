@@ -47,18 +47,32 @@ export const mockResponses: Record<string, Array<any>> = {
 }
 
 export function createMockFetch() {
+  // Rows inserted or updated through this mock, by table and `id`, so an
+  // update can return the whole stored row as PostgREST does.
+  const written = new Map<string, Record<string, unknown>>()
   return vi.fn<typeof fetch>().mockImplementation((input, init) => {
     const url = new URL(typeof input === 'string' ? input : input.toString())
     const table = url.pathname.replace('/rest/v1/', '')
     const method = init?.method ?? 'GET'
 
-    // For insert/update requests, echo the request body back as the
-    // "representation" so `.select().single()` has something schema-shaped
-    // to parse, mirroring what PostgREST would return.
+    // Insert and update requests return the stored row as the
+    // "representation", so `.select().single()` has something schema-shaped to
+    // parse. An insert stores its body; an update writes its body's columns
+    // over the stored row it matches by `id`.
     if (method === 'POST' || method === 'PATCH') {
       const body = init?.body ? JSON.parse(init.body as string) : {}
+      const id =
+        method === 'POST' ? body.id : url.searchParams.get('id')?.slice(3)
+      const storedKey = `${table}:${id}`
+      const stored =
+        method === 'PATCH'
+          ? (written.get(storedKey) ??
+            mockResponses[table]?.find((row) => `${row.id}` === `${id}`))
+          : undefined
+      const row = { ...stored, ...body }
+      written.set(storedKey, row)
       return Promise.resolve(
-        new Response(JSON.stringify(body), {
+        new Response(JSON.stringify(row), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),

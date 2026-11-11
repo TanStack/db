@@ -432,7 +432,9 @@ export const supabaseOnUpdate = async <TItem extends object>(
       const { data } = await postgrestRequest<TItem>(supabase, tableName, {
         method: 'PATCH',
         search,
-        body: serializeRow({ ...original, ...changes }, conversions),
+        // Only the changed columns: resending the rest would overwrite newer
+        // values from other clients and fail on columns the role cannot update.
+        body: serializeRow(changes, conversions),
         returnRows: true,
         single: true,
       })
