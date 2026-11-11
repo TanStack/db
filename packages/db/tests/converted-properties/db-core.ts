@@ -13,6 +13,11 @@ export const properties: ReadonlyArray<string> = [
   `proxy.own-property-histories`,
   `proxy.cycle-backedges`,
   `proxy.binary-detachment`,
+  `proxy.iteration-array-edits`,
+  `proxy.iteration-insertion-values`,
+  `proxy.iteration-nested-membership`,
+  `proxy.iteration-set-clear-readd`,
+  `proxy.iteration-persisted-writes`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -24,5 +29,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/proxy-detachment-contract-oracle.test.ts`,
     `proxy`,
     `own-property-histories cycle-backedges binary-detachment`,
+  ],
+  [
+    `db/tests/proxy-iteration-contract-oracle.test.ts`,
+    `proxy`,
+    `iteration-array-edits iteration-insertion-values iteration-nested-membership iteration-set-clear-readd iteration-persisted-writes`,
   ],
 ]
