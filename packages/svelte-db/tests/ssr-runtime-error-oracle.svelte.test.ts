@@ -254,7 +254,6 @@ function checkRuntimeTrace(
 const runtimeLaw = {
   statement: `Handled provider failure stays readable; first browser rows and flags reproduce server output, then the browser's own runtime outcome becomes visible.`,
   authority: `docs/guides/ssr.md preparation/hydration promises and maintainer runtime-error decision; packages/db/tests/ssr-snapshot-admission-oracle.ts`,
-  owner: `packages/db/tests/ssr-snapshot-admission-oracle.ts`,
   limits: `Svelte server/browser compilation, JSON transport and hydrate with empty eager sources; no throwing callbacks, portable error identity or Suspense claim.`,
 }
 oracleProperty({

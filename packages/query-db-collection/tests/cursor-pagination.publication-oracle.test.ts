@@ -134,7 +134,6 @@ function checkPublicationTrace(
 }
 const publicationLaw = {
   authority: `cursor-pagination/README.md, Contract before implementation; createCursorPager`,
-  owner: `cursor-pagination.publication-oracle.test.ts`,
   limits: `Controlled immutable page sequences; no changing HTTP endpoints or browser transport.`,
 }
 

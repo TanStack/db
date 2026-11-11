@@ -325,7 +325,6 @@ describe(`Same-key transaction laws`, () => {
         statement: `Same-key authored operations collapse to one net request while retaining exact original, modified and changed fields.`,
         authority: `The public manual transaction and Collection mutation contracts in docs/guides/mutations.md and the same-key truth table stated above`,
         limits: `The existing two-operation numeric-key grammar with controlled sync acknowledgement; provider timing, cross-Collection transactions and arbitrary overlapping histories remain outside this driver.`,
-        owner: `docs/contributing/oracle-coverage.md`,
       },
       histories: {
         arbitrary: fc.oneof(
@@ -1099,7 +1098,6 @@ describe(`Whole mixed transaction publication`, () => {
       statement: `A mixed-key transaction retains whole ordered mutation payloads and publishes coherent row, event and settlement cuts.`,
       authority: `The public manual transaction and Collection mutation contracts in docs/guides/mutations.md, with optimistic snapshot and settlement laws owned by optimistic-history-oracle.ts`,
       limits: `The existing one-Collection manual transaction grammar and controlled sync acknowledgements; provider timing, cross-Collection transactions and arbitrary overlapping same-key histories remain outside this driver.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: fc.record({

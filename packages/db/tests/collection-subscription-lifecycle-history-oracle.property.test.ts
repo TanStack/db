@@ -2053,7 +2053,6 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   oracleProperty({
     id: `subscription-lifecycle.constructed-history`,
     law: {
-      owner: `packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
       statement: `Logical demand, physical acquisition, caller outcomes, and replacement authority follow the independent lifecycle history.`,
       authority: `The shared lifecycle grammar and this file's contract prose; Collection lifecycle and ARCHITECTURE laws 9 and 10.`,
       limits: `The unchanged controlled adapter command grammar and post-command observations; row contents and real provider behavior remain separately owned.`,
@@ -2075,7 +2074,6 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   oracleProperty({
     id: `subscription-lifecycle.async-history`,
     law: {
-      owner: `packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
       statement: `Logical demand, physical acquisition, caller outcomes, and replacement authority follow the independent lifecycle history.`,
       authority: `The shared lifecycle grammar and this file's contract prose; Collection lifecycle and ARCHITECTURE laws 9 and 10.`,
       limits: `The unchanged controlled adapter command grammar and post-command observations; row contents and real provider behavior remain separately owned.`,
@@ -2100,7 +2098,6 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   oracleProperty({
     id: `subscription-lifecycle.demand-change`,
     law: {
-      owner: `packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
       statement: `Logical demand, physical acquisition, caller outcomes, and replacement authority follow the independent lifecycle history.`,
       authority: `The shared lifecycle grammar and this file's contract prose; Collection lifecycle and ARCHITECTURE laws 9 and 10.`,
       limits: `The unchanged controlled adapter command grammar and post-command observations; row contents and real provider behavior remain separately owned.`,
@@ -2126,7 +2123,6 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   oracleProperty({
     id: `subscription-lifecycle.sync-history`,
     law: {
-      owner: `packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
       statement: `Synchronous acquisitions refine the same independent lifecycle history.`,
       authority: `The shared lifecycle grammar and this file's synchronous acquisition contract.`,
       limits: `The unchanged synchronous success grammar; asynchronous outcomes use the adjacent owners.`,

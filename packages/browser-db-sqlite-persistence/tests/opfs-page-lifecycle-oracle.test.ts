@@ -923,7 +923,6 @@ const lifecycleLaw = {
   statement: `The existing settlement ledger and terminal-state model judge each original observation, error, and resource-ownership checkpoint.`,
   authority: `The OPFS opener lifecycle and worker protocol contract stated above.`,
   limits: `The existing bounded controlled-Worker histories; no physical OPFS, bfcache, or native handle claim.`,
-  owner: `SQLite persistence`,
 }
 function registerFixedHistory<T>(
   id: string,

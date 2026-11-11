@@ -319,7 +319,6 @@ oracleProperty<ApiHistory, ReturnType<typeof apiModel>>({
     statement: `Known mutation APIs preserve intent and options, use durable admission only for leaders, and retain optimism until provider settlement; unknown names reject at creation.`,
     authority: `offline-transactions README Basic Usage, Manual Transaction Control, OfflineExecutor, Tracking Submission Status; public transaction/action option types; AGENTS.md Separate Valid Edge Cases from Contract Contradictions (immediate rejection at a contradictory configuration boundary).`,
     limits: `Controlled provider/storage; disjoint inserts, synchronous action, nonempty custom keys, leader or follower after initialization.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: apiHistory,
@@ -690,7 +689,6 @@ oracleProperty<ControlHistory, ReturnType<typeof controlsModel>>({
     statement: `Outbox controls expose durable membership, scheduler counts reflect queued and running work, and a fatal storage failure refuses new durable admission.`,
     authority: `offline-transactions README OfflineExecutor, Tracking Submission Status, and scheduled-entry count examples.`,
     limits: `Controlled storage/provider; one to three disjoint inserts; counts before initialization, queued, held provider and idle clear; no removal cancellation semantics.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: controlHistory,

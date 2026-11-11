@@ -1458,7 +1458,6 @@ function registerExistingPersistenceProperty<Value>(
       statement: `The existing independent persistence models judge each legal history at its original public, receipt, durable-row, and metadata checkpoints.`,
       authority: `RFC #1659, the public persistence and sync contracts, and the individual laws stated beside the retained model helpers.`,
       limits: `The existing bounded recording-adapter histories; no additional provider, native host, schedule, or gap-closure claim.`,
-      owner: `SQLite persistence`,
     },
     histories: { arbitrary, runs, fixedSeeds },
     resolve: (history) => ({ history }),
@@ -3709,7 +3708,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       statement: `The retained independent persistence helper judges its existing legal histories at every original observation checkpoint.`,
       authority: `The persistence contracts and individual law stated beside the independent helper.`,
       limits: `The existing bounded recording-adapter histories; no additional provider, native host, schedule, or gap-closure claim.`,
-      owner: `SQLite persistence`,
     },
     histories: {
       arbitrary: retainedDemandHistory,
@@ -4897,7 +4895,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       statement: `The retained independent persistence helper judges its existing legal histories at every original observation checkpoint.`,
       authority: `The persistence contracts and individual law stated beside the independent helper.`,
       limits: `The existing bounded recording-adapter histories; no additional provider, native host, schedule, or gap-closure claim.`,
-      owner: `SQLite persistence`,
     },
     histories: {
       arbitrary: followerRemoteDemandHistory,
@@ -7791,7 +7788,6 @@ describe(`persistedCollectionOptions`, () => {
       statement: `The retained independent persistence helper judges its existing legal histories at every original observation checkpoint.`,
       authority: `The persistence contracts and individual law stated beside the independent helper.`,
       limits: `The existing bounded recording-adapter histories; no additional provider, native host, schedule, or gap-closure claim.`,
-      owner: `SQLite persistence`,
     },
     histories: {
       arbitrary: generationNoticeHistory,

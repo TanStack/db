@@ -729,7 +729,6 @@ describe(`descriptor error handoff at React commit`, () => {
           law: {
             statement: `Descriptor startup fail remains a readable loading error, throw remains a crash, and commit/unmount releases every hook owner.`,
             authority: `Shared conformance readable ordinary errors contract and expectedStartHandoff from collection-subscription-lifecycle-grammar-oracle.ts.`,
-            owner: `packages/db/tests/collection-subscription-lifecycle-grammar-oracle.ts`,
             limits: `The unchanged ordinary/infinite, error-surface/ownership, before/during commit and defined/absent cause histories.`,
           },
           histories: {
@@ -1097,7 +1096,6 @@ describe(`SSR snapshot admission`, () => {
       law: {
         statement: `Server rows and readiness are admitted only when the first browser hook can reproduce them; transported seeds give way to browser sync after commit.`,
         authority: `expectedSsrSnapshot from ssr-snapshot-admission-oracle.ts, maintainer server-only snapshot rejection decision and SSR guide rendered-view law.`,
-        owner: `packages/db/tests/ssr-snapshot-admission-oracle.ts`,
         limits: `The unchanged ordinary/infinite server render and hydrateRoot admission paths with finite eager source histories and declared browser/server writes.`,
       },
       histories: {
@@ -1709,7 +1707,6 @@ describe(`stream render snapshot cut`, () => {
     law: {
       statement: `Each first browser reader reproduces its own rendered server view, including ordinary loading beside a pending or failed Suspense stream.`,
       authority: `SSR guide per-reader hydration promise and ssrStreamHydrationMismatches independent metamorphic comparison.`,
-      owner: `packages/db/tests/ssr-stream-view-oracle.ts`,
       limits: `The unchanged bounded ordinary-first/last/Suspense-only, held/synchronous readiness, source failure, source publication and Router browser-handoff histories.`,
     },
     histories: {

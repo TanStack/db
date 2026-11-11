@@ -391,7 +391,6 @@ oracleProperty({
     statement: `Cleanup appointments replace and cancel by key, run once at their elapsed deadline, isolate callback failures, and use at most one root timer.`,
     authority: `CleanupQueue.schedule/cancel batching contract; docs/contributing/oracle-reviews/issue-1796-gc-clock.md`,
     limits: `Bounded non-reentrant callbacks, finite delays, and controlled elapsed and wall clocks; no suspend/resume or timer-provider replacement.`,
-    owner: `docs/contributing/oracle-coverage.md`,
   },
   histories: {
     arbitrary: fc.array(actionArbitrary, { maxLength: 50 }),

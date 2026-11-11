@@ -142,7 +142,6 @@ oracleProperty({
     statement: `After every graph run the fast path emits exactly the general path's unordered entries, including multiplicities and Object.is value identity.`,
     authority: `Existing reduce path equivalence contract documented above.`,
     limits: `One to six runs of one to four signed changes, two keys and the existing finite output domain. The general path is the established differential reference.`,
-    owner: `Reduce fast path`,
   },
   histories: {
     arbitrary: fc.array(

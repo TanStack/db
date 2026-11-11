@@ -498,7 +498,6 @@ export function registerLimitAdmissionOracle(): void {
             statement: `Negative limits reject synchronously without changing query construction, public windows, demand, rows or an admitted operation's outcome. Valid neighboring limits remain usable.`,
             authority: `The 2026-11-02 maintainer decision and ARCHITECTURE.md, Atomic window publication, stated above.`,
             limits: `The unchanged six core admission paths with controlled on-demand acquisition settlement; no NaN, positive-fraction or real-provider timing policy.`,
-            owner: `Limit admission`,
           },
           histories: {
             arbitrary: historyArbitrary,

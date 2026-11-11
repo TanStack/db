@@ -908,7 +908,6 @@ describe(`WHERE predicate publication oracle`, () => {
       statement: `Every filtered consumer publishes exactly the TRUE rows at each original comparison checkpoint.`,
       authority: `The SQL three-valued filtering and subscription contract stated at the start of this owner.`,
       limits: `The unchanged bounded predicate and source-transaction grammar, on scan and BasicIndex paths; cleanup and restart remain outside generated histories.`,
-      owner: `WHERE predicate publication`,
     },
     histories: {
       arbitrary: historyArbitrary,

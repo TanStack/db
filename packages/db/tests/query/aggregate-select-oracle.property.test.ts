@@ -1834,7 +1834,6 @@ const aggregateLaw = {
   statement: `Aggregate query select values, admission errors and ordered public rows agree with the independent group model at initial publication and after legal source/parent changes.`,
   authority: `The 2026-10-09 and PR2232 maintainer decisions, query-language guides and ARCHITECTURE.md contracts stated above.`,
   limits: `The unchanged bounded shapes, grouping forms, two-source/include paths and observation cuts described above.`,
-  owner: `Aggregate select shapes`,
 }
 
 // The check is `runHistory`: it runs each generated history, and after every

@@ -501,7 +501,6 @@ oracleProperty({
     statement: `Leadership loss, going offline, or disposal at any point of the commit pipeline keeps each offline transaction's admission, fencing, exactly-once provider call in commit order, settlement with its provider outcome, and durable ownership, with no unhandled rejection.`,
     authority: `the offline-transactions README, and the settlement and leadership oracles`,
     limits: `Disjoint keys (sibling rollback is the settlement oracle's); one to three transactions; fake storage over one store; no overlapping old and new executors, since exactly-once execution across independent leaders is not promised.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: history,

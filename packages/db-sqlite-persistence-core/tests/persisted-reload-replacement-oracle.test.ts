@@ -330,7 +330,6 @@ oracleProperty({
     statement: `Only source snapshot or truncate declarations replace rows; wrapper bookkeeping does not complete reload, and durable rows match public rows after settlement.`,
     authority: `Maintainer decisions F19 and F18/F6 and the persisted wrapper forwarding contract.`,
     limits: `Eager Collections and a controlled in-memory persistence adapter; no on-demand replay or cross-tab delivery.`,
-    owner: `SQLite persistence`,
   },
   histories,
   label: (history) => `${history.phase}: ${steps(history).join(` > `)}`,

@@ -519,7 +519,6 @@ async function runCacheLifecycleHistory(
 oracleProperty<CacheLifecycleCase, Verdict>({
   id: `live-query.cache-claim-lifecycle`,
   law: {
-    owner: `CacheLifecycle declaration histories`,
     statement: `Local row-option claims survive active and replaced reusable results, then retire on failure or live consumption without leaking function references into transport.`,
     authority: `The maintainer cache-conflict decision and db-client-preload-identity lifecycle documented above.`,
     limits: `The unchanged finite declaration, claimant, phase, and transport schedule matrix; no arbitrary serializer, hydrateRoot, or schema transform.`,

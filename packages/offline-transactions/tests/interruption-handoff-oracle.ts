@@ -828,7 +828,6 @@ oracleProperty<HandoffHistory, ReturnType<typeof handoffModel>>({
     statement: `Disposal preserves durable work, pending callers and optimistic state; a sequential same-runtime successor retaining the configured Collection objects settles original callers. A fresh affected Collection cannot inherit callers through an unchanged ancillary Collection.`,
     authority: `Maintainer decision for issue 2254, 2026-11-10; offline-transactions README Tracking Submission Status; core optimistic-history contract.`,
     limits: `One runtime/package copy, surviving Collections, shared or disjoint keys, up to three transactions/replacements/waiters; controlled storage and provider; no overlapping issued executors or cross-tab Promise transport.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: handoffHistory,
@@ -1137,7 +1136,6 @@ oracleProperty<HandoffHistory, ReturnType<typeof handoffModel>>({
     statement: `A disposed executor's issued outcome settles every pending caller on retained configured Collections, including a successor with added Collections that has not acquired leadership yet.`,
     authority: `README Tracking Submission Status permits issued calls to finish after disposal and retained-Collection executor replacement; maintainer decision offline-disposal-handoff-2026-11-10.`,
     limits: `One issued transaction, one to three replacements, zero to three explicit old waiters, live or restored optimism, every creation API, one failed deletion or throwing restored-settlement subscriber; successor leadership is held until the retired outcome. No concurrent issued executors or cross-tab transport.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: issuedHandoffHistory,
@@ -1241,7 +1239,6 @@ oracleProperty<HandoffHistory, ReturnType<typeof handoffModel>>({
     statement: `Storage deletion failure rejects callers regardless of its value; restoration subscriber errors propagate after outcome delivery without permanently blocking queued peers; an offline live predecessor receives the sole executing successor's durable outcome.`,
     authority: `README Tracking Submission Status and dispose contract; Transaction.touchCollection first-error propagation; maintainer decision offline-disposal-handoff-2026-11-10.`,
     limits: `Controlled provider/storage in one runtime; one issued executor; one to three retained-Collection predecessors and transactions. No copied outboxes, concurrent conflicting outcomes, immediate suffix execution, or all-error logging promise.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: reviewHandoffHistory,
@@ -1392,7 +1389,6 @@ oracleProperty<HandoffHistory, ReturnType<typeof handoffModel>>({
     statement: `After disposal and settlement of every caller and restored snapshot, surviving Collections do not retain the retired executor's resources. Subscriber exceptions propagate through the processing promise after outcome delivery.`,
     authority: `offline-transactions README dispose() resource-release promise; core transaction publication error propagation.`,
     limits: `Node/V8 heap reachability of the first retired executor's configured detector after one to three sequential replacements and outcomes; same configured Collections and acknowledged deletion. This does not judge every possible retained object, browser GC, or unfinished-transaction release.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: resourceHistory,

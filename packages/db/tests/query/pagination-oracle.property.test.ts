@@ -4778,7 +4778,6 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches multi-column nullable ordering for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
     histories: {
       arbitrary: multiOrderScenarioArbitrary,
@@ -4849,7 +4848,6 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches nullable cursor ordering while an async response is pending for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
     histories: {
       arbitrary: nullableCursorScenarioArbitrary,
@@ -5393,7 +5391,6 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches recomputation when source mutations cross a pending cursor response for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
     histories: {
       arbitrary: fc.tuple(
@@ -5453,7 +5450,6 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches recomputation across multi-action pending histories for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
     histories: {
       arbitrary: pendingHistoryScenarioArbitrary,
@@ -5624,7 +5620,6 @@ describe(`pagination recomputation oracle`, () => {
         statement: `covers ${name} window paths for a random or replayed seed [pagination.matrix.window-${index}]`,
         authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
         limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-        owner: `Ordered acquisition`,
       },
       histories: {
         arbitrary: scenarioPayloadArbitrary,
@@ -5648,7 +5643,6 @@ describe(`pagination recomputation oracle`, () => {
         statement: `covers ${name} state paths for a random or replayed seed [pagination.matrix.state-${index}]`,
         authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
         limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-        owner: `Ordered acquisition`,
       },
       histories: {
         arbitrary: stateScenarioPayloadArbitrary,
@@ -5673,7 +5667,6 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches full recomputation across ordered windows for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
     histories: { arbitrary: scenarioArbitrary, runs: 12, fixedSeeds: [1657] },
     model: (history, observations) => recordedComparison(history, observations),
@@ -5692,7 +5685,6 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches full recomputation across source and window transitions for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
     histories: {
       arbitrary: stateScenarioArbitrary,
@@ -6873,7 +6865,6 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches full recomputation when exact async cursor loads widen ordered coverage for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
     histories: { arbitrary: scenarioArbitrary, runs: 8, fixedSeeds: [1659] },
     model: (history, observations) => recordedComparison(history, observations),

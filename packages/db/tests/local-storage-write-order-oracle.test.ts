@@ -349,7 +349,6 @@ oracleProperty({
     statement: `Automatic LocalStorage writes persist in author order: no accepted write settles or reaches storage ahead of an undecided predecessor, and settled storage, public rows, and a fresh restore equal the author-order fold of the accepted writes.`,
     authority: `LocalStorage guide (direct, persisted mutations); Collection settlement (when('settled')); order law and prompt-failure rule in local-storage-order-oracle.test.ts`,
     limits: `Up to three updates and deletes of two stored rows in one Collection; no inserts, manual acceptance, peers, or storage faults.`,
-    owner: `LocalStorage Collection`,
   },
   histories,
   label: ({ writes, release, accepted }) =>

@@ -131,7 +131,6 @@ oracleProperty({
     statement: `Applying each callback's changes to the previous public rows reconstructs the rows visible in that callback, and unsubscribe stops delivery.`,
     authority: `Collection change-message and subscribeChanges contracts`,
     limits: `One production row, synchronous source transactions and settled preload; no multi-key production batches, ordering or asynchronous provider claim.`,
-    owner: `docs/contributing/oracle-coverage.md`,
   },
   histories: {
     arbitrary: fc.tuple(
@@ -225,7 +224,6 @@ oracleProperty({
     statement: `The shared publication checker reconstructs generated keyed worlds and rejects later delivery or an unpublished row.`,
     authority: `Collection change-message contract`,
     limits: `Synthetic multi-key checker calibration; this property does not add production-path coverage.`,
-    owner: `docs/contributing/oracle-coverage.md`,
   },
   histories: {
     arbitrary: fc.array(
@@ -303,7 +301,6 @@ oracleProperty({
     statement: `The shared checker rejects an absent or wrong prior update value and a repeated update.`,
     authority: `Collection change-message previousValue and publication contracts`,
     limits: `Synthetic single-row update checker calibration with counts from -1000 through 1000.`,
-    owner: `docs/contributing/oracle-coverage.md`,
   },
   histories: {
     arbitrary: fc.integer({ min: -1000, max: 1000 }),

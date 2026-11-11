@@ -914,7 +914,6 @@ describe(`hash identity oracle`, () => {
       statement: `D2 equality is symmetric and agrees with independent value identity; equal identities have equal hashes under native and colliding-marker modules.`,
       authority: `The existing nine value-identity rules documented above.`,
       limits: `The original bounded recursive value-spec grammar, mutations and realization seeds; collision freedom is not promised.`,
-      owner: `D2 value identity`,
     },
     histories: {
       arbitrary: fc.tuple(pairArb, fc.nat(), fc.nat()),
@@ -935,7 +934,6 @@ describe(`hash identity oracle`, () => {
       statement: `Constructed equal cyclic values compare equal, the changed cyclic value differs, and hashing rejects with the existing cyclic-structural-value TypeError.`,
       authority: `The existing cyclic value-identity contract documented above.`,
       limits: `The original array/Map/Set/object cyclic spec and leaf-replacement grammar; no arbitrary graph-shape claim is added.`,
-      owner: `D2 value identity`,
     },
     histories: { arbitrary: cyclicArb, runs: 300, fixedSeeds: [2026930] },
     model: expectedCyclicPair,

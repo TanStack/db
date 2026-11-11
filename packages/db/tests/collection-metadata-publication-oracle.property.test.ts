@@ -236,7 +236,6 @@ describe(`generated metadata publication histories`, () => {
       statement: `Metadata-only optimistic settlement publishes one coherent keyed row and metadata world.`,
       authority: `The established Collection sync metadata and change subscription contracts stated above`,
       limits: `Three existing numeric row keys, one to eight rounds and the existing structured metadata grammar; absent source rows, Collection metadata and other provider hosts remain outside this driver.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: publicationHistoryArbitrary,
@@ -257,7 +256,6 @@ describe(`generated metadata publication histories`, () => {
       statement: `Canceling a pending metadata transaction releases only its keys and preserves the other pending transaction's metadata.`,
       authority: `The established Collection sync metadata and change subscription contracts stated above`,
       limits: `Three numeric row keys and two queued metadata owners with the existing structured metadata grammar; absent source rows, Collection metadata and other provider hosts remain outside this driver.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: metadataCancellationArbitrary,

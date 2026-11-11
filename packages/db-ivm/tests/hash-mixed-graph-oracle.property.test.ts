@@ -334,7 +334,6 @@ oracleProperty({
     statement: `A reachable structural cycle rejects each hash attempt; unfolding sharing in an acyclic value graph preserves its hash across object, array, Map-key, Map-value, Set, and symbol-keyed carriers.`,
     authority: `Established structural-value graph contract; oracle-coverage.md, Structural values and ordered primitives; hash-graph oracle.`,
     limits: `One to six nodes, zero to three ordered edges per node, labels 0..2, six recursive carriers, and in-range targets. No collision freedom, ordering invariance, opaque references, work/depth limits, or retry atomicity.`,
-    owner: `Structural values and ordered primitives`,
   },
   histories: {
     arbitrary: graphArbitrary,

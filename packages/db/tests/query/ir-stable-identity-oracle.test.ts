@@ -443,7 +443,6 @@ describe(`semantic expression identity`, () => {
       statement: `The canonical expression transformations preserve both evaluation and projected identity.`,
       authority: `The semantic expression identity law stated at the start of this owner: inverse comparisons, commutative equality/membership and associative/idempotent boolean forms.`,
       limits: `The unchanged finite expression constructors and integer/boolean sample rows; no arbitrary expression language or SQL-null grammar.`,
-      owner: `IR identity`,
     },
     histories: {
       arbitrary: fc.tuple(
@@ -480,7 +479,6 @@ describe(`semantic expression identity`, () => {
       statement: `Distinct reference-semantic captures stay distinct in expression evaluation, projected identity and demand identity.`,
       authority: `The reference-value identity contract stated above; separately allocated arrays, records, Maps, Sets and binary values are distinct captures.`,
       limits: `The unchanged five reference-pair constructors; no arbitrary object graph or cross-runtime identity claim.`,
-      owner: `IR identity`,
     },
     histories: {
       arbitrary: referenceSemanticPairArbitrary,
@@ -529,7 +527,6 @@ describe(`semantic expression identity`, () => {
       statement: `Reversing and repeating IN candidates preserves membership results, projected identity and demand identity.`,
       authority: `The existing IN-set identity law; each candidate matches, an independently fresh string does not, and nullish operands stay UNKNOWN.`,
       limits: `The unchanged one-to-eight unique finite primitive candidate grammar; no object or non-array membership claim.`,
-      owner: `IR identity`,
     },
     histories: {
       arbitrary: membershipHistories,
@@ -596,7 +593,6 @@ describe(`stable QueryIR identity smoke test`, () => {
       statement: `Alpha-renaming source aliases preserves explicit join, nested-query and include identity.`,
       authority: `ARCHITECTURE.md's alpha-renaming law and the existing lexical-alias identity contract.`,
       limits: `The unchanged four-unique-alias grammar and three query constructors; no implicit output-shape or captured-shadowing claim.`,
-      owner: `IR identity`,
     },
     histories: {
       arbitrary: fc.uniqueArray(fc.stringMatching(/^[a-z][a-z0-9]{0,8}$/), {
@@ -647,7 +643,6 @@ describe(`stable QueryIR identity smoke test`, () => {
       statement: `Equal query identities imply Object.is-equal projected expression results.`,
       authority: `The output-preservation identity law stated above.`,
       limits: `The unchanged integer, string-concat, binary-concat and signed-zero expression-pair grammar; no converse identity promise.`,
-      owner: `IR identity`,
     },
     histories: {
       arbitrary: outputExpressionPairArbitrary,
@@ -703,7 +698,6 @@ describe(`stable QueryIR identity smoke test`, () => {
       statement: `Each compiled literal/wrapper program matches its independent denotation, and equal projected identities preserve its exact output.`,
       authority: `The existing interpretOutputProgram denotation and output-sensitive identity law stated above.`,
       limits: `The unchanged literal-pair and one-to-three wrapper grammar; reference leaves are compared by Object.is and no arbitrary JavaScript evaluator claim follows.`,
-      owner: `IR identity`,
     },
     histories: {
       arbitrary: outputProgramArbitrary,
@@ -761,7 +755,6 @@ describe(`stable QueryIR identity smoke test`, () => {
       statement: `Renaming an outer alias does not bind union-derived output fields as source references.`,
       authority: `The existing union-output identity law stated above and ARCHITECTURE.md's union result scope.`,
       limits: `The unchanged filtered alias grammar and four union-derived query constructors.`,
-      owner: `IR identity`,
     },
     histories: {
       arbitrary: fc
@@ -812,7 +805,6 @@ describe(`stable QueryIR identity smoke test`, () => {
       statement: `Queries with distinct reference-semantic captured values have distinct identity and match only their own capture.`,
       authority: `The existing captured-reference query identity law stated above.`,
       limits: `The unchanged reference-pair grammar and profile-equality query constructor.`,
-      owner: `IR identity`,
     },
     histories: {
       arbitrary: referenceSemanticPairArbitrary,

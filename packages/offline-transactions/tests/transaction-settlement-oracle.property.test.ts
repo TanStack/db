@@ -192,7 +192,6 @@ const RETRY_DECISION_PROPERTY = `offline.settlement.retry-decision`
 const settlementLaw = {
   authority: `README FIFO, durable-outbox, NonRetriableError and per-ID waitForTransactionCompletion contracts`,
   limits: `Controlled provider, fake storage, one executor and bounded existing transaction grammar; no native durability or multi-owner claim.`,
-  owner: `Offline execution`,
 }
 type ArbitraryValue<T> = T extends fc.Arbitrary<infer TInput> ? TInput : never
 

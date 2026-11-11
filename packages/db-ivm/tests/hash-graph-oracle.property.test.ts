@@ -163,7 +163,6 @@ oracleProperty({
     statement: `Each reachable cycle rejects on both attempts; an acyclic graph agrees with its independently unfolded tree regardless of sharing.`,
     authority: `Established structural-value graph contract; oracle-coverage.md, Structural values and ordered primitives.`,
     limits: `Plain numeric-labeled object nodes with array edges, one to six nodes and at most three edges per node. No collision-freedom or work-bound claim, and no other cycle carriers.`,
-    owner: `Structural values and ordered primitives`,
   },
   histories: {
     arbitrary: historyArbitrary,

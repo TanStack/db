@@ -169,7 +169,6 @@ async function runPreloadIndexHistory(
 oracleProperty({
   id: `live-query.preload-indexing`,
   law: {
-    owner: `Explicit preload indexing admission`,
     statement: `Every preload declaration obeys eager-index constructor admission, and rejection preserves a compatible caller's pending or settled preload.`,
     authority: `The maintainer preload-admission decision from 2026-10-30 and the shared indexing model above.`,
     limits: `The unchanged nine declarations, cold/valid-prior pending/settled states and derived/same/different keys; no hydrated cache or SSR.`,

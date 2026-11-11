@@ -470,7 +470,6 @@ describe(`Svelte client page identity`, () => {
         law: {
           statement: `Transported page seeds survive an outer window move until local readiness, independent peers retain their page, and returning to the first page follows local rows.`,
           authority: `packages/db/tests/conformance/window-history-oracle.ts outer window contract and docs/guides/ssr.md transported page contract`,
-          owner: `packages/db/tests/conformance/window-history-oracle.ts`,
           limits: `Existing keyed/derived Svelte client-page grammar and native flushSync cuts; no client scope switch or hydrate() claim.`,
         },
         histories: {
@@ -754,7 +753,6 @@ oracleProperty({
   law: {
     statement: `An unchanged explicit client key retains its authored input through rejected key reads and imperative window changes; a changed key admits the proposed query.`,
     authority: `packages/db/tests/conformance/contract.ts query identity law and packages/db/tests/conformance/window-history-oracle.ts`,
-    owner: `packages/db/tests/conformance/window-history-oracle.ts`,
     limits: `Existing four body/dependency and same/changed-key recovery members per generated tuple at native Svelte flush/settlement cuts.`,
   },
   histories: {

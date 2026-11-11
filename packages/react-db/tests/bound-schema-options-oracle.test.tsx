@@ -84,7 +84,6 @@ for (const hook of [`live`, `suspense`] as const) {
       statement: `React bindings retain mutation schemas until query identity changes; held updates expose transformed rows and handler payloads, settlement restores authored source rows, and sync publications remain raw.`,
       authority: `packages/db/tests/live-query-bound-options-oracle.ts; schema guide TInput/TOutput contract, optimistic-history contract and maintainer inline-option decision.`,
       limits: `72 finite synchronous-schema/key/identity cases per ordinary or ready-source Suspense hook, with settled updates before replacement; controlled sources, no typed-schema, initial-suspension, SSR, provider or concurrent-render claim.`,
-      owner: `packages/db/tests/live-query-bound-options-oracle.ts`,
     },
     histories,
     label: boundSchemaGrammar,

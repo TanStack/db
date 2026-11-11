@@ -3496,7 +3496,6 @@ describe(`ordered source work oracle`, () => {
       statement: `keeps rows, request traces, batches, errors, and liveness equal for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
     histories: { arbitrary: scenarioArbitrary, runs: 20, fixedSeeds: [17801] },
     model: (history, observations) => recordedComparison(history, observations),
@@ -7735,7 +7734,6 @@ describe(`eager indexed ordered windows`, () => {
       statement: `keeps rows and per-change work bounded for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
     histories: { arbitrary: eagerCase, runs: 40, fixedSeeds: [2044] },
     model: (history, observations) => recordedComparison(history, observations),
@@ -7800,7 +7798,6 @@ describe(`eager indexed ordered windows`, () => {
       statement: `keeps a full-join window to the first result rows for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
     histories: {
       arbitrary: eagerFullJoinCase,
@@ -7842,7 +7839,6 @@ describe(`eager indexed ordered windows`, () => {
         statement: `Ordered windows preserve the existing independent row, request, and publication judgment.`,
         authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
         limits: `The existing bounded eager history grammar and controlled provider; no new reach or provider coverage.`,
-        owner: `Ordered acquisition`,
       },
       histories: {
         arbitrary: eagerProvenReportCase,
@@ -7903,7 +7899,6 @@ describe(`eager indexed ordered windows`, () => {
         statement: `Ordered windows preserve the existing independent row, request, and publication judgment.`,
         authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
         limits: `The existing bounded eager history grammar and controlled provider; no new reach or provider coverage.`,
-        owner: `Ordered acquisition`,
       },
       // Keep the existing seed and five-history minima, without changing the grammar.
       histories: {
@@ -7977,7 +7972,6 @@ describe(`eager indexed ordered windows`, () => {
         statement: `Ordered windows preserve the existing independent row, request, and publication judgment.`,
         authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
         limits: `The existing bounded eager history grammar and controlled provider; no new reach or provider coverage.`,
-        owner: `Ordered acquisition`,
       },
       histories: {
         arbitrary: eagerHeldCase,
@@ -8042,7 +8036,6 @@ describe(`eager indexed ordered windows`, () => {
       statement: `keeps a joined-filter window whose row leaves only through the join for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
     histories: { arbitrary: eagerJoinedGapCase, runs: 40, fixedSeeds: [2063] },
     model: (history, observations) => recordedComparison(history, observations),
@@ -8061,7 +8054,6 @@ describe(`eager indexed ordered windows`, () => {
       statement: `keeps a joined-filter window to the first eligible rows for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
     histories: { arbitrary: eagerJoinedCase, runs: 40, fixedSeeds: [2059] },
     model: (history, observations) => recordedComparison(history, observations),

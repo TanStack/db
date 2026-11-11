@@ -3503,7 +3503,6 @@ describe(`source failure and health oracle`, () => {
   oracleProperty<StructuralHistory, Verdict>({
     id: `source-health.history`,
     law: {
-      owner: `Source failure and the health tree`,
       statement: `Every generated source step preserves the independently derived status, rows, health tree and event identities.`,
       authority: `The source-health laws and independent source and query models stated above.`,
       limits: `The unchanged six shapes, optional reach prefixes, twelve-step suffix and direct-subscriber choices.`,
@@ -3552,7 +3551,6 @@ describe(`source failure and health oracle`, () => {
     oracleProperty<Array<Step>, Verdict>({
       id: requiredProperty,
       law: {
-        owner: `Source-health required structural histories`,
         statement: `Every existing reach prefix obeys the shared source-health model at each step before and through a generated suffix.`,
         authority: `The source-health model and existing structural reach prefixes above.`,
         limits: `The unchanged join contexts, nested inner-ready prefix, direct subscribers and twelve-step suffix.`,
@@ -5516,7 +5514,6 @@ describe(`on-demand demand grammar`, () => {
   oracleProperty<DemandHistory, Verdict>({
     id: `source-health.on-demand`,
     law: {
-      owner: `Source-health on-demand window`,
       statement: `Window demand, replay, source health and atomic publication refine the shared independent demand model.`,
       authority: `The demand and window laws and source model stated above.`,
       limits: `The unchanged reach prefixes, ten-step suffix, direct-subscriber choices and adapter-abort contract.`,
@@ -7639,7 +7636,6 @@ describe(`lazy join demand grammar`, () => {
   oracleProperty<LazyHistory, Verdict>({
     id: `source-health.lazy-demand`,
     law: {
-      owner: `Source-health lazy join demand`,
       statement: `Lazy parent demand, request failures, replay and health observations refine the shared demand and source models.`,
       authority: `The source-health and lazy-demand laws and independent models stated above.`,
       limits: `The unchanged prefixes, ten-step suffix, controlled driver options and final cleanup observation cuts.`,
@@ -7780,7 +7776,6 @@ describe(`request error bookkeeping`, () => {
   oracleProperty<Parameters<typeof checkRequestErrorHistory>[0], Verdict>({
     id: `source-health.request-errors`,
     law: {
-      owner: `Source-health request error bookkeeping`,
       statement: `A node shows its newest still-open failure and lists every open failure once in original order, retaining identity when its frame does not change.`,
       authority: `The maintainer decisions and independent open-failure list model stated above.`,
       limits: `The unchanged three issuers, twelve-step histories and five report/settlement actions.`,

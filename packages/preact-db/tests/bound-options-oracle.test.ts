@@ -255,7 +255,6 @@ oracleProperty({
     statement: `Identity-comparing Preact bindings retain inline options until query identity changes; source publications remain live and replacements bind new keys.`,
     authority: `packages/db/tests/live-query-bound-options-oracle.ts; maintainer inline-option decision and shared framework query-identity contract.`,
     limits: `Six bounded option/identity cases, three normal rerenders, one scalar-row source update and one identity change; no DbClient admission boundary.`,
-    owner: `packages/db/tests/live-query-bound-options-oracle.ts`,
   },
   histories,
   label: ({ option, identity }) => `${option}/${identity}`,

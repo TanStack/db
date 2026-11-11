@@ -78,7 +78,6 @@ function hashProp<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
           statement: name,
           authority: `The existing deterministic fingerprint and equal-constructor laws documented above.`,
           limits: `The original flat-value constructor domain for this cell; distinct digests and graph topology are outside this owner.`,
-          owner: `D2 flat-value hashing`,
         },
         histories: {
           arbitrary: fc.tuple(...arbitraries) as Arbitrary<Ts>,

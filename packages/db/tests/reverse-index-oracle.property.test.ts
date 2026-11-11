@@ -299,7 +299,6 @@ oracleProperty({
     statement: `A reversed index preserves exact query order and bounded non-null filter work when a read crosses a large nullish group.`,
     authority: `The IndexReader.take/takeFromStart and query-aware null-placement contract stated above.`,
     limits: `Four finite histories: ascending physical index, both null placements, 10,000 rows with 5,000 nullish keys, n=50, from the start or cursor 5001.`,
-    owner: `Ordered acquisition`,
   },
   histories: ([`first`, `last`] as const).flatMap((nulls) =>
     [undefined, { from: 5001 }].map((cursor): ReadCase => ({
@@ -345,7 +344,6 @@ oracleProperty({
     statement: `A reversed index returns the query's ordered prefix or strict cursor suffix and bounds filter calls to the accepted non-null prefix plus one call per nullish key.`,
     authority: `IndexReader.take/takeFromStart and findIndexForField's query-aware null placement; the ordered-acquisition coverage owner.`,
     limits: `Generated keys 0..15, values null/undefined/0..4, 0..12 rows, n=0..6; large fixed replays use a separate bounded domain. The query-aware reader, not legacy reversal or a custom index's capability admission.`,
-    owner: `Ordered acquisition`,
   },
   histories: {
     arbitrary: readCase,

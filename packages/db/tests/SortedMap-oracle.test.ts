@@ -492,7 +492,6 @@ const sortedLaw = {
   statement: `SortedMap refines native Map ownership and full-sort views, including deferred work bounds and current row values at the promised cuts.`,
   authority: `Collection state callers and maintainer SortedMap contract recorded in docs/contributing/oracle-coverage.md.`,
   limits: `The unchanged contract, input grammar, order downgrade and observations described above.`,
-  owner: `Small structures and test mechanics`,
 }
 function sortedMechanism(order: Order) {
   return {

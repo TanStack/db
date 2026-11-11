@@ -433,7 +433,6 @@ oracleProperty({
   law: {
     statement: `Each independent Suspense binding receives its declared indexing settings, keeps them through ordinary renders, and changes them only with query identity.`,
     authority: `packages/db/tests/conformance/indexing-config-oracle.ts explicit-output law; maintainer independent-output decision 2026-11-03 and first-options rule.`,
-    owner: `packages/db/tests/conformance/indexing-config-oracle.ts`,
     limits: `The unchanged finite built-in, same-name constructor, presence, identity and two-cache-scope matrix plus focused pending delivery; no hydration, abandoned render, pending rejection or server render claim.`,
   },
   histories: histories.map((_, index) => ({ index })),

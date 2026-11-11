@@ -611,7 +611,6 @@ export function runSQLiteResetResumeOracleTests(
     law: {
       statement: `A destructive schema reset clears metadata together with its persisted baseline; compatible reopen and raw row loss preserve it.`,
       authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
-      owner: `packages/db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
       limits: `The unchanged bounded reopen grammar and supplied host harness at the after-persistence-transition-reopen checkpoint.`,
     },
     histories: { arbitrary: historyArbitrary, runs: 24, fixedSeeds: [1659] },
@@ -632,7 +631,6 @@ export function runSQLiteResetResumeOracleTests(
     law: {
       statement: `Reset clears baseline metadata while non-reset transitions preserve it.`,
       authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
-      owner: `packages/db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
       limits: `The unchanged finite reset/resume control and comparison.`,
     },
     histories: [
@@ -698,7 +696,6 @@ export function runSQLiteResetResumeOracleTests(
     law: {
       statement: `Reset clears baseline metadata while non-reset transitions preserve it.`,
       authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
-      owner: `packages/db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
       limits: `The unchanged finite reset/resume control and comparison.`,
     },
     histories: [
@@ -941,7 +938,6 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
       law: {
         statement: `Supported subset predicates return exact rows within the connection binding cap.`,
         authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
-        owner: `packages/db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
         limits: `The unchanged finite binding-capacity control and receiving path.`,
       },
       histories: [
@@ -980,7 +976,6 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
       law: {
         statement: `Supported subset predicates return exact rows within the connection binding cap.`,
         authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
-        owner: `packages/db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
         limits: `The unchanged finite binding-capacity control and receiving path.`,
       },
       histories: [
@@ -1022,7 +1017,6 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
       law: {
         statement: `Supported subset predicates return exact rows within the connection binding cap.`,
         authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
-        owner: `packages/db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
         limits: `The unchanged finite binding-capacity control and receiving path.`,
       },
       histories: [
@@ -1082,7 +1076,6 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
       law: {
         statement: `Supported subset predicates return exact rows within the connection binding cap.`,
         authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
-        owner: `packages/db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
         limits: `The unchanged finite binding-capacity control and receiving path.`,
       },
       histories: [
@@ -1137,7 +1130,6 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
       law: {
         statement: `Supported predicates return exactly their matching rows without exceeding the SQLite connection binding cap.`,
         authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
-        owner: `packages/db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
         limits: `The unchanged generated typed/list-length/connective grammar, native prepared statements and cleanup observations.`,
       },
       histories: {

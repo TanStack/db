@@ -342,7 +342,6 @@ describe(`Index refinement oracle`, () => {
       statement: `After each addition the Index get/has observations equal independently summed multiplicities, and get agrees with getIterator in order, in both structural and prefixIdentity modes.`,
       authority: `Existing Index multiset and prefixIdentity contract documented above.`,
       limits: `At most twelve signed additions to two keys over the original primitive/prefixed domain; joins, compaction and richer structural payloads remain outside this owner.`,
-      owner: `D2 Index storage`,
     },
     histories: {
       arbitrary: historyArbitrary,

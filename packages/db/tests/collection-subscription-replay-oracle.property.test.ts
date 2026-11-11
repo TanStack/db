@@ -2286,7 +2286,6 @@ oracleProperty({
     statement: `Replay publication is atomic and obsolete work cannot publish.`,
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
-    owner: `Collection lifecycle replay`,
   },
   histories: {
     arbitrary: replayScenarioArbitrary,
@@ -2312,7 +2311,6 @@ oracleProperty({
     statement: `Synchronous, asynchronous, and partially failed replays preserve the last complete snapshot.`,
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
-    owner: `Collection lifecycle replay`,
   },
   histories: {
     arbitrary: sequentialReplayScenarioArbitrary,
@@ -2338,7 +2336,6 @@ oracleProperty({
     statement: `Cleanup retires the sync run and its obsolete replay work.`,
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
-    owner: `Collection lifecycle replay`,
   },
   histories: {
     arbitrary: cleanupRestartScenarioArbitrary,
@@ -2364,7 +2361,6 @@ oracleProperty({
     statement: `Same-tick obsolete replay settlement cannot overwrite the current replay.`,
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
-    owner: `Collection lifecycle replay`,
   },
   histories: { arbitrary: fc.scheduler(), runs: 30, fixedSeeds: [1760] },
   resolve: (history) => ({ history }),
@@ -2389,7 +2385,6 @@ oracleProperty({
     statement: `Physical transport sharing preserves independent logical ownership.`,
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
-    owner: `Collection lifecycle replay`,
   },
   histories: {
     arbitrary: sharedSubscriptionScenarioArbitrary,
@@ -2415,7 +2410,6 @@ oracleProperty({
     statement: `Replay preserves optimistic overlays until their existing settlement checkpoint.`,
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
-    owner: `Collection lifecycle replay`,
   },
   histories: {
     arbitrary: optimisticReplayScenarioArbitrary,

@@ -61,7 +61,6 @@ function receivingOptions(ordered: boolean): ReceivingOptions {
       statement: `Public distinct selections retain one of each positive-support value across collision coexistence, duplicate support, removals and reinsertion after each applied source transaction.`,
       authority: `The shared unique-selection law in distinct-incrementalization-oracle.ts and the public distinct contract in docs/guides/live-queries.md.`,
       limits: `The unchanged immutable two-member collision fixture, anchor and support-cycle grammar; ordered and unordered public Collections. No arbitrary payload, framework render schedule or intermediate source publication claim.`,
-      owner: `Distinct collision review extension`,
     },
     histories: {
       arbitrary: distinctRecipe,

@@ -58,7 +58,6 @@ export function registerIncludesProperty<THistory extends Array<unknown>>(
           statement,
           authority: `The existing independent includes judgments and the live-query materialization architecture cited by the calling owner.`,
           limits: `The calling owner's unchanged histories, production paths, comparison checkpoints, and stated limits. This registration migration adds no semantic coverage.`,
-          owner: `Includes and publication`,
         },
         histories,
         label: (history) =>

@@ -422,7 +422,6 @@ describe(`mutation retention campaign reach`, () => {
       statement: `Every Collection touched by a persisting transaction retains its sync run, including a Collection whose mutations merge away, until its independently modeled GC deadline.`,
       authority: `BaseCollectionConfig.gcTime and transaction-ownership-oracle admission contract stated above`,
       limits: `The existing controlled idle-delivery mutation grammar; queued sync writes, multiple local transactions, restart, provider I/O and offline or paced mutations are outside this driver.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: historyArbitrary,

@@ -95,7 +95,6 @@ function utilsProperty<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
         statement: name,
         authority: `The existing utility equality laws and authorities documented in this file.`,
         limits: `The original bounded inputs and unchanged independent assertion callback for ${label}.`,
-        owner: `Structural values and ordered primitives`,
       },
       histories: {
         arbitrary: argumentsArbitrary,

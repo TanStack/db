@@ -274,7 +274,6 @@ describe(`SSR stream record lifetime`, () => {
   oracleProperty<SsrStreamRecordHistory, Verdict>({
     id: `ssr.stream-record-lifetime`,
     law: {
-      owner: `SSR stream record lifetime`,
       statement: `Each record demand settles at its transport checkpoint and terminal retries preserve its outcome without acquiring a source.`,
       authority: `The stream-view owner's expectedSsrStreamRecordOutcome and the record lifetime contract above.`,
       limits: `Missing, pending and local records under the existing transport grammar; pending+cleanup and timestamp policy after consumption remain excluded.`,

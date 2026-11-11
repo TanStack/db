@@ -924,7 +924,6 @@ const revertLaw = {
   statement: `Draft reads, changes, and original-row isolation agree with the existing independent draft-equality transition model after the final write.`,
   authority: `The nine draft-equality rules and maintainer decisions documented above.`,
   limits: `The existing assignment, deletion, nested, iterator, typed-array, URL, class, and revert grammars; no new values or paths are introduced.`,
-  owner: `Drafts and native values`,
 }
 
 // ---------------------------------------------------------------------------

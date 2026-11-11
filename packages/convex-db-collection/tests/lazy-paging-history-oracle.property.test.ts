@@ -388,7 +388,6 @@ oracleProperty({
     statement: `generates ownership and callback schedules against one independent scope law`,
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
-    owner: `Convex collection integration`,
   },
   histories: {
     arbitrary: convex_lazy_historyHistory,
@@ -539,7 +538,6 @@ oracleProperty({
     statement: `compares paired hidden suffixes at the production discovery boundary`,
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
-    owner: `Convex collection integration`,
   },
   histories: {
     arbitrary: convex_lazy_suffixHistory,
@@ -613,7 +611,6 @@ oracleProperty({
     statement: `The shared coverage comparison accepts retained and reacquired overshoot and rejects a missing required row.`,
     authority: `Existing checker calibration in this file.`,
     limits: `The unchanged bounded 2..8-row coverage calibration; no new production claim.`,
-    owner: `Convex collection integration`,
   },
   histories: {
     arbitrary: retentionCalibrationHistory,

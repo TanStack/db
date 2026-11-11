@@ -668,7 +668,6 @@ oracleProperty({
     statement: `Automatic garbage collection retires a Collection only after gcTime with no subscriber and no persisting transaction; a persisting transaction holds each Collection it touches, and the delay restarts when the last such transaction completes or fails; explicit cleanup() retires a Collection while a transaction persists.`,
     authority: `BaseCollectionConfig.gcTime; the persisting-transaction hold in packages/db/src/collection/lifecycle.ts (optimistic rows and adapter awaitTxId waits); explicit cleanup keeps its current contract`,
     limits: `Two Collections with a synchronous ready sync and empty source; keys as numbers, up to ${MAX_STEPS} steps; clock steps of 1, 20, 60, and 120 ms with gcTime 100; paced mutations, offline transactions, live-query Collections, writes into a cleaned-up Collection, and wall-clock corrections are not generated. The delay after a settlement on a cleaned-up Collection is not observable.`,
-    owner: `Collection garbage collection under persisting transactions`,
   },
   histories: {
     arbitrary: historyArbitrary,

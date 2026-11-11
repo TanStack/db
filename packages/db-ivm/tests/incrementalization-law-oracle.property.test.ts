@@ -654,7 +654,6 @@ function registerIncrementalization<T>(
         statement: name,
         authority: `The existing DBSP accumulation/difference law and direct evaluators documented above.`,
         limits: `The original bounded JSON relation, delivery and operator domains; message order and client publication remain outside this owner.`,
-        owner: `D2 incrementalization`,
       },
       histories: { arbitrary, runs: 100, fixedSeeds: [1741] },
       model: incrementalizationReferences,

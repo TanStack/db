@@ -142,7 +142,6 @@ describe.each([
         statement: `Preserve cyclic payload references through replacements and independently allocated equal transients.`,
         authority: `The existing fractional-window contract and independent recomputation documented above.`,
         limits: `The original bounded history and value domain for this cell; no new operator or observation path is introduced.`,
-        owner: `Top-K fractional windows`,
       },
       histories: {
         arbitrary: fc.tuple(
@@ -249,7 +248,6 @@ describe.each([
         statement: `Match full outer-join recomputation after every replacement.`,
         authority: `The existing fractional-window contract and independent recomputation documented above.`,
         limits: `The original bounded history and value domain for this cell; no new operator or observation path is introduced.`,
-        owner: `Top-K fractional windows`,
       },
       histories: {
         arbitrary: fc.tuple(
@@ -334,7 +332,6 @@ describe.each([
             statement: `Match the signed cumulative selected relation through keyed histories and digest collisions.`,
             authority: `The existing fractional-window contract and independent recomputation documented above.`,
             limits: `The original bounded history and value domain for this cell; no new operator or observation path is introduced.`,
-            owner: `Top-K fractional windows`,
           },
           histories: {
             arbitrary: fc.record({

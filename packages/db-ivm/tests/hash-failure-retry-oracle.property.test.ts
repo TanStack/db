@@ -237,7 +237,6 @@ oracleProperty({
     statement: `Failed getter traversals preserve the original rejection and read cut; retries reread the prefix, success matches a plain copy, and only success makes root reuse read nothing.`,
     authority: `Established structural-hash retry contract; oracle-coverage.md, Structural values and ordered primitives; existing hash graph cycle-retry owner.`,
     limits: `Serial calls on one uncached array of plain getter objects, 0..3 completed siblings, 0..2 tail getters, 1..3 failures, values -20..20. No pre-cached descendants, sharing, reentry, or other rejection causes.`,
-    owner: `Structural values and ordered primitives`,
   },
   histories: {
     arbitrary: retryHistoryArbitrary,

@@ -321,7 +321,6 @@ describe('settled histories', () => {
       statement: `Each settled authored history reconstructs the same public, subscription, durable, export, peer and reopened rows with key-owned versions.`,
       authority: `IndexedDB CRUD/persistence, store isolation, clear/import/export and cross-tab APIs; Collection optimistic settlement and cleanup`,
       limits: `Controlled BroadcastChannel and fake IndexedDB, bounded scalar rows and sequential settled actions; no browser scheduling, crash durability or overlapping writers.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: { arbitrary: history, runs: 30, fixedSeeds: [1179001] },
     resolve: (steps) => ({ steps }),

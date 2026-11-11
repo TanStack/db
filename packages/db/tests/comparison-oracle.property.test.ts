@@ -161,7 +161,6 @@ function comparisonProperty<
             'OrderByOptions, CompareOptions and the comparison, binary normalization and non-finite ordering contracts stated by the named comparison-laws-oracle companion',
           limits:
             'The unchanged bounded same-type and normalization grammars; unrelated object identity order, mixed-type order and query/index receiving paths remain outside this owner.',
-          owner: 'docs/contributing/oracle-coverage.md',
         },
         histories: { arbitrary, runs: campaignRuns, fixedSeeds: [fixedSeed] },
         resolve: (history) => ({ history }),

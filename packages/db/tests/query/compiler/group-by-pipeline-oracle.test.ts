@@ -270,7 +270,6 @@ oracleProperty({
     statement: `Group reduction agrees with batch partitioning and aggregation after every input replacement, with one keyed selection per retained nonempty group.`,
     authority: `The aggregate and group laws in live/ARCHITECTURE.md and the boundary-only metadata decision of 2026-11-05, stated above.`,
     limits: `The original thirty finite grouping, selection and HAVING combinations over five replacement snapshots; no Collection, correlated-route, metadata-attribution or group-ordering claim.`,
-    owner: `Group reduction`,
   },
   histories: cases,
   label: ({ grouped, selection, having }) =>

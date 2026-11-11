@@ -116,7 +116,6 @@ describe(`Optimistic request outcome histories`, () => {
       statement: `Each failed optimistic request exposes its exact outcome while independently modeled peer and source work survives.`,
       authority: `The optimistic snapshot and request settlement laws in optimistic-history-oracle.ts`,
       limits: `The existing bounded two-request grammar with controlled sync work; provider timing and arbitrary overlapping request histories remain outside this driver.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: fc.record({

@@ -503,7 +503,6 @@ oracleProperty({
     statement: `Cold acquisition and every applied child change agree with independent relational recomputation and the event replica.`,
     authority: `ARCHITECTURE.md Identity and Initial demand; the existing cold-join law above.`,
     limits: `The unchanged fixed route-move prefix and zero-to-fifteen-step tail; controlled whole-source acquisition, without demand minimization or provider I/O claims.`,
-    owner: `Cold join reconciliation`,
   },
   histories: {
     arbitrary: fc.array(coldStepArbitrary, { minLength: 0, maxLength: 15 }),
@@ -1011,7 +1010,6 @@ describe(`compound join relational oracle`, () => {
       statement: `Every component equality is TRUE for a compound match, with exact unmatched rows and event multiplicity for the selected join.`,
       authority: `ARCHITECTURE.md Identity and Initial demand; the compound relational law above.`,
       limits: `The unchanged two-or-three-term grammar with bounded keyed histories, scan/index and eager/cold paths; no optimistic or replay claim.`,
-      owner: `Compound join reconciliation`,
     },
     histories: {
       arbitrary: fc.record({

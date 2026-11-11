@@ -501,7 +501,6 @@ describe('reserved commits across real-adapter hydrations', () => {
       statement: `The retained independent SQLite model judges the existing legal histories at every original observation checkpoint.`,
       authority: `The existing contract and authority stated beside this oracle's model.`,
       limits: `The existing bounded SQLite histories, production paths, and observations; no expanded coverage claim.`,
-      owner: `SQLite persistence`,
     },
     histories: adapterHistories,
     resolve: (history) => ({ history }),

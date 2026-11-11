@@ -274,7 +274,6 @@ describe(`buildCursor properties`, () => {
       statement: `A leading-column cursor denotes exactly the strict ordered suffix, including direction and null placement.`,
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: scalarCursorArbitrary,
@@ -389,7 +388,6 @@ describe(`buildCursor properties`, () => {
       statement: `One boundary value is supported; composite cursor values reject.`,
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: exactCursorArbitrary,
@@ -411,7 +409,6 @@ describe(`buildCursor properties`, () => {
       statement: `The public snapshot orders nullable tuples by all authored terms after preload fulfills.`,
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: exactCursorArbitrary,
@@ -433,7 +430,6 @@ describe(`buildCursor properties`, () => {
       statement: `One leading boundary value remains legal with several order terms; other mismatched widths reject.`,
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: partialCursorArbitrary,
@@ -455,7 +451,6 @@ describe(`buildCursor properties`, () => {
       statement: `The public snapshot uses every authored order term even when boundary width differs.`,
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: partialCursorArbitrary,
@@ -477,7 +472,6 @@ describe(`buildCursor properties`, () => {
       statement: `Repeated cursor construction returns the same expression or the same unsupported-width rejection.`,
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: exactCursorArbitrary,

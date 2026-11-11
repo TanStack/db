@@ -185,7 +185,6 @@ oracleProperty({
     statement: `A reload repairs missing setup and preserves lawful rows while performing only the setup, snapshot, registry, and election work allowed by the shared reload model.`,
     authority: `The shared reload-class contract in db-sqlite-persistence-core/tests/reload-class-oracle.ts.`,
     limits: `Node Browser receiving driver with the existing in-process host controls; no claim about real cross-process scheduling or physical OPFS.`,
-    owner: `SQLite persistence`,
   },
   histories: {
     arbitrary: reloadHistoryArb,
@@ -205,7 +204,6 @@ oracleProperty({
     statement: `The retained host reload histories satisfy every existing setup, row, budget, and ordering comparison.`,
     authority: `The shared reload-class contract in db-sqlite-persistence-core/tests/reload-class-oracle.ts.`,
     limits: `The named fixed histories on this existing in-process receiving driver.`,
-    owner: `SQLite persistence`,
   },
   histories: fixedReloadHistories.map(([name, history]) => ({ name, history })),
   label: (entry) => entry.name,

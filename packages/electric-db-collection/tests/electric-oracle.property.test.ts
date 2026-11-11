@@ -111,7 +111,6 @@ function electricHistoryOptions<T>(
   return {
     id: property,
     law: {
-      owner: `packages/electric-db-collection/tests/electric-oracle.property.test.ts`,
       statement: name,
       authority: `The named independent Electric model/comparison passed to electricHistoryOptions and its adjacent contract prose.`,
       limits: `The existing generated history domain and controlled SDK boundary; no new product or real-service claim.`,

@@ -3115,7 +3115,6 @@ describe(`Ordered source request authority`, () => {
         statement: `preserves repair continuation identity across replay bookkeeping`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
         limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
-        owner: `Ordered acquisition`,
       },
       histories: histories,
       model: (history, observations) =>
@@ -3226,7 +3225,6 @@ describe(`Ordered source request authority`, () => {
         statement: `repairs an invalidation delivered during completed repair retirement`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
         limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
-        owner: `Ordered acquisition`,
       },
       histories: {
         arbitrary: retirementCase,
@@ -3399,7 +3397,6 @@ describe(`Ordered source request authority`, () => {
         statement: `repairs retirement invalidation through a real subscription`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
         limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
-        owner: `Ordered acquisition`,
       },
       histories: {
         arbitrary: retirementReceiverCase,
@@ -3643,7 +3640,6 @@ describe(`Ordered source request authority`, () => {
         statement: `holds, retires, and recovers requests under generated settlement orders`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
         limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
-        owner: `Ordered acquisition`,
       },
       histories: {
         arbitrary: authorityCaseArbitrary,
@@ -3874,7 +3870,6 @@ describe(`Ordered source request authority`, () => {
         statement: `answers each loaded-subset report as its coverage requires`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
         limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
-        owner: `Ordered acquisition`,
       },
       histories: {
         arbitrary: unprovenReportCase,

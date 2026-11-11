@@ -1159,7 +1159,6 @@ export function runOrdinaryTransactionWorkOracle(): void {
         statement: `The existing independent ordinary-write model judges durable rows and metadata at every original checkpoint, with the unchanged distinct-key work bound.`,
         authority: `PersistedTx semantics and the ordinary-transaction work contract stated above.`,
         limits: `The existing bounded node:sqlite history grammar; no new host, concurrency, or universal work claim.`,
-        owner: `SQLite persistence`,
       },
       histories: {
         arbitrary: independentWorkArbitrary,
@@ -1183,7 +1182,6 @@ export function runOrdinaryTransactionWorkOracle(): void {
         statement: `The existing independent ordinary-write model judges durable rows and metadata at every original checkpoint, with the unchanged distinct-key work bound.`,
         authority: `PersistedTx semantics and the ordinary-transaction work contract stated above.`,
         limits: `The existing bounded node:sqlite history grammar; no new host, concurrency, or universal work claim.`,
-        owner: `SQLite persistence`,
       },
       histories: {
         arbitrary: generatedHistoryArbitrary,

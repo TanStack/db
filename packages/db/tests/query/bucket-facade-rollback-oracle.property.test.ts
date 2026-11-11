@@ -829,7 +829,6 @@ describe(`bucket facade rollback`, () => {
       statement: `Failed facade flushes restore all written facades without unrelated row reads, events, or layout revisions; successful flushes publish pending changes once.`,
       authority: `ARCHITECTURE.md Coherent publication and the three facade laws stated above.`,
       limits: `The unchanged one-edge, four-bucket, one-to-eight-step grammar; held spanning commits keep their existing row-only comparison.`,
-      owner: `Bucket facade rollback`,
     },
     histories: {
       arbitrary: history,

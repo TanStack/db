@@ -402,7 +402,6 @@ describe(`exact loadSubset demand oracle`, () => {
       statement: `Every completed exact demand starts once and distinct demands start independently.`,
       authority: `ARCHITECTURE.md Demand grouping and ownership; the exact-demand law above.`,
       limits: `The unchanged bounded exact-demand trace grammar without abort signals; no broader coverage or row ownership claim.`,
-      owner: `Exact demand completion`,
     },
     histories: {
       arbitrary: exactDemandTraceArbitrary,
@@ -428,7 +427,6 @@ describe(`exact loadSubset demand oracle`, () => {
       statement: `Only identical in-flight demands share a transport and the same promise, in either settlement order.`,
       authority: `ARCHITECTURE.md Demand grouping and ownership; the exact-demand law above.`,
       limits: `The unchanged concurrent exact-demand grammar, with forward/reverse settlement and reset, without independent cancellation.`,
-      owner: `Exact demand in-flight sharing`,
     },
     histories: {
       arbitrary: concurrentExactScenarioArbitrary,
@@ -493,7 +491,6 @@ describe(`exact loadSubset demand oracle`, () => {
       statement: `Every exact waiter receives the same rejection and each later attempt starts fresh work until success is cached.`,
       authority: `ARCHITECTURE.md Demand grouping and ownership; the rejection and retry law above.`,
       limits: `The unchanged one-to-three failures with two-to-four waiters and Error/undefined rejection values; no applied-settlement claim.`,
-      owner: `Exact demand waiter rejection`,
     },
     histories: {
       arbitrary: rejectedWaiterScenarioArbitrary,

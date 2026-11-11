@@ -524,7 +524,6 @@ oracleProperty({
   law: {
     statement: `Unchanged nested elements retain identity and quiet consumers, while current array values and authored reactive query inputs follow their source.`,
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
-    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
     limits: `The existing callback/config/Collection finite grammar at settled Solid host cuts; no changed-element identity, native-source-only value liveness, cycles or elapsed-time claim.`,
   },
   histories: [...histories()],
@@ -541,7 +540,6 @@ oracleProperty({
   law: {
     statement: `Unchanged native children retain admission and identity across ordinary and native parent replacement in both directions.`,
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
-    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
     limits: `The existing same-parent and parent-transition cases at one or two array levels through three public inputs.`,
   },
   histories: [...nativeParentHistories()],
@@ -696,7 +694,6 @@ oracleProperty({
   law: {
     statement: `A stable helper root notifies enumeration consumers when an own data descriptor changes visibility while preserving payload and source identity.`,
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
-    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
     limits: `The existing finite helper-only visibility grammar; no public descriptor admission, accessors, symbols or in-place source edits.`,
   },
   histories: [...visibilityHistories()],
@@ -935,7 +932,6 @@ oracleProperty({
   law: {
     statement: `Admitted nested live getters follow signal changes without rebinding the query and preserve retained source getters through replacement, omission and readmission.`,
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
-    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
     limits: `The existing finite object/scalar, early/later and stable/fresh getter grammar through three public inputs at settled host cuts.`,
   },
   histories: [...getterHistories()],
@@ -1070,7 +1066,6 @@ oracleProperty({
   law: {
     statement: `The existing complete graph comparison rejects interior mixed-path corruption even when the extreme paths are intact.`,
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
-    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
     limits: `The existing three crossed-depth calibration inputs and unchanged graph comparison; no new mutation campaign.`,
   },
   histories: [...graphHistories()].filter((history) => history.crossed),
@@ -1259,7 +1254,6 @@ oracleProperty({
   law: {
     statement: `Shared acyclic graph materialization preserves every public value path within the existing source-enumeration regression budget.`,
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
-    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
     limits: `The existing finite graph grammar and unchanged 32 enumerations per distinct admitted container; no public SLO, alias topology or cyclic support claim.`,
   },
   histories: [...graphHistories()],
@@ -1645,7 +1639,6 @@ oracleProperty({
   law: {
     statement: `Tracked callable data and getter fields retain current identity and receiver results while unchanged neighbors stay quiet and retained sources remain intact.`,
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
-    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
     limits: `The existing finite callable grammar through three public inputs; no arbitrary function/getter bodies, mutable-source writes, cycles or browser rendering.`,
   },
   histories: [...callableHistories()],
@@ -1950,7 +1943,6 @@ oracleProperty({
   law: {
     statement: `Own user fields including __proto__ follow their admitted stage in Solid listeners while preserving own keys, prototypes, retained sources and quiet neighbors.`,
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
-    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
     limits: `The existing finite ordinary/reserved-name, initial-ownness and scalar/signed-zero/object/array grammar through three public inputs.`,
   },
   histories: [...reservedFieldHistories()],
@@ -2172,7 +2164,6 @@ oracleProperty({
   law: {
     statement: `Admitted arrays retain inherited and subclass methods in Solid listeners even when user data shadows hasOwnProperty.`,
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
-    owner: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,
     limits: `The existing finite array/subclass and user-shadow grammar through three public inputs; no arbitrary class instances or prototype edits.`,
   },
   histories: [...methodHistories()],

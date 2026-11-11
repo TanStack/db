@@ -546,7 +546,6 @@ oracleProperty({
     statement: `A changed source payload is replayed exactly when a helper graph restarts.`,
     authority: `Contribution-conservation and publication laws in src/query/live/ARCHITECTURE.md; reconcileChangesForD2 exact sent-row boundary`,
     limits: `The existing bounded helper simulation and source-key grammar; fixed real-consumer histories and provider E2E boundaries retain their separate scope.`,
-    owner: `docs/contributing/oracle-coverage.md`,
   },
   histories: {
     arbitrary: fc.tuple(sourceRowArbitrary, sourceKeyArbitrary),
@@ -623,7 +622,6 @@ oracleProperty({
     statement: `After every helper action, exact signed contributions integrate to the authoritative source rows.`,
     authority: `Contribution-conservation and publication laws in src/query/live/ARCHITECTURE.md; reconcileChangesForD2 exact sent-row boundary`,
     limits: `The existing bounded helper simulation and source-key grammar; fixed real-consumer histories and provider E2E boundaries retain their separate scope.`,
-    owner: `docs/contributing/oracle-coverage.md`,
   },
   histories: {
     arbitrary: reconciliationHistoryArbitrary,
@@ -662,7 +660,6 @@ oracleProperty({
     statement: `Disjoint source histories commute in source rows, sent rows and integrated weighted relation.`,
     authority: `Contribution-conservation and publication laws in src/query/live/ARCHITECTURE.md; reconcileChangesForD2 exact sent-row boundary`,
     limits: `The existing bounded helper simulation and source-key grammar; fixed real-consumer histories and provider E2E boundaries retain their separate scope.`,
-    owner: `docs/contributing/oracle-coverage.md`,
   },
   histories: {
     arbitrary: disjointHistoriesArbitrary,

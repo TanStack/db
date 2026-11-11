@@ -437,7 +437,6 @@ async function runCacheOptionsHistory(
 oracleProperty<CacheOptionsCase, Verdict>({
   id: `live-query.cache-option-admission`,
   law: {
-    owner: `CacheOptions declaration histories`,
     statement: `Independent callers must agree on reusable local getKey and schema declarations at every admission path, including retries and later original reuse.`,
     authority: `The maintainer same-identity conflict decision and shared cache-option declaration model.`,
     limits: `The unchanged finite reference/presence, key, held-delivery, claimant, and admission-path matrix; no schema transformation or arbitrary transport schedules.`,

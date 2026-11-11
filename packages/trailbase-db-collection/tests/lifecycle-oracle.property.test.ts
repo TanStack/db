@@ -501,7 +501,6 @@ it.each([`list`, `set`, `buffered`] as const)(
 oracleProperty({
   id: `trailbase.lifecycle`,
   law: {
-    owner: `packages/trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
     statement: `A TrailBase sync run publishes and retires one valid row history.`,
     authority: `The lifecycle contract in this file's opening prose and tests/ORACLE.md, enacted by checkLifecycle's independent keyed relation.`,
     limits: `The unchanged controlled RecordApi/native ReadableStream grammar; SDK fetch/SSE decoding, filtered subsets, mutation acknowledgements, and service reconnects remain outside this owner.`,
@@ -1518,7 +1517,6 @@ it.each(pageFixedHistories)(`converges: %s`, (_name, history) => {
 oracleProperty({
   id: `trailbase.page-event`,
   law: {
-    owner: `packages/trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
     statement: `Paged service rows and ordered change events converge after their histories drain.`,
     authority: `The page/event law in tests/ORACLE.md and checkPageHistory's independent service-row model.`,
     limits: `The unchanged two-page and at-most-two-load controlled grammar; offset paging varies updates only, and no live service, larger page count, or reconnect claim is added.`,

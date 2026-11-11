@@ -848,7 +848,6 @@ oracleProperty<EnvironmentHistory, ReturnType<typeof environmentModel>>({
     statement: `Initialization selects configured or preferred available storage and coordination, reports public diagnostics and callbacks, gates offline admission on leadership, and settles across disposal or dependency failure.`,
     authority: `Offline transactions guide Storage and leadership/React Native and Expo; README storage configuration; public StorageDiagnostic and waitForInit contracts; established storage-failure and unread-init tests.`,
     limits: `Controlled adapter probes and election collaborators; no native browser durability/election claim, no exact diagnostic wording, no mixed security/quota diagnostic precedence, no startup non-Error normalization promise or failed-replay availability law.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: environmentHistory,

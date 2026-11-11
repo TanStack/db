@@ -944,7 +944,6 @@ oracleProperty({
     statement: `KeyScheduler is one globally serial FIFO queue: equal creation times keep scheduling order, a delayed head blocks younger work, a failure updates retry data before releasing the active transaction without moving it, replay reconciliation retires only unissued IDs, clear retires all work and leaves the scheduler reusable, a removal returns the requested IDs other than the active one, which TransactionExecutor rejects, and a duplicate schedule of a pending ID returns false.`,
     authority: `the established KeyScheduler FIFO tests and TransactionExecutor's calling order (packages/offline-transactions/src/executor); for duplicate schedules, TransactionExecutor's outbox replay, which uses schedule's result to find newly loaded transactions`,
     limits: `Persistence, caller promise settlement, leadership, and real timers have separate owners; no fairness beyond FIFO order; at most seven pending IDs, a grammar bound (production has none); creation times never change after scheduling (maintainer decision, 2026-11-04), so no update changes one; the executor's promise that reloaded work can run at once belongs to the outbox replay owner; keeping the first record on a duplicate schedule awaits a maintainer decision.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: legalHistory,

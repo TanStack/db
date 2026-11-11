@@ -1744,7 +1744,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       statement: `Demand settlements are fenced by the sync run that owns their physical acquisition.`,
       authority: `Collection cleanup/restart and logical demand ownership in the glossary; the lifecycle grammar's existing model`,
       limits: `The existing bounded async restart regimes, status, errors, rows, acquisition, and release checkpoints.`,
-      owner: `Collection subscription lifecycle`,
     },
     histories: {
       arbitrary: asyncRestartScenarioArbitrary,
@@ -1926,7 +1925,6 @@ describe(`resumption notification error and surviving demand`, () => {
       statement: `Resumption retains its logical demands when first-demand notification throws after ownership transfer; replacement readiness acquires them.`,
       authority: `Collection cleanup/restart and logical demand ownership in the glossary, as stated above`,
       limits: `The existing pending-cleanup, notification-failure, and one-to-three-demand grammar; no arbitrary programming-error recovery or implicit restart.`,
-      owner: `Collection subscription lifecycle`,
     },
     histories: {
       arbitrary: notificationHistoryArbitrary,

@@ -113,7 +113,6 @@ describe(`Mutation result detachment`, () => {
       statement: `Changing one ordinary field copies that field without changing the original row or defining descriptors for its ordinary fields.`,
       authority: `src/proxy.ts draft-to-detached-row contract stated above`,
       limits: `The existing generated count of 1 through 40 ordinary numeric fields and one field0 assignment.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: fc.integer({ min: 1, max: 40 }),
@@ -246,7 +245,6 @@ describe(`Mutation result detachment`, () => {
       statement: `Assigned JSON data retains its authored own keys and prototype and detaches later caller changes.`,
       authority: `src/proxy.ts draft-to-stored-row value boundary contract stated above`,
       limits: `The existing four-key, integer-value and nested-or-direct JSON grammar; native cycles and binary containers remain fixed shared-check histories.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: fc.tuple(

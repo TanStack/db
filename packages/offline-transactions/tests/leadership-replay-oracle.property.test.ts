@@ -161,7 +161,6 @@ const STORAGE_FAILURE_PROPERTY = `offline.leadership.storage-failure`
 const leadershipLaw = {
   authority: `OfflineExecutor leadership and disposal; TransactionExecutor serial scheduling; OutboxManager durability`,
   limits: `Controlled in-memory storage and one executor owner at a time; no exactly-once network claim across independent leaders.`,
-  owner: `Offline leadership replay`,
 }
 function replayData(value: unknown): unknown {
   if (value instanceof Date) return { date: value.getTime() }

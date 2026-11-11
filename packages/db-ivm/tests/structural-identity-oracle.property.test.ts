@@ -491,7 +491,6 @@ describe(`structuralIdentity`, () => {
       statement: `D2 equality agrees with the independent normal-form model, and structural identity preserves equality while every shared defined identity denotes equal values.`,
       authority: `The existing structural-identity law documented above.`,
       limits: `The original equal-spec grammar and sixty-four representation decisions; no additional value domain or mutation cut is introduced.`,
-      owner: `D2 structural identity`,
     },
     histories: {
       arbitrary: fc.tuple(
@@ -658,7 +657,6 @@ describe(`structuralIdentity`, () => {
       statement: `D2 equality agrees with the independent normal-form model, and structural identity preserves equality while every shared defined identity denotes equal values.`,
       authority: `The existing structural-identity law documented above.`,
       limits: `The original independent-spec grammar with plain representations; no additional value domain or mutation cut is introduced.`,
-      owner: `D2 structural identity`,
     },
     histories: {
       arbitrary: fc.tuple(specArbitrary, specArbitrary),

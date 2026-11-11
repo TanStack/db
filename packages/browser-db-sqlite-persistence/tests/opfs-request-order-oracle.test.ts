@@ -260,7 +260,6 @@ const requestOrderLaw = {
   statement: `The existing request-order model judges ordered request completion, close, and late execute behavior through the real worker module.`,
   authority: `The shared opfs-request-order-oracle.ts contract and worker protocol.`,
   limits: `The existing in-process WASM driver and VFS access-handle control; no native browser lock-manager claim.`,
-  owner: `SQLite persistence`,
 }
 oracleProperty({
   id: requestOrderProperty,

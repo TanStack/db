@@ -2099,7 +2099,6 @@ const orderedReplayLaw = {
   statement: `Ordered public windows, replay retention, readiness, lease balance and request errors follow the unchanged independent account at each history cut, quiet settlement and recovery.`,
   authority: `ARCHITECTURE.md ordered requests, atomic window publication, replay participants and laws9,10,16,17 stated above.`,
   limits: `The original bounded commands, scenarios, one ordered source, one include level, adapter faults and per-subscription observations stated above.`,
-  owner: `Ordered truncate replay refinement`,
 }
 const preloadStates = [
   `preloadReplayFailures`,

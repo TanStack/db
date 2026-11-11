@@ -916,7 +916,6 @@ describe(`sync metadata session hold invariance`, () => {
     oracleProperty<Array<SessionAction>, Verdict>({
       id: invariance,
       law: {
-        owner: `Sync metadata session hold invariance`,
         statement: `Source reads are independent of publication holds.`,
         authority: `The independent session laws and runHoldInvariance relation in sync-metadata-session-oracle.ts.`,
         limits: `The existing bounded ${grammar.name} action grammar and core DbClient driver.`,
@@ -973,7 +972,6 @@ describe(`sync metadata session paired formulations`, () => {
       oracleProperty<Array<SessionAction>, Verdict>({
         id: name,
         law: {
-          owner: `Sync metadata session paired formulations`,
           statement: formulation.title,
           authority: `The independent key-independence and seed-order relations in sync-metadata-session-oracle.ts.`,
           limits: `The unchanged ${grammar.name} action grammar and receiving core path.`,
@@ -1027,7 +1025,6 @@ describe(`sync metadata session campaigns`, () => {
       oracleProperty<Array<SessionAction>, Verdict>({
         id: property,
         law: {
-          owner: `Sync metadata session`,
           statement: `Source reads include accepted and open writes in the independent session order, while rows and receipts follow atomic application.`,
           authority: `The borrowed consistency laws, maintainer decisions and independent model in sync-metadata-session-oracle.ts.`,
           limits: `The unchanged ${grammar.name} grammar, core hold and DbClient hydration boundary.`,

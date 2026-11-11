@@ -109,7 +109,6 @@ oracleProperty({
     statement: `A rejected descriptor binding preserves its factory failure and releases every acquired source independently; later demand and cleanup honor each source's start policy.`,
     authority: `docs/guides/ssr.md descriptor cleanup contract and packages/db/tests/descriptor-start-release-oracle.ts`,
     limits: `The existing 85 finite synchronous factory/start histories at Svelte setup, demand and cleanup cuts; no provider shutdown or concurrent scheduling claim.`,
-    owner: `packages/db/tests/descriptor-start-release-oracle.ts`,
   },
   histories: descriptorStartHistories,
   model: modelHistory,

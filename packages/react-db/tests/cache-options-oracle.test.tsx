@@ -297,7 +297,6 @@ for (const path of paths) {
       statement: `Warm DbClient results reject incompatible getKey/schema declarations synchronously, admit compatible or distinct-key declarations, and preserve original keys, rows and server text through retries.`,
       authority: `packages/db/tests/live-query-cache-options-oracle.ts; maintainer same-identity conflict decision.`,
       limits: `144 finite declaration pairs per native ordinary/Suspense or real server path; warm synchronous controlled source, no hydrateRoot, provider, pending-source or concurrent-render claim.`,
-      owner: `packages/db/tests/live-query-cache-options-oracle.ts`,
     },
     histories,
     label: (history) =>

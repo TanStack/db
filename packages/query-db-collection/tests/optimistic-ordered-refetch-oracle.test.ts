@@ -487,7 +487,6 @@ oracleProperty({
     statement: `Optimistic ordered CRUD keeps its immediate publication while persistence is held, then follows the authoritative backend window and handler outcome.`,
     authority: `queryCollectionOptions mutation and ordered-refetch contracts; oracle-coverage.md, Query DB ordered refetch`,
     limits: `Finite controlled QueryClient histories, one bounded inbox window and handler-refetch path; no HTTP or framework host claim.`,
-    owner: `Query DB ordered refetch`,
   },
   histories: orderedMutationHistories,
   model: modelOrderedMutation,

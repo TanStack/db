@@ -164,7 +164,6 @@ describe(`cursor adapter through production pagination`, () => {
           statement: `Direct writes update eager Collection rows and compatible row caches surgically while preserving page state and pager rows.`,
           authority: `queryCollectionOptions direct-write contract; cursor-pagination/README.md`,
           limits: `Handler-free writes after eager load, raw or items-envelope row caches; no writes during a pending fetch.`,
-          owner: `Opaque backend pagination`,
         },
         histories: {
           arbitrary: fc.tuple(

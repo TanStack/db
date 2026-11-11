@@ -78,7 +78,6 @@ function distinctOptions(mode: `selected` | `tuple`): CellOptions {
       statement: `Distinct emits the weighted difference of positive-support full recomputations and retains one of every unique selected combination under atomic and legal unit-split delivery.`,
       authority: `docs/guides/live-queries.md#distinct; DBSP incremental/full-recompute law in incrementalization-law-oracle.ts.`,
       limits: `Two unequal immutable {id, value} collision members and one anchor; source worlds have zero to eight slots and zero to twelve random suffix worlds. No ordering, representative policy, public Collection keys, or intermediate transaction publication.`,
-      owner: `Distinct collision review extension`,
     },
     histories: {
       arbitrary: distinctRecipe,

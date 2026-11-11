@@ -277,7 +277,6 @@ oracleProperty({
     statement: `A persisted Collection exposes the rows, publications, request outcomes, receipts, and tracked transactions that the optimistic-history model owes at every step, including while a durable store step is held and after a deferred source transaction aborts.`,
     authority: `packages/db/tests/optimistic-history-oracle.ts header (the optimistic and sync history contract, held rows behind a wrapping sync)`,
     limits: `An in-memory adapter, not SQLite timing or coordinator messages; no awaited acceptance during a hold; no schema, partial-update, or reentrant grammar.`,
-    owner: `Optimistic state`,
   },
   histories: {
     arbitrary: wrappingSyncHistory,

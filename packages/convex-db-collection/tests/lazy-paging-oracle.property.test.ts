@@ -252,7 +252,6 @@ oracleProperty({
     statement: `matches exact finite, offset, tie, continuation, whole and empty scopes`,
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
-    owner: `Convex collection integration`,
   },
   histories: {
     arbitrary: convex_lazy_valuesHistory,
@@ -411,7 +410,6 @@ oracleProperty({
     statement: `starts no unneeded ranges and preserves gap-free growth with healthy peers`,
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
-    owner: `Convex collection integration`,
   },
   histories: {
     arbitrary: convex_lazy_workHistory,
@@ -597,7 +595,6 @@ oracleProperty({
     statement: `publishes complete initial, moved and repaired live windows`,
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
-    owner: `Convex collection integration`,
   },
   histories: {
     arbitrary: convex_lazy_publicationHistory,
@@ -922,7 +919,6 @@ oracleProperty({
     statement: `waits for applied receipts, respects abort and fences callbacks across restart`,
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
-    owner: `Convex collection integration`,
   },
   histories: {
     arbitrary: convex_lazy_lifecycleHistory,
@@ -1105,7 +1101,6 @@ oracleProperty({
     statement: `keeps the newer establishing receipt through publication reentry`,
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
-    owner: `Convex collection integration`,
   },
   histories: {
     arbitrary: convex_lazy_receiptHistory,

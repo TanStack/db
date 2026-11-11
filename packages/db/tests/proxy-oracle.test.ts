@@ -329,7 +329,6 @@ oracleProperty<CallbackHistory, Array<CallbackView>>({
     statement: `A draft's array callback runs the native callback: it makes the same call, the row rebuilt from its recorded changes is the native row, its recorded changes are the native changes, and the input row is never changed. A change of a zero's sign alone is a change.`,
     authority: `packages/db/src/proxy.ts; the maintainer decision (2026-10-29) that -0 and 0 are distinct row values; the native array methods as the authority for callback results.`,
     limits: `One row of up to six numeric items, two callback steps, and the eight array callback methods; the Collection write path, virtual fields, Map and Set drafts, and detachment belong to their own oracles.`,
-    owner: `Proxy drafts`,
   },
   histories: {
     arbitrary: callbackHistory,

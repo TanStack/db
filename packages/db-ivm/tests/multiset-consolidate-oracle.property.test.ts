@@ -823,7 +823,6 @@ oracleProperty({
     statement: `MultiSet.consolidate() keeps one record per identity, the first in input order (with -0 written as 0 for unkeyed numbers), with the summed multiplicity; an identity whose sum is zero is absent; identity is keyed, single-primitive, or structural by the shape of the whole multiset; the input is unchanged.`,
     authority: `the contract comment on MultiSet.consolidate() in packages/db-ivm/src/multiset.ts (b5d92ceb)`,
     limits: `Output order is not part of the law. The keyed grammar includes the type, reference, and delimiter collisions of #1948 and non-finite numeric keys; MultiSet directly, not the query shapes that produce these records. Structural identity uses a 32-bit hash; the small domain makes a collision unlikely, not impossible. Key order only for one collation tie.`,
-    owner: `Structural values and ordered primitives`,
   },
   histories: {
     arbitrary: historyArb,

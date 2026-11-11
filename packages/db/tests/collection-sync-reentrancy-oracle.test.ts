@@ -579,7 +579,6 @@ describe(`sync publication reentrancy`, () => {
       statement: `Listener commits apply after the current publication, aborted commits apply nothing, and an open transaction publishes only after committing.`,
       authority: `Collection sync publication and aborted commit contracts stated above`,
       limits: `Up to two listener commit or abort actions on either side of one optional open transaction; fixed layout, truncate, error and subset cases remain supplemental.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: listenerScenarioArbitrary,

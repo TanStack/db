@@ -301,7 +301,6 @@ describe(`window changes at React commit`, () => {
                 law: {
                   statement: `Speculative page changes cannot mutate the committed Collection or acquire rows; committed page changes retain it.`,
                   authority: `packages/db/tests/conformance/contract.ts query identity and committed window laws; window-history-oracle.ts independent recomputation.`,
-                  owner: `packages/db/tests/conformance/window-history-oracle.ts`,
                   limits: `The unchanged ordinary/Suspense, eager/on-demand, keyed/derived, offset/limit/both paths across none/provider/explicit/descriptor scopes in React jsdom.`,
                 },
                 histories: {
@@ -679,7 +678,6 @@ for (const client of [false, true])
             law: {
               statement: `A resumed mounted replacement owns an exclusive output and retains its page independently of a peer that finishes first.`,
               authority: `packages/db/tests/conformance/contract.ts exclusive output and retained window laws; maintainer independent Suspense-output decision 2026-11-03.`,
-              owner: `packages/db/tests/conformance/window-history-oracle.ts`,
               limits: `The unchanged client/unscoped, keyed/derived, co-ready/borrower-first and compiler-first/peer-first/post-hook finite React receiving schedules.`,
             },
             histories: {

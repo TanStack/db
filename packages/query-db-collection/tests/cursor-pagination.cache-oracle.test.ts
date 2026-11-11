@@ -70,7 +70,6 @@ declareOracle({
 const cacheLaw = {
   authority: `cursor-pagination/README.md; QueryClient public cache operations`,
   limits: `Controlled immutable page sequences; no changing HTTP endpoint snapshot guarantee.`,
-  owner: `cursor-pagination.cache-oracle.test.ts`,
 }
 function checkCacheTrace(
   trace: ReadonlyArray<Observation>,

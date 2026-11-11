@@ -711,7 +711,6 @@ const snapshotHistoryArbitrary = fc.tuple(
 oracleProperty({
   id: `electric.sdk-snapshot-delivery`,
   law: {
-    owner: `packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
     statement: `Installed-SDK snapshot deliveries agree with the independent overlapping source.`,
     authority: `The snapshot-delivery contract and independent source/health judgments stated beside checkSnapshots.`,
     limits: `The unchanged finite HTTP, overlap, retry, and outage grammar over the installed SDK; no live Electric-service or native-host claim.`,
@@ -989,7 +988,6 @@ const membershipHistoryArbitrary = fc.tuple(
 oracleProperty({
   id: `electric.sdk-dnf-membership`,
   law: {
-    owner: `packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
     statement: `DNF visibility survives installed-SDK silent move-in cycles.`,
     authority: `The independent tag-group membership contract and checkMembership comparison stated above.`,
     limits: `The unchanged disjoint two-group, one-to-three-cycle HTTP grammar; arbitrary provider frames and unmatched move-ins remain outside this owner.`,
@@ -1630,7 +1628,6 @@ const rotationViolation = sameViolation()
 oracleProperty({
   id: `electric.sdk-rotation-release`,
   law: {
-    owner: `packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
     statement: `Retired SDK resources are released before constructing a replacement.`,
     authority: `The Electric resource-retirement and persisted-cache rotation contracts stated beside checkManagedRotation.`,
     limits: `The unchanged one-to-three sequential rotations through installed-SDK HTTP delivery and a Map-backed persistence adapter; no overlapping rotations or native-host claim.`,
@@ -1961,7 +1958,6 @@ const releaseHistoryArbitrary = fc.record({
 oracleProperty({
   id: `electric.sdk-source-release`,
   law: {
-    owner: `packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
     statement: `Every installed-SDK stream listener is released when its sync run is cleaned up.`,
     authority: `The resource-ownership law and EventTarget-calibrated listener comparison stated beside checkSourceRelease.`,
     limits: `The unchanged one-to-three-run browser-SDK grammar in jsdom; React Native AppState and arbitrary provider schedules remain separate.`,
@@ -2345,7 +2341,6 @@ for (const tagged of [false, true])
         oracleProperty({
           id: property,
           law: {
-            owner: `packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
             statement: `Each completed SDK snapshot cursor persists before demand settlement, tagged=${tagged} consumer=${consumer} emptySecond=${emptySecond} delivery=${delivery}.`,
             authority: `The independent authored-HTTP-position model and persisted-resume contract stated beside checkResumeCheckpoint.`,
             limits: `The unchanged bounded two-demand, restart, cursor and durable-settlement receiving lane; no additional provider schedules or native-host claim.`,

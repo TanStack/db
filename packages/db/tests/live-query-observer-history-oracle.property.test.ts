@@ -74,7 +74,6 @@ const errorTimingHistory = fc.record({
 oracleProperty({
   id: `live-query-observer.hydration-error-timing`,
   law: {
-    owner: `Observer hydration error timing`,
     statement: `The first server read retains its hydration status; a provider error after subscription publishes synchronously, and the settled browser snapshot shows the provider error.`,
     authority: `The established SSR first-view and ordinary runtime-error contracts described above.`,
     limits: `Controlled empty source, portable hydration statuses, both observer modes, and defined or undefined provider causes; framework scheduling has its own receiving witness.`,
@@ -259,7 +258,6 @@ const releaseHistory: fc.Arbitrary<ReleaseHistory> = fc.record({
 oracleProperty<ReleaseHistory, ReturnType<typeof releaseModel>, ReleasePlan>({
   id: `live-query-observer.release-failure`,
   law: {
-    owner: `Observer release failure ownership`,
     statement: `Release retires its physical channel even when notification throws; a later explicit subscription acquires one channel and receives the next publication.`,
     authority: `The established observer handle ownership contract described above.`,
     limits: `A controlled collaborator throws after retiring a real Collection handle; both modes, undefined causes, and one to three releases are retained.`,
@@ -452,7 +450,6 @@ oracleProperty<
 >({
   id: `live-query-observer.partial-attach`,
   law: {
-    owner: `Observer partial attachment`,
     statement: `A failed attachment returns no physical ownership, preserves a returned logical peer, and allows the next explicit subscription to attach that peer.`,
     authority: `The observer subscribe/dispose handle ownership contract described above.`,
     limits: `Controlled health-registration or sync failure, both observer modes, optional reentrant peer, and one or two failures.`,
@@ -1277,7 +1274,6 @@ for (const [mode, id] of [
   oracleProperty<Array<Command>, Verdict>({
     id,
     law: {
-      owner: `Observer listener eligibility`,
       statement: `Listeners receive each one-row publication in eligibility order, with the established bootstrap, reentry, disposal, and first-error rules.`,
       authority: `The existing independent eligibility ledger and contract table in this file.`,
       limits: `One row, keys and versions in the existing command grammar, at most one nested publication per command; the focused owners retain hydration, multi-row layout, and framework boundaries.`,

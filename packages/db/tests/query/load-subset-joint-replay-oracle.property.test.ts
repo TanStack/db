@@ -525,7 +525,6 @@ oracleProperty({
     statement: `Current replay participants and accepted receipts gate publication; obsolete work, retired peers, and old graphs cannot control its replacement.`,
     authority: `ARCHITECTURE.md Replay participants and failure, laws 7, 9 and 14, and the established joint-replay contract above.`,
     limits: `The unchanged bounded single-source, two-owner grammar, without joined/includes graphs or throwing callbacks.`,
-    owner: `Joint replay publication`,
   },
   histories: {
     arbitrary: scenario,

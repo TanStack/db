@@ -162,7 +162,6 @@ describe(`BTree Map oracle`, () => {
       statement: `Numeric BTree point, range, fallback and neighbor observations agree with the independent sorted Map after every action.`,
       authority: `BTree public API numeric Map contract stated above`,
       limits: `Numeric keys, plain payloads and node sizes 4 through 8; comparator validation belongs to the index-update oracle.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: fc.tuple(

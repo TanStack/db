@@ -116,7 +116,6 @@ describe(`cursor Query fetch boundaries`, () => {
           statement: `Canceling nested pages rejects preload; replacing pages fulfills it with replacement rows.`,
           authority: `cursor-pagination/README.md, Contract before implementation; createCursorPager and queryCollectionOptions`,
           limits: `Two controlled pages of one to four rows; no changing HTTP endpoint.`,
-          owner: `cursor-pagination.boundary-oracle.test.ts`,
         },
         histories: {
           arbitrary: fc.integer({ min: 1, max: 4 }),
@@ -221,7 +220,6 @@ describe(`cursor Query fetch boundaries`, () => {
       statement: `A reader abort rejects that reader with its reason and leaves shared Query transport active.`,
       authority: `cursor-pagination/README.md, Contract before implementation; createCursorPager`,
       limits: `Two controlled pages of one to four rows; no changing HTTP endpoint.`,
-      owner: `cursor-pagination.boundary-oracle.test.ts`,
     },
     histories: {
       arbitrary: fc.integer({ min: 1, max: 4 }),

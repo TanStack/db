@@ -104,7 +104,6 @@ oracleProperty({
     statement: `Concrete and shallow-copied options retain one Collection owner through cleanup; fresh options and descriptors admit independent owners whose mutations confirm from their own cache.`,
     authority: `docs/collections/convex-collection.md; established concrete options ownership contract in oracle-coverage.md.`,
     limits: `The existing controlled provider and finite identity/checkpoint matrix; no arbitrary lifecycle or real SDK transport timing.`,
-    owner: `Convex collection integration`,
   },
   histories: {
     arbitrary: ownershipHistory,

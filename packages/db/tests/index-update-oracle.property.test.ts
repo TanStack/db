@@ -329,7 +329,6 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
       statement: `Each direct index action refines an independent source Map across lookups, traversal and rebuild.`,
       authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
       limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: fc.array(arbitraryAction, { minLength: 1, maxLength: 100 }),
@@ -984,7 +983,6 @@ describe.each(indexTypes)(
         statement: `Null and undefined preserve exact membership and ordered-read semantics after each direct index action.`,
         authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
         limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
-        owner: `docs/contributing/oracle-coverage.md`,
       },
       histories: {
         arbitrary: fc.array(arbitraryNullishAction, {
@@ -1945,7 +1943,6 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
       statement: `Comparator-equal values retain exact identity lookup membership through retirement, update and rebuild.`,
       authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
       limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: fc.array(fc.integer({ min: 0, max: 4 }), {
@@ -2076,7 +2073,6 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
       statement: `A custom comparator determines group order while live source identities determine exact membership.`,
       authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
       limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: fc.array(fc.integer({ min: 0, max: 4 }), {

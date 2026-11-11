@@ -485,7 +485,6 @@ describe(`LocalStorage value fidelity oracle`, () => {
       statement: `The default JSON storage boundary rejects lossy payloads without durable writes or handler calls, and restores accepted payloads in their independently described JSON form.`,
       authority: `LocalStorage guide acceptance and restore contract stated above`,
       limits: `The existing default-parser value grammar and entry paths; custom parsers, class instances, cross-realm values, getters, peer timing and Storage failures remain outside this owner.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: historyArbitrary,

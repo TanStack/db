@@ -926,7 +926,6 @@ describe(`GC boundary campaign reach`, () => {
       statement: `Collection retention follows independently modeled logical holds, release and handoff deadlines, and controlled host idle opportunities across transaction and cleanup phases.`,
       authority: `BaseCollectionConfig.gcTime and the shared GC retention oracle's maintainer decisions`,
       limits: `The existing controlled timing and transaction grammar; cleanup restart, pending-row restoration, provider I/O and arbitrary host scheduling remain outside this driver.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: boundaryHistoryArbitrary,

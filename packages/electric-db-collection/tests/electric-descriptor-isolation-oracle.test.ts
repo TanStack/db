@@ -437,7 +437,6 @@ fixedCase.each([
 oracleProperty({
   id: `electric.persisted-tag-history`,
   law: {
-    owner: `packages/electric-db-collection/tests/electric-descriptor-isolation-oracle.test.ts`,
     statement: `Compatible warm resumes retain tag membership; fresh source snapshots rebuild it across warm and cold restart.`,
     authority: `The independent tag-set law and persisted recovery contract stated above runTagHistory.`,
     limits: `Controlled ShapeStream boundary, unmanaged full-source recovery, and the existing bounded tag/edit histories.`,
@@ -616,7 +615,6 @@ async function runOwnerHistory(history: {
 oracleProperty({
   id: `electric.bound-descriptor-history`,
   law: {
-    owner: `packages/electric-db-collection/tests/electric-descriptor-isolation-oracle.test.ts`,
     statement: `Collections derived from one Electric descriptor keep independent row updates, subscription ownership, and cleanup.`,
     authority: `The descriptor ownership contract and independent expected-row array in runOwnerHistory.`,
     limits: `The existing original, spread, and materialized descriptor forms over the controlled SDK callback boundary.`,

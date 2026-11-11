@@ -111,7 +111,6 @@ oracleProperty({
     statement: `Every prefix digest agrees with the earlier byte-at-a-time stream over the same framed bytes.`,
     authority: `Existing byte-framing contract documented above; ReferenceByteStream.`,
     limits: `One to eight string, number or bigint chunks; no symbol identity or independent murmur3 block/finalizer proof.`,
-    owner: `Murmur stream byte framing`,
   },
   histories: {
     arbitrary: fc.array(chunk, { minLength: 1, maxLength: 8 }),

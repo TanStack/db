@@ -523,7 +523,6 @@ for (const operation of [`insert`, `update`, `delete`] as const) {
       statement: `Durable ${operation} restores once across known and uncertain acknowledgement histories.`,
       authority: `Existing Convex native-value and durable replay contract above; docs/contributing/oracle-coverage.md.`,
       limits: `The unchanged isolated local backend and bounded process histories, through both installed SDKs; no new coverage claim.`,
-      owner: `Convex collection integration`,
     },
     histories: {
       arbitrary: histories,

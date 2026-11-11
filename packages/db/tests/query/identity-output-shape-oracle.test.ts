@@ -414,7 +414,6 @@ oracleProperty({
     statement: `Query identity erases aliases only when complete compiled output bags agree, including lexical keys and multiplicity.`,
     authority: `The query identity and compiled output shape contract stated above; expectedShapeRows independently predicts both initial and updated bags.`,
     limits: `The original five query forms, six safe alias names, bounded labels and finite source rows; no arbitrary cache history or framework scheduling claim.`,
-    owner: `Query identity`,
   },
   histories: {
     arbitrary: shapeHistories,
@@ -595,7 +594,6 @@ oracleProperty({
     statement: `D2 equality keys, IR equality operand keys and the compiled equality predicate agree with the independently declared value-pair partition.`,
     authority: `The supported equality-value and equality-operand contract stated at the start of this owner.`,
     limits: `The unchanged primitive, Date, Temporal, binary and reference-pair grammar; no complete JavaScript-value or collision-freedom claim.`,
-    owner: `Query identity`,
   },
   histories: {
     arbitrary: equalityPairArbitrary,

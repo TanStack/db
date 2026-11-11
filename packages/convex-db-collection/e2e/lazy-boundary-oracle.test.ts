@@ -636,7 +636,6 @@ oracleProperty({
     statement: `receives partial windows, query failure and abandoned receipts through both SDKs`,
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
-    owner: `Convex collection integration`,
   },
   histories: {
     arbitrary: convex_boundaryHistory,

@@ -128,7 +128,6 @@ describe(`array methods behave like native arrays`, () => {
       statement: `Draft array methods return the native result, preserve original-object identity relations, and detach the native final field value.`,
       authority: `src/proxy.ts draft contract and tests/proxy-oracle.test.ts native differential laws`,
       limits: `Bounded recipe arrays; fixed read-only callbacks; inserted objects have no original-row identity promise; no-op mutators may report equal changes.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: fc.tuple(
@@ -209,7 +208,6 @@ describe(`typed-array methods behave like native typed arrays`, () => {
       statement: `Draft typed-array methods return the native result and self relation, and detach the native final field value after a possible write through the result.`,
       authority: `src/proxy.ts draft contract and tests/proxy-oracle.test.ts native differential laws`,
       limits: `Float64Array recipes with fixed callbacks and bounded indices; no-op mutators may report equal changes.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
     histories: {
       arbitrary: fc.tuple(

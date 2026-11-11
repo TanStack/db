@@ -500,7 +500,6 @@ oracleProperty({
     statement: `Equal versions cancel; unequal versions retract before insertion; the ordered graph retains the exact owed source row with unit weight, and forced collisions use no hash call.`,
     authority,
     limits,
-    owner: `Ordered relations and BTree`,
   },
   histories: {
     arbitrary: fc.record({
@@ -565,7 +564,6 @@ oracleProperty({
     statement: `An ordinary row replacement retains the exact new row with unit weight with File present or absent.`,
     authority,
     limits,
-    owner: `Ordered relations and BTree`,
   },
   histories: {
     arbitrary: ordinaryRowHistory,
@@ -653,7 +651,6 @@ oracleProperty({
     statement: `Equal shared subtrees cancel with exactly one leaf read per input tree.`,
     authority,
     limits,
-    owner: `Ordered relations and BTree`,
   },
   histories: {
     arbitrary: fc.integer({ min: 0, max: 20 }),
@@ -792,7 +789,6 @@ oracleProperty({
     statement: `Unrelated replacement payload getters are not read and each source key emits its retraction and insertion.`,
     authority,
     limits,
-    owner: `Ordered relations and BTree`,
   },
   histories: {
     arbitrary: fc.integer({ min: 1, max: 100 }),
@@ -837,7 +833,6 @@ oracleProperty({
     statement: `Long same-key histories cancel independently allocated equal values completely.`,
     authority,
     limits,
-    owner: `Ordered relations and BTree`,
   },
   histories: {
     arbitrary: fc.integer({ min: 10, max: 150 }),

@@ -238,7 +238,6 @@ oracleProperty({
     statement: `Optimistic and sync histories expose the rows, publications, request outcomes, receipts, and tracked transactions that the optimistic-history model owes at every step.`,
     authority: `packages/db/tests/optimistic-history-oracle.ts header (the optimistic and sync history contract); the public transaction contract for commit admission and terminal outcomes`,
     limits: `The core grammar and production path only: no partial-update production path, schema default, pending manual edit, external completion, rejected handler, reentrant drain, ordered source operations, acknowledged handler write, or wrapping sync.`,
-    owner: `Optimistic state`,
   },
   histories: {
     arbitrary: optimisticHistory,

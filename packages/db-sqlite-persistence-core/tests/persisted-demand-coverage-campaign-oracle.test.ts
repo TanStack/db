@@ -1171,7 +1171,6 @@ const coverageLaw = {
   statement: `The existing durable-coverage model judges offline demand settlement, rows, cancellation, and window membership after each retained history.`,
   authority: `The persisted demand coverage contract and independent model stated above.`,
   limits: `The existing controlled source and node:sqlite histories; no new host, scheduler, or provider claim.`,
-  owner: `SQLite persistence`,
 }
 oracleProperty({
   id: REQUIRED_PROPERTY,

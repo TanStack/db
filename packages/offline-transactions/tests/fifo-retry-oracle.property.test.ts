@@ -480,7 +480,6 @@ oracleProperty({
     statement: `The executor runs transactions one at a time in creation order: a ready tail waits for a delayed or retrying head, eligible work runs when its deadline passes, a permanent failure lets queued rows continue, a failed phase write or deletion rejects its caller with the storage error and stops the queue, and an executor with nothing left to run holds no timer.`,
     authority: `packages/offline-transactions/README.md: FIFO Sequential Processing, Retry decisions, and offline-execution settlement; the eligibility boundary from KeyScheduler-oracle.property.test.ts; the idle law is the maintainer's decision of 2026-11-06 (an idle spin is a bad bug)`,
     limits: `An online executor with one mutation function, no retry hooks, and jitter off; no leadership changes; no storage fault on a permanent failure's removal; backoff lengths are not judged, and timer counts and polling strategy only once nothing is left to run; at most 1000 retry timers after the deadline; liveness on a controlled clock, not wall-clock latency.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: fifoHistory,

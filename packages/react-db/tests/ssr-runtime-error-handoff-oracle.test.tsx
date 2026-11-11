@@ -318,7 +318,6 @@ for (const hook of [`ordinary`, `infinite`] as const) {
   const law = {
     statement: `An SSR runtime-error view remains readable and survives JSON transport into the first hydration view; the committed browser view follows its own source outcome.`,
     authority: `docs/guides/ssr.md preparation/hydration promises and maintainer runtime-error decision; packages/db/tests/ssr-snapshot-admission-oracle.ts`,
-    owner: `packages/db/tests/ssr-snapshot-admission-oracle.ts`,
     limits: `Real renderToString, JSON transport and hydrateRoot with ordinary or infinite hooks and empty eager sources; no portable error-object identity or error row-retention claim.`,
   }
   const driver = (

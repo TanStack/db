@@ -311,7 +311,6 @@ describe(`joined result key oracle`, () => {
       statement: `Each joined source pair retains a distinct public row and key after preload and synced group changes.`,
       authority: `docs/guides/live-queries.md, Joins and getKey, and the established key contract above.`,
       limits: `The unchanged bounded two-source inner, left and full join grammar with up to three synced group changes.`,
-      owner: `Joined result keys`,
     },
     histories: {
       arbitrary: historyArbitrary,
@@ -832,7 +831,6 @@ const selectionLaw = {
   statement: `Whole-source selections preserve joined occurrences, public key identity and source attribution at each receiving cut.`,
   authority: `docs/guides/live-queries.md, Joins/getKey, and the November 5 metadata decision stated above.`,
   limits: `The unchanged direct/QueryRef, selection and custom-key forms across root, facade and inline receivers with one held optimistic mutation.`,
-  owner: `Whole-source joined occurrences`,
 }
 const driveSelectionHistory = (
   plan: { history: SelectionHistory },

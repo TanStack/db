@@ -414,7 +414,6 @@ describe(`Electric predicate compiler semantics`, () => {
   oracleProperty({
     id: `electric.sql-predicate-semantics`,
     law: {
-      owner: `packages/electric-db-collection/e2e/sql-predicate-semantics-oracle.e2e.test.ts`,
       statement: `Emitted SQL and serialized parameters select the rows permitted by independent three-valued predicate semantics.`,
       authority: `The compiler contract inventory above, PostgreSQL three-valued semantics, and this owner's separately specified finite evaluator.`,
       limits: `The unchanged finite numeric, Boolean, text-equality and null domain, received through real PostgreSQL; stable wire text, name mapping and unsupported expressions keep their focused owners.`,

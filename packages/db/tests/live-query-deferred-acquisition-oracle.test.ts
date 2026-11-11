@@ -760,7 +760,6 @@ describe(`render sync-start handoff error provenance`, () => {
   oracleProperty<StartHandoffHistory, Verdict>({
     id: `live-query.start-handoff`,
     law: {
-      owner: `Deferred sync-start handoff origin`,
       statement: `A handoff reports only its own throwing sync start, preserves the source outcome, and never retries an old render handle.`,
       authority: `The shared expectedStartHandoff model and source-error ownership contract above.`,
       limits: `The unchanged ready/fail/throw, before/during-release, Error/undefined grammar; no source rows or recovery.`,
@@ -1006,7 +1005,6 @@ describe(`deferred demand joining a sibling replay`, () => {
   oracleProperty<DeferredSiblingHistory, Verdict>({
     id: `live-query.deferred-sibling`,
     law: {
-      owner: `Deferred sibling demand resumption`,
       statement: `Deferred joined demand resumes without a readiness cycle, acquires each source subscription once, and publishes the independent self-join result.`,
       authority: `ARCHITECTURE laws 9, 10, and 15 and the self-join rule stated above.`,
       limits: `The unchanged finite subscriber/preload, one/two rows, synchronous/held root and sibling results, and both release orders; no general provider or framework schedule.`,
