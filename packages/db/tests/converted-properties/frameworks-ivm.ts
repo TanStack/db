@@ -10,6 +10,7 @@ export const properties: ReadonlyArray<string> = [
   `ivm.temporal-group-key`,
   `ivm.hash-identity-fixed`,
   `ivm.hash-identity-digest-collision`,
+  `ivm.incrementalization-law-cells`,
   // react-db
   `react.convex-lazy-paging`,
   `react.effect-callback`,
@@ -28,6 +29,11 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db-ivm/tests/hash-identity-oracle.property.test.ts`,
     `ivm`,
     `hash-identity-fixed hash-identity-digest-collision`,
+  ],
+  [
+    `db-ivm/tests/incrementalization-law-oracle.property.test.ts`,
+    `ivm`,
+    `incrementalization-law-cells`,
   ],
   // react-db
   [
