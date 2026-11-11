@@ -8,6 +8,7 @@ import {
   configureOracles,
   validateOraclePropertyRegistry,
 } from '@tanstack/oracles'
+import { convertedProperties } from './converted-properties/index.js'
 
 export * from '@tanstack/oracles'
 
@@ -893,6 +894,7 @@ export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...comparisonProperties,
   ...paginationMatrixProperties,
   ...includesMatrixProperties,
+  ...convertedProperties,
 ])
 
 /**

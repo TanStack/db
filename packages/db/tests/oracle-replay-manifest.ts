@@ -1,4 +1,5 @@
 import { registeredOracleProperties } from './oracle-config.js'
+import { convertedOwners } from './converted-properties/index.js'
 
 /**
  * This manifest maps a replay name to the source file that can prove it ran.
@@ -1418,6 +1419,7 @@ const ownerGroups: ReadonlyArray<
     `adapter-conformance.eager-live-source`,
     `convex convex.react convex.wrapped`,
   ],
+  ...convertedOwners,
 ]
 
 const owners = new Map<string, string>()
