@@ -18,8 +18,6 @@ export const oracleLintSettings = {
     implementationModules: [
       `packages/db/tests/oracle-config.ts`,
       `packages/db/tests/oracle-property.ts`,
-      `packages/db/tests/oracle-reach.ts`,
-      `packages/db/tests/oracle-campaign.ts`,
     ],
     // Frozen migration baseline: remove entries as their files convert. Never add one.
     legacyCampaigns: [

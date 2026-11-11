@@ -3437,7 +3437,7 @@ function foldChanges(collection: ObservedCollection) {
   }
 }
 
-/** A reach counter, such as the one `createOracleReach` returns. */
+/** A reach counter: a driver begins each history, then records each declared state it enters. */
 export interface ReachCounter {
   beginHistory: () => void
   reach: (state: EagerLiveSourceReachState) => void

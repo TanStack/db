@@ -332,11 +332,6 @@ const ownerGroups: ReadonlyArray<
     `legacy-campaign-baseline`,
   ],
   [
-    `db/tests/declared-reach-oracle.property.test.ts`,
-    `oracle`,
-    `declared-reach declared-reach-examples`,
-  ],
-  [
     `db/tests/query/pagination-oracle.property.test.ts`,
     `pagination`,
     `limit-admission-replay-pending-negative limit-admission-replay-pending-valid limit-admission-builder-negative limit-admission-builder-valid limit-admission-unstarted-negative limit-admission-unstarted-valid limit-admission-ready-negative limit-admission-ready-valid limit-admission-initial-pending-negative limit-admission-initial-pending-valid limit-admission-move-pending-negative limit-admission-move-pending-valid`,
@@ -1701,7 +1696,6 @@ const replayTestNames = new Map([
     `scripts.legacy-campaign-baseline`,
     `scripts\\.legacy-campaign-baseline > random seed`,
   ],
-  [`oracle.declared-reach`, `oracle\\.declared-reach > random seed`],
   ...ownerGroups
     .filter(([, prefix]) => prefix === `adapter-conformance.eager-live-source`)
     .flatMap(([, prefix, suffixes]) =>
@@ -1964,7 +1958,6 @@ const enumeratedProperties = new Set([
   `svelte.cache-options`,
   `svelte.descriptor-start-release`,
   `query.ordered-mutation-outcome`,
-  `oracle.declared-reach-examples`,
   `sorted-map.regressions`,
   `sorted-map.reach-calibration`,
   `scripts.release-version`,

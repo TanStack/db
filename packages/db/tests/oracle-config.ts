@@ -101,8 +101,6 @@ const staticOracleProperties = [
   `browser-coordinator.routing`,
   `browser.shared-driver-fairness`,
   `live-query.output-indexing`,
-  `oracle.declared-reach`,
-  `oracle.declared-reach-examples`,
   `scripts.legacy-campaign-baseline`,
   `query.public-container-copy`,
   `compiler.group-by.batch`,
