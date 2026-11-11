@@ -10,3 +10,4 @@ export {
   splitLoadSubsetOptions,
 } from './split-load-subset-options'
 export { subsetParamsToSearch } from './subset-params-to-search'
+export { isAggregateOnlySelect, queryIrToSearch } from './query-ir-to-search'

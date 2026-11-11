@@ -11,7 +11,7 @@ import { getQueryClient } from './query-client'
 import { syncTableSubscription } from './realtime'
 import type { TableEntry } from './realtime'
 import type { ColumnConversions, RowConversions } from './row-conversions'
-import type { StringCollationConfig } from '@tanstack/db'
+import type { CollectionImpl, StringCollationConfig } from '@tanstack/db'
 import type { QueryClient } from '@tanstack/query-core'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -119,6 +119,21 @@ const registerTable = (
   return entry
 }
 
+/**
+ * Options key marking a collection created by this package, so queryOnce can
+ * tell a collection backed by a Supabase table from any other collection.
+ */
+const supabaseCollection = Symbol(`supabaseCollection`)
+
+/** Whether this package created `collection`, so it reads a Supabase table */
+export function isSupabaseCollection(collection: CollectionImpl): boolean {
+  return (
+    (collection.config as { [supabaseCollection]?: boolean })[
+      supabaseCollection
+    ] === true
+  )
+}
+
 const createSupabaseConfig = <TSchema extends StandardSchemaV1>(
   options: SupabaseCollectionOptions<TSchema>,
 ) => {
@@ -193,6 +208,7 @@ const createSupabaseConfig = <TSchema extends StandardSchemaV1>(
 
   return {
     ...config,
+    [supabaseCollection]: true,
     sync: {
       // Keeps the hooks query-db-collection attaches to its sync config, such
       // as the factory that lets a direct write start an idle collection.

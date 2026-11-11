@@ -20,12 +20,16 @@ import {
   cursorCurrentToSearch,
   keyColumnsToSearch,
   loadSubsetOptionsToSearch,
+  queryIrToSearch,
   realtimeFiltersToSearch,
   subsetParamsToSearch,
 } from '../src/postgrest-filters'
 
 // A bare (unaliased) column ref, as the live subset loader receives them.
 const col = (name: string) => new IR.PropRef([name])
+// An aliased ref (`user.column`), as the serialized query IR carries them;
+// queryIrToSearch strips the alias prefix.
+const userCol = (name: string) => new IR.PropRef(['user', name])
 
 const name = col('name')
 const id = col('id')
@@ -419,6 +423,123 @@ describe('keyColumnsToSearch', () => {
     expect(search.get('user_id')).toBe('eq.1')
     expect(search.get('todo_id')).toBe('eq.2')
     expect([...search.keys()]).toEqual(['user_id', 'todo_id'])
+  })
+})
+
+// ── subsetOptionsToQueryKey ─────────────────────────────────────────
+describe('queryIrToSearch', () => {
+  const table = { type: 'table', name: 'users', alias: 'user' } as const
+  const build = (ir: Parameters<typeof queryIrToSearch>[0]) =>
+    queryIrToSearch(ir)
+
+  test('resolves the base table name', () => {
+    expect(build({ from: table }).tableName).toBe('users')
+  })
+
+  test('builds an explicit select list and renames columns', () => {
+    expect(
+      build({
+        from: table,
+        select: {
+          id: { type: 'ref', path: ['user', 'id'] },
+          alias: { type: 'ref', path: ['user', 'name'] },
+        },
+      }).search.get('select'),
+    ).toBe('id,alias:name')
+  })
+
+  test('falls back to select=* for non-pushable select expressions', () => {
+    expect(
+      build({
+        from: table,
+        select: {
+          upper: {
+            type: 'func',
+            name: 'upper',
+            args: [{ type: 'ref', path: ['user', 'name'] }],
+          },
+        },
+      }).search.get('select'),
+    ).toBe('*')
+  })
+
+  test('pushes where filters, stripping the table alias', () => {
+    expect(
+      build({ from: table, where: [eq(userCol('active'), true)] }).search.get(
+        'active',
+      ),
+    ).toBe('eq.true')
+  })
+
+  test.each([
+    [
+      'computed OR',
+      or(eq(userCol('active'), true), eq(upper(userCol('name')), 'A')),
+    ],
+    ['literal asterisk', like(userCol('name'), '*Ali*')],
+  ])('throws on non-pushable %s (strict)', (_, where) => {
+    expect(() => build({ from: table, where: [where] })).toThrow(
+      'fully pushable filters',
+    )
+  })
+
+  test('does not merge duplicate IN demands', () => {
+    expect(
+      build({
+        from: table,
+        where: [inArray(userCol('id'), [1, 2]), inArray(userCol('id'), [2, 3])],
+      }).search.getAll('id'),
+    ).toEqual(['in.(1,2)', 'in.(2,3)'])
+  })
+
+  test('orders by real columns and skips computed/$selected refs', () => {
+    const search = build({
+      from: table,
+      orderBy: [
+        {
+          expression: { type: 'ref', path: ['user', 'id'] },
+          direction: 'asc',
+          nulls: 'last',
+        },
+        {
+          expression: { type: 'ref', path: ['$selected', 'score'] },
+          direction: 'desc',
+          nulls: 'last',
+        },
+        {
+          expression: { type: 'ref', path: ['user', 'name'] },
+          direction: 'desc',
+          nulls: 'first',
+        },
+      ],
+    }).search
+    expect(search.get('order')).toBe('id.asc.nullslast,name.desc.nullsfirst')
+  })
+
+  test('emits offset independently of limit', () => {
+    const search = build({ from: table, offset: 20 }).search
+    expect(search.get('offset')).toBe('20')
+    expect(search.has('limit')).toBe(false)
+  })
+
+  test("pushes a subquery FROM's where down and resolves the base table", () => {
+    const { tableName, search } = build({
+      from: {
+        type: 'subquery',
+        alias: 'activeUser',
+        query: { from: table, where: [eq(userCol('active'), true)] },
+      },
+    })
+    expect(tableName).toBe('users')
+    expect(search.get('active')).toBe('eq.true')
+  })
+
+  test('skips residual (client-side) where clauses', () => {
+    const search = build({
+      from: table,
+      where: [{ expression: eq(userCol('id'), 1), residual: true }],
+    }).search
+    expect(search.has('id')).toBe(false)
   })
 })
 
