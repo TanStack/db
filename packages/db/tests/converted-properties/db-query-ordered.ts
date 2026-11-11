@@ -25,6 +25,10 @@ const otherProperties: ReadonlyArray<string> = [
   `where-predicate.publication-fixed`,
   `pooled-live-query.publication-fixed`,
   `pooled-live-query.release-timing`,
+  `ordered-source-loader.staged-window`,
+  `mixed-index-order.public-order`,
+  `mixed-index-order.on-demand-window`,
+  `derived-publication.queued-batches`,
 ]
 const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
@@ -51,6 +55,21 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/pooled-live-query-gc-oracle.test.ts`,
     `pooled-live-query`,
     `release-timing`,
+  ],
+  [
+    `db/tests/query/ordered-source-loader-oracle.test.ts`,
+    `ordered-source-loader`,
+    `staged-window`,
+  ],
+  [
+    `db/tests/query/mixed-index-order-oracle.test.ts`,
+    `mixed-index-order`,
+    `public-order on-demand-window`,
+  ],
+  [
+    `db/tests/query/derived-delete-reconciliation-oracle.test.ts`,
+    `derived-publication`,
+    `queued-batches`,
   ],
 ]
 
