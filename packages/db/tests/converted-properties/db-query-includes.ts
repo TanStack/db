@@ -47,6 +47,14 @@ export const properties: ReadonlyArray<string> = [
   `virtual-row-fields-input.direct-source`,
   `virtual-row-fields-input.inline`,
   `virtual-row-fields-input.compiler-cache`,
+  `virtual-row-fields.boundary-publication`,
+  `virtual-row-fields.projection-attribution`,
+  `virtual-row-fields.last-spread`,
+  `virtual-row-fields.union-branches`,
+  `virtual-row-fields.metadata-timeline`,
+  `virtual-row-fields.facade-intervals`,
+  `virtual-row-fields.nullable-facade`,
+  `virtual-row-fields.runtime-boundary`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -114,5 +122,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/virtual-row-fields-input-oracle.test.ts`,
     `virtual-row-fields-input`,
     `callback direct-source inline compiler-cache`,
+  ],
+  [
+    `db/tests/query/virtual-row-fields-oracle.test.ts`,
+    `virtual-row-fields`,
+    `boundary-publication projection-attribution last-spread union-branches metadata-timeline facade-intervals nullable-facade runtime-boundary`,
   ],
 ]

@@ -11,10 +11,29 @@ import {
 } from '../../src/query/index.js'
 import { hasVirtualProps } from '../../src/virtual-props.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import { expectedSourceMetadata } from './virtual-row-fields-source-oracle.js'
+import {
+  boundaryPublicationHistories,
+  checkAttributedRows,
+  checkBoundaryPublication,
+  checkInlineMetadataValues,
+  checkMetadataPublications,
+  checkNullableSelection,
+  expectedAttributedRows,
+  expectedBoundaryPublication,
+  expectedInlineMetadataValues,
+  expectedMetadataChanges,
+  expectedNullableSelection,
+  publishedModelRows,
+} from './virtual-row-fields-model-oracle.js'
 import {
   checkWithCleanup,
   virtualFieldNames,
 } from './virtual-row-fields-support.js'
+import type {
+  AttributionKey,
+  AttributionRow,
+} from './virtual-row-fields-model-oracle.js'
 
 type Profile = { label: string }
 
@@ -415,4 +434,217 @@ describe(`virtual metadata attribution regressions`, () => {
       await update.when(`settled`)
     }, [() => functional.cleanup(), () => live.cleanup(), () => rows.cleanup()])
   })
+})
+
+// Checker calibrations for the virtual-field publication oracle in
+// virtual-row-fields-oracle.test.ts. They run no production: each builds a
+// hostile observation from the independent model and feeds it to the oracle's
+// check, which must reject it.
+// Calibrate the same comparison against the former source-attribution rule.
+// Mutate one metadata observation at a time; ordinary group values stay valid.
+test.each(
+  boundaryPublicationHistories.filter(
+    ({ kind }) => kind === `grouped` || kind === `aggregate`,
+  ),
+)(`rejects source metadata on a grouped output: %j`, (history) => {
+  const parent = { id: `parent`, parentId: `root`, label: `parent` }
+  const child = { id: `child`, parentId: `parent`, label: `held` }
+  const expected = expectedBoundaryPublication(
+    history,
+    parent,
+    [child],
+    new Set([child.id]),
+    `parent-source`,
+    `child-source`,
+    `output`,
+  )
+  const sourceMetadata = expectedSourceMetadata(child.id, `child-source`, true)
+  for (const field of virtualFieldNames) {
+    const wrong = expected.map(
+      ({ ordinary, metadata }) =>
+        [
+          metadata.$key as AttributionKey,
+          { ...ordinary, ...metadata, [field]: sourceMetadata[field] },
+        ] as const,
+    )
+    expect(() => checkBoundaryPublication(wrong, expected), field).toThrow()
+  }
+})
+
+// Calibration feeds allowed and hostile full results through the very same
+// checker. It must see faults away from the first row and retain multiplicity.
+test.each(
+  [`functional-projection`, `structured-spread`].flatMap((shape) =>
+    [
+      `missing-peer`,
+      `duplicate-peer`,
+      `missing-id`,
+      `wrong-key`,
+      `wrong-owner`,
+      `stale-pending`,
+      `wrong-origin`,
+    ].map((fault) => ({ shape, fault })),
+  ),
+)(`rejects a hostile complete metadata result: %j`, ({ shape, fault }) => {
+  const keyOf = (id: AttributionKey) => `key-${typeof id}:${id}`
+  const expected = [
+    ...expectedAttributedRows(
+      [{ id: 1, parentId: `parent`, label: `same` }],
+      shape,
+      new Set(),
+      `left`,
+      `output`,
+      keyOf,
+    ),
+    ...expectedAttributedRows(
+      [{ id: `1`, parentId: `parent`, label: `same` }],
+      shape,
+      new Set([`1`]),
+      `right`,
+      `output`,
+      keyOf,
+    ),
+  ]
+  const allowed = expected.map((row) => ({ ...row.ordinary, ...row.metadata }))
+  checkAttributedRows(allowed, expected)
+  // A different legal output order remains accepted.
+  checkAttributedRows([...allowed].reverse(), expected)
+  const hostile: Array<Record<string, unknown>> = allowed.map((row) => ({
+    ...row,
+  }))
+  if (fault === `missing-peer`) hostile.pop()
+  if (fault === `duplicate-peer`) hostile.push({ ...hostile[1]! })
+  if (fault === `missing-id`) delete hostile[1]!.id
+  if (fault === `wrong-key`) hostile[1]!.$key = `wrong`
+  if (fault === `wrong-owner`) hostile[1]!.$collectionId = `left`
+  if (fault === `stale-pending`)
+    hostile[1]!.$hasPendingWrites = !expected[1]!.metadata.$hasPendingWrites
+  if (fault === `wrong-origin`)
+    hostile[1]!.$origin =
+      expected[1]!.metadata.$origin === `local` ? `remote` : `local`
+  expect(() => checkAttributedRows(hostile, expected)).toThrow()
+})
+
+// Publication calibrations corrupt an earlier callback while the final public
+// answer remains correct. A final-snapshot-only check would miss these faults.
+test.each([
+  `stale-read`,
+  `stale-event`,
+  `new-previous-value`,
+  `duplicate-message`,
+  `duplicate-batch`,
+  `missing-message`,
+  `no-callback`,
+  `early-wrong-later-correct`,
+] as const)(`rejects a hostile metadata publication: %s`, (fault) => {
+  const base: AttributionRow = { id: `a`, parentId: `parent`, label: `before` }
+  const before = expectedAttributedRows(
+    [base],
+    `structured-spread`,
+    new Set(),
+    `source`,
+    `output`,
+    (id) => id,
+  )
+  const after = expectedAttributedRows(
+    [{ ...base, label: `pending` }],
+    `structured-spread`,
+    new Set([base.id]),
+    `source`,
+    `output`,
+    (id) => id,
+  )
+  const allowed = {
+    rows: publishedModelRows(after),
+    changes: expectedMetadataChanges(before, after),
+  }
+  checkMetadataPublications([allowed], before, after)
+  const hostile = structuredClone(allowed)
+  if (fault === `stale-read`)
+    (hostile.rows[0] as Record<string, unknown>).$hasPendingWrites = false
+  if (fault === `stale-event`)
+    (hostile.changes[0]!.value as Record<string, unknown>).$origin = `remote`
+  if (fault === `new-previous-value`)
+    hostile.changes[0]!.previousValue = { ...hostile.changes[0]!.value }
+  if (fault === `duplicate-message`)
+    hostile.changes.push({ ...hostile.changes[0]! })
+  if (fault === `missing-message`) hostile.changes = []
+  if (fault === `early-wrong-later-correct`)
+    (hostile.rows[0] as Record<string, unknown>).$collectionId = `wrong`
+  const trace =
+    fault === `no-callback`
+      ? []
+      : fault === `duplicate-batch`
+        ? [allowed, structuredClone(allowed)]
+        : fault === `early-wrong-later-correct`
+          ? [hostile, allowed]
+          : [hostile]
+  expect(() => checkMetadataPublications(trace, before, after)).toThrow()
+})
+
+// Inline values must not receive a facade's publication metadata. These
+// controls run the same selected-shape model for absent and authored fields.
+test.each([`none`, `$key`, `$hasPendingWrites`, `all`] as const)(
+  `rejects facade enrichment of an inline value: %s`,
+  (collision) => {
+    const overrides: Record<string, unknown> = {}
+    for (const field of virtualFieldNames)
+      if (collision === field || collision === `all`)
+        overrides[field] =
+          field === `$hasPendingWrites`
+            ? true
+            : field === `$origin`
+              ? `local`
+              : `authored`
+    const expected = expectedInlineMetadataValues(
+      [{ id: `child`, parentId: `a`, label: `value` }],
+      `functional-projection`,
+      new Set(),
+      `source`,
+      overrides,
+    )
+    checkInlineMetadataValues(expected, expected)
+    const hostile = [
+      {
+        ...expected[0],
+        $key: `compiler-key`,
+        $collectionId: `facade`,
+        $origin: `remote`,
+        $hasPendingWrites: false,
+      },
+    ]
+    expect(() => checkInlineMetadataValues(hostile, expected)).toThrow()
+  },
+)
+
+// The same nullable-boundary checker must reject lost facade metadata, enriched
+// inline emptiness and a missing ordinary field on a complete source row.
+test.each([
+  `empty-facade-metadata`,
+  `empty-inline-enriched`,
+  `matched-field-missing`,
+] as const)(`rejects a hostile nullable whole-row observation: %s`, (fault) => {
+  const expected = expectedNullableSelection(
+    fault === `matched-field-missing`
+      ? { id: `child`, label: `source` }
+      : undefined,
+    `source`,
+    `facade`,
+    `generated-key`,
+  )
+  const observed = {
+    facade: structuredClone(expected.facade),
+    inline: [structuredClone(expected.inline)],
+  }
+  checkNullableSelection(observed, expected)
+  if (fault === `empty-facade-metadata`) observed.facade = [{}]
+  else if (fault === `empty-inline-enriched`)
+    observed.inline = [structuredClone(expected.facade)]
+  else
+    observed.facade = observed.facade.map((row) =>
+      Object.fromEntries(
+        Object.entries(row).filter(([key]) => key !== `label`),
+      ),
+    )
+  expect(() => checkNullableSelection(observed, expected)).toThrow()
 })
