@@ -1,5 +1,5 @@
 import { Temporal } from 'temporal-polyfill'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import {
   D2,
   MultiSet,
@@ -8,7 +8,12 @@ import {
   output,
   serializeValue,
 } from '../src/index.js'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
+import { oracleProperty } from '../../db/tests/oracle-property.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter.js'
 
 /**
  * Temporal values are valid db-ivm group keys. The established hash key domain
@@ -110,91 +115,168 @@ function observedGroupCounts(rows: Array<{ date: object }>): Array<number> {
   return observed.map(({ count }) => count).sort((left, right) => left - right)
 }
 
-describe('Temporal group keys', () => {
-  it.each(temporalCases)(
-    '$name keeps distinct values in distinct groups',
-    ({ first, second }) => {
-      oracleRoute(`case`)
-      const rows = [{ date: first() }, { date: second() }]
-      expect(observedGroupCounts(rows)).toEqual(
-        expectedGroupCounts(['first', 'second']),
-      )
-      expect(serializeValue(rows[0]!.date)).not.toBe(
-        serializeValue(rows[1]!.date),
-      )
-    },
-  )
-
-  it.each(temporalCases)(
-    '$name groups matching fresh values together',
-    ({ first }) => {
-      oracleRoute(`case`)
-      const rows = [{ date: first() }, { date: first() }]
-      expect(serializeValue(rows[0]!.date)).toBe(serializeValue(rows[1]!.date))
-      expect(observedGroupCounts(rows)).toEqual(
-        expectedGroupCounts(['first', 'first']),
-      )
-    },
-  )
-
-  it('keeps equal-comparing Duration representations in separate groups', () => {
-    oracleRoute(`case`)
-    const hour = Temporal.Duration.from('PT1H')
-    const minutes = Temporal.Duration.from('PT60M')
-    expect(Temporal.Duration.compare(hour, minutes)).toBe(0)
-    expect(observedGroupCounts([{ date: hour }, { date: minutes }])).toEqual(
-      expectedGroupCounts(['hour', 'minutes']),
-    )
-  })
-
-  it('keeps a plain object with a Temporal tag distinct from a Temporal value', () => {
-    oracleRoute(`case`)
-    const date = Temporal.PlainDate.from('2024-01-15')
-    const taggedObject = {
-      [Symbol.toStringTag]: 'Temporal.PlainDate',
-      extra: 1,
+// Each enumerated history names one fixture. The two temporal laws run once
+// per Temporal kind; the four remaining fixtures are the bounded tag and
+// representation boundaries described above. Each body below is the former
+// test body, unchanged, and is judged by the same model and assertions.
+type TemporalKind = (typeof temporalCases)[number]['name']
+type TemporalGroupKeyHistory =
+  | { law: 'distinct values' | 'fresh values'; kind: TemporalKind }
+  | {
+      law:
+        | 'equal-comparing Duration representations'
+        | 'tagged plain object'
+        | 'own-tagged empty plain object'
+        | 'own matching tag'
     }
-    Object.defineProperty(taggedObject, 'toString', {
-      value: () => '2024-01-15',
-    })
-    expect(observedGroupCounts([{ date }, { date: taggedObject }])).toEqual(
-      expectedGroupCounts(['Temporal', 'plain object']),
-    )
-    expect(serializeValue({ date })).not.toBe(
-      serializeValue({ date: taggedObject }),
-    )
+
+const temporalGroupKeyHistories: Array<TemporalGroupKeyHistory> = [
+  ...temporalCases.map(({ name }) => ({
+    law: 'distinct values' as const,
+    kind: name,
+  })),
+  ...temporalCases.map(({ name }) => ({
+    law: 'fresh values' as const,
+    kind: name,
+  })),
+  { law: 'equal-comparing Duration representations' },
+  { law: 'tagged plain object' },
+  { law: 'own-tagged empty plain object' },
+  { law: 'own matching tag' },
+]
+
+function temporalGroupKeyLabel(history: TemporalGroupKeyHistory): string {
+  switch (history.law) {
+    case 'distinct values':
+      return `${history.kind} keeps distinct values in distinct groups`
+    case 'fresh values':
+      return `${history.kind} groups matching fresh values together`
+    case 'equal-comparing Duration representations':
+      return 'keeps equal-comparing Duration representations in separate groups'
+    case 'tagged plain object':
+      return 'keeps a plain object with a Temporal tag distinct from a Temporal value'
+    case 'own-tagged empty plain object':
+      return 'keeps an own-tagged plain object with no enumerable fields distinct'
+    case 'own matching tag':
+      return 'still groups a Temporal value with an own matching tag'
+  }
+}
+
+function temporalCase(kind: TemporalKind) {
+  return temporalCases.find(({ name }) => name === kind)!
+}
+
+function runDistinctValuesCase({
+  first,
+  second,
+}: (typeof temporalCases)[number]): void {
+  const rows = [{ date: first() }, { date: second() }]
+  expect(observedGroupCounts(rows)).toEqual(
+    expectedGroupCounts(['first', 'second']),
+  )
+  expect(serializeValue(rows[0]!.date)).not.toBe(serializeValue(rows[1]!.date))
+}
+
+function runFreshValuesCase({ first }: (typeof temporalCases)[number]): void {
+  const rows = [{ date: first() }, { date: first() }]
+  expect(serializeValue(rows[0]!.date)).toBe(serializeValue(rows[1]!.date))
+  expect(observedGroupCounts(rows)).toEqual(
+    expectedGroupCounts(['first', 'first']),
+  )
+}
+
+function runDurationRepresentationsCase(): void {
+  const hour = Temporal.Duration.from('PT1H')
+  const minutes = Temporal.Duration.from('PT60M')
+  expect(Temporal.Duration.compare(hour, minutes)).toBe(0)
+  expect(observedGroupCounts([{ date: hour }, { date: minutes }])).toEqual(
+    expectedGroupCounts(['hour', 'minutes']),
+  )
+}
+
+function runTaggedPlainObjectCase(): void {
+  const date = Temporal.PlainDate.from('2024-01-15')
+  const taggedObject = {
+    [Symbol.toStringTag]: 'Temporal.PlainDate',
+    extra: 1,
+  }
+  Object.defineProperty(taggedObject, 'toString', {
+    value: () => '2024-01-15',
+  })
+  expect(observedGroupCounts([{ date }, { date: taggedObject }])).toEqual(
+    expectedGroupCounts(['Temporal', 'plain object']),
+  )
+  expect(serializeValue({ date })).not.toBe(
+    serializeValue({ date: taggedObject }),
+  )
+}
+
+function runOwnTaggedEmptyPlainObjectCase(): void {
+  const date = Temporal.PlainDate.from('2024-01-15')
+  const taggedObject = {}
+  Object.defineProperty(taggedObject, Symbol.toStringTag, {
+    value: 'Temporal.PlainDate',
+  })
+  Object.defineProperty(taggedObject, 'toString', {
+    value: () => '2024-01-15',
   })
 
-  it('keeps an own-tagged plain object with no enumerable fields distinct', () => {
-    oracleRoute(`case`)
-    const date = Temporal.PlainDate.from('2024-01-15')
-    const taggedObject = {}
-    Object.defineProperty(taggedObject, Symbol.toStringTag, {
-      value: 'Temporal.PlainDate',
-    })
-    Object.defineProperty(taggedObject, 'toString', {
-      value: () => '2024-01-15',
-    })
+  expect(Object.keys(taggedObject)).toEqual([])
+  expect(observedGroupCounts([{ date }, { date: taggedObject }])).toEqual(
+    expectedGroupCounts(['Temporal', 'plain object']),
+  )
+}
 
-    expect(Object.keys(taggedObject)).toEqual([])
-    expect(observedGroupCounts([{ date }, { date: taggedObject }])).toEqual(
-      expectedGroupCounts(['Temporal', 'plain object']),
-    )
+function runOwnMatchingTagCase(): void {
+  const date = Temporal.PlainDate.from('2024-01-15')
+  const matchingDate = Temporal.PlainDate.from('2024-01-15')
+  Object.defineProperty(matchingDate, Symbol.toStringTag, {
+    value: 'Temporal.PlainDate',
   })
 
-  it('still groups a Temporal value with an own matching tag', () => {
-    oracleRoute(`case`)
-    const date = Temporal.PlainDate.from('2024-01-15')
-    const matchingDate = Temporal.PlainDate.from('2024-01-15')
-    Object.defineProperty(matchingDate, Symbol.toStringTag, {
-      value: 'Temporal.PlainDate',
-    })
+  expect(observedGroupCounts([{ date }, { date: matchingDate }])).toEqual(
+    expectedGroupCounts(['same date', 'same date']),
+  )
+  expect(serializeValue({ date })).toBe(serializeValue({ date: matchingDate }))
+}
 
-    expect(observedGroupCounts([{ date }, { date: matchingDate }])).toEqual(
-      expectedGroupCounts(['same date', 'same date']),
-    )
-    expect(serializeValue({ date })).toBe(
-      serializeValue({ date: matchingDate }),
-    )
+function runTemporalGroupKeyCase(history: TemporalGroupKeyHistory): void {
+  switch (history.law) {
+    case 'distinct values':
+      return runDistinctValuesCase(temporalCase(history.kind))
+    case 'fresh values':
+      return runFreshValuesCase(temporalCase(history.kind))
+    case 'equal-comparing Duration representations':
+      return runDurationRepresentationsCase()
+    case 'tagged plain object':
+      return runTaggedPlainObjectCase()
+    case 'own-tagged empty plain object':
+      return runOwnTaggedEmptyPlainObjectCase()
+    case 'own matching tag':
+      return runOwnMatchingTagCase()
+  }
+}
+
+const TEMPORAL_GROUP_KEY_LAW =
+  'Temporal group keys with distinct kind or representation form distinct groups; matching fresh values coalesce.'
+
+describe('Temporal group keys', () => {
+  oracleProperty({
+    id: `ivm.temporal-group-key`,
+    law: {
+      statement: TEMPORAL_GROUP_KEY_LAW,
+      authority: `The established hash key domain documented above: Temporal kind and string representation; expectedGroupCounts.`,
+      limits: `One initial batch of two values per fixture; altered Temporal prototypes, separate polyfill copies, symbols, cycles, and mutable RegExp state are outside this contract.`,
+    },
+    owns: [`src/operators/groupBy.ts#groupBy`],
+    histories: temporalGroupKeyHistories,
+    label: temporalGroupKeyLabel,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(TEMPORAL_GROUP_KEY_LAW, plan, observe, () =>
+        runTemporalGroupKeyCase(plan.history),
+      ),
+    check: forwardAssertionJudgment,
   })
 })

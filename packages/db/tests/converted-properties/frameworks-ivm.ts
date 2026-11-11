@@ -5,6 +5,20 @@
 // files and deletes this directory.
 import type { ConvertedOwnerGroup } from './index.js'
 
-export const properties: ReadonlyArray<string> = []
+export const properties: ReadonlyArray<string> = [
+  // db-ivm
+  `ivm.temporal-group-key`,
+  // react-db
+  // vue-db and scripts
+]
 
-export const owners: ReadonlyArray<ConvertedOwnerGroup> = []
+export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
+  // db-ivm
+  [
+    `db-ivm/tests/temporal-group-key-oracle.test.ts`,
+    `ivm`,
+    `temporal-group-key`,
+  ],
+  // react-db
+  // vue-db and scripts
+]
