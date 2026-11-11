@@ -21,7 +21,7 @@ import {
   queryOnce,
   toArray,
 } from '../../src/query/index.js'
-import { oracleProperty, readOracleRunConfig } from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
 import { flushPromises } from '../utils.js'
 import { registerIncludesProperty } from './includes-registration-oracle.js'
 import {
@@ -831,8 +831,6 @@ function judgeOrderedWindowCase({
 const orderedWindowLaw = `A nested include's ordered child window matches the recomputed windowed model through root and child moves.`
 
 describe(`includes cross-formulation oracle`, () => {
-  const replay = readOracleRunConfig()
-
   // The next three properties have fixed route-transition histories. Their
   // generated integer is only a user token label: values span FastCheck's
   // default integer domain, while zero is reconstructed by the cold fixed
@@ -1445,14 +1443,7 @@ describe(`includes cross-formulation oracle`, () => {
   const orderedWindowStatement = `matches recomputation for ordered offset and limit child windows for a fixed seed`
 
   const checkEquivalenceScenario = (scenario: CrossFormulationScenario) =>
-    expectFormulationsEquivalent(
-      scenario,
-      replay.replayPath !== undefined &&
-        replay.replayProperty === `includes-cross-formulation.equivalence` &&
-        process.env.TANSTACK_DB_ORACLE_CALIBRATION === `missing-parent`
-        ? (rows) => rows.slice(1)
-        : undefined,
-    )
+    expectFormulationsEquivalent(scenario)
 
   registerIncludesProperty(
     [scenarioArbitrary],
@@ -1515,25 +1506,7 @@ describe(`includes cross-formulation oracle`, () => {
     scenario: CrossFormulationScenario
     offset: number
     limit: number
-  }) =>
-    expectWindowedIncludeMatches(
-      scenario,
-      offset,
-      limit,
-      replay.replayPath !== undefined &&
-        replay.replayProperty === `includes-cross-formulation.ordered-window` &&
-        process.env.TANSTACK_DB_ORACLE_CALIBRATION === `extra-child`
-        ? (rows) =>
-            rows.map((parent, index) =>
-              index === 0
-                ? {
-                    ...parent,
-                    children: [...parent.children, scenario.children[0]!],
-                  }
-                : parent,
-            )
-        : undefined,
-    )
+  }) => expectWindowedIncludeMatches(scenario, offset, limit)
 
   registerIncludesProperty(
     [windowedScenarioArbitrary],

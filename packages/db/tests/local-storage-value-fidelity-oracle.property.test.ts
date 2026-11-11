@@ -470,7 +470,7 @@ describe(`LocalStorage value fidelity oracle`, () => {
   }
 
   oracleProperty({
-    id: `${property}-fixed`,
+    id: `local-storage.value-fidelity-fixed`,
     law: {
       statement: `The default JSON storage boundary rejects lossy payloads without durable writes or handler calls, and restores accepted payloads in their independently described JSON form.`,
       authority: `LocalStorage guide acceptance and restore contract stated above`,

@@ -2030,6 +2030,11 @@ const nativeSyncMetadataProperties = new Set(
 )
 
 function directReplayTestName(property: string): string | undefined {
+  // An enumerated source registers one test per history and no random
+  // campaign, so its direct replay selects every test of the property, before
+  // any prefix rule below can name a campaign it does not have.
+  if (enumeratedProperties.has(property))
+    return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
   if (nativeSyncMetadataProperties.has(property))
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
   if (property.startsWith(`adapter-conformance.persisted-baseline-lifecycle.`))
@@ -2063,8 +2068,6 @@ function directReplayTestName(property: string): string | undefined {
     ].includes(property)
   )
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
-  if (enumeratedProperties.has(property))
-    return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
   if (
     [
       `query.persisted-direct-ownership`,
