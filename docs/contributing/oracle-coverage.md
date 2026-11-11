@@ -4330,6 +4330,14 @@ code from every literal `owns` list that it passes to a call: its
 `oracleProperty`, such as a shared conformance suite's registration
 function.
 
+Every oracle file registers its tests only through `oracleProperty`
+(maintainer decision, 2026-11-11). The
+[conversion record](oracle-reviews/2026-11-11-declare-oracle-removal.md)
+lists every test that moved to an ordinary file, the receiving witnesses
+renamed `*-witness.*`, the known-defect witness files, and the open
+exceptions: two multi-tab `it.fails` witnesses (#2267, #2209) and the
+production-running reach censuses that wait for enforced reach minimums.
+
 `scripts/lint-scope-oracle.property.test.js` owns lint selection after an
 edit (`scripts.lint-scope`): the changed scope, the named (pre-commit) scope,
 and the Claude edit and stop hooks. A generated construction in each campaign fixes
