@@ -366,7 +366,14 @@ async function recordGcReceiving(
     idle(true)
     await Promise.resolve()
     cut(`real Electric renewed deadline with idle budget`)
-    observe(`reach`, `renewed-usable-idle`)
+    // The usable idle opportunity comes past the model's deadline, so the
+    // model retires; the state is entered only then, and the check requires
+    // production to have retired at the same cut.
+    observe(`usable idle`, {
+      modelRetired: model.retired,
+      retired: collection.status === `cleaned-up`,
+    })
+    if (model.retired) observe(`reach`, `renewed-usable-idle`)
   } catch (error) {
     checkFailed = true
     primaryFailure = error
@@ -570,6 +577,20 @@ function checkGcReceiving(
         `zero-budget idle keeps the request`,
       )
   }
+  for (const value of valuesAt<{ modelRetired: boolean; retired: boolean }>(
+    trace,
+    `usable idle`,
+  )) {
+    if (!value.modelRetired || !value.retired)
+      return violation(
+        `usable idle`,
+        value.modelRetired
+          ? `the Collection did not retire at the first usable idle opportunity past its renewed deadline`
+          : `the model had not retired at the usable idle cut, so the wait did not cross the renewed deadline`,
+        `usable idle retires`,
+        { actual: value, expected: { modelRetired: true, retired: true } },
+      )
+  }
   const reached = valuesAt<string>(trace, `reach`)
   const missing = expected.reach.filter((state) => !reached.includes(state))
   if (missing.length > 0)
@@ -578,8 +599,8 @@ function checkGcReceiving(
       `the history did not enter ${missing.join(`, `)}`,
       `declared reach`,
     )
-  // The usable idle cut must retire the Collection: the shared model owes it,
-  // and the last gc cut above compared it.
+  // The usable idle cut retired both the model and the Collection (law
+  // `usable idle retires` above), and the last gc cut compared the rest.
   return pass
 }
 
@@ -598,6 +619,22 @@ oracleProperty({
   driver: recordGcReceiving,
   check: checkGcReceiving,
   calibrations: [
+    {
+      // A wrong public result at the usable idle cut: no retirement.
+      name: `no retirement at the usable idle opportunity`,
+      law: `usable idle retires`,
+      corrupt: (trace) =>
+        trace.some((entry) => entry.checkpoint === `usable idle`)
+          ? trace.map((entry) =>
+              entry.checkpoint === `usable idle`
+                ? {
+                    checkpoint: entry.checkpoint,
+                    value: { ...(entry.value as object), retired: false },
+                  }
+                : entry,
+            )
+          : undefined,
+    },
     {
       // A plausible wrong public result at the held cut: an early retirement.
       name: `hostile early retirement`,
