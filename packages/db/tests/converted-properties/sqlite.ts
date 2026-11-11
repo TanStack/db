@@ -5,6 +5,12 @@
 // files and deletes this directory.
 import type { ConvertedOwnerGroup } from './index.js'
 
-export const properties: ReadonlyArray<string> = []
+export const properties: ReadonlyArray<string> = [`opfs.open-outcome`]
 
-export const owners: ReadonlyArray<ConvertedOwnerGroup> = []
+export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
+  [
+    `browser-db-sqlite-persistence/tests/opfs-open-outcome-oracle.test.ts`,
+    `opfs`,
+    `open-outcome`,
+  ],
+]
