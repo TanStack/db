@@ -4352,7 +4352,18 @@ is drawn as a lockfile edit together with a changed installed copy in the
 session checkout's `node_modules`, as an install leaves them; a settings edit is
 drawn as a change that alters no report. A plain scratch directory under
 `.worktrees/` must produce no report. The repository's `.gitignore` is part of
-the tested configuration. It does not draw `.js` support modules or drivers,
+the tested configuration. It also owns the missing-install rule (maintainer
+decision, 2026-11-10: the hook never crashes). When the session checkout
+cannot resolve ESLint, its parser, and the plugin, every form writes one line
+naming the checkout and saying to run `pnpm install`. The edit and stop hooks
+of all four harness formats exit 0, the Codex stop hook with `{}` on stdout,
+and the command-line forms (the changed scope, the named scope, and `--all`)
+exit nonzero. Constructions in each campaign draw a missing install in a
+launch session and in a worktree session, whose hooks delegate through the
+launch checkout's script. A missing install is drawn only as checkouts with no
+`node_modules` at all: a partial install, a missing transitive dependency, and
+a worktree without its own install under an installed launch checkout are not
+drawn. It does not draw `.js` support modules or drivers,
 although the rule now resolves a `.js` test module when no TypeScript source
 exists for it (the plugin's part-reach oracle, in TanStack/oracles, owns that
 resolution). It does not draw an edit to `package.json` without a lockfile

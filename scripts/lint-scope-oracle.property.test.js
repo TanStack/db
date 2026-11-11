@@ -25,6 +25,19 @@
  * checkout, such as a scratch copy, is never one of the launch checkout's
  * changed files.
  *
+ * The lint needs the checkout's installed dependencies: ESLint, its TypeScript
+ * parser, and the plugin. When the session checkout cannot resolve them, as in
+ * a fresh worktree before `pnpm install`, nothing is linted and the script
+ * never crashes. Every form writes one line to stderr that names the session
+ * checkout and says how to install: `oracle lint skipped: dependencies are not
+ * installed in <checkout>; run pnpm install`. A hook, in every harness format
+ * and for both events, then exits 0, so a missing install does not block the
+ * agent; the Codex stop hook still writes the `{}` that Codex requires on
+ * stdout when a stop hook exits 0. The command-line forms (`pnpm lint:changed`,
+ * the named scope that the pre-commit hook runs, and `--all`, which
+ * `pnpm lint:oracles` runs in CI) exit nonzero with the same line, so a run
+ * that lints nothing cannot pass as a clean one.
+ *
  * Authority: AGENTS.md "Lint feedback while you work" says the hooks and
  * `pnpm lint:changed` return the oracle reports for the files that were edited,
  * and that the pre-commit hook lints the staged files. Issue #2280, written by
@@ -39,7 +52,10 @@
  * results are a function of the installed rule's code and its settings, so a
  * lockfile edit that leaves the plugin's resolved entries as they were cannot
  * change one (round-1 review of PR #2378, finding B1-10, which asked that an
- * unrelated dependency bump stop re-linting every oracle file).
+ * unrelated dependency bump stop re-linting every oracle file). The
+ * missing-dependency rule is the maintainer's decision of 2026-11-10 ("we
+ * should never just crash"): the hooks skip with one line and exit 0, and the
+ * command-line forms fail with the same line so that CI stays strict.
  *
  * Limits. The grammar draws up to three oracle files, two or three support
  * modules, one driver, and one production module, with relative imports and
@@ -68,7 +84,14 @@
  * 1 MiB default output buffer of a child process with packages nothing uses.
  * The base commit may lack it, and the branch then adds it. A settings edit changes
  * no report. The repository's own `.gitignore` is copied into each
- * temporary repository, so its rules are part of what is tested.
+ * temporary repository, so its rules are part of what is tested. A missing
+ * install is a launch checkout with no `node_modules`, so its nested worktree
+ * resolves nothing either; a temporary directory with an installed ancestor
+ * fails the run instead of entering the state. A partial install, a missing
+ * transitive dependency, and a worktree without its own install under a launch
+ * checkout that has one (which resolves the launch checkout's packages by
+ * walking up) are not drawn. Without an install, the import graph does not
+ * matter, so those histories enter no selection state.
  *
  * Structure:
  *   1. The grammar draws a module graph, the edited and untracked modules, and
@@ -98,6 +121,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
@@ -248,6 +272,12 @@ const skeletonArbitrary = fc.record({
       { weight: 1, arbitrary: fc.constant(`missing`) },
     ),
   }),
+  // Whether the checkouts have their dependencies installed. Drawn last, so
+  // the fields above keep their draws.
+  dependencies: fc.oneof(
+    { weight: 7, arbitrary: fc.constant(`installed`) },
+    { weight: 1, arbitrary: fc.constant(`missing`) },
+  ),
 })
 
 function programOf({ shape, ...skeleton }) {
@@ -267,7 +297,7 @@ function programOf({ shape, ...skeleton }) {
  * fixing the fields that enter it. The skeletons come from the campaign's seed,
  * so they are members of the grammar and vary with the seed.
  */
-const constructions = [
+const installedConstructions = [
   ...[...PLUGIN_EDITS, LOCKFILE_EDIT, SETTINGS_EDIT].map(
     (edit) => (skeleton) => ({ ...skeleton, ruleEdited: edit }),
   ),
@@ -297,6 +327,20 @@ const constructions = [
       index === 0 ? { ...oracle, fixedTargets: [PRODUCTION] } : oracle,
     ),
   }),
+]
+
+// The states above need an install to be observed, and a missing install is
+// drawn in each kind of session.
+const constructions = [
+  ...installedConstructions.map((build) => (skeleton) => ({
+    ...build(skeleton),
+    dependencies: `installed`,
+  })),
+  ...[`launch`, `worktree`].map((session) => (skeleton) => ({
+    ...skeleton,
+    session,
+    dependencies: `missing`,
+  })),
 ]
 
 const shapes = {
@@ -489,6 +533,7 @@ function buildProgram(skeleton) {
     session: skeleton.session,
     scratch: skeleton.scratch,
     lockfile: skeleton.lockfile,
+    dependencies: skeleton.dependencies,
     edges,
     reexports,
     modules,
@@ -573,6 +618,34 @@ function predictSelected(program, edited) {
 /** Whether the session checkout's reports carry the edited rule's mark. */
 function predictRuleMarked(program) {
   return isPluginEdit(program.ruleEdited)
+}
+
+// Without an install, no form lints, and none crashes. Each run writes the
+// one skip line to stderr, naming the session checkout, which the driver
+// writes as `<checkout>`. A command-line run exits nonzero, so CI fails; a hook
+// exits 0, so the agent goes on. Codex's stop hook writes `{}` on stdout,
+// because Codex requires JSON there when a stop hook exits 0; every other run
+// writes nothing to stdout.
+
+const SKIP_LINE = `oracle lint skipped: dependencies are not installed in <checkout>; run pnpm install`
+const HOOK_FORMATS = [`claude`, `codex`, `gemini`, `copilot`]
+const HOOK_EVENTS = [`edit`, `stop`]
+
+/** The skip that each form owes, by the form's name. */
+function predictSkips(program) {
+  const cli = { exit: `nonzero`, stdout: ``, stderr: [SKIP_LINE] }
+  const skips = { changed: cli, all: cli }
+  if (editedByScope(program).named.length > 0) skips.named = cli
+  for (const format of HOOK_FORMATS) {
+    for (const event of HOOK_EVENTS) {
+      skips[`${format}-${event}`] = {
+        exit: `zero`,
+        stdout: format === `codex` && event === `stop` ? `{}\n` : ``,
+        stderr: [SKIP_LINE],
+      }
+    }
+  }
+  return skips
 }
 
 // -- 3. Driver ----------------------------------------------------------------
@@ -765,6 +838,16 @@ function installPlugin(checkout) {
   })
 }
 
+/** Whether Node resolves a package from a checkout's root. */
+function resolvesFrom(checkout, specifier) {
+  try {
+    createRequire(join(checkout, `package.json`)).resolve(specifier)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** The path of a module in a checkout. */
 function modulePath(checkout, name) {
   if (CONFIGURATION.includes(name)) return join(checkout, name)
@@ -818,14 +901,20 @@ function repositoryOf(program) {
   gitIn(launch, `add`, `-A`)
   gitIn(launch, `commit`, `-q`, `-m`, `base`)
   // A worktree nested in the launch checkout finds these packages by walking
-  // up from its own files. Each checkout has its own installed plugin.
-  installDependencies(launch)
+  // up from its own files. Each checkout has its own installed plugin. A
+  // missing install leaves both checkouts without packages.
+  const installed = program.dependencies === `installed`
+  if (installed) installDependencies(launch)
   let checkout = launch
   if (program.session === `worktree`) {
     gitIn(launch, `worktree`, `add`, `-q`, `-b`, `feature`, WORKTREE)
     checkout = join(launch, WORKTREE)
-    installPlugin(checkout)
+    if (installed) installPlugin(checkout)
   }
+  if (!installed && resolvesFrom(checkout, `eslint`))
+    throw new Error(
+      `the temporary checkout ${checkout} resolves eslint from an ancestor directory, so it cannot draw a missing install`,
+    )
   if (program.scratch) {
     mkdirSync(dirname(join(launch, SCRATCH)), { recursive: true })
     writeFileSync(join(launch, SCRATCH), `${UNDECLARED_TEST}\n`)
@@ -853,7 +942,7 @@ function repositoryOf(program) {
       join(checkout, LOCKFILE),
       lockfileText({ size: program.lockfile.size }),
     )
-  if (isPluginEdit(program.ruleEdited)) {
+  if (installed && isPluginEdit(program.ruleEdited)) {
     // The new lockfile installs a changed plugin in the session checkout.
     const rule = join(checkout, RULE_SOURCE)
     const text = readFileSync(rule, `utf8`)
@@ -921,10 +1010,77 @@ function runCli(cwd, script, args, input) {
   return reportedOracles(lines)
 }
 
+/**
+ * Runs a copy of the CLI from `cwd` and returns its exit status, stdout, and
+ * stderr lines as they are, with the session checkout's path written as
+ * `<checkout>` and the launch checkout's, in a worktree session, as `<launch>`.
+ * A missing install is judged on this raw record, so a crash is a mismatch,
+ * not a thrown driver error.
+ */
+function runRaw(cwd, script, args, input, { launch, checkout }) {
+  const result = spawnSync(process.execPath, [script, ...args], {
+    cwd,
+    encoding: `utf8`,
+    input,
+  })
+  const named = (text) =>
+    text.split(checkout).join(`<checkout>`).split(launch).join(`<launch>`)
+  return {
+    exit: result.status === 0 ? `zero` : `nonzero`,
+    stdout: named(result.stdout),
+    stderr: named(result.stderr).split(`\n`).filter(Boolean),
+  }
+}
+
+/**
+ * What each form does without an install: the command-line forms in the
+ * session checkout, and each harness's hooks from the launch checkout.
+ */
+function observedSkips(program, repository) {
+  const { launch, checkout, pathOf } = repository
+  const own = join(checkout, `scripts`, `agent-lint-feedback.mjs`)
+  const launchScript = join(launch, `scripts`, `agent-lint-feedback.mjs`)
+  const named = editedByScope(program).named
+  const skips = {
+    changed: runRaw(checkout, own, [`--format=text`], ``, repository),
+    all: runRaw(checkout, own, [`--format=text`, `--all`], ``, repository),
+  }
+  if (named.length > 0)
+    skips.named = runRaw(
+      checkout,
+      own,
+      [`--format=text`, ...named.map((name) => pathOf(name))],
+      ``,
+      repository,
+    )
+  for (const format of HOOK_FORMATS) {
+    for (const event of HOOK_EVENTS) {
+      const input =
+        event === `edit`
+          ? {
+              cwd: checkout,
+              tool_input: { file_path: pathOf(program.hookTarget) },
+            }
+          : { cwd: checkout }
+      skips[`${format}-${event}`] = runRaw(
+        launch,
+        launchScript,
+        [`--format=${format}`, `--event=${event}`],
+        JSON.stringify(input),
+        repository,
+      )
+    }
+  }
+  return skips
+}
+
 /** What each scope reports, from one repository. */
 function observedSelections(program) {
-  const { launch, checkout, pathOf } = repositoryOf(program)
+  const repository = repositoryOf(program)
+  const { launch, checkout, pathOf } = repository
   try {
+    if (program.dependencies === `missing`)
+      return { skips: observedSkips(program, repository) }
     const scopes = editedByScope(program)
     const own = join(checkout, `scripts`, `agent-lint-feedback.mjs`)
     const launchScript = join(launch, `scripts`, `agent-lint-feedback.mjs`)
@@ -1025,6 +1181,10 @@ function compareRuleSource(marks, marked) {
 //     must come from its own installed copy.
 //   scratch-directory: a launch session's checkout holds a scratch directory
 //     under `.worktrees/`.
+//   missing-dependencies-launch, missing-dependencies-worktree: the checkouts
+//     have no install, and the session works in the launch checkout or in the
+//     worktree, whose hooks reach its own script through the launch
+//     checkout's. These histories lint nothing, so they enter no other state.
 
 const STATES = [
   `direct-dependent`,
@@ -1053,6 +1213,8 @@ const STATES = [
   `worktree-session`,
   `worktree-own-rule`,
   `scratch-directory`,
+  `missing-dependencies-launch`,
+  `missing-dependencies-worktree`,
 ]
 const counts = new Map(STATES.map((state) => [state, 0]))
 
@@ -1087,6 +1249,11 @@ function withoutEdges(program, drop) {
 /** Marks the states that the program enters. */
 function recordStates(program, observe) {
   const states = new Set()
+  if (program.dependencies === `missing`) {
+    states.add(`missing-dependencies-${program.session}`)
+    countStates(states, observe)
+    return
+  }
   const { changed, hook } = editedByScope(program)
   const edited = new Set(changed)
   if (program.ruleEdited) states.add(`${program.ruleEdited}-edit`)
@@ -1171,6 +1338,11 @@ function recordStates(program, observe) {
   } else if (program.scratch) {
     states.add(`scratch-directory`)
   }
+  countStates(states, observe)
+}
+
+/** Observes each entered state, and counts it outside the determinism run. */
+function countStates(states, observe) {
   for (const state of states) {
     observe(`reach`, state)
     if (!expect.getState().currentTestName.endsWith(`determinism`))
@@ -1217,14 +1389,16 @@ const constructedStates = [
   `large-lockfile-same-plugin`,
   `missing-base-lockfile`,
   `hook-production-boundary`,
+  `missing-dependencies-launch`,
+  `missing-dependencies-worktree`,
 ]
 
 oracleProperty({
   id: PROPERTY,
   law: {
-    statement: `Every oracle whose lint judgment can change is selected, and each report uses the session checkout's installed rule.`,
-    authority: `AGENTS.md: Lint feedback while you work and Name oracle files for discovery; maintainer issue 2280; review 2378 B1-10.`,
-    limits: `The unchanged bounded import, checkout, hook, and lockfile language described above.`,
+    statement: `Every oracle whose lint judgment can change is selected, and each report uses the session checkout's installed rule. Without an install, every form skips with one line naming the checkout: a hook exits 0, and a command-line run exits nonzero.`,
+    authority: `AGENTS.md: Lint feedback while you work and Name oracle files for discovery; maintainer issue 2280; review 2378 B1-10; maintainer decision 2026-11-10 that the hook never crashes.`,
+    limits: `The bounded import, checkout, hook, lockfile, and install language described above.`,
   },
   histories: {
     arbitrary: new SkeletonWithProductionPrefix(),
@@ -1240,6 +1414,8 @@ oracleProperty({
   },
   resolve: programOf,
   model: (program) => {
+    if (program.dependencies === `missing`)
+      return { skips: predictSkips(program) }
     const scopes = editedByScope(program)
     return {
       marked: predictRuleMarked(program),
@@ -1260,8 +1436,9 @@ oracleProperty({
       Object.fromEntries(
         Object.entries(observed).map(([scope, value]) => [
           scope,
-          value === undefined
-            ? undefined
+          // A skip record is plain data; a selection's marks are a set.
+          value === undefined || scope === `skips`
+            ? value
             : { ...value, marks: [...value.marks] },
         ]),
       ),
@@ -1271,6 +1448,15 @@ oracleProperty({
     const observed = trace.find(
       ({ checkpoint }) => checkpoint === `completed selections`,
     )?.value
+    if (expected.skips !== undefined)
+      return (
+        differs(
+          `completed selections`,
+          `missing install`,
+          observed?.skips,
+          expected.skips,
+        ) ?? pass
+      )
     if (observed === undefined)
       return differs(
         `completed selections`,

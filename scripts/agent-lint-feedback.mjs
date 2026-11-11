@@ -39,22 +39,19 @@
  * When `cwd` is in another checkout that has its own copy of this script, that
  * copy runs instead, so a branch is linted by its own rule, as CI lints it.
  * Without `cwd`, the checkout is the one that holds this script.
+ *
+ * The lint needs the checkout's installed dependencies, which a fresh worktree
+ * does not have. This script imports them only after it has checked that they
+ * resolve, so it never crashes on a missing install: it writes one line that
+ * names the checkout and says to run `pnpm install`. A hook then exits 0, so a
+ * missing install does not block the agent. A command-line run exits 1,
+ * because CI and the pre-commit hook must not pass a lint that did not run.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import tsParser from '@typescript-eslint/parser'
-import { ESLint } from 'eslint'
-import oraclePlugin from '@tanstack/eslint-plugin-oracles'
-import { resolveImportedTestModule } from '@tanstack/eslint-plugin-oracles/rules/no-unit-test'
-import {
-  describeLoweredRunBudget,
-  isOracleFile,
-  loweredRunBudgetsBetween,
-  mergeBase,
-} from './check-oracle-run-counts.mjs'
 import { oracleLintSettings } from './oracle-lint-settings.mjs'
 
 const { values: options, positionals } = parseArgs({
@@ -98,6 +95,44 @@ const root =
   scriptRoot
 const ownScript = join(root, `scripts`, `agent-lint-feedback.mjs`)
 const delegate = root !== scriptRoot && existsSync(ownScript)
+
+/** Whether a package resolves from this script, as its import would. */
+function resolves(specifier) {
+  try {
+    import.meta.resolve(specifier)
+    return true
+  } catch (error) {
+    if (error.code === `ERR_MODULE_NOT_FOUND`) return false
+    throw error
+  }
+}
+
+// A delegating run lints nothing itself, so it needs no install. Otherwise the
+// lint modules load only when their packages resolve.
+const linting =
+  !delegate &&
+  [
+    `eslint`,
+    `@typescript-eslint/parser`,
+    `@tanstack/eslint-plugin-oracles`,
+  ].every(resolves)
+const { default: tsParser } = linting
+  ? await import(`@typescript-eslint/parser`)
+  : {}
+const { ESLint } = linting ? await import(`eslint`) : {}
+const { default: oraclePlugin } = linting
+  ? await import(`@tanstack/eslint-plugin-oracles`)
+  : {}
+const { resolveImportedTestModule } = linting
+  ? await import(`@tanstack/eslint-plugin-oracles/rules/no-unit-test`)
+  : {}
+// The run-budget module imports the parser too, so it loads after the check.
+const {
+  describeLoweredRunBudget,
+  isOracleFile,
+  loweredRunBudgetsBetween,
+  mergeBase,
+} = linting ? await import(`./check-oracle-run-counts.mjs`) : {}
 
 function git(...args) {
   return execFileSync(`git`, args, { cwd: root, encoding: `utf8` }).trim()
@@ -427,6 +462,14 @@ if (delegate) {
     { cwd: root, input: inputText, stdio: [`pipe`, `inherit`, `inherit`] },
   )
   process.exitCode = result.status ?? 1
+} else if (!linting) {
+  process.stderr.write(
+    `oracle lint skipped: dependencies are not installed in ${scriptRoot}; run pnpm install\n`,
+  )
+  if (!isHook) process.exitCode = 1
+  // Codex requires JSON on stdout when a stop hook exits 0.
+  else if (options.format === `codex` && options.event === `stop`)
+    process.stdout.write(`{}\n`)
 } else {
   const { scope, files } = selectFiles(input)
   const report = [
