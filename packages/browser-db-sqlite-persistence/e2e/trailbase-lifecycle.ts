@@ -10,6 +10,7 @@ import {
   startupOPFSArtifacts,
 } from './persisted-startup-opfs-cleanup'
 import { runTrailBaseEager } from './trailbase-eager'
+import { removeClosedArtifacts } from './query-rejected-write-cutoff-cleanup'
 import type { HydrationLifecycleHistory } from '../../trailbase-db-collection/tests/lifecycle-hydration-oracle'
 
 export async function runTrailBaseHydration(
@@ -26,7 +27,14 @@ export async function runTrailBaseHydration(
         history,
         id,
       ),
-    [() => database.close?.(), () => removeStartupOPFSArtifacts(databaseName)],
+    [
+      () => database.close?.(),
+      () =>
+        removeClosedArtifacts(
+          () => removeStartupOPFSArtifacts(databaseName),
+          (cut, value) => console.info(`trailbase.opfs ${cut}`, value),
+        ),
+    ],
   )
   const artifacts = await startupOPFSArtifacts()
   if (artifacts.length)

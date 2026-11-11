@@ -9,6 +9,7 @@ import { powerSyncBrowserBaselineLifecycleAdapter } from '../../powersync-db-col
 import { inProcessSeams } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
 import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
 import { removeStartupOPFSArtifacts } from './persisted-startup-opfs-cleanup'
+import { removeClosedArtifacts } from './query-rejected-write-cutoff-cleanup'
 import type { BaselineLifecycleHistory } from '../../db-adapter-conformance/tests/persisted-baseline-lifecycle-oracle'
 
 async function runBaselineLifecycle(
@@ -32,7 +33,14 @@ async function runBaselineLifecycle(
         id,
         candidate,
       ),
-    [() => database.close?.(), () => removeStartupOPFSArtifacts(databaseName)],
+    [
+      () => database.close?.(),
+      () =>
+        removeClosedArtifacts(
+          () => removeStartupOPFSArtifacts(databaseName),
+          (cut, value) => console.info(`${adapter}.opfs ${cut}`, value),
+        ),
+    ],
   )
 }
 Object.assign(window, { runBaselineLifecycle })

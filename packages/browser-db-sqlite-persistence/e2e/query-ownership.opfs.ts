@@ -10,6 +10,7 @@ import {
   startupOPFSArtifacts,
 } from './persisted-startup-opfs-cleanup'
 import { recordQueryHistory } from './query-ownership-browser-support'
+import { removeClosedArtifacts } from './query-rejected-write-cutoff-cleanup'
 import type { DirectOwnershipHistory } from '../../query-db-collection/tests/persisted-direct-ownership-oracle'
 import type { ImmediateMaterializationHistory } from '../../query-db-collection/tests/immediate-eager-materialization-oracle'
 
@@ -30,7 +31,11 @@ async function runQueryPersistedDirectOwnership(
         id,
         observe,
       )
-    }, [() => database.close?.(), () => removeStartupOPFSArtifacts(name)])
+    }, [
+      () => database.close?.(),
+      () =>
+        removeClosedArtifacts(() => removeStartupOPFSArtifacts(name), observe),
+    ])
     const artifacts = await startupOPFSArtifacts()
     if (artifacts.length)
       throw new Error(

@@ -284,3 +284,37 @@ calibration rejects its corrupted trace, and both determinism tests pass.
 `pnpm --config.verifyDepsBeforeRun=false lint:changed` also passes. New-head
 CI remains required before merge. The existing maintainer allowance does not
 waive that gate.
+
+### Remaining OPFS receiver cleanup sites
+
+On `8feb587ca1688bc7330d7d95f2c9dd99bcbc1e87`, adapter-browser CI job
+`130275725937` passed 403 checks and failed one TrailBase hydration history.
+The error was `NoModificationAllowedError` from fixture file deletion, after
+database close. It was the same native handle-release condition previously
+corrected in the startup and eager-gap pages, not a row comparison failure.
+
+An audit of the shared deletion helper's callers found three remaining direct
+database-close cleanup sites without its bounded retry: TrailBase hydration,
+Query direct ownership, and the shared RxDB/PowerSync baseline lifecycle page.
+All three now call the existing `removeClosedArtifacts` after awaited close.
+It retries only `NoModificationAllowedError`, at most 100 times. Existing
+cleanup aggregation, permanent failures and primary product verdicts stay.
+No production code, model, history grammar or product comparison changes.
+
+A supplemental fixture calibration injects that exact error on the post-close
+removal, separately on all four receiving paths. Before the cleanup edits,
+actual Chromium fails all four checks with the injected error. Afterward,
+each path retries successfully and completes another history in the same
+browser origin. This calibration tests cleanup mechanics, not another product
+model or an added claim of oracle closure.
+
+```sh
+pnpm --config.verifyDepsBeforeRun=false --filter @tanstack/browser-db-sqlite-persistence test:oracles:adapters-browser tests/opfs-fixture-cleanup.test.ts tests/trailbase-hydration-oracle.test.ts tests/query-rejected-write-cutoff-browser-fidelity.test.ts
+```
+
+GREEN: 52 tests in three files, 86.00 seconds. This includes all 37 TrailBase
+hydration checks, four new receiver cleanup calibrations, and eleven existing
+transport/cleanup calibrations. Permanent busy errors still fail and a prior
+product mismatch remains primary. Fixed and random hydration campaigns each
+reach all nine required states. Changed-file lint and the browser package's
+`tsc --noEmit` pass. New-head CI remains required before merge.
