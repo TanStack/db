@@ -1361,7 +1361,7 @@ const ownerGroups: ReadonlyArray<
     ].join(` `),
   ],
   [
-    `db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts`,
+    `db-sqlite-persistence-core/tests/sync-metadata-session-persisted-oracle.test.ts`,
     `sync-metadata-session`,
     `persisted-flat persisted-nested persisted-seeds persisted-conflicts persisted-cached persisted-nested-seeds persisted-reads persisted-reads-seeds persisted-peers persisted-peers-full persisted-peers-on-demand persisted-seed-reinsert-reload persisted-kept-metadata-durability persisted-queued-metadata-repair`,
   ],

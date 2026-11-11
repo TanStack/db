@@ -5247,7 +5247,7 @@ reload after a named notice keeps a seed's metadata (decision 18).
 | Owner | Production paths | Observations and checkpoint |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [sync metadata session oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-session-oracle.ts) (`flat`, `nested`, `seeds`, `nested-seeds`, `seeds-full`, `nested-conflicts` grammars) | `DbClient` Collection, core hold, `DbClient.hydrate` seeds | `metadata.row.get`, `metadata.collection.get`, `list()`, `list(prefix)`, `collection.base`, each commit receipt's state, thrown errors; after every action and after settlement |
-| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted-driver.ts) and its [campaigns](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`, `persisted-reads`, `persisted-reads-seeds`, `persisted-peers`, `persisted-peers-full`, `persisted-peers-on-demand`) | `persistedCollectionOptions` over an in-memory adapter, store hold, core hold, and a storage read held in flight; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup; a peer's notices, eager, under full row updates, and on demand | the same source reads after every action; `collection.base` and receipts after settlement; in the peer production paths, stored rows after settlement and stored row metadata at every completed durable action cut and after settlement |
+| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted-driver.ts) and its [campaigns](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted-oracle.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`, `persisted-reads`, `persisted-reads-seeds`, `persisted-peers`, `persisted-peers-full`, `persisted-peers-on-demand`) | `persistedCollectionOptions` over an in-memory adapter, store hold, core hold, and a storage read held in flight; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup; a peer's notices, eager, under full row updates, and on demand | the same source reads after every action; `collection.base` and receipts after settlement; in the peer production paths, stored rows after settlement and stored row metadata at every completed durable action cut and after settlement |
 | [native SQLite/coordinator receiver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite-driver.ts) and its [campaigns](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite-oracle.test.ts) | two real Collections and coordinators, node:sqlite, BroadcastChannel and Web Locks; partial/full/on-demand grammar | shared model and source reads after correlated commit/notice/recovery cuts; rows, metadata and applied receipts after settlement; direct durable metadata after each correlated action and durable rows after settlement |
 | [recovery schedules](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-recovery-oracle.ts) using the same session model and native receiver | response delivery, storage reading and captured-row application held separately; bare/non-bare seeds, a second tab's source write, or cleanup during one recovery on demand | source metadata before application, after the interruption and after completion; stale source reads at cleanup start and after late work; direct durable metadata after completion |
 | paired properties and boundary witnesses in the core driver file | production against itself: holds removed, row 2's actions removed, or seeds performed first; stale run; write without a transaction; cleanup with a held seed | source reads (and row 1's view) at each shared checkpoint, or every observation after settlement for seed order; thrown errors; unhandled rejections |
@@ -5312,17 +5312,18 @@ the 40-run sibling and 8-run durability campaign mechanics in
 direct replay selection remain in their receiving files.
 
 The campaign module and the files that host these campaigns carry `oracle` in
-their names, so `pnpm lint:run-budgets` tracks their budgets: the native
+their names, so `pnpm lint:run-budgets` tracks their budgets: the persisted
+driver's `sync-metadata-session-persisted-oracle.test.ts`, the native
 receiver's `sync-metadata-session-sqlite-oracle.test.ts`,
 `sync-metadata-recovery-oracle.test.ts`, and
-`sync-metadata-missing-row-oracle.test.ts` (review finding F28). Open limit
-(owner: this sync metadata session entry; needs a maintainer decision): the
-persisted driver's campaign host, `sync-metadata-session-persisted.test.ts`,
-keeps its name, so the tripwire does not track its own budgets. Under an
-oracle name, the oracle lint reports its three raw `fcTest.prop` flat
-campaigns, which register under a replay condition (`oracle/no-disabled` and
-`oracle/oracle-property-only`). Converting them to `oracleProperty` changes
-tests, which a rename must not do.
+`sync-metadata-missing-row-oracle.test.ts` (review finding F28). The
+persisted flat property was two raw fast-check campaigns of 50 histories and
+a sample test of its fixed-seed reach. It is now an `oracleProperty` with the
+same seed (2220011), budget, model, driver, and comparison. Its four regimes
+(`read with two held transactions`, `open transaction over a held
+transaction`, `store hold`, and `core hold`) are required by constructed
+histories, whose prefixes are in the session oracle's `regimeConstructions`
+(maintainer decision, 2026-11-11, to remove every legacy campaign form).
 
 The native on-demand path can receive a successful recovery response that
 crosses an earlier cache version without transaction replay details. The shared

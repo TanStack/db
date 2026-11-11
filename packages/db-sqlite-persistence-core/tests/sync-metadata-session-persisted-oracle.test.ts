@@ -1,5 +1,4 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, it } from 'vitest'
 import {
   constructRegime,
   describeMismatch,
@@ -21,11 +20,6 @@ import {
   seedReinsertReloadReplay,
   sessionHistoryArbitrary,
 } from '../../db/tests/sync-metadata-session-oracle'
-import {
-  oraclePropertyOptions,
-  oracleRuns,
-  readOracleRunConfig,
-} from '../../db/tests/oracle-config'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { createPersistedDriver } from './sync-metadata-session-persisted-driver'
 import {
@@ -108,10 +102,6 @@ async function assertPersistedHistory(
   )
   if (mismatch) throw new Error(describeMismatch(history, mismatch))
 }
-
-const property = `sync-metadata-session.persisted-flat`
-const fixedSeed = 2_220_011
-const requestedReplayProperty = readOracleRunConfig().replayProperty
 
 describe(`sync metadata session oracle through the persisted wrapper`, () => {
   it.each([false, true])(
@@ -321,54 +311,6 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
       { type: `upsert`, key: 2, metadata: false },
     ])
   })
-
-  it(`reaches held and open-over-held reads in the fixed campaign`, () => {
-    const counts = new Map<string, number>()
-    for (const history of fc.sample(
-      sessionHistoryArbitrary(persistedFlatGrammar),
-      {
-        numRuns: oracleRuns(50),
-        seed: fixedSeed,
-      },
-    ))
-      for (const regime of historyRegimes(persistedFlatGrammar, history))
-        counts.set(regime, (counts.get(regime) ?? 0) + 1)
-    for (const regime of [
-      `read with two held transactions`,
-      `open transaction over a held transaction`,
-      `store hold`,
-      `core hold`,
-    ])
-      expect(counts.get(regime) ?? 0, regime).toBeGreaterThan(5)
-  })
-
-  if (requestedReplayProperty === undefined) {
-    fcTest.prop([sessionHistoryArbitrary(persistedFlatGrammar)], {
-      numRuns: oracleRuns(50),
-      seed: fixedSeed,
-    })(
-      `keeps the session law on flat histories (fixed)`,
-      assertPersistedHistory,
-      120_000,
-    )
-    fcTest.prop(
-      [sessionHistoryArbitrary(persistedFlatGrammar)],
-      oraclePropertyOptions(50, property),
-    )(
-      `keeps the session law on flat histories (random)`,
-      assertPersistedHistory,
-      120_000,
-    )
-  } else if (requestedReplayProperty === property) {
-    fcTest.prop(
-      [sessionHistoryArbitrary(persistedFlatGrammar)],
-      oraclePropertyOptions(50, property),
-    )(
-      `replays persisted flat session histories`,
-      assertPersistedHistory,
-      120_000,
-    )
-  }
 })
 
 /**
@@ -376,7 +318,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
  * conflict production path runs more histories: an insert over a different row needs an
  * outer insert, an inner write to the same row, and the inner commit.
  */
-const extraProductionPaths: Array<{
+const sessionProductionPaths: Array<{
   productionPath: SessionGrammar
   property: string
   seed: number
@@ -384,6 +326,20 @@ const extraProductionPaths: Array<{
   reach: Array<ConstructedRegime>
   fixed?: Array<{ name: string; history: Array<SessionAction> }>
 }> = [
+  // The flat production path, whose raw fixed and random campaigns of 50
+  // histories this property replaced with the same seed and budget.
+  {
+    productionPath: persistedFlatGrammar,
+    property: `sync-metadata-session.persisted-flat`,
+    seed: 2_220_011,
+    runs: 50,
+    reach: [
+      `read with two held transactions`,
+      `open transaction over a held transaction`,
+      `store hold`,
+      `core hold`,
+    ],
+  },
   {
     productionPath: persistedNestedGrammar,
     property: `sync-metadata-session.persisted-nested`,
@@ -858,9 +814,9 @@ registerSeedReinsertReloadProperty({
 })
 
 /**
- * Nesting and seeds: each production path above is its own property over the
- * general session grammar, with the same model, persisted driver and
- * per-action comparison as the flat campaign. Generated histories may hold
+ * Each production path above, flat, nested, and seeded, is its own property
+ * over the general session grammar, with the same model, persisted driver and
+ * per-action comparison. Generated histories may hold
  * actions that are illegal where they fall; the runner skips them, so these
  * properties do not require every authored action to run.
  *
@@ -878,7 +834,11 @@ registerSeedReinsertReloadProperty({
  * random campaign required none. A required state must not depend on the
  * seed (oracle framework, declared reach), so each campaign now requires at
  * least one constructed history per regime, beside the unchanged generated
- * runs; half of a campaign's histories are constructed.
+ * runs; half of a campaign's histories are constructed. The flat property
+ * was two raw fast-check campaigns of 50 histories, fixed seed 2220011 and
+ * random, with a sample test that required more than five fixed-seed
+ * histories in each of its four regimes. It keeps its seed and budget, and
+ * its constructed histories replace that sample test.
  */
 for (const {
   productionPath,
@@ -887,7 +847,7 @@ for (const {
   runs,
   reach: states,
   fixed,
-} of extraProductionPaths) {
+} of sessionProductionPaths) {
   oracleProperty<Array<SessionAction>, Array<OwedSessionRun>>({
     id: productionPathProperty,
     law: {
