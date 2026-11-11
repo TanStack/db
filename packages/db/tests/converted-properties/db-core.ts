@@ -24,6 +24,10 @@ const windowHistoryDrivers = [
 
 export const properties: ReadonlyArray<string> = [
   // indexes and comparison
+  `cursor.scalar-matrix`,
+  `cursor.composite-width-matrix`,
+  `cursor.leading-boundary-matrix`,
+  `cursor.local-order-fixed`,
   // transactions and mutations
   // IndexedDB and live-query observers
   // proxies and conformance
@@ -52,6 +56,11 @@ export const properties: ReadonlyArray<string> = [
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
   // indexes and comparison
+  [
+    `db/tests/cursor-oracle.property.test.ts`,
+    `cursor`,
+    `scalar-matrix composite-width-matrix leading-boundary-matrix local-order-fixed`,
+  ],
   // transactions and mutations
   // IndexedDB and live-query observers
   // proxies and conformance
