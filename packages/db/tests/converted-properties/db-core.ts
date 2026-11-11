@@ -40,6 +40,19 @@ export const properties: ReadonlyArray<string> = [
   `comparison.non-finite-witnesses`,
   `comparison.signed-infinity-custom`,
   `comparison.temporal-witnesses`,
+  `index-update.reference-model-fixed`,
+  `index-update.nullish-fixed`,
+  `index-update.nullish-string-owners`,
+  `index-update.invalid-comparator`,
+  `index-update.rejected-comparator-writes`,
+  `index-update.collection-boundary`,
+  `index-update.comparator-equal-update`,
+  `index-update.mixed-key-deletion`,
+  `index-update.mixed-key-history`,
+  `index-update.temporal-key-owners`,
+  `index-update.mixed-public-snapshot`,
+  `index-update.binary-ownership`,
+  `index-update.month-day-equality`,
   // transactions and mutations
   // IndexedDB and live-query observers
   // proxies and conformance
@@ -92,6 +105,11 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/comparison-oracle.property.test.ts`,
     `comparison`,
     `non-finite-witnesses signed-infinity-custom temporal-witnesses`,
+  ],
+  [
+    `db/tests/index-update-oracle.property.test.ts`,
+    `index-update`,
+    `reference-model-fixed nullish-fixed nullish-string-owners invalid-comparator rejected-comparator-writes collection-boundary comparator-equal-update mixed-key-deletion mixed-key-history temporal-key-owners mixed-public-snapshot binary-ownership month-day-equality`,
   ],
   // transactions and mutations
   // IndexedDB and live-query observers
