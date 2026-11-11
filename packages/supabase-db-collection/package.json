@@ -59,8 +59,8 @@
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.107.0",
-    "@tanstack/query-core": "^5.90.20",
-    "@vitest/coverage-istanbul": "^5.0.5",
+    "@tanstack/query-core": "^5.107.1",
+    "@vitest/coverage-istanbul": "^5.1.0",
     "zod": "^4.6.7"
   }
 }

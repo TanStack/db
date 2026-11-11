@@ -1802,10 +1802,10 @@ importers:
         specifier: ^2.107.0
         version: 2.119.0
       '@tanstack/query-core':
-        specifier: ^5.90.20
+        specifier: ^5.107.1
         version: 5.107.1
       '@vitest/coverage-istanbul':
-        specifier: ^5.0.5
+        specifier: ^5.1.0
         version: 5.1.0(vitest@5.1.0)
       zod:
         specifier: ^4.6.7
@@ -6387,7 +6387,7 @@ packages:
       eslint: ^8.0.0 || ^9.0.0
 
   '@tanstack/eslint-plugin-oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@d1b508a':
-    resolution: {integrity: sha512-qjW5wQbicLQTID6iILaEn632NuTI+l58ZMRDTv4+EFlLOJe2NWG2CTrk3tyq1vVVkxOuTTfiJ+4dBqya3gAD+g==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@d1b508a}
+    resolution: {tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@d1b508a}
     version: 0.0.0
     engines: {node: '>=20'}
     peerDependencies:
@@ -6398,7 +6398,7 @@ packages:
     engines: {node: '>=20.19'}
 
   '@tanstack/oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@d1b508a':
-    resolution: {integrity: sha512-i+D+r7zcr1yHsrp8GzLYrbJ4F+Nxg+gfPQO42XcRJQfgBdHyoHW1YywFinC6RD2uyaWqhFgBhTmuvl2Rf0qOPA==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@d1b508a}
+    resolution: {tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@d1b508a}
     version: 0.0.0
     engines: {node: '>=20'}
     hasBin: true
