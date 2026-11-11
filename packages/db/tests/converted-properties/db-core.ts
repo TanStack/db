@@ -27,6 +27,7 @@ export const properties: ReadonlyArray<string> = [
   `proxy.frozen-nested-writes`,
   `proxy.revert-fixed-histories`,
   `proxy.revert-native-fixed-histories`,
+  `flat-change-tracking.pinned`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -58,5 +59,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/proxy-revert-oracle.property.test.ts`,
     `proxy`,
     `revert-fixed-histories revert-native-fixed-histories`,
+  ],
+  [
+    `db/tests/flat-change-tracking-oracle.property.test.ts`,
+    `flat-change-tracking`,
+    `pinned`,
   ],
 ]

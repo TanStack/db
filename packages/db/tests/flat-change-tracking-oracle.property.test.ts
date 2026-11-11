@@ -73,18 +73,13 @@
  * contracts own them, and this file checks only that they fall back.
  */
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import {
   withArrayChangeTracking,
   withChangeTracking,
   withFlatChangeTracking,
 } from '../src/proxy.js'
-import {
-  oracleProperty,
-  oracleReplayRequested,
-  oracleRoute,
-} from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -600,20 +595,36 @@ function runHistory(history: History): void {
   )
 }
 
-declareOracle({
-  check: [runHistory],
-  model: [expectedChanges],
-})
-
 describe(`flat change tracking oracle`, () => {
-  if (!oracleReplayRequested()) {
-    for (const { name, history } of pinnedHistories) {
-      it(`matches the draft proxy when ${name}`, () => {
-        oracleRoute(`fixed history`)
-        return runHistory(history)
-      })
-    }
-  }
+  // The pinned histories are outside what the generated grammar can take
+  // back, so one enumerated property replays them through the same helper.
+  oracleProperty({
+    id: `flat-change-tracking.pinned`,
+    law: {
+      statement: `Flat and proxy trackers agree with the independent authored field-difference model, including signed zero, deletion, reversion, descriptor effects, stored drafts and callback rejection.`,
+      authority: `src/proxy.ts draft/change-set contract and the 2026-10-29 signed-zero maintainer decision`,
+      limits: `Named regressions that the generated flat-row grammar cannot take back; each is replayed through the same driver and comparison.`,
+    },
+    owns: [
+      `src/proxy.ts#withFlatChangeTracking`,
+      `src/proxy.ts#withChangeTracking`,
+      `src/proxy.ts#withArrayChangeTracking`,
+    ],
+    histories: pinnedHistories.map(({ name }) => name),
+    label: (name) => `matches the draft proxy when ${name}`,
+    resolve: (name) => ({
+      history: pinnedHistories.find((entry) => entry.name === name)!.history,
+    }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `flat change tracking equivalence`,
+        plan,
+        observe,
+        () => runHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   oracleProperty({
     id: property,
