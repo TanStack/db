@@ -1,5 +1,10 @@
 import { DiffTriggerOperation, LogLevels, sanitizeSQL } from '@powersync/common'
-import { or, whenSyncAccepted, withCollectionConfigFactory } from '@tanstack/db'
+import {
+  or,
+  validateSyncPersistenceCapability,
+  whenSyncAccepted,
+  withCollectionConfigFactory,
+} from '@tanstack/db'
 import { compileSQLite } from './sqlite-compiler'
 import { PendingOperationStore } from './PendingOperationStore'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
@@ -325,6 +330,10 @@ function createPowerSyncCollectionConfig<
    */
   const sync: SyncConfig<OutputType, string> = {
     sync: (params) => {
+      const persistence =
+        params.metadata === undefined
+          ? null
+          : validateSyncPersistenceCapability(params.metadata.persistence)
       const {
         begin,
         write,
@@ -343,6 +352,11 @@ function createPowerSyncCollectionConfig<
       }
       const abortController = new AbortController()
 
+      // Persisted first startup keeps ordinary batches even after timeout
+      // fallback. A retained reload keeps its atomic replacement.
+      const replacesRetainedRows =
+        collection.health.reloading &&
+        !collection._state.acceptedSyncedEntries().next().done
       let disposeTracking:
         ((options?: { context?: LockContext }) => Promise<void>) | null = null
       let trackingSetup: Promise<void> | null = null
@@ -427,6 +441,8 @@ function createPowerSyncCollectionConfig<
           // The load reads every row and replaces the rows the Collection
           // holds.
           snapshot?: boolean
+          afterRead?: () => Promise<void>
+          onInitialRow?: (value: OutputType) => void
           when: Record<DiffTriggerOperation, string>
           writeType: (rowId: string) => OperationType
           batchQuery: (
@@ -437,7 +453,15 @@ function createPowerSyncCollectionConfig<
         },
         appliedReceipts: Array<SyncAppliedReceipt>,
       ) {
-        const { setupContext, snapshot, when, writeType, batchQuery } = options
+        const {
+          setupContext,
+          snapshot,
+          afterRead,
+          onInitialRow,
+          when,
+          writeType,
+          batchQuery,
+        } = options
 
         return await database.triggers.createDiffTrigger({
           source: viewName,
@@ -447,21 +471,22 @@ function createPowerSyncCollectionConfig<
           when,
           hooks: {
             beforeCreate: async (context) => {
-              // A load of every row is one snapshot transaction: during a
-              // reload it replaces the kept rows, so a row the table no
-              // longer has goes. A subset load commits each batch. A
+              // A retained reload uses one snapshot across its source reads.
+              // Other initial loads and subset loads keep batch commits. A
               // transaction begins only once its rows are read, so a batch
               // that fails leaves none open.
               const batches: Array<Array<TableType>> = []
               const apply = () => {
                 begin({ snapshot })
                 for (const row of batches.splice(0).flat()) {
-                  write({
-                    type: writeType(row.id),
-                    value: deserializeSyncRow(row),
-                  })
+                  const type = writeType(row.id)
+                  const value = deserializeSyncRow(row)
+                  onInitialRow?.(value)
+                  write({ type, value })
                 }
-                appliedReceipts.push(commit())
+                const applied = commit()
+                if (applied !== true) void applied.catch(() => undefined)
+                appliedReceipts.push(applied)
               }
               let currentBatchCount = syncBatchSize
               let cursor = 0
@@ -477,6 +502,7 @@ function createPowerSyncCollectionConfig<
                 if (!snapshot) apply()
               }
               if (snapshot) apply()
+              if (afterRead) await afterRead()
               database.logger.log({
                 level: LogLevels.info,
                 message: `Sync is ready for ${viewName} into ${trackedTableName}`,
@@ -623,16 +649,59 @@ function createPowerSyncCollectionConfig<
           }
 
           const appliedReceipts: Array<SyncAppliedReceipt> = []
+          const listed =
+            persistence && !replacesRetainedRows ? new Set<string>() : undefined
           await establishTracking(
             {
-              // When the Collection holds rows, such as a reload's kept rows,
-              // the load of every row replaces them.
-              snapshot: !collection._state.acceptedSyncedEntries().next().done,
+              // Retained reloads replace atomically; fresh persisted startup
+              // keeps source batches and reconciles only restored omissions.
+              snapshot:
+                persistence === null
+                  ? !collection._state.acceptedSyncedEntries().next().done
+                  : replacesRetainedRows,
+              afterRead:
+                listed && persistence
+                  ? async () => {
+                      await persistence.hydrateBaseline()
+                      if (abortController.signal.aborted) return
+                      // Copy omitted keys before committing: a synchronous
+                      // commit can change the accepted-row iterator's backing map.
+                      // Source rows remain batched; only omitted keys are retained.
+                      const gone: Array<string> = []
+                      for (const [
+                        key,
+                      ] of collection._state.acceptedSyncedEntries()) {
+                        if (!listed.has(key)) gone.push(key)
+                      }
+                      listed.clear()
+                      for (
+                        let first = 0;
+                        first < gone.length;
+                        first += syncBatchSize
+                      ) {
+                        begin()
+                        for (const key of gone.slice(
+                          first,
+                          first + syncBatchSize,
+                        ))
+                          write({ type: `delete`, key })
+                        const applied = commit()
+                        if (applied !== true)
+                          void applied.catch(() => undefined)
+                        appliedReceipts.push(applied)
+                      }
+                    }
+                  : undefined,
               when: {
                 [DiffTriggerOperation.INSERT]: `TRUE`,
                 [DiffTriggerOperation.UPDATE]: `TRUE`,
                 [DiffTriggerOperation.DELETE]: `TRUE`,
               },
+              onInitialRow: listed
+                ? (value) => {
+                    listed.add(asPowerSyncRecord(value).id)
+                  }
+                : undefined,
               writeType: (_rowId: string) => `insert`,
               batchQuery: (
                 lockContext: LockContext,

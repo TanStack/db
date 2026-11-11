@@ -1,57 +1,51 @@
-import { describe } from 'vitest'
+/**
+ * The shared eager-source model independently judges the original status,
+ * health, rows, field values, event-fold and every publication checkpoint.
+ * PowerSync runs over real local SQLite through @powersync/node. Its typed
+ * columns cover string, integer, float, boolean and Date. Its 15-significant-
+ * digit storage exclusion remains unchanged; the diff-trigger propagation cut
+ * and per-batch publication law remain. No sync-service claim is made.
+ * Five generated constructions enforce the original minimum-five reach. Each
+ * builder returns fresh identities and preserves generated input variation.
+ */
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   checkEagerLiveSourceHistory,
-  eagerLiveSourceHistoryArb,
   eagerLiveSourceModel,
 } from '../../db-adapter-conformance/src'
-import {
-  checkEagerLiveSourceObservations,
-  eagerLiveSourceHistories,
-  eagerLiveSourceOracle,
-} from '../../db-adapter-conformance/tests/eager-live-source-property-oracle'
+import { eagerLiveSourceCampaign } from '../../db-adapter-conformance/tests/eager-live-source-oracle-suite'
+import { constructPowerSyncEagerHistory } from './eager-live-source-history-oracle'
 import { powerSyncConformanceDriver } from './conformance-driver'
 
-/**
- * # PowerSync on the shared eager live-source conformance oracle
- *
- * A receiving driver for `packages/db-adapter-conformance`. The shared
- * module states the laws, the model, the history grammar, and the check;
- * this file supplies only the PowerSync production driver in
- * `conformance-driver.ts` and the campaigns. It states no expected results.
- *
- * PowerSync runs here over a real local SQLite database. It declares none of
- * the oracle's optional capabilities: it reads its table once per sync run,
- * its changes carry no txid, and it has no provider failure after ready. Its
- * propagation step is the diff-trigger watch, which the fixture's `settle`
- * awaits. The claim is limited to local SQLite writes; a claim about the
- * PowerSync sync service needs a receiving witness against it.
- */
-
-describe(`eager live-source conformance: powersync`, () => {
-  const property = `adapter-conformance.eager-live-source.powersync`
-  const driver = powerSyncConformanceDriver()
-  const historyArb = eagerLiveSourceHistoryArb(driver)
-  const runs = 400
-  const campaignTimeoutMs = 600_000
-
-  oracleProperty({
-    id: property,
-    ...eagerLiveSourceOracle(driver),
-    check: checkEagerLiveSourceObservations,
-    histories: {
-      ...eagerLiveSourceHistories(driver),
-      runs,
-      fixedSeeds: [2118],
-    },
-    timeout: campaignTimeoutMs,
-  })
-
-  declareOracle({
-    owns: [`src/powersync.ts#powerSyncCollectionOptions`],
-    check: [checkEagerLiveSourceHistory],
-    model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-    grammar: [historyArb],
-  })
+const campaign = eagerLiveSourceCampaign(
+  powerSyncConformanceDriver(),
+  constructPowerSyncEagerHistory,
+)
+oracleProperty({
+  id: `adapter-conformance.eager-live-source.powersync`,
+  law: {
+    statement: `Initial readiness, complete row and field fidelity, coherent change publications, failure identity, post-ready health, restart and exactly-once resource release follow the shared eager live-source laws.`,
+    authority: `db-adapter-conformance/src/eager-live-source-oracle.ts; adapter law set READY-2/3/4/8/10, HEALTH-1/5, PUB-1/2/3/5/9, FID-1/4, LIFE-2/5/10, as supported by this receiver's declarations.`,
+    owner: `Adapter conformance: eager live sources (#2118), powersync receiver`,
+    limits: `Real local PowerSync SQLite, eager mode, per-batch changes, five typed field kinds, original 15-significant-digit numeric exclusion and twelve-step grammar. No remote sync-service, mutation, reload or on-demand claim.`,
+  },
+  histories: {
+    arbitrary: campaign.arbitrary,
+    states: campaign.states,
+    runs: 400,
+    fixedSeeds: [2118],
+    constructed: campaign.constructed,
+  },
+  model: campaign.model,
+  driver: campaign.driver,
+  check: campaign.check,
+  calibrations: campaign.calibrations,
+  timeout: 600000,
+})
+declareOracle({
+  owns: [`src/powersync.ts#powerSyncCollectionOptions`],
+  check: [checkEagerLiveSourceHistory, campaign.check],
+  model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
+  grammar: [campaign.arbitrary],
 })

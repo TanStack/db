@@ -1,17 +1,16 @@
-import { describe } from 'vitest'
-import { oracleProperty } from '../../db/tests/oracle-property'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   checkEagerLiveSourceHistory,
   eagerLiveSourceHistoryArb,
   eagerLiveSourceModel,
 } from '../../db-adapter-conformance/src'
-import {
-  checkEagerLiveSourceObservations,
-  eagerLiveSourceHistories,
-  eagerLiveSourceOracle,
-} from '../../db-adapter-conformance/tests/eager-live-source-property-oracle'
 import { trailBaseConformanceDriver } from './conformance-driver'
+import {
+  constructTrailBaseEagerHistory,
+  observeTrailBaseEagerHistory,
+  trailBaseEagerVerdict,
+} from './eager-live-source-framework-oracle'
+import { registerTrailBaseEager } from './eager-live-source-oracle-suite'
 
 /**
  * # TrailBase on the shared eager live-source conformance oracle
@@ -32,29 +31,20 @@ import { trailBaseConformanceDriver } from './conformance-driver'
  * limited to the controlled RecordApi.
  */
 
-describe(`eager live-source conformance: trailbase`, () => {
-  const property = `adapter-conformance.eager-live-source.trailbase`
-  const driver = trailBaseConformanceDriver()
-  const historyArb = eagerLiveSourceHistoryArb(driver)
-  const runs = 600
-  const campaignTimeoutMs = 120_000
+const property = `adapter-conformance.eager-live-source.trailbase`
+const driver = trailBaseConformanceDriver()
+const historyArb = eagerLiveSourceHistoryArb(driver)
 
-  oracleProperty({
-    id: property,
-    ...eagerLiveSourceOracle(driver),
-    check: checkEagerLiveSourceObservations,
-    histories: {
-      ...eagerLiveSourceHistories(driver),
-      runs,
-      fixedSeeds: [2118],
-    },
-    timeout: campaignTimeoutMs,
-  })
+registerTrailBaseEager(
+  { property, defaultRuns: 600 },
+  driver,
+  (history, corruptValues) =>
+    observeTrailBaseEagerHistory(driver, history, corruptValues),
+)
 
-  declareOracle({
-    owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
-    check: [checkEagerLiveSourceHistory],
-    model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-    grammar: [historyArb],
-  })
+declareOracle({
+  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
+  check: [checkEagerLiveSourceHistory, trailBaseEagerVerdict],
+  model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
+  grammar: [historyArb, constructTrailBaseEagerHistory],
 })

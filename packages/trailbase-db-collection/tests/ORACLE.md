@@ -11,6 +11,9 @@ The same interpreter runs a fixed corpus and generated histories.
 ## Laws and scope
 
 - Published inserts, updates and deletes agree with the model after each event.
+- The optional `SyncParams.metadata` API can be absent. Generated lifecycle
+  histories cross absence and presence without changing the row or lifecycle
+  law. An advertised API must still forward its `persistence` field intact.
 - Eager startup waits for its list; on-demand startup does not claim to load
   rows.
 - A list starts only after the change subscription is established, in both
@@ -40,7 +43,7 @@ The same interpreter runs a fixed corpus and generated histories.
   an event touched. Every page row is written as a full-row `update`, which
   creates a missing row and replaces a held one, so a page never collides with
   an event that core accepted but still holds. The page-event grammar enumerates
-  15 histories: eager startup or an on-demand load; an update, delete, or
+  28 histories: eager startup or an on-demand load; an update, delete, or
   insert; committed before the list call (on-demand only), while the page is in
   flight, or after it applies. It compares the Collection's rows with the
   service after the page settles and after a later change. A generated grammar
@@ -48,7 +51,7 @@ The same interpreter runs a fixed corpus and generated histories.
   pages of 256, cursor or offset paging, one or two overlapping on-demand loads,
   and up to four inserts, updates, and deletes among page releases. After every
   step a changed key holds the service's value; after the history drains, every
-  returned or changed key does. Four fixed histories cover an update between
+  returned or changed key does. Five fixed histories cover an insert and its update in transit, an update between
   pages, an update then a delete during a page, overlapping loads around an
   update, and offset paging with two updates. After the history drains, the
   Collection holds exactly the rows that a page returned or an event touched and
@@ -130,9 +133,10 @@ The same interpreter runs a fixed corpus and generated histories.
 
 Histories contain one to three Collection sync runs, eager/on-demand modes,
 delayed startup and list resolve/reject, zero to eight row edits, five stream
-endings, and immediate versus settled cleanup. Thirty-two fixed histories cover
-the boundaries; ordinary runs add 50 histories from a fixed-seed campaign and 50
-from a random campaign, with shrinking. Additional controls cover rejecting late
+endings, and immediate versus settled cleanup. Thirty-two corpus histories and four additional fixed histories cover
+the boundaries and metadata absence. Ordinary runs retain a 50-history fixed-seed
+campaign and a 50-history random campaign, with shrinking, plus thirteen
+randomized constructed histories per campaign. Additional controls cover rejecting late
 cancellation in both modes and mutate provider-owned list, event, and buffered
 rows before parsing. Model rows derive separately from command scalars, so
 provider mutation cannot change the answer.
@@ -150,6 +154,35 @@ failure awaited cancellation, and GREEN when cancellation was observed
 separately. The lifecycle production driver calls the core subset boundary; the
 early-demand grammar also drives a real live query. Service-backed E2E coverage
 remains separate.
+
+## Framework conversion and enforced reach
+
+`oracleProperty` now registers the lifecycle and page/event campaigns. Their
+run budgets and fixed seeds remain 50 / 714203 and 40 / 205917. The finite
+`trailbase.lifecycle.boundaries` property runs all 51 existing boundary histories:
+16 early-demand, 28 single-page race, four held-page, two stream-end and one
+fresh-run history. All 36 lifecycle and five page/event fixed histories remain.
+
+The authored service and independent Maps still compute row truth. The
+production driver transports those reference facts separately from public
+observations. `lifecycle-judgment-oracle.ts` applies the reusable relations at
+every original cut. It keeps exact startup-error and resource identity through
+opaque tokens. Reports and detached rejections keep append-only events and
+opaque reason identity, including DOMException, class instances and symbols;
+this law forbids any such event, regardless of its reason's value.
+
+The lifecycle grammar declares thirteen required states; the page/event grammar
+declares seven. Each has a randomized constructed builder that returns a fresh
+object. A WeakMap retains each generated construction's required states, so
+ordinary generated outputs have the same obligation as named constructions.
+Missing-state controls exercise each builder. Separate generated-only controls
+use outputs that differ from every named fixed-seed construction.
+
+The grammar now reconstructs absent metadata fields, rejecting late cancellation
+and independently allocated page command objects. The page mapper has a guarded
+inverse. These changes expand reconstruction without removing an old history.
+The complete same-seed mutation retention gate remains required before claiming
+that this pure framework conversion retained every previous kill.
 
 ## Run and replay
 
@@ -251,6 +284,54 @@ These targeted mutations test known failure classes, not overall mutation
 coverage or a proof of completeness. The 10× campaign passed 800 generated
 histories (fixed campaign seed 714203, random campaign seed 127535183) plus the
 32 corpus cases. No service-backed E2E run is claimed.
+
+## Persisted hydration and retired work
+
+The primary lifecycle runner also receives real persistence through
+`lifecycle-hydration-driver.ts`. Its directly named
+`lifecycle-hydration-oracle.ts` projects the same cleanup law onto public and
+durable rows: cleanup clears public rows and retires source authority; a new
+eager result replaces saved rows; late old work changes neither observation.
+This projection preserves row provenance only until the replacement. It does
+not reproduce the adapter's cancellation flags, wrapper queues, or core fences.
+
+The driver calls the real old run's `hydrateBaseline()` and holds its completion
+after hydration finishes. A complete old list then waits at the exact await
+before its omission sweep. A neighboring history instead rejects an old list
+after cleanup, so it does not claim hydration reach. Old work resumes while the
+Collection is cleaned up, after a new run restores rows but still holds its
+list, or after the new complete result is ready. Each history then supplies a
+new change event to prove the replacement reader remains usable.
+
+The grammar varies all subsets of three string keys for saved, old-listed, and
+replacement rows. A rejected old list has no payload, encoded as old mask 0.
+It crosses empty and nonempty replacements, overlap and
+omission, both old outcomes, all three resume cuts, and default versus
+network-first rendering. Network-first uses a deadline beyond this controlled
+history. Under the SQLite guide's "Render after SQLite restore" contract,
+both forms stay loading before adapter readiness here; cleanup rejects the
+unfinished old preload with `AbortError`.
+
+Twenty-four fixed histories and 50-history fixed-seed/fresh campaigns per host
+run the same independent judgment through controlled storage and real Node
+SQLite. Each campaign requires all nine named states. Public rows, durable
+rows, and status are compared immediately after old work resumes, at replacement
+readiness, and after the new event. The same judgment also requires old-reader
+cancel/release, continued replacement ownership, final replacement release, and
+append-only errors through cleanup. Obsolete `begin` attempts are diagnostics,
+not a zero-work product promise. Browser receiving code imports the same model,
+fixed histories, driver, and comparison.
+
+Use property ids `trailbase.lifecycle.persisted-hydration.controlled` and
+`trailbase.lifecycle.persisted-hydration.node-sqlite` with the same checked replay
+runner above. The fixed campaign seed is 728159. The
+[hydration-gap record](../../../docs/contributing/oracle-reviews/2026-11-10-trailbase-hydration-gap.md)
+records comparison results and the exact M150 cancellation-guard experiment.
+That edit is reached but equivalent in the tested persisted composition:
+old callbacks attempt a sync transaction after cleanup, while the wrapper and
+core deny them publication authority. The shared row-loss calibration rejects
+a changed replacement observation. This result does not add a promise of zero
+internal work after cancellation.
 
 ## Shared conformance driver
 

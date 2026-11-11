@@ -2385,6 +2385,12 @@ remaining design and coverage questions, including valid Temporal kinds without
 public order and mixed-kind query order. Earlier PR-branch counterexamples do
 not by themselves establish an `origin/main` failure.
 
+Persisted startup replacement is owned by the shared
+[adapter persistence conformance oracle](#adapter-conformance-persisted-startup-2367).
+The Query ownership oracle retains its scope-local removal, peer ownership,
+mutation, and non-startup lifecycle laws. Its former startup dimension now runs
+as a receiving path of the shared owner, with the same histories and cuts.
+
 The Query DB ownership oracle also owns the explicit mutation-handler refresh
 contract ([evidence](oracle-reviews/pr-2171-explicit-query-refresh.md)). Its 18-history table crosses insert, update, and delete with no
 confirmation, explicit refetch, and direct writes, with and without discarded
@@ -5157,6 +5163,13 @@ native e2e needs `cargo`. React Suspense reveals a covered failure about 300 ms
 late (its fallback throttle), so the contract's before-wait checkpoint sits at
 450 ms.
 
+The readiness fixture does not retain writes. The [shared adapter startup owner](../../packages/db-adapter-conformance/tests/persisted-startup-oracle.ts)
+receives the network-first contract on all six eager adapters. It compares
+saved rows and durable state while the source is held past the deadline, then
+the first complete source result and its durability before refresh, plus reopen.
+It also generates enabled-option responses before the deadline. Exact deadline,
+empty/failed restore, and remote-failure timing remain with this readiness owner.
+
 ## Sync metadata session
 
 [Issue #2220](https://github.com/TanStack/db/issues/2220) reports that a
@@ -7779,6 +7792,287 @@ fixed/random actual overwrite reaches are repair 25/18 and callback 25/25.
 These boundaries retain their controlled core and Node-host SQLite/Electric
 limits. No HTTP, framework, browser-process, or arbitrary-shape closure follows.
 See the [versioned amendment](oracle-reviews/2026-10-30-release-replay-retention.md#final-catch-up-provenance-and-deferred-sibling-resumption-review-2026-11-02).
+
+## Adapter conformance: persisted startup (#2367)
+
+The [shared persistence owner](../../packages/db-adapter-conformance/tests/persisted-startup-oracle.ts)
+judges complete source replacement across persisted restore. A collection-wide
+source replaces every row. A scoped source removes only its old ownership;
+an omitted row with a surviving peer stays. Authority: READY-3/PUB-7, the Query
+complete-result and scope-local omission contract, and persistence's durable
+acceptance contract. The maintainer selected this shared owner on 2026-11-09.
+The independent set model has no Query cache, source diff, or restore algorithm.
+
+[Query](../../packages/query-db-collection/tests/persisted-startup-conformance-oracle.test.ts),
+[Convex](../../packages/convex-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts),
+[Electric](../../packages/electric-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts),
+[TrailBase](../../packages/trailbase-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts),
+[RxDB](../../packages/rxdb-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts)
+and [PowerSync](../../packages/powersync-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts)
+supply receiving paths. Query uses QueryClient; Convex uses its SDK and a
+controlled socket; Electric uses ShapeStream and controlled HTTP responses;
+TrailBase uses a controlled RecordApi and native stream; RxDB uses real memory
+storage; PowerSync uses real local SQLite through its Node and browser SDKs.
+Each uses the same
+[composition driver](../../packages/db-adapter-conformance/tests/persisted-startup-driver.ts),
+judgment, controlled storage, and real Node SQLite hosts. Per host, fixed and
+random campaigns each run 80 generated histories with separate enforced reach.
+Histories cross empty and nonempty prior subsets of three keys, any next subset weighted
+toward empty, changed overlap values, and response before/after persisted
+restore. A generated initial-render axis enables network-first and crosses
+source responses before the deadline with a source held past it. Every adapter,
+host and generated campaign enforces separate reach for both enabled paths.
+Query additionally crosses peer ownership and five response origins:
+fetch, initialData/cache with fetching disabled or held pending. Already
+available results precede restore; fetched and push results exercise both orders.
+
+With network-first fallback, the shared comparisons check saved public and
+durable rows after preload while the source is still held. After delivery,
+the source's `markReady()` and applied receipts identify its first complete
+result. Other histories retain the immediate post-preload comparison.
+Public and durable rows are checked before refresh can repair storage,
+then public rows inside refresh fulfillment,
+durable rows afterward, and rows after a local-only reopen. Scoped Query
+snapshots also check exact ownership at all four snapshot cuts. Startup checks
+the reload owner's one-full-row-read law before its own durable observation.
+Query's receiving driver preserves exact fetch-count and pending-fetch premises.
+The [Chromium OPFS receiver](../../packages/browser-db-sqlite-persistence/e2e/persisted-startup-conformance-oracle.opfs.spec.ts)
+runs 116 Query histories, 104 PowerSync histories, 32 RxDB histories and 26
+complete-result histories for each of Convex, Electric and TrailBase through
+the same composition and check on real worker/OPFS. It
+repeats in the same browser profile, with file cleanup and separately enforced
+reach for network-first result/fallback, empty result/baseline, overlap, omission,
+mutation, and Query peers/ownerless baselines. Identical normalized histories are
+deduplicated; empty-baseline mutations still hold publication and remain distinct.
+Query crosses source-owned and ownerless saved provenance. Peer-only overlaps
+exercise every initial/cache origin. At fallback, ownerless rows retain their
+original absent source ownership. Complete results remove omitted ownerless rows
+and apply returned values even when a peer previously supplied the row.
+
+The independent [capability-admission owner](../../packages/db-adapter-conformance/tests/persisted-capability-oracle.ts)
+checks the cross-package SyncMetadataApi protocol. It enumerates nine required
+members with missing and false-valued corruptions, a missing capability field,
+and three legal forms (complete, explicit null, absent optional API). Real RxDB
+and PowerSync receive all 22 histories on controlled, Node SQLite and Chromium
+OPFS hosts. It checks invocation errors before source delivery and completes
+source startup for legal forms. It does not claim optional extension faults,
+on-demand acquisition results, or arbitrary malformed values. The shared startup
+calibration now fails on a bad clean candidate, counts injected persistence
+loss, and wraps hydration-scoped writes. RxDB/PowerSync must reach that scoped
+fault before restore release on real SQLite. See the [re-review evidence](oracle-reviews/2026-11-10-pr-2394-rereview.md).
+
+The original Query omission fails startup on both Node hosts and OPFS. Convex
+without its first-result truncate, a survivor in the bare eager-source grammar,
+now fails the same comparison on all three hosts. Current Convex passes; this
+migration confirms no new Convex defect. Electric also passes unchanged.
+The expanded network-first grammar passes on unchanged production across both
+Node hosts and OPFS. Per-adapter/host mutants that drop source persistence after
+fallback fail at `startupDurable`, before a refresh. Fallback checker controls
+also reject lost saved rows. The one-full-row-read law excludes only the
+observer's own durable reads.
+The receiving campaigns expose startup violations in RxDB, PowerSync and
+TrailBase before production edits, on both Node hosts and real OPFS. RxDB and
+PowerSync now keep ordinary first-startup source commits, await hydration, then
+delete only restored omissions. PowerSync commits source rows and omission
+deletes in batches bounded by `syncBatchSize`; RxDB keeps its existing single
+source commit. Both preserve atomic snapshots for retained nonempty reloads.
+TrailBase hydrates before its complete eager-list omission sweep and retains
+its event fence. Query's reconciliation stays at its adapter boundary while
+already available cache results retain immediate materialization.
+The old Query-only startup model/runner
+and OPFS files are retired after receiving parity; Query-specific ownership
+laws and the unrelated direct-write/failure-fidelity repairs remain.
+
+Limits: eager startup, three string keys and numeric values, one persistence
+instance, one source scope plus an optional persisted peer, and a disjoint optimistic
+insert held across the first source commit. Its settlement precedes the first
+complete-result comparison. Source commits and persisted restore can both be
+accepted while that transaction holds their application. Arbitrary mutation
+contents and overlapping optimistic transactions remain outside this grammar. No on-demand window,
+concurrent tab writer, arbitrary metadata namespace, failed-I/O, or every
+intermediate-publication claim. Electric's resumed delta-only streams belong to
+its recovery owner; a fresh full shape supplies this family's replacement
+premise. TrailBase has no deployed-server or SDK-wire claim, and the local RxDB
+and PowerSync sources supply no remote-replication claim. See
+[migration status](../../packages/db-adapter-conformance/MIGRATION.md),
+[original evidence](oracle-reviews/2026-11-09-issue-2367.md) and the
+[all-adapter amendment](oracle-reviews/2026-11-10-persisted-startup-adapters.md) and
+[network-first evidence](oracle-reviews/2026-11-10-network-first-startup.md), and
+[external-review amendment](oracle-reviews/2026-11-10-pr-2394-external-review.md).
+
+The additive startup work law bounds source writes by input rows and deletes
+by saved omissions. It rejects snapshot replacement and truncate at first
+startup. PowerSync crosses B=1/B=2, source sizes below/at/above B, omissions
+above B, and provider IDs transformed by deserialization. RxDB crosses source
+pagination and omissions above its read batch. The work comparison follows
+the existing public/durable/reopen judgments; correct rows cannot mask excess
+work. Both Node campaigns enforce randomized constructed reach. The actual
+Chromium receiver uses the same 104/32 histories and comparison. This is no
+latency or total-memory threshold. See the
+[batching evidence](oracle-reviews/2026-11-10-persisted-startup-batching.md).
+
+The independent
+[hydration lifecycle owner](../../packages/db-adapter-conformance/tests/persisted-baseline-lifecycle-oracle.ts)
+holds the adapter's hydration continuation across cleanup, reload and terminal
+source failure. RxDB and PowerSync receive its public/durable, error-identity
+and resource-release judgments on both Node hosts and actual Chromium OPFS.
+An acknowledgment rejected after real application does not erase accepted
+work. See the [receiving evidence](oracle-reviews/2026-11-10-persisted-baseline-lifecycle.md).
+The primary RxDB, PowerSync and TrailBase eager campaigns now use
+`oracleProperty`, preserving their models, states, budgets and prior mutant
+kills; see the [conversion record](oracle-reviews/2026-11-10-eager-source-primary-conversions.md).
+
+The [original diff-focused gap CLI audit](oracle-reviews/2026-11-10-startup-gap-cli.md)
+is historical; the [current audit](oracle-reviews/2026-11-10-startup-gap-current-head.md)
+records subsequent classification separately from startup conformance.
+The ownership oracle now shares its independent direct-write overlay judgment
+with [persisted precedence receivers](../../packages/query-db-collection/tests/persisted-precedence-oracle.test.ts).
+They cross raw/derived-select responses without an inverse cache mapping,
+four direct-write operations, before-result and before/after captured baseline
+reads, early insert/upsert before persisted restore, writes before the first
+physical fetch, cached results without a physical fetch, and a later fetch.
+Each Node host runs 104 fixed histories and fixed/fresh campaigns of 80 histories;
+the [Chromium receiving page](../../packages/browser-db-sqlite-persistence/e2e/eager-gap-conformance-oracle.opfs.spec.ts)
+runs the same 104 histories and judgment. Comparisons cover the accepted write
+when its baseline is already public, first-result public/durable/cache state,
+and public/durable state at later fetch settlement. The original derived-baseline
+survivor (`M1733`, now `M1748`) is rejected at first-result public and durable
+cuts when an omitted saved row survives. See the [precedence amendment](oracle-reviews/2026-11-10-persisted-precedence-gaps.md).
+
+The [retained-scope receiver](../../packages/query-db-collection/tests/retained-scoped-hydration-oracle.test.ts)
+judges on-demand demand restore and scope-local omission. It crosses two disjoint
+exact scopes, empty/nonempty responses, an ownerless saved row in either scope,
+and unbounded versus one-row ordered demand. Each controlled/Node SQLite host
+runs 48 fixed histories plus fixed/fresh campaigns of 60. Pending public rows,
+first demand public/durable rows, and second demand public/durable rows share
+one independent set-selection judgment. Always hydrating the full baseline
+(`M1481`) wrongly exposes unrequested rows; broadening ownerless reconciliation
+(`M558/M559`) wrongly deletes saved direct rows from a limited result. The
+comparison rejects each at its first affected cut.
+
+The same receiver adds a cached-peer first-claim judgment: a manual cache edit
+or an older fetched cache cannot replace a continuously owned row established
+by a later physical fetch. A new physical refetch can replace it. Two fixed
+histories and fixed/fresh campaigns of 60 per host compare public and durable
+values at claim and refetch. `M1376/M1377` fail at the claim cuts. Chromium
+receives both shared grammars and comparisons (50 histories). Exact mutant and
+clean replay coordinates are retained in the
+[scope/provenance report](oracle-reviews/2026-11-10-retained-scoped-hydration-gaps.md).
+This does not establish arbitrary overlapping predicates, concurrent writers,
+or failed I/O behavior.
+
+The core reload/snapshot law also receives unwrapped real RxDB and PowerSync
+through the shared [eager-reload judgment](../../packages/db-adapter-conformance/tests/eager-reload-oracle.ts),
+[RxDB receiver](../../packages/rxdb-db-collection/tests/eager-reload-conformance-oracle.property.test.ts)
+and [PowerSync receiver](../../packages/powersync-db-collection/tests/eager-reload-conformance-oracle.property.test.ts).
+They cross fresh and empty/nonempty retained reload, complete empty/change/omission
+results, and a disjoint persisting optimistic insert. Each adapter runs 24 fixed
+histories plus fixed/fresh campaigns of 80; Chromium receives the same 24.
+Fulfillment compares one coherent permitted source projection with the required
+optimistic overlay; readiness can precede application while a mutation persists.
+After mutation settlement and applied receipts, exact source rows are required.
+The exact historical snapshot-predicate negations (`M9`/`M164`) now fail
+retained-row-to-empty-result histories. See the [reload amendment](oracle-reviews/2026-11-10-adapter-reload-gaps.md).
+These unwrapped histories establish no persistence or remote-replication claim.
+
+TrailBase's [primary lifecycle owner](../../packages/trailbase-db-collection/tests/lifecycle-hydration-oracle.ts)
+now crosses cleanup while actual persisted hydration completion is held, old
+list completion/rejection, and replacement runs that are loading or ready.
+Controlled and real Node SQLite receive 24 fixed histories plus fixed/fresh
+campaigns of 50 per host; Chromium receives the same 24 histories. The comparisons
+check public/durable replacement rows, a later event and reader/error ownership.
+The exact old cancellation-guard removal (`M150`, now `M151`) reaches obsolete
+begin attempts but preserves these observations through existing wrapper/core
+fences: bounded equivalence for these histories, rather than a global claim
+that cancellation checks are unnecessary. See the [lifecycle amendment](oracle-reviews/2026-11-10-trailbase-hydration-gap.md).
+
+Query's non-retained hydration classification and redundant-call operators remain
+separate from the retained precedence receiver. Their physical-read budget belongs
+to the reload-work owner and shared startup comparisons. The current audit records
+55 observed assertion rejections after additive receiving experiments, four
+bounded survivors, and two timeouts across the 61 changed-line operators.
+Timeouts supply no behavioral rejection evidence. Startup latency/memory are
+measured separately in the [performance report](oracle-reviews/2026-11-10-persisted-startup-measurements.md).
+These additions preserve the startup comparisons and their limits above.
+
+The [framework integration record](oracle-reviews/2026-11-10-startup-framework-integration.md)
+and the [startup conversion record](oracle-reviews/2026-11-10-startup-property-conversion.md)
+track conversion of the five added/shared campaign files to `oracleProperty`,
+including randomized constructed histories, per-builder missing-state controls,
+unchanged base run budgets and direct replay. The post-conversion Chromium
+receiver passes all 226 added histories through the same judgments. The
+[Query conversion record](oracle-reviews/2026-11-10-query-oracle-property-conversion.md)
+preserves seven exact source-operator rejections and updated replay coordinates.
+The later [retention supplement](oracle-reviews/2026-11-10-startup-property-gap-retention.md)
+keeps the original stable mutant keys and instrument failures separate from
+conversion results. It records the primary Query ownership and TrailBase
+lifecycle/eager conversions, unchanged campaign budgets, and the no-mutation
+reload observation projection. That projection removes only a meaningless
+release-order flag when no mutation exists; every mutation-present observation
+and raw judgment remains unchanged.
+
+The [Query startup receivers](oracle-reviews/2026-11-10-query-startup-receiving-gaps.md)
+add independent first-result value/ownership and synchronous creation-return
+comparisons. Controlled storage, native Node SQLite and actual Chromium/OPFS
+receive the same direct-write grammar. It crosses distinct and overlapping
+saved/direct keys, independent saved/direct/source values, insert/upsert, and
+writes before versus after the first physical fetch starts. A retained distinct
+saved baseline plus a direct insert before a later changed source response
+exposed a stale public/durable value on all three hosts before the source repair.
+The repaired diff uses accepted current rows when that saved baseline has no
+entry. The original value defect and the historical ownership mutant M563 fail
+at their intended first-result comparisons on every host. Immediate nonpersisted
+initialData/cache receivers reject M1468/M1469 at synchronous creation return;
+the persisted-startup receivers do not supply that different checkpoint.
+
+The same direct receiver also validates each raw Query sync-write operation
+against the public `SyncConfig.write` input contract before forwarding it.
+Its `fetched-row-write` reach observes a row-bearing write after fetch return,
+independently of the operation chosen. The exact M1334 field deletion fails
+`sync-write` / `declared sync-write operation` on all three hosts; clean same-
+history replays pass. The [protocol evidence](oracle-reviews/2026-11-10-query-sync-write-protocol.md)
+records the source span, fixed/fresh reach, full clean suites and exact replay.
+This added check requires no write count/order or own property and does not
+claim validation of all other sync-message fields.
+
+The [rejected-write cutoff receiver](oracle-reviews/2026-11-10-query-rejected-write-cutoff-gap.md)
+closes M1794 through an actual Query stale callback after a rejected missing-key
+write, followed by a new Infinity-stale peer acquisition. The independent model
+requires the fetched value/owners and one physical request. The exact mutant
+makes two requests and fails that comparison on controlled storage, native Node
+SQLite and actual Chromium/OPFS. The client timer premise uses jsdom for the
+Node wrapper; native persistence and browser host tasks remain real.
+
+The direct receiver runs 40 histories per fixed/fresh campaign plus twelve
+randomized constructions, with fourteen states enforced per receiving path.
+The immediate receiver runs 40 plus eight constructions; the cutoff receiver
+runs 20 plus nine. Fixed regressions do not receive generated reach credit.
+Their reports preserve per-path counts, generated-only missing-state controls,
+primary-versus-cleanup diagnostics, source hashes and assertion-mutant evidence.
+The full normal Query package command passes 1,623 tests with no type errors.
+These finite receivers do not establish arbitrary concurrent writers, failed
+I/O, every intermediate publication or a whole-PR readiness verdict.
+
+Query M1473 and TrailBase M151 remain open anchored optimization-guard gaps.
+The former adds redundant cached hydration work; the latter allows obsolete
+post-cancellation scanning and begin attempts that downstream fences reject.
+Keep both useful guards. Neither a bounded public/durable equivalence result
+nor this coverage entry supplies the maintainer allowance required by AGENTS.md.
+
+The [scope omission and reacquisition receiver](../../packages/query-db-collection/tests/scope-omission-reacquisition-oracle.ts)
+checks the ownership owner's next-use law. A complete scoped result can remove
+an ownerless direct-write row. A later acquisition can then project another
+scope's retained successful cache response under the usual cache rules.
+Generated histories cross raw and derived caches, cache completion before or
+after the direct write, insert/upsert, omission versus inclusion, source values,
+and empty/nonempty scoped results. Controlled storage, Node SQLite and actual
+Chromium/OPFS use the same model and public/durable comparisons at deletion and
+reacquisition. The stale direct-position mutations M1313/M1315/M1316/M1317 fail
+that later public-row comparison on both Node hosts; M1313 also fails on
+Chromium. This is additive evidence after the
+[changed-callback inventory](oracle-reviews/2026-11-10-query-changed-callback-gap-audit.md),
+not a change to that immutable run's 24-kill/11-survivor result. It does not
+establish precedence among multiple cache results from before a row's lifetime.
 
 ## Adapter conformance: eager live sources (#2118)
 
