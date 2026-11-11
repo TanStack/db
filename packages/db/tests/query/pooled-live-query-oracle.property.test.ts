@@ -1109,12 +1109,6 @@ function expectSnapshotMatchesReference(
 }
 
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/live-query-observer.ts#createLiveQueryObserver',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/pooled-live-query.ts#createPooledLiveQuery',
-  ],
   check: [runHistory, expectSnapshotMatchesReference],
   model: [expectedKeys, expectedRows],
 })
@@ -1175,8 +1169,13 @@ describe(`pooled live query oracle`, () => {
       statement: `A pooled live-query observer publishes the same rows, order, values, status and granular changes as the equivalent live-query Collection across writes, mounts and cleanup.`,
       authority: `ARCHITECTURE.md, Pooled live queries, and the equality, Collection cleanup and observer contracts stated above.`,
       limits: `The unchanged bounded eager-source grammar with up to three peers and eight steps; no on-demand, persistence, hydration, Suspense or selection.`,
-      owner: `Pooled live-query publication`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/live-query-observer.ts#createLiveQueryObserver',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/pooled-live-query.ts#createPooledLiveQuery',
+    ],
     histories: {
       arbitrary: historyArbitrary,
       runs: 80,

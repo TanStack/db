@@ -946,7 +946,6 @@ function expectedNativePolarityKeys(
 }
 
 declareOracle({
-  owns: [`src/node-driver.ts`],
   check: [assertExpressionIndexHistory],
   model: [expectedKeysFromScan, expectedRangeKeys, expectedNativePolarityKeys],
   grammar: [generatedScenarioMatrixArbitrary],
@@ -958,9 +957,9 @@ describe(`SQLite expression-index oracle`, () => {
     law: {
       statement: `SQLite candidates retain JavaScript Number/BigInt range matches across operand directions and unary wrappers, with named-index use on the existing selective orientation.`,
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
-      owner: `packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: [{ name: `large Number range directions and wrappers` }],
 
     driver: (plan, observe) =>
@@ -1057,9 +1056,9 @@ describe(`SQLite expression-index oracle`, () => {
     law: {
       statement: `Signed-64-bit BigInts round-trip through the real adapter and equality reads preserve their exact stored value and matching key.`,
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
-      owner: `packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: {
       arbitrary: fc.bigInt({ min: SQLITE_BIGINT_MIN, max: SQLITE_BIGINT_MAX }),
       runs: DEFAULT_ORACLE_RUNS,
@@ -1129,9 +1128,9 @@ describe(`SQLite expression-index oracle`, () => {
     law: {
       statement: `BigInts immediately outside the signed SQLite integer range reject with the documented range error.`,
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
-      owner: `packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: {
       arbitrary: fc.oneof(
         fc
@@ -1197,9 +1196,9 @@ describe(`SQLite expression-index oracle`, () => {
     law: {
       statement: `Indexed equality agrees with the independent full-scan model, binds the filter value, and uses the matching named expression index.`,
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
-      owner: `packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: [
       {
         path: [`threadId`],
@@ -1224,9 +1223,9 @@ describe(`SQLite expression-index oracle`, () => {
     law: {
       statement: `Every generated matrix retains all seven query axes, their exact candidate and public keys, promised ordering, and required named-index plans.`,
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
-      owner: `packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: {
       arbitrary: generatedScenarioMatrixArbitrary,
       runs: DEFAULT_ORACLE_RUNS,
@@ -1448,9 +1447,9 @@ describe(`Temporal expression-index refinement`, () => {
     law: {
       statement: `Native rank and identity fixtures retain their exact candidate and public keys and their supported named-index plans.`,
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
-      owner: `packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: temporalFamilies,
 
     label: (family) => `${family.kind}/${family.name}`,
@@ -1537,9 +1536,9 @@ describe(`Temporal expression-index refinement`, () => {
     law: {
       statement: `Native predicates retain the independent mixed-domain matches and preserve residual filtering, fallback, scalar identity and field-pair behavior.`,
       authority: `RFC #1659 invariant 8, SQLite expression-index matching, and the existing native-value contract recorded beside this owner.`,
-      owner: `packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
       limits: `The unchanged generated bounds, finite fixtures, and real BetterSqlite3 adapter checkpoints described above; no added product or coverage claim.`,
     },
+    owns: [`src/node-driver.ts`],
     histories: temporalFamilies,
 
     label: (family) => `${family.kind}/${family.name}`,

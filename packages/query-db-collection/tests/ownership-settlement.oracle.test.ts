@@ -516,7 +516,6 @@ function invalidResultCheck(
   )
 }
 declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
   model: [
     emptySettlementModel,
     deferredSettlementModel,
@@ -541,8 +540,8 @@ oracleProperty({
       'docs/collections/query-collection.md#controlling-refetch-behavior and the independent ownership result/call-settlement models.',
     limits:
       'Original bounded real QueryClient history and all its public/persistence/receipt cuts; no native SDK or transport retry claim.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [{ throwOnError: true }, { throwOnError: false }],
   model: applicationFailureModel,
   driver: async ({ throwOnError }: { throwOnError: boolean }, observe) => {
@@ -623,8 +622,8 @@ oracleProperty({
       'docs/collections/query-collection.md#controlling-refetch-behavior and the independent ownership result/call-settlement models.',
     limits:
       'Original bounded real QueryClient history and all its public/persistence/receipt cuts; no native SDK or transport retry claim.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [{}],
   model: handlerFailureModel,
   driver: async (_history, observe) => {
@@ -708,8 +707,8 @@ oracleProperty({
       'docs/collections/query-collection.md#controlling-refetch-behavior and the independent ownership result/call-settlement models.',
     limits:
       'Original bounded real QueryClient history and all its public/persistence/receipt cuts; no native SDK or transport retry claim.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [{}],
   model: emptySettlementModel,
   driver: async (_history, observe) => {
@@ -763,8 +762,8 @@ oracleProperty({
       'docs/collections/query-collection.md#controlling-refetch-behavior and the independent ownership result/call-settlement models.',
     limits:
       'Original bounded real QueryClient history and all its public/persistence/receipt cuts; no native SDK or transport retry claim.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [`fulfilled`, `rejected`] as const,
   model: reentrantSettlementModel,
   driver: async (receiptOutcome, observe) => {
@@ -933,8 +932,8 @@ oracleProperty({
       'docs/collections/query-collection.md#controlling-refetch-behavior and the independent ownership result/call-settlement models.',
     limits:
       'Original bounded real QueryClient history and all its public/persistence/receipt cuts; no native SDK or transport retry claim.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [
     {
       invalidShape: `non-array`,
@@ -1035,8 +1034,8 @@ oracleProperty({
       'docs/collections/query-collection.md#controlling-refetch-behavior and the independent ownership result/call-settlement models.',
     limits:
       'Original bounded real QueryClient history and all its public/persistence/receipt cuts; no native SDK or transport retry claim.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [{}],
   model: deferredSettlementModel,
   driver: async (_history, observe) => {
@@ -1132,8 +1131,8 @@ oracleProperty({
       'docs/collections/query-collection.md#controlling-refetch-behavior and the independent ownership result/call-settlement models.',
     limits:
       'Original bounded real QueryClient history and all its public/persistence/receipt cuts; no native SDK or transport retry claim.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [{}],
   model: cleanupSettlementModel,
   driver: async (_history, observe) => {
@@ -1210,8 +1209,8 @@ oracleProperty({
       'docs/collections/query-collection.md#controlling-refetch-behavior and the independent ownership result/call-settlement models.',
     limits:
       'Original bounded real QueryClient history and all its public/persistence/receipt cuts; no native SDK or transport retry claim.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [{}],
   model: recoveredSettlementModel,
   driver: async (_history, observe) => {
@@ -1301,8 +1300,8 @@ oracleProperty({
       'docs/collections/query-collection.md#controlling-refetch-behavior and the independent ownership result/call-settlement models.',
     limits:
       'Original bounded real QueryClient history and all its public/persistence/receipt cuts; no native SDK or transport retry claim.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [{}],
   model: eagerRecoveredSettlementModel,
   driver: async (_history, observe) => {
@@ -1395,8 +1394,8 @@ oracleProperty({
       'docs/collections/query-collection.md#controlling-refetch-behavior and the independent ownership result/call-settlement models.',
     limits:
       'Original bounded real QueryClient history and all its public/persistence/receipt cuts; no native SDK or transport retry claim.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [{}],
   model: retainedInvalidSettlementModel,
   driver: async (_history, observe) => {
@@ -1492,8 +1491,8 @@ oracleProperty({
       'docs/collections/query-collection.md#controlling-refetch-behavior and the independent ownership result/call-settlement models.',
     limits:
       'Original bounded real QueryClient history and all its public/persistence/receipt cuts; no native SDK or transport retry claim.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [{}],
   model: overlappingDeferralModel,
   driver: async (_history, observe) => {
@@ -1649,8 +1648,8 @@ oracleProperty({
       'docs/collections/query-collection.md#controlling-refetch-behavior and the independent ownership result/call-settlement models.',
     limits:
       'Original bounded real QueryClient history and all its public/persistence/receipt cuts; no native SDK or transport retry claim.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [{}],
   model: independentSettlementModel,
   driver: async (_history, observe) => {

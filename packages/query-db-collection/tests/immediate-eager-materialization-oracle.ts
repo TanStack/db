@@ -186,8 +186,6 @@ export function immediateEagerMaterializationOptions(
         'Fresh nonpersisted eager initialData and existing exact-key cache materialize rows and readiness when synchronous startup returns.',
       authority:
         'docs/collections/query-collection.md Initial Data; query.test.ts cached-query immediate-read receiver.',
-      owner:
-        'packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
       limits:
         'Fresh disabled eager Query, no persistence or mutations, raw/derived response, at most four unique string-keyed numeric rows. Creation-return cut; no preload promise timing claim.',
     },

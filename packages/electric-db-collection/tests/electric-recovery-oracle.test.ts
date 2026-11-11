@@ -767,7 +767,6 @@ declareOracle({
     expectedReplacementRows,
   ],
   grammar: [publicationHistoryArbitrary],
-  owns: [`src/electric.ts#electricCollectionOptions`],
 })
 
 describe(`persisted Electric recovery laws`, () => {
@@ -903,11 +902,11 @@ describe(`persisted Electric recovery laws`, () => {
   oracleProperty({
     id: `electric-recovery.publication-stream-convergence`,
     law: {
-      owner: `packages/electric-db-collection/tests/electric-recovery-oracle.test.ts`,
       statement: `Independent persistence publications and stream deltas agree with complete-row state.`,
       authority: `The persisted-replica recovery law in this file's opening contract and assertPublicationHistory's independent snapshot judgment.`,
       limits: `The unchanged controlled ShapeStream and SQLite fixture, bounded publication histories, and recorded public/durable cuts; no live HTTP or native-host claim.`,
     },
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       arbitrary: publicationHistoryArbitrary,
       runs: 20,

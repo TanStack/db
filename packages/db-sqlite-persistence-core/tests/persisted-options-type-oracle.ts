@@ -796,7 +796,6 @@ export function registerPersistedOptionsTypeOracle(receiver: Receiver): void {
       statement: `Persistence wrapping preserves each generated caller's public row, input, key, utility, and option types.`,
       authority: `SQLite persistence, schemas, and VirtualRowProps contracts stated above.`,
       limits: `The existing legal generated consumer shapes through the source entry; no native runtime or published-package resolution claim.`,
-      owner: `SQLite persistence`,
     },
     histories: {
       arbitrary: shapeArbitrary,
@@ -826,7 +825,6 @@ export function registerPersistedOptionsTypeOracle(receiver: Receiver): void {
       statement: `Persistence wrapping preserves the retained consumer regression shapes through the same independent compiler judgment.`,
       authority: `The public persistence, schema, and virtual-row contracts stated above.`,
       limits: `These retained optional-field consumer fixtures are supplemental to the generated grammar.`,
-      owner: `SQLite persistence`,
     },
     histories: replayShapes,
     resolve: (history) => ({ history }),
@@ -1063,7 +1061,6 @@ export function registerPersistedUtilityAdmissionOracle(
       statement: `Local persistence rejects every reserved caller utility name before resolution, while admitted options preserve the caller utilities.`,
       authority: `The maintainer's reserved-utility admission rule and public wrapper contract stated above.`,
       limits: `The existing core/browser wrapper source entries, descriptors, schemas and sync modes; no Collection execution or native SQLite claim.`,
-      owner: `SQLite persistence`,
     },
     histories: {
       arbitrary: utilityAdmissionArbitrary,

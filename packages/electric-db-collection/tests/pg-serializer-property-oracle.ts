@@ -26,7 +26,6 @@ export function serializerProp<T>(
     oracleProperty({
       id: property,
       law: {
-        owner: `packages/electric-db-collection/tests/pg-serializer-oracle.property.test.ts`,
         statement: name,
         authority: `The established scalar output laws and independent finite-array decoder in pg-serializer-oracle.property.test.ts.`,
         limits: `The existing supported scalar and flat finite-array domains; no PostgreSQL acceptance or Electric provider casting claim.`,

@@ -330,9 +330,9 @@ describe(`SQLite resume snapshots`, () => {
     law: {
       statement: `Retired storage remains exactly while a live cache claim or current head makes it reachable.`,
       authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
-      owner: `packages/db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
       limits: `The unchanged finite histories and SQLite observation cuts.`,
     },
+    owns: [`src/sqlite-core-adapter.ts`],
     histories: [
       {
         oldClaim: `renew`,
@@ -423,9 +423,9 @@ describe(`SQLite resume snapshots`, () => {
     law: {
       statement: `Retired generations remain exactly while a live cache claim or current head makes them reachable.`,
       authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
-      owner: `packages/db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
       limits: `The unchanged three-generation grammar, retained contents and half-open clock cuts.`,
     },
+    owns: [`src/sqlite-core-adapter.ts`],
     histories: {
       arbitrary: retiredStorageHistory,
       runs: 24,
@@ -731,9 +731,9 @@ describe(`SQLite resume snapshots`, () => {
     law: {
       statement: `Managed resume reads use their in-transaction claim expiry and leave a later live peer intact.`,
       authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
-      owner: `packages/db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
       limits: `The unchanged finite histories and SQLite observation cuts.`,
     },
+    owns: [`src/sqlite-core-adapter.ts`],
     histories: [
       { clockCut: `before expiry`, elapsedMs: -1, includeRows: false },
       { clockCut: `before expiry`, elapsedMs: -1, includeRows: true },
@@ -776,9 +776,9 @@ describe(`SQLite resume snapshots`, () => {
     law: {
       statement: `Managed resume reads use their in-transaction claim expiry and leave a later live peer intact.`,
       authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
-      owner: `packages/db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
       limits: `The unchanged bounded rows, inclusion and expiry grammar at the held SQLite transaction cut.`,
     },
+    owns: [`src/sqlite-core-adapter.ts`],
     histories: {
       arbitrary: managedClaimReadHistory,
       runs: 30,
@@ -980,9 +980,9 @@ describe(`SQLite resume snapshots`, () => {
     law: {
       statement: `The existing fixed startup corpus reaches each baseline size and transition.`,
       authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
-      owner: `packages/db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
       limits: `The unchanged seed1659 twelve-history generator calibration.`,
     },
+    owns: [`src/sqlite-core-adapter.ts`],
     histories: [{ name: `startup corpus` }],
     driver: (history: { name: string }, observe) =>
       recordAssertionJudgment(
@@ -1168,9 +1168,9 @@ describe(`SQLite resume snapshots`, () => {
     law: {
       statement: `A resume token follows a coherent baseline lineage until an authoritative replacement restores a discontinuity.`,
       authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
-      owner: `packages/db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
       limits: `The unchanged bounded step grammar, legacy schema receiving path and original five reach obligations.`,
     },
+    owns: [`src/sqlite-core-adapter.ts`],
     histories: {
       arbitrary: progressHistory,
       runs: 80,
@@ -1222,7 +1222,6 @@ describe(`SQLite resume snapshots`, () => {
   // cases share those checks. The startup grammar is the generator whose coverage
   // the fixed startup corpus calibrates.
   declareOracle({
-    owns: [`src/sqlite-core-adapter.ts`],
     check: [
       assertRetiredStorageHistory,
       assertManagedClaimReadHistory,
@@ -1237,9 +1236,9 @@ describe(`SQLite resume snapshots`, () => {
     law: {
       statement: `Local-only startup preserves its managed persisted baseline through the existing startup transitions.`,
       authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
-      owner: `packages/db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
       limits: `The unchanged one-to-three-row startup grammar at held metadata and hydration snapshot cuts.`,
     },
+    owns: [`src/sqlite-core-adapter.ts`],
     histories: {
       arbitrary: startupHistoryArbitrary,
       runs: 12,

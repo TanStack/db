@@ -112,7 +112,6 @@ export function registerBaselineLifecycle(
     law: {
       statement: `Cleanup retires source authority while persisted-baseline completion or an adapter acknowledgment is held. Accepted rows remain owed, replacement results are complete, resources release once, and failures remain handled.`,
       authority: `Shared eager-source LIFE-2/5/10, READY-4, HEALTH-5; glossary accepted sync transaction, cleanup and reload; existing TrailBase persisted-hydration row projection.`,
-      owner: `Shared eager-source lifecycle receiving extension`,
       limits: `Three keys, one retirement/reload and replacement, delayed adapter acknowledgment distinct from application, local SDK data. Explicit hydrate-call reach required only for candidate mode; no remote provider service or internal-work law.`,
     },
     histories: {

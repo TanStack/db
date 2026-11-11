@@ -65,7 +65,6 @@ const fixedSeed = 1_779_001
 const pagerLaw = {
   authority: `cursor-pagination/README.md, Contract before implementation; createCursorPager`,
   limits: `Bounded immutable backend sequences; no changing HTTP endpoint snapshots.`,
-  owner: `Opaque backend pagination`,
 }
 
 // Keep the old exact comparisons, including Error equality, in the native
@@ -108,6 +107,11 @@ oracleProperty({
     ...pagerLaw,
     statement: `Backend sequences reject foreign continuation tokens while retaining their own continuations.`,
   },
+  // What this oracle owns: the opaque cursor pager that createCursorPager builds
+  // over a backend. The pager's reads must equal the full-relation model (see
+  // the declaration below), and its fetched-page counts must follow the
+  // transport rules.
+  owns: [`src/cursor-pagination.ts#createCursorPager`],
   histories: {
     arbitrary: fc.tuple(fc.integer({ min: 1, max: 5 }), fc.boolean()),
     runs: 50,
@@ -203,6 +207,7 @@ describe(`opaque cursor adapter`, () => {
       ...pagerLaw,
       statement: `The requested full-relation slice is invariant under backend page repartition.`,
     },
+    owns: [`src/cursor-pagination.ts#createCursorPager`],
     histories: {
       arbitrary: fc.tuple(rowsArbitrary, scopeArbitrary, windowArbitrary),
       runs: 100,
@@ -287,6 +292,7 @@ describe(`opaque cursor adapter`, () => {
       ...pagerLaw,
       statement: `Resetting a pager changes its source generation without changing an independent filter/order scope.`,
     },
+    owns: [`src/cursor-pagination.ts#createCursorPager`],
     histories: {
       arbitrary: fc.tuple(rowsArbitrary, scopeArbitrary, scopeArbitrary),
       runs: 50,
@@ -336,6 +342,7 @@ describe(`opaque cursor adapter`, () => {
       ...pagerLaw,
       statement: `An intermediate page fault rejects its reader without preventing a healthy peer or causing refetches of an already cached slice.`,
     },
+    owns: [`src/cursor-pagination.ts#createCursorPager`],
     histories: {
       arbitrary: fc.tuple(
         fc.array(fc.integer({ min: -2, max: 2 }), {
@@ -398,12 +405,7 @@ describe(`opaque cursor adapter`, () => {
   })
 })
 
-// What this oracle owns: the opaque cursor pager that createCursorPager builds
-// over a backend. The pager's reads must equal the full-relation model (see
-// the declaration below), and its fetched-page counts must follow the
-// transport rules.
 declareOracle({
-  owns: [`src/cursor-pagination.ts#createCursorPager`],
   check: [checkRead],
   model: [expectedRows],
 })
@@ -664,8 +666,8 @@ oracleProperty({
     statement: `A cursor pager returns exactly the requested slice of the whole filtered ordered relation, rejects an invalid window with RangeError before transport, captures each window when called, and fetches only the shortest prefix of backend pages that covers what was read, reusing fetched pages.`,
     authority: `packages/query-db-collection/tests/cursor-pagination/README.md, "Contract before implementation" (transport rules) and "Chosen implementation" (loading more fetches the missing suffix); the exact page counts the previous fixed tests pinned; the exported createCursorPager API`,
     limits: `One scope per pager; no reset, faults, or cancellation in this property; a stable backend relation, not snapshot consistency for changing endpoints.`,
-    owner: `Opaque backend pagination`,
   },
+  owns: [`src/cursor-pagination.ts#createCursorPager`],
   histories: {
     arbitrary: readHistory,
     states: [],

@@ -639,20 +639,7 @@ const advanceStep = (elapsedMs: 1 | 20 | 60 | 120): Step => ({
 })
 const cleanupStep = (side: Side): Step => ({ kind: `cleanup`, side })
 
-// What this oracle owns: the garbage-collection hold that a persisting
-// transaction places on each Collection it touches, in lifecycle.ts, and the
-// settlement that releases it. A transaction settles in `commit` (completion)
-// or `rollback` (failure), and both reach `touchCollection`, which restarts the
-// delay for each Collection the transaction touched. The oracle judges those
-// three functions with their static call trees. The cleanup-queue oracle owns
-// the timer dispatch that runs the deadline.
 declareOracle({
-  owns: [
-    `src/collection/lifecycle.ts`,
-    `src/transactions.ts#Transaction.commit`,
-    `src/transactions.ts#Transaction.rollback`,
-    `src/transactions.ts#Transaction.touchCollection`,
-  ],
   grammar: [stepArbitrary],
 })
 
@@ -668,8 +655,20 @@ oracleProperty({
     statement: `Automatic garbage collection retires a Collection only after gcTime with no subscriber and no persisting transaction; a persisting transaction holds each Collection it touches, and the delay restarts when the last such transaction completes or fails; explicit cleanup() retires a Collection while a transaction persists.`,
     authority: `BaseCollectionConfig.gcTime; the persisting-transaction hold in packages/db/src/collection/lifecycle.ts (optimistic rows and adapter awaitTxId waits); explicit cleanup keeps its current contract`,
     limits: `Two Collections with a synchronous ready sync and empty source; keys as numbers, up to ${MAX_STEPS} steps; clock steps of 1, 20, 60, and 120 ms with gcTime 100; paced mutations, offline transactions, live-query Collections, writes into a cleaned-up Collection, and wall-clock corrections are not generated. The delay after a settlement on a cleaned-up Collection is not observable.`,
-    owner: `Collection garbage collection under persisting transactions`,
   },
+  // What this oracle owns: the garbage-collection hold that a persisting
+  // transaction places on each Collection it touches, in lifecycle.ts, and the
+  // settlement that releases it. A transaction settles in `commit` (completion)
+  // or `rollback` (failure), and both reach `touchCollection`, which restarts the
+  // delay for each Collection the transaction touched. The oracle judges those
+  // three functions with their static call trees. The cleanup-queue oracle owns
+  // the timer dispatch that runs the deadline.
+  owns: [
+    `src/collection/lifecycle.ts`,
+    `src/transactions.ts#Transaction.commit`,
+    `src/transactions.ts#Transaction.rollback`,
+    `src/transactions.ts#Transaction.touchCollection`,
+  ],
   histories: {
     arbitrary: historyArbitrary,
     states: reachStates,

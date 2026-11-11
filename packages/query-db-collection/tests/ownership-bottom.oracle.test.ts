@@ -287,7 +287,6 @@ function supersededCheck(
 }
 
 declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
   model: [
     mergeCutModel,
     emptyBaselineModel,
@@ -305,8 +304,8 @@ oracleProperty({
       'docs/collections/query-collection.md#direct-writes-and-query-sync and existing ownership retention/result-settlement contracts.',
     limits:
       'Original finite history and every retained work/cache/publication checkpoint; controlled persistence rather than native SQLite.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: mergeCuts,
   model: mergeCutModel,
   driver: async (cut, observe) => {
@@ -472,8 +471,8 @@ oracleProperty({
       'docs/collections/query-collection.md#direct-writes-and-query-sync and existing ownership retention/result-settlement contracts.',
     limits:
       'Original finite history and every retained work/cache/publication checkpoint; controlled persistence rather than native SQLite.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [{}],
   model: emptyBaselineModel,
   driver: async (_history, observe) => {
@@ -527,8 +526,8 @@ oracleProperty({
       'docs/collections/query-collection.md#direct-writes-and-query-sync and existing ownership retention/result-settlement contracts.',
     limits:
       'Original finite history and every retained work/cache/publication checkpoint; controlled persistence rather than native SQLite.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [{}],
   model: coldBaselineModel,
   driver: async (_history, observe) => {
@@ -583,8 +582,8 @@ oracleProperty({
       'docs/collections/query-collection.md#direct-writes-and-query-sync and existing ownership retention/result-settlement contracts.',
     limits:
       'Original finite history and every retained work/cache/publication checkpoint; controlled persistence rather than native SQLite.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: [{}],
   model: supersededModel,
   driver: async (_history, observe) => {

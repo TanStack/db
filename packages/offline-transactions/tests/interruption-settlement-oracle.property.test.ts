@@ -9,7 +9,6 @@ import {
   violation,
   withinTurns,
 } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import {
   captureUnhandledRejections,
@@ -22,22 +21,6 @@ import './interruption-handoff-oracle'
 import './settled-id-window-oracle'
 import './executor-api-oracle'
 import './executor-lifecycle-oracle'
-
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
-  owns: [
-    `src/OfflineExecutor.ts`,
-    `src/OfflineExecutor.ts#startOfflineExecutor`,
-    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
-    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineAction`,
-    `src/OfflineExecutor.ts#OfflineExecutor.waitForTransactionCompletion`,
-    `src/OfflineExecutor.ts#OfflineExecutor.resolveTransaction`,
-    `src/OfflineExecutor.ts#OfflineExecutor.rejectTransaction`,
-    `src/OfflineExecutor.ts#OfflineExecutor.registerRestorationTransaction`,
-    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
-  ],
-})
 
 /**
  * # Does an interruption at any point keep each offline transaction's
@@ -501,8 +484,20 @@ oracleProperty({
     statement: `Leadership loss, going offline, or disposal at any point of the commit pipeline keeps each offline transaction's admission, fencing, exactly-once provider call in commit order, settlement with its provider outcome, and durable ownership, with no unhandled rejection.`,
     authority: `the offline-transactions README, and the settlement and leadership oracles`,
     limits: `Disjoint keys (sibling rollback is the settlement oracle's); one to three transactions; fake storage over one store; no overlapping old and new executors, since exactly-once execution across independent leaders is not promised.`,
-    owner: `Offline execution`,
   },
+  // What this oracle owns: the gap report judges these entries, and their
+  // reference trees within the package, by this file's tests.
+  owns: [
+    `src/OfflineExecutor.ts`,
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineAction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForTransactionCompletion`,
+    `src/OfflineExecutor.ts#OfflineExecutor.resolveTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.rejectTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.registerRestorationTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
   histories: {
     arbitrary: history,
     measured: landingStates,

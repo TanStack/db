@@ -83,7 +83,6 @@ type Fault =
 const serializerLaw = {
   authority: `SerializedOfflineTransaction and the offline persistence contract`,
   limits: `The existing bounded value grammar, controlled Temporal constructors and FakeStorageAdapter; no native storage or cross-realm promise.`,
-  owner: `Offline serialization`,
 }
 // A recipe transports the existing independently authored runtime/wire Pair.
 // Tags distinguish Date, bigint, binary and own undefined without changing any

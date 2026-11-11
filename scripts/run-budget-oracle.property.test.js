@@ -655,7 +655,6 @@ const budgetOracle = {
     statement: `Every lowered or removed tracked oracle run budget is reported with its exact before and after values.`,
     authority: `AGENTS.md: Lint feedback while you work; oracle rubric ORC-007; maintainer removal decision 2026-10-27.`,
     limits: `The unchanged bounded source grammar and report normalization described above.`,
-    owner: `Small structures and test mechanics`,
   },
   model: predictReport,
   driver: async (program, observe) => {

@@ -924,7 +924,6 @@ const revertLaw = {
   statement: `Draft reads, changes, and original-row isolation agree with the existing independent draft-equality transition model after the final write.`,
   authority: `The nine draft-equality rules and maintainer decisions documented above.`,
   limits: `The existing assignment, deletion, nested, iterator, typed-array, URL, class, and revert grammars; no new values or paths are introduced.`,
-  owner: `Drafts and native values`,
 }
 
 // ---------------------------------------------------------------------------
@@ -960,6 +959,9 @@ describe(`draft revert oracle`, () => {
   oracleProperty({
     id: SIGNED_ZERO,
     law: revertLaw,
+    // What this oracle owns: the gap report judges the draft's revert and change
+    // report, and its native mutator writes, in proxy.ts by this file's tests.
+    owns: [`src/proxy.ts`],
     histories: {
       arbitrary: signedZeroArb,
       runs: 100,
@@ -989,6 +991,7 @@ describe(`draft revert oracle`, () => {
   oracleProperty({
     id: WRITE_HISTORY,
     law: revertLaw,
+    owns: [`src/proxy.ts`],
     histories: { arbitrary: historyArb, runs: 400, fixedSeeds: [FIXED_SEED] },
     model: historyExpectation,
     driver: historyDriver,
@@ -998,6 +1001,7 @@ describe(`draft revert oracle`, () => {
   oracleProperty({
     id: NESTED_ROUND_TRIPS,
     law: revertLaw,
+    owns: [`src/proxy.ts`],
     histories: {
       arbitrary: nestedRoundTripArb,
       runs: 200,
@@ -1011,6 +1015,7 @@ describe(`draft revert oracle`, () => {
   oracleProperty({
     id: CLASS_WRITES,
     law: revertLaw,
+    owns: [`src/proxy.ts`],
     histories: {
       arbitrary: classWriteArb,
       runs: 200,
@@ -1024,6 +1029,7 @@ describe(`draft revert oracle`, () => {
   oracleProperty({
     id: PARTIAL_REVERTS,
     law: revertLaw,
+    owns: [`src/proxy.ts`],
     histories: {
       arbitrary: partialRevertArb,
       runs: 200,
@@ -1608,10 +1614,7 @@ function expectNativeHistory(history: NativeHistory): void {
   expectNativeResult(history, driveNative(history))
 }
 
-// What this oracle owns: the gap report judges the draft's revert and change
-// report, and its native mutator writes, in proxy.ts by this file's tests.
 declareOracle({
-  owns: [`src/proxy.ts`],
   check: [
     expectHistory,
     expectHistoryObservation,
@@ -1654,6 +1657,7 @@ describe(`draft revert oracle: native mutators mixed with assignments`, () => {
       statement: `Array mutators, assignments, and detached handles preserve the existing final row and permitted change-report law.`,
       limits: `The existing bounded numeric native-history grammar; Map and Set mutators are not mixed with assignments.`,
     },
+    owns: [`src/proxy.ts`],
     histories: {
       arbitrary: nativeHistoryArb,
       runs: 400,

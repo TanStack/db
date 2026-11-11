@@ -600,14 +600,7 @@ function runHistory(history: History): void {
   )
 }
 
-// What this oracle owns: the gap report judges the flat and proxy change trackers
-// (withFlatChangeTracking, withChangeTracking, withArrayChangeTracking) by this file's tests.
 declareOracle({
-  owns: [
-    `src/proxy.ts#withFlatChangeTracking`,
-    `src/proxy.ts#withChangeTracking`,
-    `src/proxy.ts#withArrayChangeTracking`,
-  ],
   check: [runHistory],
   model: [expectedChanges],
 })
@@ -628,8 +621,14 @@ describe(`flat change tracking oracle`, () => {
       statement: `Flat and proxy trackers agree with the independent authored field-difference model, including signed zero, deletion, reversion, descriptor effects, stored drafts and callback rejection.`,
       authority: `src/proxy.ts draft/change-set contract and the 2026-10-29 signed-zero maintainer decision`,
       limits: `The existing bounded flat-row grammar; nested rich containers, class instances and symbol keys belong to the other proxy owners.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
+    // What this oracle owns: the gap report judges the flat and proxy change trackers
+    // (withFlatChangeTracking, withChangeTracking, withArrayChangeTracking) by this file's tests.
+    owns: [
+      `src/proxy.ts#withFlatChangeTracking`,
+      `src/proxy.ts#withChangeTracking`,
+      `src/proxy.ts#withArrayChangeTracking`,
+    ],
     histories: {
       arbitrary: historyArbitrary,
       runs: 200,

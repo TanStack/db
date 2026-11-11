@@ -44,10 +44,6 @@ import type { UseLiveQueryConfig } from '../src/useLiveQuery'
 import type { ReactNode } from 'react'
 
 declareOracle({
-  owns: [
-    `src/DbProvider.tsx#DbProvider`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
   grammar: [localOptionPairs],
   check: [checkLocalOutputOwnership],
 })
@@ -332,9 +328,12 @@ oracleProperty({
   law: {
     statement: `Independent Suspense bindings keep their declared local output options and retain the first output after a peer mounts.`,
     authority: `packages/db/tests/live-query-cache-options-oracle.ts maintainer independent-caller law and existing React pending receiving histories.`,
-    owner: `packages/db/tests/live-query-cache-options-oracle.ts`,
     limits: `The unchanged finite option/reference/identity matrix and focused pending callback/scalar histories in unscoped and DbClient scopes; no server render, hydration or abandoned-render claim.`,
   },
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   histories,
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,

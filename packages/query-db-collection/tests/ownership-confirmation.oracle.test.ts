@@ -898,8 +898,8 @@ oracleProperty({
       'docs/collections/query-collection.md#controlling-refetch-behavior; optimistic-history acceptance and settlement law; first-RC explicit confirmation decision.',
     limits:
       'One handler, edited row and optional untouched peer; legal no/refetch/write confirmation and discarded legacy returns. No provider framing or concurrent handlers.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: ['src/query.ts#queryCollectionOptions'],
   histories: {
     arbitrary: mutationArbitrary,
     runs: 40,
@@ -982,8 +982,8 @@ oracleProperty({
       'docs/collections/query-collection.md#explicit-refetch-inside-a-handler and core applied-receipt law.',
     limits:
       'One CRUD handler and one later local persisted refetch, with durable application held after the Query fetch; no native SQLite fault or concurrent handler.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: ['src/query.ts#queryCollectionOptions'],
   histories: {
     arbitrary: postArbitrary,
     runs: 24,
@@ -1071,7 +1071,6 @@ oracleProperty({
 })
 
 declareOracle({
-  owns: ['src/query.ts#queryCollectionOptions'],
   model: [mutationModel, postModel],
   check: [checkMutation, checkPost],
   grammar: [mutationArbitrary, postArbitrary],

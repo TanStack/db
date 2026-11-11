@@ -119,14 +119,7 @@ function checkManualWriteTrace(
   )
 }
 
-// What this oracle owns: the opaque pager through a real QueryCollection and
-// live-query window (createCursorPager, queryCollectionOptions). Its model is
-// the full-relation window in cursor-pagination/model-oracle.ts.
 declareOracle({
-  owns: [
-    `src/cursor-pagination.ts#createCursorPager`,
-    `src/query.ts#queryCollectionOptions`,
-  ],
   model: [expectedWindow],
 })
 
@@ -164,8 +157,14 @@ describe(`cursor adapter through production pagination`, () => {
           statement: `Direct writes update eager Collection rows and compatible row caches surgically while preserving page state and pager rows.`,
           authority: `queryCollectionOptions direct-write contract; cursor-pagination/README.md`,
           limits: `Handler-free writes after eager load, raw or items-envelope row caches; no writes during a pending fetch.`,
-          owner: `Opaque backend pagination`,
         },
+        // What this oracle owns: the opaque pager through a real QueryCollection and
+        // live-query window (createCursorPager, queryCollectionOptions). Its model is
+        // the full-relation window in cursor-pagination/model-oracle.ts.
+        owns: [
+          `src/cursor-pagination.ts#createCursorPager`,
+          `src/query.ts#queryCollectionOptions`,
+        ],
         histories: {
           arbitrary: fc.tuple(
             fc.array(

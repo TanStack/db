@@ -82,11 +82,6 @@ function expectCopyFollowsLaw(
 }
 
 declareOracle({
-  owns: [
-    `src/query/compiler/route-metadata.ts#stripInternalCallbackMetadata`,
-    `src/query/compiler/route-metadata.ts#transformPublicContainers`,
-    `src/query/live/materialized-pipeline.ts#compileValueResolver`,
-  ],
   model: [expectedCopy],
   check: [expectCopyFollowsLaw, checkCopyPrograms, checkCopyCampaign],
   grammar: [programs, inputGrammar],
@@ -248,8 +243,12 @@ oracleProperty({
     statement: `Cleanup copies preserve public array shape, prototypes, descriptors, user symbols and reference leaves without reading accessors or mutating the source.`,
     authority: `ARCHITECTURE.md's public-value preservation law, stated at the start of this owner.`,
     limits: `The original twenty-four cleanup-path/prototype/change cells, sparse sizes zero through eight and locked lengths; resolver return before Collection enrichment. No publication or provider claim.`,
-    owner: `Public-container cleanup copies`,
   },
+  owns: [
+    `src/query/compiler/route-metadata.ts#stripInternalCallbackMetadata`,
+    `src/query/compiler/route-metadata.ts#transformPublicContainers`,
+    `src/query/live/materialized-pipeline.ts#compileValueResolver`,
+  ],
   histories: {
     arbitrary: inputGrammar,
     runs: 6,

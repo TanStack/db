@@ -258,11 +258,6 @@ function checkRecordedReload(
 }
 
 declareOracle({
-  owns: [
-    `src/main.ts#exposeElectronSQLitePersistence`,
-    `src/renderer.ts#createElectronSQLitePersistence`,
-    `src/electron-coordinator.ts`,
-  ],
   model: [model],
   check: [check, checkRecordedReload],
   grammar: [reloadHistoryArb],
@@ -274,8 +269,12 @@ oracleProperty({
     statement: `A reload repairs missing setup and preserves lawful rows while performing only the setup, snapshot, registry, and election work allowed by the shared reload model.`,
     authority: `The shared reload-class contract in db-sqlite-persistence-core/tests/reload-class-oracle.ts.`,
     limits: `Electron receiving driver with the existing in-process host controls; no claim about real cross-process scheduling or physical OPFS.`,
-    owner: `SQLite persistence`,
   },
+  owns: [
+    `src/main.ts#exposeElectronSQLitePersistence`,
+    `src/renderer.ts#createElectronSQLitePersistence`,
+    `src/electron-coordinator.ts`,
+  ],
   histories: {
     arbitrary: reloadHistoryArb,
     runs: 12,
@@ -294,8 +293,12 @@ oracleProperty({
     statement: `The retained host reload histories satisfy every existing setup, row, budget, and ordering comparison.`,
     authority: `The shared reload-class contract in db-sqlite-persistence-core/tests/reload-class-oracle.ts.`,
     limits: `The named fixed histories on this existing in-process receiving driver.`,
-    owner: `SQLite persistence`,
   },
+  owns: [
+    `src/main.ts#exposeElectronSQLitePersistence`,
+    `src/renderer.ts#createElectronSQLitePersistence`,
+    `src/electron-coordinator.ts`,
+  ],
   histories: fixedReloadHistories.map(([name, history]) => ({ name, history })),
   label: (entry) => entry.name,
   resolve: (entry) => entry.history,

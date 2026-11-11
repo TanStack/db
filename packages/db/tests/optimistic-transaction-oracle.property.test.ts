@@ -325,8 +325,14 @@ describe(`Same-key transaction laws`, () => {
         statement: `Same-key authored operations collapse to one net request while retaining exact original, modified and changed fields.`,
         authority: `The public manual transaction and Collection mutation contracts in docs/guides/mutations.md and the same-key truth table stated above`,
         limits: `The existing two-operation numeric-key grammar with controlled sync acknowledgement; provider timing, cross-Collection transactions and arbitrary overlapping histories remain outside this driver.`,
-        owner: `docs/contributing/oracle-coverage.md`,
       },
+      // What this oracle owns: the gap report judges the transaction's authored
+      // payload and its same-key merge, and the Collection's mutation intake, by this
+      // file's tests.
+      // The check drivers run one history and compare its public observations with
+      // the expected world they compute from the scenario. The typed-key payload model
+      // is the authored key list.
+      owns: [`src/transactions.ts`, `src/collection/mutations.ts`],
       histories: {
         arbitrary: fc.oneof(
           {
@@ -1099,8 +1105,8 @@ describe(`Whole mixed transaction publication`, () => {
       statement: `A mixed-key transaction retains whole ordered mutation payloads and publishes coherent row, event and settlement cuts.`,
       authority: `The public manual transaction and Collection mutation contracts in docs/guides/mutations.md, with optimistic snapshot and settlement laws owned by optimistic-history-oracle.ts`,
       limits: `The existing one-Collection manual transaction grammar and controlled sync acknowledgements; provider timing, cross-Collection transactions and arbitrary overlapping same-key histories remain outside this driver.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
+    owns: [`src/transactions.ts`, `src/collection/mutations.ts`],
     histories: {
       arbitrary: fc.record({
         order: fc.constantFrom(...orders),
@@ -1270,14 +1276,7 @@ for (const { numberKey, reversed } of [0, -1, 1, 1.5].flatMap((key) =>
   }
 }
 
-// What this oracle owns: the gap report judges the transaction's authored
-// payload and its same-key merge, and the Collection's mutation intake, by this
-// file's tests.
-// The check drivers run one history and compare its public observations with
-// the expected world they compute from the scenario. The typed-key payload model
-// is the authored key list.
 declareOracle({
-  owns: [`src/transactions.ts`, `src/collection/mutations.ts`],
   check: [runTransaction, runSameKey, runDeleteInsertReplacement],
   model: [expectedTypedKeyPayload],
 })

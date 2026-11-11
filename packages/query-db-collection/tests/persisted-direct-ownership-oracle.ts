@@ -344,8 +344,6 @@ export function persistedDirectOwnershipOptions(
         'A later complete physical fetch replaces and claims a direct row; an older result preserves it without claiming source ownership. Query adapter sync writes declare an insert, update, or delete operation.',
       authority:
         'docs/collections/query-collection.md: Understanding the Data Stores item1 and Direct Writes and Query Sync; primary ownership direct-order/direct-row-lifetime laws; docs/reference/interfaces/SyncConfig.md and ChangeMessage.md, ChangeMessageOrDeleteKeyMessage and OperationType API types.',
-      owner:
-        'packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts',
       limits:
         'First eager result, one saved row and one same-run insert/upsert, numeric values, successful I/O. Public/durable cuts follow applied receipts; cleanup is diagnostic. No arbitrary mutations, peers, concurrent writers or eager unload claim.',
     },

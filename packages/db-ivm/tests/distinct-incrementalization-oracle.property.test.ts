@@ -49,7 +49,6 @@ const policy = {
 }
 
 declareOracle({
-  owns: [`src/operators/distinct.ts#distinct`],
   check: [assertUnaryIncrementalization, checkDistinctSnapshot],
 })
 
@@ -78,7 +77,6 @@ function distinctOptions(mode: `selected` | `tuple`): CellOptions {
       statement: `Distinct emits the weighted difference of positive-support full recomputations and retains one of every unique selected combination under atomic and legal unit-split delivery.`,
       authority: `docs/guides/live-queries.md#distinct; DBSP incremental/full-recompute law in incrementalization-law-oracle.ts.`,
       limits: `Two unequal immutable {id, value} collision members and one anchor; source worlds have zero to eight slots and zero to twelve random suffix worlds. No ordering, representative policy, public Collection keys, or intermediate transaction publication.`,
-      owner: `Distinct collision review extension`,
     },
     histories: {
       arbitrary: distinctRecipe,
@@ -157,6 +155,7 @@ oracleProperty({
   ...cell0,
   check: checkDistinctCampaign,
   id: `ivm.distinct-collisions`,
+  owns: [`src/operators/distinct.ts#distinct`],
   histories: { ...cell0.histories, runs: 100, fixedSeeds: [2306] },
 })
 
@@ -165,6 +164,7 @@ oracleProperty({
   ...cell1,
   check: checkDistinctCampaign,
   id: `ivm.distinct-collisions-tuple`,
+  owns: [`src/operators/distinct.ts#distinct`],
   histories: { ...cell1.histories, runs: 100, fixedSeeds: [2306] },
 })
 

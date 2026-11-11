@@ -21,7 +21,6 @@ export function registerCapabilityConformance(
         statement: `An advertised persistence capability must satisfy its structural protocol before source delivery; absent metadata and an explicit null capability remain legal.`,
         authority: `SyncMetadataApi.persistence and sync-persistence.ts's cross-package protocol contract.`,
         limits: `The finite 22-history required-member grammar, through the real SDK and named local persistence host; no optional extension faults, on-demand results, or arbitrary malformed values.`,
-        owner: `Adapter conformance: persistence capability admission`,
       },
       // This table is the whole finite grammar. Enumeration preserves all 22
       // cases on each host without inventing a meaningless random campaign.

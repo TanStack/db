@@ -24,18 +24,10 @@ import {
 } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 import { ScenarioLifetime } from './conformance/scenario-lifetime'
 import { oracleProperty, oracleRoute, pass, violation } from './oracle-config'
-import { declareOracle } from './oracle-declaration'
 import type { Notification } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 import type { Verdict } from './oracle-config'
 
 type Row = { id: string; count: number }
-
-// What this oracle owns: the gap report judges every function in the
-// Collection change-message path (subscribeChanges) by this file's generated
-// publication histories and the calibration of its Map checker.
-declareOracle({
-  owns: [`src/collection/changes.ts#CollectionChangesManager.subscribeChanges`],
-})
 
 type QueryHistory = [number | null, Array<number | null>]
 
@@ -131,8 +123,11 @@ oracleProperty({
     statement: `Applying each callback's changes to the previous public rows reconstructs the rows visible in that callback, and unsubscribe stops delivery.`,
     authority: `Collection change-message and subscribeChanges contracts`,
     limits: `One production row, synchronous source transactions and settled preload; no multi-key production batches, ordering or asynchronous provider claim.`,
-    owner: `docs/contributing/oracle-coverage.md`,
   },
+  // What this oracle owns: the gap report judges every function in the
+  // Collection change-message path (subscribeChanges) by this file's generated
+  // publication histories and the calibration of its Map checker.
+  owns: [`src/collection/changes.ts#CollectionChangesManager.subscribeChanges`],
   histories: {
     arbitrary: fc.tuple(
       fc.option(fc.integer(), { nil: null }),
@@ -225,8 +220,8 @@ oracleProperty({
     statement: `The shared publication checker reconstructs generated keyed worlds and rejects later delivery or an unpublished row.`,
     authority: `Collection change-message contract`,
     limits: `Synthetic multi-key checker calibration; this property does not add production-path coverage.`,
-    owner: `docs/contributing/oracle-coverage.md`,
   },
+  owns: [`src/collection/changes.ts#CollectionChangesManager.subscribeChanges`],
   histories: {
     arbitrary: fc.array(
       fc.dictionary(fc.constantFrom('a', 'b', 'c'), fc.integer()),
@@ -303,8 +298,8 @@ oracleProperty({
     statement: `The shared checker rejects an absent or wrong prior update value and a repeated update.`,
     authority: `Collection change-message previousValue and publication contracts`,
     limits: `Synthetic single-row update checker calibration with counts from -1000 through 1000.`,
-    owner: `docs/contributing/oracle-coverage.md`,
   },
+  owns: [`src/collection/changes.ts#CollectionChangesManager.subscribeChanges`],
   histories: {
     arbitrary: fc.integer({ min: -1000, max: 1000 }),
     runs: 50,

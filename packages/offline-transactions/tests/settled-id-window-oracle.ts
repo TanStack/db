@@ -170,7 +170,6 @@ oracleProperty<History, ReturnType<typeof settledWindowModel>>({
     statement: `A late waiter rejects for one of the last 1,000 settled IDs and remains pending for an older or unknown ID.`,
     authority: `offline-transactions README, OfflineExecutor.waitForTransactionCompletion`,
     limits: `998–1003 unique fulfilled empty transactions, four public commit paths, one executor and runtime.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: history,

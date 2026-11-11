@@ -298,7 +298,6 @@ const publishedOwnerHistories: Array<PublishedOwnerHistory> = (
  * literal reach table to retire. Publication holds and row observations are
  * the original real QueryClient cuts, now judged by the framework check. */
 declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
   model: [
     modelReacquisition,
     modelPublishedOwners,
@@ -317,8 +316,8 @@ oracleProperty({
       'docs/collections/query-collection.md#direct-writes-and-query-sync and the documented Query stale/refetch behavior.',
     limits:
       'One released/reacquired on-demand demand, one/two rows, zero/two peer leases and an unrelated publication blocker; no native persistence.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: reacquisitionHistories,
   label: (h) =>
     JSON.stringify(h, (_key, value) =>
@@ -459,8 +458,8 @@ oracleProperty({
       'docs/collections/query-collection.md#direct-writes-and-query-sync; DbClient dehydrate/hydrate row-ownership contract.',
     limits:
       'One released lease, one claimant and optional surviving peer; the reacquired original fetch may reject. Native SQLite is a separate receiving path.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: publishedOwnerHistories,
   model: modelPublishedOwners,
   driver: async (history, observe) => {
@@ -1153,8 +1152,8 @@ oracleProperty({
       'docs/collections/query-collection.md#direct-writes-and-query-sync',
     limits:
       'One key, one/two subset claims, optional metadata, and the five documented direct lifetime operations.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: lifetimeHistories,
   model: lifetimeModel,
   driver: async (h, observe) => {
@@ -1176,8 +1175,8 @@ oracleProperty({
       'docs/collections/query-collection.md#direct-writes-and-query-sync',
     limits:
       'Two on-demand Collections share one exact Query; one extra same/other key write, optional cache edit and final refetch.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: directOrderHistories,
   model: directOrderModel,
   driver: async (h, observe) => {
@@ -1199,8 +1198,8 @@ oracleProperty({
       'docs/collections/query-collection.md#direct-writes-and-query-sync',
     limits:
       'Two exact predicates, one shared key, seven legal histories with both settlement orders, matching value, and neighboring direct-write positions.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: [`src/query.ts#queryCollectionOptions`],
   histories: overlapHistories,
   model: overlapModel,
   driver: async (h, observe) => {

@@ -24,7 +24,6 @@ import { topKBatch } from '../../src/operators/topKState.js'
 import { D2 } from '../../src/d2.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
 import { output } from '../../src/operators/index.js'
-import { declareOracle } from '../../../db/tests/oracle-declaration'
 import {
   differs,
   oracleProperty,
@@ -36,9 +35,6 @@ import type {
   Observation,
   Verdict,
 } from '../../../db/tests/oracle-property.js'
-
-// Keep the existing ownership entry and its package-local reference tree.
-declareOracle({ owns: [`src/operators/topKState.ts#topKBatch`] })
 
 // Each constructor states a relation independently of hashing. Cross that
 // relation with natural/forced collisions and fresh enclosing row allocations.
@@ -500,8 +496,9 @@ oracleProperty({
     statement: `Equal versions cancel; unequal versions retract before insertion; the ordered graph retains the exact owed source row with unit weight, and forced collisions use no hash call.`,
     authority,
     limits,
-    owner: `Ordered relations and BTree`,
   },
+  // Keep the existing ownership entry and its package-local reference tree.
+  owns: [`src/operators/topKState.ts#topKBatch`],
   histories: {
     arbitrary: fc.record({
       n: fc.integer({ min: 0, max: 254 }),
@@ -565,8 +562,8 @@ oracleProperty({
     statement: `An ordinary row replacement retains the exact new row with unit weight with File present or absent.`,
     authority,
     limits,
-    owner: `Ordered relations and BTree`,
   },
+  owns: [`src/operators/topKState.ts#topKBatch`],
   histories: {
     arbitrary: ordinaryRowHistory,
     runs: 25,
@@ -653,8 +650,8 @@ oracleProperty({
     statement: `Equal shared subtrees cancel with exactly one leaf read per input tree.`,
     authority,
     limits,
-    owner: `Ordered relations and BTree`,
   },
+  owns: [`src/operators/topKState.ts#topKBatch`],
   histories: {
     arbitrary: fc.integer({ min: 0, max: 20 }),
     runs: 25,
@@ -792,8 +789,8 @@ oracleProperty({
     statement: `Unrelated replacement payload getters are not read and each source key emits its retraction and insertion.`,
     authority,
     limits,
-    owner: `Ordered relations and BTree`,
   },
+  owns: [`src/operators/topKState.ts#topKBatch`],
   histories: {
     arbitrary: fc.integer({ min: 1, max: 100 }),
     runs: 25,
@@ -837,8 +834,8 @@ oracleProperty({
     statement: `Long same-key histories cancel independently allocated equal values completely.`,
     authority,
     limits,
-    owner: `Ordered relations and BTree`,
   },
+  owns: [`src/operators/topKState.ts#topKBatch`],
   histories: {
     arbitrary: fc.integer({ min: 10, max: 150 }),
     runs: 25,

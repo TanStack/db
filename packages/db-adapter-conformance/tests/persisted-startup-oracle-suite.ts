@@ -367,7 +367,6 @@ export function registerPersistedStartupConformance<
         law: {
           statement: `A complete eager source result replaces its persisted baseline and is durable before later refresh; network-first fallback preserves the saved snapshot. Opted-in receivers preserve ordinary startup commits without a full replacement.`,
           authority: `READY-3/PUB-7; docs/collections/query-collection.md, Direct Writes and Query Sync and Initial Data; glossary, network-first initial render; maintainer shared-owner decision 2026-11-09 and batching decision 2026-11-10.`,
-          owner: `Adapter conformance: persisted startup (#2367)`,
           limits: `Three string keys, eager startup, one source plus an optional peer, a disjoint persisting mutation, local-only reopen; no concurrent writers, failed I/O, on-demand windows, or intermediate-publication claim.`,
         },
         histories: {

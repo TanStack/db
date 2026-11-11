@@ -27,9 +27,9 @@ oracleProperty({
   law: {
     statement: `Initial readiness, complete row and field fidelity, coherent change publications, failure identity, post-ready health, restart and exactly-once resource release follow the shared eager live-source laws.`,
     authority: `db-adapter-conformance/src/eager-live-source-oracle.ts; adapter law set READY-2/3/4/8/10, HEALTH-1/5, PUB-1/2/3/5/9, FID-1/4, LIFE-2/5/10, as supported by this receiver's declarations.`,
-    owner: `Adapter conformance: eager live sources (#2118), powersync receiver`,
     limits: `Real local PowerSync SQLite, eager mode, per-batch changes, five typed field kinds, original 15-significant-digit numeric exclusion and twelve-step grammar. No remote sync-service, mutation, reload or on-demand claim.`,
   },
+  owns: [`src/powersync.ts#powerSyncCollectionOptions`],
   histories: {
     arbitrary: campaign.arbitrary,
     states: campaign.states,
@@ -44,7 +44,6 @@ oracleProperty({
   timeout: 600000,
 })
 declareOracle({
-  owns: [`src/powersync.ts#powerSyncCollectionOptions`],
   check: [checkEagerLiveSourceHistory, campaign.check],
   model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
   grammar: [campaign.arbitrary],

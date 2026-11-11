@@ -6,7 +6,6 @@
  */
 import fc from 'fast-check'
 import { describe } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   differs,
   oracleProperty,
@@ -140,7 +139,6 @@ const constructed: Array<ConstructedHistory<PrecedenceHistory>> =
     },
   }))
 
-declareOracle({ owns: ['src/query.ts#queryCollectionOptions'] })
 for (const host of ['controlled', 'node-sqlite'] as const)
   describe('persisted precedence through ' + host, () => {
     let sequence = 0
@@ -151,10 +149,10 @@ for (const host of ['controlled', 'node-sqlite'] as const)
           'An older source result preserves accepted newer direct writes while removing omitted saved rows; a later fetch can replace them.',
         authority:
           'Query collection guide: Direct Writes and Query Sync; Individual Write Operations.',
-        owner: 'Query ownership lifecycle; persisted precedence receiving path',
         limits:
           'One eager run, three saved keys, one direct write, raw/derived response, optional later fetch; no peer writer or failed I/O.',
       },
+      owns: ['src/query.ts#queryCollectionOptions'],
       histories: {
         arbitrary: historyArb,
         runs: 80,

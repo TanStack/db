@@ -41,6 +41,7 @@ describe(`eager live-source conformance: electric`, () => {
 
   oracleProperty({
     id: property,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     ...eagerLiveSourceOracle(driver),
     check: checkEagerLiveSourceObservations,
     histories: {
@@ -55,6 +56,7 @@ describe(`eager live-source conformance: electric`, () => {
   const noOnError = electricConformanceDriver({ appOnError: false })
   oracleProperty({
     id: `${property}.no-on-error`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     ...eagerLiveSourceOracle(noOnError),
     check: checkEagerLiveSourceObservations,
     histories: {
@@ -66,7 +68,6 @@ describe(`eager live-source conformance: electric`, () => {
   })
 
   declareOracle({
-    owns: [`src/electric.ts#electricCollectionOptions`],
     check: [checkEagerLiveSourceHistory],
     model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
     grammar: [historyArb],

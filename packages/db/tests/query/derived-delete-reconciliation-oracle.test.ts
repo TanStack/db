@@ -137,11 +137,6 @@ function expectedRowsAfterQueuedBatches(batches: number): Array<Row> {
 }
 
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/transactions.ts#createTransaction',
-  ],
   check: [checkFlushHistory],
   model: [expectedRowsAfterQueuedBatches, modelFlushHistory],
 })
@@ -254,7 +249,6 @@ const flushOptions = {
     statement: `Queued source batches stay invisible beneath an optimistic derived delete, share membership work only when an update needs it, and publish committed source rows after settlement.`,
     authority: `The existing derived-publication and membership-work law stated at the start of this owner.`,
     limits: `The original one-to-twelve queued flushes with one-to-five inserts and optional row-one updates; the finite shape/outcome matrix remains supplemental below.`,
-    owner: `Derived publication`,
   },
   model: modelFlushHistory,
   driver: driveFlushHistory,
@@ -262,6 +256,11 @@ const flushOptions = {
 oracleProperty({
   ...flushOptions,
   id: `derived-publication.membership-work-fixed`,
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/transactions.ts#createTransaction',
+  ],
   histories: {
     arbitrary: flushHistory,
     runs: 40,
@@ -274,6 +273,11 @@ oracleProperty({
 oracleProperty({
   ...flushOptions,
   id: `derived-publication.membership-work`,
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/transactions.ts#createTransaction',
+  ],
   histories: {
     arbitrary: flushHistory,
     runs: 60,

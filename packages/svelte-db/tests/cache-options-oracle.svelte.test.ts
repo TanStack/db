@@ -27,7 +27,6 @@ import type {
 } from '../../db/tests/live-query-cache-options-oracle'
 
 declareOracle({
-  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   check: [checkCacheOptionAdmission, checkCacheOptionRows],
   model: [conflictingCacheOptions],
   grammar: [cacheOptionHistories],
@@ -192,8 +191,8 @@ oracleProperty({
     statement: `Independent DbClient callers reject conflicting local row options at admission and retry while original callers retain their accepted keyed rows.`,
     authority: `Maintainer same-identity conflict decision in packages/db/tests/live-query-cache-options-oracle.ts`,
     limits: `The existing 144 finite declaration/key pairs at Svelte effect-root and flushSync cuts; client-free recompilation is outside this receiver.`,
-    owner: `packages/db/tests/live-query-cache-options-oracle.ts`,
   },
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: cacheOptionHistories,
   model: modelHistory,
   driver: recordHistory,

@@ -352,7 +352,6 @@ oracleProperty<LifecycleHistory, ReturnType<typeof lifecycleModel>>({
     statement: `Disposal releases acquired coordination resources; optional callbacks remain optional and report actual leadership changes only before disposal.`,
     authority: `README dispose() resource release, OfflineConfig.onLeadershipChange and the leadership oracle's distinct-change contract.`,
     limits: `Custom Node-hosted collaborators; zero to six reports; disposal before init, during election or after init; no native event-delivery claim.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: lifecycleHistory,
@@ -588,7 +587,6 @@ oracleProperty<BarrierHistory, ReturnType<typeof barrierModel>>({
     statement: `A reconnect batch protects pending writes with a public refresh barrier and unblocks refreshes after completion. Older completion cannot remove a newer pending barrier; callbacks after disposal cannot block refreshes again. A settled promise and a null field both leave refreshes unblocked.`,
     authority: `Collection.deferDataRefresh public JSDoc; README replay and dispose() processing/resource contract.`,
     limits: `Zero to three real admitted transactions, controlled provider completion, one to three online notifications, Node Promise ordering; no browser event-delivery claim.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: barrierHistory,

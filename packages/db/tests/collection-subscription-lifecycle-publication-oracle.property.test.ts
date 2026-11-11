@@ -1961,7 +1961,6 @@ function expectedSelection(
 // publishes to subscribers, in subscription.ts and in the Collection state that
 // holds the rows, by this file's tests across replay, restart, and cleanup.
 declareOracle({
-  owns: [`src/collection/subscription.ts`, `src/collection/state.ts`],
   check: [runPublicationHistory, runPublicationProduct, runRestartReceiver],
   model: [
     observeRestartRow,
@@ -3145,11 +3144,11 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   oracleProperty({
     id: `subscription-lifecycle.restart-publication`,
     law: {
-      owner: `packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts`,
       statement: `Restarted row publication follows prior row equality, logical owner state, and authoritative acquisition outcome at every existing receiving path.`,
       authority: `The lifecycle/publication contract above and the existing independent restart observation relation.`,
       limits: `The unchanged finite owner/row/outcome product, acquisition and source delivery, and the three controlled receiving paths.`,
     },
+    owns: [`src/collection/subscription.ts`, `src/collection/state.ts`],
     histories: {
       arbitrary: restartPublicationInputArbitrary,
       runs: 12,
@@ -3186,11 +3185,11 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   oracleProperty({
     id: `subscription-lifecycle.publication-history`,
     law: {
-      owner: `packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts`,
       statement: `Each command publishes the exact coherent callback batches and public rows predicted by the independent publication model.`,
       authority: `Collection.subscribeChanges, public Collection lifecycle, and the shared lifecycle grammar as stated above.`,
       limits: `The unchanged controlled source-write/lifecycle command grammar; live-query includes and real-provider behavior remain outside this owner.`,
     },
+    owns: [`src/collection/subscription.ts`, `src/collection/state.ts`],
     histories: {
       arbitrary: publicationCommandHistoryArbitrary,
       runs: 60,

@@ -4,7 +4,6 @@
  * constructions enforce required states without crediting fixed histories.
  */
 import { describe } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   differs,
   oracleProperty,
@@ -149,7 +148,6 @@ function omitConstructedState(
     : trace.filter((o) => o.checkpoint !== 'reach' || o.value !== state)
 }
 
-declareOracle({ owns: ['src/query.ts#queryCollectionOptions'] })
 for (const host of ['controlled', 'node-sqlite'] as const)
   describe('retained scoped hydration through ' + host, () => {
     let sequence = 0
@@ -160,11 +158,10 @@ for (const host of ['controlled', 'node-sqlite'] as const)
           'An on-demand persisted Collection restores only acquired demand; limited results cannot prove ownerless-row omission or retire a retained broader owner.',
         authority:
           'SQLite persistence guide: Persist a collection; Query guide: QueryFn and Predicate Push-Down, Direct Writes and Query Sync.',
-        owner:
-          'Query ownership lifecycle; retained scoped hydration receiving path',
         limits:
           'Two disjoint scopes, one cold reopen, all/one-row demands, numeric values and successful I/O; no peer writer or rotation.',
       },
+      owns: ['src/query.ts#queryCollectionOptions'],
       histories: {
         arbitrary: scopedHydrationHistoryArb,
         runs: 60,
@@ -265,11 +262,10 @@ for (const host of ['controlled', 'node-sqlite'] as const)
           'A cached Query first claim cannot replace a continuously owned later-fetched value; a later physical refetch can.',
         authority:
           'Query collection guide: Direct Writes and Query Sync, per-key fetch order and cache patches without successful-fetch authority.',
-        owner:
-          'Query ownership lifecycle; persisted cached peer claim receiving path',
         limits:
           'One overlapping key and QueryClient, manual/older fetched cache, later refetch, numeric values and successful I/O.',
       },
+      owns: ['src/query.ts#queryCollectionOptions'],
       histories: {
         arbitrary: cachedPeerClaimHistoryArb,
         runs: 60,

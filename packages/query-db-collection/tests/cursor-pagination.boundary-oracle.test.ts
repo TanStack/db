@@ -8,7 +8,6 @@ import {
   oracleProperty,
   pass,
 } from '../../db/tests/oracle-property.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createCursorPager, queryCollectionOptions } from '../src/index.js'
 import {
   makeClient,
@@ -96,16 +95,6 @@ async function finishBoundaryCleanup(
     )
 }
 
-// What this oracle owns: the cursor pager's reader and nested-query boundaries
-// (createCursorPager) and the QueryCollection preload that reads through it
-// (queryCollectionOptions). Its generated properties carry their own checks.
-declareOracle({
-  owns: [
-    `src/cursor-pagination.ts#createCursorPager`,
-    `src/query.ts#queryCollectionOptions`,
-  ],
-})
-
 describe(`cursor Query fetch boundaries`, () => {
   describe.each([false, true])(
     `nested cancellation replacement=%s`,
@@ -116,8 +105,14 @@ describe(`cursor Query fetch boundaries`, () => {
           statement: `Canceling nested pages rejects preload; replacing pages fulfills it with replacement rows.`,
           authority: `cursor-pagination/README.md, Contract before implementation; createCursorPager and queryCollectionOptions`,
           limits: `Two controlled pages of one to four rows; no changing HTTP endpoint.`,
-          owner: `cursor-pagination.boundary-oracle.test.ts`,
         },
+        // What this oracle owns: the cursor pager's reader and nested-query boundaries
+        // (createCursorPager) and the QueryCollection preload that reads through it
+        // (queryCollectionOptions). Its generated properties carry their own checks.
+        owns: [
+          `src/cursor-pagination.ts#createCursorPager`,
+          `src/query.ts#queryCollectionOptions`,
+        ],
         histories: {
           arbitrary: fc.integer({ min: 1, max: 4 }),
           runs: 30,
@@ -221,8 +216,11 @@ describe(`cursor Query fetch boundaries`, () => {
       statement: `A reader abort rejects that reader with its reason and leaves shared Query transport active.`,
       authority: `cursor-pagination/README.md, Contract before implementation; createCursorPager`,
       limits: `Two controlled pages of one to four rows; no changing HTTP endpoint.`,
-      owner: `cursor-pagination.boundary-oracle.test.ts`,
     },
+    owns: [
+      `src/cursor-pagination.ts#createCursorPager`,
+      `src/query.ts#queryCollectionOptions`,
+    ],
     histories: {
       arbitrary: fc.integer({ min: 1, max: 4 }),
       runs: 30,

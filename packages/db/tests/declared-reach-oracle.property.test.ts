@@ -833,7 +833,6 @@ const law = {
   statement: `The transitional reach helpers count, reject, report and replay exactly as the independent ledger specifies.`,
   authority: `ORC-015 and maintainer decision 2287, as documented in the contract above.`,
   limits: `The existing finite ledger language and legacy helpers; current oracleProperty reach remains owned by TanStack/oracles.`,
-  owner: `Small structures and test mechanics`,
 }
 const generatedInputs: fc.Arbitrary<ReachInput> = fc.tuple(
   ledgerArbitrary,

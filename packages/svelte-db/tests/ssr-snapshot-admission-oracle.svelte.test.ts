@@ -177,12 +177,12 @@ function checkHistory(
 const law = {
   statement: `Svelte SSR rejects untransported rows or readiness and reconstructs every admitted server view from transported state.`,
   authority: `docs/guides/ssr.md preparation/hydration contract and packages/db/tests/ssr-snapshot-admission-oracle.ts`,
-  owner: `packages/db/tests/ssr-snapshot-admission-oracle.ts`,
   limits: `The existing eager source/preparation grammar and two real server renders; native browser initialization belongs to the handoff receiver.`,
 }
 oracleProperty({
   id: `svelte.ssr-snapshot.cases`,
   law,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: ssrSnapshotExamples,
   model: expectedSsrSnapshot,
   driver: recordHistory,
@@ -191,6 +191,7 @@ oracleProperty({
 oracleProperty({
   id: `svelte.ssr-snapshot`,
   law,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: {
     arbitrary: ssrSnapshotHistoryArbitrary,
     runs: 120,
@@ -271,7 +272,6 @@ oracleProperty({
   check: checkHistory,
 })
 declareOracle({
-  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   model: [expectedSsrSnapshot],
   grammar: [ssrSnapshotHistoryArbitrary],
   check: [checkHistory],

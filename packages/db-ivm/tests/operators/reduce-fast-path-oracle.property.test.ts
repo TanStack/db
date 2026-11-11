@@ -8,13 +8,6 @@ import {
   oracleProperty,
   pass,
 } from '../../../db/tests/oracle-property.js'
-import { declareOracle } from '../../../db/tests/oracle-declaration'
-
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
-  owns: [`src/operators/reduce.ts#reduce`],
-})
 
 /**
  * # Does the reduce fast path emit what the general path emits?
@@ -142,8 +135,10 @@ oracleProperty({
     statement: `After every graph run the fast path emits exactly the general path's unordered entries, including multiplicities and Object.is value identity.`,
     authority: `Existing reduce path equivalence contract documented above.`,
     limits: `One to six runs of one to four signed changes, two keys and the existing finite output domain. The general path is the established differential reference.`,
-    owner: `Reduce fast path`,
   },
+  // What this oracle owns: the gap report judges these entries, and their
+  // reference trees within the package, by this file's tests.
+  owns: [`src/operators/reduce.ts#reduce`],
   histories: {
     arbitrary: fc.array(
       fc.array(stepArbitrary, { minLength: 1, maxLength: 4 }),

@@ -417,11 +417,7 @@ function withDeferredChange(actions: Array<Action>): Array<Action> {
   ]
 }
 
-// What this oracle owns: the gap report judges every function in
-// SortedMap.ts, and its reference tree within the package, by this file's
-// tests.
 declareOracle({
-  owns: [`src/SortedMap.ts`],
   check: [expectMap, expectView],
   model: [modelOrder, restoreBound],
   grammar: [withDeferredChange],
@@ -492,7 +488,6 @@ const sortedLaw = {
   statement: `SortedMap refines native Map ownership and full-sort views, including deferred work bounds and current row values at the promised cuts.`,
   authority: `Collection state callers and maintainer SortedMap contract recorded in docs/contributing/oracle-coverage.md.`,
   limits: `The unchanged contract, input grammar, order downgrade and observations described above.`,
-  owner: `Small structures and test mechanics`,
 }
 function sortedMechanism(order: Order) {
   return {
@@ -517,6 +512,10 @@ function sortedMechanism(order: Order) {
 oracleProperty({
   ...sortedMechanism(`key`),
   id: `sorted-map.key`,
+  // What this oracle owns: the gap report judges every function in
+  // SortedMap.ts, and its reference tree within the package, by this file's
+  // tests.
+  owns: [`src/SortedMap.ts`],
   histories: {
     arbitrary: generatedActions,
     runs: 100,
@@ -527,6 +526,7 @@ oracleProperty({
 oracleProperty({
   ...sortedMechanism(`ascending`),
   id: `sorted-map.ascending`,
+  owns: [`src/SortedMap.ts`],
   histories: {
     arbitrary: generatedActions,
     runs: 100,
@@ -537,6 +537,7 @@ oracleProperty({
 oracleProperty({
   ...sortedMechanism(`descending`),
   id: `sorted-map.descending`,
+  owns: [`src/SortedMap.ts`],
   histories: {
     arbitrary: generatedActions,
     runs: 100,
@@ -550,6 +551,7 @@ oracleProperty({
 oracleProperty({
   id: `sorted-map.regressions`,
   law: sortedLaw,
+  owns: [`src/SortedMap.ts`],
   histories: orders.flatMap((order) =>
     fixedHistories.map((actions, index) => ({ order, actions, index })),
   ),
@@ -676,6 +678,7 @@ oracleProperty({
     ...sortedLaw,
     statement: `Only a still-present changed deferred row at a promised restoring comparison earns its declared reach.`,
   },
+  owns: [`src/SortedMap.ts`],
   histories: ([`ascending`, `descending`] as const).flatMap((order) =>
     controls.map((control) => ({ order, control })),
   ),

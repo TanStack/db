@@ -80,13 +80,6 @@ function expectRankWindow(actualIds: unknown): void {
 }
 
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/basic-index.ts',
-    'src/indexes/btree-index.ts',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/live-query-collection.ts#liveQueryCollectionOptions',
-  ],
   check: [
     expectRankWindow,
     expectMaterializedWindow,
@@ -522,8 +515,14 @@ oracleProperty({
     statement: `Explicit output indexing settings govern admission, optimized ordering, index construction and reuse without changing source settings.`,
     authority: `The Collection indexing contract and the maintainer decision for issue 2292 stated above.`,
     limits: `The unchanged eighteen finite mode/constructor/construction combinations, projected rank/score reads and one source update.`,
-    owner: `Output live-query indexing`,
   },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/basic-index.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/live-query-collection.ts#liveQueryCollectionOptions',
+  ],
   histories: configurations.map((_settings, configuration) => ({
     configuration,
   })),

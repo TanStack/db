@@ -42,7 +42,6 @@ import type { Weighted } from './incrementalization-law-oracle.js'
 const family = distinctCollisionFamily(hash)
 
 declareOracle({
-  owns: [`src/operators/distinct.ts#distinct`],
   check: [checkDistinctRepresentatives],
   grammar: [distinctBucketRecipe],
 })
@@ -128,7 +127,6 @@ function representativeOptions(split: boolean): CellOptions {
       statement: `The full accumulated distinct output has exactly one unit contribution for each supported selection, no negative residues, distinct simultaneous keys, and only historically introduced source payloads.`,
       authority: `docs/guides/live-queries.md#distinct; packages/db/src/query/live/ARCHITECTURE.md, Weighted relations and public keys; 2026-10-30 distinct provenance review.`,
       limits: `Four immutable native-collision selections plus an anchor; variants 0..3, at most eight slots and twelve random suffix worlds. Representative choice and cross-build key stability remain unspecified; no external source scheduling.`,
-      owner: `Distinct provenance and fresh-identity challenge`,
     },
     histories: {
       arbitrary: distinctBucketRecipe,
@@ -183,6 +181,7 @@ oracleProperty({
   ...cell0,
   check: checkDistinctCampaign,
   id: `ivm.distinct-representatives`,
+  owns: [`src/operators/distinct.ts#distinct`],
   histories: { ...cell0.histories, runs: 100, fixedSeeds: [2309] },
 })
 
@@ -191,6 +190,7 @@ oracleProperty({
   ...cell1,
   check: checkDistinctCampaign,
   id: `ivm.distinct-representatives-unit-split`,
+  owns: [`src/operators/distinct.ts#distinct`],
   histories: { ...cell1.histories, runs: 100, fixedSeeds: [2309] },
 })
 

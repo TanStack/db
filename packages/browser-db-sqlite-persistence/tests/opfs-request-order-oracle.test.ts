@@ -252,7 +252,6 @@ const requestOrderHistory = fc
   )
 const requestOrderProperty = `opfs.request-order`
 declareOracle({
-  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   check: [runRequestOrderHistory],
   grammar: [requestOrderHistory],
 })
@@ -260,11 +259,11 @@ const requestOrderLaw = {
   statement: `The existing request-order model judges ordered request completion, close, and late execute behavior through the real worker module.`,
   authority: `The shared opfs-request-order-oracle.ts contract and worker protocol.`,
   limits: `The existing in-process WASM driver and VFS access-handle control; no native browser lock-manager claim.`,
-  owner: `SQLite persistence`,
 }
 oracleProperty({
   id: requestOrderProperty,
   law: requestOrderLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   histories: { arbitrary: requestOrderHistory, runs: 24, fixedSeeds: [1849] },
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,
@@ -277,6 +276,7 @@ oracleProperty({
 oracleProperty({
   id: `opfs.request-order-fixed`,
   law: requestOrderLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   histories: requestOrderExamples.map((history, index) => ({ history, index })),
   label: (entry) => String(entry.index),
   resolve: (entry) => ({ history: entry.history }),

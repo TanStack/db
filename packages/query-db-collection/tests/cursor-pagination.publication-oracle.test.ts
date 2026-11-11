@@ -98,11 +98,7 @@ async function driveCachedSlice(
   }
 }
 
-// What this oracle owns: which cursor sequence publishes the next Query result
-// and how a cached slice reads its rows (createCursorPager). Slice values are
-// judged against the full-relation model at their original checkpoints.
 declareOracle({
-  owns: [`src/cursor-pagination.ts#createCursorPager`],
   check: [checkPublicationTrace],
   model: [expectedRows],
 })
@@ -134,7 +130,6 @@ function checkPublicationTrace(
 }
 const publicationLaw = {
   authority: `cursor-pagination/README.md, Contract before implementation; createCursorPager`,
-  owner: `cursor-pagination.publication-oracle.test.ts`,
   limits: `Controlled immutable page sequences; no changing HTTP endpoints or browser transport.`,
 }
 
@@ -152,6 +147,10 @@ describe(`cursor cache publication`, () => {
           ...publicationLaw,
           statement: `A canceled growth cannot publish over a forced refresh; retained uncanceled growth demonstrates the stale-publication control.`,
         },
+        // What this oracle owns: which cursor sequence publishes the next Query result
+        // and how a cached slice reads its rows (createCursorPager). Slice values are
+        // judged against the full-relation model at their original checkpoints.
+        owns: [`src/cursor-pagination.ts#createCursorPager`],
         histories: {
           arbitrary: fc.tuple(
             fc.integer({ min: 1, max: 4 }),
@@ -323,6 +322,7 @@ describe(`cursor cache publication`, () => {
           ...publicationLaw,
           statement: `Malformed repeated continuations reject every joined reader, preserve the prior cache, and permit a healthy next read.`,
         },
+        owns: [`src/cursor-pagination.ts#createCursorPager`],
         histories: {
           arbitrary: fc.tuple(
             fc.integer({ min: 1, max: 4 }),
@@ -464,6 +464,7 @@ describe(`cursor cache publication`, () => {
       ...publicationLaw,
       statement: `A cached immutable slice visits exactly the returned rows and equals the independent full-relation slice.`,
     },
+    owns: [`src/cursor-pagination.ts#createCursorPager`],
     histories: {
       arbitrary: fc.tuple(
         fc.integer({ min: 1, max: 100 }),

@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 // Query's client runtime schedules the stale callback; the SQLite host stays real.
 import { describe } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createStartupHost } from '../../db-adapter-conformance/tests/persisted-startup-host'
 import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
 import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
@@ -16,8 +15,6 @@ import {
 } from './persisted-rejected-write-cutoff-oracle'
 import type { History, Trace } from './persisted-rejected-write-cutoff-oracle'
 
-declareOracle({ owns: ['src/query.ts#queryCollectionOptions'] })
-
 for (const host of ['controlled', 'node-sqlite'] as const)
   describe(host, () => {
     let sequence = 0
@@ -28,10 +25,10 @@ for (const host of ['controlled', 'node-sqlite'] as const)
           'A rejected direct write and stale observer callback leave a fetched cache authoritative for an Infinity-stale peer acquisition.',
         authority:
           'Query guide Understanding the Data Stores item 1, Direct Writes and Query Sync; Query Core staleTime and refetchOnMount; primary ownership direct-write-order judgment.',
-        owner: 'Query ownership lifecycle receiving extension',
         limits:
           'Empty eager persisted startup, one successful fetched row, rejected missing-key update/delete, raw or direct wrapped array; no accepted mutation, invalidation, failed I/O or concurrent writer.',
       },
+      owns: ['src/query.ts#queryCollectionOptions'],
       histories: {
         arbitrary,
         runs: 20,

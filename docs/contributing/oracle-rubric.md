@@ -454,6 +454,23 @@ module is linted on its own, so the rule does not report a call to it. An
 `oracle-` machinery module, such as `oracle-config.ts`, is not linted, so the
 rule judges a call to its helpers as it judges an ordinary module's.
 
+An oracle file names the production code that it judges in the `owns` list of
+each `oracleProperty` call: `oracleProperty({ id, law, owns: [...], ... })`.
+An entry is a source path relative to the package (`src/x.ts`), or one of its
+functions with its static call tree (`src/x.ts#fn`, `src/x.ts#Class.method`).
+The gap report (`pnpm gap-report`) reads the list without running the file, so
+write it in the call as a non-empty array of string or template literals: no
+spread, variable, computed list, or quoted key, and call the function by the
+name `oracleProperty`, not an alias. A file with several `oracleProperty` calls
+repeats the list on each call; the gap report judges ownership per file. A file
+that registers only through a production driver or wrapper, with no inline
+`oracleProperty` call, keeps its list in `declareOracle({ owns: [...] })`
+while the migration lasts. The gap report reads both.
+
+A law has no owner field. Code ownership by people and teams belongs to
+CODEOWNERS (maintainer decision, 2026-11-10). The coverage map's oracle owner
+is a different concept: the file that owns a law's judgment.
+
 ORC-016 keeps ordinary unit tests and concrete type assertions out of oracle
 files. Fixed regressions run through the shared law; supplemental examples live
 in ordinary test files.

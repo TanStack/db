@@ -801,10 +801,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
 
 const history = fc.array(step, { minLength: 1, maxLength: 24 })
 
-// What this oracle owns: the gap report judges the transaction's settlement
-// and the Collection's tracking of it, by this file's tests.
 declareOracle({
-  owns: [`src/transactions.ts`, `src/collection/state.ts`],
   check: [runHistory],
   model: [OwnershipModel],
 })
@@ -816,8 +813,10 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
       statement: `A settled transaction leaves every Collection that tracked it, drops its optimistic rows, and settles its public promise despite subscriber failures.`,
       authority: `Transaction settlement and Collection ownership contracts stated above`,
       limits: `Two Collections, four manual transactions, bounded legal mutations and settlement; excludes queued sync holds, offline restoration and mid-history cleanup.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
+    // What this oracle owns: the gap report judges the transaction's settlement
+    // and the Collection's tracking of it, by this file's tests.
+    owns: [`src/transactions.ts`, `src/collection/state.ts`],
     histories: { arbitrary: history, runs: 200, fixedSeeds: [2080] },
     resolve: (steps) => ({ steps }),
     model: recordedAssertionJudgment,

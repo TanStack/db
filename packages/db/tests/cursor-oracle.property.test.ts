@@ -235,10 +235,7 @@ const assertRepeatedCursor = (
   )
 }
 
-// What this oracle owns: the gap report judges buildCursor and its static
-// reference tree by this file's tests.
 declareOracle({
-  owns: [`src/utils/cursor.ts#buildCursor`],
   check: [expectCursorDenotation, expectLocalTupleOrder, assertRepeatedCursor],
   model: [compareValue, compareTuple],
 })
@@ -274,8 +271,10 @@ describe(`buildCursor properties`, () => {
       statement: `A leading-column cursor denotes exactly the strict ordered suffix, including direction and null placement.`,
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
+    // What this oracle owns: the gap report judges buildCursor and its static
+    // reference tree by this file's tests.
+    owns: [`src/utils/cursor.ts#buildCursor`],
     histories: {
       arbitrary: scalarCursorArbitrary,
       runs: 400,
@@ -389,8 +388,8 @@ describe(`buildCursor properties`, () => {
       statement: `One boundary value is supported; composite cursor values reject.`,
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
+    owns: [`src/utils/cursor.ts#buildCursor`],
     histories: {
       arbitrary: exactCursorArbitrary,
       runs: 300,
@@ -411,8 +410,8 @@ describe(`buildCursor properties`, () => {
       statement: `The public snapshot orders nullable tuples by all authored terms after preload fulfills.`,
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
+    owns: [`src/utils/cursor.ts#buildCursor`],
     histories: {
       arbitrary: exactCursorArbitrary,
       runs: 300,
@@ -433,8 +432,8 @@ describe(`buildCursor properties`, () => {
       statement: `One leading boundary value remains legal with several order terms; other mismatched widths reject.`,
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
+    owns: [`src/utils/cursor.ts#buildCursor`],
     histories: {
       arbitrary: partialCursorArbitrary,
       runs: 200,
@@ -455,8 +454,8 @@ describe(`buildCursor properties`, () => {
       statement: `The public snapshot uses every authored order term even when boundary width differs.`,
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
+    owns: [`src/utils/cursor.ts#buildCursor`],
     histories: {
       arbitrary: partialCursorArbitrary,
       runs: 200,
@@ -477,8 +476,8 @@ describe(`buildCursor properties`, () => {
       statement: `Repeated cursor construction returns the same expression or the same unsupported-width rejection.`,
       authority: `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`,
       limits: `The existing bounded nullable integer and order-term grammar; no provider ordering or paginated acquisition claim.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
+    owns: [`src/utils/cursor.ts#buildCursor`],
     histories: {
       arbitrary: exactCursorArbitrary,
       runs: 100,

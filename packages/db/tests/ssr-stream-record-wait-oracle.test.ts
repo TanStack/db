@@ -274,11 +274,14 @@ describe(`SSR stream record lifetime`, () => {
   oracleProperty<SsrStreamRecordHistory, Verdict>({
     id: `ssr.stream-record-lifetime`,
     law: {
-      owner: `SSR stream record lifetime`,
       statement: `Each record demand settles at its transport checkpoint and terminal retries preserve its outcome without acquiring a source.`,
       authority: `The stream-view owner's expectedSsrStreamRecordOutcome and the record lifetime contract above.`,
       limits: `Missing, pending and local records under the existing transport grammar; pending+cleanup and timestamp policy after consumption remain excluded.`,
     },
+    // What this oracle owns: the gap report judges the DbClient's SSR query waits
+    // and stream failure handling in client.ts by this file's tests. The record
+    // model is checkRecordHistory's expectation over the stream-view oracle.
+    owns: [`src/client.ts`],
     histories: {
       arbitrary: grammar,
       runs: 100,
@@ -360,11 +363,7 @@ describe(`SSR stream record lifetime`, () => {
   })
 })
 
-// What this oracle owns: the gap report judges the DbClient's SSR query waits
-// and stream failure handling in client.ts by this file's tests. The record
-// model is checkRecordHistory's expectation over the stream-view oracle.
 declareOracle({
-  owns: [`src/client.ts`],
   check: [checkRecordHistory],
   grammar: [grammar],
 })

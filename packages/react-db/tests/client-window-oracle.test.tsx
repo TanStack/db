@@ -416,9 +416,13 @@ describe(`client page identity`, () => {
               law: {
                 statement: `Client-backed windows retain independent committed pages and transported views; an abandoned move cannot replace the committed seed.`,
                 authority: `packages/db/tests/conformance/window-history-oracle.ts and client-window-history-oracle.ts; SSR guide preload/hydration identity law and maintainer independent-output decision 2026-11-03.`,
-                owner: `packages/db/tests/conformance/window-history-oracle.ts`,
                 limits: `The unchanged provider/explicit, ordinary/Suspense, derived/keyed and offset/limit/both paths; controlled source readiness and finite native schedules, no Electric SDK or arbitrary concurrent scheduler claim.`,
               },
+              owns: [
+                `src/DbProvider.tsx#DbProvider`,
+                `src/useLiveQuery.ts#useLiveQuery`,
+                `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+              ],
               histories: {
                 arbitrary: clientWindowArbitrary,
                 runs: 6,
@@ -469,11 +473,6 @@ describe(`client page identity`, () => {
           })
 })
 declareOracle({
-  owns: [
-    `src/DbProvider.tsx#DbProvider`,
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
   grammar: [clientWindowArbitrary],
   check: [checkClientWindowHistory, checkClientSwitch],
 })

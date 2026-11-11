@@ -329,8 +329,10 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
       statement: `Each direct index action refines an independent source Map across lookups, traversal and rebuild.`,
       authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
       limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
+    // What this oracle owns: the gap report judges every function in basic-index.ts and
+    // btree-index.ts by this file's tests.
+    owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
     histories: {
       arbitrary: fc.array(arbitraryAction, { minLength: 1, maxLength: 100 }),
       runs: 100,
@@ -758,10 +760,7 @@ function applyNullishAction(
   expectNullishMembership(index, rows)
 }
 
-// What this oracle owns: the gap report judges every function in basic-index.ts and
-// btree-index.ts by this file's tests.
 declareOracle({
-  owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
   check: [
     expectIndexMatchesModel,
     expectCustomGroups,
@@ -984,8 +983,8 @@ describe.each(indexTypes)(
         statement: `Null and undefined preserve exact membership and ordered-read semantics after each direct index action.`,
         authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
         limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
-        owner: `docs/contributing/oracle-coverage.md`,
       },
+      owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
       histories: {
         arbitrary: fc.array(arbitraryNullishAction, {
           minLength: 1,
@@ -1945,8 +1944,8 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
       statement: `Comparator-equal values retain exact identity lookup membership through retirement, update and rebuild.`,
       authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
       limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
+    owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
     histories: {
       arbitrary: fc.array(fc.integer({ min: 0, max: 4 }), {
         minLength: 2,
@@ -2076,8 +2075,8 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
       statement: `A custom comparator determines group order while live source identities determine exact membership.`,
       authority: `IndexInterface and Collection ordered-read/createIndex contracts stated above`,
       limits: `The existing bounded direct-index grammar and named value classes; no comparator transitivity, arbitrary values, locales or long Collection histories.`,
-      owner: `docs/contributing/oracle-coverage.md`,
     },
+    owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
     histories: {
       arbitrary: fc.array(fc.integer({ min: 0, max: 4 }), {
         minLength: 2,

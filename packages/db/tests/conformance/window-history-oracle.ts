@@ -775,7 +775,6 @@ export function registerWindowHistoryOracle(driver: LiveQueryDriver) {
               law: {
                 statement: `An adapter-owned outer page move retains its Collection; a changed plan replaces it, and source writes keep the current page live.`,
                 authority: `conformance/contract.ts query identity and committed-window laws; maintainer window decision 2026-10-30 and independent-output decision 2026-11-03.`,
-                owner: `packages/db/tests/conformance/window-history-oracle.ts`,
                 limits: `The unchanged driver-specific direct/nested and derived/changing/stable/opaque-key receiving paths, finite rows and authored move/plan/source-write grammar.`,
               },
               histories: {
@@ -1066,7 +1065,6 @@ function registerPendingWindowOracle(driver: LiveQueryDriver) {
     law: {
       statement: `A pending window keeps its last settled page and only the latest requested window may publish after held acquisitions settle.`,
       authority: `conformance/contract.ts pending-window law and live-query ARCHITECTURE.md atomic publication law.`,
-      owner: `packages/db/tests/conformance/window-history-oracle.ts`,
       limits: `The unchanged native framework driver over controlled on-demand rows with explicit oldest/latest settlement and pending unmount.`,
     },
     histories: {
@@ -1296,7 +1294,6 @@ function registerPublicationWindowOracle(driver: LiveQueryDriver) {
     law: {
       statement: `A declarative page move requested from a source-publication callback settles on the retained Collection with the new ordered page.`,
       authority: `conformance/contract.ts committed declarative window law and maintainer decision 2026-10-30.`,
-      owner: `packages/db/tests/conformance/window-history-oracle.ts`,
       limits: `The unchanged eager direct-query native driver, one callback-driven offset/limit/both move and independent full sort/filter/slice judgment.`,
     },
     histories: {
@@ -1478,7 +1475,6 @@ function registerPeerWindowOracle(driver: LiveQueryDriver) {
     law: {
       statement: `Equal independent inputs own distinct Collections; declarative and imperative moves retain their own page and an independent peer survives retirement.`,
       authority: `conformance/contract.ts independent output and retained window laws; maintainer independent Suspense-output decision 2026-11-03.`,
-      owner: `packages/db/tests/conformance/window-history-oracle.ts`,
       limits: `The unchanged native driver receiving two finite ordered pages, both move APIs, a source write and one reader's unmount.`,
     },
     histories: {
@@ -1635,7 +1631,6 @@ function registerKeyedAdmissionOracle(driver: LiveQueryDriver) {
     law: {
       statement: `A disabled input admits no plan; enabling it admits the current plan even under the same key, and later equal or changed keys govern invalidation.`,
       authority: `conformance/contract.ts initial disabled keyed-admission law.`,
-      owner: `packages/db/tests/conformance/window-history-oracle.ts`,
       limits: `The unchanged ordinary keyed native drivers and finite disabled/enable/stable/changed-key schedule; no Suspense disabled overload.`,
     },
     histories: {
@@ -1890,7 +1885,6 @@ function registerImmutableKeyOracle(driver: LiveQueryDriver) {
     law: {
       statement: `Immutable equal key trees retain the admitted query independently of proposed predicates; changed nested values admit the changed query.`,
       authority: `conformance/contract.ts immutable explicit-key law and maintainer decision 2026-11-03.`,
-      owner: `packages/db/tests/conformance/window-history-oracle.ts`,
       limits: `The unchanged native keyed drivers, plain records/arrays and JSON scalar leaves; no rich keys, mutation, disabled, pending or transport claim.`,
     },
     histories: {

@@ -28,9 +28,9 @@ oracleProperty({
   law: {
     statement: `Initial readiness, complete row and field fidelity, coherent change publications, failure identity, post-ready health, restart and exactly-once resource release follow the shared eager live-source laws.`,
     authority: `db-adapter-conformance/src/eager-live-source-oracle.ts; adapter law set READY-2/3/4/8/10, HEALTH-1/5, PUB-1/2/3/5/9, FID-1/4, LIFE-2/5/10, as supported by this receiver's declarations.`,
-    owner: `Adapter conformance: eager live sources (#2118), rxdb receiver`,
     limits: `Controlled RxCollection with real query semantics, seven JSON value kinds, three startup batches plus twelve steps, eager mode and per-change commits. No remote replication, persisted storage, mutation, reload or on-demand claim.`,
   },
+  owns: [`src/rxdb.ts#rxdbCollectionOptions`],
   histories: {
     arbitrary: campaign.arbitrary,
     states: campaign.states,
@@ -45,7 +45,6 @@ oracleProperty({
   timeout: 120000,
 })
 declareOracle({
-  owns: [`src/rxdb.ts#rxdbCollectionOptions`],
   check: [checkEagerLiveSourceHistory, campaign.check],
   model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
   grammar: [campaign.arbitrary],

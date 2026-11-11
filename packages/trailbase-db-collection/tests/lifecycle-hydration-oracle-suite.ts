@@ -107,7 +107,6 @@ export function registerHydrationLifecycle(
     law: {
       statement: `Cleanup retires old source authority: a late list or persisted-hydration continuation preserves the cleaned-up or replacement Collection, its durable rows, and its replacement reader.`,
       authority: `TrailBase tests/ORACLE.md cleanup law; glossary cleanup and sync run; shared persisted-startup complete eager-result law; SQLite guide Render after SQLite restore.`,
-      owner: `TrailBase lifecycle oracle, persisted hydration projection`,
       limits: `Three string keys and numeric values, one retired run and one replacement, controlled RecordApi/native stream. Network-first remains before its deadline; no remote service, arbitrary I/O failure or concurrent mutation.`,
     },
     histories: {

@@ -1918,8 +1918,8 @@ oracleProperty({
     authority: commonAuthority,
     limits:
       'The original 10 finite histories with controlled Query results, retained-scan holds and one real QueryClient; arbitrary polling, retry and external I/O remain separate paths.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: ['src/query.ts#queryCollectionOptions'],
   histories: explicitHistories,
   label: upperLabel,
   model: explicitModel,
@@ -1935,8 +1935,8 @@ oracleProperty({
     authority: commonAuthority,
     limits:
       'The original 12 finite invocation/schedule/replay cases; one mutation, one physical refresh and controlled local persistence preparation.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: ['src/query.ts#queryCollectionOptions'],
   histories: refreshHistories,
   label: upperLabel,
   model: refreshModel,
@@ -1952,8 +1952,8 @@ oracleProperty({
     authority: commonAuthority,
     limits:
       'The original 12 insert/update/delete, parameter/mutation-alias and legacy replay cases with two mutations in one direct handler.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: ['src/query.ts#queryCollectionOptions'],
   histories: identityHistories,
   label: upperLabel,
   model: identityModel,
@@ -1970,8 +1970,8 @@ oracleProperty({
       'The ownership/cache-work and cancelled-fetch lifecycle laws documented in ownership-lifecycle.oracle.test.ts.',
     limits:
       'The original two deterministic microtask diagnostics after subtracting Query Core baseline work; these are work counts, not elapsed-time bounds.',
-    owner: 'Query DB ownership lifecycle',
   },
+  owns: ['src/query.ts#queryCollectionOptions'],
   histories: [
     { ...baseHistory, site: 3820 },
     { ...baseHistory, site: 3889 },
@@ -2019,7 +2019,6 @@ oracleProperty({
 })
 
 declareOracle({
-  owns: ['src/query.ts#queryCollectionOptions'],
   model: [phaseModel, explicitModel, refreshModel, identityModel, workModel],
   check: [compareCuts],
   grammar: [explicitHistories, refreshHistories, identityHistories],

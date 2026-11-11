@@ -29,7 +29,6 @@ export const eagerLiveSourceLaw = {
   statement: `An eager live-source adapter refines the READY, HEALTH, PUB, FID, LIFE, EVID, RETRY, RECON, and RENEW laws stated beside the independent model, at every supported delivery, wait, failure, restart, and final-cleanup checkpoint.`,
   authority: `packages/db-adapter-conformance/src/eager-live-source-oracle.ts: adapter conformance law set v18; packages/db/src/types.ts sync callbacks; docs/contributing/glossary.md Collection status and health; the dated maintainer decisions beside each model rule.`,
   limits: `Only the driver's declared capabilities and value kinds over controlled providers; no on-demand loading, mutation handlers, reload, or unclaimed real-provider/framework boundary. The shared oracle states each observation limit.`,
-  owner: `Adapter conformance: eager live sources (#2118)`,
 }
 
 // This pinned framework checks the seeded construction's `enters`, but loses

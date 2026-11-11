@@ -54,12 +54,7 @@ import type {
 const { multiplier } = readOracleRunConfig()
 const it = oracleReplayTest(vitestIt)
 
-// What this oracle owns: the gap report judges the subscription's logical
-// demand and physical acquisition bookkeeping in subscription.ts, as the
-// histories below drive it, by this file's tests. The lifecycle model lives in
-// the grammar companion, which declares it.
 declareOracle({
-  owns: [`src/collection/subscription.ts`],
   check: [runHistory],
 })
 
@@ -2053,11 +2048,15 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   oracleProperty({
     id: `subscription-lifecycle.constructed-history`,
     law: {
-      owner: `packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
       statement: `Logical demand, physical acquisition, caller outcomes, and replacement authority follow the independent lifecycle history.`,
       authority: `The shared lifecycle grammar and this file's contract prose; Collection lifecycle and ARCHITECTURE laws 9 and 10.`,
       limits: `The unchanged controlled adapter command grammar and post-command observations; row contents and real provider behavior remain separately owned.`,
     },
+    // What this oracle owns: the gap report judges the subscription's logical
+    // demand and physical acquisition bookkeeping in subscription.ts, as the
+    // histories below drive it, by this file's tests. The lifecycle model lives in
+    // the grammar companion, which declares it.
+    owns: [`src/collection/subscription.ts`],
     histories: {
       arbitrary: fc.tuple(constructedPrefixArbitrary, cancellationArbitrary),
       runs: 80,
@@ -2075,11 +2074,11 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   oracleProperty({
     id: `subscription-lifecycle.async-history`,
     law: {
-      owner: `packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
       statement: `Logical demand, physical acquisition, caller outcomes, and replacement authority follow the independent lifecycle history.`,
       authority: `The shared lifecycle grammar and this file's contract prose; Collection lifecycle and ARCHITECTURE laws 9 and 10.`,
       limits: `The unchanged controlled adapter command grammar and post-command observations; row contents and real provider behavior remain separately owned.`,
     },
+    owns: [`src/collection/subscription.ts`],
     histories: {
       arbitrary: fc.tuple(
         greenLifecycleHistoryArbitrary,
@@ -2100,11 +2099,11 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   oracleProperty({
     id: `subscription-lifecycle.demand-change`,
     law: {
-      owner: `packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
       statement: `Logical demand, physical acquisition, caller outcomes, and replacement authority follow the independent lifecycle history.`,
       authority: `The shared lifecycle grammar and this file's contract prose; Collection lifecycle and ARCHITECTURE laws 9 and 10.`,
       limits: `The unchanged controlled adapter command grammar and post-command observations; row contents and real provider behavior remain separately owned.`,
     },
+    owns: [`src/collection/subscription.ts`],
     histories: {
       arbitrary: fc.tuple(
         demandChangeLifecycleHistoryArbitrary,
@@ -2126,11 +2125,11 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   oracleProperty({
     id: `subscription-lifecycle.sync-history`,
     law: {
-      owner: `packages/db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
       statement: `Synchronous acquisitions refine the same independent lifecycle history.`,
       authority: `The shared lifecycle grammar and this file's synchronous acquisition contract.`,
       limits: `The unchanged synchronous success grammar; asynchronous outcomes use the adjacent owners.`,
     },
+    owns: [`src/collection/subscription.ts`],
     histories: {
       arbitrary: syncLifecycleHistoryArbitrary,
       runs: 80,

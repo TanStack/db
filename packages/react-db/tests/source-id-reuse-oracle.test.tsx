@@ -239,9 +239,14 @@ oracleProperty({
   law: {
     statement: `Inline options bind until query identity changes; unchanged renders and source publications retain the Collection and configured references.`,
     authority: `packages/db/tests/live-query-bound-options-oracle.ts and maintainer inline-options decision, as stated by this owner.`,
-    owner: `packages/db/tests/live-query-bound-options-oracle.ts`,
     limits: `The unchanged 12 live/Suspense × getKey/schema/both × query/queryKey histories at the JavaScript configuration boundary.`,
   },
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   histories: inlineOptionHistories,
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,
@@ -282,12 +287,6 @@ function checkRerender(
   }
 }
 declareOracle({
-  owns: [
-    `src/DbProvider.tsx#DbProvider`,
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
   check: [checkRerender, checkReleaseHistory, checkBoundOptions],
   model: [expectedCollision],
   grammar: [boundOptionHistories],
@@ -864,9 +863,14 @@ describe(`React source ID reuse: rejected renders release deferred sync starts`,
     law: {
       statement: `Every rejected render releases its deferred descriptor sync starts so an independent reader starts once and receives complete initial and updated rows.`,
       authority: `This owner's existing descriptor deferral release contract and expectedReleaseObservation independent start-and-row judgment.`,
-      owner: `packages/react-db/tests/source-id-reuse-oracle.test.tsx`,
       limits: `The unchanged 344 applicable rejection-cause, hook, reader and mount/rerender histories; bounded React native schedules and controlled sources.`,
     },
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
     histories: releaseHistories.map((history, index) => ({
       index,
       cause: history.causeName,

@@ -1672,10 +1672,7 @@ function predictFilteredReplay(
   return { nextOrdered, replacement }
 }
 
-// What this oracle owns: the gap report judges every function in
-// collection/subscription.ts by this file's replay histories.
 declareOracle({
-  owns: [`src/collection/subscription.ts`],
   check: [
     runReplayScenario,
     runSequentialReplayScenario,
@@ -2286,8 +2283,10 @@ oracleProperty({
     statement: `Replay publication is atomic and obsolete work cannot publish.`,
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
-    owner: `Collection lifecycle replay`,
   },
+  // What this oracle owns: the gap report judges every function in
+  // collection/subscription.ts by this file's replay histories.
+  owns: [`src/collection/subscription.ts`],
   histories: {
     arbitrary: replayScenarioArbitrary,
     runs: 30,
@@ -2312,8 +2311,8 @@ oracleProperty({
     statement: `Synchronous, asynchronous, and partially failed replays preserve the last complete snapshot.`,
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
-    owner: `Collection lifecycle replay`,
   },
+  owns: [`src/collection/subscription.ts`],
   histories: {
     arbitrary: sequentialReplayScenarioArbitrary,
     runs: 30,
@@ -2338,8 +2337,8 @@ oracleProperty({
     statement: `Cleanup retires the sync run and its obsolete replay work.`,
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
-    owner: `Collection lifecycle replay`,
   },
+  owns: [`src/collection/subscription.ts`],
   histories: {
     arbitrary: cleanupRestartScenarioArbitrary,
     runs: 30,
@@ -2364,8 +2363,8 @@ oracleProperty({
     statement: `Same-tick obsolete replay settlement cannot overwrite the current replay.`,
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
-    owner: `Collection lifecycle replay`,
   },
+  owns: [`src/collection/subscription.ts`],
   histories: { arbitrary: fc.scheduler(), runs: 30, fixedSeeds: [1760] },
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,
@@ -2389,8 +2388,8 @@ oracleProperty({
     statement: `Physical transport sharing preserves independent logical ownership.`,
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
-    owner: `Collection lifecycle replay`,
   },
+  owns: [`src/collection/subscription.ts`],
   histories: {
     arbitrary: sharedSubscriptionScenarioArbitrary,
     runs: 30,
@@ -2415,8 +2414,8 @@ oracleProperty({
     statement: `Replay preserves optimistic overlays until their existing settlement checkpoint.`,
     authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
     limits: `The existing bounded scenario grammar and its public-row, error, readiness, and event checkpoints; no additional histories are claimed.`,
-    owner: `Collection lifecycle replay`,
   },
+  owns: [`src/collection/subscription.ts`],
   histories: {
     arbitrary: optimisticReplayScenarioArbitrary,
     runs: 30,

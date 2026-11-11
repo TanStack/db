@@ -12,7 +12,6 @@ const law = {
   statement: `Every selected finite case reaches its value comparison.`,
   authority: `oracleProperty enumerated history API and the named replay manifest contract.`,
   limits: `Two finite cases and a neighboring property in a real Vitest child process; no generated seed/path replay.`,
-  owner: `Running and replaying`,
 }
 // A case's integer is the complete expected public observation. The driver
 // reports it unchanged, unless the parent requests a wrong-value calibration.

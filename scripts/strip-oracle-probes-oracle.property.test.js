@@ -632,7 +632,6 @@ oracleProperty({
     statement: `Probe stripping retains production behavior and no guard or probe references, or refuses a program whose promised result cannot be kept.`,
     authority: `Maintainer decision 2026-11-09; @tanstack/eslint-plugin-oracles probe-form contract.`,
     limits: `The unchanged one-function program grammar, admission boundary, and observations described above.`,
-    owner: `Small structures and test mechanics`,
   },
   histories: {
     arbitrary: new ProgramWithRegressionMembership(),

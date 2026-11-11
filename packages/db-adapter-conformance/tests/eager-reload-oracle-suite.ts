@@ -185,7 +185,6 @@ export function registerEagerReloadConformance(
       statement: `A complete eager source result replaces retained source membership and values; before source entry the previous public rows remain, and a persisting optimistic overlay follows the accepted-versus-applied sync contract until settlement.`,
       authority: `Glossary reload, snapshot transaction and accepted sync transaction; eager-source READY-3/PUB-7; optimistic-history-oracle.ts.`,
       limits: `Three string keys and numeric values, one fresh load or eager reload, one disjoint optimistic insert, real local SDK storage. No remote replication, persisted durability, arbitrary mutations, on-demand reload, or every intermediate publication.`,
-      owner: `Adapter conformance: complete eager reload`,
     },
     histories: {
       arbitrary: eagerReloadHistoryArb,

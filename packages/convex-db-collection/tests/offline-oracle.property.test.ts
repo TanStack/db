@@ -25,7 +25,6 @@ import {
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexCollectionOptions } from '../src/index'
 import { convexOfflineMutation } from '../src/offline'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { controlledClient, query, withTestCleanup } from './helpers'
 import type { Row } from './helpers'
 import type { ConvexClient } from 'convex/browser'
@@ -36,13 +35,6 @@ type AssertionReach = {
   beginHistory: () => void
   reach: (state: string) => void
 }
-
-declareOracle({
-  owns: [
-    `src/index.ts#convexCollectionOptions`,
-    `src/offline.ts#convexOfflineMutation`,
-  ],
-})
 
 const mutation = makeFunctionReference<
   `mutation`,
@@ -136,8 +128,11 @@ oracleProperty({
     statement: `preserves ordered replay and retry classification across bridge failures`,
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
-    owner: `Convex collection integration`,
   },
+  owns: [
+    `src/index.ts#convexCollectionOptions`,
+    `src/offline.ts#convexOfflineMutation`,
+  ],
   histories: {
     arbitrary: convex_offlineHistory,
     runs: 60,
@@ -305,8 +300,11 @@ oracleProperty({
     statement: `requires real source acceptance through cold replay histories`,
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
-    owner: `Convex collection integration`,
   },
+  owns: [
+    `src/index.ts#convexCollectionOptions`,
+    `src/offline.ts#convexOfflineMutation`,
+  ],
   histories: {
     arbitrary: convex_offline_sourceHistory,
     runs: 60,
@@ -515,8 +513,11 @@ oracleProperty({
     statement: `keeps rejected source acceptance terminal until a fresh sync run`,
     authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
     limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
-    owner: `Convex collection integration`,
   },
+  owns: [
+    `src/index.ts#convexCollectionOptions`,
+    `src/offline.ts#convexOfflineMutation`,
+  ],
   histories: {
     arbitrary: convex_offline_acceptanceHistory,
     runs: 60,

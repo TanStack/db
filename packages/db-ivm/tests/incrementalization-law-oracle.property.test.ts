@@ -554,16 +554,6 @@ const orderedHistory: fc.Arbitrary<Array<Weighted<Keyed>>> = fc
 // What this oracle owns: the gap report judges these entries, and their
 // reference trees within the package, by this file's tests.
 declareOracle({
-  owns: [
-    `src/operators/map.ts#map`,
-    `src/operators/filter.ts#filter`,
-    `src/operators/consolidate.ts#consolidate`,
-    `src/operators/reduce.ts#reduce`,
-    `src/operators/groupBy.ts#groupBy`,
-    `src/operators/join.ts#join`,
-    `src/operators/orderBy.ts#orderByWithFractionalIndex`,
-    `src/operators/groupedOrderBy.ts#groupedOrderByWithFractionalIndex`,
-  ],
   grammar: [orderedHistory],
   check: [checkIncrementalization],
   model: [incrementalizationReferences],
@@ -654,8 +644,17 @@ function registerIncrementalization<T>(
         statement: name,
         authority: `The existing DBSP accumulation/difference law and direct evaluators documented above.`,
         limits: `The original bounded JSON relation, delivery and operator domains; message order and client publication remain outside this owner.`,
-        owner: `D2 incrementalization`,
       },
+      owns: [
+        `src/operators/map.ts#map`,
+        `src/operators/filter.ts#filter`,
+        `src/operators/consolidate.ts#consolidate`,
+        `src/operators/reduce.ts#reduce`,
+        `src/operators/groupBy.ts#groupBy`,
+        `src/operators/join.ts#join`,
+        `src/operators/orderBy.ts#orderByWithFractionalIndex`,
+        `src/operators/groupedOrderBy.ts#groupedOrderByWithFractionalIndex`,
+      ],
       histories: { arbitrary, runs: 100, fixedSeeds: [1741] },
       model: incrementalizationReferences,
       driver: async (history, observe) => {

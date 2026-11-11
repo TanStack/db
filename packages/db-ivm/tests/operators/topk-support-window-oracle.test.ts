@@ -23,14 +23,7 @@ import { TopKRelation } from './topk-relation-oracle.js'
 import type { TopKComparisonRecorder } from './topk-relation-oracle.js'
 import type { TopKWithFractionalIndexOptions } from '../../src/operators/topKWithFractionalIndex.js'
 
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
 declareOracle({
-  owns: [
-    `src/operators/topKWithFractionalIndex.ts#topKWithFractionalIndex`,
-    `src/operators/groupedTopKWithFractionalIndex.ts#groupedTopKWithFractionalIndex`,
-    `src/operators/orderBy.ts#orderByWithFractionalIndex`,
-  ],
   check: [TopKRelation, checkNumericWindow],
   model: [selectedWindowKeys, requestedWindowChanged],
 })
@@ -137,8 +130,14 @@ describe.each([
       statement: `Select positive typed-key support at every input and window-move cut, with unit indexed output and the reported selected size.`,
       authority: `The existing top-K support/window contract documented above.`,
       limits: `The original five-key, support 0..3 and offset/limit 0..6 grammar, with one payload per key.`,
-      owner: `Top-K support and windows`,
     },
+    // What this oracle owns: the gap report judges these entries, and their
+    // reference trees within the package, by this file's tests.
+    owns: [
+      `src/operators/topKWithFractionalIndex.ts#topKWithFractionalIndex`,
+      `src/operators/groupedTopKWithFractionalIndex.ts#groupedTopKWithFractionalIndex`,
+      `src/operators/orderBy.ts#orderByWithFractionalIndex`,
+    ],
     histories: {
       arbitrary: fc.array(
         fc.record({
@@ -413,8 +412,12 @@ describe.each([
           statement: `Finite authored bounds preserve selected rows, reported size, partial bounds and changed-window demand.`,
           authority: `The existing numeric-window and demand contracts documented above.`,
           limits: `The original three-to-five-key safe-integer numeric profiles; no CPU threshold or provider-acquisition claim.`,
-          owner: `Top-K support and windows`,
         },
+        owns: [
+          `src/operators/topKWithFractionalIndex.ts#topKWithFractionalIndex`,
+          `src/operators/groupedTopKWithFractionalIndex.ts#groupedTopKWithFractionalIndex`,
+          `src/operators/orderBy.ts#orderByWithFractionalIndex`,
+        ],
         histories: {
           arbitrary: numericWindowInput,
           runs: 100,
@@ -787,8 +790,12 @@ describe.each([
         statement: `Negative offsets select absolute rank intersections and retain signed row, size and source-edit fidelity.`,
         authority: `The maintainer's 2026-11-02 absolute-rank decision documented above.`,
         limits: `The original negative-depth, installed-cardinality, width, gap and legal support-tail grammar; multiple groups and downstream acquisition remain outside this owner.`,
-        owner: `Top-K support and windows`,
       },
+      owns: [
+        `src/operators/topKWithFractionalIndex.ts#topKWithFractionalIndex`,
+        `src/operators/groupedTopKWithFractionalIndex.ts#groupedTopKWithFractionalIndex`,
+        `src/operators/orderBy.ts#orderByWithFractionalIndex`,
+      ],
       histories: {
         arbitrary: negativeWindowHistory,
         runs: 100,

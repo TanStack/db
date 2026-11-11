@@ -58,7 +58,6 @@ export function registerBrowserProperty<THistory>(
           statement,
           authority: `The calling owner's existing RFC #1659 and persistence contract citations.`,
           limits: `The calling owner's unchanged histories, paths, checkpoints and stated limits; this registration migration adds no coverage.`,
-          owner: `SQLite persistence and native hosts`,
         },
         histories,
         label: (history) =>

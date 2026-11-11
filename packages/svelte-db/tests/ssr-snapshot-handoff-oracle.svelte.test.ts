@@ -569,12 +569,12 @@ function checkReceivingHistory(
 const handoffLaw = {
   statement: `Every admitted Svelte browser initialization reproduces its render-time server rows and status before effects subscribe.`,
   authority: `docs/guides/ssr.md preparation/hydration contract and packages/db/tests/ssr-snapshot-admission-oracle.ts`,
-  owner: `packages/db/tests/ssr-snapshot-admission-oracle.ts`,
   limits: `Existing eager source/preparation and write timing grammar at real server compilation and browser hydrate; no asynchronous provider claim.`,
 }
 oracleProperty({
   id: `svelte.ssr-handoff.cases`,
   law: handoffLaw,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: ssrSnapshotExamples,
   model: expectedSsrSnapshot,
   driver: recordHandoff,
@@ -645,6 +645,7 @@ const handoffConstructions = [
 oracleProperty({
   id: `svelte.ssr-handoff`,
   law: handoffLaw,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: {
     arbitrary: ssrSnapshotHistoryArbitrary,
     runs: 120,
@@ -668,7 +669,6 @@ oracleProperty({
 const receivingLaw = {
   statement: `Every hydrating reader receives its server view, while a fresh mount receives the current browser view after earlier authoritative readers; each reader then follows that browser view.`,
   authority: `docs/guides/ssr.md per-reader hydration and ordinary browser laws; maintainer decision2026-10-26`,
-  owner: `packages/db/tests/ssr-snapshot-admission-oracle.ts`,
   limits: `Existing bounded reader, root/child and provider nesting grammar on native Svelte roots with one shared transported client.`,
 }
 const receivingConstructions: Array<{
@@ -739,6 +739,7 @@ const receivingConstructions: Array<{
 oracleProperty({
   id: `svelte.ssr-receiving-reader.cases`,
   law: receivingLaw,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: ssrReceivingExamples,
   model: expectedSsrReceivingViews,
   driver: recordReceivingHistory,
@@ -747,6 +748,7 @@ oracleProperty({
 oracleProperty({
   id: `svelte.ssr-receiving-reader`,
   law: receivingLaw,
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   histories: {
     arbitrary: ssrReceivingHistoryArbitrary,
     runs: 120,
@@ -764,7 +766,6 @@ oracleProperty({
   timeout: 30_000,
 })
 declareOracle({
-  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   model: [expectedSsrSnapshot, expectedSsrReceivingViews],
   check: [checkHandoff, checkReceivingHistory],
   grammar: [ssrSnapshotHistoryArbitrary, ssrReceivingHistoryArbitrary],

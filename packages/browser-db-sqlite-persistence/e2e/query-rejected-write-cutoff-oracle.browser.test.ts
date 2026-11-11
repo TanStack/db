@@ -39,7 +39,6 @@ describe('chromium-opfs', () => {
         'A rejected direct write and stale observer callback leave a fetched cache authoritative for an Infinity-stale peer acquisition.',
       authority:
         'Query guide Understanding the Data Stores item 1, Direct Writes and Query Sync; Query Core staleTime and refetchOnMount; primary ownership direct-write-order judgment.',
-      owner: 'Query ownership lifecycle receiving extension',
       limits:
         'Empty eager persisted startup, one successful fetched row, rejected missing-key update/delete, raw or direct wrapped array; no accepted mutation, invalidation, failed I/O or concurrent writer.',
     },

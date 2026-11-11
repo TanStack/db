@@ -2447,13 +2447,6 @@ const authorityProperty = `ordered-loader.request-authority`
 // the request ledger. The grammar is authorityCaseArbitrary, which the campaigns
 // and the calibration witnesses below read for coverage.
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/btree-index.ts',
-    'src/query/effect.ts#createEffect',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/live/ordered-source-loader.ts',
-  ],
   check: [checkAuthorityCase, checkRetirementProgress, checkRetirementReceiver],
   grammar: [authorityCaseArbitrary],
 })
@@ -3115,8 +3108,14 @@ describe(`Ordered source request authority`, () => {
         statement: `preserves repair continuation identity across replay bookkeeping`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
         limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
-        owner: `Ordered acquisition`,
       },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
       histories: histories,
       model: (history, observations) =>
         recordedComparison(history, observations),
@@ -3226,8 +3225,14 @@ describe(`Ordered source request authority`, () => {
         statement: `repairs an invalidation delivered during completed repair retirement`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
         limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
-        owner: `Ordered acquisition`,
       },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
       histories: {
         arbitrary: retirementCase,
         runs: 200,
@@ -3399,8 +3404,14 @@ describe(`Ordered source request authority`, () => {
         statement: `repairs retirement invalidation through a real subscription`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
         limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
-        owner: `Ordered acquisition`,
       },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
       histories: {
         arbitrary: retirementReceiverCase,
         runs: 600,
@@ -3643,8 +3654,14 @@ describe(`Ordered source request authority`, () => {
         statement: `holds, retires, and recovers requests under generated settlement orders`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
         limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
-        owner: `Ordered acquisition`,
       },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
       histories: {
         arbitrary: authorityCaseArbitrary,
         runs: 10000,
@@ -3874,8 +3891,14 @@ describe(`Ordered source request authority`, () => {
         statement: `answers each loaded-subset report as its coverage requires`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
         limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
-        owner: `Ordered acquisition`,
       },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
       histories: {
         arbitrary: unprovenReportCase,
         runs: 1000,

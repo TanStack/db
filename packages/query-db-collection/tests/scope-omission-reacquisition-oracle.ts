@@ -357,7 +357,6 @@ export function options(
         'A complete scoped omission retires a direct row without invalidating distinct retained Query entries; reacquisition starts a new row lifetime from its retained response.',
       authority:
         'Query guide Direct Writes and Query Sync: scope-local omission, retained-cache reacquisition.',
-      owner: 'Query ownership lifecycle receiving extension',
       limits:
         'Two matching scopes, one same-run insert/upsert, complete A response and retained B success, numeric values and successful I/O; no stale requests, window/cursor or concurrent writer.',
     },

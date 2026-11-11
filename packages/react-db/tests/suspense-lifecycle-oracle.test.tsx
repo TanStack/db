@@ -924,10 +924,6 @@ async function checkPreload(
   })
 }
 declareOracle({
-  owns: [
-    `src/DbProvider.tsx#DbProvider`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
   model: [advance],
   grammar: [retryArbitrary, replacementArbitrary, preloadArbitrary],
   check: [compare, checkRetry, checkReplacement, checkPreload],
@@ -943,9 +939,12 @@ describe(`Suspense lifecycle histories`, () => {
           law: {
             statement: `The current initial attempt determines fallback, rows and boundary errors; cleanup and retry retire stale failures and successful peers own independent outputs.`,
             authority: `docs/guides/error-handling.md Suspense and Error Boundaries, hook JSDoc and shared conformance contract, enacted by advance and compare.`,
-            owner: `packages/react-db/tests/suspense-lifecycle-oracle.test.tsx`,
             limits: `The unchanged finite fail/crash/abandon, pending rerenders, reset/remount and post-ready source paths across none/provider/explicit and keyed/derived React hooks.`,
           },
+          owns: [
+            `src/DbProvider.tsx#DbProvider`,
+            `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+          ],
           histories: {
             arbitrary: retryArbitrary,
             runs: 24,
@@ -1027,9 +1026,12 @@ describe(`Suspense lifecycle histories`, () => {
     law: {
       statement: `A replacement client request supplies the current attempt; late obsolete rejection cannot poison its pending or ready view.`,
       authority: `The existing replacement and cleanup contract examples, and advance/compare's independent current-attempt law.`,
-      owner: `packages/react-db/tests/suspense-lifecycle-oracle.test.tsx`,
       limits: `The unchanged failure-first, replace-first, cleanup-first and client-first schedules with finite rows and Error/record/undefined causes.`,
     },
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
     histories: {
       arbitrary: replacementArbitrary,
       runs: 32,
@@ -1119,9 +1121,12 @@ describe(`Suspense lifecycle histories`, () => {
         law: {
           statement: `Cleanup and restart replace the query-only preload obligation; its retired rejection cannot replace the new pending or ready view.`,
           authority: `The existing supplied-query preload cleanup contract, enacted by advance and compare.`,
-          owner: `packages/react-db/tests/suspense-lifecycle-oracle.test.tsx`,
           limits: `The unchanged unscoped/provider supplied Collections, finite rerenders, and rejection before/after cleanup; no provider transport or native hydration claim.`,
         },
+        owns: [
+          `src/DbProvider.tsx#DbProvider`,
+          `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+        ],
         histories: {
           arbitrary: preloadArbitrary,
           runs: 24,
@@ -1942,9 +1947,12 @@ for (const scope of [`none`, `provider`, `explicit`] as const)
         law: {
           statement: `Co-mounted current attempts make retry progress, own exclusive outputs and retain private page and health observations independently of their peer.`,
           authority: `The shared conformance exclusive output/window laws, observer hydration failure-ending-seed law, and current-attempt model advance/compare.`,
-          owner: `packages/react-db/tests/suspense-lifecycle-oracle.test.tsx`,
           limits: `The unchanged siblingHistories expansion for each generated base history across none/provider/explicit and keyed/derived modes; controlled subset work in React 19 jsdom.`,
         },
+        owns: [
+          `src/DbProvider.tsx#DbProvider`,
+          `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+        ],
         histories: {
           arbitrary: siblingsArbitrary,
           runs: 8,

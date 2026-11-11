@@ -812,11 +812,7 @@ function expectedThreeGenerationSettlement(
   }
 }
 
-// What this oracle owns: the gap report judges the demand lifecycle of a
-// subscription in subscription.ts, its startup, cleanup, restart, and
-// release, by this file's tests.
 declareOracle({
-  owns: [`src/collection/subscription.ts`],
   check: [runAsyncRestartScenario],
   model: [
     modelSubscriberResumeRetirement,
@@ -1744,8 +1740,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       statement: `Demand settlements are fenced by the sync run that owns their physical acquisition.`,
       authority: `Collection cleanup/restart and logical demand ownership in the glossary; the lifecycle grammar's existing model`,
       limits: `The existing bounded async restart regimes, status, errors, rows, acquisition, and release checkpoints.`,
-      owner: `Collection subscription lifecycle`,
     },
+    // What this oracle owns: the gap report judges the demand lifecycle of a
+    // subscription in subscription.ts, its startup, cleanup, restart, and
+    // release, by this file's tests.
+    owns: [`src/collection/subscription.ts`],
     histories: {
       arbitrary: asyncRestartScenarioArbitrary,
       runs: 30,
@@ -1926,8 +1925,8 @@ describe(`resumption notification error and surviving demand`, () => {
       statement: `Resumption retains its logical demands when first-demand notification throws after ownership transfer; replacement readiness acquires them.`,
       authority: `Collection cleanup/restart and logical demand ownership in the glossary, as stated above`,
       limits: `The existing pending-cleanup, notification-failure, and one-to-three-demand grammar; no arbitrary programming-error recovery or implicit restart.`,
-      owner: `Collection subscription lifecycle`,
     },
+    owns: [`src/collection/subscription.ts`],
     histories: {
       arbitrary: notificationHistoryArbitrary,
       runs: 60,

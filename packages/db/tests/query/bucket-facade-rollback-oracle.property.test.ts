@@ -811,10 +811,6 @@ const history = fc.array(step, { minLength: 1, maxLength: 8 })
 // predicts the rows that each flush owes, which events it may name, and which
 // layout revision it owes.
 declareOracle({
-  owns: [
-    'src/query/live/bucket-facade-adapter.ts',
-    'src/transactions.ts#createTransaction',
-  ],
   check: [runHistory, checkEvents],
   model: [applyOps, layoutExpectation, shownLayoutExpectation, touchedIds],
 })
@@ -829,8 +825,11 @@ describe(`bucket facade rollback`, () => {
       statement: `Failed facade flushes restore all written facades without unrelated row reads, events, or layout revisions; successful flushes publish pending changes once.`,
       authority: `ARCHITECTURE.md Coherent publication and the three facade laws stated above.`,
       limits: `The unchanged one-edge, four-bucket, one-to-eight-step grammar; held spanning commits keep their existing row-only comparison.`,
-      owner: `Bucket facade rollback`,
     },
+    owns: [
+      'src/query/live/bucket-facade-adapter.ts',
+      'src/transactions.ts#createTransaction',
+    ],
     histories: {
       arbitrary: history,
       runs: 150,

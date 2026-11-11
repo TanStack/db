@@ -36,7 +36,6 @@ oracleProperty<BarrierHistory, ReturnType<typeof barrierModel>>({
     statement: `A real QueryDB refetch that receives stale data during restored durable replay remains pending while provider work is held, then fulfills with fresh rows after provider settlement and acknowledged outbox cleanup.`,
     authority: `Collection.deferDataRefresh public JSDoc; QueryDB external refetch settlement owner and offline-refresh e2e stale-read premise. Persisting local mutations have a separate fetch-settlement exception.`,
     limits: `Real QueryClient and QueryDB Collection in Node/jsdom, one to three restored offline inserts with per-ID waiters, controlled query backend and provider; no native browser event or remote durability claim. Local persisting-mutation refetches may settle at fetch; overlap and retirement remain with the core receiving path.`,
-    owner: `Offline execution`,
   },
   histories: {
     arbitrary: queryBarrierHistory,

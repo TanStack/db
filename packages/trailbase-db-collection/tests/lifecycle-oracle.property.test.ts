@@ -1782,9 +1782,9 @@ oracleProperty({
   law: {
     statement: `A sync run publishes the independent service row history, settles startup and subset loads at their promised cuts, and cleanup retires its late work and resources.`,
     authority: `TrailBase tests/ORACLE.md; Collection lifecycle readiness, cleanup, health, and exact reported-error contracts.`,
-    owner: `TrailBase lifecycle oracle`,
     limits: `Controlled RecordApi/native streams, one to three sync runs, zero to eight scalar changes per stream. No deployed server, network retries, persistence or arbitrary scheduler.`,
   },
+  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
   histories: {
     arbitrary: scenarioArb,
     runs: 50,
@@ -1976,9 +1976,9 @@ oracleProperty({
   law: {
     statement: `Pages and change events converge to the independent service map at every cut after the row's pending events arrive; cleanup fences an earlier sync run.`,
     authority: `TrailBase tests/ORACLE.md page/event and fresh-run laws; subscribe-before-list boundary.`,
-    owner: `TrailBase lifecycle page/event oracle`,
     limits: `258 service rows, cursor or offset paging, one or two loads, up to ten steps and four scalar changes. Offset paging updates existing rows only; no live deployed server.`,
   },
+  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
   histories: {
     arbitrary: pageHistoryArb,
     runs: 40,
@@ -2042,9 +2042,9 @@ oracleProperty({
   law: {
     statement: `Early demand waits for the listener; page/event overlap and held optimistic work converge to the service; stream end retains rows and health; a new sync run ignores old event fences.`,
     authority: `TrailBase tests/ORACLE.md early demand, page/event, held-page, stream-end and fresh-run laws.`,
-    owner: `TrailBase lifecycle oracle`,
     limits: `All 51 cases of the original finite grammars: 16 early demand, 28 one-page race, four held-page, two stream-end, one fresh-run. Controlled provider boundary only.`,
   },
+  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
   histories: boundaryHistories,
   model: (h: BoundaryHistory, trace) => referenceFacts(h, trace),
   driver: async (h, record) => {
@@ -2078,7 +2078,6 @@ oracleProperty({
 // The reusable judgments own this production boundary. The framework handles
 // campaign registration; this declaration retains gap-report discovery.
 declareOracle({
-  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
   check: [checkLawFacts],
   model: [referenceFacts, expectedEarlyDemand],
   grammar: [scenarioArb, pageHistoryArb],

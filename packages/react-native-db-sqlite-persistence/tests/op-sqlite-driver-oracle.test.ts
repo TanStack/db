@@ -174,7 +174,6 @@ const law = {
   statement: `SQLite query preserves every alias, row, value, key order, and row order across documented object and columnar result carriers, including rows made only of write marker aliases.`,
   authority: `SQLiteDriver.query contract; published OP-SQLite rows and rawRows/columnNames result envelopes; the explicit bare-array result mode contract.`,
   limits: `Controlled object-envelope results and a real better-sqlite3 shim for columnar and direct-row SQL results; unique aliases from the declared bounded field-name lists and two asymmetric scalar rows. Frozen provider receipts and device/JSI/worker delivery remain separate receiving evidence. Malformed envelopes and transactions remain in the ordinary driver suite.`,
-  owner: `OP-SQLite SQL aliases`,
 }
 
 // The exact keys are observed separately: the framework's data comparison
@@ -365,6 +364,7 @@ const calibrations: Array<Calibration<Aliases, Aliases>> = [
 oracleProperty<Aliases, Expected>({
   id: `op-sqlite.write-marker-aliases`,
   law,
+  owns: [`src/op-sqlite-driver.ts`],
   histories: {
     arbitrary: writeResultAliasesArbitrary,
     runs: aliasOracleRuns,
@@ -443,6 +443,7 @@ function equivalentResults(aliases: Aliases): ReadonlyArray<{
 oracleProperty<Aliases, Expected>({
   id: `op-sqlite.result-carrier-equivalence`,
   law,
+  owns: [`src/op-sqlite-driver.ts`],
   histories: {
     arbitrary: statementResultAliasesArbitrary,
     runs: aliasOracleRuns,
@@ -503,6 +504,7 @@ oracleProperty<Aliases, Expected>({
 oracleProperty<Aliases, Expected>({
   id: `op-sqlite.columnar-sql-aliases`,
   law,
+  owns: [`src/op-sqlite-driver.ts`],
   histories: {
     arbitrary: statementResultAliasesArbitrary,
     runs: aliasOracleRuns,
@@ -570,7 +572,6 @@ oracleProperty<Aliases, Expected>({
 })
 
 declareOracle({
-  owns: [`src/op-sqlite-driver.ts`],
   model: [aliasQueryCase],
   grammar: [writeResultAliasesArbitrary, statementResultAliasesArbitrary],
 })

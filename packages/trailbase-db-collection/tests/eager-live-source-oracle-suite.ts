@@ -53,7 +53,6 @@ export function registerTrailBaseEager(
     law: {
       statement: `The eager source's initial gate, complete rows and field values, per-change publications, failure identity, post-ready health, restart and exactly-once resource release follow the shared eager live-source laws.`,
       authority: `db-adapter-conformance/src/eager-live-source-oracle.ts, adapter law set READY-2/3/4, HEALTH-1/5, PUB-1/2/3, FID-1/4, LIFE-2/5/10; TrailBase tests/ORACLE.md.`,
-      owner: `Adapter conformance: eager live sources (#2118), TrailBase receiver`,
       limits: `Controlled RecordApi, already decoded events, native ReadableStream; seven JSON value kinds, twelve grammar steps, eager mode and per-change commits. No deployed service, SDK fetch/SSE, mutation acknowledgement, on-demand loading or reload claim.`,
     },
     histories: {

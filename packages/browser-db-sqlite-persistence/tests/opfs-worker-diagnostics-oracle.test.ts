@@ -322,7 +322,6 @@ TANSTACK_DB_ORACLE_PROPERTY=opfs-worker.diagnostics for direct replay.
 TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the generated campaign.
 */
 declareOracle({
-  owns: [`src/opfs-worker.ts`],
   check: [checkNative],
   model: [referenceMessage, referenceResponse],
 })
@@ -366,8 +365,8 @@ oracleProperty({
     statement: `Worker initialization preserves the primary diagnostic and exposed VFS cause; storage-root capability failures report unavailability before SQLite opens.`,
     authority: `README Notes and the worker protocol's INTERNAL and PERSISTENCE_UNAVAILABLE classifications.`,
     limits: `Mocked wa-sqlite and OPFS boundaries; no native lock or handle-release claim.`,
-    owner: `SQLite persistence`,
   },
+  owns: [`src/opfs-worker.ts`],
   histories: {
     arbitrary: diagnosticInput,
     runs: diagnosticRuns,
@@ -389,8 +388,8 @@ oracleProperty({
     statement: `The retained initialization failures preserve exact diagnostic fields and SQLite-open admission.`,
     authority: `README Notes and worker response protocol.`,
     limits: `The eight retained mocked initialization inputs, including WebKit's long UnknownError message.`,
-    owner: `SQLite persistence`,
   },
+  owns: [`src/opfs-worker.ts`],
   histories: diagnosticExamples.map(([history]) => history),
   label: (_history) =>
     String(diagnosticExamples.findIndex(([history]) => history === _history)),

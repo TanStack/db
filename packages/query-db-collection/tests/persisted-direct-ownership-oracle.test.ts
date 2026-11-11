@@ -1,6 +1,5 @@
 /** Controlled and real SQLite receivers of the primary ownership judgment. */
 import { describe } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
 import { createStartupHost } from '../../db-adapter-conformance/tests/persisted-startup-host'
@@ -21,9 +20,8 @@ for (const host of ['controlled', 'node-sqlite'] as const)
       }, [() => storage.close()])
     }, host)
     oracleProperty({
+      owns: ['src/query.ts#queryCollectionOptions'],
       ...options,
       check: (h, trace, expected) => options.check(h, trace, expected),
     })
   })
-
-declareOracle({ owns: ['src/query.ts#queryCollectionOptions'] })

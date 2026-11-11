@@ -2085,12 +2085,6 @@ async function checkOrderedReplay(
 // implies. Its expectation is computed inside the function body, not by a named
 // model part yet.
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/collection/subscription.ts',
-    'src/indexes/btree-index.ts',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
   check: [checkOrderedReplay],
 })
 
@@ -2099,7 +2093,6 @@ const orderedReplayLaw = {
   statement: `Ordered public windows, replay retention, readiness, lease balance and request errors follow the unchanged independent account at each history cut, quiet settlement and recovery.`,
   authority: `ARCHITECTURE.md ordered requests, atomic window publication, replay participants and laws9,10,16,17 stated above.`,
   limits: `The original bounded commands, scenarios, one ordered source, one include level, adapter faults and per-subscription observations stated above.`,
-  owner: `Ordered truncate replay refinement`,
 }
 const preloadStates = [
   `preloadReplayFailures`,
@@ -3360,6 +3353,12 @@ describe(`Ordered windows across truncate replays`, () => {
   oracleProperty({
     id: 'replay.new-sibling-demand',
     law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
     histories: [{ matrix: 'new-sibling-demand' }],
     resolve: (history) => history,
     model: recordedAssertionJudgment,
@@ -3376,6 +3375,12 @@ describe(`Ordered windows across truncate replays`, () => {
   oracleProperty({
     id: 'replay.sibling-settlement-order',
     law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
     histories: [{ matrix: 'sibling-settlement-order' }],
     resolve: (history) => history,
     model: recordedAssertionJudgment,
@@ -3397,6 +3402,12 @@ describe(`Ordered windows across truncate replays`, () => {
   oracleProperty({
     id: 'replay.subscription-error-order',
     law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
     histories: [{ matrix: 'subscription-error-order' }],
     resolve: (history) => history,
     model: recordedAssertionJudgment,
@@ -3416,6 +3427,12 @@ describe(`Ordered windows across truncate replays`, () => {
   oracleProperty({
     id: 'replay.subscription-success-scope',
     law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
     histories: [{ matrix: 'subscription-success-scope' }],
     resolve: (history) => history,
     model: recordedAssertionJudgment,
@@ -3520,6 +3537,12 @@ describe(`Ordered windows across truncate replays`, () => {
   oracleProperty({
     id: orderedReplayProperty,
     law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
     histories: {
       arbitrary: fc.tuple(
         fc.array(orderedCommand, { minLength: 1, maxLength: 12 }),
@@ -3927,6 +3950,12 @@ describe(`Ordered windows across truncate replays`, () => {
   oracleProperty({
     id: preloadProperty,
     law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
     histories: {
       arbitrary: preloadCase,
       runs: 300,
@@ -3946,6 +3975,12 @@ describe(`Ordered windows across truncate replays`, () => {
   oracleProperty({
     id: failedReplayProperty,
     law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
     histories: {
       arbitrary: failedReplayCase,
       runs: 600,
@@ -3991,6 +4026,12 @@ const replayDemandHistory = fc.record({
 oracleProperty({
   id: replayDemandProperty,
   law: orderedReplayLaw,
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/collection/subscription.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   histories: {
     arbitrary: replayDemandHistory,
     runs: 75,
@@ -4061,6 +4102,12 @@ oracleProperty({
 oracleProperty({
   id: orderedFailureProperty,
   law: orderedReplayLaw,
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/collection/subscription.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   histories: {
     arbitrary: fc.tuple(
       fc.array(orderedCommand, { minLength: 0, maxLength: 6 }),

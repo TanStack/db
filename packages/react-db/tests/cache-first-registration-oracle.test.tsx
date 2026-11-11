@@ -394,9 +394,13 @@ oracleProperty({
   law: {
     statement: `An actual first server reader establishes local option claims; independent retries preserve admission and original rows through later observation and source publication.`,
     authority: `packages/db/tests/live-query-cache-options-oracle.ts independent cache declaration law and docs/guides/ssr.md rendered-view law.`,
-    owner: `packages/db/tests/live-query-cache-options-oracle.ts`,
     limits: `The unchanged finite 1152 ordinary/Suspense first-reader, preload/server second-reader and held/ready source histories; controlled server streaming, no Router transport or hydration claim.`,
   },
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   histories,
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,
@@ -407,11 +411,6 @@ oracleProperty({
   check: forwardAssertionJudgment,
 })
 declareOracle({
-  owns: [
-    `src/DbProvider.tsx#DbProvider`,
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
   check: [
     checkFirstRegistrationHistory,
     checkCacheOptionAdmission,

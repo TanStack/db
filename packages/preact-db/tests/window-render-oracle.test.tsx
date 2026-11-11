@@ -343,8 +343,8 @@ for (const [id, remote, keyed, move] of renderProperties) {
       statement: `A Preact window moves only after its render commits. A rejected render cannot move the committed Collection or acquire rows.`,
       authority: `packages/db/tests/conformance/contract.ts query-identity and window-commit laws; maintainer decision 2026-10-30 (#2291).`,
       limits: `Real Preact error-boundary rendering, eager or finite synchronous on-demand sources, derived or explicit keys, and finite offset/limit moves; no Suspense, concurrent scheduling, or asynchronous provider settlement.`,
-      owner: `Adapter-owned outer window moves`,
     },
+    owns: [`src/useLiveQuery.ts#useLiveQuery`],
     histories: {
       arbitrary: renderHistoryArbitrary,
       runs: 6,
@@ -419,7 +419,6 @@ for (const [id, remote, keyed, move] of renderProperties) {
 }
 
 declareOracle({
-  owns: [`src/useLiveQuery.ts#useLiveQuery`],
   grammar: [renderHistoryArbitrary],
   model: [expectedRender],
   check: [checkRender],

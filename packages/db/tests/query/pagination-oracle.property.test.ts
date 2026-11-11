@@ -864,12 +864,6 @@ async function runPaginationScenario(
  * one history, and `referenceWindowRows` predicts each window from the rows.
  */
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/btree-index.ts',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/utils/comparison.ts#makeComparator',
-  ],
   check: [runPaginationScenario, runMultiOrderScenario],
   model: [referenceWindowRows, referenceMultiOrder],
 })
@@ -4778,8 +4772,13 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches multi-column nullable ordering for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
     histories: {
       arbitrary: multiOrderScenarioArbitrary,
       runs: 12,
@@ -4849,8 +4848,13 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches nullable cursor ordering while an async response is pending for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
     histories: {
       arbitrary: nullableCursorScenarioArbitrary,
       runs: 8,
@@ -5393,8 +5397,13 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches recomputation when source mutations cross a pending cursor response for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
     histories: {
       arbitrary: fc.tuple(
         pendingMutationScenarioArbitrary,
@@ -5453,8 +5462,13 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches recomputation across multi-action pending histories for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
     histories: {
       arbitrary: pendingHistoryScenarioArbitrary,
       runs: 8,
@@ -5624,8 +5638,13 @@ describe(`pagination recomputation oracle`, () => {
         statement: `covers ${name} window paths for a random or replayed seed [pagination.matrix.window-${index}]`,
         authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
         limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-        owner: `Ordered acquisition`,
       },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/utils/comparison.ts#makeComparator',
+      ],
       histories: {
         arbitrary: scenarioPayloadArbitrary,
         runs: 1,
@@ -5648,8 +5667,13 @@ describe(`pagination recomputation oracle`, () => {
         statement: `covers ${name} state paths for a random or replayed seed [pagination.matrix.state-${index}]`,
         authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
         limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-        owner: `Ordered acquisition`,
       },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/utils/comparison.ts#makeComparator',
+      ],
       histories: {
         arbitrary: stateScenarioPayloadArbitrary,
         runs: 1,
@@ -5673,8 +5697,13 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches full recomputation across ordered windows for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
     histories: { arbitrary: scenarioArbitrary, runs: 12, fixedSeeds: [1657] },
     model: (history, observations) => recordedComparison(history, observations),
     driver: async (history, observe) =>
@@ -5692,8 +5721,13 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches full recomputation across source and window transitions for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
     histories: {
       arbitrary: stateScenarioArbitrary,
       runs: 8,
@@ -6873,8 +6907,13 @@ describe(`pagination recomputation oracle`, () => {
       statement: `matches full recomputation when exact async cursor loads widen ordered coverage for a random or replayed seed`,
       authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
       limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
-      owner: `Ordered acquisition`,
     },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
     histories: { arbitrary: scenarioArbitrary, runs: 8, fixedSeeds: [1659] },
     model: (history, observations) => recordedComparison(history, observations),
     driver: async (history, observe) =>

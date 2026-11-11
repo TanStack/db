@@ -35,10 +35,6 @@ import type {
 
 const values = distinctCollisionValues(hash)
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
   check: [checkDistinctSnapshot],
   grammar: [distinctRecipe],
 })
@@ -61,7 +57,6 @@ function receivingOptions(ordered: boolean): ReceivingOptions {
       statement: `Public distinct selections retain one of each positive-support value across collision coexistence, duplicate support, removals and reinsertion after each applied source transaction.`,
       authority: `The shared unique-selection law in distinct-incrementalization-oracle.ts and the public distinct contract in docs/guides/live-queries.md.`,
       limits: `The unchanged immutable two-member collision fixture, anchor and support-cycle grammar; ordered and unordered public Collections. No arbitrary payload, framework render schedule or intermediate source publication claim.`,
-      owner: `Distinct collision review extension`,
     },
     histories: {
       arbitrary: distinctRecipe,
@@ -159,6 +154,10 @@ const unordered = receivingOptions(false)
 oracleProperty({
   ...unordered,
   id: `query.distinct-collisions`,
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   histories: { ...unordered.histories, runs: 100, fixedSeeds: [2306] },
   check: checkDistinctCampaign,
 })
@@ -166,6 +165,10 @@ const ordered = receivingOptions(true)
 oracleProperty({
   ...ordered,
   id: `query.distinct-collisions-ordered`,
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   histories: { ...ordered.histories, runs: 100, fixedSeeds: [2306] },
   check: checkDistinctCampaign,
 })

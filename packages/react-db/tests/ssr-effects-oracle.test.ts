@@ -175,11 +175,6 @@ function checkRender(
 }
 
 declareOracle({
-  owns: [
-    `src/DbProvider.tsx#DbProvider`,
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
-  ],
   check: [checkRender],
   grammar: [histories],
 })
@@ -284,9 +279,13 @@ for (const runtime of runtimes) {
       law: {
         statement: `Supported React server renders preserve prepared SSR admission and emit no client-only layout-effect diagnostic.`,
         authority: `docs/guides/ssr.md prepared SSR promises; React >=18 support and #2229; shared ssr-snapshot-admission-oracle.ts judgment.`,
-        owner: `packages/db/tests/ssr-snapshot-admission-oracle.ts`,
         limits: `Real React18 and installed React server renderers, provider/explicit-client ordinary/Suspense paths and standalone/supplied diagnostic paths; no hydration equality or client commit timing.`,
       },
+      owns: [
+        `src/DbProvider.tsx#DbProvider`,
+        `src/useLiveQuery.ts#useLiveQuery`,
+        `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+      ],
       histories: {
         arbitrary: grammar,
         runs: 24,
@@ -362,9 +361,13 @@ for (const runtime of runtimes) {
     law: {
       statement: `A disabled server hook returns without a client-only layout-effect diagnostic.`,
       authority: `React >=18 support and prepared SSR guide; the same SSR diagnostic judgment.`,
-      owner: `packages/db/tests/ssr-snapshot-admission-oracle.ts`,
       limits: `The unchanged disabled SSR history in React18 and the installed React runtime.`,
     },
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
     histories: [
       {
         preparation: `none`,

@@ -111,7 +111,6 @@ function electricHistoryOptions<T>(
   return {
     id: property,
     law: {
-      owner: `packages/electric-db-collection/tests/electric-oracle.property.test.ts`,
       statement: name,
       authority: `The named independent Electric model/comparison passed to electricHistoryOptions and its adjacent contract prose.`,
       limits: `The existing generated history domain and controlled SDK boundary; no new product or real-service claim.`,
@@ -2728,6 +2727,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration1,
     id: `electric.initial-tagged-move-outs`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration1.histories,
       runs: 20,
@@ -2750,6 +2750,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration2,
     id: `electric.process-grammar`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration2.histories,
       runs: 20,
@@ -2950,6 +2951,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration3,
     id: queuedPresenceProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration3.histories,
       runs: queuedPresenceRuns,
@@ -2981,6 +2983,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration4,
     id: publicationBeforePersistenceProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration4.histories,
       runs: 8,
@@ -3027,6 +3030,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration5,
     id: adapterFailurePolicyProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration5.histories,
       runs: 8,
@@ -3074,6 +3078,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration6,
     id: `electric.design-convergence`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration6.histories,
       runs: 24,
@@ -3416,6 +3421,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration7,
     id: `electric.synthetic-batch-partition`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration7.histories,
       runs: 10,
@@ -3462,6 +3468,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration8,
     id: `electric.valid-batch-partition`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration8.histories,
       runs: 20,
@@ -3522,6 +3529,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration9,
     id: `electric.publication-epoch-convergence`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration9.histories,
       runs: 20,
@@ -3727,6 +3735,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration10,
     id: `electric.invalid-resume-partition`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration10.histories,
       runs: 20,
@@ -3847,6 +3856,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration11,
     id: `electric.match-reentry`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration11.histories,
       runs: 10,
@@ -4557,6 +4567,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration12,
     id: `electric.retry-decision`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration12.histories,
       runs: 30,
@@ -4609,6 +4620,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration13,
     id: durablePrefixProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration13.histories,
       runs: 10,
@@ -4654,6 +4666,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration14,
     id: `electric.source-ledger-calibration`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration14.histories,
       runs: 20,
@@ -4755,6 +4768,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration15,
     id: `electric.subset-request-row-validity`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration15.histories,
       runs: 40,
@@ -4855,6 +4869,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration16,
     id: `electric.resume-metadata-merge`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration16.histories,
       runs: 50,
@@ -5012,6 +5027,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration17,
     id: `electric.metadata-merge-complete-state`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration17.histories,
       runs: 30,
@@ -5108,6 +5124,7 @@ describe(`Electric adapter laws`, () => {
   oracleProperty({
     ...electricHistoryRegistration18,
     id: persistenceInterleavingProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: {
       ...electricHistoryRegistration18.histories,
       runs: 4,
@@ -5153,5 +5170,4 @@ declareOracle({
     queuedPresenceArbitraries,
     persistenceInterleavingCampaignArbitrary,
   ],
-  owns: [`src/electric.ts#electricCollectionOptions`],
 })

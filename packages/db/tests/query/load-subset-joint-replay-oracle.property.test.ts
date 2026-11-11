@@ -40,20 +40,11 @@ import {
 } from '../oracle-assertion-adapter.js'
 import { oracleProperty } from '../oracle-config.js'
 import { flushPromises, withOracleCleanup } from '../utils.js'
-import { declareOracle } from '../oracle-declaration.js'
 import type {
   LoadSubsetOptions,
   SyncAppliedReceipt,
   SyncConfig,
 } from '../../src/types.js'
-
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/transactions.ts#createTransaction',
-  ],
-})
 
 type Row = { id: string; version: number; value: number; kind: `data` | `hold` }
 type PublicRow = Pick<Row, `id` | `version` | `value`>
@@ -525,8 +516,12 @@ oracleProperty({
     statement: `Current replay participants and accepted receipts gate publication; obsolete work, retired peers, and old graphs cannot control its replacement.`,
     authority: `ARCHITECTURE.md Replay participants and failure, laws 7, 9 and 14, and the established joint-replay contract above.`,
     limits: `The unchanged bounded single-source, two-owner grammar, without joined/includes graphs or throwing callbacks.`,
-    owner: `Joint replay publication`,
   },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/transactions.ts#createTransaction',
+  ],
   histories: {
     arbitrary: scenario,
     runs: 35,
