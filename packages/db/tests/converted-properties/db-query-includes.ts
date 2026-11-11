@@ -37,6 +37,16 @@ export const properties: ReadonlyArray<string> = [
   `includes-context-transport.compound-join`,
   `includes-context-transport.materialized-input`,
   `includes-context-transport.outer-join-keys`,
+  `virtual-row-fields-types.public-types`,
+  `virtual-row-fields-types.hostile-observations`,
+  `virtual-row-fields-types.construction-admission`,
+  `virtual-row-fields-effect.callback-delivery`,
+  `virtual-row-fields-effect.explicit-metadata`,
+  `virtual-row-fields-effect.boundary-membership`,
+  `virtual-row-fields-input.callback`,
+  `virtual-row-fields-input.direct-source`,
+  `virtual-row-fields-input.inline`,
+  `virtual-row-fields-input.compiler-cache`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -89,5 +99,20 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/includes-context-transport-oracle.test.ts`,
     `includes-context-transport`,
     `grammar compound-join materialized-input outer-join-keys`,
+  ],
+  [
+    `db/tests/query/virtual-row-fields-types-oracle.test.ts`,
+    `virtual-row-fields-types`,
+    `public-types hostile-observations construction-admission`,
+  ],
+  [
+    `db/tests/query/virtual-row-fields-effect-oracle.test.ts`,
+    `virtual-row-fields-effect`,
+    `callback-delivery explicit-metadata boundary-membership`,
+  ],
+  [
+    `db/tests/query/virtual-row-fields-input-oracle.test.ts`,
+    `virtual-row-fields-input`,
+    `callback direct-source inline compiler-cache`,
   ],
 ]
