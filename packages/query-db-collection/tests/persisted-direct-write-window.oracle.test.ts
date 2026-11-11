@@ -8,7 +8,7 @@ import {
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
-import { rejectsAs } from './calibration-rejection'
+import { rejectsAs } from '../../db/tests/calibration-rejection'
 import {
   checked,
   createAdapter,

@@ -25,7 +25,7 @@ import {
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
 import { oracleProperty } from '../../db/tests/oracle-property'
-import { rejectsAs } from './calibration-rejection'
+import { rejectsAs } from '../../db/tests/calibration-rejection'
 import { withTestCleanup } from './helpers'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import type { SyncAppliedReceipt, SyncConfig } from '@tanstack/db'

@@ -2148,6 +2148,18 @@ const outsideReplayConfigs = new Map([
  */
 const ownerReplayConfigs = new Map([
   [
+    `packages/convex-db-collection/e2e/auth-app-oracle.test.ts`,
+    `vitest.e2e.config.ts`,
+  ],
+  [
+    `packages/convex-db-collection/e2e/public-pagination-oracle.test.ts`,
+    `vitest.e2e.config.ts`,
+  ],
+  [
+    `packages/convex-db-collection/e2e/lazy-paging-oracle.test.ts`,
+    `vitest.lazy.e2e.config.ts`,
+  ],
+  [
     `packages/electric-db-collection/e2e/electric.e2e.test.ts`,
     `vitest.e2e.config.ts`,
   ],

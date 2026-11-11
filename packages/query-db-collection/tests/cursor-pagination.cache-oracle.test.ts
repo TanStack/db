@@ -13,7 +13,7 @@ import {
   pass,
 } from '../../db/tests/oracle-property.js'
 import { createCursorPager } from '../src/index.js'
-import { rejectsAs } from './calibration-rejection'
+import { rejectsAs } from '../../db/tests/calibration-rejection'
 import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model-oracle.js'
 import type { Observation, Verdict } from '../../db/tests/oracle-property.js'
