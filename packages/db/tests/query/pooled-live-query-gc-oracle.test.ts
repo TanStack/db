@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
@@ -7,14 +7,13 @@ import { BaseQueryBuilder, Query } from '../../src/query/builder/index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { CollectionHasSubscribersError } from '../../src/errors.js'
-import { oracleProperty, oracleRoute } from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../oracle-assertion-adapter.js'
-import { declareOracle } from '../oracle-declaration.js'
 import {
   captureMicrotaskErrors,
   mockSyncCollectionOptions,
@@ -88,15 +87,6 @@ async function expectPooledReleaseMatchesCollection(
       expect([expected - 1, expected]).toContain(actual),
     )
 }
-
-declareOracle({
-  check: [
-    expectPooledReleaseMatchesCollection,
-    checkCallbackHistory,
-    expectPooledCleanupMatchesOrdinary,
-  ],
-  model: [expectedCallbackHistory],
-})
 
 /**
  * Callback failure does not transfer an unreturned subscription handle or
@@ -588,14 +578,36 @@ describe(`pooled live query gcTime`, () => {
     check: forwardAssertionJudgment,
   })
 
-  for (const gcTime of [1, 100, 0, Number.POSITIVE_INFINITY]) {
-    for (const subscribe of [true, false]) {
-      it(`matches a live-query Collection for gcTime ${gcTime}${subscribe ? `` : ` without a subscriber`}`, async () => {
-        oracleRoute(`case`)
-        await expectPooledReleaseMatchesCollection(gcTime, subscribe)
-      })
-    }
-  }
+  // Every release-timing cell: four gcTimes, with and without a subscriber.
+  oracleProperty({
+    id: `pooled-live-query.release-timing`,
+    law: {
+      statement: `A pooled live query releases its source when the equivalent live-query Collection does, allowing the one tick the Collection's cleanup queue adds.`,
+      authority: `ARCHITECTURE.md, Pooled live queries, and the gcTime contract stated above.`,
+      limits: `Four gcTimes (1, 100, 0, and Infinity), each with and without a subscriber, on a synchronous source.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/live-query-observer.ts#createLiveQueryObserver',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/pooled-live-query.ts#createPooledLiveQuery',
+    ],
+    histories: [1, 100, 0, Number.POSITIVE_INFINITY].flatMap((gcTime) =>
+      [true, false].map((subscribe) => ({ gcTime, subscribe })),
+    ),
+    label: ({ gcTime, subscribe }) =>
+      `matches a live-query Collection for gcTime ${gcTime}${subscribe ? `` : ` without a subscriber`}`,
+    resolve: (cell) => ({ cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`pooled release timing`, plan, observe, () =>
+        expectPooledReleaseMatchesCollection(
+          plan.cell.gcTime,
+          plan.cell.subscribe,
+        ),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -885,11 +897,6 @@ describe(`pooled live query cleanup admission`, () => {
       { kind: `cleanup`, view: 0, dependents: false },
     ],
   }
-  it(`keeps a view whose cleanup rejected in its partition`, async () => {
-    oracleRoute(`fixed history`)
-    await expectPooledCleanupMatchesOrdinary(fixedHistory)
-  })
-
   oracleProperty({
     id: property,
     law: {
@@ -908,6 +915,12 @@ describe(`pooled live query cleanup admission`, () => {
       runs: 80,
       fixedSeeds: [2168],
       states: cleanupReachStates,
+      fixed: [
+        {
+          name: `keeps a view whose cleanup rejected in its partition`,
+          history: fixedHistory,
+        },
+      ],
       constructed: [
         {
           name: `rejected view survives sibling cleanup and is retried`,

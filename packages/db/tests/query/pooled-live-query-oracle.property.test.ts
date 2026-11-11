@@ -79,7 +79,7 @@
  * and are outside this owner.
  */
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Query } from '../../src/query/builder/index.js'
@@ -91,18 +91,13 @@ import {
 } from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
-import {
-  oracleProperty,
-  oracleReplayRequested,
-  oracleRoute,
-} from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../oracle-assertion-adapter.js'
-import { declareOracle } from '../oracle-declaration.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,
@@ -1108,61 +1103,45 @@ function expectSnapshotMatchesReference(
   )
 }
 
-declareOracle({
-  check: [runHistory, expectSnapshotMatchesReference],
-  model: [expectedKeys, expectedRows],
-})
+// Generated fields are plain values; this covers a field whose getter
+// throws, which both paths treat as a row that does not match. It compares
+// the pooled snapshot with the live-query Collection through the shared
+// `expectSnapshotMatchesReference` check.
+async function runThrowingGetterHistory(): Promise<void> {
+  const source = createCollection(
+    mockSyncCollectionOptions<any>({
+      id: `pooled-${serial++}`,
+      getKey: (row) => row.id,
+      initialData: [
+        { id: `a`, profile: { code: 1 } },
+        {
+          id: `b`,
+          profile: {
+            get code(): number {
+              throw new Error(`getter failed`)
+            },
+          },
+        },
+      ],
+    }),
+  )
+  await source.stateWhenReady()
+  const query = (q: any) =>
+    q.from({ r: source }).where(({ r }: any) => eq(r.profile.code, 1))
+  const pooled = createLiveQueryObserver(
+    createPooledLiveQuery(query(new Query())),
+    { mode: `wholesale` },
+  )
+  const stop = pooled.subscribe(() => {})
+  const reference = createLiveQueryCollection({ query, startSync: true })
+  await reference.preload()
+  const snapshot = pooled.getSnapshot()
+  expectSnapshotMatchesReference(snapshot, reference)
+  stop()
+  await source.cleanup({ dependents: true })
+}
 
 describe(`pooled live query oracle`, () => {
-  // The fixed histories and the fixed-seed campaign stand aside during any path
-  // replay. The random campaign below is the one that a replay of this
-  // property selects.
-  if (!oracleReplayRequested()) {
-    // Generated fields are plain values; this covers a field whose getter
-    // throws, which both paths treat as a row that does not match.
-    it(`matches the live-query Collection when an eq path getter throws`, async () => {
-      oracleRoute(`fixed history`)
-      const source = createCollection(
-        mockSyncCollectionOptions<any>({
-          id: `pooled-${serial++}`,
-          getKey: (row) => row.id,
-          initialData: [
-            { id: `a`, profile: { code: 1 } },
-            {
-              id: `b`,
-              profile: {
-                get code(): number {
-                  throw new Error(`getter failed`)
-                },
-              },
-            },
-          ],
-        }),
-      )
-      await source.stateWhenReady()
-      const query = (q: any) =>
-        q.from({ r: source }).where(({ r }: any) => eq(r.profile.code, 1))
-      const pooled = createLiveQueryObserver(
-        createPooledLiveQuery(query(new Query())),
-        { mode: `wholesale` },
-      )
-      const stop = pooled.subscribe(() => {})
-      const reference = createLiveQueryCollection({ query, startSync: true })
-      await reference.preload()
-      const snapshot = pooled.getSnapshot()
-      expectSnapshotMatchesReference(snapshot, reference)
-      stop()
-      await source.cleanup({ dependents: true })
-    })
-
-    for (const { name, history } of fixedHistories) {
-      it(`matches the live-query Collection when ${name}`, () => {
-        oracleRoute(`case`)
-        return runHistory(history)
-      })
-    }
-  }
-
   oracleProperty({
     id: property,
     law: {
@@ -1212,6 +1191,42 @@ describe(`pooled live query oracle`, () => {
     driver: (plan: { history: History }, observe) =>
       recordAssertionJudgment(property, plan, observe, () =>
         runHistory(plan.history, { reach: (state) => observe(`reach`, state) }),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  // The named histories hold Date values and a row whose field getter
+  // throws, which the generated grammar of plain values cannot take back. Each
+  // replays through the shared driver under its old test name.
+  const namedHistories = new Map<string, History | undefined>([
+    [`an eq path getter throws`, undefined],
+    ...fixedHistories.map(({ name, history }): [string, History] => [
+      name,
+      history,
+    ]),
+  ])
+  oracleProperty({
+    id: `pooled-live-query.publication-fixed`,
+    law: {
+      statement: `A pooled live-query observer publishes the same rows, order, values, status and granular changes as the equivalent live-query Collection across writes, mounts and cleanup.`,
+      authority: `ARCHITECTURE.md, Pooled live queries, and the equality, Collection cleanup and observer contracts stated above.`,
+      limits: `Named histories that the generated grammar of plain values cannot take back: a field whose eq path getter throws, and the fixed regressions.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/live-query-observer.ts#createLiveQueryObserver',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/pooled-live-query.ts#createPooledLiveQuery',
+    ],
+    histories: [...namedHistories.keys()],
+    label: (name) => `matches the live-query Collection when ${name}`,
+    resolve: (name) => ({ history: namedHistories.get(name) }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(property, plan, observe, () =>
+        plan.history === undefined
+          ? runThrowingGetterHistory()
+          : runHistory(plan.history),
       ),
     check: forwardAssertionJudgment,
   })

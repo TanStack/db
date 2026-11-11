@@ -23,6 +23,8 @@ const otherProperties: ReadonlyArray<string> = [
   `load-subset.transaction-refinement`,
   `load-subset.source-readiness-refinement`,
   `where-predicate.publication-fixed`,
+  `pooled-live-query.publication-fixed`,
+  `pooled-live-query.release-timing`,
 ]
 const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
@@ -39,6 +41,16 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/where-predicate-publication-oracle.property.test.ts`,
     `where-predicate`,
     `publication-fixed`,
+  ],
+  [
+    `db/tests/query/pooled-live-query-oracle.property.test.ts`,
+    `pooled-live-query`,
+    `publication-fixed`,
+  ],
+  [
+    `db/tests/query/pooled-live-query-gc-oracle.test.ts`,
+    `pooled-live-query`,
+    `release-timing`,
   ],
 ]
 
