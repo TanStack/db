@@ -247,3 +247,40 @@ HTTP 403 installation recovery remains stashed through the merge commit;
 the committed dependency pins are preserved. The full PowerSync run has
 progressed through both startup hosts into eager conformance but has no final
 verdict at this checkpoint. Final-head CI remains a separate gate.
+
+### Final-head CI campaign deadline correction
+
+The full local PowerSync run subsequently passed all 671 tests in 18 files,
+with no type errors, in 931.75 seconds. On head
+`331bde897d1a1ea5e688379f73a989fe93aa117e`, GitHub Collections job
+`130255720337` instead reported 13 startup tests exceeding their 60-second
+test deadlines. All other Collections packages passed. All E2E jobs, including
+both Chromium receiving suites, and the other CI checks passed. CodeRabbit
+remained paused at its previously recorded reviewed head.
+
+The 13 failures were the controlled host's fixed/random campaigns, nine
+missing-state calibrations, and determinism on both hosts. The log reported
+only deadline failures, with no model comparison failure. Neighboring
+calibrations finished in 56.7–59.7 seconds. Individual fixed histories finished
+in approximately 0.3–0.7 seconds. An 80-history campaign plus constructed
+witnesses, and especially its repeated determinism execution, can exceed
+60 seconds on that runner.
+
+The shared registrar now accepts a test deadline, defaulting to the existing
+60 seconds. Only PowerSync startup selects 180 seconds. This changes no
+production code, law, model, generator, run budget, comparison, calibration,
+receiving path or product deadline. It does not classify CI timeouts as kills.
+
+Local command after that change:
+
+```sh
+pnpm --config.verifyDepsBeforeRun=false --filter @tanstack/powersync-db-collection exec vitest run tests/persisted-startup-conformance-oracle.property.test.ts --maxWorkers=2 --fsModuleCache=false -t 'fixed seed 2367|random seed|omits constructed response-before-restore|determinism'
+```
+
+Result: eight selected tests pass across both hosts, no type errors, 107.18
+seconds. The remaining 246 tests were outside this targeted selection. Each
+fixed/random campaign reports all fourteen required states. The missing-reach
+calibration rejects its corrupted trace, and both determinism tests pass.
+`pnpm --config.verifyDepsBeforeRun=false lint:changed` also passes. New-head
+CI remains required before merge. The existing maintainer allowance does not
+waive that gate.

@@ -50,12 +50,14 @@ export function registerPersistedStartupConformance<
   origins = [],
   origin = () => undefined,
   scopedStartupCommit = false,
+  timeout = 60_000,
 }: {
   property: string
   adapter: PersistedStartupAdapter<H>
   histories: Array<H>
   arbitrary: Arbitrary<H>
   scopedStartupCommit?: boolean
+  timeout?: number
   origins?: Array<string>
   origin?: (history: H) => string | undefined
 }) {
@@ -506,7 +508,7 @@ export function registerPersistedStartupConformance<
             }),
           ),
         ],
-        timeout: 60_000,
+        timeout,
       })
     })
   }

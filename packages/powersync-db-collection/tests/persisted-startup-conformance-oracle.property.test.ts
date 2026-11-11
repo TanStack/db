@@ -25,5 +25,9 @@ describe(`persisted startup conformance: PowerSync`, () => {
     histories: persistedStartupBatchHistories,
     arbitrary: historyArb,
     scopedStartupCommit: true,
+    // Each history opens a real PowerSync database. CI needs more than 60s
+    // for 80 histories plus constructed reach, and for their determinism replay.
+    // Keep every history, calibration and comparison in the shared suite.
+    timeout: 180_000,
   })
 })
