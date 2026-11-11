@@ -1107,7 +1107,10 @@ oracleProperty({
     // whose message names this fault's admission error counts as the check
     // rejecting the illegal construction; any other outcome fails this
     // calibration, as it failed the old test.
-    driver: (plan, observe) =>
+    driver: (
+      plan: { consumer: ReturnType<typeof consumerSource> },
+      observe: (checkpoint: string, value: unknown) => void,
+    ) =>
       recordAssertionJudgment(admissionLaw, plan, observe, async () => {
         const { consumer } = plan
         const wrong =

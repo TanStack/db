@@ -349,6 +349,20 @@ export function checkMaterializedInputRows(
   expect(actual, checkpoint).toEqual(expected)
 }
 
+export const outerJoinKeyGrammar = (
+  [`inner`, `left`, `right`, `full`] as const
+).flatMap((join) =>
+  [false, true].flatMap((mainRef) =>
+    [false, true].flatMap((joinedRef) =>
+      ([`numbers`, `strings`, `mixed`] as const).map((keys) => ({
+        join,
+        mainRef,
+        joinedRef,
+        keys,
+      })),
+    ),
+  ),
+)
 export type OuterKeyRow = { id: number; link: number; parentGroup: number }
 export function expectedOuterJoinKeyRows(
   mains: ReadonlyArray<OuterKeyRow>,

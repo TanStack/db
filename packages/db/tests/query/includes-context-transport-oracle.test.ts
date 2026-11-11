@@ -41,6 +41,7 @@ import {
   grammarCells,
   materializedInputCells,
   materializedInputGrammar,
+  outerJoinKeyGrammar,
 } from './includes-context-transport-model-oracle.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import {
@@ -2647,20 +2648,6 @@ describe(`parent route after inherited inline input materialization`, () => {
  * flat independent join. It judges rows and stable distinct membership, without
  * prescribing generated key serialization or callback timing.
  */
-const outerJoinKeyGrammar = (
-  [`inner`, `left`, `right`, `full`] as const
-).flatMap((join) =>
-  [false, true].flatMap((mainRef) =>
-    [false, true].flatMap((joinedRef) =>
-      ([`numbers`, `strings`, `mixed`] as const).map((keys) => ({
-        join,
-        mainRef,
-        joinedRef,
-        keys,
-      })),
-    ),
-  ),
-)
 // The former case body, unchanged, for one join, reference, and key cell.
 async function judgeOuterJoinKeyCell({
   join,

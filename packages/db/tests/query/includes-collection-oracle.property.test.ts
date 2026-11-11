@@ -1347,7 +1347,10 @@ describe(`Collection-valued includes oracle`, () => {
       // the corrupted observation keeps the expected rows and publications, and
       // only an AssertionError from the shared comparison counts as rejecting
       // it. Any other outcome fails this calibration, as it failed the old test.
-      driver: (plan, observe) =>
+      driver: (
+        plan: { name: string },
+        observe: (checkpoint: string, value: unknown) => void,
+      ) =>
         recordAssertionJudgment(rootEventObservationLaw, plan, observe, () =>
           observeChildValueUpdate((observed, expected) => {
             const bad = structuredClone(observed)
