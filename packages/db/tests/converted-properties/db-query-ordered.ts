@@ -54,8 +54,31 @@ const paginationOwners: ReadonlyArray<ConvertedOwnerGroup> = [
 ]
 
 // ordered-work-oracle.property.test.ts
-const orderedWorkProperties: ReadonlyArray<string> = []
-const orderedWorkOwners: ReadonlyArray<ConvertedOwnerGroup> = []
+const orderedWorkProperties: ReadonlyArray<string> = [
+  `ordered-work.work-order-term-parity`,
+  `ordered-work.work-finite-prefix-parity`,
+  `ordered-work.work-value-update`,
+  `ordered-work.work-anti-join-existing-row`,
+  `ordered-work.work-none-filter-bound`,
+  `ordered-work.work-left-join-bound`,
+  `ordered-work.work-joined-demand-settles`,
+  `ordered-work.work-joined-demand-waits`,
+  `ordered-work.work-joined-filter-refill`,
+  `ordered-work.work-joined-filter-stops`,
+  `ordered-work.work-underfilled-source`,
+  `ordered-work.work-eager-fixed`,
+  `ordered-work.work-optimistic-window`,
+  `ordered-work.work-installed-departure`,
+  `ordered-work.work-compiler-cache`,
+  `ordered-work.work-joined-plan`,
+]
+const orderedWorkOwners: ReadonlyArray<ConvertedOwnerGroup> = [
+  [
+    `db/tests/query/ordered-work-oracle.property.test.ts`,
+    `ordered-work`,
+    `work-order-term-parity work-finite-prefix-parity work-value-update work-anti-join-existing-row work-none-filter-bound work-left-join-bound work-joined-demand-settles work-joined-demand-waits work-joined-filter-refill work-joined-filter-stops work-underfilled-source work-eager-fixed work-optimistic-window work-installed-departure work-compiler-cache work-joined-plan`,
+  ],
+]
 
 // ordered-lifecycle, bucket-facade-rollback, cold-join-reconciliation, and
 // ordered-source-loader-state oracles
@@ -83,6 +106,8 @@ const otherProperties: ReadonlyArray<string> = [
   `custom-index-order.later-eligible`,
   `custom-index-order.eager-reader`,
   `aggregate.select-fixed`,
+  `load-subset.exact-axis-pairs`,
+  `load-subset.rejected-waiter-fixed`,
 ]
 const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
@@ -169,6 +194,16 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/aggregate-select-oracle.property.test.ts`,
     `aggregate`,
     `select-fixed`,
+  ],
+  [
+    `db/tests/query/load-subset-oracle.property.test.ts`,
+    `load-subset`,
+    `exact-axis-pairs`,
+  ],
+  [
+    `db/tests/query/load-subset-oracle.property.test.ts`,
+    `load-subset`,
+    `rejected-waiter-fixed`,
   ],
 ]
 
