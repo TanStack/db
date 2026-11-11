@@ -22,6 +22,7 @@ const config = defineConfig({
         `tests/sqlite-boolean-arity-oracle.test.ts`,
 
         `tests/collection-setup-reopen-oracle.test.ts`,
+        `tests/persisted-demand-coverage-campaign-oracle.test.ts`,
         `tests/shared-logical-scheduling-oracle.test.ts`,
         `tests/persisted-reload-replacement-oracle.test.ts`,
         `tests/persisted-readiness-oracle.test.ts`,

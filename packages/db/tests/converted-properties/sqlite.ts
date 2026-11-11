@@ -19,6 +19,8 @@ export const properties: ReadonlyArray<string> = [
   `persisted-demand-coverage.bookkeeping`,
   `persisted-demand-coverage.window`,
   `persisted-demand-coverage.next-page`,
+  `persisted-demand-coverage.storage-fault-sweep`,
+  `persisted-demand-coverage.release-sweep`,
   `browser.shared-driver-fairness.neutral`,
   `browser.shared-driver-fairness.persist-storm`,
   `browser.shared-driver-fairness.persist-first`,
