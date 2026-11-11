@@ -4388,23 +4388,29 @@ import and writes the same skip line with exit status 1. A broken plugin
 leaves that report clean.
 
 The same owner covers the remaining failure paths of review finding F26, under
-the same 2026-11-10 decision. An unknown `--format` or `--event`, a hook input
-that is not a JSON object, a checkout with no `main` branch for the
+the same 2026-11-10 decision. An unknown `--format`, `--event`, or other
+option, a hook input that is not a JSON object, a checkout with no `main` branch for the
 merge-base, and an error that the rule throws while it lints each end with one
 `oracle lint failed: <message>` line. A hook format exits 0 and hands the line
 to the agent on its harness's channel; with an unknown event, that is the edit
-channel. Every other run writes the line to stderr and exits nonzero, and so
+channel. The script reads the format and event leniently before it judges the
+other options, so an unknown option beside a hook format also answers on the
+agent channel. Every other run writes the line to stderr and exits nonzero, and so
 does `pnpm lint:run-budgets` without `main`. A fault dimension draws each
 failure, and a construction in each campaign enters it (`unknown-format-fault`,
-`unknown-event-fault`, `invalid-input-fault`, `no-main-fault`, and
-`lint-error-fault`). The model predicts the line in each form that the failure
-reaches, and a clean run for a form that lints no file when the rule throws.
-A failure is drawn only with the session checkout's own full install. Without
+`unknown-event-fault`, `unknown-option-fault`, `invalid-input-fault`,
+`no-main-fault`, and `lint-error-fault`). The model predicts the line in each
+form that the failure reaches, and a clean run for a form that lints no file
+when the rule throws. A failure is drawn only with a full install. A worktree
+that lints with an outer plugin also draws a missing `main` and a lint error,
+which happen after the plugin loads. There the line that names the plugin
+comes before the failure line, so a lint-time throw says which plugin threw
+(`outer-plugin-lint-error`, constructed in each campaign). Without
 `main`, only the forms that always need the merge-base run: the changed scope,
 the four stop hooks, and the run-budget report. An edit hook or a named scope
 that names the lockfile also reads the merge-base; that is not drawn. The
-values are three unknown formats, three unknown events, two texts that are not
-JSON, and three JSON values that are not objects. The lint error is one that
+values are three unknown formats, three unknown events, three unknown options
+(`--bogus`, `--all=yes`, and `-x`), two texts that are not JSON, and three JSON values that are not objects. The lint error is one that
 the rule throws on every file. A git failure other than a missing `main`, and
 an error in the delegated copy of the script, are not drawn.
 
@@ -4426,11 +4432,13 @@ the user that does not block. Copilot's `agentStop` documents only
 `decision` and `reason`, so its stop is silent. A worktree-install dimension
 (own or none) draws this state under an installed launch checkout, and a
 construction in each campaign enters it (`worktree-outer-plugin`). Another
-construction gives such a worktree a stop with no report
-(`outer-plugin-quiet-stop`). The model predicts the launch checkout's
-unmarked rule for such a worktree, even when its branch changed the plugin,
-the line in every form, and, in each harness, whether the stop blocks and
-what it shows. A checkout whose own plugin loads must print no such line. It
+construction gives such a worktree a stop and an edit with no report
+(`outer-plugin-quiet-stop` and `outer-plugin-quiet-edit`). The model predicts
+the launch checkout's unmarked rule for such a worktree, even when its branch
+changed the plugin, and the line in every form. In each harness, it predicts
+whether the stop blocks and what it shows, and the whole edit hook output
+when the edit has no report: the agent channel, never `systemMessage`, which
+reaches only the user. A checkout whose own plugin loads must print no such line. It
 does not draw a launch checkout whose plugin is linked from outside every
 checkout.
 
@@ -5323,7 +5331,8 @@ the 40-run sibling and 8-run durability campaign mechanics in
 direct replay selection remain in their receiving files.
 
 The campaign module and the files that host these campaigns carry `oracle` in
-their names, so `pnpm lint:run-budgets` tracks their budgets: the persisted
+their names, so `pnpm lint:run-budgets` tracks their budgets, except the
+loop-carried entries recorded under `scripts.run-budget`: the persisted
 driver's `sync-metadata-session-persisted-oracle.test.ts`, the native
 receiver's `sync-metadata-session-sqlite-oracle.test.ts`,
 `sync-metadata-recovery-oracle.test.ts`, and

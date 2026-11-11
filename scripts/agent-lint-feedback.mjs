@@ -61,7 +61,9 @@
  * with no main branch for the merge-base, and an error thrown while linting.
  * An unknown format has no harness to answer through, so it answers on the
  * command line. An unknown event in a harness's format answers on the edit
- * event's channel.
+ * event's channel, and so does any other bad argument beside a known format.
+ * A failure while an outer plugin lints, or while the merge-base is found,
+ * follows the line that names that plugin.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
@@ -86,34 +88,46 @@ function parseHookInput(text) {
   throw new Error(`the hook input is not a JSON object`)
 }
 
+const argumentOptions = {
+  format: { type: `string`, default: `text` },
+  event: { type: `string`, default: `edit` },
+  all: { type: `boolean`, default: false },
+}
+
 /**
  * The run's options and hook input, and `failure`, the line that says why
- * they cannot be used, if one does. The options that were read before the
- * failure choose how it is reported.
+ * they cannot be used, if one does. A lenient first reading takes the format
+ * and event that report a failure: a known format, or the command line, and
+ * the stop event, or the edit event. So any other bad argument with a
+ * harness's format answers on that harness's channel.
  */
 function readInvocation() {
+  const lenient = parseArgs({
+    options: argumentOptions,
+    strict: false,
+    allowPositionals: true,
+  }).values
   const invocation = {
-    options: { format: `text`, event: `edit`, all: false },
+    options: {
+      format: formats.has(lenient.format) ? lenient.format : `text`,
+      event: lenient.event === `stop` ? `stop` : `edit`,
+      all: false,
+    },
     positionals: [],
     inputText: ``,
     input: {},
   }
   try {
     const { values, positionals } = parseArgs({
-      options: {
-        format: { type: `string`, default: `text` },
-        event: { type: `string`, default: `edit` },
-        all: { type: `boolean`, default: false },
-      },
+      options: argumentOptions,
       allowPositionals: true,
     })
-    invocation.positionals = positionals
     if (!formats.has(values.format))
       throw new Error(`--format must be one of ${[...formats].join(`, `)}`)
-    invocation.options = { ...values, event: `edit` }
     if (![`edit`, `stop`].includes(values.event))
       throw new Error(`--event must be edit or stop`)
-    invocation.options.event = values.event
+    invocation.options = values
+    invocation.positionals = positionals
     if (values.format !== `text`) {
       invocation.inputText = readFileSync(0, `utf8`)
       invocation.input = parseHookInput(invocation.inputText)
@@ -585,6 +599,6 @@ if (failure !== undefined) {
       .join(`\n`)
     respond(report, input, scope, outerPlugin)
   } catch (error) {
-    respond(failureLine(error), input, `unavailable`)
+    respond(failureLine(error), input, `unavailable`, outerPlugin)
   }
 }
