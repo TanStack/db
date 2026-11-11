@@ -239,17 +239,6 @@ async function runFixedPersistStorm(): Promise<void> {
   })
 }
 
-const fixedFairnessHistories = new Map<string, () => Promise<void>>([
-  [
-    `reaches cold hydration and preserves independently seeded public rows without queued persists`,
-    runNeutralReach,
-  ],
-  [
-    `completes a pending cold hydrate before an unrelated persist backlog drains and distinguishes K=1 from K=2`,
-    runFixedPersistStorm,
-  ],
-])
-
 // The named persist-first storm: four persists, then two hydrates. The real
 // scheduler must pass it; the persist-first FIFO scheduling mutant must fail
 // the checker on it.
@@ -262,28 +251,41 @@ const persistFirstScenario = () =>
 
 async function rejectPersistFirstFifo(): Promise<void> {
   let rejected: ReturnType<typeof findSharedDriverFairnessViolation>
-  await withNodeScenario(
-    createScenario(
-      `persist-first-fixture-fault`,
-      [`persist`, `persist`, `persist`, `persist`, `hydrate`, `hydrate`],
-      1,
-    ),
-    (observation) => {
-      expectObservationReach(observation)
-      const violation = findSharedDriverFairnessViolation(observation)
-      if (!violation) {
-        throw new Error(
-          `persist-first scheduling mutant escaped the fairness checker; ` +
-            `cleanup diagnostics: ${JSON.stringify(observation.cleanupFailures)}`,
-        )
-      }
-      expect(violation.checkpoint.completedPersistIds).toHaveLength(4)
-      expect(violation.checkpoint.pendingPersistCount).toBe(0)
-      expect(observation.cleanupFailures).toEqual([])
-      rejected = violation
-    },
-    { schedulingFault: `persist-first-fifo` },
-  )
+  // A failure of this witness's own checks, including the marked reach check,
+  // fails the calibration, as it failed the old test: it is rethrown without a
+  // cause chain, so the adapter cannot read it as the check rejecting the
+  // mutant. Only the violation found below counts as that rejection.
+  try {
+    await withNodeScenario(
+      createScenario(
+        `persist-first-fixture-fault`,
+        [`persist`, `persist`, `persist`, `persist`, `hydrate`, `hydrate`],
+        1,
+      ),
+      (observation) => {
+        expectObservationReach(observation)
+        const violation = findSharedDriverFairnessViolation(observation)
+        if (!violation) {
+          throw new Error(
+            `persist-first scheduling mutant escaped the fairness checker; ` +
+              `cleanup diagnostics: ${JSON.stringify(observation.cleanupFailures)}`,
+          )
+        }
+        expect(violation.checkpoint.completedPersistIds).toHaveLength(4)
+        expect(violation.checkpoint.pendingPersistCount).toBe(0)
+        expect(observation.cleanupFailures).toEqual([])
+        rejected = violation
+      },
+      { schedulingFault: `persist-first-fifo` },
+    )
+  } catch (error) {
+    throw Object.assign(
+      new Error(
+        `persist-first calibration witness failed: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+      { witnessFailure: error },
+    )
+  }
   // The checker found the mutant's violation at the asserted checkpoint.
   if (rejected)
     rejectAt(
@@ -296,18 +298,44 @@ async function rejectPersistFirstFifo(): Promise<void> {
 
 describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
   oracleProperty({
-    id: `browser.shared-driver-fairness.fixed`,
+    id: `browser.shared-driver-fairness.neutral`,
     law: {
       ...fairnessLawText,
-      limits: `The neutral hydrate-only history and the fixed persist storm, with the storm's checker calibrations of a K=2 answer, a preempted running persist, and swapped persist order.`,
+      limits: `The neutral hydrate-only history: cold hydration is reached and public rows are preserved without queued persists.`,
     },
     owns: [`src/wa-sqlite-driver.ts`],
-    histories: [...fixedFairnessHistories.keys()],
-    label: (name) => name,
-    resolve: (name) => ({ run: fixedFairnessHistories.get(name)! }),
+    histories: [
+      {
+        name: `reaches cold hydration and preserves independently seeded public rows without queued persists`,
+      },
+    ],
+    label: ({ name }) => name,
     model: recordedAssertionJudgment,
     driver: (plan, observe) =>
-      recordAssertionJudgment(fairnessLaw, plan, observe, () => plan.run()),
+      recordAssertionJudgment(fairnessLaw, plan, observe, () =>
+        runNeutralReach(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `browser.shared-driver-fairness.persist-storm`,
+    law: {
+      ...fairnessLawText,
+      limits: `The fixed persist storm, with its checker calibrations of a K=2 answer, a preempted running persist, and swapped persist order on the real observation.`,
+    },
+    owns: [`src/wa-sqlite-driver.ts`],
+    histories: [
+      {
+        name: `completes a pending cold hydrate before an unrelated persist backlog drains and distinguishes K=1 from K=2`,
+      },
+    ],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(fairnessLaw, plan, observe, () =>
+        runFixedPersistStorm(),
+      ),
     check: forwardAssertionJudgment,
   })
 
