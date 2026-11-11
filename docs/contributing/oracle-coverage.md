@@ -4306,6 +4306,17 @@ keys and the fixed seed 271828 as removed, although both campaigns still run in
 the oracle file. Owner: `scripts.run-budget`. Needed witness: a campaign whose
 budget a helper computes and passes in as parameters.
 
+A budget that a loop variable carries is not tracked for the same reason.
+`sync-metadata-session-persisted-oracle.test.ts` registers eleven persisted
+production paths (`persisted-flat` through `persisted-peers-on-demand`) in one
+`oracleProperty` loop over an array of `{ property, seed, runs }` entries.
+The call reads `id`, `fixedSeeds`, and `runs` from the loop's variables, so a
+lowered `runs` in an entry is not reported (checked on 2026-11-11 by lowering
+the `persisted-flat` entry from 50 to 49). The file's literal campaigns, such
+as `persisted-queued-metadata-repair`, are tracked. Owner:
+`scripts.run-budget`. Needed witness: a campaign whose id, seed, and count come
+from an array entry that a loop destructures.
+
 `scripts/strip-oracle-probes-oracle.property.test.js` owns the build-time removal of the
 oracle state probes from published builds (`scripts.strip-oracle-probes`, maintainer decision of
 2026-11-09). Its grammar draws one-function programs with the guard in the placements that the
