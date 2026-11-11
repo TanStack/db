@@ -13,7 +13,13 @@ import type {
 import type { Observation } from '../../db/tests/oracle-property'
 
 export function registerBaselineLifecycle(
-  config: { property: string; defaultRuns: number; streamFailure: boolean },
+  config: {
+    property: string
+    defaultRuns: number
+    streamFailure: boolean
+    /** The receiving adapter's production entry, forwarded to oracleProperty. */
+    owns?: ReadonlyArray<string>
+  },
   receive: (
     h: BaselineLifecycleHistory,
     id: string,
@@ -109,6 +115,7 @@ export function registerBaselineLifecycle(
   let sequence = 0
   oracleProperty({
     id,
+    owns: config.owns,
     law: {
       statement: `Cleanup retires source authority while persisted-baseline completion or an adapter acknowledgment is held. Accepted rows remain owed, replacement results are complete, resources release once, and failures remain handled.`,
       authority: `Shared eager-source LIFE-2/5/10, READY-4, HEALTH-5; glossary accepted sync transaction, cleanup and reload; existing TrailBase persisted-hydration row projection.`,

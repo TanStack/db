@@ -42,9 +42,14 @@ import { createCollection } from '@tanstack/db'
 import { ConvexClient } from 'convex/browser'
 import { ConvexReactClient } from 'convex/react'
 import { makeFunctionReference } from 'convex/server'
-import { describe, expect, inject, it } from 'vitest'
+import { expect, inject } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexPaginatedCollectionOptions } from '../src/index'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from '../tests/helpers'
 import { createNetworkGate } from './network-gate'
 import type { PaginationOptions, PaginationResult } from 'convex/server'
@@ -73,185 +78,195 @@ function expectedRows(
     )
 }
 
-// The model: the append-only ledger in reverse insertion order, with the
-// query's author predicate and text transformation.
-declareOracle({ model: [expectedRows] })
-
 // The backend starts with a new runtime directory and empty database. File and
 // test execution are sequential, so this ledger includes all successful writes
 // across the six histories, including rows outside the requested author scope.
-describe.each([`javascript`, `react`] as const)(
-  `public pagination app with %s client`,
-  (kind) => {
-    it.each(queries)(
-      `mirrors %s through live writes and a real reconnect`,
-      async (name) => {
-        const gate = await createNetworkGate(backend)
-        const writer = new ConvexClient(backend, {
+const mirrors = ([`javascript`, `react`] as const).flatMap((kind) =>
+  queries.map((name) => ({ kind, name })),
+)
+
+// One client mirrors one query through live writes, a real disconnect, and
+// reconnect. Every select and publication observation must be a complete
+// ledger revision, and each checkpoint must equal the model's rows.
+async function mirrorThroughReconnect({
+  kind,
+  name,
+}: (typeof mirrors)[number]): Promise<void> {
+  const gate = await createNetworkGate(backend)
+  const writer = new ConvexClient(backend, {
+    unsavedChangesWarning: false,
+    logger: false,
+  })
+  const client =
+    kind === `javascript`
+      ? new ConvexClient(gate.url, {
           unsavedChangesWarning: false,
           logger: false,
         })
-        const client =
-          kind === `javascript`
-            ? new ConvexClient(gate.url, {
-                unsavedChangesWarning: false,
-                logger: false,
-              })
-            : new ConvexReactClient(gate.url, {
-                unsavedChangesWarning: false,
-                logger: false,
-              })
-        const author = `author:${kind}:${name}`
-        const query = makeFunctionReference<
-          `query`,
-          { paginationOpts: PaginationOptions; author?: string },
-          PaginationResult<Message>
-        >(`messages:${name}`)
-        let selected: ReadonlyArray<Message> = []
-        let recording = false
-        let disconnected = false
-        let allowedSnapshots: Array<Array<Message>> = []
-        const disconnectedSnapshots: Array<Array<Message>> = []
-        const observations: Array<{
-          boundary: `select` | `publication`
-          rows: Array<Message>
-          allowed: Array<Array<Message>>
-        }> = []
-        const byBody = (a: Message, b: Message) => a.body.localeCompare(b.body)
-        // Snapshot the allowed revisions now. Extending the ledger later must
-        // not retroactively excuse an impossible earlier observation. Public
-        // Collection iteration order is not provider order; select preserves it.
-        const record = (
-          boundary: `select` | `publication`,
-          rows: ReadonlyArray<Message>,
-        ) => {
-          if (!recording) return
-          const project = (snapshot: ReadonlyArray<Message>) => {
-            const projected = snapshot.map(({ author: from, body }) => ({
-              author: from,
-              body,
-            }))
-            return boundary === `publication`
-              ? projected.sort(byBody)
-              : projected
-          }
-          observations.push({
-            boundary,
-            rows: project(rows),
-            allowed: allowedSnapshots.map(project),
-          })
-        }
-        const checkObservations = () => {
-          for (const observation of observations)
-            expect(
-              observation.allowed,
-              `${observation.boundary} must expose a complete ledger revision`,
-            ).toContainEqual(observation.rows)
-        }
-        const collection = createCollection(
-          convexPaginatedCollectionOptions({
-            client,
-            query,
-            queryArgs: name === `listWithExtraArg` ? { author } : {},
-            pageSize: 3,
-            select: (rows) => {
-              selected = rows.map(({ author: from, body }) => ({
-                author: from,
-                body,
-              }))
-              record(`select`, selected)
-              return rows
-            },
-            getKey: (row) => row.body,
-            gcTime: 0,
-          }),
-        )
-        const publish = async (from: string) => {
-          const message = {
-            author: from,
-            body: `message ${ledger.length} from ${from}`,
-          }
-          if (recording) {
-            const next = expectedRows(name, author, [...ledger, message])
-            if (disconnected) disconnectedSnapshots.push(next)
-            else allowedSnapshots.push(next)
-          }
-          await writer.mutation(send, message)
-          ledger.push(message)
-        }
-        const check = async (waitForUpdate = true) => {
-          const expected = expectedRows(name, author)
-          if (waitForUpdate)
-            await expect
-              .poll(() => selected, { timeout: 15000 })
-              .toEqual(expected)
-          else expect(selected).toEqual(expected)
-          await collection.utils.awaitSync()
-          expect(
-            [...collection.values()]
-              .map(({ author: from, body }) => ({ author: from, body }))
-              .sort(byBody),
-          ).toEqual([...expected].sort(byBody))
-          checkObservations()
-          // Both cuts have reached this complete source revision. A later
-          // source phase may repeat it or advance through new complete revisions.
-          allowedSnapshots = [expected]
-        }
-        let subscription:
-          ReturnType<typeof collection.subscribeChanges> | undefined
-        await withTestCleanup(
-          async () => {
-            for (let index = 0; index < 17; index++)
-              await publish(index % 2 === 0 ? author : `other:${author}`)
-            allowedSnapshots = [expectedRows(name, author)]
-            recording = true
-            subscription = collection.subscribeChanges(() => {
-              record(`publication`, [...collection.values()])
-            })
-            await collection.preload()
-            await check(false)
-            await publish(author)
-            await check()
-            await publish(`other:${author}`)
-            await check()
-            const before = [...selected]
-            disconnected = true
-            gate.disconnect()
-            await expect
-              .poll(() => client.connectionState().isWebSocketConnected)
-              .toBe(false)
-            await publish(author)
-            await publish(`other:${author}`)
-            expect(selected).toEqual(before)
-            expect(
-              [...collection.values()]
-                .map(({ author: from, body }) => ({ author: from, body }))
-                .sort(byBody),
-            ).toEqual([...before].sort(byBody))
-            checkObservations()
-            allowedSnapshots.push(...disconnectedSnapshots)
-            disconnected = false
-            gate.reconnect()
-            await check()
-            expect(
-              observations.some(
-                (observation) => observation.boundary === `select`,
-              ),
-            ).toBe(true)
-            expect(
-              observations.some(
-                (observation) => observation.boundary === `publication`,
-              ),
-            ).toBe(true)
-          },
-          () => subscription?.unsubscribe(),
-          () => collection.cleanup(),
-          () => client.close(),
-          () => writer.close(),
-          () => gate.close(),
-        )
+      : new ConvexReactClient(gate.url, {
+          unsavedChangesWarning: false,
+          logger: false,
+        })
+  const author = `author:${kind}:${name}`
+  const query = makeFunctionReference<
+    `query`,
+    { paginationOpts: PaginationOptions; author?: string },
+    PaginationResult<Message>
+  >(`messages:${name}`)
+  let selected: ReadonlyArray<Message> = []
+  let recording = false
+  let disconnected = false
+  let allowedSnapshots: Array<Array<Message>> = []
+  const disconnectedSnapshots: Array<Array<Message>> = []
+  const observations: Array<{
+    boundary: `select` | `publication`
+    rows: Array<Message>
+    allowed: Array<Array<Message>>
+  }> = []
+  const byBody = (a: Message, b: Message) => a.body.localeCompare(b.body)
+  // Snapshot the allowed revisions now. Extending the ledger later must
+  // not retroactively excuse an impossible earlier observation. Public
+  // Collection iteration order is not provider order; select preserves it.
+  const record = (
+    boundary: `select` | `publication`,
+    rows: ReadonlyArray<Message>,
+  ) => {
+    if (!recording) return
+    const project = (snapshot: ReadonlyArray<Message>) => {
+      const projected = snapshot.map(({ author: from, body }) => ({
+        author: from,
+        body,
+      }))
+      return boundary === `publication` ? projected.sort(byBody) : projected
+    }
+    observations.push({
+      boundary,
+      rows: project(rows),
+      allowed: allowedSnapshots.map(project),
+    })
+  }
+  const checkObservations = () => {
+    for (const observation of observations)
+      expect(
+        observation.allowed,
+        `${observation.boundary} must expose a complete ledger revision`,
+      ).toContainEqual(observation.rows)
+  }
+  const collection = createCollection(
+    convexPaginatedCollectionOptions({
+      client,
+      query,
+      queryArgs: name === `listWithExtraArg` ? { author } : {},
+      pageSize: 3,
+      select: (rows) => {
+        selected = rows.map(({ author: from, body }) => ({
+          author: from,
+          body,
+        }))
+        record(`select`, selected)
+        return rows
       },
-      45000,
-    )
+      getKey: (row) => row.body,
+      gcTime: 0,
+    }),
+  )
+  const publish = async (from: string) => {
+    const message = {
+      author: from,
+      body: `message ${ledger.length} from ${from}`,
+    }
+    if (recording) {
+      const next = expectedRows(name, author, [...ledger, message])
+      if (disconnected) disconnectedSnapshots.push(next)
+      else allowedSnapshots.push(next)
+    }
+    await writer.mutation(send, message)
+    ledger.push(message)
+  }
+  const check = async (waitForUpdate = true) => {
+    const expected = expectedRows(name, author)
+    if (waitForUpdate)
+      await expect.poll(() => selected, { timeout: 15000 }).toEqual(expected)
+    else expect(selected).toEqual(expected)
+    await collection.utils.awaitSync()
+    expect(
+      [...collection.values()]
+        .map(({ author: from, body }) => ({ author: from, body }))
+        .sort(byBody),
+    ).toEqual([...expected].sort(byBody))
+    checkObservations()
+    // Both cuts have reached this complete source revision. A later
+    // source phase may repeat it or advance through new complete revisions.
+    allowedSnapshots = [expected]
+  }
+  let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+  await withTestCleanup(
+    async () => {
+      for (let index = 0; index < 17; index++)
+        await publish(index % 2 === 0 ? author : `other:${author}`)
+      allowedSnapshots = [expectedRows(name, author)]
+      recording = true
+      subscription = collection.subscribeChanges(() => {
+        record(`publication`, [...collection.values()])
+      })
+      await collection.preload()
+      await check(false)
+      await publish(author)
+      await check()
+      await publish(`other:${author}`)
+      await check()
+      const before = [...selected]
+      disconnected = true
+      gate.disconnect()
+      await expect
+        .poll(() => client.connectionState().isWebSocketConnected)
+        .toBe(false)
+      await publish(author)
+      await publish(`other:${author}`)
+      expect(selected).toEqual(before)
+      expect(
+        [...collection.values()]
+          .map(({ author: from, body }) => ({ author: from, body }))
+          .sort(byBody),
+      ).toEqual([...before].sort(byBody))
+      checkObservations()
+      allowedSnapshots.push(...disconnectedSnapshots)
+      disconnected = false
+      gate.reconnect()
+      await check()
+      expect(
+        observations.some((observation) => observation.boundary === `select`),
+      ).toBe(true)
+      expect(
+        observations.some(
+          (observation) => observation.boundary === `publication`,
+        ),
+      ).toBe(true)
+    },
+    () => subscription?.unsubscribe(),
+    () => collection.cleanup(),
+    () => client.close(),
+    () => writer.close(),
+    () => gate.close(),
+  )
+}
+
+oracleProperty({
+  id: `convex.public-pagination`,
+  law: {
+    statement: `A paginated Collection over the public pagination app mirrors the append-only ledger, in reverse insertion order with the query's author predicate and text transformation, through live writes and a real reconnect; every observation is a complete ledger revision.`,
+    authority: `The public pagination application and contract stated at the top of this file; docs/collections/convex-collection.md.`,
+    limits: `Three queries through both SDK clients against one local backend, with sequential histories sharing one ledger; no concurrent writers or server cursor claim.`,
   },
-)
+  histories: mirrors,
+  label: ({ kind, name }) =>
+    `public pagination app with ${kind} client: mirrors ${name} through live writes and a real reconnect`,
+  resolve: (mirror) => ({ mirror }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`convex public pagination`, plan, observe, () =>
+      mirrorThroughReconnect(plan.mirror),
+    ),
+  check: forwardAssertionJudgment,
+  timeout: 45000,
+})

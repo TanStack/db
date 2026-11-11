@@ -13,10 +13,13 @@ import type { PersistedStartupHistory } from './persisted-startup-oracle'
 export function registerCapabilityConformance(
   name: string,
   adapter: PersistedStartupAdapter<PersistedStartupHistory>,
+  /** The receiving adapter's production entry, forwarded to oracleProperty. */
+  { owns }: { owns?: ReadonlyArray<string> } = {},
 ) {
   for (const host of [`controlled`, `node-sqlite`] as const)
     oracleProperty({
       id: `adapter.${name}.capability.${host}`,
+      owns,
       law: {
         statement: `An advertised persistence capability must satisfy its structural protocol before source delivery; absent metadata and an explicit null capability remain legal.`,
         authority: `SyncMetadataApi.persistence and sync-persistence.ts's cross-package protocol contract.`,

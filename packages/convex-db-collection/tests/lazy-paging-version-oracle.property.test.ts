@@ -24,7 +24,7 @@
  */
 import { createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
-import { expect, it } from 'vitest'
+import { expect } from 'vitest'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -32,7 +32,7 @@ import {
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
 import { oracleProperty } from '../../db/tests/oracle-property'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import { rejectsAs } from './calibration-rejection'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import { assertLazySourceFacts } from './lazy-paging-model-oracle'
@@ -260,6 +260,22 @@ oracleProperty({
       `three-or-more-revisions`,
       `superseded-before-delivery`,
     ] as const,
+    // The transient-publication calibrations below corrupt this history.
+    fixed: [
+      {
+        name: `four held revisions of eight rows with supersession`,
+        history: {
+          size: 8,
+          pageSize: 2,
+          descending: false,
+          react: false,
+          revisions: 4,
+          text: `authored`,
+          choices: [0, 1],
+          skip: true,
+        },
+      },
+    ],
     constructed: [
       ...([false, true] as const).map((react) => ({
         name: react
@@ -299,45 +315,23 @@ oracleProperty({
         reach: (state) => observe(`reach`, state),
       }),
     ),
+  calibrations: ([`rollback`, `mixed`] as const).map((fault) => ({
+    name: `rejects a transient ${fault} publication even with the correct final revision`,
+    law: `convex.lazy-version`,
+    driver: async (
+      plan: { history: History },
+      observe: (checkpoint: string, value: unknown) => void,
+    ) =>
+      recordAssertionJudgment(`convex.lazy-version`, plan, observe, () =>
+        rejectsAs(
+          `lazy-paging-version-oracle.property.test.ts:232:toThrow`,
+          () => runVersions(plan.history, fault),
+          (failure) =>
+            expect(() => {
+              throw failure
+            }).toThrow(`lazy version`),
+        ),
+      ),
+  })),
   timeout: 60000,
-})
-
-it.each([`rollback`, `mixed`] as const)(
-  `rejects a transient %s publication even with the correct final revision`,
-  async (fault) => {
-    oracleRoute(`calibration`)
-    await oracleAssertion(
-      `lazy-paging-version-oracle.property.test.ts:232:toThrow`,
-      () =>
-        expect(
-          runVersions(
-            {
-              size: 8,
-              pageSize: 2,
-              descending: false,
-              react: false,
-              revisions: 4,
-              text: `authored`,
-              choices: [0, 1],
-              skip: true,
-            },
-            fault,
-          ),
-        ).rejects.toThrow(`lazy version`),
-    )
-  },
-)
-
-it(`allows stuttering, skipped and observationally identical revisions`, () => {
-  oracleRoute(`case`)
-  const a = [{ id: `a`, rank: 0, text: `first` }]
-  const b = [{ id: `a`, rank: 0, text: `middle` }]
-  const c = [{ id: `a`, rank: 0, text: `last` }]
-  const model = new LazyVersionModel()
-  for (const rows of [a, a, b, c]) model.offer(rows)
-  for (const rows of [a, a, c, c]) model.observe(rows)
-  oracleAssertion(
-    `lazy-paging-version-oracle.property.test.ts:258:toThrow`,
-    () => expect(() => model.observe(a)).toThrow(`lazy version`),
-  )
 })

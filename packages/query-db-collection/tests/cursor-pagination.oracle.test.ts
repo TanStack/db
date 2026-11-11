@@ -1,13 +1,20 @@
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import {
   differs,
   oracleProperty,
   pass,
 } from '../../db/tests/oracle-property.js'
 import { createDeferred } from '../../db/src/deferred.js'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import {
+  allAscending,
+  fixtureRows,
+} from './cursor-pagination-reference-support'
 import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model-oracle.js'
 import { createCursorPager } from './cursor-pagination/pager.js'
@@ -54,12 +61,6 @@ const windowArbitrary = fc.record({
   offset: fc.integer({ min: 0, max: 35 }),
   limit: fc.option(fc.integer({ min: 0, max: 35 }), { nil: undefined }),
 })
-const fixtureRows: Array<Row> = Array.from({ length: 9 }, (_, id) => ({
-  id,
-  rank: Math.floor(id / 6),
-  group: id % 2,
-}))
-const allAscending: Scope = { group: undefined, descending: false }
 
 const fixedSeed = 1_779_001
 const pagerLaw = {
@@ -152,53 +153,60 @@ oracleProperty({
   check: (_history, trace, expected) => checkPagerTrace(trace, expected),
 })
 
-async function checkRead(
-  source: Array<Row>,
-  scope: Scope,
-  window: Window,
-  read: (window: Window) => Promise<Array<Row>>,
-) {
-  const expected = expectedRows(source, scope, window)
-  expect(await read(window), `ordered slice ${JSON.stringify(window)}`).toEqual(
-    expected,
+const heldResponseActions = [`abort`, `reject`, `reset`] as const
+// A held first read ends by abort, rejection or reset while a peer reads.
+// The peer's rows must equal the model's slice, and only the first read fails.
+async function keepPeerAfterHeldResponse(
+  action: (typeof heldResponseActions)[number],
+): Promise<void> {
+  const backend = createBackend(fixtureRows, allAscending, 2)
+  const gate = createDeferred<void>()
+  const abort = new AbortController()
+  const failure = new Error(`backend failed`)
+  let calls = 0
+  const pager = createCursorPager(async (cursor, signal) => {
+    const page = await backend.fetchPage(cursor, signal)
+    if (++calls === 1) await gate.promise
+    return page
+  })
+  const outcomes: Array<string> = []
+  const first = pager.read({ offset: 0, limit: 2 }, abort.signal).then(
+    () => {
+      outcomes.push(`first-success`)
+      return undefined
+    },
+    (error: unknown) => {
+      outcomes.push(`first-error`)
+      return error
+    },
   )
+  await vi.waitFor(() => expect(calls).toBe(1))
+  expect(outcomes).toEqual([])
+  if (action === `abort`) abort.abort()
+  if (action === `reset`) pager.reset()
+  const peer = pager.read({ offset: 0, limit: 6 })
+  const peerObserved = peer.then((rows) => {
+    outcomes.push(`peer-success`)
+    return rows
+  })
+  if (action === `reject`) gate.reject(failure)
+  else gate.resolve()
+  const error = await first
+  if (action === `reject`) expect(error).toBe(failure)
+  else expect(error).toMatchObject({ name: `AbortError` })
+  await expect(peerObserved).resolves.toEqual(
+    expectedRows(fixtureRows, allAscending, { offset: 0, limit: 6 }),
+  )
+  expect(outcomes).toEqual([`first-error`, `peer-success`])
+  // Cancelling a reader leaves the shared Query fetch active. A successful
+  // page remains reusable; failed or reset Query fetches start again.
+  if (action === `abort`) {
+    expect(backend.calls[1]).toEqual(expect.any(String))
+    expect(backend.calls).toHaveLength(3)
+  } else {
+    expect(backend.calls.slice(0, 2)).toEqual([undefined, undefined])
+  }
 }
-
-describe(`cursor pagination reference`, () => {
-  it(`preserves ties, filtering and reverse total order`, () => {
-    oracleRoute(`case`)
-    expect(
-      expectedRows(
-        fixtureRows,
-        { group: 1, descending: true },
-        { offset: 1, limit: 3 },
-      ).map((row) => row.id),
-    ).toEqual([5, 3, 1])
-    expect(
-      expectedRows(fixtureRows, allAscending, { offset: 0, limit: 0 }),
-    ).toEqual([])
-  })
-
-  it(`rejects capped-page, wrong-order and duplicate-row answers`, async () => {
-    oracleRoute(`calibration`)
-    const window = { offset: 0, limit: 8 }
-    const expected = expectedRows(fixtureRows, allAscending, window)
-    for (const wrong of [
-      expected.slice(0, 2),
-      [...expected].reverse(),
-      [...expected.slice(0, 7), expected[0]!],
-    ]) {
-      await expect(
-        checkRead(fixtureRows, allAscending, window, () =>
-          Promise.resolve(wrong),
-        ),
-      ).rejects.toThrow(`ordered slice`)
-    }
-    await checkRead(fixtureRows, allAscending, window, () =>
-      Promise.resolve(expected),
-    )
-  })
-})
 
 describe(`opaque cursor adapter`, () => {
   oracleProperty({
@@ -232,59 +240,24 @@ describe(`opaque cursor adapter`, () => {
     check: (_history, trace, expected) => checkPagerTrace(trace, expected),
   })
 
-  it.each([`abort`, `reject`, `reset`] as const)(
-    `keeps a healthy peer usable after held response %s`,
-    async (action) => {
-      oracleRoute(`case`)
-      const backend = createBackend(fixtureRows, allAscending, 2)
-      const gate = createDeferred<void>()
-      const abort = new AbortController()
-      const failure = new Error(`backend failed`)
-      let calls = 0
-      const pager = createCursorPager(async (cursor, signal) => {
-        const page = await backend.fetchPage(cursor, signal)
-        if (++calls === 1) await gate.promise
-        return page
-      })
-      const outcomes: Array<string> = []
-      const first = pager.read({ offset: 0, limit: 2 }, abort.signal).then(
-        () => {
-          outcomes.push(`first-success`)
-          return undefined
-        },
-        (error: unknown) => {
-          outcomes.push(`first-error`)
-          return error
-        },
-      )
-      await vi.waitFor(() => expect(calls).toBe(1))
-      expect(outcomes).toEqual([])
-      if (action === `abort`) abort.abort()
-      if (action === `reset`) pager.reset()
-      const peer = pager.read({ offset: 0, limit: 6 })
-      const peerObserved = peer.then((rows) => {
-        outcomes.push(`peer-success`)
-        return rows
-      })
-      if (action === `reject`) gate.reject(failure)
-      else gate.resolve()
-      const error = await first
-      if (action === `reject`) expect(error).toBe(failure)
-      else expect(error).toMatchObject({ name: `AbortError` })
-      await expect(peerObserved).resolves.toEqual(
-        expectedRows(fixtureRows, allAscending, { offset: 0, limit: 6 }),
-      )
-      expect(outcomes).toEqual([`first-error`, `peer-success`])
-      // Cancelling a reader leaves the shared Query fetch active. A successful
-      // page remains reusable; failed or reset Query fetches start again.
-      if (action === `abort`) {
-        expect(backend.calls[1]).toEqual(expect.any(String))
-        expect(backend.calls).toHaveLength(3)
-      } else {
-        expect(backend.calls.slice(0, 2)).toEqual([undefined, undefined])
-      }
+  oracleProperty({
+    id: `cursor-pagination.held-response-peer`,
+    law: {
+      ...pagerLaw,
+      statement: `A held response that ends by abort, rejection or reset fails only its own read; a healthy peer read returns the full-relation slice.`,
     },
-  )
+    owns: [`src/cursor-pagination.ts#createCursorPager`],
+    histories: heldResponseActions,
+    label: (action) =>
+      `keeps a healthy peer usable after held response ${action}`,
+    resolve: (action) => ({ action }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`held response peer`, plan, observe, () =>
+        keepPeerAfterHeldResponse(plan.action),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   oracleProperty({
     id: `cursor-pagination.reset`,
@@ -403,11 +376,6 @@ describe(`opaque cursor adapter`, () => {
     },
     check: (_history, trace, expected) => checkPagerTrace(trace, expected),
   })
-})
-
-declareOracle({
-  check: [checkRead],
-  model: [expectedRows],
 })
 
 // ---------------------------------------------------------------------------

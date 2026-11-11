@@ -23,7 +23,6 @@
  * or delete. This boundary law constrains neither write counts nor ordering.
  */
 import fc from 'fast-check'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { mergeDirectWritesOverFetch } from './direct-write-precedence-oracle'
 import type {
   ConstructedHistory,
@@ -512,8 +511,3 @@ export function persistedDirectOwnershipOptions(
     ],
   }
 }
-declareOracle({
-  model: [expectedDirectOwnership],
-  grammar: [directOwnershipHistoryArb, directOwnershipHistories],
-  check: [checkDirectOwnership],
-})

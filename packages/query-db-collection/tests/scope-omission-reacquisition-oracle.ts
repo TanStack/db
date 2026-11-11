@@ -18,7 +18,6 @@ import { untilStartup } from '../../db-adapter-conformance/tests/persisted-start
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
 import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { mergeDirectWritesOverFetch } from './direct-write-precedence-oracle'
 import type { SyncPersistenceCapabilityV1 } from '@tanstack/db'
 import type { PersistedCollectionPersistence } from '../../db-sqlite-persistence-core/src'
@@ -495,8 +494,3 @@ export async function calibrateGeneratedConstructions(
     }
   }
 }
-declareOracle({
-  model: [expected],
-  grammar: [arbitrary],
-  check: [check, calibrateGeneratedConstructions],
-})

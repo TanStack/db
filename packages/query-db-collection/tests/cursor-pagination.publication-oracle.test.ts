@@ -8,7 +8,6 @@ import {
   pass,
   violation,
 } from '../../db/tests/oracle-property.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createCursorPager } from '../src/index.js'
 import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model-oracle.js'
@@ -97,11 +96,6 @@ async function driveCachedSlice(
     client.clear()
   }
 }
-
-declareOracle({
-  check: [checkPublicationTrace],
-  model: [expectedRows],
-})
 
 // The native check compares the same public facts in checkpoint order. It
 // accepts a cut trace, so a later runtime or cleanup error cannot hide an

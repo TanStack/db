@@ -12,7 +12,6 @@
  * the first mismatching cut. No Vitest assertion executes in the driver.
  */
 import { isDeepStrictEqual } from 'node:util'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 
 import { pass, violation } from '../../db/tests/oracle-property'
 import type { Observation, Verdict } from '../../db/tests/oracle-property'
@@ -233,5 +232,3 @@ export function checkLawFacts(
     ? pass
     : violation(`complete`, `history did not finish`, law)
 }
-
-declareOracle({ model: [referenceFacts], check: [checkLawFacts] })

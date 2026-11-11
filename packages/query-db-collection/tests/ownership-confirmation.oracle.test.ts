@@ -7,7 +7,6 @@ import {
   pass,
   violation,
 } from '../../db/tests/oracle-property.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 import { withOracleCleanup } from '../../db/tests/utils.js'
 import { atMutationCheckpoint } from '../../db/tests/mutation-confirmation-support.js'
@@ -1068,10 +1067,4 @@ oracleProperty({
       }),
     ),
   ],
-})
-
-declareOracle({
-  model: [mutationModel, postModel],
-  check: [checkMutation, checkPost],
-  grammar: [mutationArbitrary, postArbitrary],
 })

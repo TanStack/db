@@ -18,7 +18,6 @@
 import { hashKey } from '@tanstack/query-core'
 import { createCollection } from '@tanstack/db'
 import { afterEach, vi } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   differs,
   oracleProperty,
@@ -286,15 +285,6 @@ function supersededCheck(
   )
 }
 
-declareOracle({
-  model: [
-    mergeCutModel,
-    emptyBaselineModel,
-    coldBaselineModel,
-    supersededModel,
-  ],
-  check: [checkCuts, supersededCheck],
-})
 oracleProperty({
   id: 'query-db.ownership.older-fetch-merge',
   law: {

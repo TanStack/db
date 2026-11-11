@@ -1,15 +1,19 @@
 import { QueryClient } from '@tanstack/query-core'
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import {
   differs,
   oracleProperty,
   pass,
 } from '../../db/tests/oracle-property.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createCursorPager } from '../src/index.js'
+import { rejectsAs } from './calibration-rejection'
 import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model-oracle.js'
 import type { Observation, Verdict } from '../../db/tests/oracle-property.js'
@@ -56,11 +60,6 @@ async function checkWindow(
   ).toEqual(expectedRows(source, scope, { offset: 0, limit: width }))
 }
 
-declareOracle({
-  check: [checkWindow],
-  model: [expectedRows],
-})
-
 // The reference above still owns row truth. These native traces carry the
 // same values, identity witnesses and request counts at the old checkpoints.
 const cacheLaw = {
@@ -91,6 +90,317 @@ function checkCacheTrace(
       Object.keys(expected).length,
     ) ?? pass
   )
+}
+
+// ## Fixed cache cases
+//
+// Each case runs the production pager over a real QueryClient and compares
+// every window with the reference slice (checkWindow and expectedRows). They
+// name Query cache events that the generated grammar does not schedule.
+
+// After invalidation the pager must read the refreshed rows. The calibration
+// below ignores the invalidation and requires checkWindow to reject the reuse.
+async function refreshAfterInvalidation(
+  ignoreInvalidation: boolean,
+): Promise<void> {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { staleTime: Infinity, gcTime: Infinity, retry: false },
+    },
+  })
+  let rows = makeRows(2)
+  const key = [`sensitivity`]
+  const pager = createCursorPager({
+    queryClient: client,
+    queryKey: key,
+    fetchPage: () => Promise.resolve({ rows, nextCursor: null }),
+  })
+  try {
+    await checkWindow(pager, rows, 2)
+    rows = makeRows(2, 1)
+    await client.invalidateQueries({ queryKey: key })
+    if (ignoreInvalidation) {
+      // Deliberately bypass Query's stale check, but still execute the
+      // production pager and the same value checker as the history law.
+      client
+        .getQueryCache()
+        .find({ queryKey: key, exact: true })!
+        .setState({ isInvalidated: false })
+    }
+    // With the mutant, the calibration requires this check to reject the reuse
+    // with its `window matches` comparison.
+    await checkWindow(pager, rows, 2)
+  } finally {
+    vi.restoreAllMocks()
+    client.clear()
+  }
+}
+
+// A 99 ms cutoff refetches too soon; a 101 ms cutoff reuses stale rows.
+async function reuseUntilExpiry(): Promise<void> {
+  // A 99 ms cutoff refetches too soon; a 101 ms cutoff reuses stale rows.
+  vi.useFakeTimers({ toFake: [`Date`] })
+  vi.setSystemTime(1000)
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+  })
+  const key = [`expiry-edge`]
+  const initial = makeRows(2)
+  let source = initial
+  let calls = 0
+  const pager = createCursorPager({
+    queryClient: client,
+    queryKey: key,
+    staleTime: 100,
+    fetchPage: () => {
+      calls++
+      return Promise.resolve({ rows: source, nextCursor: null })
+    },
+  })
+  try {
+    await checkWindow(pager, initial, 2)
+    source = makeRows(2, 1)
+    vi.setSystemTime(1099)
+    await checkWindow(pager, initial, 2)
+    expect(calls).toBe(1)
+    vi.setSystemTime(1100)
+    await checkWindow(pager, source, 2)
+    expect(calls).toBe(2)
+  } finally {
+    client.clear()
+    vi.useRealTimers()
+  }
+}
+
+async function cancelHeldWork(): Promise<void> {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { staleTime: Infinity, gcTime: Infinity, retry: false },
+    },
+  })
+  const key = [`cancel`]
+  const hold = createDeferred<void>()
+  const delivered = createDeferred<void>()
+  let deliveredSignal: AbortSignal | undefined
+  let holdResponse = true
+  const rows = makeRows(2)
+  const pager = createCursorPager({
+    queryClient: client,
+    queryKey: key,
+    fetchPage: async (_cursor, signal) => {
+      deliveredSignal = signal
+      if (holdResponse) {
+        await hold.promise
+        delivered.resolve()
+      }
+      return { rows, nextCursor: null }
+    },
+  })
+  const pending = pager.read({}).then(
+    () => `success`,
+    () => `rejected`,
+  )
+  try {
+    await vi.waitFor(() => expect(deliveredSignal).toBeDefined())
+    await client.cancelQueries({ queryKey: key, exact: true })
+    expect(await pending).toBe(`rejected`)
+    expect(deliveredSignal?.aborted).toBe(true)
+    hold.resolve()
+    await delivered.promise
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(client.getQueryData(key)).toBeUndefined()
+    holdResponse = false
+    await checkWindow(pager, rows, 2)
+  } finally {
+    hold.resolve()
+    await pending
+    client.clear()
+  }
+}
+
+async function collectInactivePages(gcTime: number): Promise<void> {
+  vi.useFakeTimers()
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const backend = createBackend(makeRows(6), scope, 2)
+  const key = [`collect`]
+  const pager = createCursorPager({
+    queryClient: client,
+    queryKey: key,
+    staleTime: Infinity,
+    gcTime,
+    fetchPage: backend.fetchPage,
+  })
+  try {
+    await pager.read({ limit: 3 })
+    expect(backend.calls).toHaveLength(2)
+    expect(client.getQueryData(key)).toBeDefined()
+    // The 25 ms case rejects a cutoff moved one millisecond either way.
+    if (gcTime > 0) {
+      await vi.advanceTimersByTimeAsync(gcTime - 1)
+      expect(client.getQueryData(key)).toBeDefined()
+    }
+    await vi.advanceTimersByTimeAsync(1)
+    expect(client.getQueryData(key)).toBeUndefined()
+    expect(await pager.read({ limit: 3 })).toEqual(
+      expectedRows(makeRows(6), scope, { offset: 0, limit: 3 }),
+    )
+    expect(backend.calls).toHaveLength(4)
+  } finally {
+    client.clear()
+    vi.useRealTimers()
+  }
+}
+
+async function keepCachedDataDuringRefresh(
+  cause: `expiry` | `invalidate`,
+): Promise<void> {
+  vi.useFakeTimers({ toFake: [`Date`] })
+  vi.setSystemTime(1000)
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+  })
+  const key = [`refresh`]
+  let source = makeRows(6)
+  let backend = createBackend(source, scope, 2)
+  let hold: ReturnType<typeof createDeferred<void>> | undefined
+  const pager = createCursorPager({
+    queryClient: client,
+    queryKey: key,
+    staleTime: 100,
+    fetchPage: async (cursor, signal) => {
+      if (cursor === undefined) backend = createBackend(source, scope, 2)
+      const page = await backend.fetchPage(cursor, signal)
+      if (hold) await hold.promise
+      return page
+    },
+  })
+  try {
+    await pager.read({ limit: 4 })
+    const old = client.getQueryData(key)
+    source = makeRows(6, 1)
+    if (cause === `expiry`) vi.setSystemTime(1100)
+    else await client.invalidateQueries({ queryKey: key })
+    hold = createDeferred<void>()
+    const error = new Error(`refresh failed`)
+    const pending = pager.read({ limit: 4 }).catch((reason: unknown) => reason)
+    await vi.waitFor(() => expect(client.isFetching()).toBe(1))
+    expect(client.getQueryData(key)).toBe(old)
+    hold.reject(error)
+    expect(await pending).toBe(error)
+    expect(client.getQueryData(key)).toBe(old)
+    hold = undefined
+    expect(await pager.read({ limit: 4 })).toEqual(
+      expectedRows(source, scope, { offset: 0, limit: 4 }),
+    )
+  } finally {
+    hold?.resolve()
+    client.clear()
+    vi.useRealTimers()
+  }
+}
+
+async function shareFetchesAcrossReaders(): Promise<void> {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: Infinity, staleTime: Infinity },
+    },
+  })
+  const backend = createBackend(makeRows(6), scope, 2)
+  const hold = createDeferred<void>()
+  const options = {
+    queryClient: client,
+    queryKey: [`shared`],
+    fetchPage: async (cursor: string | undefined, signal: AbortSignal) => {
+      const page = await backend.fetchPage(cursor, signal)
+      await hold.promise
+      return page
+    },
+  }
+  const a = createCursorPager(options)
+  const b = createCursorPager(options)
+  const abort = new AbortController()
+  const error = new Error(`reader left`)
+  const pending = Promise.allSettled([
+    a.read({ limit: 2 }, abort.signal),
+    b.read({ limit: 4 }),
+  ])
+  try {
+    await vi.waitFor(() => expect(backend.calls).toHaveLength(1))
+    abort.abort(error)
+    hold.resolve()
+    expect(await pending).toEqual([
+      { status: `rejected`, reason: error },
+      {
+        status: `fulfilled`,
+        value: expectedRows(makeRows(6), scope, { offset: 0, limit: 4 }),
+      },
+    ])
+    expect(backend.calls).toHaveLength(2)
+  } finally {
+    hold.resolve()
+    await pending
+    client.clear()
+  }
+}
+
+type CacheCase =
+  | { name: string; kind: `invalidation` }
+  | { name: string; kind: `expiry` }
+  | { name: string; kind: `cancellation` }
+  | { name: string; kind: `collection`; gcTime: number }
+  | { name: string; kind: `refresh`; cause: `expiry` | `invalidate` }
+  | { name: string; kind: `shared` }
+
+// The invalidation case comes first: the calibration runs on the first case
+// whose clean run passes and that its mutant changes.
+const cacheCases: Array<CacheCase> = [
+  { name: `accepts a real refresh after invalidation`, kind: `invalidation` },
+  {
+    name: `reuses a cache one millisecond before expiry and refreshes at expiry`,
+    kind: `expiry`,
+  },
+  {
+    name: `QueryClient cancellation rejects held work without installing its late page`,
+    kind: `cancellation`,
+  },
+  ...[0, 25].map((gcTime): CacheCase => ({
+    name: `collects inactive pages independently of freshness with gcTime ${gcTime}`,
+    kind: `collection`,
+    gcTime,
+  })),
+  ...([`expiry`, `invalidate`] as const).map((cause): CacheCase => ({
+    name: `keeps cached data while a ${cause} refresh is held or fails`,
+    kind: `refresh`,
+    cause,
+  })),
+  {
+    name: `shares Query fetches across readers without letting one abort cancel its peer`,
+    kind: `shared`,
+  },
+]
+
+// `ignoreInvalidation` is the calibration's mutant configuration; only the
+// invalidation case reads it.
+function runCacheCase(
+  cacheCase: CacheCase,
+  ignoreInvalidation = false,
+): Promise<void> {
+  switch (cacheCase.kind) {
+    case `invalidation`:
+      return refreshAfterInvalidation(ignoreInvalidation)
+    case `expiry`:
+      return reuseUntilExpiry()
+    case `cancellation`:
+      return cancelHeldWork()
+    case `collection`:
+      return collectInactivePages(cacheCase.gcTime)
+    case `refresh`:
+      return keepCachedDataDuringRefresh(cacheCase.cause)
+    case `shared`:
+      return shareFetchesAcrossReaders()
+  }
 }
 
 describe(`cursor cache lifecycle`, () => {
@@ -365,126 +675,6 @@ describe(`cursor cache lifecycle`, () => {
     },
   )
 
-  it(`the cache oracle rejects reuse after invalidation and accepts a real refresh`, async () => {
-    oracleRoute(`calibration`)
-    for (const ignoreInvalidation of [false, true]) {
-      const client = new QueryClient({
-        defaultOptions: {
-          queries: { staleTime: Infinity, gcTime: Infinity, retry: false },
-        },
-      })
-      let rows = makeRows(2)
-      const key = [`sensitivity`]
-      const pager = createCursorPager({
-        queryClient: client,
-        queryKey: key,
-        fetchPage: () => Promise.resolve({ rows, nextCursor: null }),
-      })
-      try {
-        await checkWindow(pager, rows, 2)
-        rows = makeRows(2, 1)
-        await client.invalidateQueries({ queryKey: key })
-        if (ignoreInvalidation) {
-          // Deliberately bypass Query's stale check, but still execute the
-          // production pager and the same value checker as the history law.
-          client
-            .getQueryCache()
-            .find({ queryKey: key, exact: true })!
-            .setState({ isInvalidated: false })
-          await expect(checkWindow(pager, rows, 2)).rejects.toThrow(
-            `window matches`,
-          )
-        } else await checkWindow(pager, rows, 2)
-      } finally {
-        vi.restoreAllMocks()
-        client.clear()
-      }
-    }
-  })
-
-  it(`reuses a cache one millisecond before expiry and refreshes at expiry`, async () => {
-    oracleRoute(`case`)
-    // A 99 ms cutoff refetches too soon; a 101 ms cutoff reuses stale rows.
-    vi.useFakeTimers({ toFake: [`Date`] })
-    vi.setSystemTime(1000)
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
-    })
-    const key = [`expiry-edge`]
-    const initial = makeRows(2)
-    let source = initial
-    let calls = 0
-    const pager = createCursorPager({
-      queryClient: client,
-      queryKey: key,
-      staleTime: 100,
-      fetchPage: () => {
-        calls++
-        return Promise.resolve({ rows: source, nextCursor: null })
-      },
-    })
-    try {
-      await checkWindow(pager, initial, 2)
-      source = makeRows(2, 1)
-      vi.setSystemTime(1099)
-      await checkWindow(pager, initial, 2)
-      expect(calls).toBe(1)
-      vi.setSystemTime(1100)
-      await checkWindow(pager, source, 2)
-      expect(calls).toBe(2)
-    } finally {
-      client.clear()
-      vi.useRealTimers()
-    }
-  })
-
-  it(`QueryClient cancellation rejects held work without installing its late page`, async () => {
-    oracleRoute(`case`)
-    const client = new QueryClient({
-      defaultOptions: {
-        queries: { staleTime: Infinity, gcTime: Infinity, retry: false },
-      },
-    })
-    const key = [`cancel`]
-    const hold = createDeferred<void>()
-    const delivered = createDeferred<void>()
-    let deliveredSignal: AbortSignal | undefined
-    let holdResponse = true
-    const rows = makeRows(2)
-    const pager = createCursorPager({
-      queryClient: client,
-      queryKey: key,
-      fetchPage: async (_cursor, signal) => {
-        deliveredSignal = signal
-        if (holdResponse) {
-          await hold.promise
-          delivered.resolve()
-        }
-        return { rows, nextCursor: null }
-      },
-    })
-    const pending = pager.read({}).then(
-      () => `success`,
-      () => `rejected`,
-    )
-    try {
-      await vi.waitFor(() => expect(deliveredSignal).toBeDefined())
-      await client.cancelQueries({ queryKey: key, exact: true })
-      expect(await pending).toBe(`rejected`)
-      expect(deliveredSignal?.aborted).toBe(true)
-      hold.resolve()
-      await delivered.promise
-      await new Promise((resolve) => setTimeout(resolve, 0))
-      expect(client.getQueryData(key)).toBeUndefined()
-      holdResponse = false
-      await checkWindow(pager, rows, 2)
-    } finally {
-      hold.resolve()
-      await pending
-      client.clear()
-    }
-  })
-
   oracleProperty({
     id: `cursor-pagination.cache`,
     law: {
@@ -632,139 +822,41 @@ describe(`cursor cache lifecycle`, () => {
     check: (_history, trace, expected) => checkCacheTrace(trace, expected),
   })
 
-  it.each([0, 25])(
-    `collects inactive pages independently of freshness with gcTime %i`,
-    async (gcTime) => {
-      oracleRoute(`case`)
-      vi.useFakeTimers()
-      const client = new QueryClient({
-        defaultOptions: { queries: { retry: false } },
-      })
-      const backend = createBackend(makeRows(6), scope, 2)
-      const key = [`collect`]
-      const pager = createCursorPager({
-        queryClient: client,
-        queryKey: key,
-        staleTime: Infinity,
-        gcTime,
-        fetchPage: backend.fetchPage,
-      })
-      try {
-        await pager.read({ limit: 3 })
-        expect(backend.calls).toHaveLength(2)
-        expect(client.getQueryData(key)).toBeDefined()
-        // The 25 ms case rejects a cutoff moved one millisecond either way.
-        if (gcTime > 0) {
-          await vi.advanceTimersByTimeAsync(gcTime - 1)
-          expect(client.getQueryData(key)).toBeDefined()
-        }
-        await vi.advanceTimersByTimeAsync(1)
-        expect(client.getQueryData(key)).toBeUndefined()
-        expect(await pager.read({ limit: 3 })).toEqual(
-          expectedRows(makeRows(6), scope, { offset: 0, limit: 3 }),
-        )
-        expect(backend.calls).toHaveLength(4)
-      } finally {
-        client.clear()
-        vi.useRealTimers()
-      }
+  oracleProperty({
+    id: `cursor-pagination.cache-cases`,
+    law: {
+      ...cacheLaw,
+      statement: `Across invalidation, expiry, cancellation, garbage collection, a held or failed refresh and shared readers, every pager window equals the reference slice of the source snapshot that the Query cache permits.`,
     },
-  )
-
-  it.each([`expiry`, `invalidate`] as const)(
-    `keeps cached data while a %s refresh is held or fails`,
-    async (cause) => {
-      oracleRoute(`case`)
-      vi.useFakeTimers({ toFake: [`Date`] })
-      vi.setSystemTime(1000)
-      const client = new QueryClient({
-        defaultOptions: { queries: { retry: false, gcTime: Infinity } },
-      })
-      const key = [`refresh`]
-      let source = makeRows(6)
-      let backend = createBackend(source, scope, 2)
-      let hold: ReturnType<typeof createDeferred<void>> | undefined
-      const pager = createCursorPager({
-        queryClient: client,
-        queryKey: key,
-        staleTime: 100,
-        fetchPage: async (cursor, signal) => {
-          if (cursor === undefined) backend = createBackend(source, scope, 2)
-          const page = await backend.fetchPage(cursor, signal)
-          if (hold) await hold.promise
-          return page
-        },
-      })
-      try {
-        await pager.read({ limit: 4 })
-        const old = client.getQueryData(key)
-        source = makeRows(6, 1)
-        if (cause === `expiry`) vi.setSystemTime(1100)
-        else await client.invalidateQueries({ queryKey: key })
-        hold = createDeferred<void>()
-        const error = new Error(`refresh failed`)
-        const pending = pager
-          .read({ limit: 4 })
-          .catch((reason: unknown) => reason)
-        await vi.waitFor(() => expect(client.isFetching()).toBe(1))
-        expect(client.getQueryData(key)).toBe(old)
-        hold.reject(error)
-        expect(await pending).toBe(error)
-        expect(client.getQueryData(key)).toBe(old)
-        hold = undefined
-        expect(await pager.read({ limit: 4 })).toEqual(
-          expectedRows(source, scope, { offset: 0, limit: 4 }),
-        )
-      } finally {
-        hold?.resolve()
-        client.clear()
-        vi.useRealTimers()
-      }
-    },
-  )
-
-  it(`shares Query fetches across readers without letting one abort cancel its peer`, async () => {
-    oracleRoute(`case`)
-    const client = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false, gcTime: Infinity, staleTime: Infinity },
+    owns: [`src/cursor-pagination.ts#createCursorPager`],
+    histories: cacheCases,
+    label: ({ name }) => name,
+    resolve: (cacheCase) => ({ cacheCase }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`cursor cache case`, plan, observe, () =>
+        runCacheCase(plan.cacheCase),
+      ),
+    check: forwardAssertionJudgment,
+    calibrations: [
+      {
+        name: `the cache oracle rejects reuse after invalidation and accepts a real refresh`,
+        law: `cursor cache case`,
+        driver: (
+          plan: { cacheCase: CacheCase },
+          observe: (checkpoint: string, value: unknown) => void,
+        ) =>
+          recordAssertionJudgment(`cursor cache case`, plan, observe, () =>
+            rejectsAs(
+              `ignored invalidation`,
+              () => runCacheCase(plan.cacheCase, true),
+              (failure) =>
+                expect(() => {
+                  throw failure
+                }).toThrow(`window matches`),
+            ),
+          ),
       },
-    })
-    const backend = createBackend(makeRows(6), scope, 2)
-    const hold = createDeferred<void>()
-    const options = {
-      queryClient: client,
-      queryKey: [`shared`],
-      fetchPage: async (cursor: string | undefined, signal: AbortSignal) => {
-        const page = await backend.fetchPage(cursor, signal)
-        await hold.promise
-        return page
-      },
-    }
-    const a = createCursorPager(options)
-    const b = createCursorPager(options)
-    const abort = new AbortController()
-    const error = new Error(`reader left`)
-    const pending = Promise.allSettled([
-      a.read({ limit: 2 }, abort.signal),
-      b.read({ limit: 4 }),
-    ])
-    try {
-      await vi.waitFor(() => expect(backend.calls).toHaveLength(1))
-      abort.abort(error)
-      hold.resolve()
-      expect(await pending).toEqual([
-        { status: `rejected`, reason: error },
-        {
-          status: `fulfilled`,
-          value: expectedRows(makeRows(6), scope, { offset: 0, limit: 4 }),
-        },
-      ])
-      expect(backend.calls).toHaveLength(2)
-    } finally {
-      hold.resolve()
-      await pending
-      client.clear()
-    }
+    ],
   })
 })

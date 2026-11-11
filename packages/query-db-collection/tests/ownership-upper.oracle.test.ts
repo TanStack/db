@@ -14,7 +14,6 @@ import {
   pass,
   violation,
 } from '../../db/tests/oracle-property.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createDeferred } from '../../db/src/deferred.js'
 import { queryCollectionOptions } from '../src/query.js'
 import {
@@ -2016,10 +2015,4 @@ oracleProperty({
           : undefined,
     },
   ],
-})
-
-declareOracle({
-  model: [phaseModel, explicitModel, refreshModel, identityModel, workModel],
-  check: [compareCuts],
-  grammar: [explicitHistories, refreshHistories, identityHistories],
 })

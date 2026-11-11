@@ -17,7 +17,7 @@
  */
 import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
-import { expect, it } from 'vitest'
+import { expect } from 'vitest'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -25,8 +25,7 @@ import {
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
 import { oracleProperty } from '../../db/tests/oracle-property'
-import { oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
+import { rejectsAs } from './calibration-rejection'
 import { withTestCleanup } from './helpers'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import type { SyncAppliedReceipt, SyncConfig } from '@tanstack/db'
@@ -36,9 +35,6 @@ type AssertionReach = {
   beginHistory: () => void
   reach: (state: string) => void
 }
-
-// Owns no convex source: this grammar drives @tanstack/db Collection sync with its own SyncConfig, not the convex pager.
-declareOracle({})
 
 type Row = { id: string }
 const gate = () => {
@@ -433,6 +429,30 @@ oracleProperty({
       `uncancelable-accept-after-abort`,
       `abort-with-only-inflight-work`,
     ] as const,
+    // The fault calibrations below corrupt these authored interleavings: the
+    // premature in-flight cancellation needs the cancel at the first response.
+    fixed: [
+      {
+        name: `three responses and batches, cancel at the second`,
+        history: {
+          responses: 3,
+          batches: 3,
+          choices: [0],
+          cancelAt: 2,
+          uncancelable: true,
+        },
+      },
+      {
+        name: `three responses and batches, cancel at the first`,
+        history: {
+          responses: 3,
+          batches: 3,
+          choices: [0],
+          cancelAt: 1,
+          uncancelable: true,
+        },
+      },
+    ],
     constructed: [
       {
         name: `existing constructive history`,
@@ -458,50 +478,27 @@ oracleProperty({
         reach: (state) => observe(`reach`, state),
       }),
     ),
+  calibrations: (
+    [`borrow-peer`, `first-only`, `premature-inflight-cancel`] as const
+  ).map((fault) => ({
+    name: `rejects ${fault} under interleaving`,
+    law: `convex.lazy-interleaving`,
+    driver: async (
+      plan: {
+        history: AssertionHistory<typeof convex_lazy_interleavingHistory>
+      },
+      observe: (checkpoint: string, value: unknown) => void,
+    ) =>
+      recordAssertionJudgment(`convex.lazy-interleaving`, plan, observe, () =>
+        rejectsAs(
+          `lazy-paging-interleaving-oracle.property.test.ts:414:toThrow`,
+          () => runInterleaving({ ...plan.history, constructive: true }, fault),
+          (failure) =>
+            expect(() => {
+              throw failure
+            }).toThrow(/receipt (law|model)/),
+        ),
+      ),
+  })),
   timeout: 60000,
-})
-
-it.each([`borrow-peer`, `first-only`, `premature-inflight-cancel`] as const)(
-  `rejects %s under interleaving`,
-  async (fault) => {
-    oracleRoute(`calibration`)
-    await oracleAssertion(
-      `lazy-paging-interleaving-oracle.property.test.ts:414:toThrow`,
-      () =>
-        expect(
-          runInterleaving(
-            {
-              responses: 3,
-              batches: 3,
-              choices: [0],
-              cancelAt: fault === `premature-inflight-cancel` ? 1 : 2,
-              constructive: true,
-              uncancelable: true,
-            },
-            fault,
-          ),
-        ).rejects.toThrow(/receipt (law|model)/),
-    )
-  },
-)
-
-it(`permits core fulfillment after abort once an uncancelable baseline applies`, () => {
-  oracleRoute(`case`)
-  const model = new LazyReceiptModel()
-  model.acquire(`a`, [`v1`])
-  model.initiate(`a`, `baseline`)
-  model.abort(`a`)
-  model.accept(`receipt`, [`v1`], [`a`])
-  oracleAssertion(
-    `lazy-paging-interleaving-oracle.property.test.ts:437:toThrow`,
-    () => expect(() => model.observe(`a`, `success`)).toThrow(`in-flight work`),
-  )
-  model.finish(`a`, `baseline`)
-  oracleAssertion(
-    `lazy-paging-interleaving-oracle.property.test.ts:439:toThrow`,
-    () => expect(() => model.observe(`a`, `success`)).toThrow(`receipt`),
-  )
-  model.apply(`receipt`)
-  model.observe(`a`, `success`)
-  model.complete()
 })

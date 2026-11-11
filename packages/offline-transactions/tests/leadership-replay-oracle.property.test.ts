@@ -1,19 +1,18 @@
 import { isDeepStrictEqual } from 'node:util'
 import { createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, vi } from 'vitest'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import { OfflineExecutor } from '../src/OfflineExecutor'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
-import { oracleRoute } from '../../db/tests/oracle-config'
 import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   FakeStorageAdapter,
   createTestOfflineEnvironment,
   gate,
   turn,
 } from './harness'
+import { foldReplayLedger } from './leadership-replay-ledger-model-oracle'
 import { storedTransaction } from './leadership-replay-support'
 import {
   atOracleCheckpoint,
@@ -22,6 +21,7 @@ import {
 } from './oracle-lifecycle'
 import type { Observation, Verdict } from '../../db/tests/oracle-property'
 import type { OfflineTransaction } from '../src/types'
+import type { ReplayLedgerEvent } from './leadership-replay-ledger-model-oracle'
 
 /**
  * # May leadership replay an offline transaction more than once, or report
@@ -90,36 +90,6 @@ beforeEach(() => {
 afterEach(() => {
   releaseClock?.()
 })
-
-type ReplayLedgerEvent =
-  | { type: `stored`; id: string }
-  | { type: `read-captured`; ids: Array<string> }
-  | { type: `durably-removed`; id: string }
-  | { type: `read-delivered` }
-
-// The model records durable facts instead of copying OutboxManager's version
-// fences. A stale captured value cannot undo a later durable removal. These
-// fixtures use FakeStorageAdapter and therefore establish executor/outbox
-// behavior, not IndexedDB, LocalStorage, or native transaction completion.
-function foldReplayLedger(events: ReadonlyArray<ReplayLedgerEvent>): {
-  unfinished: Array<string>
-  staleCapture: Array<string>
-} {
-  const stored = new Set<string>()
-  const removed = new Set<string>()
-  let staleCapture: Array<string> = []
-
-  for (const event of events) {
-    if (event.type === `stored`) stored.add(event.id)
-    else if (event.type === `durably-removed`) removed.add(event.id)
-    else if (event.type === `read-captured`) staleCapture = [...event.ids]
-  }
-
-  return {
-    unfinished: Array.from(stored).filter((id) => !removed.has(id)),
-    staleCapture,
-  }
-}
 
 // Each campaign below is its own replay property, and a path belongs to one of
 // them. To replay a shrink path, set TANSTACK_DB_ORACLE_SEED,
@@ -205,10 +175,6 @@ function storedCalls(count: number, payload: string) {
     metadata: { payload },
   }))
 }
-declareOracle({
-  check: [checkLeadershipTrace],
-  model: [foldReplayLedger],
-})
 
 describe.each([`construction`, `leadership`, `outbox read`, `retry hook`])(
   `disposed startup at %s`,
@@ -951,21 +917,6 @@ oracleProperty({
       pass
     )
   },
-})
-
-it(`append-only replay judgment rejects stale admission after durable removal`, () => {
-  oracleRoute(`case`)
-  const ledger: Array<ReplayLedgerEvent> = [
-    { type: `stored`, id: `removed` },
-    { type: `stored`, id: `peer` },
-    { type: `read-captured`, ids: [`removed`, `peer`] },
-    { type: `durably-removed`, id: `removed` },
-    { type: `read-delivered` },
-  ]
-  const expected = foldReplayLedger(ledger)
-
-  expect(expected.unfinished).toEqual([`peer`])
-  expect(expected.staleCapture).not.toEqual(expected.unfinished)
 })
 
 const delayedReadArbitrary = fc.record({

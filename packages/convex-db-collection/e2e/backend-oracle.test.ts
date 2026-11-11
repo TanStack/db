@@ -33,7 +33,7 @@ import { createCollection } from '@tanstack/db'
 import { ConvexClient } from 'convex/browser'
 import { ConvexReactClient } from 'convex/react'
 import { makeFunctionReference } from 'convex/server'
-import { describe, expect, inject, it } from 'vitest'
+import { expect, inject } from 'vitest'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -43,7 +43,6 @@ import {
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexPaginatedCollectionOptions } from '../src/index'
 import { withTestCleanup } from '../tests/helpers'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { all, seed } from './backend-support'
 import type { Task } from './backend-support'
 import type { Value } from 'convex/values'
@@ -97,120 +96,138 @@ async function expectMirrorsAllTasks(
   )
 }
 
-declareOracle({ check: [expectMirrorsAllTasks] })
-
-describe.each([`javascript`, `react`] as const)(
-  `real backend with %s client`,
-  (kind) => {
-    it.each([`list`, `split`] as const)(
-      `loads %s pages through inserts, moves, deletions, and server splits`,
-      async (functionName) => {
-        const client =
-          kind === `javascript`
-            ? new ConvexClient(url, { unsavedChangesWarning: false })
-            : new ConvexReactClient(url, { unsavedChangesWarning: false })
-        let splitResponses = 0
-        const inspect = (value: unknown): void => {
-          if (
-            value &&
-            typeof value === `object` &&
-            `pageStatus` in value &&
-            (value.pageStatus === `SplitRequired` ||
-              value.pageStatus === `SplitRecommended`)
-          )
-            splitResponses++
-        }
-        const source: ConvexCollectionClient =
-          `onUpdate` in client
-            ? {
-                onUpdate: (query, args, callback, onError) =>
-                  client.onUpdate(
-                    query,
-                    args,
-                    (value) => {
-                      inspect(value)
-                      return callback(value)
-                    },
-                    onError,
-                  ),
-              }
-            : {
-                watchQuery: (query, args, options) => {
-                  const watch = client.watchQuery(query, args, options)
-                  return {
-                    ...watch,
-                    localQueryResult: () => {
-                      const value = watch.localQueryResult()
-                      inspect(value)
-                      return value
-                    },
-                  }
-                },
-              }
-
-        const collection = createCollection(
-          convexPaginatedCollectionOptions({
-            id: `tasks`,
-            client: source,
-            query: makeFunctionReference<
-              `query`,
-              { paginationOpts: PaginationOptions },
-              PaginationResult<Task>
-            >(`tasks:${functionName}`),
-            queryArgs: {},
-            pageSize: 4,
-            getKey: (task) => task.clientId,
-            gcTime: 0,
-          }),
-        )
-        const check = () => expectMirrorsAllTasks(client, collection)
-        await withTestCleanup(
-          async () => {
-            await client.mutation(seed, { count: 23 })
-            await collection.preload()
-            oracleAssertion(`backend-oracle.test.ts:160:toBe`, () =>
-              expect(collection.size).toBe(23),
-            )
-            await check()
-            for (const operation of [
-              {
-                clientId: `new-first`,
-                rank: -10,
-                text: `insert before all pages`,
-              },
-              {
-                clientId: `new-last`,
-                rank: 100,
-                text: `append after exhaustion`,
-              },
-              {
-                clientId: `3`,
-                rank: 3,
-                text: `delete a boundary`,
-                remove: true,
-              },
-              { clientId: `12`, rank: -5, text: `move across cursor ranges` },
-              { clientId: `8`, rank: 8, text: `update a middle page` },
-            ]) {
-              await client.mutation(write, {
-                ...operation,
-                idempotencyKey: crypto.randomUUID(),
-              })
-              await check()
-            }
-            if (functionName === `split`)
-              oracleAssertion(
-                `backend-oracle.test.ts:189:toBeGreaterThan`,
-                () => expect(splitResponses).toBeGreaterThan(0),
-              )
-          },
-          () => collection.cleanup(),
-          () => client.close(),
-        )
-      },
-    )
-  },
+const pageLoads = ([`javascript`, `react`] as const).flatMap((kind) =>
+  ([`list`, `split`] as const).map((functionName) => ({ kind, functionName })),
 )
+
+// One client loads one paginated function's pages, then receives each
+// authored backend write. After every write the Collection must mirror the
+// backend's own complete `all` query.
+async function loadPagesThroughWrites({
+  kind,
+  functionName,
+}: (typeof pageLoads)[number]): Promise<void> {
+  const client =
+    kind === `javascript`
+      ? new ConvexClient(url, { unsavedChangesWarning: false })
+      : new ConvexReactClient(url, { unsavedChangesWarning: false })
+  let splitResponses = 0
+  const inspect = (value: unknown): void => {
+    if (
+      value &&
+      typeof value === `object` &&
+      `pageStatus` in value &&
+      (value.pageStatus === `SplitRequired` ||
+        value.pageStatus === `SplitRecommended`)
+    )
+      splitResponses++
+  }
+  const source: ConvexCollectionClient =
+    `onUpdate` in client
+      ? {
+          onUpdate: (query, args, callback, onError) =>
+            client.onUpdate(
+              query,
+              args,
+              (value) => {
+                inspect(value)
+                return callback(value)
+              },
+              onError,
+            ),
+        }
+      : {
+          watchQuery: (query, args, options) => {
+            const watch = client.watchQuery(query, args, options)
+            return {
+              ...watch,
+              localQueryResult: () => {
+                const value = watch.localQueryResult()
+                inspect(value)
+                return value
+              },
+            }
+          },
+        }
+
+  const collection = createCollection(
+    convexPaginatedCollectionOptions({
+      id: `tasks`,
+      client: source,
+      query: makeFunctionReference<
+        `query`,
+        { paginationOpts: PaginationOptions },
+        PaginationResult<Task>
+      >(`tasks:${functionName}`),
+      queryArgs: {},
+      pageSize: 4,
+      getKey: (task) => task.clientId,
+      gcTime: 0,
+    }),
+  )
+  const check = () => expectMirrorsAllTasks(client, collection)
+  await withTestCleanup(
+    async () => {
+      await client.mutation(seed, { count: 23 })
+      await collection.preload()
+      oracleAssertion(`backend-oracle.test.ts:160:toBe`, () =>
+        expect(collection.size).toBe(23),
+      )
+      await check()
+      for (const operation of [
+        {
+          clientId: `new-first`,
+          rank: -10,
+          text: `insert before all pages`,
+        },
+        {
+          clientId: `new-last`,
+          rank: 100,
+          text: `append after exhaustion`,
+        },
+        {
+          clientId: `3`,
+          rank: 3,
+          text: `delete a boundary`,
+          remove: true,
+        },
+        { clientId: `12`, rank: -5, text: `move across cursor ranges` },
+        { clientId: `8`, rank: 8, text: `update a middle page` },
+      ]) {
+        await client.mutation(write, {
+          ...operation,
+          idempotencyKey: crypto.randomUUID(),
+        })
+        await check()
+      }
+      if (functionName === `split`)
+        oracleAssertion(`backend-oracle.test.ts:189:toBeGreaterThan`, () =>
+          expect(splitResponses).toBeGreaterThan(0),
+        )
+    },
+    () => collection.cleanup(),
+    () => client.close(),
+  )
+}
+
+oracleProperty({
+  id: `convex.backend-pages`,
+  law: {
+    statement: `A paginated Convex Collection mirrors the backend's complete task list after preload and after each insert, move, deletion and server split.`,
+    authority: `The real-backend contract stated at the top of this file; docs/collections/convex-collection.md; docs/contributing/oracle-coverage.md.`,
+    limits: `The isolated local backend, 23 seeded tasks, five authored writes, the list and split functions, through both installed SDKs.`,
+  },
+  histories: pageLoads,
+  label: ({ kind, functionName }) =>
+    `real backend with ${kind} client: loads ${functionName} pages through inserts, moves, deletions, and server splits`,
+  resolve: (pageLoad) => ({ pageLoad }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`convex backend pages`, plan, observe, () =>
+      loadPagesThroughWrites(plan.pageLoad),
+    ),
+  check: forwardAssertionJudgment,
+})
 
 async function durableHistory(
   draft: { clientId: string; text: string; rank: number; payload?: Value },

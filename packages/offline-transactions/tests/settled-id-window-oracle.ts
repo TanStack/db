@@ -1,5 +1,4 @@
 import fc from 'fast-check'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
 import { createTestOfflineEnvironment, turn } from './harness'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
@@ -153,11 +152,6 @@ function checkSettledWindow(
   return pass
 }
 
-declareOracle({
-  grammar: [history],
-  model: [settledWindowModel],
-  check: [checkSettledWindow],
-})
 const states = [
   ...paths.map((path) => `path ${path}`),
   `below horizon`,

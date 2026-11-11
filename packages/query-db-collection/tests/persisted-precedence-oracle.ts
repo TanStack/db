@@ -10,7 +10,6 @@
  * independently. These legality constraints avoid duplicate or invalid histories.
  * Three saved keys, one inserted key, one sync run, no failed I/O or peer claims.
  */
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { mergeDirectWritesOverFetch } from './direct-write-precedence-oracle'
 import type {
   MergeRow,
@@ -200,8 +199,3 @@ export const precedenceReached = (h: PrecedenceHistory) => [
   h.op,
   ...(h.laterFetch ? [`later-fetch`] : []),
 ]
-declareOracle({
-  model: [expectedPersistedPrecedence],
-  grammar: [precedenceHistories],
-  check: [precedenceViolations],
-})

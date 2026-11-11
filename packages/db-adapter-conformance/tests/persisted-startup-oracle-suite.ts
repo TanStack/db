@@ -51,6 +51,7 @@ export function registerPersistedStartupConformance<
   origin = () => undefined,
   scopedStartupCommit = false,
   timeout = 60_000,
+  owns,
 }: {
   property: string
   adapter: PersistedStartupAdapter<H>
@@ -60,6 +61,8 @@ export function registerPersistedStartupConformance<
   timeout?: number
   origins?: Array<string>
   origin?: (history: H) => string | undefined
+  /** The receiving adapter's production entry, forwarded to oracleProperty. */
+  owns?: ReadonlyArray<string>
 }) {
   const states = [
     ...startupRequiredStates(
@@ -364,6 +367,7 @@ export function registerPersistedStartupConformance<
 
       oracleProperty({
         id: property,
+        owns,
         law: {
           statement: `A complete eager source result replaces its persisted baseline and is durable before later refresh; network-first fallback preserves the saved snapshot. Opted-in receivers preserve ordinary startup commits without a full replacement.`,
           authority: `READY-3/PUB-7; docs/collections/query-collection.md, Direct Writes and Query Sync and Initial Data; glossary, network-first initial render; maintainer shared-owner decision 2026-11-09 and batching decision 2026-11-10.`,

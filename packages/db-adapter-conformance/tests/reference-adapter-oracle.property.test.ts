@@ -1,16 +1,15 @@
-import { describe, expect, it } from 'vitest'
-import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
+import { describe, expect } from 'vitest'
 import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
 import {
-  checkEagerLiveSourceHistory,
-  eagerLiveSourceHistoryArb,
-  eagerLiveSourceModel,
-  reachStatesFor,
-} from '../src'
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { checkEagerLiveSourceHistory, reachStatesFor } from '../src'
 import {
   checkEagerLiveSourceObservations,
   eagerLiveSourceHistories,
+  eagerLiveSourceLaw,
   eagerLiveSourceOracle,
   eagerLiveSourceOracleDriver,
   eagerLiveSourceRequiredStates,
@@ -19,6 +18,7 @@ import { referenceDriver } from './reference-adapter'
 import type { Observation } from '../../db/tests/oracle-property'
 import type {
   ConformanceRow,
+  EagerLiveSourceDriver,
   EagerLiveSourceHistory,
   EagerLiveSourceReachState,
   EagerLiveSourceStep,
@@ -56,7 +56,6 @@ import type { ReferenceMutant } from './reference-adapter'
 describe(`eager live-source oracle campaigns`, () => {
   const property = `adapter-conformance.eager-live-source.reference`
   const driver = referenceDriver()
-  const historyArb = eagerLiveSourceHistoryArb(driver)
   const runs = 600
   const campaignTimeoutMs = 120_000
 
@@ -146,19 +145,32 @@ describe(`eager live-source oracle campaigns`, () => {
   // cut, so in this history only the synchronous check at the restart rejects
   // it; in a campaign a non-prompt restart rejects it too.
   describe(`eager live-source conformance: prompt restart cut`, () => {
-    oracleReplayTest(it)(
-      `rejects a run that is ready at its prompt restart`,
-      async () => {
-        oracleRoute(`calibration`)
-        await expect(
-          checkEagerLiveSourceHistory(referenceDriver(`ready-at-restart`), [
-            { kind: `fail` },
-            { kind: `restart`, prompt: true },
-            { kind: `snapshot`, rows: [] },
-          ]),
-        ).rejects.toMatchObject({ law: `LIFE-5 (prompt restart)` })
+    const promptRestart: EagerLiveSourceHistory = [
+      { kind: `fail` },
+      { kind: `restart`, prompt: true },
+      { kind: `snapshot`, rows: [] },
+    ]
+    oracleProperty({
+      id: `${property}.prompt-restart`,
+      ...eagerLiveSourceOracle(driver),
+      law: {
+        ...eagerLiveSourceLaw,
+        limits: `The one prompt-restart history above, through the shared driver and check, on the reference adapter.`,
       },
-    )
+      check: checkEagerLiveSourceObservations,
+      histories: [promptRestart],
+      label: () => `a failure, a prompt restart and an empty delivery`,
+      calibrations: [
+        {
+          name: `rejects a run that is ready at its prompt restart`,
+          law: `LIFE-5 (prompt restart)`,
+          driver: eagerLiveSourceOracleDriver(
+            referenceDriver(`ready-at-restart`),
+          ),
+        },
+      ],
+      timeout: campaignTimeoutMs,
+    })
   })
 
   // Per-change commits use the same law and generated histories; reversing a
@@ -449,88 +461,124 @@ describe(`eager live-source oracle campaigns`, () => {
     ],
   ]
 
-  describe(`eager live-source grammar controls`, () => {
-    oracleReplayTest(it).each(witnesses)(
-      `reconstructs %s`,
-      async (_name, history) => {
-        oracleRoute(`fixed history`)
-        expect(withinGrammar(history, withoutValues)).toBe(true)
-        const { skipped } = await checkEagerLiveSourceHistory(
-          withoutValues,
-          history,
-        )
-        expect(skipped).toBe(0)
-      },
-    )
+  // Exclusion: each history ends with one step that is illegal where it
+  // stands. The check skips it and leaves the model where it was. A batch
+  // before the first ready is legal only with `listen-before-fetch`, so its
+  // case runs on a driver that does not declare it.
+  const lateListener = {
+    ...driver,
+    capabilities: new Set(
+      [...driver.capabilities].filter((c) => c !== `listen-before-fetch`),
+    ),
+  }
+  const invalid: Array<[string, EagerLiveSourceHistory]> = [
+    [
+      `a second renewal in one sync run`,
+      [{ kind: `renew` }, { kind: `renew` }],
+    ],
+    [
+      `a reconnect without a disconnect`,
+      [{ kind: `snapshot`, rows: [] }, { kind: `reconnect` }],
+    ],
+    [
+      `a delivery after the provider failed`,
+      [{ kind: `fail` }, { kind: `snapshot`, rows: [] }],
+    ],
+    [
+      `a batch while disconnected`,
+      [
+        { kind: `snapshot`, rows: [] },
+        { kind: `disconnect` },
+        { kind: `changes`, changes: [] },
+      ],
+    ],
+  ]
 
-    oracleReplayTest(it).each(valueWitnesses)(
-      `reconstructs %s`,
-      async (_name, history) => {
-        oracleRoute(`fixed history`)
-        expect(withinGrammar(history, withoutFields)).toBe(true)
-        const { skipped } = await checkEagerLiveSourceHistory(
-          withoutFields,
-          history,
-        )
-        expect(skipped).toBe(0)
-      },
-    )
-
-    // Exclusion: each history ends with one step that is illegal where it
-    // stands. The check skips it and leaves the model where it was. A batch
-    // before the first ready is legal only with `listen-before-fetch`, so its
-    // case runs on a driver that does not declare it.
-    const lateListener = {
-      ...driver,
-      capabilities: new Set(
-        [...driver.capabilities].filter((c) => c !== `listen-before-fetch`),
-      ),
-    }
-    oracleReplayTest(it)(
+  /** A grammar control: the domain its history runs in, the history, and the
+   * number of steps the check must skip (0 for reconstruction). */
+  type GrammarControl = {
+    domain: EagerLiveSourceDriver
+    history: EagerLiveSourceHistory
+    reconstructs: boolean
+    skipped: number
+  }
+  // Witness rows may hold Dates and bigints, so each history is the control's
+  // test name, and `resolve` maps it to its control.
+  const grammarControls = new Map<string, GrammarControl>([
+    ...witnesses.map(([name, history]): [string, GrammarControl] => [
+      `reconstructs ${name}`,
+      { domain: withoutValues, history, reconstructs: true, skipped: 0 },
+    ]),
+    ...valueWitnesses.map(([name, history]): [string, GrammarControl] => [
+      `reconstructs ${name}`,
+      { domain: withoutFields, history, reconstructs: true, skipped: 0 },
+    ]),
+    [
       `excludes a batch before the first ready without listen-before-fetch`,
-      async () => {
-        oracleRoute(`fixed history`)
-        const history = [{ kind: `changes` as const, changes: [] }]
-        const { skipped } = await checkEagerLiveSourceHistory(
-          lateListener,
-          history,
-        )
-        expect(skipped).toBe(1)
+      {
+        domain: lateListener,
+        history: [{ kind: `changes` as const, changes: [] }],
+        reconstructs: false,
+        skipped: 1,
       },
-    )
-    const invalid: Array<[string, EagerLiveSourceHistory]> = [
-      [
-        `a second renewal in one sync run`,
-        [{ kind: `renew` }, { kind: `renew` }],
-      ],
-      [
-        `a reconnect without a disconnect`,
-        [{ kind: `snapshot`, rows: [] }, { kind: `reconnect` }],
-      ],
-      [
-        `a delivery after the provider failed`,
-        [{ kind: `fail` }, { kind: `snapshot`, rows: [] }],
-      ],
-      [
-        `a batch while disconnected`,
-        [
-          { kind: `snapshot`, rows: [] },
-          { kind: `disconnect` },
-          { kind: `changes`, changes: [] },
-        ],
-      ],
-    ]
-    oracleReplayTest(it).each(invalid)(
-      `excludes %s`,
-      async (_name, history) => {
-        oracleRoute(`fixed history`)
-        const { skipped } = await checkEagerLiveSourceHistory(
-          withoutValues,
-          history,
-        )
-        expect(skipped).toBe(1)
+    ],
+    ...invalid.map(([name, history]): [string, GrammarControl] => [
+      `excludes ${name}`,
+      { domain: withoutValues, history, reconstructs: false, skipped: 1 },
+    ]),
+  ])
+
+  // Runs one control through the shared check on the reference adapter. A
+  // reconstruction must lie in the generator's domain and skip no step; an
+  // exclusion skips exactly its final illegal step.
+  async function runGrammarControl({
+    domain,
+    history,
+    reconstructs,
+    skipped: expectedSkipped,
+  }: GrammarControl): Promise<void> {
+    if (reconstructs) expect(withinGrammar(history, domain)).toBe(true)
+    const { skipped } = await checkEagerLiveSourceHistory(domain, history)
+    expect(skipped).toBe(expectedSkipped)
+  }
+
+  // The controls whose test names start with `prefix`, through the shared
+  // check on the reference adapter.
+  function grammarControlCases(prefix: `reconstructs ` | `excludes `) {
+    return {
+      law: {
+        statement: `Reconstruction: each known adapter witness lies in the history grammar's domain, and the shared check accepts it on the reference adapter without skipping a step. Exclusion: a history that ends with a step illegal where it stands has exactly that step skipped, and the model stays where it was.`,
+        authority: `docs/contributing/oracle-rubric.md ORC-004 grammar controls; the shared oracle in src/eager-live-source-oracle.ts.`,
+        limits: `The named Neon, TrailBase and RxDB witnesses and the five invalid histories above, on the reference adapter; this judges the grammar and the check, not a published adapter.`,
       },
-    )
+      histories: [...grammarControls.keys()].filter((name) =>
+        name.startsWith(prefix),
+      ),
+      label: (name: string) => name,
+      resolve: (name: string) => grammarControls.get(name)!,
+      model: recordedAssertionJudgment,
+      driver: (
+        plan: GrammarControl,
+        observe: (checkpoint: string, value: unknown) => void,
+      ) =>
+        recordAssertionJudgment(`grammar control`, plan, observe, () =>
+          runGrammarControl(plan),
+        ),
+      timeout: campaignTimeoutMs,
+    }
+  }
+
+  describe(`eager live-source grammar controls`, () => {
+    oracleProperty({
+      id: `${property}.reconstruction`,
+      ...grammarControlCases(`reconstructs `),
+      check: forwardAssertionJudgment,
+    })
+    oracleProperty({
+      id: `${property}.exclusion`,
+      ...grammarControlCases(`excludes `),
+      check: forwardAssertionJudgment,
+    })
   })
 
   // Ablation judges the grammar rather than a new product law. The same
@@ -644,11 +692,4 @@ describe(`eager live-source oracle campaigns`, () => {
       step.kind === `snapshot` ? { kind: step.kind, rows: step.rows } : step,
     ),
   )
-
-  // Owns no production entry: the reference adapter is a test fixture.
-  declareOracle({
-    check: [checkEagerLiveSourceHistory, checkEagerLiveSourceObservations],
-    model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-    grammar: [historyArb],
-  })
 })

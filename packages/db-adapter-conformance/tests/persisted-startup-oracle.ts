@@ -34,7 +34,6 @@
  * persisted-startup-driver.ts and persisted-startup-host.ts.
  */
 import fc from 'fast-check'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { expectedEagerRowScans } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
 
 export type PersistedStartupHistory = {
@@ -163,25 +162,11 @@ export function expectedPersistedStartup(
 // axis loses the startup race; dropping peers admits a scoped global truncate.
 // A cached result is already available, so its receiving grammar restricts it
 // to before-restore. Duplicate keys and collection-wide peers are not legal.
-export const persistedStartupMembershipArb = (scope: StartupScope) =>
-  fc.oneof(
-    fc.record({
-      previous: fc.constant(0),
-      next: fc.integer({ min: 0, max: 7 }),
-      peer: fc.constant(false),
-    }),
-    fc.record({
-      previous: fc.integer({ min: 1, max: 7 }),
-      next: fc.oneof(fc.constant(0), fc.integer({ min: 0, max: 7 })),
-      peer: scope === `scoped` ? fc.boolean() : fc.constant(false),
-    }),
-  )
 // A deadline fallback requires a nonempty saved baseline (empty restore stays
 // loading), network-first enabled, and a held
 // source result. Ordinary responses retain both restore orders. The deadline's
 // exact threshold belongs to the persisted-readiness oracle; here zero expires
 // the wait while the source is held, and 60 seconds keeps it pending otherwise.
-export const persistedStartupRenderArb = fc.boolean()
 export function withStartupRender<H extends PersistedStartupHistory>(
   h: H,
   networkFirst: boolean,
@@ -498,22 +483,3 @@ export function persistedStartupViolations(
     )
   return violations
 }
-
-declareOracle({
-  model: [expectedPersistedStartup, expectedStartupFallback],
-  grammar: [
-    persistedStartupMembershipArb,
-    persistedStartupRenderArb,
-    withStartupRender,
-    withStartupMutations,
-    uniqueStartupHistories,
-    persistedStartupHistoryArb,
-  ],
-  check: [
-    persistedStartupFallbackViolations,
-    persistedStartupCutViolations,
-    persistedStartupPremiseViolations,
-    persistedStartupViolations,
-    persistedStartupBatchViolations,
-  ],
-})

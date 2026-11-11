@@ -1,5 +1,5 @@
 import fc from 'fast-check'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, vi } from 'vitest'
 import {
   IR,
   createCollection,
@@ -9,18 +9,16 @@ import {
 import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
-import {
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleReplayRequested, oracleRuns } from '../../db/tests/oracle-config'
 import {
   oracleProperty,
   violation as oracleViolation,
   pass,
 } from '../../db/tests/oracle-property'
+import {
+  recordAssertionJudgment,
+  rejectAt,
+} from '../../db/tests/oracle-assertion-adapter'
 import {
   checkExistingElectricComparison,
   existingElectricComparison,
@@ -129,8 +127,6 @@ vi.mock(`@electric-sql/client`, async (importOriginal) => {
 // TANSTACK_DB_ORACLE_SEED=20260917 TANSTACK_DB_ORACLE_PATH=0 \
 // TANSTACK_DB_ORACLE_PROPERTY=electric.sdk-snapshot-delivery \
 // pnpm --dir packages/electric-db-collection exec vitest run tests/electric-sdk-delivery-oracle.property.test.ts
-// Ordinary tests stand aside during any path replay, which runs one property.
-const fixedCase = oracleReplayTest(it)
 // TANSTACK_DB_ELECTRIC_SDK_DELIVERY_FAULT is a fault-injection switch, not a
 // replay variable. It stays readable during replays.
 const replayFault = process.env.TANSTACK_DB_ELECTRIC_SDK_DELIVERY_FAULT
@@ -141,26 +137,6 @@ if (
 ) {
   throw new Error(`Unknown Electric SDK delivery oracle fault`)
 }
-
-// The checks are the drivers that run a finite history and compare production
-// with the model state at each checkpoint. The retry model is the shared
-// module `electric-retry-decision-model.ts`, which predicts each observation.
-declareOracle({
-  check: [
-    checkSnapshots,
-    checkMembership,
-    runClientRetryCell,
-    checkSourceRelease,
-    checkManagedRotation,
-    checkResumeCheckpoint,
-  ],
-  model: [
-    createRetryModel,
-    applyRetryModel,
-    expectedRetryObservation,
-    expectedResumeCheckpoint,
-  ],
-})
 
 // Scaled with the run multiplier, so stress campaigns keep their budget.
 const campaignTimeoutMs = oracleRuns(30_000)
@@ -846,78 +822,162 @@ oracleProperty({
   timeout: campaignTimeoutMs,
 })
 
-fixedCase(`detects dropped snapshot rows`, async () => {
-  oracleRoute(`calibration`)
-  await expect(checkSnapshots(2, `payload`, true)).rejects.toMatchObject({
-    name: `AssertionError`,
-    message: expect.stringContaining(`snapshot 0 applied rows`),
-  })
-})
+/** Whether a calibration's old Vitest matchers accept a rejection. */
+function matches(assertions: () => void): boolean {
+  try {
+    assertions()
+    return true
+  } catch {
+    return false
+  }
+}
+const asError = (failure: unknown): Error =>
+  failure instanceof Error ? failure : new Error(String(failure))
+/** A rejection that the old matchers did not accept stays a driver error: a
+ * new, unmarked error, so no comparison checkpoint inside it counts. */
+const unaccepted = (mutant: string, failure: unknown): Error =>
+  new Error(
+    `${mutant} failed in a way that its calibration does not accept: ${String(failure)}`,
+  )
+const rejectionOf = (run: Promise<unknown>): Promise<unknown> =>
+  run.then(
+    () => undefined,
+    (error: unknown) => error ?? new Error(String(error)),
+  )
 
-fixedCase(
-  `retains the snapshot law and checkpoint when cleanup also fails`,
-  async () => {
-    oracleRoute(`calibration`)
-    const cleanupFailure = new Error(`injected cleanup failure`)
-    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-    const subscribe = ShapeStream.prototype.subscribe
-    snapshotViolation.reset()
-    try {
-      let primary: unknown
-      try {
-        await snapshotViolation.check({ width: 2, name: `payload` }, () =>
-          checkSnapshots(2, `payload`, true, cleanupFailure),
-        )
-      } catch (error) {
-        primary = snapshotViolation.report(error)
-      }
-      expect(primary).toMatchObject({
-        name: `AssertionError`,
-        message: expect.stringContaining(`snapshot 0 applied rows`),
-      })
-      expect((primary as Error).message).toContain(
-        `Original violation: AssertionError:snapshot 0 applied rows`,
-      )
-      expect(warning.mock.calls).toEqual([
-        [
-          `Electric oracle cleanup failed after a primary error: injected snapshot cleanup`,
-          cleanupFailure,
-        ],
-      ])
-      expect(ShapeStream.prototype.subscribe).toBe(subscribe)
-    } finally {
-      warning.mockRestore()
-    }
+// The snapshot calibrations below corrupt exactly the two-row `payload`
+// history with no retries, which the generated grammar cannot take back (it
+// always draws live attempts), so it runs as its own enumerated case through
+// the same checkSnapshots driver and comparison.
+type SnapshotCalibrationPlan = { history: { width: number; name: string } }
+const SNAPSHOT_FIXED_LAW = `electric.sdk-snapshot-delivery-fixed`
+oracleProperty({
+  id: `electric.sdk-snapshot-delivery-fixed`,
+  law: {
+    statement: `Installed-SDK snapshot deliveries agree with the independent overlapping source.`,
+    authority: `The snapshot-delivery contract and independent source/health judgments stated beside checkSnapshots.`,
+    limits: `The two-row payload history without retries, which the snapshot calibrations corrupt; it runs through the same driver as electric.sdk-snapshot-delivery.`,
   },
-)
-
-fixedCase(
-  `restores the SDK setup resources after construction fails`,
-  async () => {
-    oracleRoute(`case`)
-    const primary = new Error(`collection construction failed`)
-    const secondary = new Error(`provider release failed`)
-    const subscribe = ShapeStream.prototype.subscribe
-    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-    try {
-      await expect(
-        checkSnapshots(2, `payload`, false, undefined, {
-          primary,
-          cleanup: secondary,
+  owns: [`src/electric.ts#electricCollectionOptions`],
+  histories: [{ width: 2, name: `payload` }],
+  label: ({ width, name }) => `${width} rows named ${name}, no retries`,
+  ...existingElectricComparison(
+    SNAPSHOT_FIXED_LAW,
+    ({ width, name }: { width: number; name: string }) =>
+      checkSnapshots(width, name),
+  ),
+  check: checkExistingElectricComparison,
+  calibrations: [
+    {
+      name: `detects dropped snapshot rows`,
+      law: SNAPSHOT_FIXED_LAW,
+      driver: (plan: SnapshotCalibrationPlan, observe) =>
+        recordAssertionJudgment(SNAPSHOT_FIXED_LAW, plan, observe, async () => {
+          const { width, name } = plan.history
+          const failure = await rejectionOf(checkSnapshots(width, name, true))
+          if (failure === undefined) return
+          // Exactly the old matcher.
+          if (
+            matches(() =>
+              expect(failure).toMatchObject({
+                name: `AssertionError`,
+                message: expect.stringContaining(`snapshot 0 applied rows`),
+              }),
+            )
+          )
+            rejectAt(`dropped snapshot rows`, asError(failure))
+          throw unaccepted(`the dropped-rows mutant`, failure)
         }),
-      ).rejects.toBe(primary)
-      expect(warning.mock.calls).toEqual([
-        [
-          `Electric oracle cleanup failed after a primary error: snapshot HTTP provider during setup`,
-          secondary,
-        ],
-      ])
-      expect(ShapeStream.prototype.subscribe).toBe(subscribe)
-    } finally {
-      warning.mockRestore()
-    }
-  },
-)
+    },
+    {
+      name: `retains the snapshot law and checkpoint when cleanup also fails`,
+      law: SNAPSHOT_FIXED_LAW,
+      driver: (plan: SnapshotCalibrationPlan, observe) =>
+        recordAssertionJudgment(SNAPSHOT_FIXED_LAW, plan, observe, async () => {
+          const { width, name } = plan.history
+          const cleanupFailure = new Error(`injected cleanup failure`)
+          const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+          const subscribe = ShapeStream.prototype.subscribe
+          snapshotViolation.reset()
+          try {
+            let primary: unknown
+            try {
+              await snapshotViolation.check({ width, name }, () =>
+                checkSnapshots(width, name, true, cleanupFailure),
+              )
+            } catch (error) {
+              primary = snapshotViolation.report(error)
+            }
+            if (primary === undefined) return
+            // Exactly the old matchers: the primary law and checkpoint survive,
+            // the cleanup failure is reported once, and the SDK is restored.
+            if (
+              matches(() => {
+                expect(primary).toMatchObject({
+                  name: `AssertionError`,
+                  message: expect.stringContaining(`snapshot 0 applied rows`),
+                })
+                expect((primary as Error).message).toContain(
+                  `Original violation: AssertionError:snapshot 0 applied rows`,
+                )
+                expect(warning.mock.calls).toEqual([
+                  [
+                    `Electric oracle cleanup failed after a primary error: injected snapshot cleanup`,
+                    cleanupFailure,
+                  ],
+                ])
+                expect(ShapeStream.prototype.subscribe).toBe(subscribe)
+              })
+            )
+              rejectAt(`snapshot cleanup failure`, asError(primary))
+            throw unaccepted(`the cleanup-failure mutant`, primary)
+          } finally {
+            warning.mockRestore()
+          }
+        }),
+    },
+    {
+      name: `restores the SDK setup resources after construction fails`,
+      law: SNAPSHOT_FIXED_LAW,
+      driver: (plan: SnapshotCalibrationPlan, observe) =>
+        recordAssertionJudgment(SNAPSHOT_FIXED_LAW, plan, observe, async () => {
+          const { width, name } = plan.history
+          const primary = new Error(`collection construction failed`)
+          const secondary = new Error(`provider release failed`)
+          const subscribe = ShapeStream.prototype.subscribe
+          const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+          try {
+            const failure = await rejectionOf(
+              checkSnapshots(width, name, false, undefined, {
+                primary,
+                cleanup: secondary,
+              }),
+            )
+            if (failure === undefined) return
+            // Exactly the old matchers: the construction failure stays primary,
+            // the release failure is reported, and the SDK is restored.
+            if (
+              matches(() => {
+                expect(failure).toBe(primary)
+                expect(warning.mock.calls).toEqual([
+                  [
+                    `Electric oracle cleanup failed after a primary error: snapshot HTTP provider during setup`,
+                    secondary,
+                  ],
+                ])
+                expect(ShapeStream.prototype.subscribe).toBe(subscribe)
+              })
+            )
+              rejectAt(`setup failure cleanup`, asError(failure))
+            throw unaccepted(`the setup-failure mutant`, failure)
+          } finally {
+            warning.mockRestore()
+          }
+        }),
+    },
+  ],
+  timeout: campaignTimeoutMs,
+})
 
 async function checkMembership(
   leftWidth: number,
@@ -1105,6 +1165,8 @@ oracleProperty({
     arbitrary: membershipHistoryArbitrary,
     runs: 12,
     fixedSeeds: [20260918],
+    // The dropped move-in calibration corrupts this smallest history.
+    fixed: [{ name: `one left, one right, one cycle`, history: [1, 1, 1] }],
   },
   ...existingElectricComparison(
     `electric.sdk-dnf-membership`,
@@ -1114,15 +1176,37 @@ oracleProperty({
       ),
   ),
   check: checkExistingElectricComparison,
+  calibrations: [
+    {
+      name: `detects dropped move-in at its visibility checkpoint`,
+      law: `electric.sdk-dnf-membership`,
+      driver: (plan: { history: [number, number, number] }, observe) =>
+        recordAssertionJudgment(
+          `electric.sdk-dnf-membership`,
+          plan,
+          observe,
+          async () => {
+            const [left, right, cycles] = plan.history
+            const failure = await rejectionOf(
+              checkMembership(left, right, cycles, true),
+            )
+            if (failure === undefined) return
+            // Exactly the old matcher.
+            if (
+              matches(() =>
+                expect(failure).toMatchObject({
+                  name: `AssertionError`,
+                  message: expect.stringContaining(`after silent move-in`),
+                }),
+              )
+            )
+              rejectAt(`dropped move-in`, asError(failure))
+            throw unaccepted(`the dropped move-in mutant`, failure)
+          },
+        ),
+    },
+  ],
   timeout: campaignTimeoutMs,
-})
-
-fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
-  oracleRoute(`calibration`)
-  await expect(checkMembership(1, 1, 1, true)).rejects.toMatchObject({
-    name: `AssertionError`,
-    message: expect.stringContaining(`after silent move-in`),
-  })
 })
 
 /**
@@ -1367,14 +1451,25 @@ async function runClientRetryCell(
   ])
 }
 
-fixedCase.each(clientRetryCells)(
-  `installed client: %s in %s mode with an onError %s follows the retry-decision model`,
-  (outcome, mode, decision) => {
-    oracleRoute(`case`)
-    return runClientRetryCell(outcome, mode, decision)
+oracleProperty({
+  id: `electric.sdk-client-retry`,
+  law: {
+    statement: `The installed Electric client's retry, give-up and recovery outcomes follow the retry-decision model at every checkpoint.`,
+    authority: `The retry-decision law and model in electric-retry-decision-model.ts, received through the installed client as stated above.`,
+    limits: `The eighteen outcome, sync-mode and onError-decision cells above; rejection causes are compared only as rejections here.`,
   },
-  60_000,
-)
+  owns: [`src/electric.ts#electricCollectionOptions`],
+  histories: clientRetryCells,
+  label: ([outcome, mode, decision]) =>
+    `installed client: ${outcome} in ${mode} mode with an onError ${decision} follows the retry-decision model`,
+  ...existingElectricComparison(
+    `electric.sdk-client-retry`,
+    ([outcome, mode, decision]: (typeof clientRetryCells)[number]) =>
+      runClientRetryCell(outcome, mode, decision),
+  ),
+  check: checkExistingElectricComparison,
+  timeout: 60_000,
+})
 
 /**
  * A managed cache claim can expire while an installed SDK snapshot request is
@@ -1729,10 +1824,6 @@ async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
   ])
 }
 
-fixedCase(`discards an old SDK snapshot after managed cache rotation`, () => {
-  oracleRoute(`case`)
-  return checkManagedRotation([`after-snapshots`])
-})
 const rotationViolation = sameViolation()
 oracleProperty({
   id: `electric.sdk-rotation-release`,
@@ -1753,6 +1844,12 @@ oracleProperty({
     ),
     runs: 40,
     fixedSeeds: [20261026],
+    fixed: [
+      {
+        name: `discards an old SDK snapshot after managed cache rotation`,
+        history: [`after-snapshots`],
+      },
+    ],
   },
   ...existingElectricComparison(
     `electric.sdk-rotation-release`,
@@ -2020,20 +2117,23 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
 
 // Replay the smallest incomplete deliveries and their terminal neighbors in
 // every mode through the same driver and cleanup comparison as generation.
-fixedCase.each([`eager`, `on-demand`, `progressive`] as const)(
-  `releases listeners after incomplete delivery in %s mode`,
-  async (mode) => {
-    oracleRoute(`case`)
-    for (const answer of [`row`, `reset`] as const)
-      for (const end of [
+const incompleteDeliveries = (
+  [`eager`, `on-demand`, `progressive`] as const
+).flatMap((mode) =>
+  ([`row`, `reset`] as const).flatMap((answer) =>
+    (
+      [
         `open`,
         `give-up`,
         `abort`,
         `deciding-retry`,
         `deciding-give-up`,
-      ] as const)
-        await checkSourceRelease({ mode, runs: [{ answers: [answer], end }] })
-  },
+      ] as const
+    ).map((end) => ({
+      name: `releases listeners after incomplete delivery in ${mode} mode: ${answer} answer, ${end} end`,
+      history: { mode, runs: [{ answers: [answer], end }] },
+    })),
+  ),
 )
 
 const releaseViolation = sameViolation()
@@ -2077,6 +2177,7 @@ oracleProperty({
     arbitrary: releaseHistoryArbitrary,
     runs: 40,
     fixedSeeds: [20261024],
+    fixed: incompleteDeliveries,
   },
   ...existingElectricComparison(
     `electric.sdk-source-release`,
