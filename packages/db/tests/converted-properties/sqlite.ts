@@ -5,12 +5,21 @@
 // files and deletes this directory.
 import type { ConvertedOwnerGroup } from './index.js'
 
-export const properties: ReadonlyArray<string> = [`opfs.open-outcome`]
+export const properties: ReadonlyArray<string> = [
+  `opfs.open-outcome`,
+  `electron.ipc-readiness`,
+  `electron.follower-settlement`,
+]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
     `browser-db-sqlite-persistence/tests/opfs-open-outcome-oracle.test.ts`,
     `opfs`,
     `open-outcome`,
+  ],
+  [
+    `electron-db-sqlite-persistence/tests/electron-ipc-readiness-oracle.test.ts`,
+    `electron`,
+    `ipc-readiness follower-settlement`,
   ],
 ]
