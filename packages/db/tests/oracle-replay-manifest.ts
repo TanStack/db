@@ -18,13 +18,11 @@ const ownerGroups: ReadonlyArray<
     `query-db-collection/tests/documented-mutations-oracle.test.ts`,
     `documented-mutations`,
     `query`,
-    `db/tests/documented-mutations-oracle.ts`,
   ],
   [
     `electric-db-collection/tests/documented-mutations-oracle.test.ts`,
     `documented-mutations`,
     `electric`,
-    `db/tests/documented-mutations-oracle.ts`,
   ],
   [
     `query-db-collection/tests/reload-housekeeping-oracle.test.ts`,
