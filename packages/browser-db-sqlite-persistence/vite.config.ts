@@ -11,6 +11,7 @@ const adapterBrowserTests = [
   `tests/trailbase-hydration-oracle.test.ts`,
   `tests/trailbase-eager-live-source-oracle.test.ts`,
   `tests/trailbase-browser-fidelity.test.ts`,
+  `tests/opfs-fixture-cleanup.test.ts`,
   `tests/query-rejected-write-cutoff-browser-fidelity.test.ts`,
   `tests/persisted-baseline-lifecycle-oracle.test.ts`,
 ]

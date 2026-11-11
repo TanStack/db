@@ -318,3 +318,19 @@ transport/cleanup calibrations. Permanent busy errors still fail and a prior
 product mismatch remains primary. Fixed and random hydration campaigns each
 reach all nine required states. Changed-file lint and the browser package's
 `tsc --noEmit` pass. New-head CI remains required before merge.
+
+### Chromium calibration routing correction
+
+On `f6cee8966e20460c900f5159fdc508f7d6495adc`, the SQLite-adapter job
+`130284780161` also selected the new cleanup calibration through the package's
+default `tests/**/*.test.ts` pattern. Its runner does not install Chromium.
+The four new checks failed at browser launch with a missing executable;
+the other browser-package runtime checks passed (1,349 passed, two expected
+failures, one skipped). This is a test-registration mistake, not a product
+comparison failure.
+
+The default Vite configuration now lists this file beside the existing
+Chromium-only exclusions. The dedicated adapter-browser configuration still
+includes it. `vitest list --filesOnly --json` verifies that the default
+configuration excludes the file and the Chromium configuration selects it.
+No test is disabled in its intended receiving job. Changed-file lint passes.
