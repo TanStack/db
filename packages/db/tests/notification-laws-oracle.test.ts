@@ -15,7 +15,7 @@
  * production batches, and asynchronous providers are outside this owner.
  * `change-event-history-oracle.test.ts` owns direct source Collection events.
  */
-import { expect, it } from 'vitest'
+import { expect } from 'vitest'
 import fc from 'fast-check'
 import { createCollection, createLiveQueryCollection } from '../src'
 import {
@@ -23,7 +23,7 @@ import {
   expectNotificationsStopped,
 } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 import { ScenarioLifetime } from './conformance/scenario-lifetime'
-import { oracleProperty, oracleRoute, pass, violation } from './oracle-config'
+import { oracleProperty, pass, violation } from './oracle-config'
 import type { Notification } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 import type { Verdict } from './oracle-config'
 
@@ -255,41 +255,6 @@ oracleProperty({
       ? pass
       : violation(`complete history`, `the synthetic history was not recorded`)
   },
-})
-
-it.each([
-  'duplicate',
-  'spurious-delete',
-  'wrong-key',
-  'wrong-payload',
-  'missing-event',
-  'absent-update',
-  'absent-delete',
-  'unknown-type',
-])(`rejects the %s publication mutant`, (fault) => {
-  oracleRoute(`calibration`)
-  const peer = { id: 'peer', count: 2 }
-  const row = { id: 'owned', count: 1 }
-  const insert = { type: 'insert', key: row.id, value: row }
-  const healthy: Array<Notification<Row>> = [
-    { events: [], rows: [peer] },
-    { events: [insert], rows: [peer, row] },
-  ]
-  expectNotificationHistory([peer], healthy, [peer, row])
-  const callbacks = structuredClone(healthy)
-  const batch = callbacks[1]!
-  if (fault === 'duplicate') callbacks.push(structuredClone(batch))
-  if (fault === 'spurious-delete')
-    batch.events.push({ ...insert, type: 'delete' })
-  if (fault === 'wrong-key') batch.events[0]!.key = 'wrong'
-  if (fault === 'wrong-payload') batch.events[0]!.value.count++
-  if (fault === 'missing-event') batch.events = []
-  if (fault === 'absent-update') batch.events[0]!.type = 'update'
-  if (fault === 'absent-delete') batch.events[0]!.type = 'delete'
-  if (fault === 'unknown-type') batch.events[0]!.type = 'upsert'
-  expect(() =>
-    expectNotificationHistory([peer], callbacks, [peer, row]),
-  ).toThrow()
 })
 
 oracleProperty({

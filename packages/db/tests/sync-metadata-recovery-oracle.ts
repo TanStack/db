@@ -1,5 +1,4 @@
 import { fc } from '@fast-check/vitest'
-import { declareOracle } from './oracle-declaration.js'
 import {
   compareSource,
   createSessionModel,
@@ -275,12 +274,3 @@ export async function runRecoverySchedule(
   if (primary !== undefined) throw primary
   return outcome!
 }
-
-declareOracle({
-  grammar: [
-    recoveryValueArbitrary,
-    recoverySchedulesOf,
-    recoverySchedulesArbitrary,
-  ],
-  check: [runRecoverySchedule],
-})

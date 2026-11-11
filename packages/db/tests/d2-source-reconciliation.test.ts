@@ -12,10 +12,20 @@ import {
   expectedWeightedRowIdentity,
   runWithCleanup,
 } from './d2-source-reconciliation-support.js'
+import {
+  applyReconciliationStep,
+  createReconciliationModel,
+  executedReplayReach,
+  upsert,
+} from './d2-source-reconciliation-model-oracle.js'
 import type {
   SourceKey,
   SourceRow,
 } from './d2-source-reconciliation-support.js'
+import type {
+  Reconciler,
+  ReconciliationStep,
+} from './d2-source-reconciliation-model-oracle.js'
 import type { ChangeMessage } from '../src/types.js'
 
 it(`retains a D2 mismatch and later cleanup diagnostics while releasing every resource`, async () => {
@@ -526,3 +536,161 @@ it(`keeps revision and value in weighted row identity`, () => {
     ]),
   )
 })
+
+// Moved from d2-source-reconciliation-oracle.property.test.ts. The first three
+// step the model and its per-step check through fixed histories and compare
+// the model's state with literal rows; the next tests the reach measurement
+// that the fixed-seed census uses; the last calibrates the per-step check
+// against a corrupted reconciler on a hand-built model state.
+it(`keeps numeric and string source keys distinct across restart`, () => {
+  const model = createReconciliationModel()
+  const row = { id: 1, revision: 1, value: 1 }
+  const keys = [0, `0`] as const
+
+  applyReconciliationStep(model, {
+    type: `batch`,
+    operations: keys.map((key) => ({
+      type: `upsert` as const,
+      key,
+      row,
+      reportedPreviousValue: row,
+    })),
+  })
+  expect(model.sourceRows).toEqual(
+    new Map<SourceKey, SourceRow>([
+      [0, row],
+      [`0`, row],
+    ]),
+  )
+  expect(model.sentRows).toEqual(model.sourceRows)
+  expect(model.relation).toEqual(
+    new Map([
+      [expectedWeightedRowIdentity(0, row), 1],
+      [expectedWeightedRowIdentity(`0`, row), 1],
+    ]),
+  )
+
+  applyReconciliationStep(model, { type: `teardown` })
+  applyReconciliationStep(model, { type: `restart` })
+  expect(model.sourceRows).toEqual(
+    new Map<SourceKey, SourceRow>([
+      [0, row],
+      [`0`, row],
+    ]),
+  )
+  expect(model.sentRows).toEqual(model.sourceRows)
+  expect(model.relation).toEqual(
+    new Map([
+      [expectedWeightedRowIdentity(0, row), 1],
+      [expectedWeightedRowIdentity(`0`, row), 1],
+    ]),
+  )
+})
+
+it(`preserves external source rows across graph teardown and restart`, () => {
+  const model = createReconciliationModel()
+  const row = { id: 1, revision: 1, value: 1 }
+
+  applyReconciliationStep(model, upsert(`row`, row))
+  applyReconciliationStep(model, { type: `teardown` })
+  expect(model.graphActive).toBe(false)
+  expect(model.sourceRows).toEqual(new Map([[`row`, row]]))
+  expect(model.sentRows).toEqual(new Map())
+  expect(model.relation).toEqual(new Map())
+
+  applyReconciliationStep(model, { type: `restart` })
+  expect(model.graphActive).toBe(true)
+  expect(model.sourceRows).toEqual(new Map([[`row`, row]]))
+  expect(model.sentRows).toEqual(new Map([[`row`, row]]))
+  expect(model.relation).toEqual(
+    new Map([[expectedWeightedRowIdentity(`row`, row), 1]]),
+  )
+})
+
+it(`replays external source changes made while the graph is down`, () => {
+  const model = createReconciliationModel()
+  const first = { id: 1, revision: 1, value: 1 }
+  const replacement = { id: 1, revision: 2, value: 2 }
+
+  applyReconciliationStep(model, upsert(`row`, first))
+  applyReconciliationStep(model, { type: `teardown` })
+  applyReconciliationStep(model, upsert(`row`, replacement, first))
+  expect(model.sourceRows).toEqual(new Map([[`row`, replacement]]))
+  expect(model.sentRows).toEqual(new Map())
+  expect(model.relation).toEqual(new Map())
+
+  applyReconciliationStep(model, { type: `restart` })
+  expect(model.sourceRows).toEqual(new Map([[`row`, replacement]]))
+  expect(model.sentRows).toEqual(new Map([[`row`, replacement]]))
+  expect(model.relation).toEqual(
+    new Map([[expectedWeightedRowIdentity(`row`, replacement), 1]]),
+  )
+})
+
+it(`does not count absent replay or an unfinished downtime as replay coverage`, () => {
+  const absent: ReconciliationStep = {
+    type: `batch`,
+    operations: [{ type: `replay`, key: `missing` }],
+  }
+  expect(
+    executedReplayReach([{ type: `teardown` }, absent, { type: `restart` }]),
+  ).toBe(0)
+  const change = upsert(`row`, { id: 1, revision: 1, value: 1 })
+  expect(executedReplayReach([{ type: `teardown` }, change])).toBe(0)
+  expect(
+    executedReplayReach([{ type: `teardown` }, change, { type: `restart` }]),
+  ).toBe(1)
+  expect(
+    executedReplayReach([
+      change,
+      { type: `teardown` },
+      change,
+      { type: `restart` },
+    ]),
+  ).toBe(0)
+})
+
+it.each([`upsert`, `rawUpdate`, `replay`, `restart`] as const)(
+  `detects driver mutation at %s without changing expected source rows`,
+  (entry) => {
+    const model = createReconciliationModel()
+    const row = { id: 1, revision: 1, value: 1 }
+    const step: ReconciliationStep =
+      entry === `restart`
+        ? { type: `restart` }
+        : entry === `replay`
+          ? { type: `batch`, operations: [{ type: `replay`, key: `row` }] }
+          : {
+              type: `batch`,
+              operations: [
+                { type: entry, key: `row`, row, reportedPreviousValue: row },
+              ],
+            }
+    if (entry === `restart` || entry === `replay`) {
+      applyReconciliationStep(model, upsert(`row`, row))
+      applyReconciliationStep(model, { type: `teardown` })
+      if (entry === `replay`) model.graphActive = true
+    }
+    const corrupt: Reconciler = (changes, sent) => {
+      for (const change of changes) change.value.value++
+      return reconcileChangesForD2(changes, sent)
+    }
+    expect(() => applyReconciliationStep(model, step, corrupt)).toThrowError(
+      expect.objectContaining({ name: `AssertionError` }),
+    )
+    expect(model.sourceRows.get(`row`)).toEqual({
+      id: 1,
+      revision: 1,
+      value: 1,
+    })
+    expect(row).toEqual({ id: 1, revision: 1, value: 1 })
+    // Fresh real helper control at the same entry, including restart hydration.
+    const valid = createReconciliationModel()
+    if (entry === `restart` || entry === `replay`) {
+      applyReconciliationStep(valid, upsert(`row`, row))
+      applyReconciliationStep(valid, { type: `teardown` })
+      if (entry === `replay`) valid.graphActive = true
+    }
+    applyReconciliationStep(valid, step)
+  },
+)

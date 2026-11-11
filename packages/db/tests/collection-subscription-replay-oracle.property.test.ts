@@ -12,7 +12,6 @@ import {
   oracleRoute,
   readOracleRunConfig,
 } from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
 import { oracleProperty } from './oracle-property.js'
 import {
   forwardAssertionJudgment,
@@ -27,10 +26,20 @@ import {
   sortedChanges,
   sortedRows,
 } from './collection-subscription-replay-support.js'
+import {
+  replayScenarioArbitrary,
+  rowsArbitrary,
+} from './collection-subscription-replay-grammar-oracle.js'
 import type {
   ReplayChange,
   ReplayRow,
 } from './collection-subscription-replay-support.js'
+import type {
+  ReplayDemandId,
+  ReplayLoad,
+  ReplayScenario,
+  SourceAction,
+} from './collection-subscription-replay-grammar-oracle.js'
 import type { Collection } from '../src/collection/index.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,
@@ -56,7 +65,8 @@ import type { Scheduler } from 'fast-check'
  * rows, including during subscriber callback reentry.
  *
  * Small scenario records describe source rows, logical demands, replay
- * attempts, settlement order, release points, and later source actions. Plain
+ * attempts, settlement order, release points, and later source actions; their
+ * grammar lives in collection-subscription-replay-grammar-oracle.ts. Plain
  * Map-based reducers compute the expected snapshot and event batches. The
  * production driver uses real Collection subscriptions, indexes, transactions,
  * and callback reentry. It compares every intermediate publication, not only
@@ -71,24 +81,6 @@ import type { Scheduler } from 'fast-check'
  * oracle.
  */
 
-type ReplayDemandId = ReplayRow[`id`]
-
-type ReplayLoad = {
-  demandId: ReplayDemandId
-  rows: ReadonlyArray<ReplayRow>
-  outcome: `resolve` | `reject`
-  writeBeforeSettlement?: boolean
-}
-
-type ReplayAttempt = {
-  loads: ReadonlyArray<ReplayLoad>
-}
-
-type SourceAction =
-  | { type: `put`; row: ReplayRow }
-  | { type: `delete`; id: ReplayRow[`id`] }
-  | { type: `request`; demandId: ReplayDemandId }
-
 type SourceWriteOrigin =
   | { type: `initial`; demandId: ReplayDemandId }
   | { type: `replay`; demandId: ReplayDemandId; attemptIndex: number }
@@ -98,16 +90,6 @@ type SourceWrite = {
   origin: SourceWriteOrigin
   installed: boolean
   rows: ReadonlyArray<ReplayRow>
-}
-
-type ReplayScenario = {
-  initialRows: ReadonlyArray<ReplayRow>
-  demandIds: ReadonlyArray<ReplayDemandId>
-  attempts: ReadonlyArray<ReplayAttempt>
-  settlementOrder: ReadonlyArray<number>
-  settlementPhases: ReadonlyArray<number>
-  releaseOnLastAttempt?: ReplayDemandId
-  afterSettlement: ReadonlyArray<SourceAction>
 }
 
 type SequentialReplayLoad = {
@@ -149,115 +131,6 @@ type PendingReplay = {
   wroteRows: boolean
   settled: boolean
 }
-
-// Values include -0, a distinct row value from 0 (maintainer decision,
-// 2026-10-29), so a replay can replace a row that differs only by a zero's
-// sign.
-const replayValue = fc.oneof(fc.integer({ min: -2, max: 2 }), fc.constant(-0))
-
-const rowArbitrary: fc.Arbitrary<ReplayRow> = fc.record({
-  id: fc.constantFrom(`one` as const, `two` as const),
-  value: replayValue,
-})
-
-const rowsArbitrary = fc.uniqueArray(rowArbitrary, {
-  minLength: 0,
-  maxLength: 2,
-  selector: ({ id }) => id,
-})
-
-function replayLoadArbitrary(
-  demandId: ReplayDemandId,
-): fc.Arbitrary<ReplayLoad> {
-  return fc.record({
-    demandId: fc.constant(demandId),
-    rows: fc
-      .option(replayValue, { nil: undefined })
-      .map((value) => (value === undefined ? [] : [{ id: demandId, value }])),
-    outcome: fc.constantFrom(`resolve` as const, `reject` as const),
-    writeBeforeSettlement: fc.boolean(),
-  })
-}
-
-function sourceActionArbitrary(
-  demandIds: ReadonlyArray<ReplayDemandId>,
-): fc.Arbitrary<SourceAction> {
-  return fc.oneof(
-    fc
-      .tuple(fc.constantFrom(...demandIds), replayValue)
-      .map(([id, value]) => ({ type: `put` as const, row: { id, value } })),
-    fc
-      .constantFrom(...demandIds)
-      .map((id) => ({ type: `delete` as const, id })),
-  )
-}
-
-const replayScenarioArbitrary: fc.Arbitrary<ReplayScenario> = fc
-  .uniqueArray(fc.constantFrom<ReplayDemandId>(`one`, `two`), {
-    minLength: 1,
-    maxLength: 2,
-  })
-  .chain((demandIds) =>
-    fc
-      .record({
-        initialRows: rowsArbitrary,
-        attempts: fc.array(
-          fc
-            .tuple(
-              ...demandIds.map((demandId) => replayLoadArbitrary(demandId)),
-            )
-            .map((loads) => ({ loads })),
-          { minLength: 1, maxLength: 3 },
-        ),
-        releaseOnLastAttempt: fc.option(fc.constantFrom(...demandIds), {
-          nil: undefined,
-        }),
-      })
-      .chain(({ initialRows, attempts, releaseOnLastAttempt }) => {
-        const replayCount = attempts.length * demandIds.length
-        const lastAttemptIndex = attempts.length - 1
-        return fc
-          .record({
-            settlementOrder: fc.shuffledSubarray(
-              Array.from({ length: replayCount }, (_, index) => index),
-              { minLength: replayCount, maxLength: replayCount },
-            ),
-            rawSettlementPhases: fc.array(
-              fc.integer({ min: 0, max: lastAttemptIndex }),
-              { minLength: replayCount, maxLength: replayCount },
-            ),
-            afterSettlement:
-              releaseOnLastAttempt === undefined
-                ? fc.array(sourceActionArbitrary(demandIds), {
-                    minLength: 0,
-                    maxLength: 3,
-                  })
-                : fc
-                    .tuple(
-                      fc.constant<SourceAction>({
-                        type: `request`,
-                        demandId: releaseOnLastAttempt,
-                      }),
-                      fc.array(sourceActionArbitrary(demandIds), {
-                        minLength: 0,
-                        maxLength: 2,
-                      }),
-                    )
-                    .map(([request, actions]) => [request, ...actions]),
-          })
-          .map(({ settlementOrder, rawSettlementPhases, afterSettlement }) => ({
-            initialRows,
-            demandIds,
-            attempts,
-            settlementOrder,
-            settlementPhases: rawSettlementPhases.map((phase, replayIndex) =>
-              Math.max(phase, Math.floor(replayIndex / demandIds.length)),
-            ),
-            releaseOnLastAttempt,
-            afterSettlement,
-          }))
-      }),
-  )
 
 const sequentialReplayScenarioArbitrary: fc.Arbitrary<SequentialReplayScenario> =
   fc.record({
@@ -1672,590 +1545,201 @@ function predictFilteredReplay(
   return { nextOrdered, replacement }
 }
 
-declareOracle({
-  check: [
-    runReplayScenario,
-    runSequentialReplayScenario,
-    runCleanupRestartScenario,
-    expectScheduledReplaySettlementIsGenerationSafe,
-    runSharedSubscriptionScenario,
-    runOptimisticReplayScenario,
-  ],
-  model: [publicationDiff, predictFilteredReplay],
-  grammar: [
-    replayScenarioArbitrary,
-    sequentialReplayScenarioArbitrary,
-    cleanupRestartScenarioArbitrary,
-    sharedSubscriptionScenarioArbitrary,
-    optimisticReplayScenarioArbitrary,
-  ],
-})
+// A snapshot chosen while a direct truncate replay is pending enters the
+// private replacement, not the callback mirror. Its key still excludes that
+// row from the next ordered local selection. An earlier subscriber's callback
+// is a legal reentry cut: it can read the source replacement before this
+// subscriber receives the same source transaction.
+async function runFilteredSnapshotReentry(): Promise<void> {
+  type Row = { id: string; value: number }
+  const rows: Array<Row> = [
+    { id: `one`, value: 1 },
+    { id: `two`, value: 2 },
+    { id: `three`, value: 3 },
+  ]
+  // The model separates a callback-visible row from rows selected locally
+  // during replay. Neither all source rows nor the callback mirror determines
+  // the next choice; only the filtered snapshot selected `one` here.
+  const privatelySelected = new Set(
+    rows.filter(({ id }) => id === `one`).map(({ id }) => id),
+  )
+  const initialPublicRows = new Map<string, Row>([[`one`, rows[0]!]])
+  const { nextOrdered, replacement: expectedReplacement } =
+    predictFilteredReplay(rows, initialPublicRows, privatelySelected)
+  const publicRows = new Map<string, Row>()
 
-describe(`CollectionSubscription replay oracle`, () => {
-  it(`generates shared, failed, stale, released, and post-replay histories`, () => {
-    oracleRoute(`fixed seed`)
-    const scenarios = fc.sample(
-      replayScenarioArbitrary,
-      oracleFixedSeed(1755, { numRuns: 300 }),
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => void
+  let truncate!: () => void
+  const heldReplay = createDeferred<void>()
+  const loadOptions: Array<LoadSubsetOptions> = []
+  let holdReplayRequest = false
+  let heldRequestCount = 0
+  const collection = createCollection<Row>({
+    id: `ordered-replay-mixed-snapshot-reentry`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        begin()
+        for (const value of rows) write({ type: `insert`, value })
+        commit()
+        params.markReady()
+        return {
+          loadSubset: (options) => {
+            loadOptions.push(options)
+            if (
+              holdReplayRequest &&
+              options.orderBy !== undefined &&
+              options.offset === 0 &&
+              options.cursor === undefined
+            ) {
+              holdReplayRequest = false
+              heldRequestCount++
+              return heldReplay.promise
+            }
+            return true
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const index = collection.createIndex((row) => row.value, {
+    indexType: BTreeIndex,
+  })
+  const orderBy = valueOrderBy()
+  const whereOne = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+  const batches: Array<Array<string>> = []
+  const invalidChanges: Array<string> = []
+  let armed = false
+  let reentered = false
+  const trigger = collection.subscribeChanges(
+    (changes) => {
+      if (!armed || !changes.some(({ type }) => type === `insert`)) return
+      armed = false
+      reentered = true
+      target.requestSnapshot({ where: whereOne })
+      target.requestLimitedSnapshot({ orderBy, limit: 1 })
+    },
+    { includeInitialState: false },
+  )
+  const target = collection.subscribeChanges((changes) => {
+    if (changes.length === 0) return
+    const batch: Array<string> = []
+    for (const change of changes) {
+      batch.push(`${change.type}:${change.key}`)
+      if (change.type === `insert`) {
+        if (publicRows.has(String(change.key)))
+          invalidChanges.push(`duplicate insert:${change.key}`)
+        publicRows.set(String(change.key), change.value)
+      } else if (change.type === `delete`) {
+        publicRows.delete(String(change.key))
+      } else {
+        publicRows.set(String(change.key), change.value)
+      }
+    }
+    batches.push(batch)
+  })
+  target.setOrderByIndex(index)
+  try {
+    target.requestLimitedSnapshot({ orderBy, limit: 1 })
+    oracleAssertion('existing comparison at 1702', () =>
+      expect(batches).toEqual([[`insert:one`]]),
+    )
+    batches.length = 0
+
+    target.requestSnapshot({
+      where: new Func(`eq`, [new PropRef([`id`]), new Value(`missing`)]),
+    })
+    holdReplayRequest = true
+    begin()
+    truncate()
+    commit()
+    await flushPromises()
+    oracleAssertion('existing comparison at 1713', () =>
+      expect(heldRequestCount).toBe(1),
     )
 
-    oracleAssertion('existing comparison at 1561', () =>
-      expect(scenarios.some(({ demandIds }) => demandIds.length > 1)).toBe(
-        true,
+    armed = true
+    begin()
+    for (const value of rows) write({ type: `insert`, value })
+    commit()
+    await flushPromises()
+
+    oracleAssertion('existing comparison at 1721', () =>
+      expect(reentered).toBe(true),
+    )
+    oracleAssertion('existing comparison at 1722', () =>
+      expect(batches).toEqual([]),
+    )
+    oracleAssertion('existing comparison at 1723', () =>
+      expect(loadOptions.at(-1)).toMatchObject({ offset: 0 }),
+    )
+    oracleAssertion('existing comparison at 1724', () =>
+      expect(loadOptions.at(-1)?.limit).toBeGreaterThanOrEqual(
+        1 + privatelySelected.size + Number(nextOrdered !== undefined),
       ),
     )
-    oracleAssertion('existing comparison at 1562', () =>
-      expect(scenarios.some(({ attempts }) => attempts.length > 1)).toBe(true),
+    oracleAssertion('existing comparison at 1727', () =>
+      expect(loadOptions.at(-1)?.cursor?.lastKey).toBeUndefined(),
     )
-    oracleAssertion('existing comparison at 1563', () =>
-      expect(
-        scenarios.some(({ attempts }) =>
-          attempts.some(({ loads }) =>
-            loads.some(({ outcome }) => outcome === `reject`),
-          ),
-        ),
-      ).toBe(true),
+    heldReplay.resolve()
+    await flushPromises()
+    oracleAssertion('existing comparison at 1730', () =>
+      expect(batches.map((batch) => [...batch].sort())).toEqual([
+        expectedReplacement.sort(),
+      ]),
     )
-    oracleAssertion('existing comparison at 1570', () =>
-      expect(
-        scenarios.some(({ attempts }) =>
-          attempts.some(({ loads }) =>
-            loads.some(({ writeBeforeSettlement }) => writeBeforeSettlement),
-          ),
-        ),
-      ).toBe(true),
+    oracleAssertion('existing comparison at 1733', () =>
+      expect(invalidChanges).toEqual([]),
     )
-    oracleAssertion('existing comparison at 1577', () =>
-      expect(
-        scenarios.some(({ settlementOrder }) =>
-          settlementOrder.some((value, index) => value !== index),
-        ),
-      ).toBe(true),
+    oracleAssertion('existing comparison at 1734', () =>
+      expect([...publicRows.keys()].sort()).toEqual(
+        rows.map(({ id }) => id).sort(),
+      ),
     )
-    oracleAssertion('existing comparison at 1582', () =>
-      expect(
-        scenarios.some(({ releaseOnLastAttempt }) =>
-          Boolean(releaseOnLastAttempt),
-        ),
-      ).toBe(true),
-    )
-    oracleAssertion('existing comparison at 1587', () =>
-      expect(
-        scenarios.some(({ afterSettlement }) => afterSettlement.length > 0),
-      ).toBe(true),
-    )
-    oracleAssertion('existing comparison at 1590', () =>
-      expect(
-        scenarios.some(({ afterSettlement }) =>
-          afterSettlement.some(({ type }) => type === `request`),
-        ),
-      ).toBe(true),
-    )
-  })
+  } finally {
+    heldReplay.resolve()
+    trigger.unsubscribe()
+    target.unsubscribe()
+    await collection.cleanup()
+  }
+}
 
+describe(`CollectionSubscription replay oracle`, () => {
   // A snapshot chosen while a direct truncate replay is pending enters the
   // private replacement, not the callback mirror. Its key still excludes that
   // row from the next ordered local selection. An earlier subscriber's callback
   // is a legal reentry cut: it can read the source replacement before this
   // subscriber receives the same source transaction.
-  it(`continues after a privately selected filtered snapshot during callback reentry`, async () => {
-    oracleRoute(`fixed history`)
-    type Row = { id: string; value: number }
-    const rows: Array<Row> = [
-      { id: `one`, value: 1 },
-      { id: `two`, value: 2 },
-      { id: `three`, value: 3 },
-    ]
-    // The model separates a callback-visible row from rows selected locally
-    // during replay. Neither all source rows nor the callback mirror determines
-    // the next choice; only the filtered snapshot selected `one` here.
-    const privatelySelected = new Set(
-      rows.filter(({ id }) => id === `one`).map(({ id }) => id),
-    )
-    const initialPublicRows = new Map<string, Row>([[`one`, rows[0]!]])
-    const { nextOrdered, replacement: expectedReplacement } =
-      predictFilteredReplay(rows, initialPublicRows, privatelySelected)
-    const publicRows = new Map<string, Row>()
-
-    let begin!: () => void
-    let write!: (message: { type: `insert`; value: Row }) => void
-    let commit!: () => void
-    let truncate!: () => void
-    const heldReplay = createDeferred<void>()
-    const loadOptions: Array<LoadSubsetOptions> = []
-    let holdReplayRequest = false
-    let heldRequestCount = 0
-    const collection = createCollection<Row>({
-      id: `ordered-replay-mixed-snapshot-reentry`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (params) => {
-          begin = params.begin
-          write = params.write
-          commit = params.commit
-          truncate = params.truncate
-          begin()
-          for (const value of rows) write({ type: `insert`, value })
-          commit()
-          params.markReady()
-          return {
-            loadSubset: (options) => {
-              loadOptions.push(options)
-              if (
-                holdReplayRequest &&
-                options.orderBy !== undefined &&
-                options.offset === 0 &&
-                options.cursor === undefined
-              ) {
-                holdReplayRequest = false
-                heldRequestCount++
-                return heldReplay.promise
-              }
-              return true
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const index = collection.createIndex((row) => row.value, {
-      indexType: BTreeIndex,
-    })
-    const orderBy = valueOrderBy()
-    const whereOne = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
-    const batches: Array<Array<string>> = []
-    const invalidChanges: Array<string> = []
-    let armed = false
-    let reentered = false
-    const trigger = collection.subscribeChanges(
-      (changes) => {
-        if (!armed || !changes.some(({ type }) => type === `insert`)) return
-        armed = false
-        reentered = true
-        target.requestSnapshot({ where: whereOne })
-        target.requestLimitedSnapshot({ orderBy, limit: 1 })
-      },
-      { includeInitialState: false },
-    )
-    const target = collection.subscribeChanges((changes) => {
-      if (changes.length === 0) return
-      const batch: Array<string> = []
-      for (const change of changes) {
-        batch.push(`${change.type}:${change.key}`)
-        if (change.type === `insert`) {
-          if (publicRows.has(String(change.key)))
-            invalidChanges.push(`duplicate insert:${change.key}`)
-          publicRows.set(String(change.key), change.value)
-        } else if (change.type === `delete`) {
-          publicRows.delete(String(change.key))
-        } else {
-          publicRows.set(String(change.key), change.value)
-        }
-      }
-      batches.push(batch)
-    })
-    target.setOrderByIndex(index)
-    try {
-      target.requestLimitedSnapshot({ orderBy, limit: 1 })
-      oracleAssertion('existing comparison at 1702', () =>
-        expect(batches).toEqual([[`insert:one`]]),
-      )
-      batches.length = 0
-
-      target.requestSnapshot({
-        where: new Func(`eq`, [new PropRef([`id`]), new Value(`missing`)]),
-      })
-      holdReplayRequest = true
-      begin()
-      truncate()
-      commit()
-      await flushPromises()
-      oracleAssertion('existing comparison at 1713', () =>
-        expect(heldRequestCount).toBe(1),
-      )
-
-      armed = true
-      begin()
-      for (const value of rows) write({ type: `insert`, value })
-      commit()
-      await flushPromises()
-
-      oracleAssertion('existing comparison at 1721', () =>
-        expect(reentered).toBe(true),
-      )
-      oracleAssertion('existing comparison at 1722', () =>
-        expect(batches).toEqual([]),
-      )
-      oracleAssertion('existing comparison at 1723', () =>
-        expect(loadOptions.at(-1)).toMatchObject({ offset: 0 }),
-      )
-      oracleAssertion('existing comparison at 1724', () =>
-        expect(loadOptions.at(-1)?.limit).toBeGreaterThanOrEqual(
-          1 + privatelySelected.size + Number(nextOrdered !== undefined),
-        ),
-      )
-      oracleAssertion('existing comparison at 1727', () =>
-        expect(loadOptions.at(-1)?.cursor?.lastKey).toBeUndefined(),
-      )
-      heldReplay.resolve()
-      await flushPromises()
-      oracleAssertion('existing comparison at 1730', () =>
-        expect(batches.map((batch) => [...batch].sort())).toEqual([
-          expectedReplacement.sort(),
-        ]),
-      )
-      oracleAssertion('existing comparison at 1733', () =>
-        expect(invalidChanges).toEqual([]),
-      )
-      oracleAssertion('existing comparison at 1734', () =>
-        expect([...publicRows.keys()].sort()).toEqual(
-          rows.map(({ id }) => id).sort(),
-        ),
-      )
-    } finally {
-      heldReplay.resolve()
-      trigger.unsubscribe()
-      target.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
-  it(`keeps private row tracking through consecutive failed replays`, async () => {
-    oracleRoute(`fixed history`)
-    await runReplayScenario({
-      initialRows: [
-        { id: `one`, value: -2 },
-        { id: `two`, value: 0 },
-      ],
-      demandIds: [`two`],
-      attempts: [
-        {
-          loads: [
-            {
-              demandId: `two`,
-              rows: [],
-              outcome: `reject`,
-              writeBeforeSettlement: true,
-            },
-          ],
-        },
-        {
-          loads: [
-            {
-              demandId: `two`,
-              rows: [],
-              outcome: `reject`,
-              writeBeforeSettlement: true,
-            },
-          ],
-        },
-        {
-          loads: [
-            {
-              demandId: `two`,
-              rows: [{ id: `two`, value: -2 }],
-              outcome: `resolve`,
-              writeBeforeSettlement: true,
-            },
-          ],
-        },
-      ],
-      settlementOrder: [0, 2, 1],
-      settlementPhases: [0, 1, 2],
-      afterSettlement: [],
-    })
-  })
-
-  it(`retains a successful retry after retiring its failed peer`, async () => {
-    oracleRoute(`fixed history`)
-    await runReplayScenario({
-      initialRows: [{ id: `two`, value: 0 }],
-      demandIds: [`one`, `two`],
-      attempts: [
-        {
-          loads: [
-            {
-              demandId: `one`,
-              rows: [{ id: `one`, value: 1 }],
-              outcome: `reject`,
-              writeBeforeSettlement: false,
-            },
-            {
-              demandId: `two`,
-              rows: [{ id: `two`, value: -1 }],
-              outcome: `reject`,
-              writeBeforeSettlement: false,
-            },
-          ],
-        },
-        {
-          loads: [
-            {
-              demandId: `one`,
-              rows: [{ id: `one`, value: 2 }],
-              outcome: `reject`,
-              writeBeforeSettlement: true,
-            },
-            {
-              demandId: `two`,
-              rows: [{ id: `two`, value: 1 }],
-              outcome: `resolve`,
-              writeBeforeSettlement: false,
-            },
-          ],
-        },
-      ],
-      settlementOrder: [3, 1, 0, 2],
-      settlementPhases: [0, 0, 1, 1],
-      releaseOnLastAttempt: `one`,
-      afterSettlement: [{ type: `request`, demandId: `one` }],
-    })
-  })
-
-  it(`does not republish an identical snapshot after a synchronous replay failure`, async () => {
-    oracleRoute(`fixed history`)
-    await runSequentialReplayScenario({
-      initialRows: [{ id: `one`, value: 0 }],
-      loads: [
-        { rows: [], outcome: `throw` },
-        { rows: [{ id: `one`, value: 0 }], outcome: `return` },
-      ],
-    })
-  })
-
-  it(`keeps a same-key source replacement private after a failed replay`, async () => {
-    oracleRoute(`fixed history`)
-    await runReplayScenario({
-      initialRows: [{ id: `one`, value: 1 }],
-      demandIds: [`one`],
-      attempts: [
-        {
-          loads: [{ demandId: `one`, rows: [], outcome: `reject` }],
-        },
-      ],
-      settlementOrder: [0],
-      settlementPhases: [0],
-      afterSettlement: [{ type: `put`, row: { id: `one`, value: 2 } }],
-    })
-  })
-
-  it(`does not let an unpublished truncate delete suppress a later insert`, async () => {
-    oracleRoute(`fixed history`)
-    await runReplayScenario({
-      initialRows: [],
-      demandIds: [`two`, `one`],
-      attempts: [
-        {
-          loads: [
-            {
-              demandId: `two`,
-              rows: [{ id: `two`, value: -1 }],
-              outcome: `resolve`,
-            },
-            { demandId: `one`, rows: [], outcome: `reject` },
-          ],
-        },
-        {
-          loads: [
-            { demandId: `two`, rows: [], outcome: `resolve` },
-            {
-              demandId: `one`,
-              rows: [{ id: `one`, value: -1 }],
-              outcome: `resolve`,
-            },
-          ],
-        },
-      ],
-      settlementOrder: [0, 1, 2, 3],
-      settlementPhases: [0, 0, 1, 1],
-      afterSettlement: [{ type: `put`, row: { id: `two`, value: 1 } }],
-    })
-  })
-
-  it(`lets the newest successful replay replace an older failed replay`, async () => {
-    oracleRoute(`fixed history`)
-    await runReplayScenario({
-      initialRows: [{ id: `one`, value: 1 }],
-      demandIds: [`one`],
-      attempts: [
-        {
-          loads: [{ demandId: `one`, rows: [], outcome: `reject` }],
-        },
-        {
-          loads: [
-            {
-              demandId: `one`,
-              rows: [{ id: `one`, value: 2 }],
-              outcome: `resolve`,
-            },
-          ],
-        },
-      ],
-      settlementOrder: [1, 0],
-      settlementPhases: [1, 1],
-      afterSettlement: [],
-    })
-  })
-
-  it(`ignores an obsolete replay that settles after the newest replay`, async () => {
-    oracleRoute(`fixed history`)
-    await runReplayScenario({
-      initialRows: [{ id: `one`, value: 0 }],
-      demandIds: [`one`],
-      attempts: [
-        {
-          loads: [
-            {
-              demandId: `one`,
-              rows: [{ id: `one`, value: 1 }],
-              outcome: `resolve`,
-            },
-          ],
-        },
-        {
-          loads: [
-            {
-              demandId: `one`,
-              rows: [{ id: `one`, value: 2 }],
-              outcome: `resolve`,
-            },
-          ],
-        },
-      ],
-      settlementOrder: [1, 0],
-      settlementPhases: [1, 1],
-      afterSettlement: [],
-    })
-  })
-
-  it(`releases every successful overlapping replay acquisition`, async () => {
-    oracleRoute(`fixed history`)
-    await runReplayScenario({
-      initialRows: [],
-      demandIds: [`one`],
-      attempts: [
-        {
-          loads: [{ demandId: `one`, rows: [], outcome: `resolve` }],
-        },
-        {
-          loads: [{ demandId: `one`, rows: [], outcome: `resolve` }],
-        },
-      ],
-      settlementOrder: [1, 0],
-      settlementPhases: [1, 1],
-      afterSettlement: [],
-    })
-  })
-
-  it(`uses the newest complete multi-demand replay`, async () => {
-    oracleRoute(`fixed history`)
-    await runReplayScenario({
-      initialRows: [{ id: `one`, value: 1 }],
-      demandIds: [`one`, `two`],
-      attempts: [
-        {
-          loads: [
-            {
-              demandId: `one`,
-              rows: [{ id: `one`, value: 2 }],
-              outcome: `resolve`,
-            },
-            { demandId: `two`, rows: [], outcome: `reject` },
-          ],
-        },
-        {
-          loads: [
-            {
-              demandId: `one`,
-              rows: [{ id: `one`, value: 3 }],
-              outcome: `resolve`,
-            },
-            {
-              demandId: `two`,
-              rows: [{ id: `two`, value: 4 }],
-              outcome: `resolve`,
-            },
-          ],
-        },
-      ],
-      settlementOrder: [2, 3, 0, 1],
-      settlementPhases: [1, 1, 1, 1],
-      afterSettlement: [],
-    })
-  })
-
-  it(`retains applied rows after their replay demand is released`, async () => {
-    oracleRoute(`fixed history`)
-    await runReplayScenario({
-      initialRows: [{ id: `two`, value: 0 }],
-      demandIds: [`one`, `two`],
-      attempts: [
-        {
-          loads: [
-            {
-              demandId: `one`,
-              rows: [{ id: `one`, value: 1 }],
-              outcome: `reject`,
-              writeBeforeSettlement: true,
-            },
-            {
-              demandId: `two`,
-              rows: [{ id: `two`, value: 2 }],
-              outcome: `resolve`,
-            },
-          ],
-        },
-      ],
-      settlementOrder: [0, 1],
-      settlementPhases: [0, 0],
-      releaseOnLastAttempt: `one`,
-      afterSettlement: [{ type: `request`, demandId: `one` }],
-    })
-  })
-
-  it(`refreshes a retained row when its final released demand is reacquired`, async () => {
-    oracleRoute(`fixed history`)
-    // Reduced from the fixed replay corpus after removing release-time pruning.
-    await runReplayScenario({
-      initialRows: [{ id: `one`, value: 0 }],
-      demandIds: [`one`],
-      attempts: [
-        {
-          loads: [
-            {
-              demandId: `one`,
-              rows: [{ id: `one`, value: 1 }],
-              outcome: `resolve`,
-              writeBeforeSettlement: true,
-            },
-          ],
-        },
-      ],
-      settlementOrder: [0],
-      settlementPhases: [0],
-      releaseOnLastAttempt: `one`,
-      afterSettlement: [{ type: `request`, demandId: `one` }],
-    })
-  })
-
-  it(`replaces a retained snapshot with a later empty replay`, async () => {
-    oracleRoute(`fixed history`)
-    await runReplayScenario({
-      initialRows: [{ id: `one`, value: 1 }],
-      demandIds: [`one`],
-      attempts: [
-        {
-          loads: [{ demandId: `one`, rows: [], outcome: `reject` }],
-        },
-        {
-          loads: [{ demandId: `one`, rows: [], outcome: `resolve` }],
-        },
-      ],
-      settlementOrder: [0, 1],
-      settlementPhases: [0, 1],
-      afterSettlement: [],
-    })
+  oracleProperty({
+    id: `subscription-replay.filtered-reentry`,
+    law: {
+      statement: `A snapshot selected privately during a pending replay excludes its key from the next ordered local selection, and the replay then publishes the filtered-replay model's replacement batch.`,
+      authority: `Collection subscribeChanges contract; the replay laws stated above and the filtered-replay model.`,
+      limits: `The one callback-reentry history with three static rows and one held replay request.`,
+    },
+    owns: [`src/collection/subscription.ts`],
+    histories: [
+      `continues after a privately selected filtered snapshot during callback reentry`,
+    ] as const,
+    label: (name) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `subscription-replay.filtered-reentry`,
+        plan,
+        observe,
+        runFilteredSnapshotReentry,
+      ),
+    check: forwardAssertionJudgment,
   })
 
   // The fixed campaign's histories reach a replacement that changes a row
@@ -2304,6 +1788,352 @@ oracleProperty({
   check: forwardAssertionJudgment,
 })
 
+// Named regressions that the replay scenario grammar cannot take back: its
+// arbitrary chains without an unmapper. Each replays the same driver and
+// comparison as the generated completion campaign.
+const replayFixedScenarios: ReadonlyArray<{
+  name: string
+  history: ReplayScenario
+}> = [
+  {
+    name: `keeps private row tracking through consecutive failed replays`,
+    history: {
+      initialRows: [
+        { id: `one`, value: -2 },
+        { id: `two`, value: 0 },
+      ],
+      demandIds: [`two`],
+      attempts: [
+        {
+          loads: [
+            {
+              demandId: `two`,
+              rows: [],
+              outcome: `reject`,
+              writeBeforeSettlement: true,
+            },
+          ],
+        },
+        {
+          loads: [
+            {
+              demandId: `two`,
+              rows: [],
+              outcome: `reject`,
+              writeBeforeSettlement: true,
+            },
+          ],
+        },
+        {
+          loads: [
+            {
+              demandId: `two`,
+              rows: [{ id: `two`, value: -2 }],
+              outcome: `resolve`,
+              writeBeforeSettlement: true,
+            },
+          ],
+        },
+      ],
+      settlementOrder: [0, 2, 1],
+      settlementPhases: [0, 1, 2],
+      afterSettlement: [],
+    },
+  },
+  {
+    name: `retains a successful retry after retiring its failed peer`,
+    history: {
+      initialRows: [{ id: `two`, value: 0 }],
+      demandIds: [`one`, `two`],
+      attempts: [
+        {
+          loads: [
+            {
+              demandId: `one`,
+              rows: [{ id: `one`, value: 1 }],
+              outcome: `reject`,
+              writeBeforeSettlement: false,
+            },
+            {
+              demandId: `two`,
+              rows: [{ id: `two`, value: -1 }],
+              outcome: `reject`,
+              writeBeforeSettlement: false,
+            },
+          ],
+        },
+        {
+          loads: [
+            {
+              demandId: `one`,
+              rows: [{ id: `one`, value: 2 }],
+              outcome: `reject`,
+              writeBeforeSettlement: true,
+            },
+            {
+              demandId: `two`,
+              rows: [{ id: `two`, value: 1 }],
+              outcome: `resolve`,
+              writeBeforeSettlement: false,
+            },
+          ],
+        },
+      ],
+      settlementOrder: [3, 1, 0, 2],
+      settlementPhases: [0, 0, 1, 1],
+      releaseOnLastAttempt: `one`,
+      afterSettlement: [{ type: `request`, demandId: `one` }],
+    },
+  },
+  {
+    name: `keeps a same-key source replacement private after a failed replay`,
+    history: {
+      initialRows: [{ id: `one`, value: 1 }],
+      demandIds: [`one`],
+      attempts: [
+        {
+          loads: [{ demandId: `one`, rows: [], outcome: `reject` }],
+        },
+      ],
+      settlementOrder: [0],
+      settlementPhases: [0],
+      afterSettlement: [{ type: `put`, row: { id: `one`, value: 2 } }],
+    },
+  },
+  {
+    name: `does not let an unpublished truncate delete suppress a later insert`,
+    history: {
+      initialRows: [],
+      demandIds: [`two`, `one`],
+      attempts: [
+        {
+          loads: [
+            {
+              demandId: `two`,
+              rows: [{ id: `two`, value: -1 }],
+              outcome: `resolve`,
+            },
+            { demandId: `one`, rows: [], outcome: `reject` },
+          ],
+        },
+        {
+          loads: [
+            { demandId: `two`, rows: [], outcome: `resolve` },
+            {
+              demandId: `one`,
+              rows: [{ id: `one`, value: -1 }],
+              outcome: `resolve`,
+            },
+          ],
+        },
+      ],
+      settlementOrder: [0, 1, 2, 3],
+      settlementPhases: [0, 0, 1, 1],
+      afterSettlement: [{ type: `put`, row: { id: `two`, value: 1 } }],
+    },
+  },
+  {
+    name: `lets the newest successful replay replace an older failed replay`,
+    history: {
+      initialRows: [{ id: `one`, value: 1 }],
+      demandIds: [`one`],
+      attempts: [
+        {
+          loads: [{ demandId: `one`, rows: [], outcome: `reject` }],
+        },
+        {
+          loads: [
+            {
+              demandId: `one`,
+              rows: [{ id: `one`, value: 2 }],
+              outcome: `resolve`,
+            },
+          ],
+        },
+      ],
+      settlementOrder: [1, 0],
+      settlementPhases: [1, 1],
+      afterSettlement: [],
+    },
+  },
+  {
+    name: `ignores an obsolete replay that settles after the newest replay`,
+    history: {
+      initialRows: [{ id: `one`, value: 0 }],
+      demandIds: [`one`],
+      attempts: [
+        {
+          loads: [
+            {
+              demandId: `one`,
+              rows: [{ id: `one`, value: 1 }],
+              outcome: `resolve`,
+            },
+          ],
+        },
+        {
+          loads: [
+            {
+              demandId: `one`,
+              rows: [{ id: `one`, value: 2 }],
+              outcome: `resolve`,
+            },
+          ],
+        },
+      ],
+      settlementOrder: [1, 0],
+      settlementPhases: [1, 1],
+      afterSettlement: [],
+    },
+  },
+  {
+    name: `releases every successful overlapping replay acquisition`,
+    history: {
+      initialRows: [],
+      demandIds: [`one`],
+      attempts: [
+        {
+          loads: [{ demandId: `one`, rows: [], outcome: `resolve` }],
+        },
+        {
+          loads: [{ demandId: `one`, rows: [], outcome: `resolve` }],
+        },
+      ],
+      settlementOrder: [1, 0],
+      settlementPhases: [1, 1],
+      afterSettlement: [],
+    },
+  },
+  {
+    name: `uses the newest complete multi-demand replay`,
+    history: {
+      initialRows: [{ id: `one`, value: 1 }],
+      demandIds: [`one`, `two`],
+      attempts: [
+        {
+          loads: [
+            {
+              demandId: `one`,
+              rows: [{ id: `one`, value: 2 }],
+              outcome: `resolve`,
+            },
+            { demandId: `two`, rows: [], outcome: `reject` },
+          ],
+        },
+        {
+          loads: [
+            {
+              demandId: `one`,
+              rows: [{ id: `one`, value: 3 }],
+              outcome: `resolve`,
+            },
+            {
+              demandId: `two`,
+              rows: [{ id: `two`, value: 4 }],
+              outcome: `resolve`,
+            },
+          ],
+        },
+      ],
+      settlementOrder: [2, 3, 0, 1],
+      settlementPhases: [1, 1, 1, 1],
+      afterSettlement: [],
+    },
+  },
+  {
+    name: `retains applied rows after their replay demand is released`,
+    history: {
+      initialRows: [{ id: `two`, value: 0 }],
+      demandIds: [`one`, `two`],
+      attempts: [
+        {
+          loads: [
+            {
+              demandId: `one`,
+              rows: [{ id: `one`, value: 1 }],
+              outcome: `reject`,
+              writeBeforeSettlement: true,
+            },
+            {
+              demandId: `two`,
+              rows: [{ id: `two`, value: 2 }],
+              outcome: `resolve`,
+            },
+          ],
+        },
+      ],
+      settlementOrder: [0, 1],
+      settlementPhases: [0, 0],
+      releaseOnLastAttempt: `one`,
+      afterSettlement: [{ type: `request`, demandId: `one` }],
+    },
+  },
+  {
+    // Reduced from the fixed replay corpus after removing release-time pruning.
+    name: `refreshes a retained row when its final released demand is reacquired`,
+    history: {
+      initialRows: [{ id: `one`, value: 0 }],
+      demandIds: [`one`],
+      attempts: [
+        {
+          loads: [
+            {
+              demandId: `one`,
+              rows: [{ id: `one`, value: 1 }],
+              outcome: `resolve`,
+              writeBeforeSettlement: true,
+            },
+          ],
+        },
+      ],
+      settlementOrder: [0],
+      settlementPhases: [0],
+      releaseOnLastAttempt: `one`,
+      afterSettlement: [{ type: `request`, demandId: `one` }],
+    },
+  },
+  {
+    name: `replaces a retained snapshot with a later empty replay`,
+    history: {
+      initialRows: [{ id: `one`, value: 1 }],
+      demandIds: [`one`],
+      attempts: [
+        {
+          loads: [{ demandId: `one`, rows: [], outcome: `reject` }],
+        },
+        {
+          loads: [{ demandId: `one`, rows: [], outcome: `resolve` }],
+        },
+      ],
+      settlementOrder: [0, 1],
+      settlementPhases: [0, 1],
+      afterSettlement: [],
+    },
+  },
+]
+
+oracleProperty({
+  id: `subscription-replay.completion-fixed`,
+  law: {
+    statement: `Replay publication is atomic and obsolete work cannot publish.`,
+    authority: `Collection subscribeChanges contract; the replay and cleanup laws stated above`,
+    limits: `Named regressions that the generated scenario grammar cannot take back; each is replayed through the same driver and comparison.`,
+  },
+  owns: [`src/collection/subscription.ts`],
+  histories: replayFixedScenarios,
+  label: ({ name }) => name,
+  resolve: ({ history }) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `Replay publication is atomic and obsolete work cannot publish.`,
+      plan,
+      observe,
+      () => runReplayScenario(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+
 // The existing independent helper retains its model and comparison checkpoints.
 oracleProperty({
   id: `subscription-replay.sequential`,
@@ -2317,6 +2147,18 @@ oracleProperty({
     arbitrary: sequentialReplayScenarioArbitrary,
     runs: 30,
     fixedSeeds: [1761],
+    fixed: [
+      {
+        name: `does not republish an identical snapshot after a synchronous replay failure`,
+        history: {
+          initialRows: [{ id: `one`, value: 0 }],
+          loads: [
+            { rows: [], outcome: `throw` },
+            { rows: [{ id: `one`, value: 0 }], outcome: `return` },
+          ],
+        },
+      },
+    ],
   },
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,

@@ -8,12 +8,20 @@ import {
   flushPromises,
 } from './utils.js'
 import { oracleReplayRequested } from './oracle-config.js'
+import { oracleAssertion } from './oracle-assertion-adapter.js'
 import {
+  acquisitionEntries,
+  acquisitionInteractionCauses,
   acquisitionInteractionCellDefinitions,
+  acquisitionLifecycleStates,
+  acquisitionPhases,
+  excludedAcquisitionCells,
   failureScenarios,
   legalAcquisitionCells,
   releaseScenarios,
   restartScenarios,
+  startOutcomes,
+  startReentries,
   startScenarios,
 } from './collection-subscription-lifecycle-cell-support.js'
 import type {
@@ -2017,5 +2025,77 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     subscription.unsubscribe()
     expect(unloads).toEqual([original, replacement])
     await collection.cleanup()
+  })
+})
+
+/**
+ * Grammar-size checks for the acquisition cell table and scenario grammar in
+ * collection-subscription-lifecycle-cell-support.ts. They test test code, so
+ * they moved here from collection-subscription-lifecycle-oracle.test.ts.
+ */
+describe(`CollectionSubscription demand lifecycle cell grammar`, () => {
+  it(`covers every finite start, failure-delivery, and release cell`, () => {
+    oracleAssertion('existing comparison at 823', () =>
+      expect(
+        new Set(
+          startScenarios.map(({ outcome, reentry }) => `${outcome}:${reentry}`),
+        ),
+      ).toHaveLength(startOutcomes.length * startReentries.length),
+    )
+    oracleAssertion('existing comparison at 828', () =>
+      expect(
+        new Set(
+          failureScenarios.map(
+            ({ outcome, reentry }) => `${outcome}:${reentry}`,
+          ),
+        ),
+      ).toHaveLength(2 * startReentries.length),
+    )
+    oracleAssertion('existing comparison at 833', () =>
+      expect(
+        new Set(
+          releaseScenarios.map(
+            ({ outcome, reentry }) => `${outcome}:${reentry}`,
+          ),
+        ),
+      ).toHaveLength(2 * 4),
+    )
+    oracleAssertion('existing comparison at 838', () =>
+      expect(
+        new Set(
+          restartScenarios.map(
+            ({ outcome, reentry }) => `${outcome}:${reentry}`,
+          ),
+        ),
+      ).toHaveLength(4 * 5),
+    )
+  })
+
+  it(`accounts for every acquisition phase and entry pair`, () => {
+    const allCells = new Set<AcquisitionCell>(
+      acquisitionPhases.flatMap((phase) =>
+        acquisitionEntries.map((entry) => `${phase}:${entry}` as const),
+      ),
+    )
+    oracleAssertion('existing comparison at 852', () =>
+      expect(
+        new Set([...legalAcquisitionCells, ...excludedAcquisitionCells.keys()]),
+      ).toEqual(allCells),
+    )
+  })
+
+  it(`accounts for every acquisition lifecycle state and interaction cause`, () => {
+    const allCells = new Set<AcquisitionInteractionCell>(
+      acquisitionLifecycleStates.flatMap((state) =>
+        acquisitionInteractionCauses.map(
+          (cause) => `${state}:${cause}` as const,
+        ),
+      ),
+    )
+    oracleAssertion('existing comparison at 866', () =>
+      expect(
+        new Set(Object.keys(acquisitionInteractionCellDefinitions)),
+      ).toEqual(allCells),
+    )
   })
 })
