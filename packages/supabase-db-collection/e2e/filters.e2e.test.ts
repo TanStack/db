@@ -11,30 +11,85 @@ import {
   upper,
 } from '@tanstack/db'
 import { expect } from 'vitest'
+import { experimental_queryOnce } from '../src/index'
+import { executeQuery } from '../src/query-once'
 import { makeUsersCollection, test } from './e2e.utils'
 
 const name = new IR.PropRef<string>([`user`, `name`])
 const active = new IR.PropRef<boolean>([`user`, `active`])
 const id = new IR.PropRef<number>([`user`, `id`])
 
-// An on-demand live query sends its WHERE to PostgREST and becomes ready once
-// that read has finished, so its rows are the server's answer filtered again
-// on the client. A filter the server applies too strictly loses rows, which
-// the client cannot add back. Each call reads through a fresh collection, so
-// rows an earlier query loaded cannot hide the loss.
-const liveNames = async (where: IR.BasicExpression<boolean>) => {
-  const { collection, supabase } = makeUsersCollection()
-  const live = createLiveQueryCollection((q) =>
-    q.from({ user: collection }).where(() => where),
-  )
+// Each case reads the same filter on three paths, and every path asserts the
+// rows it returns, not the shape of a URL:
+//
+// - An on-demand live query sends its WHERE to PostgREST and becomes ready
+//   once that read has finished, so its rows are the server's answer filtered
+//   again on the client.
+// - `experimental_queryOnce` runs the same one-shot query through TanStack
+//   DB's `queryOnce`.
+// - `executeQuery` sends a serialized query IR straight to PostgREST, through
+//   the translation that server-side aggregates use. Nothing filters its rows
+//   again, so a filter the server applies too loosely shows up here.
+//
+// A filter the server applies too strictly loses rows, which the client
+// cannot add back. Each call reads through a fresh collection, so rows an
+// earlier query loaded cannot hide the loss.
+const withUsers = async <T>(
+  read: (users: ReturnType<typeof makeUsersCollection>) => Promise<T>,
+): Promise<T> => {
+  const users = makeUsersCollection()
   try {
-    await live.preload()
-    return live.toArray.map((row) => row.name).sort()
+    return await read(users)
   } finally {
-    await live.cleanup()
-    await collection.cleanup()
-    await supabase.removeAllChannels()
+    await users.collection.cleanup()
+    await users.supabase.removeAllChannels()
   }
+}
+
+const sortedNames = (rows: Array<unknown>) =>
+  rows.map((row) => (row as { name: string }).name).sort()
+
+const liveNames = (where: IR.BasicExpression<boolean>) =>
+  withUsers(async ({ collection }) => {
+    const live = createLiveQueryCollection((q) =>
+      q.from({ user: collection }).where(() => where),
+    )
+    try {
+      await live.preload()
+      return sortedNames(live.toArray)
+    } finally {
+      await live.cleanup()
+    }
+  })
+
+const queryOnceNames = (where: IR.BasicExpression<boolean>) =>
+  withUsers(async ({ collection, supabase }) =>
+    sortedNames(
+      await experimental_queryOnce(
+        (q) => q.from({ user: collection }).where(() => where),
+        supabase,
+      ),
+    ),
+  )
+
+const serverNames = (where: IR.BasicExpression<boolean>) =>
+  withUsers(async ({ supabase }) =>
+    sortedNames(
+      await executeQuery(supabase, {
+        from: { type: `table`, name: `users`, alias: `user` },
+        where: [where],
+      }),
+    ),
+  )
+
+const expectNamesOnEveryPath = async (
+  where: IR.BasicExpression<boolean>,
+  expected: ReadonlyArray<string>,
+) => {
+  const label = JSON.stringify(where)
+  expect(await liveNames(where), `live query ${label}`).toEqual(expected)
+  expect(await queryOnceNames(where), `queryOnce ${label}`).toEqual(expected)
+  expect(await serverNames(where), `executeQuery ${label}`).toEqual(expected)
 }
 
 const cases = [
@@ -62,8 +117,8 @@ const cases = [
 ] as const
 
 for (const [label, where, expected] of cases) {
-  test(`${label} returns matching rows through a live query`, async () => {
-    expect(await liveNames(where)).toEqual(expected)
+  test(`${label} returns matching rows on every query path`, async () => {
+    await expectNamesOnEveryPath(where, expected)
   })
 }
 
@@ -80,12 +135,14 @@ for (const value of [``, ` a `, `a,b(c)`, `a"b\\c`, `a.b:c&d=1+%`, `{a,b}`]) {
       or(eq(name, value), eq(id, -1)),
       inArray(name, [value]),
     ]) {
-      expect(await liveNames(where), JSON.stringify(where)).toEqual([value])
+      await expectNamesOnEveryPath(where, [value])
     }
   })
 }
 
-test(`LIKE treats backslashes literally`, async ({ other }) => {
+test(`LIKE treats backslashes literally on every query path`, async ({
+  other,
+}) => {
   const value = `a\\path`
   const { error } = await other
     .from(`users`)
@@ -95,15 +152,20 @@ test(`LIKE treats backslashes literally`, async ({ other }) => {
     like(name, `a\\%`),
     or(like(name, `a\\%`), eq(id, -1)),
   ]) {
-    expect(await liveNames(where), JSON.stringify(where)).toEqual([value])
+    await expectNamesOnEveryPath(where, [value])
   }
 })
 
+// executeQuery is left out here: it returns PostgREST's rows without
+// filtering them again, so a filter PostgREST cannot express has no exact
+// answer on that path.
 test(`unsupported OR and negated patterns retain rows for client filtering`, async () => {
-  expect(
-    await liveNames(or(eq(name, `Nobody`), eq(upper(name), `ALICE`))),
-  ).toEqual([`Alice`])
-  // PostgREST would interpret * as a wildcard and remove Alice here, whereas
-  // TanStack treats it literally and should keep both seeded names.
-  expect(await liveNames(not(like(name, `*Ali*`)))).toEqual([`Alice`, `Bob`])
+  for (const read of [liveNames, queryOnceNames]) {
+    expect(
+      await read(or(eq(name, `Nobody`), eq(upper(name), `ALICE`))),
+    ).toEqual([`Alice`])
+    // PostgREST would interpret * as a wildcard and remove Alice here, whereas
+    // TanStack treats it literally and should keep both seeded names.
+    expect(await read(not(like(name, `*Ali*`)))).toEqual([`Alice`, `Bob`])
+  }
 })

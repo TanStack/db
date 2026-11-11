@@ -1,5 +1,6 @@
 import { createLiveQueryCollection, eq, inArray } from '@tanstack/db'
 import { expect, vi } from 'vitest'
+import { experimental_queryOnce } from '../src/index'
 import { WAIT, test } from './e2e.utils'
 
 test('reads seeded rows through PostgREST', ({ usersLive }) => {
@@ -25,6 +26,19 @@ test('pushes a WHERE filter down to PostgREST', async ({ users }) => {
   } finally {
     await live.cleanup()
   }
+})
+
+test('queryOnce runs a one-shot filtered query', async ({ users }) => {
+  const rows = await experimental_queryOnce(
+    (q) =>
+      q
+        .from({ user: users.collection })
+        .where(({ user }) => eq(user.active, true)),
+    users.supabase,
+  )
+
+  expect(rows).toHaveLength(1)
+  expect(rows[0]?.name).toBe('Alice')
 })
 
 test('reads a set larger than the server row cap across pages', async ({
