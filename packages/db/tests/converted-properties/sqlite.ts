@@ -10,6 +10,8 @@ export const properties: ReadonlyArray<string> = [
   `electron.ipc-readiness`,
   `electron.follower-settlement`,
   `sqlite-reload.class.electron-app`,
+  `sqlite-persistence.typed-value-reopen`,
+  `sqlite-persistence.native-temporal-query`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -27,5 +29,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `electron-db-sqlite-persistence/tests/reload-class-oracle.electron.e2e.test.ts`,
     `sqlite-reload`,
     `class.electron-app`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sqlite-temporal-value-oracle.test.ts`,
+    `sqlite-persistence`,
+    `typed-value-reopen native-temporal-query`,
   ],
 ]
