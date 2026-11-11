@@ -9,7 +9,7 @@ import {
   createLiveQueryCollection,
   eq,
 } from '@tanstack/db'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, vi } from 'vitest'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -17,7 +17,6 @@ import {
   recordedAssertionJudgment,
   rejectAt,
 } from '../../db/tests/oracle-assertion-adapter'
-import { oracleRoute } from '../../db/tests/oracle-config'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   createBrowserWASQLitePersistence,
@@ -218,12 +217,16 @@ Reach, challenge, replay, cleanup, and limits:
   failure, plus cancellation on release and disposal.
 */
 
-beforeEach(() => {
+// Each test starts with a fresh controlled fixture and ends by proving that
+// nothing it started is still live. A driver whose history runs more than once
+// in one test, as the framework's determinism test runs it, resets the fixture
+// itself after each run.
+function prepareCoordinatorFixture(): void {
   durableTerms.clear()
   installControlledBrowserSeams()
-})
+}
 
-afterEach(async () => {
+async function resetCoordinatorFixture(): Promise<void> {
   const cleanupDiagnostics: Array<CleanupDiagnostic> = []
   for (const coordinator of liveCoordinators) {
     await captureCleanup(cleanupDiagnostics, `afterEach live coordinator`, () =>
@@ -261,7 +264,10 @@ afterEach(async () => {
   heldLocks.clear()
   queuedLocks.clear()
   expect.soft(cleanupDiagnostics).toEqual([])
-})
+}
+
+beforeEach(prepareCoordinatorFixture)
+afterEach(resetCoordinatorFixture)
 
 async function observeOwnerEntryOrResponse(
   ownerEntered: () => boolean,
@@ -1616,8 +1622,7 @@ async function requestBothCollections(
 }
 
 describe(`generated collection-route histories`, () => {
-  it(`routes every adapter-bound RPC by collection before and after leadership transfer`, async () => {
-    oracleRoute(`fixed history`)
+  async function runAdapterBoundRpcRouting(): Promise<void> {
     const makePullResult = (
       marker: string,
       latestRowVersion: number,
@@ -1864,6 +1869,33 @@ describe(`generated collection-route histories`, () => {
         },
       ],
     ])
+  }
+  oracleProperty({
+    id: `browser-coordinator.adapter-bound-rpc-routing`,
+    law: {
+      ...coordinatorLaw,
+      limits: `Two collections, a leader, a follower, and a requester over the controlled BroadcastChannel, before and after one leadership transfer.`,
+    },
+    owns: [`src/browser-coordinator.ts`],
+    histories: [
+      {
+        name: `routes every adapter-bound RPC by collection before and after leadership transfer`,
+      },
+    ],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(coordinatorJudgment, plan, observe, async () => {
+        try {
+          await runAdapterBoundRpcRouting()
+        } finally {
+          // The determinism test runs this history twice in one test, so the
+          // fixture that the hooks reset between tests is reset here too.
+          await resetCoordinatorFixture()
+          prepareCoordinatorFixture()
+        }
+      }),
+    check: forwardAssertionJudgment,
   })
 
   function createRoutingJudgment() {

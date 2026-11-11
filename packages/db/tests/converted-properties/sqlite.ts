@@ -44,6 +44,7 @@ export const properties: ReadonlyArray<string> = [
   `browser-coordinator.fresh-init`,
   `browser-coordinator.write-ownership`,
   `browser-coordinator.real-tab-follower`,
+  `browser-coordinator.adapter-bound-rpc-routing`,
   `persistence.hydration-boundary-commit`,
   `persistence.hydration-straddle-fifo`,
   `persistence.hydration-straddle-abort`,
@@ -91,6 +92,11 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `cell lifecycle joined session-reset bookkeeping window next-page`,
   ],
   [
+    `db-sqlite-persistence-core/tests/persisted-demand-coverage-campaign-oracle.test.ts`,
+    `persisted-demand-coverage`,
+    `storage-fault-sweep release-sweep`,
+  ],
+  [
     `browser-db-sqlite-persistence/tests/shared-driver-fairness-oracle.test.ts`,
     `browser.shared-driver-fairness`,
     `neutral persist-storm persist-first barrier`,
@@ -109,7 +115,7 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
     `browser-db-sqlite-persistence/tests/per-collection-coordinator-oracle.test.ts`,
     `browser-coordinator`,
-    `subset-wire subset-ack collection-scoped-lease remote-lease-takeover adapter-isolation fresh-init write-ownership real-tab-follower`,
+    `subset-wire subset-ack collection-scoped-lease remote-lease-takeover adapter-isolation fresh-init write-ownership real-tab-follower adapter-bound-rpc-routing`,
   ],
   [
     `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
