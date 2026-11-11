@@ -5,6 +5,7 @@
  * collection-subscription-lifecycle-publication-oracle.property.test.ts.
  */
 import { expect } from 'vitest'
+import { oracleAssertion } from './oracle-assertion-adapter.js'
 import type { SyncConfig } from '../src/types.js'
 import type { DemandName } from './collection-subscription-lifecycle-grammar-oracle.js'
 
@@ -68,9 +69,15 @@ export function assertTerminalPublication(
   actual: TerminalPublicationSnapshot,
   retired: TerminalPublicationSnapshot,
 ): void {
-  expect(actual).toEqual(retired)
-  expect(actual.subscriberCount).toBe(0)
+  oracleAssertion(`terminal publication comparison at 71`, () =>
+    expect(actual).toEqual(retired),
+  )
+  oracleAssertion(`terminal publication comparison at 72`, () =>
+    expect(actual.subscriberCount).toBe(0),
+  )
   actual.errors.forEach((error, index) =>
-    expect(error).toBe(retired.errors[index]),
+    oracleAssertion(`terminal publication comparison at 74`, () =>
+      expect(error).toBe(retired.errors[index]),
+    ),
   )
 }

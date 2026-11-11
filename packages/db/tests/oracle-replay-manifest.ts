@@ -89,6 +89,33 @@ const ownerGroups: ReadonlyArray<
     `chromium`,
   ],
   [
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
+    `persistence`,
+    `crossed-leadership-index`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-options.test.ts`,
+    `persisted-options.types`,
+    `core-fixed`,
+    `db-sqlite-persistence-core/tests/persisted-options-type-oracle.ts`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/persisted-options.test.ts`,
+    `persisted-options.types`,
+    `browser-fixed`,
+    `db-sqlite-persistence-core/tests/persisted-options-type-oracle.ts`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/reserved-commit-sqlite-adapter-oracle.test.ts`,
+    `sqlite`,
+    `reserved-commit-hydration`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sqlite-boolean-arity-oracle.test.ts`,
+    `sqlite-persistence`,
+    `boolean-arity-fixed`,
+  ],
+  [
     `browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts`,
     `opfs`,
     `page-lifecycle-fixed mixed-execute-fixed terminal-event-fixed close-fixed failure-cleanup-fixed`,
@@ -164,6 +191,117 @@ const ownerGroups: ReadonlyArray<
     `ordered-mutation-outcome`,
   ],
   [
+    `convex-db-collection/e2e/backend-oracle.test.ts`,
+    `convex.backend`,
+    `insert update delete`,
+  ],
+  [
+    `convex-db-collection/tests/values-oracle.property.test.ts`,
+    `convex`,
+    `values`,
+  ],
+  [
+    `convex-db-collection/e2e/lazy-app-write-oracle.test.ts`,
+    `convex`,
+    `lazy-app`,
+  ],
+  [
+    `convex-db-collection/e2e/lazy-boundary-oracle.test.ts`,
+    `convex`,
+    `boundary`,
+  ],
+  [
+    `convex-db-collection/e2e/lazy-concurrency-oracle.test.ts`,
+    `convex`,
+    `backend-concurrency`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-abort-replay-oracle.property.test.ts`,
+    `convex`,
+    `abort-replay`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-failure-history-oracle.property.test.ts`,
+    `convex`,
+    `lazy-failure-history`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-history-oracle.property.test.ts`,
+    `convex`,
+    `lazy-history lazy-suffix lazy-retention-calibration`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-interleaving-oracle.property.test.ts`,
+    `convex`,
+    `lazy-interleaving`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-load-outcome-oracle.property.test.ts`,
+    `convex`,
+    `load-outcome`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-native-receipt-oracle.property.test.ts`,
+    `convex`,
+    `lazy-native-receipt`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-oracle.property.test.ts`,
+    `convex`,
+    `lazy-values lazy-work lazy-publication lazy-lifecycle lazy-receipt`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-receipt-oracle.property.test.ts`,
+    `convex`,
+    `lazy-exact-receipt`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-revalidation-oracle.property.test.ts`,
+    `convex`,
+    `revalidation`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-version-oracle.property.test.ts`,
+    `convex`,
+    `lazy-version`,
+  ],
+  [
+    `convex-db-collection/tests/offline-oracle.property.test.ts`,
+    `convex`,
+    `offline offline-source offline-acceptance`,
+  ],
+  [
+    `convex-db-collection/tests/pagination-oracle.property.test.ts`,
+    `convex`,
+    `pagination-rows pagination-work pagination-bound`,
+  ],
+  [
+    `convex-db-collection/tests/snapshot-oracle.property.test.ts`,
+    `convex`,
+    `snapshot`,
+  ],
+  [
+    `convex-db-collection/tests/ownership-oracle.property.test.ts`,
+    `convex`,
+    `ownership`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/browser-coordinator-oracle.test.ts`,
+    `browser-coordinator`,
+    `mutation-delivery adapter-routing disposal collection-release retry-retention`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/per-collection-coordinator-oracle.test.ts`,
+    `browser-coordinator`,
+    `remote-lease routing`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/shared-driver-fairness-oracle.test.ts`,
+    `browser`,
+    `shared-driver-fairness`,
+  ],
+
+  [
     `../scripts/legacy-campaign-baseline-oracle.property.test.js`,
     `scripts`,
     `legacy-campaign-baseline`,
@@ -171,7 +309,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/declared-reach-oracle.property.test.ts`,
     `oracle`,
-    `declared-reach`,
+    `declared-reach declared-reach-examples`,
   ],
   [
     `db/tests/query/pagination-oracle.property.test.ts`,
@@ -342,8 +480,22 @@ const ownerGroups: ReadonlyArray<
       `ssr-effects-react18-disabled ssr-effects-current-disabled`,
     ].join(` `),
   ],
-  [`../scripts/run-budget-oracle.property.test.js`, `scripts`, `run-budget`],
+  [
+    `../scripts/run-budget-oracle.property.test.js`,
+    `scripts`,
+    `run-budget run-budget-reexported run-budget-every-source run-budget-support-only`,
+  ],
   [`../scripts/lint-scope-oracle.property.test.js`, `scripts`, `lint-scope`],
+  [
+    `../scripts/publish-history-oracle.property.test.js`,
+    `scripts`,
+    `publish-command`,
+  ],
+  [
+    `../scripts/publish-http-oracle.property.test.js`,
+    `scripts`,
+    `publish-http`,
+  ],
   [
     `../scripts/strip-oracle-probes-oracle.property.test.js`,
     `scripts`,
@@ -360,9 +512,24 @@ const ownerGroups: ReadonlyArray<
     `stream-record-lifetime`,
   ],
   [
+    `db/tests/live-query-cache-lifecycle-oracle.test.ts`,
+    `live-query`,
+    `cache-claim-lifecycle`,
+  ],
+  [
+    `db/tests/live-query-cache-options-oracle.test.ts`,
+    `live-query`,
+    `cache-option-admission`,
+  ],
+  [
+    `db/tests/live-query-preload-indexing-oracle.test.ts`,
+    `live-query`,
+    `preload-indexing`,
+  ],
+  [
     `db/tests/live-query-deferred-acquisition-oracle.test.ts`,
     `live-query`,
-    `start-handoff`,
+    `start-handoff deferred-sibling`,
   ],
   [
     `db/tests/query/pooled-live-query-gc-oracle.test.ts`,
@@ -409,7 +576,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/live-query-observer-snapshot-oracle.property.test.ts`,
     `live-query-observer`,
-    `retained-snapshot row-container-sharing capture-paths record-shape sparse-array`,
+    `retained-snapshot snapshot-health row-container-sharing capture-paths record-shape sparse-array`,
   ],
   [
     `db/tests/cleanup-queue-oracle.property.test.ts`,
@@ -419,7 +586,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/SortedMap-oracle.test.ts`,
     `sorted-map`,
-    `key ascending descending`,
+    `key ascending descending regressions reach-calibration`,
   ],
   [
     `db/tests/replay-guard-calibration.fixture.test.ts`,
@@ -539,6 +706,11 @@ const ownerGroups: ReadonlyArray<
     `match-reentry publication-epoch-convergence persistence-interleaving`,
   ],
   [
+    `electric-db-collection/e2e/sql-predicate-semantics-oracle.e2e.test.ts`,
+    `electric`,
+    `sql-predicate-semantics`,
+  ],
+  [
     `electric-db-collection/tests/electric-recovery-oracle.test.ts`,
     `electric-recovery`,
     `publication-stream-convergence`,
@@ -586,7 +758,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
     `subscription-lifecycle`,
-    `history-statistics async-history sync-history demand-change`,
+    `history-statistics async-history constructed-history sync-history demand-change`,
   ],
   [
     `db/tests/source-health-oracle.test.ts`,
@@ -621,7 +793,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
     `sqlite-resume`,
-    `startup-generation source-progress`,
+    `startup-generation source-progress startup-corpus`,
   ],
   [
     `db/tests/query/compiler/group-by-pipeline-oracle.test.ts`,
@@ -674,6 +846,11 @@ const ownerGroups: ReadonlyArray<
     `demand-scheduling release-reentry partial-values`,
   ],
   [
+    `db/tests/query/load-subset-joint-replay-oracle.property.test.ts`,
+    `load-subset`,
+    `joint-replay`,
+  ],
+  [
     `db/tests/query/load-subset-oracle.property.test.ts`,
     `load-subset`,
     `exact-completion exact-inflight rejected-waiter`,
@@ -691,7 +868,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/load-subset-replay-refinement-oracle.test.ts`,
     `replay`,
-    `ordered-window-faults ordered-failed-replay ordered-preload-recovery keyed-request-failures subscription-demand-origin`,
+    `ordered-window-faults ordered-failed-replay ordered-preload-recovery keyed-request-failures subscription-demand-origin new-sibling-demand sibling-settlement-order subscription-error-order subscription-success-scope`,
   ],
   [
     `db/tests/query/pagination-oracle.property.test.ts`,
@@ -756,7 +933,7 @@ const ownerGroups: ReadonlyArray<
   [
     `query-db-collection/tests/refetch-ordered-prefix-oracle.test.ts`,
     `query-db`,
-    `refetch-ordered-prefix refetch-held-page-end`,
+    `refetch-ordered-prefix refetch-held-page-end refetch-held-report`,
   ],
   [
     `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
@@ -766,13 +943,13 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/sqlite-core-adapter-cli-runtime.test.ts`,
     `sqlite-persistence`,
-    `binding-capacity`,
+    `binding-capacity binding-capacity.corpus binding-capacity.transaction binding-capacity.root-limit binding-capacity.scalar-stress`,
     `db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-core-adapter-cli-runtime.test.ts`,
     `sqlite-resume`,
-    `baseline-lineage`,
+    `baseline-lineage baseline-lineage.external-metadata baseline-lineage.calibration`,
     `db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
   ],
   [
@@ -814,7 +991,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
     `sqlite-resume`,
-    `managed-claim-read retired-storage`,
+    `managed-claim-read managed-claim-read.cases retired-storage retired-storage.cases`,
   ],
   [
     `db-sqlite-persistence-core/tests/persisted-demand-coverage-campaign-oracle.test.ts`,
@@ -847,9 +1024,14 @@ const ownerGroups: ReadonlyArray<
     `publication`,
   ],
   [
+    `db/tests/query/custom-index-order-selection-oracle.test.ts`,
+    `live-query`,
+    `output-indexing`,
+  ],
+  [
     `db/tests/query/join-result-key-oracle.property.test.ts`,
     `join-result-key`,
-    `pairs whole-source`,
+    `pairs whole-source whole-source-matrix`,
   ],
   [
     `db/tests/query/public-container-copy-oracle.test.ts`,
@@ -890,7 +1072,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/aggregate-select-oracle.property.test.ts`,
     `aggregate`,
-    `select-shapes`,
+    `select-shapes select-structural select-required`,
   ],
   [
     `db/tests/query/compiler/in-evaluator-oracle.property.test.ts`,
@@ -930,12 +1112,12 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/proxy-detachment-contract-oracle.test.ts`,
     `proxy`,
-    `json-data-keys`,
+    `ordinary-field-copies json-data-keys`,
   ],
   [
     `db-ivm/tests/operators/topKWithFractionalIndex-oracle.test.ts`,
     `ivm`,
-    `topk-cyclic-payloads-array topk-cyclic-payloads-grouped topk-outer-join-replacements-array topk-outer-join-replacements-grouped`,
+    `topk-cyclic-payloads-array topk-cyclic-payloads-grouped topk-outer-join-replacements-array topk-outer-join-replacements-grouped topk-fractional-keyed-array topk-fractional-keyed-grouped`,
   ],
   // Owners of the replays that moved to the shared variables.
   [
@@ -983,7 +1165,7 @@ const ownerGroups: ReadonlyArray<
   [
     `electric-db-collection/tests/electric-oracle.property.test.ts`,
     `electric`,
-    `adapter-failure-policy design-convergence durable-prefix initial-tagged-move-outs invalid-resume-partition metadata-merge-complete-state process-grammar publication-before-persistence queued-presence-order resume-metadata-merge retry-decision subset-request-row-validity synthetic-batch-partition valid-batch-partition`,
+    `adapter-failure-policy design-convergence durable-prefix initial-tagged-move-outs invalid-resume-partition metadata-merge-complete-state process-grammar source-ledger-calibration publication-before-persistence queued-presence-order resume-metadata-merge retry-decision subset-request-row-validity synthetic-batch-partition valid-batch-partition`,
   ],
   [
     `electric-db-collection/tests/pg-serializer-oracle.property.test.ts`,
@@ -1059,6 +1241,12 @@ const ownerGroups: ReadonlyArray<
     `offline-transactions/tests/transaction-serializer-oracle.property.test.ts`,
     `offline`,
     `serializer.mutation-wire serializer.date-marker serializer.version-two`,
+    `offline-transactions/tests/transaction-serializer-oracle.ts`,
+  ],
+  [
+    `offline-transactions/tests/transaction-serializer-oracle.property.test.ts`,
+    `offline`,
+    `serializer.malformed-object serializer.mutation-codec`,
   ],
   [
     `offline-transactions/tests/transaction-settlement-oracle.property.test.ts`,
@@ -1073,7 +1261,7 @@ const ownerGroups: ReadonlyArray<
   [
     `node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
     `sqlite-persistence`,
-    `expression-index bigint-roundtrip bigint-rejection`,
+    `expression-index bigint-roundtrip bigint-rejection expression-index.large-number expression-index.fixed-filter expression-index.native-identity expression-index.native-polarity`,
   ],
   [
     `browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts`,
@@ -1311,9 +1499,26 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [`load-subset.joint-replay`, `load-subset\\.joint-replay > random seed`],
   [`evaluators.like`, `evaluators\\.like > random seed`],
   [`evaluators.in`, `evaluators\\.in > random seed`],
   ...[
+    `aggregate.select-shapes`,
+    `aggregate.select-required`,
+    `pooled-live-query.bootstrap-ownership`,
+    `pooled-live-query.cleanup-peers`,
+    `pooled-live-query.late-cleanup`,
+    `pooled-live-query.cleanup-admission`,
+    `pooled-live-query.publication`,
+    `join-result-key.pairs`,
+    `join-result-key.whole-source`,
+    `load-subset.exact-completion`,
+    `load-subset.exact-inflight`,
+    `load-subset.rejected-waiter`,
+    `bucket-facade.rollback-history`,
+    `where-predicate.publication`,
+    `cold-join.reconciliation`,
+    `cold-join.compound`,
     `ir-identity.canonical-expressions`,
     `ir-identity.reference-expressions`,
     `ir-identity.membership-set`,
@@ -1332,6 +1537,51 @@ const replayTestNames = new Map([
     (property) =>
       [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
   ),
+  ...[
+    `async-history`,
+    `constructed-history`,
+    `demand-change`,
+    `sync-history`,
+    `publication-history`,
+    `restart-publication`,
+  ].map(
+    (name) =>
+      [
+        `subscription-lifecycle.${name}`,
+        `subscription-lifecycle\\.${name} > random seed`,
+      ] as const,
+  ),
+  [
+    `electric.sql-predicate-semantics`,
+    `electric\\.sql-predicate-semantics > random seed`,
+  ],
+  [`trailbase.lifecycle`, `trailbase\\.lifecycle > random seed`],
+  [`trailbase.page-event`, `trailbase\\.page-event > random seed`],
+  ...[...registeredOracleProperties]
+    .filter((property) => property.startsWith(`electric.sdk-`))
+    .map(
+      (property) =>
+        [property, `${property.replaceAll(`.`, `\\.`)} > random seed`] as const,
+    ),
+  [
+    `electric-recovery.publication-stream-convergence`,
+    `electric-recovery\\.publication-stream-convergence > random seed`,
+  ],
+  ...ownerGroups
+    .filter(
+      ([file]) =>
+        file ===
+        `electric-db-collection/tests/electric-oracle.property.test.ts`,
+    )
+    .flatMap(([, prefix, suffixes]) =>
+      suffixes.split(` `).map((suffix) => {
+        const property = `${prefix}.${suffix}`
+        return [
+          property,
+          `${property.replaceAll(`.`, `\\.`)} > random seed`,
+        ] as const
+      }),
+    ),
   ...ownerGroups
     .filter(([, prefix]) => prefix === `pg-serializer`)
     .flatMap(([, prefix, suffixes]) =>
@@ -1391,10 +1641,42 @@ const replayTestNames = new Map([
       [property, `${property.replaceAll(`.`, `\\.`)}.*random seed`] as const,
   ),
   [
+    `sqlite-persistence.expression-index`,
+    `sqlite-persistence\\.expression-index > random seed`,
+  ],
+  [
+    `sqlite-persistence.bigint-roundtrip`,
+    `sqlite-persistence\\.bigint-roundtrip > random seed`,
+  ],
+  [
+    `sqlite-persistence.bigint-rejection`,
+    `sqlite-persistence\\.bigint-rejection > random seed`,
+  ],
+  [
+    `sqlite-resume.retired-storage`,
+    `sqlite-resume\\.retired-storage > random seed`,
+  ],
+  [
+    `sqlite-resume.managed-claim-read`,
+    `sqlite-resume\\.managed-claim-read > random seed`,
+  ],
+  [
+    `sqlite-resume.startup-generation`,
+    `sqlite-resume\\.startup-generation > random seed`,
+  ],
+  [
+    `sqlite-resume.baseline-lineage`,
+    `sqlite-resume\\.baseline-lineage > random seed`,
+  ],
+  [
+    `sqlite-persistence.binding-capacity`,
+    `sqlite-persistence\\.binding-capacity > random seed`,
+  ],
+  [
     `scripts.legacy-campaign-baseline`,
     `scripts\\.legacy-campaign-baseline > random seed`,
   ],
-  [`oracle.declared-reach`, `reach ledgers refine the declared reach model`],
+  [`oracle.declared-reach`, `oracle\\.declared-reach > random seed`],
   ...ownerGroups
     .filter(([, prefix]) => prefix === `adapter-conformance.eager-live-source`)
     .flatMap(([, prefix, suffixes]) =>
@@ -1408,7 +1690,15 @@ const replayTestNames = new Map([
     ),
   [
     `query-db.refetch-held-page-end`,
-    `generated same-key page shifts.*replay campaign`,
+    `query-db\\.refetch-held-page-end > random seed`,
+  ],
+  [
+    `query-db.refetch-ordered-prefix`,
+    `query-db\\.refetch-ordered-prefix > random seed`,
+  ],
+  [
+    `query-db.refetch-held-report`,
+    `query-db\\.refetch-held-report > random seed`,
   ],
   [`svelte.client-window`, `svelte\\.client-window > random seed`],
   [
@@ -1463,19 +1753,6 @@ const replayTestNames = new Map([
     `preact.window-render.on-demand-keyed-both`,
     `preact\\.window-render\\.on-demand-keyed-both > random seed`,
   ],
-  [`ivm.topk-numeric-window`, `Numeric window oracle:.*random campaign`],
-  [
-    `ivm.topk-negative-window-array`,
-    `Absolute-rank negative window oracle:.*array.*random`,
-  ],
-  [
-    `ivm.topk-negative-window-grouped`,
-    `Absolute-rank negative window oracle:.*grouped.*random`,
-  ],
-  [
-    `ivm.topk-negative-window-orderBy`,
-    `Absolute-rank negative window oracle:.*orderBy.*random`,
-  ],
   [`ivm.distinct-collisions`, `ivm\\.distinct-collisions > random seed`],
   [
     `ivm.distinct-representatives`,
@@ -1492,15 +1769,11 @@ const replayTestNames = new Map([
   [`query.distinct-collisions`, `query\\.distinct-collisions > random seed`],
   [
     `sqlite-resume.source-progress`,
-    `preserves source progress evidence.*random or replayed`,
+    `sqlite-resume\\.source-progress > random seed`,
   ],
   [
     `browser.electric-source-prefix`,
     `converges after interleaved source prefixes.*random or replayed`,
-  ],
-  [
-    `source-health.required-history`,
-    `required histories refine the model.*random`,
   ],
   [
     `collection-lifecycle.gc-mutation-shapes`,
@@ -1509,47 +1782,6 @@ const replayTestNames = new Map([
   [
     `collection-lifecycle.gc-retention-boundaries`,
     `preserves retention across transaction phases.*seed undefined`,
-  ],
-  [
-    `ssr.stream-record-lifetime`,
-    `settles each record demand at its transport checkpoint.*random`,
-  ],
-  [
-    `live-query-observer.retained-snapshot`,
-    `first reads match the capture-time rows.*random`,
-  ],
-  [
-    `live-query-observer.row-container-sharing`,
-    `reuses rows across metadata changes.*random`,
-  ],
-  [
-    `live-query-observer.capture-paths`,
-    `checks query capture boundaries.*random`,
-  ],
-  [
-    `live-query-observer.record-shape`,
-    `compares authored shape at every read.*random`,
-  ],
-  [
-    `live-query-observer.sparse-array`,
-    `publishes changed array positions to every receiver.*random`,
-  ],
-  [`live-query.start-handoff`, `reports only its own thrown starts.*random`],
-  [
-    `pooled-live-query.late-cleanup`,
-    `releases late cleanup registration channels.*random`,
-  ],
-  [
-    `pooled-live-query.bootstrap-ownership`,
-    `bootstrap ownership after callback failure.*random`,
-  ],
-  [
-    `pooled-live-query.cleanup-peers`,
-    `cleanup status reaches every observer.*random`,
-  ],
-  [
-    `pooled-live-query.cleanup-admission`,
-    `matches a live-query Collection's cleanup admission \\(random\\)`,
   ],
   [
     `subscription-lifecycle.notification-error`,
@@ -1572,24 +1804,62 @@ const replayTestNames = new Map([
   ],
   [
     `index-update.reference-model`,
-    `matches a reference model across valid operation sequences \\(seed undefined\\)`,
+    `index-update\\.reference-model > random seed`,
   ],
   [
     `index-update.nullish-membership`,
-    `refines nullish membership histories \\(seed undefined\\)`,
+    `index-update\\.nullish-membership > random seed`,
   ],
   [
     `index-update.exact-identity`,
-    `preserves exact equality while ordered traversal retains every row \\(seed undefined\\)`,
+    `index-update\\.exact-identity > random seed`,
   ],
   [
     `index-update.custom-comparator`,
-    `matches an independent custom-comparator model \\(seed undefined\\)`,
+    `index-update\\.custom-comparator > random seed`,
   ],
   [`ivm.hash-identity`, `ivm\\.hash-identity > random seed`],
   [`ivm.hash-identity-cycles`, `ivm\\.hash-identity-cycles > random seed`],
   [`ivm.hash-value`, `ivm\\.hash-value > random seed`],
   [`ivm.incrementalization-law`, `ivm\\.incrementalization-law > random seed`],
+  [`ivm.topk-support-window`, `ivm\\.topk-support-window > random seed`],
+  [`ivm.topk-numeric-window`, `ivm\\.topk-numeric-window > random seed`],
+  [
+    `ivm.topk-negative-window-array`,
+    `ivm\\.topk-negative-window-array > random seed`,
+  ],
+  [
+    `ivm.topk-negative-window-grouped`,
+    `ivm\\.topk-negative-window-grouped > random seed`,
+  ],
+  [
+    `ivm.topk-negative-window-orderBy`,
+    `ivm\\.topk-negative-window-orderBy > random seed`,
+  ],
+  [
+    `ivm.topk-cyclic-payloads-array`,
+    `ivm\\.topk-cyclic-payloads-array > random seed`,
+  ],
+  [
+    `ivm.topk-cyclic-payloads-grouped`,
+    `ivm\\.topk-cyclic-payloads-grouped > random seed`,
+  ],
+  [
+    `ivm.topk-outer-join-replacements-array`,
+    `ivm\\.topk-outer-join-replacements-array > random seed`,
+  ],
+  [
+    `ivm.topk-outer-join-replacements-grouped`,
+    `ivm\\.topk-outer-join-replacements-grouped > random seed`,
+  ],
+  [
+    `ivm.topk-fractional-keyed-array`,
+    `ivm\\.topk-fractional-keyed-array > random seed`,
+  ],
+  [
+    `ivm.topk-fractional-keyed-grouped`,
+    `ivm\\.topk-fractional-keyed-grouped > random seed`,
+  ],
   [`ivm.index-refinement`, `ivm\\.index-refinement > random seed`],
   [`ivm.murmur-stream`, `ivm\\.murmur-stream > random seed`],
   [`ivm.reduce-fast-path`, `ivm\\.reduce-fast-path > random seed`],
@@ -1635,6 +1905,19 @@ const enumeratedProperties = new Set([
   `query-db.ownership.refresh-overlap`,
   `query-db.ownership.handler-identity`,
   `query-db.ownership.work`,
+  `sqlite-persistence.expression-index.large-number`,
+  `sqlite-persistence.expression-index.fixed-filter`,
+  `sqlite-persistence.expression-index.native-identity`,
+  `sqlite-persistence.expression-index.native-polarity`,
+  `sqlite-resume.retired-storage.cases`,
+  `sqlite-resume.managed-claim-read.cases`,
+  `sqlite-resume.startup-corpus`,
+  `sqlite-resume.baseline-lineage.external-metadata`,
+  `sqlite-resume.baseline-lineage.calibration`,
+  `sqlite-persistence.binding-capacity.corpus`,
+  `sqlite-persistence.binding-capacity.transaction`,
+  `sqlite-persistence.binding-capacity.root-limit`,
+  `sqlite-persistence.binding-capacity.scalar-stress`,
   `solid.row-materialization`,
   `solid.native-parent-materialization`,
   `solid.descriptor-visibility`,
@@ -1651,6 +1934,13 @@ const enumeratedProperties = new Set([
   `svelte.cache-options`,
   `svelte.descriptor-start-release`,
   `query.ordered-mutation-outcome`,
+  `oracle.declared-reach-examples`,
+  `sorted-map.regressions`,
+  `sorted-map.reach-calibration`,
+  `scripts.release-version`,
+  `scripts.release-seed-failure`,
+  `scripts.publish-command`,
+  `scripts.publish-http`,
   `reverse-index.large-reads`,
   `react.suspense-local-options`,
   `react.suspense-indexing-config`,
@@ -1671,6 +1961,10 @@ const enumeratedProperties = new Set([
   `react.cache-options.server-render`,
   `preact.bound-options`,
   `preact.bound-schema-options`,
+  `live-query.cache-claim-lifecycle`,
+  `live-query.cache-option-admission`,
+  `live-query.preload-indexing`,
+  `live-query.deferred-sibling`,
   `oracle-replay.enumerated-calibration`,
   `oracle-replay.enumerated-calibration-neighbor`,
 ])
@@ -1697,6 +1991,16 @@ const nativeReactProperties = new Set([
 function directReplayTestName(property: string): string | undefined {
   if (property.startsWith(`adapter-conformance.persisted-baseline-lifecycle.`))
     return `${property.replaceAll(`.`, `\\.`)}.*random seed`
+  if (
+    property.startsWith(`browser-coordinator.`) ||
+    [
+      `browser.shared-driver-fairness`,
+      `browser.electric-source-prefix`,
+      `browser.multi-tab-reserved-history`,
+    ].includes(property)
+  )
+    return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
+
   // Includes registrations now use the framework's canonical campaign name.
   if (
     property.startsWith(`includes.matrix.`) ||
@@ -1740,28 +2044,19 @@ function directReplayTestName(property: string): string | undefined {
     ].includes(property)
   )
     return `${property.replaceAll(`.`, `\\.`)}.*random seed`
-  if (property.startsWith(`pagination.limit-admission-`)) {
-    const suffix = property.slice(`pagination.limit-admission-`.length)
-    const negative = suffix.endsWith(`-negative`)
-    const path = suffix.slice(0, -(negative ? `-negative` : `-valid`).length)
-    return `${path} ${negative ? `rejects negatives` : `admits valid neighbors`} \\(random\\)`
-  }
+  if (property.startsWith(`pagination.limit-admission-`))
+    return `${property.replaceAll(`.`, `\\.`)} > random seed`
   if (property.startsWith(`framework.`)) {
     switch (property.split(`.`).at(-1)) {
       case `result-shape`:
         return `result-shape > random seed`
       case `window-history`:
-        return `(?:direct|nested) window histories \\(fresh\\)`
       case `pending-window-history`:
-        return `pending window histories \\(fresh\\)`
       case `publication-window-history`:
-        return `publication callback window histories \\(fresh\\)`
       case `peer-window-history`:
-        return `peer page histories \\(fresh\\)`
       case `keyed-admission`:
-        return `initial disabled keyed admission \\(fresh\\)`
       case `immutable-key-history`:
-        return `immutable query key histories \\(fresh\\)`
+        return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
     }
   }
   if (
@@ -1769,18 +2064,16 @@ function directReplayTestName(property: string): string | undefined {
     property.startsWith(`react.ssr-effects-`)
   )
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
-  if (property === `replay.ordered-window-faults`)
-    return `keeps the ordered window under load and release faults \\(replay campaign\\)`
-  if (property === `replay.ordered-failed-replay`)
-    return `keeps the last publication through a failed replay \\(replay campaign\\)`
-  if (property === `replay.ordered-preload-recovery`)
-    return `recovers replays that start during the initial preload \\(replay campaign\\)`
-  if (property === `replay.keyed-request-failures`)
-    return `distinguishes keyed request failure from reacquisition \\(replay campaign\\)`
-  if (property === `replay.subscription-demand-origin`)
-    return `distinguishes failed demand origins \\(replay campaign\\)`
-  if (property === `cold-join.compound`)
-    return `recomputes generated compound histories, seed=undefined`
+  if (
+    [
+      `replay.ordered-window-faults`,
+      `replay.ordered-failed-replay`,
+      `replay.ordered-preload-recovery`,
+      `replay.keyed-request-failures`,
+      `replay.subscription-demand-origin`,
+    ].includes(property)
+  )
+    return `${property.replaceAll(`.`, `\\.`)} > random seed`
   if (property === `oracle-replay.calibration`)
     return `executes the replay calibration property`
   if (property.startsWith(`pagination.matrix.`))
@@ -1829,6 +2122,26 @@ const ownerReplayConfigs = new Map([
   [
     `packages/browser-db-sqlite-persistence/tests/trailbase-eager-live-source-oracle.test.ts`,
     `vitest.adapter-oracles.config.ts`,
+  ],
+  [
+    `packages/convex-db-collection/e2e/backend-oracle.test.ts`,
+    `vitest.e2e.config.ts`,
+  ],
+  [
+    `packages/convex-db-collection/e2e/lazy-app-write-oracle.test.ts`,
+    `vitest.lazy.e2e.config.ts`,
+  ],
+  [
+    `packages/convex-db-collection/e2e/lazy-boundary-oracle.test.ts`,
+    `vitest.lazy.e2e.config.ts`,
+  ],
+  [
+    `packages/convex-db-collection/e2e/lazy-concurrency-oracle.test.ts`,
+    `vitest.lazy.e2e.config.ts`,
+  ],
+  [
+    `packages/electric-db-collection/e2e/sql-predicate-semantics-oracle.e2e.test.ts`,
+    `vitest.e2e.config.ts`,
   ],
   [
     `packages/db-adapter-conformance/tests/neon-realtime-oracle.property.test.ts`,

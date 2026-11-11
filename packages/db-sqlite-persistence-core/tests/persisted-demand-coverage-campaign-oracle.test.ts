@@ -7,18 +7,15 @@ import {
   createLiveQueryCollection,
   eq,
 } from '@tanstack/db'
+import { oracleReplayRequested, oracleRuns } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplaySkips,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-  recordOracleReplay,
-} from '../../db/tests/oracle-config'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   SQLiteCorePersistenceAdapter,
   persistedCollectionOptions,
@@ -1160,55 +1157,47 @@ const REACH_STATES: ReadonlyArray<CoverageReach> = [
 
 async function checkHistory(
   history: History,
-  ...reaches: ReadonlyArray<ReturnType<typeof createOracleReach<CoverageReach>>>
+  observe: (checkpoint: string, value: unknown) => void,
 ): Promise<void> {
-  for (const reach of reaches) reach.beginHistory()
   for (const record of await runHistory(history)) {
-    expect(
-      coverageViolations(record, (state) => {
-        for (const reach of reaches) reach.reach(state)
-      }),
-    ).toEqual([])
-  }
-}
-
-// fc.check exposes the actual random seed even when comparisons pass but the
-// subsequent reach assertion fails. Preserve fast-check's native failure text
-// and the guarded replay witness, rather than losing a shrink path or cause.
-async function assertRun<T>(property: string, result: fc.RunDetails<T>) {
-  recordOracleReplay(property, result)
-  const message = await fc.asyncDefaultReportMessage(result)
-  if (message !== undefined)
-    throw new Error(message, { cause: result.errorInstance })
-}
-
-async function campaign(options: NonNullable<Parameters<typeof fc.assert>[1]>) {
-  // A seed alone runs a reseeded campaign and must still enforce reach.
-  // A path replays one input directly and does not owe campaign-wide reach.
-  const reach = createOracleReach<CoverageReach>(PROPERTY, REACH_STATES, {
-    replaying: oracleReplayRequested(),
-  })
-  let seed: number | undefined
-  if (!oracleReplaySkips(PROPERTY)) {
-    oracleRoute(oracleRouteOf(options))
-    const result = await fc.check(
-      fc.asyncProperty(historyArb, (history) => checkHistory(history, reach)),
-      options,
+    oracleAssertion(`demand coverage observation`, () =>
+      expect(
+        coverageViolations(record, (state) => observe(`reach`, state)),
+      ).toEqual([]),
     )
-    seed = result.seed
-    await assertRun(PROPERTY, result)
   }
-  if (!oracleReplayRequested() || !oracleReplaySkips(REQUIRED_PROPERTY)) {
-    const result = await fc.check(
-      fc.asyncProperty(requiredHistoriesArb, async (histories) => {
-        const requiredReach = createOracleReach<CoverageReach>(
-          REQUIRED_PROPERTY,
-          REACH_STATES,
-          { replaying: false },
-        )
-        for (const { name, history } of histories) {
+}
+const coverageLaw = {
+  statement: `The existing durable-coverage model judges offline demand settlement, rows, cancellation, and window membership after each retained history.`,
+  authority: `The persisted demand coverage contract and independent model stated above.`,
+  limits: `The existing controlled source and node:sqlite histories; no new host, scheduler, or provider claim.`,
+  owner: `SQLite persistence`,
+}
+oracleProperty({
+  id: REQUIRED_PROPERTY,
+  law: coverageLaw,
+  histories: {
+    arbitrary: requiredHistoriesArb,
+    runs: REQUIRED_RUNS,
+    fixedSeeds: [2102],
+    measured: REACH_STATES,
+  },
+  resolve: (histories) => ({ histories }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `required demand coverage`,
+      plan,
+      observe,
+      async () => {
+        quietConsole()
+        const reached = new Set<string>()
+        for (const { name, history } of plan.histories) {
           try {
-            await checkHistory(history, requiredReach, reach)
+            await checkHistory(history, (checkpoint, value) => {
+              if (checkpoint === `reach`) reached.add(String(value))
+              observe(checkpoint, value)
+            })
           } catch (error) {
             throw new Error(
               `required history: ${name}\n${JSON.stringify(history)}`,
@@ -1216,41 +1205,34 @@ async function campaign(options: NonNullable<Parameters<typeof fc.assert>[1]>) {
             )
           }
         }
-        // Credit only real model/driver observations inside this generated pack.
-        // An unrelated random history cannot hide a missing required witness.
-        requiredReach.assertReached()
-        if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT) {
-          console.log(
-            REQUIRED_PROPERTY,
-            JSON.stringify(Object.fromEntries(requiredReach.counts())),
-          )
-        }
-      }),
-      oracleReplayRequested()
-        ? oraclePropertyOptions(REQUIRED_RUNS, REQUIRED_PROPERTY)
-        : { seed, numRuns: oracleRuns(REQUIRED_RUNS) },
-    )
-    seed = result.seed
-    await assertRun(REQUIRED_PROPERTY, result)
-  }
-  if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT) {
-    console.log(
-      PROPERTY,
-      `seed=${seed}`,
-      JSON.stringify(Object.fromEntries(reach.counts())),
-    )
-  }
-  try {
-    reach.assertReached()
-  } catch (error) {
-    throw new Error(
-      `${PROPERTY}: seed=${seed}, numRuns=${options.numRuns}; replay the full campaign with this seed`,
-      { cause: error },
-    )
-  }
-  return reach.counts()
-}
+        oracleAssertion(`required coverage pack reach`, () =>
+          expect(reached).toEqual(new Set(REACH_STATES)),
+        )
+      },
+    ),
+  check: forwardAssertionJudgment,
+  timeout: campaignTimeoutMs,
+})
 
+oracleProperty({
+  id: PROPERTY,
+  law: coverageLaw,
+  histories: {
+    arbitrary: historyArb,
+    runs: RUNS,
+    fixedSeeds: [2102],
+    measured: REACH_STATES,
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`demand coverage`, plan, observe, () => {
+      quietConsole()
+      return checkHistory(plan.history, observe)
+    }),
+  check: forwardAssertionJudgment,
+  timeout: campaignTimeoutMs,
+})
 // The release law: a released load owns no wait, so the source Collection is
 // not loading a subset after the release, nor after the wait would have
 // passed.
@@ -1275,30 +1257,26 @@ describe(`persisted demand coverage over generated histories`, () => {
   it.skipIf(oracleReplayRequested())(
     `keeps the law when any one storage call fails`,
     async () => {
-      oracleRoute(`case`)
       quietConsole()
       const baseline = await runWithFault(undefined)
       // Positive witness: without a failure, session 2 settles D offline.
       expect(baseline.session2).toEqual({ status: `ready`, rows: [`r1`, `r2`] })
-      const reach = createOracleReach<FaultReach>(
-        `persisted demand coverage storage failures`,
-        [
-          `coverage read failed`,
-          `row write failed`,
-          `coverage check failed`,
-          `coverage write failed`,
-        ],
-      )
+      const reached = new Set<FaultReach>()
+      const expectedReach: Array<FaultReach> = [
+        `coverage read failed`,
+        `row write failed`,
+        `coverage check failed`,
+        `coverage write failed`,
+      ]
       for (const session of [1, 2] as const) {
         const count = baseline.calls.filter((c) => c.session === session).length
         for (let index = 0; index < count; index++) {
           for (const timing of [`before effect`, `after effect`] as const) {
-            reach.beginHistory()
             const run = await runWithFault({ session, index, timing })
             const failed = run.calls.filter((c) => c.session === session)[index]
             if (!failed) continue
             try {
-              checkFault(failed, timing, run, (state) => reach.reach(state))
+              checkFault(failed, timing, run, (state) => reached.add(state))
             } catch (error) {
               throw new Error(
                 `failure at session ${session} call ${index} ` +
@@ -1309,7 +1287,7 @@ describe(`persisted demand coverage over generated histories`, () => {
           }
         }
       }
-      reach.assertReached()
+      expect(reached).toEqual(new Set(expectedReach))
     },
     600_000,
   )
@@ -1317,26 +1295,22 @@ describe(`persisted demand coverage over generated histories`, () => {
   it.skipIf(oracleReplayRequested())(
     `owns no wait after a release at any step of a load`,
     async () => {
-      oracleRoute(`case`)
       quietConsole()
       const driver = createDriver(new DatabaseSync(`:memory:`))
       await coverGroupA(driver)
-      const reach = createOracleReach<ReleaseReach>(
-        `persisted demand coverage releases`,
-        [
-          `released before the source load`,
-          `released while the source load waited`,
-          `released during a coverage read`,
-        ],
-      )
+      const reached = new Set<ReleaseReach>()
+      const expectedReach: Array<ReleaseReach> = [
+        `released before the source load`,
+        `released while the source load waited`,
+        `released during a coverage read`,
+      ]
       for (let steps = 0; steps <= 24; steps++) {
-        reach.beginHistory()
         checkRelease(
           steps,
-          await runReleaseAt(driver, steps, (state) => reach.reach(state)),
+          await runReleaseAt(driver, steps, (state) => reached.add(state)),
         )
       }
-      reach.assertReached()
+      expect(reached).toEqual(new Set(expectedReach))
     },
     300_000,
   )
@@ -1344,7 +1318,6 @@ describe(`persisted demand coverage over generated histories`, () => {
   it.skipIf(oracleReplayRequested())(
     `rejects observations that ignore lost rows, obsolete loads, or other window rows`,
     () => {
-      oracleRoute(`calibration`)
       // Checker calibration (ORC-006): the shared judgment must reject a wrong
       // observation of each kind. Each record below states what production
       // would wrongly show; the comparison must report it.
@@ -1451,23 +1424,5 @@ describe(`persisted demand coverage over generated histories`, () => {
         ),
       ).toHaveLength(1)
     },
-  )
-
-  it.skipIf(oracleReplayRequested())(
-    `refines the model over a fixed campaign`,
-    async () => {
-      quietConsole()
-      await campaign(oracleFixedSeed(2102, { numRuns: oracleRuns(RUNS) }))
-    },
-    campaignTimeoutMs,
-  )
-
-  it.skipIf(oracleReplaySkips(PROPERTY, REQUIRED_PROPERTY))(
-    `refines the model over a random or replayed campaign`,
-    async () => {
-      quietConsole()
-      await campaign(oraclePropertyOptions(RUNS, PROPERTY))
-    },
-    campaignTimeoutMs,
   )
 })

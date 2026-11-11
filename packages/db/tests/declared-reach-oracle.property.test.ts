@@ -52,15 +52,23 @@
  * `oraclePropertyOptions` under the process's own. Each check compares one
  * whole observation with the model.
  */
-import { fc, test as fcTest } from '@fast-check/vitest'
+import fc from 'fast-check'
 import { afterAll, expect, vi } from 'vitest'
-import { createOracleReach } from './oracle-reach.js'
 import { runOracleCampaign } from './oracle-campaign.js'
 import {
+  oracleProperty,
   oraclePropertyOptions,
   oracleRandomParameters,
+  oracleReplayRequested,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
+import type { createOracleReach } from './oracle-reach.js'
 
 const property = `oracle.declared-reach`
 
@@ -364,7 +372,10 @@ function namedStates(failure: string | undefined): Failure | undefined {
 // The check: the observed ledger refines the model.
 async function checkLedger(ledger: Ledger) {
   const expected = expectedVerdict(ledger)
-  expect(await observeLedger(ledger), `reach verdict`).toEqual(expected)
+  const actual = await observeLedger(ledger)
+  oracleAssertion(`existing reach comparison`, () =>
+    expect(actual, `reach verdict`).toEqual(expected),
+  )
   return expected
 }
 
@@ -496,8 +507,10 @@ function observeCampaign(ledger: Ledger): Promise<CampaignObservation> {
               ) as CampaignLine,
           )
         for (const [index, line] of observations.entries())
-          expect(line.seed, `reported campaign seed`).toBe(
-            parameters[index]?.seed,
+          oracleAssertion(`existing reach comparison`, () =>
+            expect(line.seed, `reported campaign seed`).toBe(
+              parameters[index]?.seed,
+            ),
           )
         return observations
       }
@@ -537,8 +550,9 @@ function observeCampaign(ledger: Ledger): Promise<CampaignObservation> {
 
 // The check: the observed campaigns refine the campaign model.
 async function checkCampaign(ledger: Ledger) {
-  expect(await observeCampaign(ledger), `campaign observation`).toEqual(
-    expectedCampaign(ledger),
+  const actual = await observeCampaign(ledger)
+  oracleAssertion(`existing reach comparison`, () =>
+    expect(actual, `campaign observation`).toEqual(expectedCampaign(ledger)),
   )
 }
 
@@ -598,15 +612,19 @@ function checkRunParameters(
     const info = vi.spyOn(console, `info`).mockImplementation(() => {})
     try {
       const parameters = select()
-      expect(
-        Number.isSafeInteger(parameters.seed),
-        `selected seed is replayable`,
-      ).toBe(true)
-      expect(
-        info.mock.calls.map(([line]) =>
-          JSON.parse(String(line).replace(/^ORACLE_SEED /, ``)),
-        ),
-      ).toEqual([{ property, seed: parameters.seed }])
+      oracleAssertion(`existing reach comparison`, () =>
+        expect(
+          Number.isSafeInteger(parameters.seed),
+          `selected seed is replayable`,
+        ).toBe(true),
+      )
+      oracleAssertion(`existing reach comparison`, () =>
+        expect(
+          info.mock.calls.map(([line]) =>
+            JSON.parse(String(line).replace(/^ORACLE_SEED /, ``)),
+          ),
+        ).toEqual([{ property, seed: parameters.seed }]),
+      )
       return parameters
     } finally {
       info.mockRestore()
@@ -614,39 +632,47 @@ function checkRunParameters(
   }
   const replayed = run === `path` ? property : otherProperty
   // toEqual treats an undefined key as absent.
-  expect(
-    project(
-      observe(() =>
-        oracleRandomParameters(
-          baseRuns,
-          run === `ordinary`
-            ? undefined
-            : run === `seed`
-              ? {
-                  campaignSeed: 1,
-                  replayPath: undefined,
-                  replayProperty: undefined,
-                }
-              : { campaignSeed: 1, replayPath: `0`, replayProperty: replayed },
-          property,
-          examples,
+  oracleAssertion(`existing reach comparison`, () =>
+    expect(
+      project(
+        observe(() =>
+          oracleRandomParameters(
+            baseRuns,
+            run === `ordinary`
+              ? undefined
+              : run === `seed`
+                ? {
+                    campaignSeed: 1,
+                    replayPath: undefined,
+                    replayProperty: undefined,
+                  }
+                : {
+                    campaignSeed: 1,
+                    replayPath: `0`,
+                    replayProperty: replayed,
+                  },
+            property,
+            examples,
+          ),
         ),
       ),
+      `run parameters`,
+    ).toEqual(
+      expectedRunParameters({ run, seed: 1, path: `0` }, baseRuns, examples),
     ),
-    `run parameters`,
-  ).toEqual(
-    expectedRunParameters({ run, seed: 1, path: `0` }, baseRuns, examples),
   )
-  expect(
-    project(
-      observe(() => oraclePropertyOptions(baseRuns, property, { examples })),
-    ),
-    `property options under this process`,
-  ).toEqual(
-    expectedRunParameters(
-      processSelection,
-      baseRuns * processMultiplier,
-      examples,
+  oracleAssertion(`existing reach comparison`, () =>
+    expect(
+      project(
+        observe(() => oraclePropertyOptions(baseRuns, property, { examples })),
+      ),
+      `property options under this process`,
+    ).toEqual(
+      expectedRunParameters(
+        processSelection,
+        baseRuns * processMultiplier,
+        examples,
+      ),
     ),
   )
 }
@@ -723,81 +749,150 @@ const ledgerExamples = [
   }),
   fixedLedger({ campaignFault: `bad-seed`, histories: [history(false, 0, 1)] }),
 ]
-const ledgerExampleInputs = new Set(ledgerExamples.map(([ledger]) => ledger))
-const ledgerReach = createOracleReach(`oracle.declared-reach`, reachStates, {
-  fixedHistories: ledgerExamples.length,
-})
-let ledgersRan = false
-afterAll(() => {
-  if (ledgersRan) ledgerReach.assertReached()
+type ReachInput = [Ledger, number, Array<number>]
+type Observe = (checkpoint: string, value: unknown) => void
+const totalReachCounts = new Map<(typeof reachStates)[number], number>(
+  reachStates.map((state) => [state, 0]),
+)
+const fixedSeen = new Set<Ledger>()
+const fixedEntered = new Set<(typeof reachStates)[number]>()
+let generatedRan = false
+
+// The outer campaign now belongs to the native framework. The vendored APIs
+// remain the implementation under test until their final callers retire; the
+// independent ledger, all judgments and input language stay unchanged.
+async function runJudgments(
+  [ledger, baseRuns, examples]: ReachInput,
+  fixedInput: boolean,
+  observe: Observe,
+) {
+  const counted = !expect.getState().currentTestName!.endsWith(`determinism`)
+  if (!fixedInput && counted) generatedRan = true
+  if (fixedInput && counted) fixedSeen.add(ledger)
+  const entered = new Set<(typeof reachStates)[number]>()
+  const mark = (state: (typeof reachStates)[number]) => {
+    if (entered.has(state)) return
+    entered.add(state)
+    observe(`reach`, state)
+    if (counted) {
+      totalReachCounts.set(state, (totalReachCounts.get(state) ?? 0) + 1)
+      if (fixedInput) fixedEntered.add(state)
+    }
+  }
+  const verdict = await checkLedger(ledger)
+  await checkCampaign(ledger)
+  checkRunParameters(ledger.run, baseRuns, examples)
+  const { counts, failure } = verdict
+  const ordinary = expectedVerdict({
+    ...ledger,
+    run: `ordinary`,
+    replaying: undefined,
+  }).failure
+  const environmentChecks = ledger.run === `ordinary` || ledger.run === `seed`
+  if (verdict.invalid) mark(`invalid reach options`)
+  if (ledger.campaignFault !== undefined)
+    mark(`an invalid campaign environment`)
+  if (verdict.invalid) return
+  if (
+    ledger.replaying === undefined &&
+    ledger.run === `path` &&
+    (ordinary?.belowMinimum.size ?? 0) > 0
+  )
+    mark(`a path replay with a state below the minimum`)
+  if (
+    ledger.replaying === undefined &&
+    ledger.run === `other-path` &&
+    (ordinary?.belowMinimum.size ?? 0) > 0
+  )
+    mark(`a path replay of another property with a state below the minimum`)
+  if (ledger.replaying !== undefined && ledger.replaying === environmentChecks)
+    mark(`a replaying option that overrides the environment`)
+  if (failure?.stoppedAt !== undefined)
+    mark(`a run that stopped inside the fixed histories`)
+  if (ledger.run === `seed` && (failure?.belowMinimum.size ?? 0) > 0)
+    mark(`a seed-only run fails below the minimum`)
+  if (failure?.unfixed.some((state) => (counts.get(state) ?? 0) > 0))
+    mark(`a fixed history miss that a later history enters`)
+  if (ledger.minimum > 1 && (failure?.belowMinimum.size ?? 0) > 0)
+    mark(`a state below a minimum above one`)
+  if (environmentChecks && ledger.replaying === undefined && !failure)
+    mark(`a ledger that passes`)
+  if (verdict.rejected.some(([, reason]) => reason === `early`))
+    mark(`a reach before the first history`)
+  if (verdict.rejected.some(([, reason]) => reason === `undeclared`))
+    mark(`a reach of an undeclared state`)
+  if (
+    ledger.histories.filter(({ fixed }) => fixed).length > ledger.fixedHistories
+  )
+    mark(`a fixed history beyond the declared ones`)
+  const firstFixed = ledger.histories.findIndex(({ fixed }) => fixed)
+  if (ledger.fixedHistories > 0 && firstFixed > 0)
+    mark(`an unfixed history before the first fixed one`)
+}
+const law = {
+  statement: `The transitional reach helpers count, reject, report and replay exactly as the independent ledger specifies.`,
+  authority: `ORC-015 and maintainer decision 2287, as documented in the contract above.`,
+  limits: `The existing finite ledger language and legacy helpers; current oracleProperty reach remains owned by TanStack/oracles.`,
+  owner: `Small structures and test mechanics`,
+}
+const generatedInputs: fc.Arbitrary<ReachInput> = fc.tuple(
+  ledgerArbitrary,
+  fc.integer({ min: 1, max: 200 }),
+  fc.array(fc.integer(), { maxLength: 5 }),
+)
+oracleProperty({
+  id: property,
+  law,
+  histories: {
+    arbitrary: generatedInputs,
+    runs: 200,
+    fixedSeeds: [],
+    measured: reachStates,
+  },
+  resolve: (input) => ({ input }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`declared reach compatibility`, plan, observe, () =>
+      runJudgments(plan.input, false, observe),
+    ),
+  check: forwardAssertionJudgment,
 })
 
-fcTest.prop(
-  [
-    ledgerArbitrary,
-    fc.integer({ min: 1, max: 200 }),
-    fc.array(fc.integer(), { maxLength: 5 }),
-  ],
-  oraclePropertyOptions(200, property, { examples: ledgerExamples }),
-)(
-  `reach ledgers refine the declared reach model`,
-  async (ledger, baseRuns, examples) => {
-    ledgersRan = true
-    ledgerReach.beginHistory({ fixed: ledgerExampleInputs.has(ledger) })
-    const verdict = await checkLedger(ledger)
-    await checkCampaign(ledger)
-    checkRunParameters(ledger.run, baseRuns, examples)
-    const { counts, failure } = verdict
-    const ordinary = expectedVerdict({
-      ...ledger,
-      run: `ordinary`,
-      replaying: undefined,
-    }).failure
-    const environmentChecks = ledger.run === `ordinary` || ledger.run === `seed`
-    if (verdict.invalid) ledgerReach.reach(`invalid reach options`)
-    if (ledger.campaignFault !== undefined)
-      ledgerReach.reach(`an invalid campaign environment`)
-    if (verdict.invalid) return
-    if (
-      ledger.replaying === undefined &&
-      ledger.run === `path` &&
-      (ordinary?.belowMinimum.size ?? 0) > 0
+// Every original fixed ledger is native data and runs through the same helper.
+// Enumeration keeps exact-case replay without claiming the chain arbitrary can
+// recover a shrink context for a hand-written ledger.
+oracleProperty({
+  id: `oracle.declared-reach-examples`,
+  law,
+  histories: ledgerExamples,
+  label: (input) => `ledger ${ledgerExamples.indexOf(input)}`,
+  resolve: (input) => ({ input }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`declared reach compatibility`, plan, observe, () =>
+      runJudgments(plan.input, true, observe),
+    ),
+  check: forwardAssertionJudgment,
+})
+
+afterAll(() => {
+  if (generatedRan && !oracleReplayRequested()) {
+    oracleAssertion(`existing reach comparison`, () =>
+      expect(fixedSeen.size, `all original fixed ledgers ran`).toBe(
+        ledgerExamples.length,
+      ),
     )
-      ledgerReach.reach(`a path replay with a state below the minimum`)
-    if (
-      ledger.replaying === undefined &&
-      ledger.run === `other-path` &&
-      (ordinary?.belowMinimum.size ?? 0) > 0
+    oracleAssertion(`existing reach comparison`, () =>
+      expect(
+        reachStates.filter((state) => !fixedEntered.has(state)),
+        `each state has its original fixed witness`,
+      ).toEqual([]),
     )
-      ledgerReach.reach(
-        `a path replay of another property with a state below the minimum`,
-      )
-    if (
-      ledger.replaying !== undefined &&
-      ledger.replaying === environmentChecks
+    oracleAssertion(`existing reach comparison`, () =>
+      expect(
+        [...totalReachCounts].filter(([, count]) => count < 1),
+        `original reach minimum`,
+      ).toEqual([]),
     )
-      ledgerReach.reach(`a replaying option that overrides the environment`)
-    if (failure?.stoppedAt !== undefined)
-      ledgerReach.reach(`a run that stopped inside the fixed histories`)
-    if (ledger.run === `seed` && (failure?.belowMinimum.size ?? 0) > 0)
-      ledgerReach.reach(`a seed-only run fails below the minimum`)
-    if (failure?.unfixed.some((state) => (counts.get(state) ?? 0) > 0))
-      ledgerReach.reach(`a fixed history miss that a later history enters`)
-    if (ledger.minimum > 1 && (failure?.belowMinimum.size ?? 0) > 0)
-      ledgerReach.reach(`a state below a minimum above one`)
-    if (environmentChecks && ledger.replaying === undefined && !failure)
-      ledgerReach.reach(`a ledger that passes`)
-    if (verdict.rejected.some(([, reason]) => reason === `early`))
-      ledgerReach.reach(`a reach before the first history`)
-    if (verdict.rejected.some(([, reason]) => reason === `undeclared`))
-      ledgerReach.reach(`a reach of an undeclared state`)
-    if (
-      ledger.histories.filter(({ fixed }) => fixed).length >
-      ledger.fixedHistories
-    )
-      ledgerReach.reach(`a fixed history beyond the declared ones`)
-    const firstFixed = ledger.histories.findIndex(({ fixed }) => fixed)
-    if (ledger.fixedHistories > 0 && firstFixed > 0)
-      ledgerReach.reach(`an unfixed history before the first fixed one`)
-  },
-)
+  }
+})

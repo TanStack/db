@@ -82,20 +82,22 @@
  * them. The mock sync source is a controlled provider; this oracle claims only
  * how the Collection filters and routes the sync transactions it supplies.
  */
-import { fc, test as fcTest } from '@fast-check/vitest'
+import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { and, eq, not, or } from '../../src/query/builder/functions.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
+import {
+  oracleProperty,
   oracleReplayRequested,
-  oracleReplayTest,
   oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
@@ -785,8 +787,10 @@ async function runHistory(history: History): Promise<void> {
     const path = `${indexed ? `index` : `scan`} path for ${describePredicate(history.predicate)}`
     const listObservations = (list: Array<Observation>) =>
       list.map((o) => `${o.checkpoint} ${o.consumer}: [${o.keys.join(`,`)}]`)
-    expect(listObservations(observations), path).toEqual(
-      listObservations(model),
+    oracleAssertion(path, () =>
+      expect(listObservations(observations), path).toEqual(
+        listObservations(model),
+      ),
     )
   }
 }
@@ -893,25 +897,32 @@ describe(`WHERE predicate publication oracle`, () => {
         return runHistory(history)
       })
     }
-
-    const historyFixedSeed = oracleFixedSeed(44_500_301, {
-      numRuns: oracleRuns(80),
-    })
-    fcTest.prop([historyArbitrary], historyFixedSeed)(
-      `publishes exactly the TRUE rows (fixed)`,
-      (history) => {
-        oracleRoute(oracleRouteOf(historyFixedSeed))
-        return runHistory(history)
-      },
-    )
   }
 
-  const historyCampaign = oraclePropertyOptions(80, property)
-  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
-    `publishes exactly the TRUE rows (random)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(historyCampaign))
-      return runHistory(history)
+  // The complete existing helper keeps its independent Kleene model and all
+  // consumer comparisons. The adapter records data and retains assertion
+  // diagnostics separately; setup and cleanup errors remain driver errors.
+  oracleProperty({
+    id: property,
+    law: {
+      statement: `Every filtered consumer publishes exactly the TRUE rows at each original comparison checkpoint.`,
+      authority: `The SQL three-valued filtering and subscription contract stated at the start of this owner.`,
+      limits: `The unchanged bounded predicate and source-transaction grammar, on scan and BasicIndex paths; cleanup and restart remain outside generated histories.`,
+      owner: `WHERE predicate publication`,
     },
-  )
+    histories: {
+      arbitrary: historyArbitrary,
+      runs: 80,
+      fixedSeeds: [44_500_301],
+      states: [],
+      constructed: [],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { history: History }, observe) =>
+      recordAssertionJudgment(property, plan, observe, () =>
+        runHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

@@ -184,22 +184,22 @@ describe(`guarded oracle replay`, () => {
     [
       `sorted-map.key`,
       `tests/SortedMap-oracle.test.ts`,
-      `SortedMap key history.*seed undefined`,
+      `sorted-map\\.key > random seed`,
     ],
     [
       `sorted-map.ascending`,
       `tests/SortedMap-oracle.test.ts`,
-      `SortedMap ascending history.*seed undefined`,
+      `sorted-map\\.ascending > random seed`,
     ],
     [
       `sorted-map.descending`,
       `tests/SortedMap-oracle.test.ts`,
-      `SortedMap descending history.*seed undefined`,
+      `sorted-map\\.descending > random seed`,
     ],
     [
       `collection-state.mixed-transaction`,
       `tests/optimistic-transaction-oracle.property.test.ts`,
-      `varies full payloads, seed=undefined`,
+      `collection-state\\.mixed-transaction > random seed`,
     ],
     [
       `query-identity.compiled-output`,
@@ -209,7 +209,7 @@ describe(`guarded oracle replay`, () => {
     [
       `load-subset.rejected-waiter`,
       `tests/query/load-subset-oracle.property.test.ts`,
-      `retries failed exact demand histories through fresh success for a random or replayed seed`,
+      `load-subset\\.rejected-waiter > random seed`,
     ],
   ])(
     `executes the actual named owner %s and rejects a filtered target`,

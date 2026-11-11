@@ -31,12 +31,21 @@ import { ConvexClient } from 'convex/browser'
 import { ConvexReactClient } from 'convex/react'
 import { makeFunctionReference } from 'convex/server'
 import fc from 'fast-check'
-import { expect, inject, it } from 'vitest'
+import { expect, inject } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexPaginatedCollectionOptions } from '../src/index'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import { withTestCleanup } from '../tests/helpers'
 import { lazyRequest } from '../tests/lazy-paging-driver'
-import { lazyOracleRuns, receiveBothSdks } from '../tests/lazy-paging-campaign'
+import {
+  lazyOracleBaseRuns,
+  receiveBothSdks,
+} from '../tests/lazy-paging-campaign'
 import {
   LazyTerminalGraphModel,
   assertLazyCoverage,
@@ -50,6 +59,12 @@ import type { LazyRow, LazyScope } from '../tests/lazy-paging-model-oracle'
 import type { ConvexCollectionClient } from '../src/index'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type { PaginationOptions, PaginationResult } from 'convex/server'
+
+type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
+type AssertionReach = {
+  beginHistory: () => void
+  reach: (state: string) => void
+}
 
 type Task = { _id: string; clientId: string; rank: number; text: string }
 type Change = { clientId: string; rank: number; text: string; remove?: boolean }
@@ -354,18 +369,22 @@ async function receive(h: History, kind: `javascript` | `react`) {
             batch.held && batch.facts.some((value) => changed.has(value)),
         ),
     )
-    expect(
-      source.base.size,
-      `partial prefix accidentally exhausted source`,
-    ).toBeLessThan(truth.length)
+    oracleAssertion(`lazy-boundary-oracle.test.ts:359:toBeLessThan`, () =>
+      expect(
+        source.base.size,
+        `partial prefix accidentally exhausted source`,
+      ).toBeLessThan(truth.length),
+    )
   }
   const reachLatest = async () => {
     const expected = signature(expectedLazyRows(truth, scope))
     await waitFor(() => signature(graph.toArray.map(project)) === expected)
-    expect(
-      callbackSnapshots,
-      `latest window never reached actual change callback`,
-    ).toContain(expected)
+    oracleAssertion(`lazy-boundary-oracle.test.ts:367:toContain`, () =>
+      expect(
+        callbackSnapshots,
+        `latest window never reached actual change callback`,
+      ).toContain(expected),
+    )
     assertLazyCoverage([...source.base.values()].map(project), truth, scope)
     checkpoint()
   }
@@ -413,8 +432,12 @@ async function receive(h: History, kind: `javascript` | `react`) {
       stopStatus = graph.on(`status:change`, observeGraph)
       await graph.preload()
       monitor()
-      expect(source.base.size).toBeLessThan(truth.length)
-      expect(source.base.has(String(h.size - 1))).toBe(false)
+      oracleAssertion(`lazy-boundary-oracle.test.ts:418:toBeLessThan`, () =>
+        expect(source.base.size).toBeLessThan(truth.length),
+      )
+      oracleAssertion(`lazy-boundary-oracle.test.ts:419:toBe`, () =>
+        expect(source.base.has(String(h.size - 1))).toBe(false),
+      )
       reaches.add(`unread-tail`)
       hold()
       await edit([
@@ -447,7 +470,9 @@ async function receive(h: History, kind: `javascript` | `react`) {
       await waitFor(() =>
         batches.slice(beforeGrowth).some((batch) => batch.held),
       )
-      expect(growthSettled, `growth escaped held application`).toBe(false)
+      oracleAssertion(`lazy-boundary-oracle.test.ts:452:toBe`, () =>
+        expect(growthSettled, `growth escaped held application`).toBe(false),
+      )
       reaches.add(`demand-growth-held`)
       await edit([
         { clientId: `1`, rank: 1, text: `removed`, remove: true },
@@ -467,14 +492,20 @@ async function receive(h: History, kind: `javascript` | `react`) {
       await waitFor(() => growthSettled)
       await growth
       await reachLatest()
-      expect(source.base.size).toBeLessThan(truth.length)
+      oracleAssertion(`lazy-boundary-oracle.test.ts:472:toBeLessThan`, () =>
+        expect(source.base.size).toBeLessThan(truth.length),
+      )
       const unread = truth.find((row) => row.id === String(h.size - 3))!
-      expect(
-        evidence.has(fact(unread)),
-        `growth must retain a genuinely unread tail`,
-      ).toBe(false)
+      oracleAssertion(`lazy-boundary-oracle.test.ts:474:toBe`, () =>
+        expect(
+          evidence.has(fact(unread)),
+          `growth must retain a genuinely unread tail`,
+        ).toBe(false),
+      )
       reaches.add(`demand-growth-with-unread-tail`)
-      expect(providerErrors).toEqual([])
+      oracleAssertion(`lazy-boundary-oracle.test.ts:479:toEqual`, () =>
+        expect(providerErrors).toEqual([]),
+      )
 
       // Only now acquire the whole relation, to compose shared acceptance with
       // a genuine query error and cleanup-abandoned actual receipts.
@@ -502,10 +533,12 @@ async function receive(h: History, kind: `javascript` | `react`) {
           String(error).includes(`oracle query failure`),
         ),
       )
-      expect(
-        attempts.get(canceled)!.outcome,
-        `canceled caller escaped accepted work before cleanup`,
-      ).toBeUndefined()
+      oracleAssertion(`lazy-boundary-oracle.test.ts:507:toBeUndefined`, () =>
+        expect(
+          attempts.get(canceled)!.outcome,
+          `canceled caller escaped accepted work before cleanup`,
+        ).toBeUndefined(),
+      )
       reaches.add(`real-query-error-after-shared-acceptance`)
       // A provider error does not grant abandonment authority. Graph status
       // before cleanup is unconstrained here; only cleanup activates terminality.
@@ -513,7 +546,9 @@ async function receive(h: History, kind: `javascript` | `react`) {
       terminal.cleanup(graph.toArray.map(project))
       receipts.cleanup()
       const pending = batches.filter((batch) => batch.state === `pending`)
-      expect(pending.length).toBeGreaterThan(0)
+      oracleAssertion(`lazy-boundary-oracle.test.ts:518:toBeGreaterThan`, () =>
+        expect(pending.length).toBeGreaterThan(0),
+      )
       cleaning = source._lifecycle.cleanup()
       terminal.observe(graph.status, graph.toArray.map(project))
       await waitFor(
@@ -542,8 +577,10 @@ async function receive(h: History, kind: `javascript` | `react`) {
       terminal.observe(graph.status, graph.toArray.map(project))
       checkpoint()
       const server = (await writer.query(all, {})).map(project)
-      expect([...server].sort((a, b) => a.id.localeCompare(b.id))).toEqual(
-        [...truth].sort((a, b) => a.id.localeCompare(b.id)),
+      oracleAssertion(`lazy-boundary-oracle.test.ts:547:toEqual`, () =>
+        expect([...server].sort((a, b) => a.id.localeCompare(b.id))).toEqual(
+          [...truth].sort((a, b) => a.id.localeCompare(b.id)),
+        ),
       )
       reaches.add(`fresh-graph-old-terminal`)
     },
@@ -567,10 +604,45 @@ async function receive(h: History, kind: `javascript` | `react`) {
   return reaches
 }
 
-it(`receives partial windows, query failure and abandoned receipts through both SDKs`, async () => {
-  await runOracleCampaign(
-    `CONVEX_BOUNDARY_ORACLE`,
-    [
+const convex_boundaryHistory = grammar
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_boundaryJudgment(
+  h: AssertionHistory<typeof convex_boundaryHistory>,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  for (const [kind, reached] of await receiveBothSdks((sdk) =>
+    receive(h, sdk),
+  )) {
+    for (const state of [
+      `unread-tail`,
+      `partial-membership-order-held`,
+      `demand-growth-with-unread-tail`,
+      `demand-growth-held`,
+      `two-partial-revisions-held`,
+      `real-query-error-after-shared-acceptance`,
+      `actual-cleanup-abandonment`,
+      `fresh-graph-old-terminal`,
+    ] as const)
+      if (reached.has(state)) reach.reach(state)
+    reach.reach(kind)
+  }
+}
+
+oracleProperty({
+  id: `convex.boundary`,
+  law: {
+    statement: `receives partial windows, query failure and abandoned receipts through both SDKs`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+    owner: `Convex collection integration`,
+  },
+  histories: {
+    arbitrary: convex_boundaryHistory,
+    runs: lazyOracleBaseRuns(4),
+    fixedSeeds: [20261029],
+    measured: [
       `unread-tail`,
       `partial-membership-order-held`,
       `demand-growth-with-unread-tail`,
@@ -582,29 +654,47 @@ it(`receives partial windows, query failure and abandoned receipts through both 
       `javascript`,
       `react`,
     ] as const,
-    (reach, parameters) =>
-      fc.assert(
-        fc.asyncProperty(grammar, async (h) => {
-          reach.beginHistory()
-          for (const [kind, reached] of await receiveBothSdks((sdk) =>
-            receive(h, sdk),
-          )) {
-            for (const state of [
-              `unread-tail`,
-              `partial-membership-order-held`,
-              `demand-growth-with-unread-tail`,
-              `demand-growth-held`,
-              `two-partial-revisions-held`,
-              `real-query-error-after-shared-acceptance`,
-              `actual-cleanup-abandonment`,
-              `fresh-graph-old-terminal`,
-            ] as const)
-              if (reached.has(state)) reach.reach(state)
-            reach.reach(kind)
-          }
-        }),
-        { numRuns: lazyOracleRuns(4), ...parameters },
-      ),
-    { fixedSeed: 20261029 },
-  )
-}, 120000)
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  // Every old bundle already constructs all its required states. Preserve
+  // its small backend run budget by checking that same reach per bundle,
+  // instead of adding another complete backend bundle as a native constructor.
+  driver: async (plan, observe) => {
+    const reached = new Set<string>()
+    await recordAssertionJudgment(
+      `convex.boundary`,
+      plan,
+      observe,
+      async () => {
+        await convex_boundaryJudgment(plan.history, {
+          beginHistory: () => {},
+          reach: (state) => {
+            reached.add(state)
+            observe(`reach`, state)
+          },
+        })
+        oracleAssertion(`required state reach`, () =>
+          expect(
+            (
+              [
+                `unread-tail`,
+                `partial-membership-order-held`,
+                `demand-growth-with-unread-tail`,
+                `demand-growth-held`,
+                `two-partial-revisions-held`,
+                `real-query-error-after-shared-acceptance`,
+                `actual-cleanup-abandonment`,
+                `fresh-graph-old-terminal`,
+                `javascript`,
+                `react`,
+              ] as const
+            ).filter((state) => !reached.has(state)),
+          ).toEqual([]),
+        )
+      },
+    )
+  },
+  timeout: 120000,
+})

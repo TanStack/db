@@ -195,3 +195,55 @@ pnpm --config.verifyDepsBeforeRun=false --filter @tanstack/powersync-db-collecti
 The full PowerSync package run remains in progress. Its earlier CI timeouts
 are not treated as collateral failures without a passing rerun. Final-head CI
 and integration with later main remain separate gates.
+
+## Integration with main's final property migration
+
+The normal merge of main `2e7b07367120bdec1a87f95d0b888a3ff9ac1f21`
+(#2406) into branch `fb3f13949837c67236fc8ab7d21e76e93e91e37b`
+preserves both property migrations. The three-way metadata check accounts for
+all 986 merged manifest entries without missing or accidental changes. The
+shrinking legacy list keeps main's two remaining compatibility entries. The
+Query owner remains split across its branch files; TrailBase retains its
+complete branch conversion and boundary/hydration receiving registrations.
+The upstream conversions add no model law to port: their 22 existing Query
+and nine existing TrailBase top-level function bodies are unchanged. Models,
+comparisons, constructed histories, run budgets and receiving paths remain
+intact. The four changed adapter production sources are unchanged by this
+merge.
+
+Main pins the framework and ESLint plugin to `b6bf6fc`. Exact published
+archives were checked against the committed SHA512 lock integrities. Their
+runtime, source and declarations are byte-identical to `f4d5a0e`; the framework
+gap CLI changes five files for help, stable selection keys, skipped-batch
+retries, worker/asset query handling and evidence hints. This integration does
+not run a new mutation discovery campaign.
+
+The historical CLI repair investigation remains version-scoped. Source
+inspection of both exact published versions found none of the three earlier
+isolated repairs: the expected-failure early-stop guard, untruncated full-title
+configuration, or explicit complete second-pass capture integrity guard.
+Capture and classifier bytes are identical between these two versions. The
+new skipped-batch retry logic is related to capture but does not implement
+those three guards. This inspection is not a fresh reproduction against
+`b6bf6fc` and does not reclassify earlier inconclusive outcomes.
+
+With the exact new runtime/plugin, four metadata checks pass. The seven-file
+Query ownership run passes 411 checks (394 runtime tests and 17 ordinary type
+checks), with no type errors. TrailBase lifecycle passes all 205 tests.
+Targeted ESLint for the metadata, eight ownership files and TrailBase lifecycle
+passes, as does the shrinking legacy checker and `git diff --check`.
+
+Guarded replay also passes for `query-db.ownership.mutation-confirmation`,
+`query-db.ownership.post-handler`, `trailbase.lifecycle` and
+`pagination.limit-admission-builder-valid`. Each reports the exact requested
+property, seed `2367`, path `0`, one execution and one successful witness.
+After relinking the local framework package, these commands required
+`--fsModuleCache=false`: the stale-cache attempts ran ordinary campaigns and
+were correctly rejected for having no replay witness. No oracle expectation
+or production code changed to obtain the positive replay evidence.
+
+Only ignored local dependency links were adjusted for validation. The local
+HTTP 403 installation recovery remains stashed through the merge commit;
+the committed dependency pins are preserved. The full PowerSync run has
+progressed through both startup hosts into eager conformance but has no final
+verdict at this checkpoint. Final-head CI remains a separate gate.

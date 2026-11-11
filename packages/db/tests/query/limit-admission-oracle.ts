@@ -24,13 +24,16 @@ import { createLiveQueryCollection } from '../../src/query/live-query-collection
 import { createDeferred } from '../../src/deferred.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
+  oracleProperty,
+  oracleReplayRequested,
   oracleRoute,
-  oracleRouteOf,
 } from '../oracle-config.js'
-import { createOracleReach } from '../oracle-reach.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import {
   atOracleCheckpoint,
   createOracleFailureFidelity,
@@ -66,7 +69,13 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
   }),
   limit: fc.integer({ min: 1, max: 3 }),
   offset: fc.integer({ min: 0, max: 2 }),
-  negative: fc.integer({ min: 1, max: 1_000_000 }).map((value) => -value),
+  negative: fc.integer({ min: 1, max: 1_000_000 }).map(
+    (value) => -value,
+    (value) => {
+      if (typeof value !== `number`) throw new Error(`not a negative number`)
+      return -value
+    },
+  ),
 })
 const example: History = {
   ranks: Array.from({ length: 12 }, (_, index) => index),
@@ -91,10 +100,15 @@ function checkAdmission(
   limit: number,
   outcome: ReturnType<typeof attempt>,
 ): void {
-  expect(outcome.threw, `admission of limit ${limit}`).toBe(!admitted(limit))
+  oracleAssertion(`admission of limit ${limit}`, () =>
+    expect(outcome.threw, `admission of limit ${limit}`).toBe(!admitted(limit)),
+  )
   // Both public entry points document RangeError. A wrong thrown value must
   // not satisfy rejection merely because it preserves the other observations.
-  if (outcome.threw) expect(outcome.error).toBeInstanceOf(RangeError)
+  if (outcome.threw)
+    oracleAssertion(`checkAdmission comparison 2`, () =>
+      expect(outcome.error).toBeInstanceOf(RangeError),
+    )
 }
 
 function attempt<T>(
@@ -151,10 +165,15 @@ function checkSettlement(
   { observation }: ReturnType<typeof settlement>,
   error?: Error,
 ): void {
-  expect(observation).toEqual(
-    error ? { value: `rejected`, error } : { value: `fulfilled` },
+  oracleAssertion(`checkSettlement comparison 3`, () =>
+    expect(observation).toEqual(
+      error ? { value: `rejected`, error } : { value: `fulfilled` },
+    ),
   )
-  if (error) expect(observation.error).toBe(error)
+  if (error)
+    oracleAssertion(`checkSettlement comparison 4`, () =>
+      expect(observation.error).toBe(error),
+    )
 }
 
 async function runHistory(
@@ -232,9 +251,13 @@ async function runHistory(
           reached(value < 0 ? `negative` : `valid`)
           atOracleCheckpoint(`limit admission`, `builder return`, () => {
             checkAdmission(value, outcome)
-            expect(getQueryIR(builder)).toEqual(before)
+            oracleAssertion(`runHistory comparison 5`, () =>
+              expect(getQueryIR(builder)).toEqual(before),
+            )
             if (!outcome.threw)
-              expect(getQueryIR(outcome.result).limit).toBe(value)
+              oracleAssertion(`runHistory comparison 6`, () =>
+                expect(getQueryIR(outcome.result).limit).toBe(value),
+              )
           })
         }
         return
@@ -269,9 +292,17 @@ async function runHistory(
         operationOutcome = settlement(operation)
         await flushPromises()
         if (hold) {
-          expect(pending.length, `held acquisition premise`).toBeGreaterThan(0)
-          expect(operation).toBeInstanceOf(Promise)
-          expect(operationOutcome.observation.value).toBe(`pending`)
+          oracleAssertion(`held acquisition premise`, () =>
+            expect(pending.length, `held acquisition premise`).toBeGreaterThan(
+              0,
+            ),
+          )
+          oracleAssertion(`runHistory comparison 8`, () =>
+            expect(operation).toBeInstanceOf(Promise),
+          )
+          oracleAssertion(`runHistory comparison 9`, () =>
+            expect(operationOutcome.observation.value).toBe(`pending`),
+          )
           reached(`held`)
         }
       }
@@ -295,7 +326,10 @@ async function runHistory(
           reached(value < 0 ? `negative` : `valid`)
           atOracleCheckpoint(`limit admission`, `${path} return`, () => {
             checkAdmission(value, outcome)
-            if (!admitted(value)) expect(observe()).toEqual(before)
+            if (!admitted(value))
+              oracleAssertion(`runHistory comparison 10`, () =>
+                expect(observe()).toEqual(before),
+              )
           })
           if (admitted(value))
             expectedWindow = { offset: options.offset!, limit: value }
@@ -304,7 +338,10 @@ async function runHistory(
             `rejection preserves window`,
             `${path} next turn`,
             () => {
-              if (!admitted(value)) expect(observe()).toEqual(before)
+              if (!admitted(value))
+                oracleAssertion(`runHistory comparison 11`, () =>
+                  expect(observe()).toEqual(before),
+                )
             },
           )
           if (admitted(value) && !outcome.threw) {
@@ -319,8 +356,14 @@ async function runHistory(
               () => {
                 checkSettlement(candidateOutcome)
                 checkSettlement(preloadOutcome)
-                expect(live.utils.getWindow()).toEqual(expectedWindow)
-                expect(observe().rows).toEqual(selected(rows, expectedWindow))
+                oracleAssertion(`runHistory comparison 12`, () =>
+                  expect(live.utils.getWindow()).toEqual(expectedWindow),
+                )
+                oracleAssertion(`runHistory comparison 13`, () =>
+                  expect(observe().rows).toEqual(
+                    selected(rows, expectedWindow),
+                  ),
+                )
               },
             )
           }
@@ -340,9 +383,16 @@ async function runHistory(
         `${path} settled`,
         () => {
           checkSettlement(operationOutcome, loadError)
-          expect(live.utils.getWindow()).toEqual(expectedWindow)
-          expect(observe().rows).toEqual(selected(rows, expectedWindow))
-          if (loadError) expect(live.utils.lastSubsetError).toBe(loadError)
+          oracleAssertion(`runHistory comparison 14`, () =>
+            expect(live.utils.getWindow()).toEqual(expectedWindow),
+          )
+          oracleAssertion(`runHistory comparison 15`, () =>
+            expect(observe().rows).toEqual(selected(rows, expectedWindow)),
+          )
+          if (loadError)
+            oracleAssertion(`runHistory comparison 16`, () =>
+              expect(live.utils.lastSubsetError).toBe(loadError),
+            )
         },
       )
       if (path.endsWith(`pending`))
@@ -357,8 +407,12 @@ async function runHistory(
       sync.commit()
       await flushPromises()
       atOracleCheckpoint(`valid next use`, `${path} source update`, () => {
-        expect(live.utils.getWindow()).toEqual(expectedWindow)
-        expect(observe().rows).toEqual(selected(rows, expectedWindow))
+        oracleAssertion(`runHistory comparison 17`, () =>
+          expect(live.utils.getWindow()).toEqual(expectedWindow),
+        )
+        oracleAssertion(`runHistory comparison 18`, () =>
+          expect(observe().rows).toEqual(selected(rows, expectedWindow)),
+        )
       })
       reached(`next-use`)
     },
@@ -372,6 +426,36 @@ declareOracle({
   grammar: [historyArbitrary],
 })
 
+// Every payload already crosses every required admission/settlement cut for
+// its path. The identity builder preserves generated ranks, bounds and the
+// candidate/outcome loops. The negative map's inverse above only makes that
+// unchanged generated language recognizable for constructed histories.
+async function judgeLimitHistory(
+  history: History,
+  path: Path,
+  negative: boolean,
+  reached: (state: string) => void,
+): Promise<void> {
+  // Each accepted value gets its own held premise. Settling zero must not move
+  // the remaining candidates to readiness. Negative held moves retain both
+  // successful and failed settlement branches.
+  for (const candidate of negative
+    ? [undefined]
+    : [0, -0, history.limit, Infinity]) {
+    for (const rejectHeldMove of negative && path === `move-pending`
+      ? [false, true]
+      : [false])
+      await runHistory(
+        history,
+        path,
+        negative,
+        reached,
+        candidate,
+        rejectHeldMove,
+      )
+  }
+}
+
 export function registerLimitAdmissionOracle(): void {
   describe(`negative limit admission`, () => {
     for (const path of [
@@ -384,79 +468,75 @@ export function registerLimitAdmissionOracle(): void {
     ] as const) {
       for (const negative of [false, true]) {
         const property = `pagination.limit-admission-${path}-${negative ? `negative` : `valid`}`
-        for (const campaign of [`fixed`, `random`] as const) {
-          const registration =
-            campaign === `fixed`
-              ? oracleReplayTest(it)
-              : oracleReplayTest(it, property)
-          registration(
-            `${path} ${negative ? `rejects negatives` : `admits valid neighbors`} (${campaign})`,
-            async () => {
-              const states = [
-                negative ? `negative` : `valid`,
-                ...(path === `builder` ? [] : [`next-use`]),
-                ...(path.endsWith(`pending`) ? [`held`] : []),
-                ...(path.endsWith(`pending`) ? [`successful-settlement`] : []),
-                ...(negative && path === `move-pending`
-                  ? [`failed-settlement`]
-                  : []),
-              ]
-              const reach = createOracleReach(property, states, {
-                fixedHistories: 1,
-              })
-              const fidelity = createOracleFailureFidelity<History>((history) =>
-                JSON.stringify(history),
-              )
-              let count = 0
-              const parameters = {
-                ...oraclePropertyOptions(20, property, {
-                  examples: [[example]],
-                }),
-                ...(campaign === `fixed` ? oracleFixedSeed(2291) : {}),
+        const states = [
+          negative ? `negative` : `valid`,
+          ...(path === `builder` ? [] : [`next-use`]),
+          ...(path.endsWith(`pending`) ? [`held`] : []),
+          ...(path.endsWith(`pending`) ? [`successful-settlement`] : []),
+          ...(negative && path === `move-pending` ? [`failed-settlement`] : []),
+        ]
+        // The previous explicit history has ranks outside the random grammar.
+        // Retain it through the same model, driver and comparison rather than
+        // widening that grammar to satisfy native fixed-history membership.
+        if (!oracleReplayRequested())
+          it(`${path} ${negative ? `rejects negatives` : `admits valid neighbors`} (fixed history)`, async () => {
+            oracleRoute(`case`)
+            await judgeLimitHistory(example, path, negative, () => {})
+          }, 30000)
+
+        // Native campaigns preserve the first law. Keep the existing fidelity
+        // wrapper as well: it distinguishes the original law AND checkpoint
+        // and retains original/reduced traces and cleanup diagnostics. A fresh
+        // instance belongs to each native Vitest test, including its shrinks.
+        const fidelityByTest = new Map<
+          string,
+          ReturnType<typeof createOracleFailureFidelity<History>>
+        >()
+        oracleProperty({
+          id: property,
+          law: {
+            statement: `Negative limits reject synchronously without changing query construction, public windows, demand, rows or an admitted operation's outcome. Valid neighboring limits remain usable.`,
+            authority: `The 2026-11-02 maintainer decision and ARCHITECTURE.md, Atomic window publication, stated above.`,
+            limits: `The unchanged six core admission paths with controlled on-demand acquisition settlement; no NaN, positive-fraction or real-provider timing policy.`,
+            owner: `Limit admission`,
+          },
+          histories: {
+            arbitrary: historyArbitrary,
+            runs: 20,
+            fixedSeeds: [2291],
+            states,
+            constructed: [
+              {
+                name: `admission and settlement cuts`,
+                enters: states,
+                build: (generated) => generated,
+              },
+            ],
+          },
+          resolve: (history) => ({ history }),
+          model: recordedAssertionJudgment,
+          driver: (plan: { history: History }, observe) =>
+            recordAssertionJudgment(property, plan, observe, async () => {
+              const testName = expect.getState().currentTestName!
+              let fidelity = fidelityByTest.get(testName)
+              if (fidelity === undefined) {
+                fidelity = createOracleFailureFidelity<History>((history) =>
+                  JSON.stringify(history),
+                )
+                fidelityByTest.set(testName, fidelity)
               }
-              oracleRoute(oracleRouteOf(parameters))
               await fidelity.assert(() =>
-                fc.assert(
-                  fc.asyncProperty(historyArbitrary, (history) => {
-                    reach.beginHistory({ fixed: count++ === 0 })
-                    return fidelity.run(history, async () => {
-                      // Each accepted value gets its own held premise. Settling
-                      // zero must not move the remaining candidates to readiness.
-                      for (const candidate of negative
-                        ? [undefined]
-                        : [0, -0, history.limit, Infinity]) {
-                        // Each generated payload crosses both legal outcomes
-                        // of an admitted move. Rejection must preserve either.
-                        for (const rejectHeldMove of negative &&
-                        path === `move-pending`
-                          ? [false, true]
-                          : [false])
-                          await runHistory(
-                            history,
-                            path,
-                            negative,
-                            (state) => reach.reach(state),
-                            candidate,
-                            rejectHeldMove,
-                          )
-                      }
-                    })
-                  }),
-                  parameters,
+                fidelity.run(plan.history, () =>
+                  judgeLimitHistory(plan.history, path, negative, (state) =>
+                    observe(`reach`, state),
+                  ),
                 ),
               )
-              reach.assertReached()
-              if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
-                process.stderr.write(
-                  `${property} ${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-                )
-              }
-            },
-            // Shrinking a stalled operation can spend the diagnostic budget
-            // on several candidates before reporting its named comparison.
-            30_000,
-          )
-        }
+            }),
+          check: forwardAssertionJudgment,
+          // Shrinking a stalled operation retains the original diagnostic budget.
+          timeout: 30000,
+        })
       }
     }
   })

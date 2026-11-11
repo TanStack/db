@@ -98,21 +98,15 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { createCollection } from '@tanstack/db'
-import { createOracleReach } from '../../db/tests/oracle-reach.js'
+import { oracleAssertion } from '../../db/tests/oracle-assertion-adapter'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../../electric-db-collection/src/electric'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import { createBrowserWASQLitePersistence } from '../src/browser-persistence'
+import { requiredBrowserObservations } from './browser-required-observations'
+import { registerBrowserProperty } from './browser-property-registration-oracle'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
 import { sourceHeadViolation } from './electric-convergence-oracle'
 import type {
@@ -538,7 +532,7 @@ async function openWarmTabs(host: Host, count: number, syncMode: SyncMode) {
     for (let task = 0; task < 400 && !tab.hasStream(); task++) {
       await new Promise((resolve) => setTimeout(resolve, 2))
     }
-    expect(tab.hasStream()).toBe(true)
+    oracleAssertion('openWarmTabs', () => expect(tab.hasStream()).toBe(true))
     tabs.push(tab)
   }
   return tabs
@@ -557,7 +551,7 @@ async function waitForStream(tab: Tab, count: number) {
   for (let task = 0; task < 400 && tab.streamCount() < count; task++) {
     await new Promise((resolve) => setTimeout(resolve, 2))
   }
-  expect(tab.streamCount()).toBe(count)
+  oracleAssertion('waitForStream', () => expect(tab.streamCount()).toBe(count))
 }
 
 // The server after the deploy, answering a new stream from where it starts:
@@ -714,7 +708,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
       | `peer commit announced during the stopped tab's open transaction`
       | `a source stopped while its transaction was open`
       | `restarted tab opened a new stream`
-    const reach = createOracleReach<RefetchReach>(
+    const reach = requiredBrowserObservations<RefetchReach>(
       `browser.multi-tab-reserved-refetch`,
       [
         ...(arrival === `storm`
@@ -831,13 +825,15 @@ describe(`multi-tab Electric over one persisted database`, () => {
           ? { sourceError: tab.collection.health.error !== null }
           : {}),
       }))
-    expect(observe(judgesRowsBeforeRestart)).toEqual(
-      tabs.map((tab) => ({
-        tab: tab.tab,
-        status: tab === stoppedTab ? stoppedStatus : `ready`,
-        ...(judgesRowsBeforeRestart(tab) ? { rows: afterDeploy } : {}),
-        ...(judgesSourceError(tab) ? { sourceError: true } : {}),
-      })),
+    oracleAssertion('runStormHistory', () =>
+      expect(observe(judgesRowsBeforeRestart)).toEqual(
+        tabs.map((tab) => ({
+          tab: tab.tab,
+          status: tab === stoppedTab ? stoppedStatus : `ready`,
+          ...(judgesRowsBeforeRestart(tab) ? { rows: afterDeploy } : {}),
+          ...(judgesSourceError(tab) ? { sourceError: true } : {}),
+        })),
+      ),
     )
 
     // Checkpoint 2, after the application recovers the stopped tab and the
@@ -860,16 +856,20 @@ describe(`multi-tab Electric over one persisted database`, () => {
       const restartedAt = recovered.startedAt()
       await serveHead(host, recovered, restartedAt)
       if (stop === `resume invalidated`) {
-        expect(restartedAt).toEqual({ handle: undefined, offset: `-1` })
+        oracleAssertion('runStormHistory', () =>
+          expect(restartedAt).toEqual({ handle: undefined, offset: `-1` }),
+        )
       }
       // The new sync run starts without the retired run's problems.
-      expect(observe(() => syncMode === `eager`)).toEqual(
-        tabs.map((tab) => ({
-          tab: tab.tab,
-          status: `ready`,
-          ...(syncMode === `eager` ? { rows: afterDeploy } : {}),
-          ...(judgesSourceError(tab) ? { sourceError: false } : {}),
-        })),
+      oracleAssertion('runStormHistory', () =>
+        expect(observe(() => syncMode === `eager`)).toEqual(
+          tabs.map((tab) => ({
+            tab: tab.tab,
+            status: `ready`,
+            ...(syncMode === `eager` ? { rows: afterDeploy } : {}),
+            ...(judgesSourceError(tab) ? { sourceError: false } : {}),
+          })),
+        ),
       )
     }
     reach.assertReached()
@@ -1455,10 +1455,12 @@ describe(`multi-tab Electric over one persisted database`, () => {
             : undefined,
         ),
       )
-      expect(
-        actual,
-        `${label}\nactual   ${JSON.stringify(actual)}\nexpected ${JSON.stringify(expected)}\nerrors   ${JSON.stringify(errors.filter(Boolean))}`,
-      ).toEqual(expected)
+      oracleAssertion('runGeneratedHistory', () =>
+        expect(
+          actual,
+          `${label}\nactual   ${JSON.stringify(actual)}\nexpected ${JSON.stringify(expected)}\nerrors   ${JSON.stringify(errors.filter(Boolean))}`,
+        ).toEqual(expected),
+      )
     }
 
     // Warm start: every tab delivers the snapshot and commits it.
@@ -1662,15 +1664,16 @@ describe(`multi-tab Electric over one persisted database`, () => {
     }
     await check(`after every tab caught up`, rowsOf(log.rows))
     if (models.every((model) => !model.closed)) {
-      expect(
-        sourceHeadViolation(rowsOf(log.rows), {
-          durableRows: await activeHost.durableRows(),
-          tabs: tabs.map((tab) => ({
-            status: tab.collection.status,
-            rows: tab.publicRows(),
-          })),
-        }),
-      ).toBeUndefined()
+      const sourceHeadComparison = sourceHeadViolation(rowsOf(log.rows), {
+        durableRows: await activeHost.durableRows(),
+        tabs: tabs.map((tab) => ({
+          status: tab.collection.status,
+          rows: tab.publicRows(),
+        })),
+      })
+      oracleAssertion('runGeneratedHistory', () =>
+        expect(sourceHeadComparison).toBeUndefined(),
+      )
     }
   }
 
@@ -1708,134 +1711,139 @@ describe(`multi-tab Electric over one persisted database`, () => {
       `now`,
     ),
   })
-  const runSourcePrefixCampaign = async (
-    parameters: ReturnType<typeof oraclePropertyOptions>,
-  ) => {
-    const states = [
-      `present/empty`,
-      `present/disjoint`,
-      `absent/empty`,
-      `absent/disjoint`,
-      `drained before recovery`,
-      `missing progress at recovery`,
-      `foreign progress at recovery`,
-      `divergent source restart`,
-      `divergent source reload`,
-      `explicit resume at divergent recovery`,
-      `explicit now at divergent recovery`,
-      `explicit initial offset at recovery`,
-      `explicit handle at recovery`,
-      `interrupted reset before explicit resume recovery`,
-      `interrupted reset before explicit now recovery`,
-    ] as const
-    const reach = createOracleReach(`browser.electric-source-prefix`, states)
-    oracleRoute(oracleRouteOf(parameters))
-    await fc.assert(
-      fc.asyncProperty(sourcePrefixHistory, async (history) => {
-        const slowTab = 1 - history.fastTab
-        // Keep every original history, then repeat it with a recovery that
-        // stops before its first source delivery. The first start writes its
-        // reset marker through production; the second must still recover.
-        // Pairing both paths preserves the uninterrupted domain and gives
-        // every generated cursor form an interrupted neighbor.
-        for (const interrupted of [false, true]) {
-          reach.beginHistory()
-          const steps: Array<HistoryStep> = [
-            ...Array.from({ length: history.pairs * 2 }, (): HistoryStep => ({
-              kind: `server change`,
-              key: history.key,
-              pick: 0,
-            })),
-            { kind: `catch up`, tab: history.fastTab, pick: 0 },
-            { kind: `catch up`, tab: slowTab, pick: 1 },
-            ...(history.advancingBatch === `disjoint`
-              ? [{ kind: `server change` as const, key: 2, pick: 1 }]
-              : []),
-            { kind: `catch up`, tab: history.fastTab, pick: 0 },
-            ...(history.drain
-              ? [{ kind: `catch up` as const, tab: slowTab, pick: 0 }]
-              : []),
-            ...(history.recovery === 0
-              ? [{ kind: `stop` as const, tab: slowTab, pick: 0 }]
-              : []),
-            ...(interrupted
-              ? [
-                  {
-                    kind: `recover` as const,
-                    tab: slowTab,
-                    pick: history.recovery,
-                    callerCursor: `none` as const,
-                  },
-                  { kind: `stop` as const, tab: slowTab, pick: 0 },
-                ]
-              : []),
-            { kind: `recover`, tab: slowTab, pick: history.recovery },
-          ]
-          let primary: { error: unknown } | undefined
-          try {
-            await runGeneratedHistory(
-              { tabCount: 2, steps },
-              () => fc.pre(false),
-              (divergent, how, cursor, hadResetMarker) => {
-                if (history.drain && !divergent)
-                  reach.reach(`drained before recovery`)
-                if (!history.drain && divergent) {
-                  if (cursor === `resume`)
-                    reach.reach(`explicit resume at divergent recovery`)
-                  if (cursor === `now`)
-                    reach.reach(`explicit now at divergent recovery`)
-                  if (
-                    interrupted &&
-                    hadResetMarker &&
-                    (cursor === `resume` || cursor === `now`)
-                  )
-                    reach.reach(
-                      `interrupted reset before explicit ${cursor} recovery`,
-                    )
-                  reach.reach(`divergent source ${how}`)
-                  reach.reach(
-                    `${history.key === 1 ? `present` : `absent`}/${history.advancingBatch}`,
-                  )
-                }
-                if (history.progressFormat !== `current`) {
-                  reach.reach(`${history.progressFormat} progress at recovery`)
-                }
-                if (cursor === `initial-offset`)
-                  reach.reach(`explicit initial offset at recovery`)
-                if (cursor === `handle`)
-                  reach.reach(`explicit handle at recovery`)
-              },
-              history.progressFormat,
-              history.callerCursor,
-            )
-          } catch (error) {
-            primary = { error }
-          } finally {
-            await finishHistory(primary)
-          }
-        }
-      }),
-      parameters,
-    )
-    console.info(`source prefix reach`, Object.fromEntries(reach.counts()))
-    reach.assertReached()
-  }
-  it.skipIf(oracleReplayRequested())(
-    `converges after interleaved source prefixes (fixed seed)`,
-    () => {
-      return runSourcePrefixCampaign(
-        oracleFixedSeed(2281, { numRuns: oracleRuns(80) }),
-      )
-    },
-    600_000,
+  const states = [
+    `present/empty`,
+    `present/disjoint`,
+    `absent/empty`,
+    `absent/disjoint`,
+    `drained before recovery`,
+    `missing progress at recovery`,
+    `foreign progress at recovery`,
+    `divergent source restart`,
+    `divergent source reload`,
+    `explicit resume at divergent recovery`,
+    `explicit now at divergent recovery`,
+    `explicit initial offset at recovery`,
+    `explicit handle at recovery`,
+    `interrupted reset before explicit resume recovery`,
+    `interrupted reset before explicit now recovery`,
+  ] as const
+  let sourcePrefixReach = requiredBrowserObservations(
+    'browser.electric-source-prefix',
+    states,
   )
-  oracleReplayTest(it, `browser.electric-source-prefix`)(
-    `converges after interleaved source prefixes (random or replayed)`,
-    () => {
-      return runSourcePrefixCampaign(
-        oraclePropertyOptions(80, `browser.electric-source-prefix`),
-      )
+  const judgeSourcePrefix = async (
+    history: typeof sourcePrefixHistory extends fc.Arbitrary<infer T>
+      ? T
+      : never,
+  ) => {
+    const slowTab = 1 - history.fastTab
+    // Keep every original history, then repeat it with a recovery that
+    // stops before its first source delivery. The first start writes its
+    // reset marker through production; the second must still recover.
+    // Pairing both paths preserves the uninterrupted domain and gives
+    // every generated cursor form an interrupted neighbor.
+    for (const interrupted of [false, true]) {
+      sourcePrefixReach.beginHistory()
+      const steps: Array<HistoryStep> = [
+        ...Array.from({ length: history.pairs * 2 }, (): HistoryStep => ({
+          kind: `server change`,
+          key: history.key,
+          pick: 0,
+        })),
+        { kind: `catch up`, tab: history.fastTab, pick: 0 },
+        { kind: `catch up`, tab: slowTab, pick: 1 },
+        ...(history.advancingBatch === `disjoint`
+          ? [{ kind: `server change` as const, key: 2, pick: 1 }]
+          : []),
+        { kind: `catch up`, tab: history.fastTab, pick: 0 },
+        ...(history.drain
+          ? [{ kind: `catch up` as const, tab: slowTab, pick: 0 }]
+          : []),
+        ...(history.recovery === 0
+          ? [{ kind: `stop` as const, tab: slowTab, pick: 0 }]
+          : []),
+        ...(interrupted
+          ? [
+              {
+                kind: `recover` as const,
+                tab: slowTab,
+                pick: history.recovery,
+                callerCursor: `none` as const,
+              },
+              { kind: `stop` as const, tab: slowTab, pick: 0 },
+            ]
+          : []),
+        { kind: `recover`, tab: slowTab, pick: history.recovery },
+      ]
+      let primary: { error: unknown } | undefined
+      try {
+        await runGeneratedHistory(
+          { tabCount: 2, steps },
+          () => fc.pre(false),
+          (divergent, how, cursor, hadResetMarker) => {
+            if (history.drain && !divergent)
+              sourcePrefixReach.reach(`drained before recovery`)
+            if (!history.drain && divergent) {
+              if (cursor === `resume`)
+                sourcePrefixReach.reach(`explicit resume at divergent recovery`)
+              if (cursor === `now`)
+                sourcePrefixReach.reach(`explicit now at divergent recovery`)
+              if (
+                interrupted &&
+                hadResetMarker &&
+                (cursor === `resume` || cursor === `now`)
+              )
+                sourcePrefixReach.reach(
+                  `interrupted reset before explicit ${cursor} recovery`,
+                )
+              sourcePrefixReach.reach(`divergent source ${how}`)
+              sourcePrefixReach.reach(
+                `${history.key === 1 ? `present` : `absent`}/${history.advancingBatch}`,
+              )
+            }
+            if (history.progressFormat !== `current`) {
+              sourcePrefixReach.reach(
+                `${history.progressFormat} progress at recovery`,
+              )
+            }
+            if (cursor === `initial-offset`)
+              sourcePrefixReach.reach(`explicit initial offset at recovery`)
+            if (cursor === `handle`)
+              sourcePrefixReach.reach(`explicit handle at recovery`)
+          },
+          history.progressFormat,
+          history.callerCursor,
+        )
+      } catch (error) {
+        primary = { error }
+      } finally {
+        await finishHistory(primary)
+      }
+    }
+  }
+  registerBrowserProperty(
+    sourcePrefixHistory,
+    {
+      id: 'browser.electric-source-prefix',
+      runs: 80,
+      fixedSeed: 2281,
+      beforeCampaign: () => {
+        sourcePrefixReach = requiredBrowserObservations(
+          'browser.electric-source-prefix',
+          states,
+        )
+      },
+      afterCampaign: () => {
+        console.info(
+          'source prefix reach',
+          Object.fromEntries(sourcePrefixReach.counts()),
+        )
+        sourcePrefixReach.assertReached()
+      },
     },
+    'converges after interleaved source prefixes',
+    judgeSourcePrefix,
     600_000,
   )
 
@@ -1865,67 +1873,56 @@ describe(`multi-tab Electric over one persisted database`, () => {
   })
 
   const createGeneratedReach = () =>
-    createOracleReach<GeneratedReach>(`browser.multi-tab-reserved-history`, [
-      `stopped source restarted during final catch-up`,
-      `durable divergence repaired during final catch-up`,
-      `lagging commit rewritten during final catch-up`,
-      `must-refetch delivered`,
-      `peer commit during an open reserved transaction`,
-      `source stopped with an open transaction`,
-      `tab recovered`,
-      `durable rows behind the server`,
-      `peer commit while a tab was not ready`,
-      `peer commit after error without retry mid-transaction`,
-      `peer commit after SDK gives up mid-transaction`,
-      `peer commit after signal aborted mid-transaction`,
-      `peer reset abandoned an open transaction`,
-      `reset-abandoned commit put the Collection in error`,
-      `reset-abandoned source recovered during final catch-up`,
-    ])
+    requiredBrowserObservations<GeneratedReach>(
+      `browser.multi-tab-reserved-history`,
+      [
+        `stopped source restarted during final catch-up`,
+        `durable divergence repaired during final catch-up`,
+        `lagging commit rewritten during final catch-up`,
+        `must-refetch delivered`,
+        `peer commit during an open reserved transaction`,
+        `source stopped with an open transaction`,
+        `tab recovered`,
+        `durable rows behind the server`,
+        `peer commit while a tab was not ready`,
+        `peer commit after error without retry mid-transaction`,
+        `peer commit after SDK gives up mid-transaction`,
+        `peer commit after signal aborted mid-transaction`,
+        `peer reset abandoned an open transaction`,
+        `reset-abandoned commit put the Collection in error`,
+        `reset-abandoned source recovered during final catch-up`,
+      ],
+    )
   let generatedReach = createGeneratedReach()
 
-  const runGeneratedCampaign = async (
-    parameters: ReturnType<typeof oraclePropertyOptions>,
-  ) => {
-    generatedReach = createGeneratedReach()
-    oracleRoute(oracleRouteOf(parameters))
-    await fc.assert(
-      fc.asyncProperty(generatedHistory, async (history) => {
-        let primary: { error: unknown } | undefined
-        try {
-          // fc.pre discards a history that reaches the known limit.
-          await runGeneratedHistory(history, () => fc.pre(false))
-        } catch (error) {
-          primary = { error }
-        } finally {
-          await finishHistory(primary)
-        }
-      }),
-      parameters,
-    )
-    console.info(
-      `multi-tab generated reach`,
-      Object.fromEntries(generatedReach.counts()),
-    )
-    generatedReach.assertReached()
-  }
-  it.skipIf(oracleReplayRequested())(
-    `keeps reserved commits lawful across generated multi-tab histories (fixed seed)`,
-    () => {
-      return runGeneratedCampaign(
-        oracleFixedSeed(GENERATED_FIXED_SEED, {
-          numRuns: oracleRuns(GENERATED_RUNS),
-        }),
-      )
+  registerBrowserProperty(
+    generatedHistory,
+    {
+      id: GENERATED_PROPERTY,
+      runs: GENERATED_RUNS,
+      fixedSeed: GENERATED_FIXED_SEED,
+      beforeCampaign: () => {
+        generatedReach = createGeneratedReach()
+      },
+      afterCampaign: () => {
+        console.info(
+          'multi-tab generated reach',
+          Object.fromEntries(generatedReach.counts()),
+        )
+        generatedReach.assertReached()
+      },
     },
-    600_000,
-  )
-  oracleReplayTest(it, GENERATED_PROPERTY)(
-    `keeps reserved commits lawful across generated multi-tab histories (random or replayed)`,
-    () => {
-      return runGeneratedCampaign(
-        oraclePropertyOptions(GENERATED_RUNS, GENERATED_PROPERTY),
-      )
+    'keeps reserved commits lawful across generated multi-tab histories',
+    async (history) => {
+      let primary: { error: unknown } | undefined
+      try {
+        // fc.pre discards a history that reaches the known limit.
+        await runGeneratedHistory(history, () => fc.pre(false))
+      } catch (error) {
+        primary = { error }
+      } finally {
+        await finishHistory(primary)
+      }
     },
     600_000,
   )

@@ -196,11 +196,11 @@ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 pnpm test:oracles --coverage.enabled=false
 For a failing random campaign, use its reported seed and shrink path:
 
 ```sh
-TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0:1 TANSTACK_DB_ORACLE_PROPERTY=trailbase.lifecycle node --import tsx ../db/tests/oracle-replay.ts tests/lifecycle-oracle.property.test.ts --coverage.enabled=false -t 'trailbase.lifecycle.*random seed'
+TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0:1 TANSTACK_DB_ORACLE_PROPERTY=trailbase.lifecycle node --import tsx ../db/tests/oracle-replay.ts tests/lifecycle-oracle.property.test.ts --coverage.enabled=false
 ```
 
-Use `TANSTACK_DB_ORACLE_PROPERTY=trailbase.page-event` and
-`-t 'trailbase.page-event.*random seed'` for the page-event grammar.
+Use `TANSTACK_DB_ORACLE_PROPERTY=trailbase.page-event` for the page-event grammar.
+The manifest selects the native random campaign for the requested property.
 
 Replace the example seed/path with the failure's values. The guarded runner
 requires a witness that the named property executed with this seed and path;

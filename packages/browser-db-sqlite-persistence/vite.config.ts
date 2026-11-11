@@ -110,6 +110,7 @@ const config = defineConfig({
       exclude: [
         ...adapterBrowserTests,
         `**/node_modules/**`,
+        `tests/persisted-options.test.ts`,
         `tests/reload-class-oracle.test.ts`,
         `tests/opfs-page-lifecycle-oracle.test.ts`,
         `tests/opfs-request-order-oracle.test.ts`,
