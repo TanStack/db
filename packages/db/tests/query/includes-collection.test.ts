@@ -4,7 +4,7 @@
 // Map model, and the bounded exhaustive relationship campaign are owned by
 // includes-collection-oracle.property.test.ts.
 import { test as fcTest } from '@fast-check/vitest'
-import { describe, expect } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import {
   add,
   caseWhen,
@@ -28,9 +28,16 @@ import {
   createControlledCollection,
   expectedMaterializations,
 } from './includes-collection-support.js'
-import { createCollectionDriver } from './includes-collection-driver-oracle.js'
+import {
+  advanceFacadeIntervals,
+  checkFacadeIntervals,
+  createCollectionDriver,
+} from './includes-collection-driver-oracle.js'
 import type { TraceProjection } from '../trace-runner.js'
-import type { CollectionContext } from './includes-collection-driver-oracle.js'
+import type {
+  CollectionContext,
+  MetadataFacade,
+} from './includes-collection-driver-oracle.js'
 import type {
   ChildRow,
   DeleteIdentityObservation,
@@ -1389,4 +1396,70 @@ describe(`Collection-valued includes oracle`, () => {
 
     await runTrace({ steps: [], driver, projection })
   })
+})
+
+// A checker calibration of the facade-interval check that the Collection and
+// metadata oracles share. It runs no production.
+// These public-handle controls replay the same active-interval model used by
+// the metadata receiver. They challenge sharing, retirement and reactivation
+// separately; ordinary child values remain outside this partial checker.
+test.each([
+  `split-shared`,
+  `retargeted`,
+  `retired-rows`,
+  `retired-status`,
+  `missing-group`,
+  `active-status`,
+] as const)(`rejects a hostile facade interval observation: %s`, (fault) => {
+  const original: MetadataFacade = {
+    id: `original`,
+    status: `ready`,
+    toArray: [],
+  }
+  const replacement: MetadataFacade = {
+    id: `replacement`,
+    status: `ready`,
+    toArray: [],
+  }
+  const seen = new Map<number, MetadataFacade>()
+  const first = advanceFacadeIntervals<string>({ active: new Map(), next: 0 }, [
+    `a`,
+    `a`,
+  ])
+  checkFacadeIntervals(
+    first,
+    [
+      { group: `a`, facade: original },
+      { group: `a`, facade: original },
+    ],
+    seen,
+  )
+  if (fault === `split-shared`) {
+    expect(() =>
+      checkFacadeIntervals(
+        first,
+        [
+          { group: `a`, facade: original },
+          { group: `a`, facade: replacement },
+        ],
+        seen,
+      ),
+    ).toThrow()
+    return
+  }
+  const retired = advanceFacadeIntervals(first, [])
+  checkFacadeIntervals(retired, [], seen)
+  const returned = advanceFacadeIntervals(retired, [`a`])
+  if (fault === `retargeted`) {
+    expect(() =>
+      checkFacadeIntervals(returned, [{ group: `a`, facade: original }], seen),
+    ).toThrow()
+    return
+  }
+  if (fault === `active-status`) replacement.status = `cleaned-up`
+  if (fault === `retired-rows`) original.toArray = [{ id: `stale` }]
+  if (fault === `retired-status`) original.status = `cleaned-up`
+  const actual =
+    fault === `missing-group` ? [] : [{ group: `a`, facade: replacement }]
+  expect(() => checkFacadeIntervals(returned, actual, seen)).toThrow()
 })

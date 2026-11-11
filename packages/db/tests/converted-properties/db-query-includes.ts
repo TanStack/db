@@ -55,6 +55,18 @@ export const properties: ReadonlyArray<string> = [
   `virtual-row-fields.facade-intervals`,
   `virtual-row-fields.nullable-facade`,
   `virtual-row-fields.runtime-boundary`,
+  `includes-collection.retired-held-facade`,
+  `includes-collection.delete-facade-identity`,
+  `includes-collection.facade-application-failure`,
+  `includes-collection.facade-root-publication`,
+  `includes-collection.shared-facade-retirement`,
+  `includes-collection.held-truncate-reorder`,
+  `includes-collection.fixed-relationship`,
+  `includes-collection.exhaustive-two-step`,
+  `includes-collection.checkpoint-failure`,
+  `includes-collection.held-ordered-repair`,
+  `includes-collection.root-event-observation`,
+  `includes-collection.rollback-retained-child`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -127,5 +139,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/virtual-row-fields-oracle.test.ts`,
     `virtual-row-fields`,
     `boundary-publication projection-attribution last-spread union-branches metadata-timeline facade-intervals nullable-facade runtime-boundary`,
+  ],
+  [
+    `db/tests/query/includes-collection-oracle.property.test.ts`,
+    `includes-collection`,
+    `retired-held-facade delete-facade-identity facade-application-failure facade-root-publication shared-facade-retirement held-truncate-reorder fixed-relationship exhaustive-two-step checkpoint-failure held-ordered-repair root-event-observation rollback-retained-child`,
   ],
 ]
