@@ -28,6 +28,9 @@ export const properties: ReadonlyArray<string> = [
   `cursor.composite-width-matrix`,
   `cursor.leading-boundary-matrix`,
   `cursor.local-order-fixed`,
+  `duration-query-equality.direct-lookup`,
+  `duration-query-equality.public-eq`,
+  `duration-query-equality.calendar-indexing`,
   // transactions and mutations
   // IndexedDB and live-query observers
   // proxies and conformance
@@ -60,6 +63,11 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/cursor-oracle.property.test.ts`,
     `cursor`,
     `scalar-matrix composite-width-matrix leading-boundary-matrix local-order-fixed`,
+  ],
+  [
+    `db/tests/duration-query-equality-oracle.test.ts`,
+    `duration-query-equality`,
+    `direct-lookup public-eq calendar-indexing`,
   ],
   // transactions and mutations
   // IndexedDB and live-query observers
