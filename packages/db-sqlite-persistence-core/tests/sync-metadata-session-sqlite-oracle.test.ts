@@ -12,7 +12,7 @@ import { oracleReplayTest } from '../../db/tests/oracle-config'
 import {
   registerKeptMetadataDurabilityProperty,
   registerSeedReinsertReloadProperty,
-} from './sync-metadata-session-campaign'
+} from './sync-metadata-session-campaign-oracle'
 import { createSQLiteDriver } from './sync-metadata-session-sqlite-driver'
 import type {
   SessionAction,

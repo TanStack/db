@@ -444,6 +444,7 @@ function renderFiles(program, revision) {
 
 let work
 let scriptText
+let loadFailureText
 
 beforeAll(() => {
   // Each run has its own directory, so concurrent runs cannot remove each
@@ -453,6 +454,10 @@ beforeAll(() => {
   scriptText = readFileSync(
     process.env.RUN_BUDGET_SCRIPT ??
       join(repoRoot, `scripts`, `check-oracle-run-counts.mjs`),
+    `utf8`,
+  )
+  loadFailureText = readFileSync(
+    join(repoRoot, `scripts`, `lint-load-failure.mjs`),
     `utf8`,
   )
 })
@@ -528,6 +533,11 @@ async function reportOf(program) {
     writeFileSync(
       join(directory, `scripts`, `check-oracle-run-counts.mjs`),
       scriptText,
+    )
+    // The script imports the module that words its failure line.
+    writeFileSync(
+      join(directory, `scripts`, `lint-load-failure.mjs`),
+      loadFailureText,
     )
     write(renderFiles(program, `base`))
     await git(`add`, `-A`)

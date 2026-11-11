@@ -12,7 +12,7 @@ import type { Todo, TodoSyncParams } from './persisted-support'
 
 // Fixed witnesses for the sync metadata session through the persisted
 // wrapper. The session law is owned by sync-metadata-session-oracle.ts and
-// its persisted driver, sync-metadata-session-persisted.test.ts.
+// its persisted driver, sync-metadata-session-persisted-oracle.test.ts.
 
 // A row another tab's source wrote in this run reaches this tab when it loads
 // a new demand from storage. It is a source row, not a persisted cache row,

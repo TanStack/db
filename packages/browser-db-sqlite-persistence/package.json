@@ -60,6 +60,11 @@
     "@journeyapps/wa-sqlite": "^1.4.1",
     "typescript": ">=4.7"
   },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@journeyapps/wa-sqlite": "^1.7.2",
     "@playwright/test": "^1.65.0",
