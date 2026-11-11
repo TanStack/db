@@ -58,14 +58,20 @@ export default [
   { settings: oracleLintSettings },
   oraclePlugin.configs.recommended,
   oraclePlugin.configs.production,
-  // Witnesses for runtimes that are not Vitest on Node (maintainer decision,
-  // 2026-11-11). These shared suites also run inside the Capacitor and Tauri
-  // WebView apps, which bundle them and cannot load the framework's Node-only
-  // main entry, so they keep their plain tests and are not oracle files. Every
-  // other oracle rule still applies to them.
+  // Receiving witnesses for runtimes that are not Vitest on Node (maintainer
+  // decision, 2026-11-11). oracleProperty registers through Vitest and its
+  // main entry is Node-only, so Playwright specs and the shared suites that
+  // the Capacitor and Tauri WebView apps bundle keep their plain tests. Each
+  // compares production with the shared check of its Vitest oracle owner.
+  // They are not oracle files, so oracle/no-unit-test does not apply; every
+  // other oracle rule does.
   {
-    name: `db/collection-e2e-witnesses`,
-    files: [`packages/db-collection-e2e/src/suites/*-witness.suite.ts`],
+    name: `db/receiving-witnesses`,
+    files: [
+      `packages/db-collection-e2e/src/suites/*-witness.suite.ts`,
+      `packages/db/e2e/**/*-witness.spec.ts`,
+      `packages/browser-db-sqlite-persistence/e2e/*-witness.*.ts`,
+    ],
     plugins: { oracle: oraclePlugin },
     linterOptions: { noInlineConfig: true },
     rules: {
