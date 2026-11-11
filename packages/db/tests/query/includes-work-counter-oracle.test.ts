@@ -1,8 +1,13 @@
 import { fc } from '@fast-check/vitest'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
-import { oracleAssertion } from '../oracle-assertion-adapter.js'
-import { oracleFixedSeed, oracleRoute, oracleRuns } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+import { beforeAll, describe, expect, vi } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from '../oracle-assertion-adapter.js'
+import { oracleProperty, oracleRuns } from '../oracle-config.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
@@ -32,6 +37,19 @@ import {
   observeWork,
   runCleanups,
 } from './includes-work-counter-support.js'
+import {
+  WINDOW_RUNS,
+  expectPayloadValue,
+  payloadExamples,
+  windowCase,
+} from './includes-work-counter-model-oracle.js'
+import type {
+  ChildForm,
+  WindowCase,
+  WindowChild,
+  WindowGrandchild,
+  WindowParent,
+} from './includes-work-counter-model-oracle.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 import type { Context, QueryBuilder } from '../../src/query/index.js'
@@ -174,6 +192,10 @@ function campaigns(fixedSeed: number, property: string, runs = 6) {
   return [{ name: `fixed and random`, options: { runs, property, fixedSeed } }]
 }
 
+const correlatedLinksLaw = `A join preserves correlated source pushdown: unrelated joined-link fillers do not increase source work beyond the baseline bound.`
+const joinTargetsLaw = `Indexed join-target growth keeps correlated source work flat.`
+const joinFreeLaw = `Join-free correlated includes keep source work flat as unrelated fillers grow.`
+
 describe(`includes deterministic work-counter oracle`, () => {
   beforeAll(async () => {
     const [joinedBaseline, joinFreeBaseline] = await Promise.all([
@@ -184,36 +206,96 @@ describe(`includes deterministic work-counter oracle`, () => {
     joinFreeBaselineObservation = joinFreeBaseline
   })
 
-  it.each([1, 2, 3])(
-    `checks the work bound at the small filler boundary (%i)`,
-    (...args: Parameters<typeof expectCorrelatedJoinWorkBound>) => {
-      oracleRoute(`case`)
-      return expectCorrelatedJoinWorkBound(...args)
+  oracleProperty({
+    id: `includes-work.correlated-links-fixed`,
+    law: {
+      statement: correlatedLinksLaw,
+      authority: `Law 12 (work) and the physical planning and work contract in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `The small filler boundary counts 1 to 3 and the joined-link range endpoint 24.`,
     },
-  )
-  it(`checks the joined-link filler range endpoint`, () => {
-    oracleRoute(`fixed history`)
-    return expectCorrelatedJoinWorkBound(24)
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/btree-index.ts`,
+      `src/local-only.ts#localOnlyCollectionOptions`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: [
+      ...[1, 2, 3].map((fillers) => ({
+        name: `checks the work bound at the small filler boundary (${fillers})`,
+        fillers,
+      })),
+      { name: `checks the joined-link filler range endpoint`, fillers: 24 },
+    ],
+    label: ({ name }) => name,
+    resolve: (history) => ({ ...history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(correlatedLinksLaw, plan, observe, () =>
+        expectCorrelatedJoinWorkBound(plan.fillers),
+      ),
+    check: forwardAssertionJudgment,
   })
-  it.each([1, 24])(
-    `checks join-target growth at filler count %i`,
-    (...args: Parameters<typeof expectJoinTargetWorkBound>) => {
-      oracleRoute(`case`)
-      return expectJoinTargetWorkBound(...args)
+
+  oracleProperty({
+    id: `includes-work.join-targets-fixed`,
+    law: {
+      statement: joinTargetsLaw,
+      authority: `Law 12 (work) and the physical planning and work contract in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `The join-target filler range endpoints 1 and 24.`,
     },
-  )
-  it.each([1, 24])(
-    `checks join-free growth at filler count %i`,
-    (...args: Parameters<typeof expectJoinFreeWorkBound>) => {
-      oracleRoute(`case`)
-      return expectJoinFreeWorkBound(...args)
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/btree-index.ts`,
+      `src/local-only.ts#localOnlyCollectionOptions`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: [1, 24],
+    label: (fillers) => `checks join-target growth at filler count ${fillers}`,
+    resolve: (fillers) => ({ fillers }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(joinTargetsLaw, plan, observe, () =>
+        expectJoinTargetWorkBound(plan.fillers),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes-work.join-free-fixed`,
+    law: {
+      statement: joinFreeLaw,
+      authority: `Law 12 (work) and the physical planning and work contract in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `The join-free filler range endpoints 1 and 24.`,
     },
-  )
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/btree-index.ts`,
+      `src/local-only.ts#localOnlyCollectionOptions`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: [1, 24],
+    label: (fillers) => `checks join-free growth at filler count ${fillers}`,
+    resolve: (fillers) => ({ fillers }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(joinFreeLaw, plan, observe, () =>
+        expectJoinFreeWorkBound(plan.fillers),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   for (const campaign of campaigns(1709, `includes-work.correlated-links`)) {
     registerIncludesProperty(
       [fc.integer({ min: 1, max: 24 })],
-      campaign.options,
+      {
+        ...campaign.options,
+        owns: [
+          `src/collection/index.ts#createCollection`,
+          `src/indexes/btree-index.ts`,
+          `src/local-only.ts#localOnlyCollectionOptions`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        ],
+      },
       `a join preserves correlated source pushdown (${campaign.name})`,
       (...args: Parameters<typeof expectCorrelatedJoinWorkBound>) => {
         return expectCorrelatedJoinWorkBound(...args)
@@ -224,7 +306,15 @@ describe(`includes deterministic work-counter oracle`, () => {
   for (const campaign of campaigns(170_900, `includes-work.join-targets`)) {
     registerIncludesProperty(
       [fc.integer({ min: 1, max: 24 })],
-      campaign.options,
+      {
+        ...campaign.options,
+        owns: [
+          `src/collection/index.ts#createCollection`,
+          `src/indexes/btree-index.ts`,
+          `src/local-only.ts#localOnlyCollectionOptions`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        ],
+      },
       `indexed join-target growth keeps source work flat (${campaign.name})`,
       (...args: Parameters<typeof expectJoinTargetWorkBound>) => {
         return expectJoinTargetWorkBound(...args)
@@ -235,7 +325,15 @@ describe(`includes deterministic work-counter oracle`, () => {
   for (const campaign of campaigns(17_090, `includes-work.join-free`)) {
     registerIncludesProperty(
       [fc.integer({ min: 1, max: 24 })],
-      campaign.options,
+      {
+        ...campaign.options,
+        owns: [
+          `src/collection/index.ts#createCollection`,
+          `src/indexes/btree-index.ts`,
+          `src/local-only.ts#localOnlyCollectionOptions`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        ],
+      },
       `join-free correlated includes keep source work flat (${campaign.name})`,
       (...args: Parameters<typeof expectJoinFreeWorkBound>) => {
         return expectJoinFreeWorkBound(...args)
@@ -339,134 +437,6 @@ describe(`includes deterministic work-counter oracle`, () => {
  * Indexes exist before the live query starts, and every step completes before
  * it is checked.
  */
-type WindowParent = { id: string; rank: number; group: string }
-type WindowChild = { id: string; group: string; n: number }
-type WindowGrandchild = { id: string; childId: string }
-type ChildForm =
-  | `materialize`
-  | `collection`
-  | `ordered`
-  | `limited`
-  | `findOne`
-  | `nested`
-  | `limited-nested`
-type ParentForm = `page` | `findOne` | `orderOnly`
-
-type WindowCommand =
-  | { type: `insert-parent`; copy: number | null }
-  | { type: `delete-parent`; pick: number }
-  | { type: `rank`; pick: number; up: boolean }
-  | { type: `insert-child`; pick: number }
-  | { type: `delete-child`; pick: number }
-  | { type: `move`; offset: number; limit: number }
-
-type WindowCase = {
-  parents: number
-  groups: number
-  // Parents that copy an earlier parent's rank, and its group when `group`.
-  copies: Array<{ pick: number; group: boolean }>
-  childrenPerGroup: number
-  childForm: ChildForm
-  childSource: `local` | `on-demand`
-  parentForm: ParentForm
-  // Groups a static parent filter keeps, by index; one uses `eq`.
-  parentFilter: Array<number> | null
-  direction: `asc` | `desc`
-  distinct: boolean
-  offset: number
-  limit: number
-  history: Array<WindowCommand>
-  // A replay of a known transient top-K row: the extra child rows it may load
-  // at a checkpoint where the parent's ordered acquisition had not completed.
-  overshoot?: number
-  // A `findOne` parent skips its `offset` when false. Omitted means true.
-  findOneOffset?: boolean
-  // A window `setWindow` requests before the live query starts.
-  startWindow?: { offset: number; limit: number } | null
-  // A static child filter on the grandchild correlation field (the child
-  // id), by index into the initial children; the include keeps only those.
-  childFilter?: Array<number> | null
-}
-
-const windowCommand: fc.Arbitrary<WindowCommand> = fc.oneof(
-  fc.record({
-    type: fc.constant(`insert-parent` as const),
-    copy: fc.option(fc.nat(), { nil: null }),
-  }),
-  fc.record({ type: fc.constant(`delete-parent` as const), pick: fc.nat() }),
-  fc.record({
-    type: fc.constant(`rank` as const),
-    pick: fc.nat(),
-    up: fc.boolean(),
-  }),
-  fc.record({ type: fc.constant(`insert-child` as const), pick: fc.nat() }),
-  fc.record({ type: fc.constant(`delete-child` as const), pick: fc.nat() }),
-  fc.record({
-    type: fc.constant(`move` as const),
-    offset: fc.integer({ min: 0, max: 20 }),
-    limit: fc.integer({ min: 1, max: 4 }),
-  }),
-)
-
-const windowCase: fc.Arbitrary<WindowCase> = fc
-  .integer({ min: 8, max: 40 })
-  .chain((parents) =>
-    fc.record({
-      parents: fc.constant(parents),
-      // At least half as many groups as parents, so most rows own a group.
-      groups: fc.integer({ min: Math.ceil(parents / 2), max: parents }),
-      copies: fc.array(fc.record({ pick: fc.nat(), group: fc.boolean() }), {
-        maxLength: 4,
-      }),
-      childrenPerGroup: fc.integer({ min: 1, max: 3 }),
-      childForm: fc.constantFrom(
-        `materialize` as const,
-        `collection` as const,
-        `ordered` as const,
-        `limited` as const,
-        `findOne` as const,
-        `nested` as const,
-        `limited-nested` as const,
-      ),
-      childSource: fc.constantFrom(`local` as const, `on-demand` as const),
-      parentForm: fc.constantFrom(
-        `page` as const,
-        `findOne` as const,
-        `orderOnly` as const,
-      ),
-      parentFilter: fc.option(
-        fc.uniqueArray(fc.nat({ max: parents - 1 }), {
-          minLength: 1,
-          maxLength: 6,
-        }),
-        { nil: null },
-      ),
-      direction: fc.constantFrom(`asc` as const, `desc` as const),
-      distinct: fc.boolean(),
-      offset: fc.integer({ min: 0, max: 20 }),
-      limit: fc.integer({ min: 1, max: 4 }),
-      history: fc.array(windowCommand, { maxLength: 8 }),
-      findOneOffset: fc.boolean(),
-      startWindow: fc.option(
-        fc.record({
-          offset: fc.integer({ min: 0, max: 20 }),
-          limit: fc.integer({ min: 1, max: 4 }),
-        }),
-        { nil: null },
-      ),
-      childFilter: fc.option(
-        fc.uniqueArray(fc.nat({ max: 200 }), { minLength: 1, maxLength: 4 }),
-        { nil: null },
-      ),
-    }),
-  )
-  // A findOne parent has one result row; `distinct` would not change it.
-  .map((testCase) =>
-    testCase.parentForm === `findOne`
-      ? { ...testCase, distinct: false }
-      : testCase,
-  )
-
 type WindowUnit = { key: string; rank: number; group: string }
 type ShownRow = { key: string; rank: number; group: string; kids: unknown }
 type ObservedKid = { id: string; grand?: Iterable<{ id: string }> }
@@ -1119,27 +1089,6 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
 // the window model and compares the shown rows with it. The three metamorphic
 // checks compare each scaled fixture with its minimal baseline run. The grammar
 // is the windowed history generator, which the reconstruction test samples.
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/btree-index.ts',
-    'src/local-only.ts#localOnlyCollectionOptions',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
-  check: [
-    checkWindowedIncludeWork,
-    expectCorrelatedJoinWorkBound,
-    expectJoinTargetWorkBound,
-    expectJoinFreeWorkBound,
-  ],
-  model: [windowUnits, modelKids],
-  grammar: [windowCase],
-})
-
-// Enough runs that each dimension appears at the default multiplier; the
-// reconstruction check below counts them.
-const WINDOW_RUNS = 60
-
 /** A fixed history: its strict forward-move tally is not reach evidence. */
 async function expectWindowedIncludeWork(testCase: WindowCase): Promise<void> {
   await checkWindowedIncludeWork(testCase)
@@ -1161,39 +1110,33 @@ const fixedWindowCase: WindowCase = {
   history: [],
 }
 
-describe(`includes work under an ordered parent window`, () => {
-  it.each([false, true])(
-    `loads children only for a late page's parents (distinct=%s)`,
-    (distinct) => {
-      oracleRoute(`case`)
-      return expectWindowedIncludeWork({
-        ...fixedWindowCase,
-        parents: 40,
-        groups: 40,
-        childrenPerGroup: 3,
-        direction: `desc`,
-        distinct,
-        offset: 20,
-        history: [{ type: `move`, offset: 10, limit: 3 }],
-      })
+// The fixed parent-window histories, each replayed through the shared window
+// check. Their strict forward-move tally is not reach evidence.
+const windowFixedHistories: Array<{ name: string; testCase: WindowCase }> = [
+  ...[false, true].map((distinct) => ({
+    name: `loads children only for a late page's parents (distinct=${distinct})`,
+    testCase: {
+      ...fixedWindowCase,
+      parents: 40,
+      groups: 40,
+      childrenPerGroup: 3,
+      direction: `desc`,
+      distinct,
+      offset: 20,
+      history: [{ type: `move`, offset: 10, limit: 3 }],
     },
-  )
-
-  it.each([`ordered`, `limited`, `limited-nested`] as const)(
-    `moves the parent window, not the %s child's`,
-    (childForm) => {
-      oracleRoute(`case`)
-      return expectWindowedIncludeWork({
-        ...fixedWindowCase,
-        childForm,
-        history: [{ type: `move`, offset: 3, limit: 2 }],
-      })
+  })),
+  ...([`ordered`, `limited`, `limited-nested`] as const).map((childForm) => ({
+    name: `moves the parent window, not the ${childForm} child's`,
+    testCase: {
+      ...fixedWindowCase,
+      childForm,
+      history: [{ type: `move`, offset: 3, limit: 2 }],
     },
-  )
-
-  it(`collapses parents whose selected values match under distinct`, () => {
-    oracleRoute(`fixed history`)
-    return expectWindowedIncludeWork({
+  })),
+  {
+    name: `collapses parents whose selected values match under distinct`,
+    testCase: {
       ...fixedWindowCase,
       copies: [
         { pick: 1, group: true },
@@ -1202,25 +1145,23 @@ describe(`includes work under an ordered parent window`, () => {
       distinct: true,
       limit: 3,
       history: [{ type: `insert-parent`, copy: 3 }],
-    })
-  })
-
-  it(`creates no static child demand from a static parent filter`, () => {
-    oracleRoute(`fixed history`)
-    return expectWindowedIncludeWork({
+    },
+  },
+  {
+    name: `creates no static child demand from a static parent filter`,
+    testCase: {
       ...fixedWindowCase,
       childSource: `on-demand`,
       parentFilter: [0, 1, 2, 3, 4],
       offset: 3,
       limit: 1,
-    })
-  })
-
+    },
+  },
   // On demand, a group's children arrive only through a load, so a fresh
   // parent past the narrowed window must not load them.
-  it(`stops routing rows that setWindow drops from an orderBy-only parent`, () => {
-    oracleRoute(`fixed history`)
-    return expectWindowedIncludeWork({
+  {
+    name: `stops routing rows that setWindow drops from an orderBy-only parent`,
+    testCase: {
       ...fixedWindowCase,
       childrenPerGroup: 3,
       childSource: `on-demand`,
@@ -1229,38 +1170,35 @@ describe(`includes work under an ordered parent window`, () => {
         { type: `move`, offset: 0, limit: 2 },
         { type: `insert-parent`, copy: null },
       ],
-    })
-  })
-
-  it(`loads one page of children for a findOne parent`, () => {
-    oracleRoute(`fixed history`)
-    return expectWindowedIncludeWork({
+    },
+  },
+  {
+    name: `loads one page of children for a findOne parent`,
+    testCase: {
       ...fixedWindowCase,
       childForm: `findOne`,
       parentForm: `findOne`,
       offset: 5,
-    })
-  })
-
+    },
+  },
   // A window requested before start can drop rows a static filter names,
   // so static child demand must not load their children.
-  it(`creates no static child demand under a window requested before start`, () => {
-    oracleRoute(`fixed history`)
-    return expectWindowedIncludeWork({
+  {
+    name: `creates no static child demand under a window requested before start`,
+    testCase: {
       ...fixedWindowCase,
       childForm: `ordered`,
       childSource: `on-demand`,
       parentForm: `orderOnly`,
       parentFilter: [0, 1, 2, 3, 4, 5],
       startWindow: { offset: 0, limit: 1 },
-    })
-  })
-
+    },
+  },
   // A child's static filter names a child whose parent the window drops, so
   // its grandchild demand must wait for the window too.
-  it(`creates no static grandchild demand below a windowed parent`, () => {
-    oracleRoute(`fixed history`)
-    return expectWindowedIncludeWork({
+  {
+    name: `creates no static grandchild demand below a windowed parent`,
+    testCase: {
       ...fixedWindowCase,
       parents: 10,
       groups: 10,
@@ -1268,15 +1206,14 @@ describe(`includes work under an ordered parent window`, () => {
       childForm: `nested`,
       limit: 1,
       childFilter: [5],
-    })
-  })
-
+    },
+  },
   // A window requested before start that moves a findOne past its one named
   // correlation value drops that row, so its children must not load; one at
   // offset 0 drops nothing, so its static demand still starts at once.
-  it(`creates no static child demand for a findOne moved past its named value before start`, () => {
-    oracleRoute(`fixed history`)
-    return expectWindowedIncludeWork({
+  {
+    name: `creates no static child demand for a findOne moved past its named value before start`,
+    testCase: {
       ...fixedWindowCase,
       parents: 21,
       groups: 11,
@@ -1285,36 +1222,38 @@ describe(`includes work under an ordered parent window`, () => {
       findOneOffset: false,
       parentFilter: [10],
       startWindow: { offset: 1, limit: 1 },
-    })
-  })
-
+    },
+  },
   // Forward moves load more parent rows, so the generated campaigns cannot
   // check them strictly; these do, with no overshoot allowed.
-  it.each([
-    [`local`, false],
-    [`local`, true],
-    [`on-demand`, false],
-    [`on-demand`, true],
-  ] as const)(
-    `moves the window forward strictly (%s children, distinct=%s)`,
-    (childSource, distinct) => {
-      oracleRoute(`case`)
-      return expectWindowedIncludeWork({
-        ...fixedWindowCase,
-        parents: 40,
-        groups: 40,
-        childrenPerGroup: 2,
-        childSource,
-        distinct,
-        history: [
-          { type: `move`, offset: 20, limit: 2 },
-          { type: `move`, offset: 30, limit: 2 },
-        ],
-        overshoot: 0,
-      })
+  ...(
+    [
+      [`local`, false],
+      [`local`, true],
+      [`on-demand`, false],
+      [`on-demand`, true],
+    ] as const
+  ).map(([childSource, distinct]) => ({
+    name: `moves the window forward strictly (${childSource} children, distinct=${distinct})`,
+    testCase: {
+      ...fixedWindowCase,
+      parents: 40,
+      groups: 40,
+      childrenPerGroup: 2,
+      childSource,
+      distinct,
+      history: [
+        { type: `move`, offset: 20, limit: 2 },
+        { type: `move`, offset: 30, limit: 2 },
+      ],
+      overshoot: 0,
     },
-  )
+  })),
+]
 
+const orderedWindowLaw = `A parent window bounds child loading: only the rows the window shows activate routes and create child demand.`
+
+describe(`includes work under an ordered parent window`, () => {
   // Replays of transient top-K rows (#2151). Each shows the correct
   // rows and loads one child row beyond the bound, at a checkpoint where the
   // parent's ordered acquisition had not completed: a held row moved past every
@@ -1411,67 +1350,80 @@ describe(`includes work under an ordered parent window`, () => {
       },
     ],
   ]
-  it.each(transient)(`bounds a transient top-K row: %s`, (_, testCase) => {
-    oracleRoute(`case`)
-    return expectWindowedIncludeWork({ ...testCase, overshoot: 1 })
+
+  oracleProperty({
+    id: `includes-work.ordered-window-fixed`,
+    law: {
+      statement: orderedWindowLaw,
+      authority: `Law 12 (work) and the physical planning and work contract in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `The named fixed parent-window histories, including strict forward moves that the generated campaign cannot check strictly.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/btree-index.ts`,
+      `src/local-only.ts#localOnlyCollectionOptions`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: windowFixedHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ ...history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(orderedWindowLaw, plan, observe, () =>
+        expectWindowedIncludeWork(plan.testCase),
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  // The same replays fail when no overshoot is allowed, so each one reaches
-  // a transient row and the loader-activity observation sees it.
-  it.each(transient)(
-    `reaches a transient top-K row: %s`,
-    async (_, testCase) => {
-      oracleRoute(`calibration`)
-      await expect(
-        checkWindowedIncludeWork({ ...testCase, overshoot: 0 }),
-      ).rejects.toThrow(/child rows loaded by/)
+  oracleProperty({
+    id: `includes-work.transient-top-k`,
+    law: {
+      statement: orderedWindowLaw,
+      authority: `Law 12 (work) and the physical planning and work contract in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `The six replays of transient top-K rows (a recorded limit, #2151), each allowed one extra loaded child row, and their zero-overshoot calibrations.`,
     },
-  )
-
-  // Reconstruction: the fixed campaign's executed cases reach each premise.
-  it(`reaches every window dimension in the executed fixed cases`, () => {
-    oracleRoute(`fixed seed`)
-    const cases = fc
-      .sample(
-        fc.tuple(windowCase),
-        oracleFixedSeed(2137, { numRuns: oracleRuns(WINDOW_RUNS) }),
-      )
-      .map(([testCase]) => testCase)
-    const count = (premise: (testCase: WindowCase) => boolean) =>
-      cases.filter(premise).length
-    for (const [premise, reached] of [
-      [`on-demand child`, count((c) => c.childSource === `on-demand`)],
-      [`static filter`, count((c) => c.parentFilter !== null)],
-      [`limited-nested`, count((c) => c.childForm === `limited-nested`)],
-      [`page parent`, count((c) => c.parentForm === `page`)],
-      [`findOne parent`, count((c) => c.parentForm === `findOne`)],
-      [
-        `orderBy-only parent moved by setWindow`,
-        count(
-          (c) =>
-            c.parentForm === `orderOnly` &&
-            c.history.some((command) => command.type === `move`),
-        ),
-      ],
-      [
-        `on-demand static filter`,
-        count((c) => c.childSource === `on-demand` && c.parentFilter !== null),
-      ],
-      [
-        `findOne parent without offset`,
-        count((c) => c.parentForm === `findOne` && c.findOneOffset === false),
-      ],
-      [
-        `orderBy-only parent with a static filter`,
-        count((c) => c.parentForm === `orderOnly` && c.parentFilter !== null),
-      ],
-      [
-        `window requested before start`,
-        count((c) => c.parentForm !== `findOne` && c.startWindow !== null),
-      ],
-    ] as const) {
-      expect(reached, premise).toBeGreaterThanOrEqual(3)
-    }
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/btree-index.ts`,
+      `src/local-only.ts#localOnlyCollectionOptions`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: transient.map(([name, testCase]) => ({ name, testCase })),
+    label: ({ name }) => `bounds a transient top-K row: ${name}`,
+    resolve: (history) => ({ ...history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(orderedWindowLaw, plan, observe, () =>
+        expectWindowedIncludeWork({ ...plan.testCase, overshoot: 1 }),
+      ),
+    check: forwardAssertionJudgment,
+    calibrations: transient.map(([name]) => ({
+      name: `reaches a transient top-K row: ${name}`,
+      law: orderedWindowLaw,
+      // The former calibration body: the same replay fails when no overshoot is
+      // allowed, so it reaches a transient row and the loader-activity
+      // observation sees it. It applies to its own replay only; on another
+      // replay it reports no rejection, so the framework tries the next one.
+      // Exactly the old matcher: only a rejection whose message names the
+      // loaded child rows counts; any other failure is rethrown without the
+      // shared check's marking and fails this calibration.
+      driver: (plan, observe) =>
+        recordAssertionJudgment(orderedWindowLaw, plan, observe, async () => {
+          if (plan.name !== name) return
+          try {
+            await checkWindowedIncludeWork({ ...plan.testCase, overshoot: 0 })
+          } catch (error) {
+            if (
+              error instanceof Error &&
+              /child rows loaded by/.test(error.message)
+            )
+              rejectAt(`transient top-K ${name}`, error)
+            throw new Error(
+              `the zero-overshoot replay failed outside the expected rejection: ${String(error)}`,
+            )
+          }
+        }),
+    })),
   })
 
   for (const campaign of campaigns(
@@ -1488,6 +1440,12 @@ describe(`includes work under an ordered parent window`, () => {
         [windowCase],
         {
           ...campaign.options,
+          owns: [
+            `src/collection/index.ts#createCollection`,
+            `src/indexes/btree-index.ts`,
+            `src/local-only.ts#localOnlyCollectionOptions`,
+            `src/query/live-query-collection.ts#createLiveQueryCollection`,
+          ],
           beforeCampaign: () => {
             strictForwardMoves = 0
           },
@@ -1548,42 +1506,6 @@ const payloadBoundaries = [
   `correlated-collection`,
   `correlated-group`,
 ] as const
-
-declareOracle({
-  check: [expectPayloadWork, expectPayloadValue],
-  model: [expectedPayloadDocument],
-  grammar: [payloadBoundaries],
-})
-
-// The source payload must still contain its authored fields at publication.
-// Reconstructing them from the history inputs prevents an in-place production
-// mutation from changing the expected value along with the observation.
-function expectedPayloadDocument(blockCount: number, tick: number) {
-  return {
-    blocks: Array.from({ length: blockCount }, (_, id) => ({
-      id,
-      text: `block ${id} at ${tick}`,
-      attrs: { indent: id % 3, tick },
-    })),
-    tick,
-  }
-}
-
-function expectPayloadValue(
-  observed: ReadonlyArray<{ id: number; document: unknown }>,
-  sourceDocument: unknown,
-  blockCount: number,
-  tick: number,
-): void {
-  oracleAssertion('includes work-counter-oracle comparison 1532', () =>
-    expect(observed.map(({ id, document }) => ({ id, document }))).toEqual([
-      { id: 1, document: expectedPayloadDocument(blockCount, tick) },
-    ]),
-  )
-  oracleAssertion('includes work-counter-oracle comparison 1535', () =>
-    expect(observed[0]!.document).toBe(sourceDocument),
-  )
-}
 
 async function expectPayloadWork(blockCount: number): Promise<void> {
   const reach = requiredIncludesObservations(
@@ -1809,22 +1731,6 @@ async function expectPayloadWork(blockCount: number): Promise<void> {
 }
 
 const payloadProperty = `includes-work.projection-payload`
-const payloadExamples: Array<[number]> = [[0], [1], [20], [40]]
-
-// This wrong observation preserves source identity while corrupting content.
-// The same comparison used at every public checkpoint must reject it, including
-// an empty payload whose only changed field is its root tick.
-it.each(payloadExamples)(
-  `rejects a source payload mutated in place (%i blocks)`,
-  (blockCount) => {
-    oracleRoute(`calibration`)
-    const document = expectedPayloadDocument(blockCount, 0)
-    document.tick = -1
-    expect(() =>
-      expectPayloadValue([{ id: 1, document }], document, blockCount, 0),
-    ).toThrow(/to deeply equal/)
-  },
-)
 
 registerIncludesProperty(
   [fc.integer({ min: 0, max: 40 })],
@@ -1833,6 +1739,12 @@ registerIncludesProperty(
     runs: 8,
     fixedSeed: 2355,
     examples: payloadExamples,
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/btree-index.ts`,
+      `src/local-only.ts#localOnlyCollectionOptions`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
   },
   `nested source payloads need no metadata descriptor scans (fixed and random)`,
   (blockCount) => {

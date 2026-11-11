@@ -88,6 +88,11 @@ export const properties: ReadonlyArray<string> = [
   `includes-alias-shadowing.captured-join-operands`,
   `includes-alias-shadowing.grouped-ancestor-references`,
   `includes-alias-shadowing.joined-subquery-ancestor`,
+  `includes-work.correlated-links-fixed`,
+  `includes-work.join-targets-fixed`,
+  `includes-work.join-free-fixed`,
+  `includes-work.ordered-window-fixed`,
+  `includes-work.transient-top-k`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -170,5 +175,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/includes-alias-shadowing-oracle.test.ts`,
     `includes-alias-shadowing`,
     `captured-scope two-include-positions shared-sibling-builder fresh-inner-queryref local-equality-shadow grandparent-capture outer-filter-roles captured-projection-pushdown same-path-group-keys nested-filter-group-keys redundant-wrappers lazy-join-demand recursive-join-bindings nested-source-placement outer-join-absence chained-join-absence joined-queryref-lazy-targets mixed-outer-join-chains captured-join-operands grouped-ancestor-references joined-subquery-ancestor`,
+  ],
+  [
+    `db/tests/query/includes-work-counter-oracle.test.ts`,
+    `includes-work`,
+    `correlated-links-fixed join-targets-fixed join-free-fixed ordered-window-fixed transient-top-k`,
   ],
 ]

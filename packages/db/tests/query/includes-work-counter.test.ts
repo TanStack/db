@@ -4,6 +4,7 @@
 // that the work bound states is owned by includes-work-counter-oracle.test.ts,
 // and the shared fixtures live in includes-work-counter-support.ts.
 
+import { fc } from '@fast-check/vitest'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import {
@@ -15,6 +16,7 @@ import {
   eq,
   toArray,
 } from '../../src/query/index.js'
+import { oracleFixedSeed, oracleRuns } from '../oracle-config.js'
 import {
   createSourceCollection,
   expectSourceWorkBound,
@@ -24,6 +26,14 @@ import {
   observeWork,
   runCleanups,
 } from './includes-work-counter-support.js'
+import {
+  WINDOW_RUNS,
+  expectPayloadValue,
+  expectedPayloadDocument,
+  payloadExamples,
+  windowCase,
+} from './includes-work-counter-model-oracle.js'
+import type { WindowCase } from './includes-work-counter-model-oracle.js'
 import type {
   SourceWork,
   WorkObservation,
@@ -434,3 +444,68 @@ describe(`static include demand and setWindow ownership`, () => {
     }
   })
 })
+
+// A grammar census and a checker calibration for the includes work-counter
+// oracle. They run no production: the census samples the fixed campaign's
+// parent-window cases and counts each premise, and the calibration feeds a
+// mutated payload to the oracle's value check.
+describe(`includes work-counter grammar and checks`, () => {
+  // Reconstruction: the fixed campaign's executed cases reach each premise.
+  it(`reaches every window dimension in the executed fixed cases`, () => {
+    const cases = fc
+      .sample(
+        fc.tuple(windowCase),
+        oracleFixedSeed(2137, { numRuns: oracleRuns(WINDOW_RUNS) }),
+      )
+      .map(([testCase]) => testCase)
+    const count = (premise: (testCase: WindowCase) => boolean) =>
+      cases.filter(premise).length
+    for (const [premise, reached] of [
+      [`on-demand child`, count((c) => c.childSource === `on-demand`)],
+      [`static filter`, count((c) => c.parentFilter !== null)],
+      [`limited-nested`, count((c) => c.childForm === `limited-nested`)],
+      [`page parent`, count((c) => c.parentForm === `page`)],
+      [`findOne parent`, count((c) => c.parentForm === `findOne`)],
+      [
+        `orderBy-only parent moved by setWindow`,
+        count(
+          (c) =>
+            c.parentForm === `orderOnly` &&
+            c.history.some((command) => command.type === `move`),
+        ),
+      ],
+      [
+        `on-demand static filter`,
+        count((c) => c.childSource === `on-demand` && c.parentFilter !== null),
+      ],
+      [
+        `findOne parent without offset`,
+        count((c) => c.parentForm === `findOne` && c.findOneOffset === false),
+      ],
+      [
+        `orderBy-only parent with a static filter`,
+        count((c) => c.parentForm === `orderOnly` && c.parentFilter !== null),
+      ],
+      [
+        `window requested before start`,
+        count((c) => c.parentForm !== `findOne` && c.startWindow !== null),
+      ],
+    ] as const) {
+      expect(reached, premise).toBeGreaterThanOrEqual(3)
+    }
+  })
+})
+
+// This wrong observation preserves source identity while corrupting content.
+// The same comparison used at every public checkpoint must reject it, including
+// an empty payload whose only changed field is its root tick.
+it.each(payloadExamples)(
+  `rejects a source payload mutated in place (%i blocks)`,
+  (blockCount) => {
+    const document = expectedPayloadDocument(blockCount, 0)
+    document.tick = -1
+    expect(() =>
+      expectPayloadValue([{ id: 1, document }], document, blockCount, 0),
+    ).toThrow(/to deeply equal/)
+  },
+)
