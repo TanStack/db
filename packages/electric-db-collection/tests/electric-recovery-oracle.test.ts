@@ -1,10 +1,8 @@
 import { DatabaseSync } from 'node:sqlite'
 import { isDeepStrictEqual } from 'node:util'
-import { fc } from '@fast-check/vitest'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
-import { oracleFixedSeed, oracleRoute } from '../../db/tests/oracle-config'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   SQLiteCorePersistenceAdapter,
@@ -30,6 +28,8 @@ import {
   upToDate,
   withFixtureCleanup,
 } from './electric-recovery-support'
+import { publicationHistoryArbitrary } from './electric-recovery-publication-grammar-oracle'
+import type { PublicationHistoryCommand } from './electric-recovery-publication-grammar-oracle'
 import type { Message } from '@electric-sql/client'
 import type { PersistedTx } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
@@ -94,6 +94,13 @@ vi.mock(`@electric-sql/client`, async () => ({
     }
   }),
 }))
+
+// Each test, and each enumerated case, starts with no stream subscribers and
+// cleared SDK mock calls, so its subscriber and request indexes are its own.
+function resetRecoveryBoundary() {
+  subscribers.length = 0
+  vi.clearAllMocks()
+}
 
 function deferred() {
   let resolve!: () => void
@@ -555,61 +562,6 @@ function expectedPostRestartObservation(
 }
 
 /**
- * The Map adapter stands in for SQLite's row operations. An insert replaces
- * the row; an update keeps the fields that the command omits.
- */
-function expectedDurableRow(
-  operation: `insert` | `update`,
-  previous: Item,
-  next: Item,
-): Item {
-  return operation === `insert` ? next : { ...previous, ...next }
-}
-
-type PublicationHistoryCommand = {
-  id: number
-  name: string
-  deleted: boolean
-  fullReload: boolean
-  operation?: `insert` | `update`
-  obsolete?: boolean
-}
-
-/**
- * One model command pairs two production boundaries: a committed peer
- * publication, then an Electric stream update. The row Map models complete
- * public values; the publication marker is only a reach witness, not model
- * state. No later command branches on that marker.
- *
- * The bounded grammar permits 1–8 pairs, keys 2–4 beside the untouched
- * baseline key 1, and names of length 0–8. Key variation distinguishes
- * independent rows from repeated edits; name and optional field variation
- * distinguish partial update from same-key insert replacement. Deletion
- * changes membership;
- * fullReload requires a persisted read. A targeted notice can also require
- * a read when its row is new to this Collection: the notice carries a
- * patch without a completeness certificate. Public rows, rather than the
- * number of reads, decide whether that route satisfies the law. Multiple
- * pairs expose repeated-key histories. The authored history below
- * reconstructs insert then delete with a reload. The other fixed histories
- * reach both sequence-length and name/key margins. The grammar excludes a
- * malformed peer transaction that lists one key as both changed and deleted;
- * the publisher constructs exactly one of those lists from `deleted`.
- * Arbitrary keys and longer histories remain outside this property.
- */
-const publicationHistoryArbitrary = fc.array(
-  fc.record({
-    id: fc.integer({ min: 2, max: 4 }),
-    name: fc.string({ maxLength: 8 }),
-    deleted: fc.boolean(),
-    fullReload: fc.boolean(),
-    operation: fc.constantFrom(`insert` as const, `update` as const),
-    obsolete: fc.boolean(),
-  }),
-  { minLength: 1, maxLength: 8 },
-)
-
-/**
  * The model applies a committed peer publication to the expected rows. A
  * delete removes the key; an insert replaces the row; an update keeps the
  * fields that the notice omits.
@@ -756,42 +708,131 @@ function expectedReplacementRows(empty: boolean): Array<Item> {
   return empty ? [] : [freshRow]
 }
 
-describe(`persisted Electric recovery laws`, () => {
-  // The Map adapter is the driver's durable boundary. It must enact SQLite's
-  // distinct row operations before its rows can serve as evidence for a peer
-  // notice. Insert replaces a same-key row; update retains omitted fields.
-  it.each([`insert`, `update`] as const)(
-    `models a same-key %s against the durable row operation`,
-    async (operation) => {
-      oracleRoute(`case`)
-      const f = fixture(`on-demand`)
-      await withFixtureCleanup(f, async () => {
-        const old = { ...freshRow, obsolete: `old field` }
-        await f.commitExternalTx({
-          txId: `old`,
-          term: 1,
-          seq: 1,
-          rowVersion: 1,
-          mutations: [{ type: `insert`, key: old.id, value: old }],
-        })
-        const next = { ...freshRow, name: `next` }
-        await f.commitExternalTx({
-          txId: `next`,
-          term: 2,
-          seq: 1,
-          rowVersion: 2,
-          mutations: [{ type: operation, key: next.id, value: next }],
-        })
-        expect(f.rows.get(next.id)).toEqual(
-          expectedDurableRow(operation, old, next),
-        )
+// One invalid-resume scenario: the invalid resume's cut, then the fresh
+// replacement's cuts, compared with expectedReplacementRows.
+async function runInvalidResumeScenario({
+  syncMode,
+  empty,
+  hydration,
+}: (typeof scenarios)[number]) {
+  resetRecoveryBoundary()
+  const f = fixture(syncMode)
+  const gate = deferred()
+  await withFixtureCleanup(
+    f,
+    async () => {
+      f.start()
+      await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
+      await vi.waitFor(() => expect(subscribers).toHaveLength(1))
+      expect(vi.mocked(ShapeStream).mock.calls[0]?.[0]).toMatchObject({
+        offset: `10_0`,
+        handle: `shape-old`,
       })
+      const invalidCut = f.exposures.length
+      f.record(`before invalid resume`)
+      subscribers[0]!([
+        change(`delete`, { id: 1 }),
+        change(`update`, { id: 2, name: `partial` }),
+        upToDate,
+      ])
+      f.record(`after invalid resume`)
+      await vi.waitFor(() => expect(f.collection.status).toBe(`error`))
+      await vi.waitFor(() =>
+        expect(f.metadata.get(`electric:resume`)).toMatchObject({
+          kind: `reset`,
+        }),
+      )
+      expect(f.publicRows()).toEqual([oldRow])
+      expect(f.durableRows()).toEqual([oldRow])
+      expectWholeRecoveryTrace(f.exposures.slice(invalidCut), [[oldRow]])
+
+      f.stopObserving()
+      await f.collection.cleanup()
+      f.pauseHydration(gate.promise)
+      const recoveryCut = f.exposures.length
+      f.start()
+      await vi.waitFor(() => expect(subscribers).toHaveLength(2))
+      expect(vi.mocked(ShapeStream).mock.calls[1]?.[0]).toMatchObject({
+        offset: undefined,
+        handle: undefined,
+      })
+      // Fresh progressive mode hydrates persisted rows only on demand.
+      const hydrationDone =
+        syncMode === `progressive`
+          ? Promise.resolve(f.collection._sync.loadSubset({ limit: 10 }))
+          : undefined
+      const hydrationOutcome = hydrationDone?.then(
+        () => undefined,
+        (error: unknown) => ({ error }),
+      )
+      const awaitHydration = async () => {
+        const outcome = await hydrationOutcome
+        if (outcome) throw outcome.error
+      }
+      if (hydration === `before`) {
+        gate.resolve()
+        await awaitHydration()
+        await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
+      }
+      f.record(`before replacement data`)
+      const partialCut = f.exposures.length
+      const expected = expectedReplacementRows(empty)
+      subscribers[1]!(
+        expected.map((row) => change(`insert`, structuredClone(row))),
+      )
+      f.record(`after replacement data`)
+      subscribers[1]!([{ headers: { control: `subset-end` } }])
+      f.record(`after subset completion`)
+      expectWholeRecoveryTrace(f.exposures.slice(partialCut), [
+        hydration === `before` ? [oldRow] : [],
+      ])
+      subscribers[1]!([upToDate])
+      f.record(`after replacement commit`)
+      // Preserve the original hydration-after-commit cells: the final
+      // control is delivered before releasing the paused hydration gate.
+      gate.resolve()
+      await awaitHydration()
+      await vi.waitFor(() => expect(f.collection.status).toBe(`ready`))
+      await vi.waitFor(() =>
+        expect(f.metadata.get(`electric:resume`)).toMatchObject({
+          kind: `resume`,
+          requiresTagState: false,
+          offset: `20_0`,
+        }),
+      )
+      // The source's complete snapshot defines both results. A reset marker
+      // plus a fresh offset is not proof that the old materialization left.
+      const rowFailures: Array<unknown> = []
+      try {
+        expect(f.publicRows()).toEqual(expected)
+      } catch (error) {
+        rowFailures.push(
+          new Error(`Public replacement rows differ`, { cause: error }),
+        )
+      }
+      try {
+        expect(f.durableRows()).toEqual(expected)
+      } catch (error) {
+        rowFailures.push(
+          new Error(`Durable replacement rows differ`, { cause: error }),
+        )
+      }
+      if (rowFailures.length > 0) {
+        throw new AggregateError(rowFailures, `Replacement-ready row mismatch`)
+      }
+      f.record(`replacement ready`)
+      expectWholeRecoveryTrace(f.exposures.slice(recoveryCut), [
+        [],
+        [oldRow],
+        expected,
+      ])
     },
+    gate.resolve,
   )
-  beforeEach(() => {
-    subscribers.length = 0
-    vi.clearAllMocks()
-  })
+}
+
+describe(`persisted Electric recovery laws`, () => {
+  beforeEach(resetRecoveryBoundary)
 
   /**
    * This matrix is the reached consumer half of the SQLite reset/resume law.
@@ -810,14 +851,26 @@ describe(`persisted Electric recovery laws`, () => {
    * nonempty + resume + schema-reset + up-to-date-only cell preserves the
    * original report at https://github.com/TanStack/db/issues/1589.
    */
-  it.each(persistedRestartScenarios)(
-    `couples $resumeKind state to $transition with $rowState rows and $sourceHistory source history`,
-    async (scenario) => {
-      oracleRoute(`case`)
-      const { cleanupEvidence } = await observePersistedRestart(scenario)
-      expect(cleanupEvidence).toContain(`passed: committed retired-stream`)
+  oracleProperty({
+    id: `electric-recovery.persisted-restart`,
+    law: {
+      statement: `A persisted Electric restart couples durable resume state to its transition: the request offset and handle, complete public and durable rows, durable resume kind and readiness at the post-restart up-to-date checkpoint follow the canonical-row model.`,
+      authority: `The persisted-replica recovery law in this file's opening contract and expectedPostRestartObservation's independent model.`,
+      limits: `The finite reset/resume matrix above over the real SQLite adapter and controlled ShapeStream; no callback multiplicity, real HTTP or arbitrary external edit sequences.`,
     },
-  )
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: persistedRestartScenarios,
+    label: ({ resumeKind, transition, rowState, sourceHistory }) =>
+      `couples ${resumeKind} state to ${transition} with ${rowState} rows and ${sourceHistory} source history`,
+    ...existingElectricComparison(
+      `electric-recovery.persisted-restart`,
+      async (scenario: PersistedRestartScenario) => {
+        const { cleanupEvidence } = await observePersistedRestart(scenario)
+        expect(cleanupEvidence).toContain(`passed: committed retired-stream`)
+      },
+    ),
+    check: checkExistingElectricComparison,
+  })
 
   const publicationHistoryExamples: Array<[Array<PublicationHistoryCommand>]> =
     [
@@ -862,28 +915,33 @@ describe(`persisted Electric recovery laws`, () => {
       ],
     ]
 
-  it.each(publicationHistoryExamples)(
-    `reconstructs the authored persistence publication history`,
-    (commands) => {
-      oracleRoute(`fixed history`)
-      return assertPublicationHistory(commands)
+  // The authored histories omit optional fields that the generated record
+  // always draws, so the arbitrary cannot take them back. They run as their
+  // own enumerated cases through the same driver and comparison.
+  oracleProperty({
+    id: `electric-recovery.publication-stream-fixed`,
+    law: {
+      statement: `Independent persistence publications and stream deltas agree with complete-row state.`,
+      authority: `The persisted-replica recovery law in this file's opening contract and assertPublicationHistory's independent snapshot judgment.`,
+      limits: `The four authored publication histories above, through the same driver and comparison as electric-recovery.publication-stream-convergence.`,
     },
-  )
-
-  it(`fixed recovery corpus reaches every deletion and reload combination`, () => {
-    oracleRoute(`fixed seed`)
-    const combinations = new Set(
-      fc
-        .sample(
-          publicationHistoryArbitrary,
-          oracleFixedSeed(1659, { numRuns: 20 }),
-        )
-        .flat()
-        .map(({ deleted, fullReload }) => `${deleted}:${fullReload}`),
-    )
-    expect(combinations).toEqual(
-      new Set([`false:false`, `false:true`, `true:false`, `true:true`]),
-    )
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: publicationHistoryExamples.map(([commands], index) => ({
+      index,
+      commands,
+    })),
+    label: ({ index }) =>
+      `reconstructs the authored persistence publication history ${index}`,
+    ...existingElectricComparison(
+      `electric-recovery.publication-stream-fixed`,
+      ({
+        commands,
+      }: {
+        index: number
+        commands: Array<PublicationHistoryCommand>
+      }) => assertPublicationHistory(commands),
+    ),
+    check: checkExistingElectricComparison,
   })
 
   oracleProperty({
@@ -906,126 +964,21 @@ describe(`persisted Electric recovery laws`, () => {
     check: checkExistingElectricComparison,
   })
 
-  it.each(scenarios)(
-    `$syncMode invalid resume replaces omitted cached rows: empty=$empty, hydration=$hydration callback`,
-    async ({ syncMode, empty, hydration }) => {
-      oracleRoute(`case`)
-      const f = fixture(syncMode)
-      const gate = deferred()
-      await withFixtureCleanup(
-        f,
-        async () => {
-          f.start()
-          await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
-          await vi.waitFor(() => expect(subscribers).toHaveLength(1))
-          expect(vi.mocked(ShapeStream).mock.calls[0]?.[0]).toMatchObject({
-            offset: `10_0`,
-            handle: `shape-old`,
-          })
-          const invalidCut = f.exposures.length
-          f.record(`before invalid resume`)
-          subscribers[0]!([
-            change(`delete`, { id: 1 }),
-            change(`update`, { id: 2, name: `partial` }),
-            upToDate,
-          ])
-          f.record(`after invalid resume`)
-          await vi.waitFor(() => expect(f.collection.status).toBe(`error`))
-          await vi.waitFor(() =>
-            expect(f.metadata.get(`electric:resume`)).toMatchObject({
-              kind: `reset`,
-            }),
-          )
-          expect(f.publicRows()).toEqual([oldRow])
-          expect(f.durableRows()).toEqual([oldRow])
-          expectWholeRecoveryTrace(f.exposures.slice(invalidCut), [[oldRow]])
-
-          f.stopObserving()
-          await f.collection.cleanup()
-          f.pauseHydration(gate.promise)
-          const recoveryCut = f.exposures.length
-          f.start()
-          await vi.waitFor(() => expect(subscribers).toHaveLength(2))
-          expect(vi.mocked(ShapeStream).mock.calls[1]?.[0]).toMatchObject({
-            offset: undefined,
-            handle: undefined,
-          })
-          // Fresh progressive mode hydrates persisted rows only on demand.
-          const hydrationDone =
-            syncMode === `progressive`
-              ? Promise.resolve(f.collection._sync.loadSubset({ limit: 10 }))
-              : undefined
-          const hydrationOutcome = hydrationDone?.then(
-            () => undefined,
-            (error: unknown) => ({ error }),
-          )
-          const awaitHydration = async () => {
-            const outcome = await hydrationOutcome
-            if (outcome) throw outcome.error
-          }
-          if (hydration === `before`) {
-            gate.resolve()
-            await awaitHydration()
-            await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
-          }
-          f.record(`before replacement data`)
-          const partialCut = f.exposures.length
-          const expected = expectedReplacementRows(empty)
-          subscribers[1]!(
-            expected.map((row) => change(`insert`, structuredClone(row))),
-          )
-          f.record(`after replacement data`)
-          subscribers[1]!([{ headers: { control: `subset-end` } }])
-          f.record(`after subset completion`)
-          expectWholeRecoveryTrace(f.exposures.slice(partialCut), [
-            hydration === `before` ? [oldRow] : [],
-          ])
-          subscribers[1]!([upToDate])
-          f.record(`after replacement commit`)
-          // Preserve the original hydration-after-commit cells: the final
-          // control is delivered before releasing the paused hydration gate.
-          gate.resolve()
-          await awaitHydration()
-          await vi.waitFor(() => expect(f.collection.status).toBe(`ready`))
-          await vi.waitFor(() =>
-            expect(f.metadata.get(`electric:resume`)).toMatchObject({
-              kind: `resume`,
-              requiresTagState: false,
-              offset: `20_0`,
-            }),
-          )
-          // The source's complete snapshot defines both results. A reset marker
-          // plus a fresh offset is not proof that the old materialization left.
-          const rowFailures: Array<unknown> = []
-          try {
-            expect(f.publicRows()).toEqual(expected)
-          } catch (error) {
-            rowFailures.push(
-              new Error(`Public replacement rows differ`, { cause: error }),
-            )
-          }
-          try {
-            expect(f.durableRows()).toEqual(expected)
-          } catch (error) {
-            rowFailures.push(
-              new Error(`Durable replacement rows differ`, { cause: error }),
-            )
-          }
-          if (rowFailures.length > 0) {
-            throw new AggregateError(
-              rowFailures,
-              `Replacement-ready row mismatch`,
-            )
-          }
-          f.record(`replacement ready`)
-          expectWholeRecoveryTrace(f.exposures.slice(recoveryCut), [
-            [],
-            [oldRow],
-            expected,
-          ])
-        },
-        gate.resolve,
-      )
+  oracleProperty({
+    id: `electric-recovery.invalid-resume`,
+    law: {
+      statement: `An invalid resume keeps the last complete public and durable rows and records repair debt; the fresh replacement then replaces omitted cached rows atomically, whether hydration finishes before or after the replacement commits.`,
+      authority: `The persisted-replica recovery law in this file's opening contract and expectedReplacementRows' complete-source model.`,
+      limits: `Eager and progressive sync, empty or nonempty replacement, and hydration before or after the replacement callback, over the controlled ShapeStream and Map adapter fixture.`,
     },
-  )
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: scenarios,
+    label: ({ syncMode, empty, hydration }) =>
+      `${syncMode} invalid resume replaces omitted cached rows: empty=${empty}, hydration=${hydration} callback`,
+    ...existingElectricComparison(
+      `electric-recovery.invalid-resume`,
+      runInvalidResumeScenario,
+    ),
+    check: checkExistingElectricComparison,
+  })
 })

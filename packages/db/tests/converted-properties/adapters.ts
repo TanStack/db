@@ -3,7 +3,7 @@
 // edits this file, so parallel groups do not conflict in oracle-config.ts
 // or oracle-replay-manifest.ts. Integration folds both lists into those
 // files and deletes this directory.
-import type { ConvertedOwnerGroup } from "./index.js";
+import type { ConvertedOwnerGroup } from './index.js'
 
 export const properties: ReadonlyArray<string> = [
   // query-db-collection (refetch)
@@ -22,6 +22,23 @@ export const properties: ReadonlyArray<string> = [
   `query-db.persisted-direct-write-refetch-order`,
   `query-db.persisted-direct-duplicate-insert`,
   // electric-db-collection
+  `pg-serializer.array-controls`,
+  `electric.persisted-tag-history-restart`,
+  `electric.persisted-tag-history-recovery`,
+  `electric-recovery.persisted-restart`,
+  `electric-recovery.publication-stream-fixed`,
+  `electric-recovery.invalid-resume`,
+  `electric.mutation-confirmation`,
+  `electric.initial-tagged-move-outs-cases`,
+  `electric.process-grammar-fixed`,
+  `electric.publication-before-persistence-fixed`,
+  `electric.adapter-failure-policy-fixed`,
+  `electric.design-witnesses`,
+  `electric.retry-decision-fixed`,
+  `electric.durable-prefix-fixed`,
+  `electric.sdk-snapshot-delivery-fixed`,
+  `electric.sdk-client-retry`,
+  `electric.sql-predicate-semantics-faults`,
   // convex-db-collection and db-adapter-conformance
   `adapter-conformance.eager-live-source.reference.prompt-restart`,
   `adapter-conformance.eager-live-source.reference.reconstruction`,
@@ -36,7 +53,7 @@ export const properties: ReadonlyArray<string> = [
   `offline.settlement.restored`,
   `offline.settlement.started-peer`,
   `offline.connectivity-replay`,
-];
+]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
   // query-db-collection (refetch)
@@ -82,6 +99,36 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `persisted-direct-write-window persisted-direct-write-refetch-order persisted-direct-duplicate-insert`,
   ],
   // electric-db-collection
+  [
+    `electric-db-collection/tests/pg-serializer-oracle.property.test.ts`,
+    `pg-serializer`,
+    `array-controls`,
+  ],
+  [
+    `electric-db-collection/tests/electric-descriptor-isolation-oracle.test.ts`,
+    `electric`,
+    `persisted-tag-history-restart persisted-tag-history-recovery`,
+  ],
+  [
+    `electric-db-collection/tests/electric-recovery-oracle.test.ts`,
+    `electric-recovery`,
+    `persisted-restart publication-stream-fixed invalid-resume`,
+  ],
+  [
+    `electric-db-collection/tests/electric-oracle.property.test.ts`,
+    `electric`,
+    `mutation-confirmation initial-tagged-move-outs-cases process-grammar-fixed publication-before-persistence-fixed adapter-failure-policy-fixed design-witnesses retry-decision-fixed durable-prefix-fixed`,
+  ],
+  [
+    `electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
+    `electric`,
+    `sdk-snapshot-delivery-fixed sdk-client-retry`,
+  ],
+  [
+    `electric-db-collection/e2e/sql-predicate-semantics-oracle.e2e.test.ts`,
+    `electric`,
+    `sql-predicate-semantics-faults`,
+  ],
   // convex-db-collection and db-adapter-conformance
   [
     `db-adapter-conformance/tests/reference-adapter-oracle.property.test.ts`,
@@ -129,4 +176,4 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `offline`,
     `connectivity-replay`,
   ],
-];
+]
