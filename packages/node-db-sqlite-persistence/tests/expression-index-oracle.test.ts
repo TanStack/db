@@ -54,8 +54,12 @@
  * sqlite-persistence.bigint-roundtrip, or sqlite-persistence.bigint-rejection.
  * That property's random campaign replays only its recorded history; the fixed
  * campaigns and the other properties stand aside. A seed alone reseeds the
- * random campaigns. Per-axis grammar ablations and same-path SQL/compiler faults must
- * fail the expression-index property. The
+ * random campaigns. A matrix that lacks an axis fails every history's grammar
+ * check (assertGeneratedScenarioGrammar, run by the driver), and each axis's
+ * plausible wrong SQL answer is a native calibration that the unchanged
+ * comparison must reject. Seed, run and path configuration, and the shrinking
+ * and same-path replay of a failure, belong to the @tanstack/oracles
+ * self-oracle, which owns those laws for every oracleProperty. The
  * retained fixed campaign reconstructs the known valid matrix. The bounds
  * above state its range; exact grammar checks reject missing, duplicate, and
  * unexpected axes as nearby invalid matrices. The focused overbroad and former
@@ -65,9 +69,11 @@
  * Native registration retains the data tuple before resolving its IR objects.
  * The existing independent helpers and their authored comparison cuts remain
  * unchanged; the assertion adapter passes their judgment to oracleProperty.
- * Product campaigns use the native fixed/random/replay runner. The retained
- * fast-check controls test grammar ablation, SQL-fault shrinking and same-path
- * replay, plus seed/run/path configuration without additional SQLite work.
+ * Product campaigns use the native fixed/random/replay runner, and the SQL
+ * wrong answers are its calibrations. The raw fast-check controls that once
+ * checked grammar ablation, SQL-fault shrinking, same-path replay and
+ * seed/run/path configuration are gone: the per-history grammar check above
+ * enforces ablation, and the framework's self-oracle enforces the rest.
  */
 import fc from 'fast-check'
 import { describe, expect, vi, it as vitestIt } from 'vitest'
@@ -80,10 +86,8 @@ import {
 import {
   oracleFixedSeed,
   oracleProperty,
-  oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
-  oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import {
   forwardAssertionJudgment,
@@ -153,32 +157,6 @@ const legalPathArbitrary = fc
     ),
   )
   .map(([root, tail]) => [root, ...tail])
-
-type GeneratedPropertyCampaign = {
-  name: `fixed` | `random`
-  parameters: ReturnType<typeof oraclePropertyOptions>
-}
-
-// The fixed campaign fixes its campaign seed and stands aside on every path replay. The
-// random campaign runs in ordinary and reseeded campaigns, and as the replay of
-// its property, where oraclePropertyOptions returns the recorded path.
-const fixedGeneratedCampaign: GeneratedPropertyCampaign = {
-  name: `fixed`,
-  parameters: oracleFixedSeed(DEFAULT_ORACLE_SEED, {
-    numRuns: oracleRuns(DEFAULT_ORACLE_RUNS),
-  }),
-}
-
-function randomGeneratedCampaign(property: string): GeneratedPropertyCampaign {
-  return {
-    name: `random`,
-    parameters: oraclePropertyOptions(DEFAULT_ORACLE_RUNS, property),
-  }
-}
-
-function generatedCampaignParameters(campaign: GeneratedPropertyCampaign) {
-  return { verbose: 2 as const, ...campaign.parameters }
-}
 
 function expectedKeysFromScan(
   rows: ReadonlyArray<ScanRow>,
@@ -633,51 +611,25 @@ function assertGeneratedScenarioObservation(
   }
 }
 
-type GeneratedScenarioPropertyOptions = {
-  ablateKind?: GeneratedScenarioKind
-  faultKind?: GeneratedScenarioKind
-  onScenario?: (kind: GeneratedScenarioKind) => void
-}
-
-function generatedScenarioProperty({
-  ablateKind,
-  faultKind,
-  onScenario,
-}: GeneratedScenarioPropertyOptions = {}) {
-  return fc.asyncProperty(
-    generatedScenarioMatrixArbitrary.map(resolveGeneratedScenarioMatrix),
-    async (matrix) => {
-      const scenarios =
-        ablateKind === undefined
-          ? matrix
-          : matrix.filter(({ kind }) => kind !== ablateKind)
-      assertGeneratedScenarioGrammar(scenarios)
-
-      for (const scenario of scenarios) {
-        onScenario?.(scenario.kind)
-        const observation = await observeExpressionIndexScenario({
-          ...scenario,
-          ...(faultKind === scenario.kind
-            ? { transformQuery: mutateGeneratedScenarioQuery(scenario.kind) }
-            : {}),
-        })
-        assertGeneratedScenarioObservation(scenario, observation)
-      }
-    },
-  )
-}
-
 // Each original matrix contains every scenario kind. Retain its exact query
 // comparisons and record the existing all-kinds reach check for each matrix.
+// A calibration names `faultKind`: that axis's SQL is replaced by its plausible
+// wrong answer (GENERATED_SCENARIO_FAULTS) before the driver executes it.
 async function runGeneratedScenarioMatrix(
   matrix: Array<GeneratedExpressionIndexScenario>,
   observe: (checkpoint: string, value: unknown) => void,
+  faultKind?: GeneratedScenarioKind,
 ) {
   const reachedScenarios = new Set<GeneratedScenarioKind>()
   assertGeneratedScenarioGrammar(matrix)
   for (const scenario of matrix) {
     reachedScenarios.add(scenario.kind)
-    const observation = await observeExpressionIndexScenario(scenario)
+    const observation = await observeExpressionIndexScenario({
+      ...scenario,
+      ...(faultKind === scenario.kind
+        ? { transformQuery: mutateGeneratedScenarioQuery(scenario.kind) }
+        : {}),
+    })
     assertGeneratedScenarioObservation(scenario, observation)
     observe(`reach`, scenario.kind)
   }
@@ -1243,100 +1195,27 @@ describe(`SQLite expression-index oracle`, () => {
       ),
     model: recordedAssertionJudgment,
     check: forwardAssertionJudgment,
+    // Each axis's plausible wrong SQL answer must fail the unchanged
+    // comparison (moved from the raw wrong-answer control; the framework's
+    // self-oracle owns the shrink-and-replay fidelity that control also
+    // checked).
+    calibrations: GENERATED_SCENARIO_FAULTS.map(({ kind, wrongAnswer }) => ({
+      name: `${kind}: ${wrongAnswer}`,
+      law: `sqlite-persistence.expression-index`,
+      driver: (
+        plan: Array<GeneratedExpressionIndexScenario>,
+        observe: (checkpoint: string, value: unknown) => void,
+      ) =>
+        recordAssertionJudgment(
+          `sqlite-persistence.expression-index`,
+          plan,
+          observe,
+          () => runGeneratedScenarioMatrix(plan, observe, kind),
+        ),
+    })),
   })
 
-  // Retain the existing shrinking and same-path replay self-checks. Native
-  // calibrations judge wrong answers but do not expose their shrink paths.
-  async function checkGeneratedCampaignCoordinates(
-    campaign: GeneratedPropertyCampaign,
-  ) {
-    oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
-    // These assertions check fast-check's configuration result, separately from
-    // the native product campaign above. Drawing the same tuple needs no SQLite.
-    const details = await fc.check(
-      fc.asyncProperty(generatedScenarioMatrixArbitrary, async () => {}),
-      generatedCampaignParameters(campaign),
-    )
-    const parameters = generatedCampaignParameters(campaign)
-
-    oracleAssertion(
-      `expect(details.numRuns).toBe(campaign.parameters.numRuns)`,
-      () => expect(details.numRuns).toBe(campaign.parameters.numRuns),
-    )
-    oracleAssertion(
-      `expect('seed' in parameters).toBe(campaign.parameters.seed !== undefined)`,
-      () =>
-        expect(`seed` in parameters).toBe(
-          campaign.parameters.seed !== undefined,
-        ),
-    )
-    oracleAssertion(
-      `expect('path' in parameters).toBe(campaign.parameters.path !== undefined)`,
-      () =>
-        expect(`path` in parameters).toBe(
-          campaign.parameters.path !== undefined,
-        ),
-    )
-    if (campaign.parameters.seed !== undefined) {
-      oracleAssertion(
-        `expect(details.seed).toBe(campaign.parameters.seed)`,
-        () => expect(details.seed).toBe(campaign.parameters.seed),
-      )
-    }
-    if (campaign.parameters.path !== undefined) {
-      oracleAssertion(
-        `expect(details.runConfiguration.path).toBe(campaign.parameters.path)`,
-        () =>
-          expect(details.runConfiguration.path).toBe(campaign.parameters.path),
-      )
-    }
-    oracleAssertion(`expect(details.seed).toEqual(expect.any(Number))`, () =>
-      expect(details.seed).toEqual(expect.any(Number)),
-    )
-  }
-  oracleReplayTest(vitestIt).each([fixedGeneratedCampaign])(
-    `preserves generated campaign coordinates in the $name campaign`,
-    checkGeneratedCampaignCoordinates,
-  )
-  oracleReplayTest(vitestIt, `sqlite-persistence.expression-index`).each([
-    randomGeneratedCampaign(`sqlite-persistence.expression-index`),
-  ])(
-    `preserves generated campaign coordinates in the $name campaign`,
-    checkGeneratedCampaignCoordinates,
-  )
-
   const generatedControlTest = oracleReplayTest(vitestIt)
-
-  generatedControlTest.each(GENERATED_SCENARIO_KINDS)(
-    `rejects the generated grammar when the %s axis is ablated`,
-    async (kind) => {
-      oracleRoute(`calibration`)
-      const details = await fc.check(
-        generatedScenarioProperty({ ablateKind: kind }),
-        oracleFixedSeed(DEFAULT_ORACLE_SEED, { numRuns: 1, verbose: 2 }),
-      )
-      const evidence = JSON.stringify({
-        seed: details.seed,
-        path: details.counterexamplePath,
-        error: String(details.errorInstance),
-      })
-
-      oracleAssertion(evidence, () =>
-        expect(details.failed, evidence).toBe(true),
-      )
-      oracleAssertion(evidence, () =>
-        expect(details.seed, evidence).toBe(DEFAULT_ORACLE_SEED),
-      )
-      oracleAssertion(evidence, () =>
-        expect(details.counterexamplePath, evidence).not.toBeNull(),
-      )
-      oracleAssertion(evidence, () =>
-        expect(String(details.errorInstance), evidence).toContain(
-          `missing=${kind}`,
-        ),
-      )
-    },
-  )
 
   generatedControlTest(
     `reconstructs the retained generated grammar and rejects a nearby duplicate axis`,
@@ -1365,75 +1244,6 @@ describe(`SQLite expression-index oracle`, () => {
           expect(() =>
             assertGeneratedScenarioGrammar([...matrix, equalityScenario]),
           ).toThrow(`duplicate=eq`),
-      )
-    },
-  )
-
-  generatedControlTest.each(GENERATED_SCENARIO_FAULTS)(
-    `rejects the plausible $wrongAnswer for the $kind axis`,
-    async ({ kind }) => {
-      oracleRoute(`calibration`)
-      const details = await fc.check(
-        generatedScenarioProperty({ faultKind: kind }),
-        oracleFixedSeed(DEFAULT_ORACLE_SEED, { numRuns: 1, verbose: 2 }),
-      )
-      const evidence = JSON.stringify({
-        seed: details.seed,
-        path: details.counterexamplePath,
-        error: String(details.errorInstance),
-      })
-
-      oracleAssertion(evidence, () =>
-        expect(details.failed, evidence).toBe(true),
-      )
-      oracleAssertion(evidence, () =>
-        expect(details.seed, evidence).toBe(DEFAULT_ORACLE_SEED),
-      )
-      oracleAssertion(evidence, () =>
-        expect(details.counterexamplePath, evidence).not.toBeNull(),
-      )
-      oracleAssertion(evidence, () =>
-        expect(String(details.errorInstance ?? ``), evidence).not.toContain(
-          `did not reach`,
-        ),
-      )
-      oracleAssertion(evidence, () =>
-        expect(String(details.errorInstance), evidence).toContain(
-          `"kind": "${kind}"`,
-        ),
-      )
-
-      if (details.counterexamplePath === null) {
-        throw new Error(`${kind} wrong-answer control did not shrink to a path`)
-      }
-      const replay = await fc.check(
-        generatedScenarioProperty({ faultKind: kind }),
-        {
-          seed: details.seed,
-          path: details.counterexamplePath,
-          numRuns: 1,
-          verbose: 2,
-        },
-      )
-      const replayEvidence = JSON.stringify({
-        seed: replay.seed,
-        requestedPath: details.counterexamplePath,
-        replayPath: replay.counterexamplePath,
-        error: String(replay.errorInstance),
-      })
-      oracleAssertion(replayEvidence, () =>
-        expect(replay.failed, replayEvidence).toBe(true),
-      )
-      oracleAssertion(replayEvidence, () =>
-        expect(
-          String(replay.errorInstance ?? ``),
-          replayEvidence,
-        ).not.toContain(`did not reach`),
-      )
-      oracleAssertion(replayEvidence, () =>
-        expect(String(replay.errorInstance), replayEvidence).toContain(
-          `"kind": "${kind}"`,
-        ),
       )
     },
   )
