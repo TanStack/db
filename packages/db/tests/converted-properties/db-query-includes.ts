@@ -93,6 +93,18 @@ export const properties: ReadonlyArray<string> = [
   `includes-work.join-free-fixed`,
   `includes-work.ordered-window-fixed`,
   `includes-work.transient-top-k`,
+  `includes.optimistic-cuts`,
+  `includes.apply-checkpoints`,
+  `includes.omitted-child`,
+  `includes.failed-optimistic-cleanup`,
+  `includes.composed-transitions`,
+  `includes.materialize-reference-update`,
+  `includes.full-row-fixed`,
+  `includes.history-pair-fixed`,
+  `includes.flat-materialization-cases`,
+  `includes.incremental-fixed`,
+  `includes.materialize-fixed`,
+  `includes.scoped-alpha-fixed`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -180,5 +192,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/includes-work-counter-oracle.test.ts`,
     `includes-work`,
     `correlated-links-fixed join-targets-fixed join-free-fixed ordered-window-fixed transient-top-k`,
+  ],
+  [
+    `db/tests/query/includes-oracle.property.test.ts`,
+    `includes`,
+    `optimistic-cuts apply-checkpoints omitted-child failed-optimistic-cleanup composed-transitions materialize-reference-update full-row-fixed history-pair-fixed flat-materialization-cases incremental-fixed materialize-fixed scoped-alpha-fixed`,
   ],
 ]
