@@ -1,7 +1,12 @@
 import { setImmediate as yieldToRunner } from 'node:timers/promises'
 import { fc } from '@fast-check/vitest'
-import { afterEach, describe, expect, it } from 'vitest'
-import { oracleAssertion } from '../oracle-assertion-adapter.js'
+import { afterEach, describe, expect } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import {
   createLiveQueryCollection,
   eq,
@@ -12,8 +17,7 @@ import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { runTrace } from '../trace-runner.js'
-import { oracleRoute } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+import { oracleProperty } from '../oracle-config.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { registerIncludesProperty } from './includes-registration-oracle.js'
@@ -593,18 +597,6 @@ function expectedHeldPublicationRows(
     }))
 }
 
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/basic-index.ts',
-    'src/indexes/btree-index.ts',
-    'src/query/effect.ts#createEffect',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
-  check: [expectPublicationMatches],
-  model: [recomputeRows, expectedHeldPublicationRows],
-})
-
 const q2Shapes = [`passThrough`, `where`, `orderBy`, `select`] as const
 const q1Shapes = [`direct`, `joined`] as const
 
@@ -618,6 +610,444 @@ function publicationCampaigns(runs: number, property: string) {
       options: { runs, property, fixedSeed: fixedPublicationSeed },
     },
   ]
+}
+
+const publicationShapeCells = q1Shapes.flatMap((q1Shape) =>
+  q2Shapes.map((q2Shape) => ({ q1Shape, q2Shape })),
+)
+
+const plainWriteLaw = `Every plain source write reaches a callback from both query layers and its synchronous checkpoints before the write yields, and each checkpoint matches the recomputed rows.`
+const transientTearLaw = `A layered tear that exists only inside the write is rejected at the in-action checkpoint, though a settled-only observation misses it.`
+const callbackOnlyTearLaw = `The callback-time comparison rejects a corrupted callback capture and a missing change batch while installed reads still agree.`
+const confirmationSidesLaw = `The optimistic and confirmed checkpoints of a confirmation are both compared, so corrupting either one is rejected.`
+const missingCallbacksLaw = `The callback-reach check rejects a checkpoint whose optimistic or rollback callbacks are missing, even when the final reads agree.`
+const heldPublicationLaw = `A held ordered repair publishes the final row once against the last public snapshot: a layout notification without a value change when the final value equals it, and one update otherwise.`
+
+// The former per-shape case body, unchanged.
+async function judgePlainWriteCheckpoints(
+  q1Shape: (typeof q1Shapes)[number],
+  q2Shape: (typeof q2Shapes)[number],
+): Promise<void> {
+  const actions: Array<PublicationAction> = [
+    { type: `parentScalar`, value: 7 },
+    { type: `childScalar`, value: 8 },
+    { type: `parentRoute`, group: 20 },
+    { type: `atomicReplace`, group: 30, value: 9 },
+    { type: `parentThenChild`, parentValue: 10, childValue: 11 },
+  ]
+  const driver = createPublicationDriver(q1Shape, q2Shape)
+  await runTrace({
+    steps: actions,
+    driver: {
+      ...driver,
+      apply: (action, context, checkpoint) => {
+        const beforeCallbacks = context.callbacks.length
+        let reached = 0
+        const result = driver.apply(action, context, () => {
+          reached++
+          return checkpoint()
+        })
+        // Capture before awaiting the async action's returned Promise.
+        const synchronousCount = reached
+        return Promise.resolve(result).then(() => {
+          for (const layer of [`q1`, `q2`] as const) {
+            expect(
+              context.callbacks
+                .slice(beforeCallbacks)
+                .some((callback) => callback.layer === layer),
+            ).toBe(true)
+          }
+          expect(synchronousCount).toBe(
+            action.type === `parentThenChild` ? 2 : 1,
+          )
+        })
+      },
+    },
+    projection: publicationProjection,
+  })
+}
+
+// The former per-shape case body, unchanged.
+async function judgeTransientTear(
+  q1Shape: (typeof q1Shapes)[number],
+  q2Shape: (typeof q2Shapes)[number],
+): Promise<void> {
+  const run = (observeInsideAction: boolean) => {
+    let transient = false
+    const driver = createPublicationDriver(q1Shape, q2Shape)
+    return runTrace({
+      steps: [{ type: `parentScalar` as const, value: 7 }],
+      driver: {
+        ...driver,
+        apply: (action, context, checkpoint) => {
+          transient = true
+          queueMicrotask(() => {
+            transient = false
+          })
+          return driver.apply(
+            action,
+            context,
+            observeInsideAction ? checkpoint : () => undefined,
+          )
+        },
+      },
+      projection: {
+        ...publicationProjection,
+        observe: (context) => {
+          const observed = publicationProjection.observe(context)
+          if (transient) observed.q2[0]!.item.value = -999
+          return observed
+        },
+      },
+    })
+  }
+  // The old settled-only observation misses this test-owned fault.
+  await expect(run(false)).resolves.toBeUndefined()
+  await expect(run(true)).rejects.toMatchObject({
+    name: `TraceAssertionError`,
+    checkpoint: 1,
+  })
+}
+
+// The former per-shape case body, unchanged.
+async function judgeCallbackOnlyTear(
+  q1Shape: (typeof q1Shapes)[number],
+  q2Shape: (typeof q2Shapes)[number],
+): Promise<void> {
+  const driver = createPublicationDriver(q1Shape, q2Shape)
+  let reached = 0
+  const context = await driver.setup()
+  try {
+    await driver.start?.(context)
+    await driver.apply(
+      { type: `parentScalar`, value: 7 },
+      context,
+      () => undefined,
+    )
+    const callback = context.callbacks.find((entry) => entry.layer === `q2`)
+    expect(callback).toBeDefined()
+    callback!.rows[0]!.item.value = -999
+    reached++
+    // The installed final reads still agree. This fault corrupts only the
+    // captured callback and repairs it before the write returns.
+    const observed = publicationProjection.observe(context)
+    const expected = publicationProjection.recompute(context)
+    expect(observed.q1).toEqual(expected.q1)
+    expect(observed.q2).toEqual(expected.q2)
+    expect(() =>
+      publicationProjection.assertEqual(observed, expected),
+    ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
+    // Repair the row capture, then remove the whole change batch. The
+    // same callback-time comparison must reject a missing public event.
+    callback!.rows = structuredClone(callback!.expected)
+    callback!.changes = []
+    expect(() =>
+      publicationProjection.assertEqual(
+        publicationProjection.observe(context),
+        expected,
+      ),
+    ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
+    expect(reached).toBe(1)
+  } finally {
+    await driver.cleanup(context)
+  }
+}
+
+// The former per-shape case body, unchanged.
+async function judgeConfirmationSides(
+  q1Shape: (typeof q1Shapes)[number],
+  q2Shape: (typeof q2Shapes)[number],
+): Promise<void> {
+  for (const fault of [`none`, `optimistic`, `confirmed`] as const) {
+    const driver = createPublicationDriver(q1Shape, q2Shape)
+    let phase: `initial` | `optimistic` | `confirmed` = `initial`
+    const seen: Array<string> = []
+    let hits = 0
+    const run = runTrace({
+      steps: [{ type: `optimisticConfirm` as const, value: 7 }],
+      driver: {
+        ...driver,
+        apply: async (action, context, checkpoint) => {
+          phase = `optimistic`
+          await driver.apply(action, context, checkpoint)
+          phase = `confirmed`
+        },
+      },
+      projection: {
+        ...publicationProjection,
+        observe: (context) => {
+          seen.push(phase)
+          const observed = publicationProjection.observe(context)
+          if (phase === fault) {
+            observed.q2[0]!.item.value = -999
+            hits++
+          }
+          return observed
+        },
+      },
+    })
+    if (fault === `none`) {
+      await run
+      expect(seen).toEqual([`initial`, `optimistic`, `confirmed`])
+      expect(hits).toBe(0)
+    } else {
+      await expect(run).rejects.toMatchObject({
+        name: `TraceAssertionError`,
+      })
+      expect(hits).toBe(1)
+    }
+  }
+}
+
+const missingCallbackCases = [
+  { phase: `optimistic`, cut: 0, checkpoint: 1 },
+  { phase: `rollback`, cut: 1, checkpoint: 2 },
+]
+
+// The former case body, unchanged.
+async function judgeMissingCallbacks({
+  cut,
+  checkpoint: expectedCheckpoint,
+}: (typeof missingCallbackCases)[number]): Promise<void> {
+  const driver = createPublicationDriver(`direct`, `passThrough`)
+  let reachedCuts = 0
+  let previousCallbackCount = 0
+  const run = runTrace({
+    steps: [{ type: `optimisticRollback` as const, value: 7 }],
+    driver: {
+      ...driver,
+      apply: (action, context, checkpoint) =>
+        driver.apply(action, context, () => {
+          // Remove one phase's recorded public callbacks while preserving
+          // the final reads. The callback-reach check must reject it.
+          if (reachedCuts === cut) {
+            context.callbacks.splice(previousCallbackCount)
+          }
+          reachedCuts++
+          previousCallbackCount = context.callbacks.length
+          return checkpoint()
+        }),
+    },
+    projection: publicationProjection,
+  })
+  await expect(run).rejects.toMatchObject({
+    name: `TraceAssertionError`,
+    checkpoint: expectedCheckpoint,
+  })
+  expect(reachedCuts).toBe(2)
+}
+
+const heldPublicationCases = [
+  { intermediate: `A`, final: `A` },
+  { intermediate: `B`, final: `A` },
+  { intermediate: `B`, final: `C` },
+]
+
+// The former case body, unchanged.
+async function judgeHeldPublication({
+  intermediate,
+  final,
+}: (typeof heldPublicationCases)[number]): Promise<void> {
+  type Row = { id: number; rank: number; value: string }
+  const sourceRows = new Map<number, Row>([
+    [1, { id: 1, rank: 1, value: `A` }],
+    [2, { id: 2, rank: 2, value: `X` }],
+  ])
+  let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+  let holdRepair = false
+  const held: Array<() => void> = []
+  let requests = 0
+  const source = createCollection<Row, number>({
+    id: `held-publication-source-${nextCollectionId++}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (operations) => {
+        sync = operations
+        operations.markReady()
+        return {
+          loadSubset: () => {
+            requests++
+            if (requests === 1) {
+              sync.begin()
+              for (const row of sourceRows.values()) {
+                sync.write({ type: `insert`, value: { ...row } })
+              }
+              expect(sync.commit()).toBe(true)
+            }
+            return holdRepair
+              ? new Promise<void>((resolve) => held.push(resolve))
+              : true
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const children = createControlledCollection(`held-publication-child`, [
+    { id: 10, parentId: 1 },
+  ])
+  children.collection.createIndex((child) => child.parentId, {
+    indexType: BasicIndex,
+  })
+  const query = createLiveQueryCollection({
+    query: (q) =>
+      q
+        .from({ parent: source })
+        .orderBy(({ parent }) => parent.rank)
+        .limit(2)
+        .select(({ parent }) => ({
+          id: parent.id,
+          value: parent.value,
+          children: materialize(
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentId, parent.id))
+              .select(({ child }) => ({ id: child.id })),
+          ),
+        })),
+    getKey: (row) => row.id,
+  })
+  const snapshot = () =>
+    query.toArray.map(({ id, value, children: childRows }) => ({
+      id,
+      value,
+      children: childRows.map(({ id: childId }) => childId),
+    }))
+  const callbacks: Array<{
+    rows: ReturnType<typeof snapshot>
+    changes: Array<{
+      type: string
+      key: string | number
+      value?: string
+      previousValue?: string
+    }>
+  }> = []
+  const effectBatches: Array<
+    Array<{
+      type: string
+      key: string | number
+      value: string
+      previousValue: string | undefined
+    }>
+  > = []
+  let effect: ReturnType<typeof createEffect> | undefined
+  let unsubscribe: (() => void) | undefined
+
+  await withHistoryCleanup(
+    async () => {
+      await query.preload()
+      effect = createEffect<{ id: number; value: string }, number>({
+        query: (q) =>
+          q
+            .from({ parent: source })
+            .orderBy(({ parent }) => parent.rank)
+            .limit(2)
+            .select(({ parent }) => ({
+              id: parent.id,
+              value: parent.value,
+            })),
+        skipInitial: true,
+        onBatch: (events) => {
+          effectBatches.push(
+            events.map((event) => ({
+              type: event.type,
+              key: event.key,
+              value: event.value.value,
+              previousValue:
+                event.type === `update` ? event.previousValue.value : undefined,
+            })),
+          )
+        },
+      })
+      await flushPromises()
+      const before = snapshot()
+      expect(before).toEqual(expectedHeldPublicationRows(sourceRows))
+      const subscription = query.subscribeChanges(
+        (changes) => {
+          callbacks.push({
+            rows: snapshot(),
+            changes: changes.map((change) =>
+              change.type === `update`
+                ? {
+                    type: change.type,
+                    key: change.key,
+                    value: change.value.value,
+                    previousValue: change.previousValue?.value,
+                  }
+                : { type: change.type, key: change.key },
+            ),
+          })
+        },
+        { includeInitialState: false },
+      )
+      unsubscribe = () => subscription.unsubscribe()
+
+      holdRepair = true
+      const write = (row: Row) => {
+        sourceRows.set(row.id, { ...row })
+        sync.begin()
+        sync.write({ type: `update`, value: { ...row } })
+        expect(sync.commit()).toBe(true)
+      }
+      write({ id: 1, rank: 2.5, value: `A` })
+      write({ id: 1, rank: 2.5, value: intermediate })
+      write({ id: 1, rank: 2.5, value: final })
+      expect(held.length).toBeGreaterThan(0)
+      expect(snapshot()).toEqual(before)
+      expect(callbacks).toEqual([])
+      expect(effectBatches).toEqual([])
+
+      holdRepair = false
+      for (const release of held.splice(0)) release()
+      await flushPromises()
+      const after = expectedHeldPublicationRows(sourceRows)
+      expect(snapshot()).toEqual(after)
+      expect(callbacks).toEqual([
+        {
+          rows: after,
+          changes:
+            final === `A`
+              ? []
+              : [
+                  {
+                    type: `update`,
+                    key: 1,
+                    value: final,
+                    previousValue: `A`,
+                  },
+                ],
+        },
+      ])
+      expect(effectBatches).toEqual(
+        final === `A`
+          ? []
+          : [
+              [
+                {
+                  type: `update`,
+                  key: 1,
+                  value: final,
+                  previousValue: `A`,
+                },
+              ],
+            ],
+      )
+    },
+    () => [
+      () => {
+        holdRepair = false
+        for (const release of held) release()
+      },
+      () => unsubscribe?.(),
+      () => effect?.dispose(),
+      () => query.cleanup(),
+      () => source.cleanup(),
+      () => children.collection.cleanup(),
+    ],
+  )
 }
 
 describe(`layered-query publication oracle`, () => {
@@ -636,179 +1066,22 @@ describe(`layered-query publication oracle`, () => {
 
   for (const q1Shape of q1Shapes) {
     for (const q2Shape of q2Shapes) {
-      it(`observes every plain write before yielding through ${q1Shape}/${q2Shape}`, async () => {
-        oracleRoute(`case`)
-        const actions: Array<PublicationAction> = [
-          { type: `parentScalar`, value: 7 },
-          { type: `childScalar`, value: 8 },
-          { type: `parentRoute`, group: 20 },
-          { type: `atomicReplace`, group: 30, value: 9 },
-          { type: `parentThenChild`, parentValue: 10, childValue: 11 },
-        ]
-        const driver = createPublicationDriver(q1Shape, q2Shape)
-        await runTrace({
-          steps: actions,
-          driver: {
-            ...driver,
-            apply: (action, context, checkpoint) => {
-              const beforeCallbacks = context.callbacks.length
-              let reached = 0
-              const result = driver.apply(action, context, () => {
-                reached++
-                return checkpoint()
-              })
-              // Capture before awaiting the async action's returned Promise.
-              const synchronousCount = reached
-              return Promise.resolve(result).then(() => {
-                for (const layer of [`q1`, `q2`] as const) {
-                  expect(
-                    context.callbacks
-                      .slice(beforeCallbacks)
-                      .some((callback) => callback.layer === layer),
-                  ).toBe(true)
-                }
-                expect(synchronousCount).toBe(
-                  action.type === `parentThenChild` ? 2 : 1,
-                )
-              })
-            },
-          },
-          projection: publicationProjection,
-        })
-      })
-
-      it(`rejects a transient layered tear through ${q1Shape}/${q2Shape}`, async () => {
-        oracleRoute(`case`)
-        const run = (observeInsideAction: boolean) => {
-          let transient = false
-          const driver = createPublicationDriver(q1Shape, q2Shape)
-          return runTrace({
-            steps: [{ type: `parentScalar` as const, value: 7 }],
-            driver: {
-              ...driver,
-              apply: (action, context, checkpoint) => {
-                transient = true
-                queueMicrotask(() => {
-                  transient = false
-                })
-                return driver.apply(
-                  action,
-                  context,
-                  observeInsideAction ? checkpoint : () => undefined,
-                )
-              },
-            },
-            projection: {
-              ...publicationProjection,
-              observe: (context) => {
-                const observed = publicationProjection.observe(context)
-                if (transient) observed.q2[0]!.item.value = -999
-                return observed
-              },
-            },
-          })
-        }
-        // The old settled-only observation misses this test-owned fault.
-        await expect(run(false)).resolves.toBeUndefined()
-        await expect(run(true)).rejects.toMatchObject({
-          name: `TraceAssertionError`,
-          checkpoint: 1,
-        })
-      })
-
-      it(`rejects a callback-only tear before reads recover through ${q1Shape}/${q2Shape}`, async () => {
-        oracleRoute(`case`)
-        const driver = createPublicationDriver(q1Shape, q2Shape)
-        let reached = 0
-        const context = await driver.setup()
-        try {
-          await driver.start?.(context)
-          await driver.apply(
-            { type: `parentScalar`, value: 7 },
-            context,
-            () => undefined,
-          )
-          const callback = context.callbacks.find(
-            (entry) => entry.layer === `q2`,
-          )
-          expect(callback).toBeDefined()
-          callback!.rows[0]!.item.value = -999
-          reached++
-          // The installed final reads still agree. This fault corrupts only the
-          // captured callback and repairs it before the write returns.
-          const observed = publicationProjection.observe(context)
-          const expected = publicationProjection.recompute(context)
-          expect(observed.q1).toEqual(expected.q1)
-          expect(observed.q2).toEqual(expected.q2)
-          expect(() =>
-            publicationProjection.assertEqual(observed, expected),
-          ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
-          // Repair the row capture, then remove the whole change batch. The
-          // same callback-time comparison must reject a missing public event.
-          callback!.rows = structuredClone(callback!.expected)
-          callback!.changes = []
-          expect(() =>
-            publicationProjection.assertEqual(
-              publicationProjection.observe(context),
-              expected,
-            ),
-          ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
-          expect(reached).toBe(1)
-        } finally {
-          await driver.cleanup(context)
-        }
-      })
-
-      it(`checks both sides of confirmation through ${q1Shape}/${q2Shape}`, async () => {
-        oracleRoute(`case`)
-        for (const fault of [`none`, `optimistic`, `confirmed`] as const) {
-          const driver = createPublicationDriver(q1Shape, q2Shape)
-          let phase: `initial` | `optimistic` | `confirmed` = `initial`
-          const seen: Array<string> = []
-          let hits = 0
-          const run = runTrace({
-            steps: [{ type: `optimisticConfirm` as const, value: 7 }],
-            driver: {
-              ...driver,
-              apply: async (action, context, checkpoint) => {
-                phase = `optimistic`
-                await driver.apply(action, context, checkpoint)
-                phase = `confirmed`
-              },
-            },
-            projection: {
-              ...publicationProjection,
-              observe: (context) => {
-                seen.push(phase)
-                const observed = publicationProjection.observe(context)
-                if (phase === fault) {
-                  observed.q2[0]!.item.value = -999
-                  hits++
-                }
-                return observed
-              },
-            },
-          })
-          if (fault === `none`) {
-            await run
-            expect(seen).toEqual([`initial`, `optimistic`, `confirmed`])
-            expect(hits).toBe(0)
-          } else {
-            await expect(run).rejects.toMatchObject({
-              name: `TraceAssertionError`,
-            })
-            expect(hits).toBe(1)
-          }
-        }
-      })
-
       for (const campaign of publicationCampaigns(
         12,
         `includes-publication.parent-scalar.${q1Shape}.${q2Shape}`,
       )) {
         registerIncludesProperty(
           [changedValueArbitrary],
-          campaign.options,
+          {
+            ...campaign.options,
+            owns: [
+              `src/collection/index.ts#createCollection`,
+              `src/indexes/basic-index.ts`,
+              `src/indexes/btree-index.ts`,
+              `src/query/effect.ts#createEffect`,
+              `src/query/live-query-collection.ts#createLiveQueryCollection`,
+            ],
+          },
           `publishes parent scalar updates through a ${q1Shape} Q1 and ${q2Shape} Q2 (${campaign.name})`,
           async (value) => {
             await expectPublicationMatches(
@@ -826,7 +1099,16 @@ describe(`layered-query publication oracle`, () => {
       )) {
         registerIncludesProperty(
           [changedValueArbitrary, changedChildValueArbitrary],
-          campaign.options,
+          {
+            ...campaign.options,
+            owns: [
+              `src/collection/index.ts#createCollection`,
+              `src/indexes/basic-index.ts`,
+              `src/indexes/btree-index.ts`,
+              `src/query/effect.ts#createEffect`,
+              `src/query/live-query-collection.ts#createLiveQueryCollection`,
+            ],
+          },
           `recovers a ${q1Shape} Q1 and ${q2Shape} Q2 after a child update (${campaign.name})`,
           async (parentValue, childValue) => {
             await expectPublicationMatches(
@@ -844,7 +1126,16 @@ describe(`layered-query publication oracle`, () => {
       )) {
         registerIncludesProperty(
           [changedValueArbitrary],
-          campaign.options,
+          {
+            ...campaign.options,
+            owns: [
+              `src/collection/index.ts#createCollection`,
+              `src/indexes/basic-index.ts`,
+              `src/indexes/btree-index.ts`,
+              `src/query/effect.ts#createEffect`,
+              `src/query/live-query-collection.ts#createLiveQueryCollection`,
+            ],
+          },
           `publishes optimistic state before and after confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2 (${campaign.name})`,
           async (value) => {
             await expectPublicationMatches(
@@ -858,41 +1149,135 @@ describe(`layered-query publication oracle`, () => {
     }
   }
 
-  it.each([
-    { phase: `optimistic`, cut: 0, checkpoint: 1 },
-    { phase: `rollback`, cut: 1, checkpoint: 2 },
-  ])(
-    `rejects missing $phase callbacks at the public checkpoint`,
-    async ({ cut, checkpoint: expectedCheckpoint }) => {
-      oracleRoute(`case`)
-      const driver = createPublicationDriver(`direct`, `passThrough`)
-      let reachedCuts = 0
-      let previousCallbackCount = 0
-      const run = runTrace({
-        steps: [{ type: `optimisticRollback` as const, value: 7 }],
-        driver: {
-          ...driver,
-          apply: (action, context, checkpoint) =>
-            driver.apply(action, context, () => {
-              // Remove one phase's recorded public callbacks while preserving
-              // the final reads. The callback-reach check must reject it.
-              if (reachedCuts === cut) {
-                context.callbacks.splice(previousCallbackCount)
-              }
-              reachedCuts++
-              previousCallbackCount = context.callbacks.length
-              return checkpoint()
-            }),
-        },
-        projection: publicationProjection,
-      })
-      await expect(run).rejects.toMatchObject({
-        name: `TraceAssertionError`,
-        checkpoint: expectedCheckpoint,
-      })
-      expect(reachedCuts).toBe(2)
+  oracleProperty({
+    id: `includes-publication.plain-write-checkpoints`,
+    law: {
+      statement: plainWriteLaw,
+      authority: `ARCHITECTURE.md, "Coherent publication", "Atomic window publication", and normative laws 8–9, stated at the start of this owner.`,
+      limits: `The eight enumerated Q1 and Q2 shape cells over controlled source Collections.`,
     },
-  )
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/indexes/btree-index.ts`,
+      `src/query/effect.ts#createEffect`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: publicationShapeCells,
+    label: ({ q1Shape, q2Shape }) =>
+      `observes every plain write before yielding through ${q1Shape}/${q2Shape}`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(plainWriteLaw, plan, observe, () =>
+        judgePlainWriteCheckpoints(plan.q1Shape, plan.q2Shape),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes-publication.transient-tear`,
+    law: {
+      statement: transientTearLaw,
+      authority: `ARCHITECTURE.md, "Coherent publication", "Atomic window publication", and normative laws 8–9, stated at the start of this owner.`,
+      limits: `The eight enumerated Q1 and Q2 shape cells over controlled source Collections.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/indexes/btree-index.ts`,
+      `src/query/effect.ts#createEffect`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: publicationShapeCells,
+    label: ({ q1Shape, q2Shape }) =>
+      `rejects a transient layered tear through ${q1Shape}/${q2Shape}`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(transientTearLaw, plan, observe, () =>
+        judgeTransientTear(plan.q1Shape, plan.q2Shape),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes-publication.callback-only-tear`,
+    law: {
+      statement: callbackOnlyTearLaw,
+      authority: `ARCHITECTURE.md, "Coherent publication", "Atomic window publication", and normative laws 8–9, stated at the start of this owner.`,
+      limits: `The eight enumerated Q1 and Q2 shape cells over controlled source Collections.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/indexes/btree-index.ts`,
+      `src/query/effect.ts#createEffect`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: publicationShapeCells,
+    label: ({ q1Shape, q2Shape }) =>
+      `rejects a callback-only tear before reads recover through ${q1Shape}/${q2Shape}`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(callbackOnlyTearLaw, plan, observe, () =>
+        judgeCallbackOnlyTear(plan.q1Shape, plan.q2Shape),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes-publication.confirmation-sides`,
+    law: {
+      statement: confirmationSidesLaw,
+      authority: `ARCHITECTURE.md, "Coherent publication", "Atomic window publication", and normative laws 8–9, stated at the start of this owner.`,
+      limits: `The eight enumerated Q1 and Q2 shape cells over controlled source Collections.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/indexes/btree-index.ts`,
+      `src/query/effect.ts#createEffect`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: publicationShapeCells,
+    label: ({ q1Shape, q2Shape }) =>
+      `checks both sides of confirmation through ${q1Shape}/${q2Shape}`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(confirmationSidesLaw, plan, observe, () =>
+        judgeConfirmationSides(plan.q1Shape, plan.q2Shape),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes-publication.missing-callbacks`,
+    law: {
+      statement: missingCallbacksLaw,
+      authority: `ARCHITECTURE.md, "Coherent publication", "Atomic window publication", and normative laws 8–9, stated at the start of this owner.`,
+      limits: `The two enumerated optimistic and rollback cuts in the direct pass-through shape.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/indexes/btree-index.ts`,
+      `src/query/effect.ts#createEffect`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: missingCallbackCases,
+    label: ({ phase }) =>
+      `rejects missing ${phase} callbacks at the public checkpoint`,
+    resolve: (missingCase) => ({ ...missingCase }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(missingCallbacksLaw, plan, observe, () =>
+        judgeMissingCallbacks(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   for (const campaign of publicationCampaigns(
     100,
@@ -900,7 +1285,16 @@ describe(`layered-query publication oracle`, () => {
   )) {
     registerIncludesProperty(
       [changedChildValueArbitrary],
-      campaign.options,
+      {
+        ...campaign.options,
+        owns: [
+          `src/collection/index.ts#createCollection`,
+          `src/indexes/basic-index.ts`,
+          `src/indexes/btree-index.ts`,
+          `src/query/effect.ts#createEffect`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        ],
+      },
       `publishes child-only scalar updates through both layers (${campaign.name})`,
       async (value) => {
         await expectPublicationMatches({ type: `childScalar`, value })
@@ -914,7 +1308,16 @@ describe(`layered-query publication oracle`, () => {
   )) {
     registerIncludesProperty(
       [fc.constantFrom(20, 30)],
-      campaign.options,
+      {
+        ...campaign.options,
+        owns: [
+          `src/collection/index.ts#createCollection`,
+          `src/indexes/basic-index.ts`,
+          `src/indexes/btree-index.ts`,
+          `src/query/effect.ts#createEffect`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        ],
+      },
       `compares route transitions at both query layers (${campaign.name})`,
       async (group) => {
         await expectPublicationMatches({ type: `parentRoute`, group })
@@ -933,7 +1336,16 @@ describe(`layered-query publication oracle`, () => {
           value: changedValueArbitrary,
         }),
       ],
-      campaign.options,
+      {
+        ...campaign.options,
+        owns: [
+          `src/collection/index.ts#createCollection`,
+          `src/indexes/basic-index.ts`,
+          `src/indexes/btree-index.ts`,
+          `src/query/effect.ts#createEffect`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        ],
+      },
       `compares atomic parent replacements at both query layers (${campaign.name})`,
       async (row) => {
         await expectPublicationMatches({ type: `atomicReplace`, ...row })
@@ -947,7 +1359,16 @@ describe(`layered-query publication oracle`, () => {
   )) {
     registerIncludesProperty(
       [changedValueArbitrary],
-      campaign.options,
+      {
+        ...campaign.options,
+        owns: [
+          `src/collection/index.ts#createCollection`,
+          `src/indexes/basic-index.ts`,
+          `src/indexes/btree-index.ts`,
+          `src/query/effect.ts#createEffect`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        ],
+      },
       `publishes restored state after optimistic rollback (${campaign.name})`,
       async (value) => {
         await expectPublicationMatches({
@@ -969,216 +1390,29 @@ describe(`layered-query publication oracle`, () => {
  * checks a value update.
  */
 describe(`held include publication`, () => {
-  it.each([
-    { intermediate: `A`, final: `A` },
-    { intermediate: `B`, final: `A` },
-    { intermediate: `B`, final: `C` },
-  ])(
-    `compares the final $intermediate to $final row with the last public snapshot`,
-    async ({ intermediate, final }) => {
-      oracleRoute(`case`)
-      type Row = { id: number; rank: number; value: string }
-      const sourceRows = new Map<number, Row>([
-        [1, { id: 1, rank: 1, value: `A` }],
-        [2, { id: 2, rank: 2, value: `X` }],
-      ])
-      let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-      let holdRepair = false
-      const held: Array<() => void> = []
-      let requests = 0
-      const source = createCollection<Row, number>({
-        id: `held-publication-source-${nextCollectionId++}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        sync: {
-          sync: (operations) => {
-            sync = operations
-            operations.markReady()
-            return {
-              loadSubset: () => {
-                requests++
-                if (requests === 1) {
-                  sync.begin()
-                  for (const row of sourceRows.values()) {
-                    sync.write({ type: `insert`, value: { ...row } })
-                  }
-                  expect(sync.commit()).toBe(true)
-                }
-                return holdRepair
-                  ? new Promise<void>((resolve) => held.push(resolve))
-                  : true
-              },
-              unloadSubset: () => {},
-            }
-          },
-        },
-      })
-      const children = createControlledCollection(`held-publication-child`, [
-        { id: 10, parentId: 1 },
-      ])
-      children.collection.createIndex((child) => child.parentId, {
-        indexType: BasicIndex,
-      })
-      const query = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ parent: source })
-            .orderBy(({ parent }) => parent.rank)
-            .limit(2)
-            .select(({ parent }) => ({
-              id: parent.id,
-              value: parent.value,
-              children: materialize(
-                q
-                  .from({ child: children.collection })
-                  .where(({ child }) => eq(child.parentId, parent.id))
-                  .select(({ child }) => ({ id: child.id })),
-              ),
-            })),
-        getKey: (row) => row.id,
-      })
-      const snapshot = () =>
-        query.toArray.map(({ id, value, children: childRows }) => ({
-          id,
-          value,
-          children: childRows.map(({ id: childId }) => childId),
-        }))
-      const callbacks: Array<{
-        rows: ReturnType<typeof snapshot>
-        changes: Array<{
-          type: string
-          key: string | number
-          value?: string
-          previousValue?: string
-        }>
-      }> = []
-      const effectBatches: Array<
-        Array<{
-          type: string
-          key: string | number
-          value: string
-          previousValue: string | undefined
-        }>
-      > = []
-      let effect: ReturnType<typeof createEffect> | undefined
-      let unsubscribe: (() => void) | undefined
-
-      await withHistoryCleanup(
-        async () => {
-          await query.preload()
-          effect = createEffect<{ id: number; value: string }, number>({
-            query: (q) =>
-              q
-                .from({ parent: source })
-                .orderBy(({ parent }) => parent.rank)
-                .limit(2)
-                .select(({ parent }) => ({
-                  id: parent.id,
-                  value: parent.value,
-                })),
-            skipInitial: true,
-            onBatch: (events) => {
-              effectBatches.push(
-                events.map((event) => ({
-                  type: event.type,
-                  key: event.key,
-                  value: event.value.value,
-                  previousValue:
-                    event.type === `update`
-                      ? event.previousValue.value
-                      : undefined,
-                })),
-              )
-            },
-          })
-          await flushPromises()
-          const before = snapshot()
-          expect(before).toEqual(expectedHeldPublicationRows(sourceRows))
-          const subscription = query.subscribeChanges(
-            (changes) => {
-              callbacks.push({
-                rows: snapshot(),
-                changes: changes.map((change) =>
-                  change.type === `update`
-                    ? {
-                        type: change.type,
-                        key: change.key,
-                        value: change.value.value,
-                        previousValue: change.previousValue?.value,
-                      }
-                    : { type: change.type, key: change.key },
-                ),
-              })
-            },
-            { includeInitialState: false },
-          )
-          unsubscribe = () => subscription.unsubscribe()
-
-          holdRepair = true
-          const write = (row: Row) => {
-            sourceRows.set(row.id, { ...row })
-            sync.begin()
-            sync.write({ type: `update`, value: { ...row } })
-            expect(sync.commit()).toBe(true)
-          }
-          write({ id: 1, rank: 2.5, value: `A` })
-          write({ id: 1, rank: 2.5, value: intermediate })
-          write({ id: 1, rank: 2.5, value: final })
-          expect(held.length).toBeGreaterThan(0)
-          expect(snapshot()).toEqual(before)
-          expect(callbacks).toEqual([])
-          expect(effectBatches).toEqual([])
-
-          holdRepair = false
-          for (const release of held.splice(0)) release()
-          await flushPromises()
-          const after = expectedHeldPublicationRows(sourceRows)
-          expect(snapshot()).toEqual(after)
-          expect(callbacks).toEqual([
-            {
-              rows: after,
-              changes:
-                final === `A`
-                  ? []
-                  : [
-                      {
-                        type: `update`,
-                        key: 1,
-                        value: final,
-                        previousValue: `A`,
-                      },
-                    ],
-            },
-          ])
-          expect(effectBatches).toEqual(
-            final === `A`
-              ? []
-              : [
-                  [
-                    {
-                      type: `update`,
-                      key: 1,
-                      value: final,
-                      previousValue: `A`,
-                    },
-                  ],
-                ],
-          )
-        },
-        () => [
-          () => {
-            holdRepair = false
-            for (const release of held) release()
-          },
-          () => unsubscribe?.(),
-          () => effect?.dispose(),
-          () => query.cleanup(),
-          () => source.cleanup(),
-          () => children.collection.cleanup(),
-        ],
-      )
+  oracleProperty({
+    id: `includes-publication.held-repair`,
+    law: {
+      statement: heldPublicationLaw,
+      authority: `ARCHITECTURE.md, "Coherent publication", "Atomic window publication", and normative laws 8–9, stated at the start of this owner.`,
+      limits: `The three enumerated intermediate and final values of one two-row root reorder; no Collection-valued facade, cleanup, or concurrent optimistic change.`,
     },
-  )
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/indexes/btree-index.ts`,
+      `src/query/effect.ts#createEffect`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: heldPublicationCases,
+    label: ({ intermediate, final }) =>
+      `compares the final ${intermediate} to ${final} row with the last public snapshot`,
+    resolve: (heldCase) => ({ ...heldCase }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(heldPublicationLaw, plan, observe, () =>
+        judgeHeldPublication(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

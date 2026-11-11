@@ -6,7 +6,6 @@ import { grouping } from '../../../src/query/compiler/grouping.js'
 import { createValueIdentity } from '../../../src/query/equality-value-identity.js'
 import { Aggregate, Func, PropRef, Value } from '../../../src/query/ir.js'
 import { oracleProperty, pass, violation } from '../../oracle-config.js'
-import { declareOracle } from '../../oracle-declaration.js'
 import type { Observation, Verdict } from '../../oracle-config.js'
 import type { Select } from '../../../src/query/ir.js'
 import type { KeyedNamespacedRow } from '../../../src/types.js'
@@ -256,12 +255,6 @@ function checkGroupHistory(
   }
   return pass
 }
-
-declareOracle({
-  model: [expectedGroupRows, modelGroupHistory],
-  check: [compareGroupRows, checkGroupHistory],
-  grammar: [cases, snapshots],
-})
 
 oracleProperty({
   id: `compiler.group-by.batch`,

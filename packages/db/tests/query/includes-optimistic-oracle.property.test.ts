@@ -1,6 +1,12 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { oracleAssertion } from '../oracle-assertion-adapter.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from '../oracle-assertion-adapter.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -15,8 +21,7 @@ import {
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
-import { oracleRoute } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+import { oracleProperty } from '../oracle-config.js'
 import { registerIncludesProperty } from './includes-registration-oracle.js'
 import {
   assertCanStartOptimisticChange,
@@ -632,17 +637,6 @@ function expectedHeldRepairRows(
     }))
 }
 
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/basic-index.ts',
-    'src/indexes/btree-index.ts',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
-  check: [expectHistoryMatches],
-  model: [recompute, expectedHeldRepairRows],
-})
-
 const routeValuesArbitrary: fc.Arbitrary<RouteValues> = fc.record({
   // Routes are equality keys. Disjoint ranges preserve distinctness while
   // letting FastCheck shrink each semantic role independently.
@@ -661,638 +655,794 @@ function optimisticProperty(
 ): void {
   registerIncludesProperty(
     [routeValuesArbitrary],
-    { property, runs: 12, fixedSeed: 1_658_013 },
+    {
+      property,
+      runs: 12,
+      fixedSeed: 1_658_013,
+      owns: [
+        `src/collection/index.ts#createCollection`,
+        `src/indexes/basic-index.ts`,
+        `src/indexes/btree-index.ts`,
+        `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      ],
+    },
     name,
     run,
   )
 }
 
-describe(`optimistic relationship-transition oracle`, () => {
-  fcTest(
-    `keeps a same-root optimistic snapshot private until ordered repair publishes`,
-    async () => {
-      oracleRoute(`fixed history`)
-      type OrderedRoot = { id: number; rank: number; value: string }
-      type Child = { id: number; parentId: number }
-      type PublishedRoot = {
-        id: number
-        value: string
-        children: Array<{ id: number }>
-      }
-      type Event = {
-        type: string
-        key: unknown
-        value: PublishedRoot
-        previousValue?: PublishedRoot
-      }
+const heldRepairLaw = `A same-root optimistic snapshot stays private while an authoritative ordered repair is held, and the repair then publishes the reference rows with the snapshot applied.`
+const siblingDeliveryLaw = `A queued sibling delivery reaches the nested result at one checkpoint, whether or not an optimistic change is pending.`
+const failedCleanupLaw = `A failed optimistic action leaves no pending model or runtime work and cleans up every Collection, retaining the action failure and suppressing a later cleanup failure.`
+const applyCheckpointLaw = `The trace driver checks the optimistic overlay before apply yields.`
+const immediateRouteLaw = `A reparent moves the row to its optimistic parent route at the immediate optimistic checkpoint.`
 
-      const sourceRows = new Map<number, OrderedRoot>([
-        [1, { id: 1, rank: 1, value: `A` }],
-        [2, { id: 2, rank: 2, value: `X` }],
-      ])
-      let sync!: Parameters<SyncConfig<OrderedRoot, number>[`sync`]>[0]
-      let holdRepair = false
-      let requests = 0
-      const held: Array<() => void> = []
-      const heldRequests: Array<LoadSubsetOptions> = []
-      const mutation = createDeferred<void>()
-      const roots = createCollection<OrderedRoot, number>({
-        id: `held-optimistic-repair-roots`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        onUpdate: () => mutation.promise,
-        sync: {
-          sync: (operations) => {
-            sync = operations
-            operations.markReady()
-            return {
-              loadSubset: (options) => {
-                requests++
-                if (requests === 1) {
-                  sync.begin()
-                  for (const row of sourceRows.values())
-                    sync.write({ type: `insert`, value: { ...row } })
-                  expect(sync.commit()).toBe(true)
-                }
-                if (holdRepair) {
-                  heldRequests.push(options)
-                  return new Promise<void>((resolve) => held.push(resolve))
-                }
-                return true
-              },
-              unloadSubset: () => {},
+// The former fixed-history test body, unchanged: one held ordered repair over
+// a same-root optimistic snapshot, compared with expectedHeldRepairRows.
+async function judgeHeldRepairSnapshot(): Promise<void> {
+  type OrderedRoot = { id: number; rank: number; value: string }
+  type Child = { id: number; parentId: number }
+  type PublishedRoot = {
+    id: number
+    value: string
+    children: Array<{ id: number }>
+  }
+  type Event = {
+    type: string
+    key: unknown
+    value: PublishedRoot
+    previousValue?: PublishedRoot
+  }
+
+  const sourceRows = new Map<number, OrderedRoot>([
+    [1, { id: 1, rank: 1, value: `A` }],
+    [2, { id: 2, rank: 2, value: `X` }],
+  ])
+  let sync!: Parameters<SyncConfig<OrderedRoot, number>[`sync`]>[0]
+  let holdRepair = false
+  let requests = 0
+  const held: Array<() => void> = []
+  const heldRequests: Array<LoadSubsetOptions> = []
+  const mutation = createDeferred<void>()
+  const roots = createCollection<OrderedRoot, number>({
+    id: `held-optimistic-repair-roots`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    onUpdate: () => mutation.promise,
+    sync: {
+      sync: (operations) => {
+        sync = operations
+        operations.markReady()
+        return {
+          loadSubset: (options) => {
+            requests++
+            if (requests === 1) {
+              sync.begin()
+              for (const row of sourceRows.values())
+                sync.write({ type: `insert`, value: { ...row } })
+              expect(sync.commit()).toBe(true)
             }
+            if (holdRepair) {
+              heldRequests.push(options)
+              return new Promise<void>((resolve) => held.push(resolve))
+            }
+            return true
           },
-        },
-      })
-      const children = createControlledCollection<Child>(
-        `held-optimistic-repair-children`,
-        [{ id: 10, parentId: 1 }],
-      )
-      children.collection.createIndex((child) => child.parentId, {
-        indexType: BasicIndex,
-      })
-      const live = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ root: roots })
-            .orderBy(({ root }) => root.rank)
-            .limit(2)
-            .select(({ root }) => ({
-              id: root.id,
-              value: root.value,
-              children: materializeChildRows(
-                q
-                  .from({ child: children.collection })
-                  .where(({ child }) => eq(child.parentId, root.id))
-                  .select(({ child }) => ({ id: child.id })),
-              ),
-            })),
-        getKey: (row) => row.id,
-      })
-      const published = (row: unknown) =>
-        stripVirtualProperties(row) as PublishedRoot
-      const snapshot = (): Array<PublishedRoot> =>
-        live.toArray.map((row) => published(row))
-      const callbacks: Array<{
-        rows: Array<PublishedRoot>
-        changes: Array<Event>
-      }> = []
-      let unsubscribe: (() => void) | undefined
-      let persistence: Promise<void> | undefined
-
-      await withHistoryCleanup(
-        async () => {
-          await live.preload()
-          const before = expectedHeldRepairRows(sourceRows)
-          expect(snapshot()).toEqual(before)
-          const subscription = live.subscribeChanges(
-            (changes) => {
-              callbacks.push({
-                rows: snapshot(),
-                changes: changes.map((change) => ({
-                  type: change.type,
-                  key: change.key,
-                  value: published(change.value),
-                  ...(change.type === `update`
-                    ? { previousValue: published(change.previousValue) }
-                    : {}),
-                })),
-              })
-            },
-            { includeInitialState: false },
-          )
-          unsubscribe = () => subscription.unsubscribe()
-
-          // The source-order change invalidates finite coverage and starts a
-          // bounded repair. Its new rank is private to the live query.
-          holdRepair = true
-          const moved = { ...sourceRows.get(1)!, rank: 2.5 }
-          sourceRows.set(1, moved)
-          sync.begin()
-          sync.write({ type: `update`, value: { ...moved } })
-          expect(sync.commit()).toBe(true)
-          expect(requests).toBeGreaterThan(1)
-          expect(held.length).toBeGreaterThan(0)
-          expect(heldRequests).toHaveLength(1)
-          expect(heldRequests[0]).toMatchObject({ limit: 2, refetch: true })
-          expect(
-            heldRequests[0]!.orderBy?.map(({ expression, compareOptions }) => ({
-              path: expression instanceof PropRef ? expression.path : undefined,
-              direction: compareOptions.direction,
-            })),
-          ).toEqual([{ path: [`rank`], direction: `asc` }])
-          expect(heldRequests[0]!.cursor).toBeUndefined()
-          expect(heldRequests[0]!.offset).toBeUndefined()
-          expect(snapshot()).toEqual(before)
-          expect(callbacks).toEqual([])
-
-          // This changes the same root row while its order repair is held.
-          // A leaked optimistic row or early retraction would be public here.
-          const transaction = roots.update(1, (draft) => {
-            draft.value = `B`
-          })
-          persistence = transaction.when(`settled`).then(
-            () => undefined,
-            () => undefined,
-          )
-          await flushPromises()
-          expect(roots.get(1)?.value).toBe(`B`)
-          const checkHeldCut = (
-            rows: Array<PublishedRoot>,
-            events: typeof callbacks,
-          ) => {
-            expect(rows).toEqual(before)
-            expect(events).toEqual([])
-          }
-          // Wrong-result controls reach this cut: early optimistic visibility
-          // and a premature root retraction both fail the same refinement.
-          expect(() =>
-            checkHeldCut(expectedHeldRepairRows(sourceRows, `B`), []),
-          ).toThrow()
-          expect(() => checkHeldCut(before.slice(1), [])).toThrow()
-          checkHeldCut(snapshot(), callbacks)
-
-          holdRepair = false
-          for (const release of held.splice(0)) release()
-          await flushPromises()
-          const after = expectedHeldRepairRows(sourceRows, `B`)
-          const withoutOverlay = expectedHeldRepairRows(sourceRows)
-          expect(after).not.toEqual(before)
-          expect(after).not.toEqual(withoutOverlay)
-          const expectedPublication: typeof callbacks = [
-            {
-              rows: after,
-              changes: [
-                {
-                  type: `update`,
-                  key: 1,
-                  value: after[1]!,
-                  previousValue: before[0]!,
-                },
-              ],
-            },
-          ]
-          const checkPublishedCut = (
-            rows: Array<PublishedRoot>,
-            events: typeof callbacks,
-          ) => {
-            expect(rows).toEqual(after)
-            expect(events).toEqual(expectedPublication)
-          }
-          // A repair that drops the optimistic snapshot or retracts the root
-          // cannot pass the publication comparison.
-          expect(() => checkPublishedCut(withoutOverlay, [])).toThrow()
-          expect(() => checkPublishedCut(after.slice(0, 1), [])).toThrow()
-          checkPublishedCut(snapshot(), callbacks)
-
-          // Rejection removes only the optimistic snapshot. The repaired
-          // authoritative rank and child route remain publicly coherent.
-          mutation.reject(new Error(`discard optimistic value`))
-          await persistence
-          await flushPromises()
-          expect(snapshot()).toEqual(withoutOverlay)
-          expect(callbacks).toEqual([
-            {
-              rows: after,
-              changes: [
-                {
-                  type: `update`,
-                  key: 1,
-                  value: after[1],
-                  previousValue: before[0],
-                },
-              ],
-            },
-            {
-              rows: withoutOverlay,
-              changes: [
-                {
-                  type: `update`,
-                  key: 1,
-                  value: withoutOverlay[1],
-                  previousValue: after[1],
-                },
-              ],
-            },
-          ])
-        },
-        () => [
-          () => {
-            holdRepair = false
-            for (const release of held.splice(0)) release()
-            mutation.reject(new Error(`cleanup optimistic value`))
-          },
-          () => persistence,
-          () => unsubscribe?.(),
-          () => live.cleanup(),
-          () => roots.cleanup(),
-          () => children.collection.cleanup(),
-        ],
-      )
-    },
-  )
-
-  for (const pending of [false, true]) {
-    fcTest(
-      `observes queued sibling delivery with pending=${pending}`,
-      async () => {
-        oracleRoute(`case`)
-        const routes: RouteValues = {
-          rootA: 10,
-          rootB: 100,
-          rootC: 200,
-          original: 300,
-          optimistic: 400,
-          authoritative: 500,
+          unloadSubset: () => {},
         }
-        const { roots, levels } = fixture(routes)
-        const sibling: ChildRow = {
-          id: 12,
-          parentGroup: 10,
-          group: 300,
-          value: 120,
-          position: 1,
-        }
-        const changes: Array<SyncChange<ChildRow>> = [
-          { type: `insert`, value: sibling },
-        ]
-        const driver = createDriver(roots, levels)
-        const events: Array<{ type: string; row: ChildRow }> = []
-        let unsubscribe: (() => void) | undefined
-        let siblingCuts = 0
-        let runtime: PendingRuntimeMutation | undefined
-        const descendants = [
-          {
-            id: 21,
-            group: 1300,
-            value: 210,
-            position: 0,
-            children: [{ id: 31, group: 2300, value: 310, position: 0 }],
-          },
-        ]
-        const published = (optimistic: boolean) => [
-          {
-            id: 1,
-            group: 10,
-            value: 10,
-            position: 0,
-            children: optimistic
-              ? [{ id: 11, group: 400, value: 110, position: 0, children: [] }]
-              : [
-                  {
-                    id: 11,
-                    group: 300,
-                    value: 110,
-                    position: 0,
-                    children: descendants,
-                  },
-                  {
-                    id: 12,
-                    group: 300,
-                    value: 120,
-                    position: 1,
-                    children: descendants,
-                  },
-                ],
-          },
-          { id: 2, group: 100, value: 20, position: 1, children: [] },
-          { id: 3, group: 200, value: 30, position: 2, children: [] },
-        ]
-        await runTrace({
-          steps: [
-            pending
-              ? {
-                  type: `optimisticRollback`,
-                  level: 1,
-                  id: 11,
-                  patch: { group: 400 },
-                  beforeRollback: { level: 1, changes },
-                }
-              : { type: `sync`, level: 1, changes },
-            {
-              type: `sync`,
-              level: 2,
-              changes: [
-                { type: `update`, value: { ...levels[1][0]!, value: 211 } },
-              ],
-            },
-          ] satisfies Array<OptimisticRelationshipStep>,
-          driver: {
-            ...driver,
-            setup: async () => {
-              const context = await driver.setup()
-              const source = context.sources.levels[0]
-              const subscription = source.collection.subscribeChanges(
-                (batch) => {
-                  events.push(
-                    ...batch.map(({ type, value }) => ({
-                      type,
-                      row: { ...value },
-                    })),
-                  )
-                },
-                { includeInitialState: false },
-              )
-              unsubscribe = () => subscription.unsubscribe()
-              const writeBatch = source.writeBatch
-              source.writeBatch = (batch) => {
-                const eventStart = events.length
-                runtime = [...context.runtimePending][0]
-                writeBatch(batch)
-                siblingCuts += 1
-                const actual = {
-                  present: source.collection.has(12),
-                  row: source.collection.get(12),
-                  events: events.slice(eventStart),
-                  rows: stripVirtualProperties(context.live.toArray),
-                }
-                expect(actual.present).toBe(!pending)
-                if (pending) expect(actual.row).toBeUndefined()
-                else expect(actual.row).toMatchObject(sibling)
-                expect(actual.rows).toEqual(published(pending))
-                if (pending) {
-                  expect(actual.events).toEqual([])
-                  expect(runtime?.transaction.state).toBe(`persisting`)
-                  expect(runtime?.settled).toBe(false)
-                } else {
-                  expect(runtime).toBeUndefined()
-                  expect(actual.events).toContainEqual({
-                    type: `insert`,
-                    row: expect.objectContaining(sibling),
-                  })
-                }
-              }
-              return context
-            },
-            apply: async (step, context, checkpoint) => {
-              await driver.apply(step, context, checkpoint)
-              if (step.level === 1) {
-                if (pending) {
-                  await runtime!.receipt
-                  expect(runtime!.settled).toBe(true)
-                  expect(runtime!.transaction.state).toBe(`failed`)
-                }
-                expect(
-                  context.sources.levels[0].collection.get(12),
-                ).toMatchObject(sibling)
-                expect(events).toContainEqual({
-                  type: `insert`,
-                  row: expect.objectContaining(sibling),
-                })
-                expect(stripVirtualProperties(context.live.toArray)).toEqual(
-                  published(false),
-                )
-              }
-            },
-            cleanup: async (context) => {
-              const results = await Promise.allSettled([
-                Promise.resolve().then(() => unsubscribe?.()),
-                Promise.resolve().then(() => driver.cleanup(context)),
-              ])
-              const errors = results.flatMap((result): Array<unknown> =>
-                result.status === `rejected` ? [result.reason as unknown] : [],
-              )
-              if (errors.length === 1) throw errors[0]
-              if (errors.length > 1)
-                throw new AggregateError(
-                  errors,
-                  `Sibling observation cleanup failed`,
-                )
-            },
-          },
-          projection,
-        })
-        expect(siblingCuts).toBe(1)
       },
-    )
-  }
-
-  for (const compound of [false, true]) {
-    for (const cleanupFails of [false, true]) {
-      fcTest(
-        `cleans failed optimistic work (compound=${compound}, cleanup failure=${cleanupFails})`,
-        async () => {
-          oracleRoute(`case`)
-          const routes: RouteValues = {
-            rootA: 10,
-            rootB: 100,
-            rootC: 200,
-            original: 300,
-            optimistic: 400,
-            authoritative: 500,
-          }
-          const { roots, levels } = fixture(routes)
-          const driver = createDriver(roots, levels)
-          const failure = new Error(`optimistic action failed`)
-          const cleanupFailure = new Error(`live cleanup failed after disposal`)
-          let context: OptimisticContext | undefined
-          let failedTransaction: SettlingTransaction | undefined
-          const fail = (current: OptimisticContext): never => {
-            const runtime = [...current.runtimePending][0]
-            expect(runtime).toBeDefined()
-            failedTransaction = runtime!.transaction
-            throw failure
-          }
-          const step: OptimisticRelationshipStep = compound
-            ? {
-                type: `optimisticRollback`,
-                level: 1,
-                id: 11,
-                patch: { group: routes.optimistic },
-                beforeRollback: {
-                  level: 1,
-                  changes: [
-                    {
-                      type: `insert`,
-                      value: {
-                        id: 12,
-                        parentGroup: routes.rootA,
-                        group: routes.original,
-                        value: 120,
-                        position: 1,
-                      },
-                    },
-                  ],
-                },
-              }
-            : {
-                type: `optimistic`,
-                handle: `failed`,
-                level: 1,
-                id: 11,
-                patch: { parentGroup: routes.rootB },
-              }
-          await expect(
-            runTrace({
-              steps: [step],
-              driver: {
-                ...driver,
-                setup: async () => {
-                  const current = await driver.setup()
-                  context = current
-                  if (compound) {
-                    const source = current.sources.levels[0]
-                    const writeBatch = source.writeBatch
-                    source.writeBatch = (changes) => {
-                      writeBatch(changes)
-                      fail(current)
-                    }
-                  }
-                  if (cleanupFails) {
-                    const cleanup = current.live.cleanup.bind(current.live)
-                    current.live.cleanup = async () => {
-                      await cleanup()
-                      throw cleanupFailure
-                    }
-                  }
-                  return current
-                },
-              },
-              projection: {
-                ...projection,
-                assertEqual: (actual, expected) => {
-                  projection.assertEqual(actual, expected)
-                  if (!compound && context!.pending.size > 0) fail(context!)
-                  return undefined
-                },
-              },
-            }),
-          ).rejects.toBe(failure)
-          expect(
-            (failure as Error & { suppressed?: Array<unknown> }).suppressed,
-          ).toEqual(cleanupFails ? [cleanupFailure] : undefined)
-          if (!context) throw new Error(`Expected initialized trace context`)
-          expect(failedTransaction?.state).toBe(`failed`)
-          expect(context.pending.size).toBe(0)
-          expect(context.runtimePending.size).toBe(0)
-          for (const collection of [
-            context.live,
-            context.sources.roots.collection,
-            ...context.sources.levels.map((source) => source.collection),
-          ])
-            expect(collection.status).toBe(`cleaned-up`)
-        },
-      )
-    }
-  }
-
-  fcTest(
-    `checks the optimistic overlay before yielding from apply`,
-    async () => {
-      oracleRoute(`fixed history`)
-      const routes: RouteValues = {
-        rootA: 10,
-        rootB: 100,
-        rootC: 200,
-        original: 300,
-        optimistic: 400,
-        authoritative: 500,
-      }
-      const { roots, levels } = fixture(routes)
-      const driver = createDriver(roots, levels)
-      await runTrace({
-        steps: [
-          {
-            type: `optimistic` as const,
-            handle: `immediate`,
-            level: 1 as const,
-            id: 11,
-            patch: { parentGroup: routes.rootB },
-          },
-        ],
-        driver: {
-          ...driver,
-          apply: (step, context, checkpoint) => {
-            let checkpoints = 0
-            const applied = driver.apply(step, context, () => {
-              checkpoints += 1
-              return checkpoint()
-            })
-            const checkpointsBeforeYield = checkpoints
-            return Promise.resolve(applied).then(() => {
-              expect(checkpointsBeforeYield).toBe(1)
-            })
-          },
-        },
-        projection,
-      })
     },
+  })
+  const children = createControlledCollection<Child>(
+    `held-optimistic-repair-children`,
+    [{ id: 10, parentId: 1 }],
   )
+  children.collection.createIndex((child) => child.parentId, {
+    indexType: BasicIndex,
+  })
+  const live = createLiveQueryCollection({
+    query: (q) =>
+      q
+        .from({ root: roots })
+        .orderBy(({ root }) => root.rank)
+        .limit(2)
+        .select(({ root }) => ({
+          id: root.id,
+          value: root.value,
+          children: materializeChildRows(
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentId, root.id))
+              .select(({ child }) => ({ id: child.id })),
+          ),
+        })),
+    getKey: (row) => row.id,
+  })
+  const published = (row: unknown) =>
+    stripVirtualProperties(row) as PublishedRoot
+  const snapshot = (): Array<PublishedRoot> =>
+    live.toArray.map((row) => published(row))
+  const callbacks: Array<{
+    rows: Array<PublishedRoot>
+    changes: Array<Event>
+  }> = []
+  let unsubscribe: (() => void) | undefined
+  let persistence: Promise<void> | undefined
 
-  fcTest(
-    `rejects a stale route at the immediate optimistic checkpoint`,
+  await withHistoryCleanup(
     async () => {
-      oracleRoute(`calibration`)
-      const routes: RouteValues = {
-        rootA: 10,
-        rootB: 100,
-        rootC: 200,
-        original: 300,
-        optimistic: 400,
-        authoritative: 500,
-      }
-      const { roots, levels } = fixture(routes)
-      let initial: unknown
-      let optimistic: unknown
-      let observations = 0
+      await live.preload()
+      const before = expectedHeldRepairRows(sourceRows)
+      expect(snapshot()).toEqual(before)
+      const subscription = live.subscribeChanges(
+        (changes) => {
+          callbacks.push({
+            rows: snapshot(),
+            changes: changes.map((change) => ({
+              type: change.type,
+              key: change.key,
+              value: published(change.value),
+              ...(change.type === `update`
+                ? { previousValue: published(change.previousValue) }
+                : {}),
+            })),
+          })
+        },
+        { includeInitialState: false },
+      )
+      unsubscribe = () => subscription.unsubscribe()
 
-      await expect(
-        runTrace({
-          steps: [
+      // The source-order change invalidates finite coverage and starts a
+      // bounded repair. Its new rank is private to the live query.
+      holdRepair = true
+      const moved = { ...sourceRows.get(1)!, rank: 2.5 }
+      sourceRows.set(1, moved)
+      sync.begin()
+      sync.write({ type: `update`, value: { ...moved } })
+      expect(sync.commit()).toBe(true)
+      expect(requests).toBeGreaterThan(1)
+      expect(held.length).toBeGreaterThan(0)
+      expect(heldRequests).toHaveLength(1)
+      expect(heldRequests[0]).toMatchObject({ limit: 2, refetch: true })
+      expect(
+        heldRequests[0]!.orderBy?.map(({ expression, compareOptions }) => ({
+          path: expression instanceof PropRef ? expression.path : undefined,
+          direction: compareOptions.direction,
+        })),
+      ).toEqual([{ path: [`rank`], direction: `asc` }])
+      expect(heldRequests[0]!.cursor).toBeUndefined()
+      expect(heldRequests[0]!.offset).toBeUndefined()
+      expect(snapshot()).toEqual(before)
+      expect(callbacks).toEqual([])
+
+      // This changes the same root row while its order repair is held.
+      // A leaked optimistic row or early retraction would be public here.
+      const transaction = roots.update(1, (draft) => {
+        draft.value = `B`
+      })
+      persistence = transaction.when(`settled`).then(
+        () => undefined,
+        () => undefined,
+      )
+      await flushPromises()
+      expect(roots.get(1)?.value).toBe(`B`)
+      const checkHeldCut = (
+        rows: Array<PublishedRoot>,
+        events: typeof callbacks,
+      ) => {
+        expect(rows).toEqual(before)
+        expect(events).toEqual([])
+      }
+      // Wrong-result controls reach this cut: early optimistic visibility
+      // and a premature root retraction both fail the same refinement.
+      expect(() =>
+        checkHeldCut(expectedHeldRepairRows(sourceRows, `B`), []),
+      ).toThrow()
+      expect(() => checkHeldCut(before.slice(1), [])).toThrow()
+      checkHeldCut(snapshot(), callbacks)
+
+      holdRepair = false
+      for (const release of held.splice(0)) release()
+      await flushPromises()
+      const after = expectedHeldRepairRows(sourceRows, `B`)
+      const withoutOverlay = expectedHeldRepairRows(sourceRows)
+      expect(after).not.toEqual(before)
+      expect(after).not.toEqual(withoutOverlay)
+      const expectedPublication: typeof callbacks = [
+        {
+          rows: after,
+          changes: [
             {
-              type: `optimistic`,
-              handle: `reparent`,
-              level: 1,
-              id: 11,
-              patch: { parentGroup: routes.rootB },
+              type: `update`,
+              key: 1,
+              value: after[1]!,
+              previousValue: before[0]!,
             },
           ],
-          driver: createDriver(roots, levels),
-          projection: {
-            ...projection,
-            observe: (context) => {
-              const actual = projection.observe(context)
-              observations += 1
-              if (observations === 1) initial = actual
-              if (observations === 2) {
-                optimistic = actual
-                return initial
-              }
-              return actual
+        },
+      ]
+      const checkPublishedCut = (
+        rows: Array<PublishedRoot>,
+        events: typeof callbacks,
+      ) => {
+        expect(rows).toEqual(after)
+        expect(events).toEqual(expectedPublication)
+      }
+      // A repair that drops the optimistic snapshot or retracts the root
+      // cannot pass the publication comparison.
+      expect(() => checkPublishedCut(withoutOverlay, [])).toThrow()
+      expect(() => checkPublishedCut(after.slice(0, 1), [])).toThrow()
+      checkPublishedCut(snapshot(), callbacks)
+
+      // Rejection removes only the optimistic snapshot. The repaired
+      // authoritative rank and child route remain publicly coherent.
+      mutation.reject(new Error(`discard optimistic value`))
+      await persistence
+      await flushPromises()
+      expect(snapshot()).toEqual(withoutOverlay)
+      expect(callbacks).toEqual([
+        {
+          rows: after,
+          changes: [
+            {
+              type: `update`,
+              key: 1,
+              value: after[1],
+              previousValue: before[0],
             },
-          },
-        }),
-      ).rejects.toMatchObject({
-        name: `TraceAssertionError`,
-        checkpoint: 1,
-      })
-      expect(observations).toBe(2)
-      expect(optimistic).not.toEqual(initial)
+          ],
+        },
+        {
+          rows: withoutOverlay,
+          changes: [
+            {
+              type: `update`,
+              key: 1,
+              value: withoutOverlay[1],
+              previousValue: after[1],
+            },
+          ],
+        },
+      ])
     },
+    () => [
+      () => {
+        holdRepair = false
+        for (const release of held.splice(0)) release()
+        mutation.reject(new Error(`cleanup optimistic value`))
+      },
+      () => persistence,
+      () => unsubscribe?.(),
+      () => live.cleanup(),
+      () => roots.cleanup(),
+      () => children.collection.cleanup(),
+    ],
   )
+}
+
+// The former case body, unchanged, for one pending flag.
+async function judgeQueuedSiblingDelivery(pending: boolean): Promise<void> {
+  const routes: RouteValues = {
+    rootA: 10,
+    rootB: 100,
+    rootC: 200,
+    original: 300,
+    optimistic: 400,
+    authoritative: 500,
+  }
+  const { roots, levels } = fixture(routes)
+  const sibling: ChildRow = {
+    id: 12,
+    parentGroup: 10,
+    group: 300,
+    value: 120,
+    position: 1,
+  }
+  const changes: Array<SyncChange<ChildRow>> = [
+    { type: `insert`, value: sibling },
+  ]
+  const driver = createDriver(roots, levels)
+  const events: Array<{ type: string; row: ChildRow }> = []
+  let unsubscribe: (() => void) | undefined
+  let siblingCuts = 0
+  let runtime: PendingRuntimeMutation | undefined
+  const descendants = [
+    {
+      id: 21,
+      group: 1300,
+      value: 210,
+      position: 0,
+      children: [{ id: 31, group: 2300, value: 310, position: 0 }],
+    },
+  ]
+  const published = (optimistic: boolean) => [
+    {
+      id: 1,
+      group: 10,
+      value: 10,
+      position: 0,
+      children: optimistic
+        ? [{ id: 11, group: 400, value: 110, position: 0, children: [] }]
+        : [
+            {
+              id: 11,
+              group: 300,
+              value: 110,
+              position: 0,
+              children: descendants,
+            },
+            {
+              id: 12,
+              group: 300,
+              value: 120,
+              position: 1,
+              children: descendants,
+            },
+          ],
+    },
+    { id: 2, group: 100, value: 20, position: 1, children: [] },
+    { id: 3, group: 200, value: 30, position: 2, children: [] },
+  ]
+  await runTrace({
+    steps: [
+      pending
+        ? {
+            type: `optimisticRollback`,
+            level: 1,
+            id: 11,
+            patch: { group: 400 },
+            beforeRollback: { level: 1, changes },
+          }
+        : { type: `sync`, level: 1, changes },
+      {
+        type: `sync`,
+        level: 2,
+        changes: [{ type: `update`, value: { ...levels[1][0]!, value: 211 } }],
+      },
+    ] satisfies Array<OptimisticRelationshipStep>,
+    driver: {
+      ...driver,
+      setup: async () => {
+        const context = await driver.setup()
+        const source = context.sources.levels[0]
+        const subscription = source.collection.subscribeChanges(
+          (batch) => {
+            events.push(
+              ...batch.map(({ type, value }) => ({
+                type,
+                row: { ...value },
+              })),
+            )
+          },
+          { includeInitialState: false },
+        )
+        unsubscribe = () => subscription.unsubscribe()
+        const writeBatch = source.writeBatch
+        source.writeBatch = (batch) => {
+          const eventStart = events.length
+          runtime = [...context.runtimePending][0]
+          writeBatch(batch)
+          siblingCuts += 1
+          const actual = {
+            present: source.collection.has(12),
+            row: source.collection.get(12),
+            events: events.slice(eventStart),
+            rows: stripVirtualProperties(context.live.toArray),
+          }
+          expect(actual.present).toBe(!pending)
+          if (pending) expect(actual.row).toBeUndefined()
+          else expect(actual.row).toMatchObject(sibling)
+          expect(actual.rows).toEqual(published(pending))
+          if (pending) {
+            expect(actual.events).toEqual([])
+            expect(runtime?.transaction.state).toBe(`persisting`)
+            expect(runtime?.settled).toBe(false)
+          } else {
+            expect(runtime).toBeUndefined()
+            expect(actual.events).toContainEqual({
+              type: `insert`,
+              row: expect.objectContaining(sibling),
+            })
+          }
+        }
+        return context
+      },
+      apply: async (step, context, checkpoint) => {
+        await driver.apply(step, context, checkpoint)
+        if (step.level === 1) {
+          if (pending) {
+            await runtime!.receipt
+            expect(runtime!.settled).toBe(true)
+            expect(runtime!.transaction.state).toBe(`failed`)
+          }
+          expect(context.sources.levels[0].collection.get(12)).toMatchObject(
+            sibling,
+          )
+          expect(events).toContainEqual({
+            type: `insert`,
+            row: expect.objectContaining(sibling),
+          })
+          expect(stripVirtualProperties(context.live.toArray)).toEqual(
+            published(false),
+          )
+        }
+      },
+      cleanup: async (context) => {
+        const results = await Promise.allSettled([
+          Promise.resolve().then(() => unsubscribe?.()),
+          Promise.resolve().then(() => driver.cleanup(context)),
+        ])
+        const errors = results.flatMap((result): Array<unknown> =>
+          result.status === `rejected` ? [result.reason as unknown] : [],
+        )
+        if (errors.length === 1) throw errors[0]
+        if (errors.length > 1)
+          throw new AggregateError(errors, `Sibling observation cleanup failed`)
+      },
+    },
+    projection,
+  })
+  expect(siblingCuts).toBe(1)
+}
+
+// The former case body, unchanged, for one compound and cleanup-failure cell.
+async function judgeFailedOptimisticCleanup(
+  compound: boolean,
+  cleanupFails: boolean,
+): Promise<void> {
+  const routes: RouteValues = {
+    rootA: 10,
+    rootB: 100,
+    rootC: 200,
+    original: 300,
+    optimistic: 400,
+    authoritative: 500,
+  }
+  const { roots, levels } = fixture(routes)
+  const driver = createDriver(roots, levels)
+  const failure = new Error(`optimistic action failed`)
+  const cleanupFailure = new Error(`live cleanup failed after disposal`)
+  let context: OptimisticContext | undefined
+  let failedTransaction: SettlingTransaction | undefined
+  const fail = (current: OptimisticContext): never => {
+    const runtime = [...current.runtimePending][0]
+    expect(runtime).toBeDefined()
+    failedTransaction = runtime!.transaction
+    throw failure
+  }
+  const step: OptimisticRelationshipStep = compound
+    ? {
+        type: `optimisticRollback`,
+        level: 1,
+        id: 11,
+        patch: { group: routes.optimistic },
+        beforeRollback: {
+          level: 1,
+          changes: [
+            {
+              type: `insert`,
+              value: {
+                id: 12,
+                parentGroup: routes.rootA,
+                group: routes.original,
+                value: 120,
+                position: 1,
+              },
+            },
+          ],
+        },
+      }
+    : {
+        type: `optimistic`,
+        handle: `failed`,
+        level: 1,
+        id: 11,
+        patch: { parentGroup: routes.rootB },
+      }
+  await expect(
+    runTrace({
+      steps: [step],
+      driver: {
+        ...driver,
+        setup: async () => {
+          const current = await driver.setup()
+          context = current
+          if (compound) {
+            const source = current.sources.levels[0]
+            const writeBatch = source.writeBatch
+            source.writeBatch = (changes) => {
+              writeBatch(changes)
+              fail(current)
+            }
+          }
+          if (cleanupFails) {
+            const cleanup = current.live.cleanup.bind(current.live)
+            current.live.cleanup = async () => {
+              await cleanup()
+              throw cleanupFailure
+            }
+          }
+          return current
+        },
+      },
+      projection: {
+        ...projection,
+        assertEqual: (actual, expected) => {
+          projection.assertEqual(actual, expected)
+          if (!compound && context!.pending.size > 0) fail(context!)
+          return undefined
+        },
+      },
+    }),
+  ).rejects.toBe(failure)
+  expect(
+    (failure as Error & { suppressed?: Array<unknown> }).suppressed,
+  ).toEqual(cleanupFails ? [cleanupFailure] : undefined)
+  if (!context) throw new Error(`Expected initialized trace context`)
+  expect(failedTransaction?.state).toBe(`failed`)
+  expect(context.pending.size).toBe(0)
+  expect(context.runtimePending.size).toBe(0)
+  for (const collection of [
+    context.live,
+    context.sources.roots.collection,
+    ...context.sources.levels.map((source) => source.collection),
+  ])
+    expect(collection.status).toBe(`cleaned-up`)
+}
+
+// The former fixed-history body, unchanged: the shared trace driver and
+// projection, with apply counting its synchronous checkpoints.
+async function judgeCheckpointBeforeYield(): Promise<void> {
+  const routes: RouteValues = {
+    rootA: 10,
+    rootB: 100,
+    rootC: 200,
+    original: 300,
+    optimistic: 400,
+    authoritative: 500,
+  }
+  const { roots, levels } = fixture(routes)
+  const driver = createDriver(roots, levels)
+  await runTrace({
+    steps: [
+      {
+        type: `optimistic` as const,
+        handle: `immediate`,
+        level: 1 as const,
+        id: 11,
+        patch: { parentGroup: routes.rootB },
+      },
+    ],
+    driver: {
+      ...driver,
+      apply: (step, context, checkpoint) => {
+        let checkpoints = 0
+        const applied = driver.apply(step, context, () => {
+          checkpoints += 1
+          return checkpoint()
+        })
+        const checkpointsBeforeYield = checkpoints
+        return Promise.resolve(applied).then(() => {
+          expect(checkpointsBeforeYield).toBe(1)
+        })
+      },
+    },
+    projection,
+  })
+}
+
+// The immediate reparent history that the stale-route calibration corrupts.
+// Its clean replay is the shared trace check, expectHistoryMatches.
+const immediateReparentHistories = [
+  {
+    routes: {
+      rootA: 10,
+      rootB: 100,
+      rootC: 200,
+      original: 300,
+      optimistic: 400,
+      authoritative: 500,
+    },
+    steps: [
+      {
+        type: `optimistic` as const,
+        handle: `reparent`,
+        level: 1 as const,
+        id: 11,
+        patch: { parentGroup: 100 },
+      },
+    ],
+  },
+]
+
+describe(`optimistic relationship-transition oracle`, () => {
+  oracleProperty({
+    id: `includes-optimistic.held-repair`,
+    law: {
+      statement: heldRepairLaw,
+      authority: `The optimistic relationship-transition laws stated at the start of this owner, and the optimistic and atomic window publication rules in packages/db/src/query/live/ARCHITECTURE.md.`,
+      limits: `The one held ordered-repair witness over controlled source Collections; no real-provider event timing or Collection-valued facade claim.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/indexes/btree-index.ts`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: [
+      `keeps a same-root optimistic snapshot private until ordered repair publishes`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(heldRepairLaw, plan, observe, () =>
+        judgeHeldRepairSnapshot(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes-optimistic.sibling-delivery`,
+    law: {
+      statement: siblingDeliveryLaw,
+      authority: `The optimistic relationship-transition laws stated at the start of this owner, and the optimistic and atomic window publication rules in packages/db/src/query/live/ARCHITECTURE.md.`,
+      limits: `The two enumerated pending flags over fixed route values.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/indexes/btree-index.ts`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: [false, true],
+    label: (pending) =>
+      `observes queued sibling delivery with pending=${pending}`,
+    resolve: (pending) => ({ pending }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(siblingDeliveryLaw, plan, observe, () =>
+        judgeQueuedSiblingDelivery(plan.pending),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes-optimistic.failed-cleanup`,
+    law: {
+      statement: failedCleanupLaw,
+      authority: `The optimistic relationship-transition laws stated at the start of this owner, and the optimistic and atomic window publication rules in packages/db/src/query/live/ARCHITECTURE.md.`,
+      limits: `The four enumerated compound and cleanup-failure cells over fixed route values.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/indexes/btree-index.ts`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: [false, true].flatMap((compound) =>
+      [false, true].map((cleanupFails) => ({ compound, cleanupFails })),
+    ),
+    label: ({ compound, cleanupFails }) =>
+      `cleans failed optimistic work (compound=${compound}, cleanup failure=${cleanupFails})`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(failedCleanupLaw, plan, observe, () =>
+        judgeFailedOptimisticCleanup(plan.compound, plan.cleanupFails),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes-optimistic.apply-checkpoint`,
+    law: {
+      statement: applyCheckpointLaw,
+      authority: `The optimistic relationship-transition laws stated at the start of this owner, and the optimistic and atomic window publication rules in packages/db/src/query/live/ARCHITECTURE.md.`,
+      limits: `The one immediate optimistic step over fixed route values.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/indexes/btree-index.ts`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: [`checks the optimistic overlay before yielding from apply`],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(applyCheckpointLaw, plan, observe, () =>
+        judgeCheckpointBeforeYield(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes-optimistic.immediate-route`,
+    law: {
+      statement: immediateRouteLaw,
+      authority: `The optimistic relationship-transition laws stated at the start of this owner, and the optimistic and atomic window publication rules in packages/db/src/query/live/ARCHITECTURE.md.`,
+      limits: `The one immediate level-one reparent over fixed route values, replayed through the shared trace check, and its stale-route calibration.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/indexes/btree-index.ts`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: immediateReparentHistories,
+    label: () =>
+      `moves a reparented row at the immediate optimistic checkpoint`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(immediateRouteLaw, plan, observe, () =>
+        expectHistoryMatches(plan.history.routes, plan.history.steps),
+      ),
+    check: forwardAssertionJudgment,
+    calibrations: [
+      {
+        name: `rejects a stale route at the immediate optimistic checkpoint`,
+        law: immediateRouteLaw,
+        // The former calibration body: the projection returns the initial rows
+        // at the optimistic checkpoint. Exactly the old matcher: only a
+        // TraceAssertionError at checkpoint 1, after two observations whose
+        // optimistic rows differ from the initial rows, counts as the check
+        // rejecting it.
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            immediateRouteLaw,
+            plan,
+            observe,
+            async () => {
+              const { roots, levels } = fixture(plan.history.routes)
+              let initial: unknown
+              let optimistic: unknown
+              let observations = 0
+              try {
+                await runTrace({
+                  steps: plan.history.steps,
+                  driver: createDriver(roots, levels),
+                  projection: {
+                    ...projection,
+                    observe: (context) => {
+                      const actual = projection.observe(context)
+                      observations += 1
+                      if (observations === 1) initial = actual
+                      if (observations === 2) {
+                        optimistic = actual
+                        return initial
+                      }
+                      return actual
+                    },
+                  },
+                })
+              } catch (error) {
+                if (
+                  error instanceof Error &&
+                  error.name === `TraceAssertionError` &&
+                  (error as Error & { checkpoint?: unknown }).checkpoint === 1
+                ) {
+                  expect(observations).toBe(2)
+                  expect(optimistic).not.toEqual(initial)
+                  rejectAt(`stale route calibration`, error)
+                }
+                // The shared trace check marks its own comparison failures.
+                // A failure outside the old matcher is rethrown without that
+                // marking, so it fails this calibration as it failed the old
+                // test.
+                throw new Error(
+                  `the stale-route corruption failed outside the expected rejection: ${String(error)}`,
+                )
+              }
+            },
+          ),
+      },
+    ],
+  })
 
   optimisticProperty(
     `includes-optimistic.rekey-detach`,

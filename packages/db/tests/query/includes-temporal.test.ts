@@ -33,6 +33,10 @@ import {
   nextCollectionId,
   startPreload,
 } from './includes-temporal-support.js'
+import {
+  expectReleaseReentryObservation,
+  expectScheduledDemandObservation,
+} from './includes-temporal-check-oracle.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { Deferred } from '../../src/deferred.js'
@@ -1975,4 +1979,35 @@ describe(`includes temporal oracle`, () => {
 
   it(`a nested progressive subset loads inside the fast-path window`, () =>
     expectProgressiveTraceMatches(`nested`))
+})
+
+// Checker calibrations for the includes temporal oracle. They run no
+// production: each feeds a wrong public observation to the oracle's check.
+describe(`includes temporal checks`, () => {
+  it(`rejects an obsolete child row at the first scheduled checkpoint`, () => {
+    expect(() =>
+      expectScheduledDemandObservation(
+        {
+          completed: [`demand-0`],
+          ready: false,
+          rows: [{ id: 1, comments: [{ id: 100, body: `obsolete` }] }],
+        },
+        0,
+      ),
+    ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
+  })
+
+  it(`rejects a failed release that suppresses reacquisition`, () => {
+    expect(() =>
+      expectReleaseReentryObservation(
+        {
+          changed: false,
+          empty: false,
+          loadCount: 1,
+          requestedKeys: [[1]],
+        },
+        [1],
+      ),
+    ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
+  })
 })

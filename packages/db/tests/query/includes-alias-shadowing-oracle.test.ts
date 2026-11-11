@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect } from 'vitest'
 import {
   Query,
   add,
@@ -16,8 +16,12 @@ import { optimizeQuery } from '../../src/query/optimizer.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises } from '../utils.js'
-import { declareOracle } from '../oracle-declaration.js'
-import { oracleRoute } from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import { createScopedSource } from './includes-scope-identity-oracle.js'
 import {
   initialLocks,
@@ -179,21 +183,6 @@ function expectRowsFollowModel(
   )
 }
 
-declareOracle({
-  owns: [
-    'src/collection/change-events.ts#createFilterFunctionFromExpression',
-    'src/collection/index.ts#createCollection',
-    'src/indexes/basic-index.ts',
-    'src/query/builder/index.ts',
-    'src/query/builder/query-ir.ts#getQueryIR',
-    'src/query/ir-stable-identity.ts#getQueryIdentity',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/optimizer.ts#optimizeQuery',
-  ],
-  check: [expectRowsFollowModel],
-  model: [modelRows],
-})
-
 /** The driver builds through the public Query and live Collection entry points. */
 function buildQuery(
   form: Form,
@@ -343,94 +332,119 @@ function expectedLockChildren(
   })
 }
 
-declareOracle({
-  model: [
-    expectedVoteIds,
-    expectedReports,
-    expectedChildIdsByParent,
-    expectedLockChildren,
-  ],
-})
-
 describe(`captured alias scope oracle`, () => {
-  for (const form of [
-    `direct`,
-    `queryRef`,
-    `union`,
-    `joinedImplicit`,
-  ] as const) {
-    for (const alias of [`lock`, `vote`] as const) {
-      for (const order of [`childFirst`, `parentFirst`] as const) {
-        for (const mode of [`eager`, `onDemand`] as const) {
-          test(`${form}, ${alias}, ${order}, ${mode}: exact rows follow source roles`, async () => {
-            oracleRoute(`case`)
-            const locks = createScopedSource(
-              `shadow-locks`,
-              initialLocks,
-              `eager`,
-            )
-            const votes = createScopedSource(`shadow-votes`, initialVotes, mode)
-            const modelLocks = new Map(initialLocks.map((row) => [row.id, row]))
-            const modelVotes = new Map(initialVotes.map((row) => [row.id, row]))
-            const live = createLiveQueryCollection({
-              query: buildQuery(form, alias, order, locks, votes),
-            })
-            await withHistoryCleanup(
-              async () => {
-                await live.preload()
-                const check = (checkpoint: string) =>
-                  expectRowsFollowModel(
-                    live,
-                    modelLocks,
-                    modelVotes,
-                    form,
-                    alias,
-                    checkpoint,
-                  )
-                check(`initial publication`)
+  const capturedScopeCells = (
+    [`direct`, `queryRef`, `union`, `joinedImplicit`] as const
+  ).flatMap((form) =>
+    ([`lock`, `vote`] as const).flatMap((alias) =>
+      ([`childFirst`, `parentFirst`] as const).flatMap((order) =>
+        ([`eager`, `onDemand`] as const).map((mode) => ({
+          form,
+          alias,
+          order,
+          mode,
+        })),
+      ),
+    ),
+  )
 
-                const addedVote = { id: 13, lockId: 2, lockName: `A` }
-                votes.put(addedVote)
-                modelVotes.set(addedVote.id, addedVote)
-                check(`child insert`)
+  // The former test body, unchanged.
+  async function judgeCapturedScope({
+    form,
+    alias,
+    order,
+    mode,
+  }: (typeof capturedScopeCells)[number]): Promise<void> {
+    const locks = createScopedSource(`shadow-locks`, initialLocks, `eager`)
+    const votes = createScopedSource(`shadow-votes`, initialVotes, mode)
+    const modelLocks = new Map(initialLocks.map((row) => [row.id, row]))
+    const modelVotes = new Map(initialVotes.map((row) => [row.id, row]))
+    const live = createLiveQueryCollection({
+      query: buildQuery(form, alias, order, locks, votes),
+    })
+    await withHistoryCleanup(
+      async () => {
+        await live.preload()
+        const check = (checkpoint: string) =>
+          expectRowsFollowModel(
+            live,
+            modelLocks,
+            modelVotes,
+            form,
+            alias,
+            checkpoint,
+          )
+        check(`initial publication`)
 
-                const addedLock = { id: 3, name: `C` }
-                locks.put(addedLock)
-                modelLocks.set(addedLock.id, addedLock)
-                check(`parent insert`)
+        const addedVote = { id: 13, lockId: 2, lockName: `A` }
+        votes.put(addedVote)
+        modelVotes.set(addedVote.id, addedVote)
+        check(`child insert`)
 
-                const newChild = { id: 14, lockId: 3, lockName: `C` }
-                votes.put(newChild)
-                modelVotes.set(newChild.id, newChild)
-                check(`child insert after parent insert`)
+        const addedLock = { id: 3, name: `C` }
+        locks.put(addedLock)
+        modelLocks.set(addedLock.id, addedLock)
+        check(`parent insert`)
 
-                const movedVote = { id: 11, lockId: 2, lockName: `B` }
-                votes.put(movedVote)
-                modelVotes.set(movedVote.id, movedVote)
-                check(`child moves between parents`)
+        const newChild = { id: 14, lockId: 3, lockName: `C` }
+        votes.put(newChild)
+        modelVotes.set(newChild.id, newChild)
+        check(`child insert after parent insert`)
 
-                votes.remove(12)
-                modelVotes.delete(12)
-                check(`child delete`)
+        const movedVote = { id: 11, lockId: 2, lockName: `B` }
+        votes.put(movedVote)
+        modelVotes.set(movedVote.id, movedVote)
+        check(`child moves between parents`)
 
-                locks.remove(1)
-                modelLocks.delete(1)
-                check(`parent delete`)
-              },
-              () => [
-                () => live.cleanup(),
-                () => locks.collection.cleanup(),
-                () => votes.collection.cleanup(),
-              ],
-            )
-          })
-        }
-      }
-    }
+        votes.remove(12)
+        modelVotes.delete(12)
+        check(`child delete`)
+
+        locks.remove(1)
+        modelLocks.delete(1)
+        check(`parent delete`)
+      },
+      () => [
+        () => live.cleanup(),
+        () => locks.collection.cleanup(),
+        () => votes.collection.cleanup(),
+      ],
+    )
   }
 
-  test(`one captured child plan remains correct in two include positions`, async () => {
-    oracleRoute(`fixed history`)
+  const capturedScopeLaw = `Exact rows follow source roles for every captured-alias form, alias, write order, and loading mode.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.captured-scope`,
+    law: {
+      statement: capturedScopeLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: capturedScopeCells,
+    label: ({ form, alias, order, mode }) =>
+      `${form}, ${alias}, ${order}, ${mode}: exact rows follow source roles`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(capturedScopeLaw, plan, observe, () =>
+        judgeCapturedScope(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  // The former test body, unchanged.
+  async function judgeTwoIncludePositions(): Promise<void> {
     const locks = createScopedSource(`reuse-locks`, initialLocks, `eager`)
     const votes = createScopedSource(`reuse-votes`, initialVotes, `eager`)
     const live = createLiveQueryCollection({
@@ -478,6 +492,38 @@ describe(`captured alias scope oracle`, () => {
         () => votes.collection.cleanup(),
       ],
     )
+  }
+
+  const twoIncludePositionsLaw = `One captured child plan remains correct in two include positions.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.two-include-positions`,
+    law: {
+      statement: twoIncludePositionsLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: [
+      `one captured child plan remains correct in two include positions`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(twoIncludePositionsLaw, plan, observe, () =>
+        judgeTwoIncludePositions(),
+      ),
+    check: forwardAssertionJudgment,
   })
 
   /**
@@ -494,119 +540,153 @@ describe(`captured alias scope oracle`, () => {
    * a managerId update must publish exact report IDs. The adjacent rejection
    * cells below retain the actual ancestor/descendant boundary.
    */
-  for (const placement of [`queryRef`, `union`, `joined`] as const) {
-    for (const mode of [`eager`, `onDemand`] as const) {
-      test(`a shared ${placement} builder remains legal in a sibling include with ${mode} sources`, async () => {
-        oracleRoute(`case`)
-        type Employee = { id: number; managerId: number }
-        const employeeRows = new Map<number, Employee>([
-          [1, { id: 1, managerId: 0 }],
-          [2, { id: 2, managerId: 1 }],
-          [3, { id: 3, managerId: 1 }],
-        ])
-        const employees = createScopedSource(
-          `sibling-employee-${placement}-${mode}`,
-          [...employeeRows.values()],
-          mode,
-        )
-        const extra = createScopedSource(
-          `sibling-extra-${placement}-${mode}`,
-          [{ id: 4, managerId: 0 }],
-          mode,
-        )
-        const managers = createScopedSource(
-          `sibling-manager-${placement}-${mode}`,
-          [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 99 }],
-          `eager`,
-        )
-        employees.collection.createIndex((row) => row.managerId, {
-          indexType: BasicIndex,
-        })
-        const shared = new Query()
-          .from({ employee: employees.collection })
-          .select(({ employee }) => ({
-            id: employee.id,
-            managerId: employee.managerId,
+  const sharedSiblingBuilderCells = (
+    [`queryRef`, `union`, `joined`] as const
+  ).flatMap((placement) =>
+    ([`eager`, `onDemand`] as const).map((mode) => ({ placement, mode })),
+  )
+
+  // The former test body, unchanged.
+  async function judgeSharedSiblingBuilder({
+    placement,
+    mode,
+  }: (typeof sharedSiblingBuilderCells)[number]): Promise<void> {
+    type Employee = { id: number; managerId: number }
+    const employeeRows = new Map<number, Employee>([
+      [1, { id: 1, managerId: 0 }],
+      [2, { id: 2, managerId: 1 }],
+      [3, { id: 3, managerId: 1 }],
+    ])
+    const employees = createScopedSource(
+      `sibling-employee-${placement}-${mode}`,
+      [...employeeRows.values()],
+      mode,
+    )
+    const extra = createScopedSource(
+      `sibling-extra-${placement}-${mode}`,
+      [{ id: 4, managerId: 0 }],
+      mode,
+    )
+    const managers = createScopedSource(
+      `sibling-manager-${placement}-${mode}`,
+      [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 99 }],
+      `eager`,
+    )
+    employees.collection.createIndex((row) => row.managerId, {
+      indexType: BasicIndex,
+    })
+    const shared = new Query()
+      .from({ employee: employees.collection })
+      .select(({ employee }) => ({
+        id: employee.id,
+        managerId: employee.managerId,
+      }))
+    const reportsFor = (manager: { id: number }) => ({
+      id: manager.id,
+      reports: toArray(
+        new Query()
+          .from({ report: shared })
+          .where(({ report }) => eq(report.managerId, manager.id))
+          .select(({ report }) => ({ id: report.id })),
+      ),
+    })
+    const build = () => {
+      if (placement === `union`) {
+        const other = new Query()
+          .from({ other: extra.collection })
+          .select(({ other: row }) => ({
+            id: row.id,
+            managerId: row.managerId,
           }))
-        const reportsFor = (manager: { id: number }) => ({
-          id: manager.id,
-          reports: toArray(
-            new Query()
-              .from({ report: shared })
-              .where(({ report }) => eq(report.managerId, manager.id))
-              .select(({ report }) => ({ id: report.id })),
-          ),
+        return createLiveQueryCollection({
+          query: new Query()
+            .from({ manager: new Query().unionAll(shared, other) })
+            .select(({ manager }) =>
+              reportsFor(manager as unknown as Employee),
+            ),
         })
-        const build = () => {
-          if (placement === `union`) {
-            const other = new Query()
-              .from({ other: extra.collection })
-              .select(({ other: row }) => ({
-                id: row.id,
-                managerId: row.managerId,
-              }))
-            return createLiveQueryCollection({
-              query: new Query()
-                .from({ manager: new Query().unionAll(shared, other) })
-                .select(({ manager }) =>
-                  reportsFor(manager as unknown as Employee),
-                ),
-            })
-          }
-          if (placement === `joined`) {
-            return createLiveQueryCollection({
-              query: new Query()
-                .from({ manager: managers.collection })
-                .innerJoin({ helper: shared }, ({ manager, helper }) =>
-                  eq(manager.id, helper.id),
-                )
-                .select(({ manager }) =>
-                  reportsFor(manager as unknown as Employee),
-                ),
-            })
-          }
-          return createLiveQueryCollection({
-            query: new Query()
-              .from({ manager: shared })
-              .select(({ manager }) =>
-                reportsFor(manager as unknown as Employee),
-              ),
-          })
-        }
-
-        const observe = (live: ReturnType<typeof build>) =>
-          live.toArray
-            .map(({ id, reports }) => ({
-              id,
-              reports: reports.map(({ id: reportId }) => reportId).sort(),
-            }))
-            .sort((a, b) => a.id - b.id)
-        const model = () => expectedReports(employeeRows, placement)
-        let live: ReturnType<typeof build> | undefined
-        await withHistoryCleanup(
-          async () => {
-            expect(() => {
-              live = build()
-            }).not.toThrow()
-            await live!.preload()
-            expect(observe(live!), `initial publication`).toEqual(model())
-
-            const moved = { id: 3, managerId: 2 }
-            employeeRows.set(3, moved)
-            employees.put(moved)
-            await flushPromises()
-            expect(observe(live!), `employee changes manager`).toEqual(model())
-          },
-          () => [
-            () => live?.cleanup(),
-            () => employees.collection.cleanup(),
-            () => extra.collection.cleanup(),
-            () => managers.collection.cleanup(),
-          ],
-        )
+      }
+      if (placement === `joined`) {
+        return createLiveQueryCollection({
+          query: new Query()
+            .from({ manager: managers.collection })
+            .innerJoin({ helper: shared }, ({ manager, helper }) =>
+              eq(manager.id, helper.id),
+            )
+            .select(({ manager }) =>
+              reportsFor(manager as unknown as Employee),
+            ),
+        })
+      }
+      return createLiveQueryCollection({
+        query: new Query()
+          .from({ manager: shared })
+          .select(({ manager }) => reportsFor(manager as unknown as Employee)),
       })
     }
+
+    const observe = (live: ReturnType<typeof build>) =>
+      live.toArray
+        .map(({ id, reports }) => ({
+          id,
+          reports: reports.map(({ id: reportId }) => reportId).sort(),
+        }))
+        .sort((a, b) => a.id - b.id)
+    const model = () => expectedReports(employeeRows, placement)
+    let live: ReturnType<typeof build> | undefined
+    await withHistoryCleanup(
+      async () => {
+        expect(() => {
+          live = build()
+        }).not.toThrow()
+        await live!.preload()
+        expect(observe(live!), `initial publication`).toEqual(model())
+
+        const moved = { id: 3, managerId: 2 }
+        employeeRows.set(3, moved)
+        employees.put(moved)
+        await flushPromises()
+        expect(observe(live!), `employee changes manager`).toEqual(model())
+      },
+      () => [
+        () => live?.cleanup(),
+        () => employees.collection.cleanup(),
+        () => extra.collection.cleanup(),
+        () => managers.collection.cleanup(),
+      ],
+    )
   }
+
+  const sharedSiblingBuilderLaw = `A shared QueryRef, union, or joined builder remains legal and correct in a sibling include.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.shared-sibling-builder`,
+    law: {
+      statement: sharedSiblingBuilderLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: sharedSiblingBuilderCells,
+    label: ({ placement, mode }) =>
+      `a shared ${placement} builder remains legal in a sibling include with ${mode} sources`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(sharedSiblingBuilderLaw, plan, observe, () =>
+        judgeSharedSiblingBuilder(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   /**
    * The inner QueryRef owns a different lexical scope from the include that
@@ -615,8 +695,8 @@ describe(`captured alias scope oracle`, () => {
    * The plain model groups each current row by parentId after preload and a
    * source update; it never consults the builder's binding IDs.
    */
-  test(`fresh inner QueryRef declarations do not impersonate a captured parent`, async () => {
-    oracleRoute(`fixed history`)
+  // The former test body, unchanged.
+  async function judgeFreshInnerQueryref(): Promise<void> {
     const rows = [
       { id: 1, parentId: 1 },
       { id: 2, parentId: 1 },
@@ -661,10 +741,42 @@ describe(`captured alias scope oracle`, () => {
       },
       () => [() => live.cleanup(), () => source.collection.cleanup()],
     )
+  }
+
+  const freshInnerQueryrefLaw = `Fresh inner QueryRef declarations do not impersonate a captured parent.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.fresh-inner-queryref`,
+    law: {
+      statement: freshInnerQueryrefLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: [
+      `fresh inner QueryRef declarations do not impersonate a captured parent`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(freshInnerQueryrefLaw, plan, observe, () =>
+        judgeFreshInnerQueryref(),
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  test(`a local child equality cannot impersonate a shadowed correlation`, async () => {
-    oracleRoute(`fixed history`)
+  // The former test body, unchanged.
+  async function judgeLocalEqualityShadow(): Promise<void> {
     const locks = createScopedSource(
       `local-equality-locks`,
       initialLocks,
@@ -714,10 +826,42 @@ describe(`captured alias scope oracle`, () => {
         () => votes.collection.cleanup(),
       ],
     )
+  }
+
+  const localEqualityShadowLaw = `A local child equality cannot impersonate a shadowed correlation.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.local-equality-shadow`,
+    law: {
+      statement: localEqualityShadowLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: [
+      `a local child equality cannot impersonate a shadowed correlation`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(localEqualityShadowLaw, plan, observe, () =>
+        judgeLocalEqualityShadow(),
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  test(`a nested include can capture its grandparent beside a shadowed child`, async () => {
-    oracleRoute(`fixed history`)
+  // The former test body, unchanged.
+  async function judgeGrandparentCapture(): Promise<void> {
     const locks = createScopedSource(`nested-locks`, initialLocks, `eager`)
     const votes = createScopedSource(`nested-votes`, initialVotes, `eager`)
     const currentVotes = new Map(initialVotes.map((vote) => [vote.id, vote]))
@@ -774,6 +918,38 @@ describe(`captured alias scope oracle`, () => {
         () => votes.collection.cleanup(),
       ],
     )
+  }
+
+  const grandparentCaptureLaw = `A nested include can capture its grandparent beside a shadowed child.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.grandparent-capture`,
+    law: {
+      statement: grandparentCaptureLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: [
+      `a nested include can capture its grandparent beside a shadowed child`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(grandparentCaptureLaw, plan, observe, () =>
+        judgeGrandparentCapture(),
+      ),
+    check: forwardAssertionJudgment,
   })
 
   /**
@@ -819,112 +995,143 @@ describe(`outer filters stay with their source under alias shadowing`, () => {
             },
       )
 
-  declareOracle({ model: [model] })
+  const outerFilterRolesCells = ([`join`, `include`] as const).flatMap((form) =>
+    ([`eager`, `onDemand`] as const).flatMap((mode) =>
+      ([1, 2] as const).map((childId) => ({ form, mode, childId })),
+    ),
+  )
 
-  for (const form of [`join`, `include`] as const) {
-    for (const mode of [`eager`, `onDemand`] as const) {
-      for (const childId of [1, 2] as const) {
-        test(`${form}, ${mode}, child ID ${childId}: projected rows follow source roles`, async () => {
-          oracleRoute(`case`)
-          const parentRow = { id: 1, linkId: childId }
-          const childRow = { id: childId, linkId: 1 }
-          const expected = model(
-            form,
-            new Map([[parentRow.id, parentRow]]),
-            new Map([[childRow.id, childRow]]),
-          )
-          const cases = ([`u`, `v`] as const).map((alias) => {
-            const parents = createScopedSource(
-              `outer-filter-parent-${form}-${mode}-${childId}-${alias}`,
-              [parentRow],
-              mode,
-            )
-            const children = createScopedSource(
-              `outer-filter-child-${form}-${mode}-${childId}-${alias}`,
-              [childRow],
-              mode,
-            )
-            children.collection.createIndex((child) => child.id, {
-              indexType: BasicIndex,
+  // The former test body, unchanged.
+  async function judgeOuterFilterRoles({
+    form,
+    mode,
+    childId,
+  }: (typeof outerFilterRolesCells)[number]): Promise<void> {
+    const parentRow = { id: 1, linkId: childId }
+    const childRow = { id: childId, linkId: 1 }
+    const expected = model(
+      form,
+      new Map([[parentRow.id, parentRow]]),
+      new Map([[childRow.id, childRow]]),
+    )
+    const cases = ([`u`, `v`] as const).map((alias) => {
+      const parents = createScopedSource(
+        `outer-filter-parent-${form}-${mode}-${childId}-${alias}`,
+        [parentRow],
+        mode,
+      )
+      const children = createScopedSource(
+        `outer-filter-child-${form}-${mode}-${childId}-${alias}`,
+        [childRow],
+        mode,
+      )
+      children.collection.createIndex((child) => child.id, {
+        indexType: BasicIndex,
+      })
+      const childQuery = new Query()
+        .from({ [alias]: children.collection })
+        .select((context: Context) => ({
+          id: (context[alias] as Child).id,
+          linkId: (context[alias] as Child).linkId,
+        }))
+      const root = new Query()
+        .from({ u: parents.collection })
+        .where(({ u }) => eq(u.id, 1))
+      const live =
+        form === `join`
+          ? createLiveQueryCollection({
+              query: root
+                .leftJoin({ w: childQuery }, ({ u, w }) => eq(u.linkId, w.id))
+                .select(({ u, w }) => ({ id: u.id, joinedId: w.id })),
             })
-            const childQuery = new Query()
-              .from({ [alias]: children.collection })
-              .select((context: Context) => ({
-                id: (context[alias] as Child).id,
-                linkId: (context[alias] as Child).linkId,
-              }))
-            const root = new Query()
-              .from({ u: parents.collection })
-              .where(({ u }) => eq(u.id, 1))
-            const live =
-              form === `join`
-                ? createLiveQueryCollection({
-                    query: root
-                      .leftJoin({ w: childQuery }, ({ u, w }) =>
-                        eq(u.linkId, w.id),
-                      )
-                      .select(({ u, w }) => ({ id: u.id, joinedId: w.id })),
-                  })
-                : createLiveQueryCollection({
-                    query: root.select(({ u: parent }) => ({
-                      id: parent.id,
-                      children: toArray(
-                        new Query()
-                          .from({ [alias]: children.collection })
-                          .where((context: Context) =>
-                            eq((context[alias] as Child).linkId, parent.id),
-                          )
-                          .select((context: Context) => ({
-                            id: (context[alias] as Child).id,
-                          })),
-                      ),
+          : createLiveQueryCollection({
+              query: root.select(({ u: parent }) => ({
+                id: parent.id,
+                children: toArray(
+                  new Query()
+                    .from({ [alias]: children.collection })
+                    .where((context: Context) =>
+                      eq((context[alias] as Child).linkId, parent.id),
+                    )
+                    .select((context: Context) => ({
+                      id: (context[alias] as Child).id,
                     })),
-                  })
-            return {
-              alias,
-              parents,
-              children,
-              live,
-            }
-          })
-
-          await withHistoryCleanup(
-            async () => {
-              for (const entry of cases) {
-                await entry.live.preload()
-                const rows = [...entry.live.toArray].map((row) =>
-                  form === `join`
-                    ? {
-                        id: row.id,
-                        joinedId: (row as { joinedId?: number }).joinedId,
-                      }
-                    : {
-                        id: row.id,
-                        children: (
-                          row as { children: Array<{ id: number }> }
-                        ).children.map((child) => child.id),
-                      },
-                )
-                expect(rows, `${entry.alias}: public rows`).toEqual(expected)
-                if (mode === `onDemand`) {
-                  expect(
-                    entry.children.collection.toArray.map((child) => child.id),
-                    `${entry.alias}: child provider admission`,
-                  ).toEqual([childId])
-                }
-              }
-            },
-            () =>
-              cases.flatMap((entry) => [
-                () => entry.live.cleanup(),
-                () => entry.parents.collection.cleanup(),
-                () => entry.children.collection.cleanup(),
-              ]),
-          )
-        })
+                ),
+              })),
+            })
+      return {
+        alias,
+        parents,
+        children,
+        live,
       }
-    }
+    })
+
+    await withHistoryCleanup(
+      async () => {
+        for (const entry of cases) {
+          await entry.live.preload()
+          const rows = [...entry.live.toArray].map((row) =>
+            form === `join`
+              ? {
+                  id: row.id,
+                  joinedId: (row as { joinedId?: number }).joinedId,
+                }
+              : {
+                  id: row.id,
+                  children: (
+                    row as { children: Array<{ id: number }> }
+                  ).children.map((child) => child.id),
+                },
+          )
+          expect(rows, `${entry.alias}: public rows`).toEqual(expected)
+          if (mode === `onDemand`) {
+            expect(
+              entry.children.collection.toArray.map((child) => child.id),
+              `${entry.alias}: child provider admission`,
+            ).toEqual([childId])
+          }
+        }
+      },
+      () =>
+        cases.flatMap((entry) => [
+          () => entry.live.cleanup(),
+          () => entry.parents.collection.cleanup(),
+          () => entry.children.collection.cleanup(),
+        ]),
+    )
   }
+
+  const outerFilterRolesLaw = `Outer filters stay with their source under alias shadowing, so projected rows follow source roles.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.outer-filter-roles`,
+    law: {
+      statement: outerFilterRolesLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: outerFilterRolesCells,
+    label: ({ form, mode, childId }) =>
+      `${form}, ${mode}, child ID ${childId}: projected rows follow source roles`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(outerFilterRolesLaw, plan, observe, () =>
+        judgeOuterFilterRoles(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -959,123 +1166,159 @@ describe(`captured projections keep their binding during predicate pushdown`, ()
           : [],
     }))
 
-  declareOracle({ model: [model] })
+  const capturedProjectionPushdownCells = ([`eager`, `onDemand`] as const).map(
+    (mode) => ({ mode }),
+  )
 
-  for (const mode of [`eager`, `onDemand`] as const) {
-    test(`${mode}: parent rank controls the child result under both child aliases`, async () => {
-      oracleRoute(`case`)
-      const parentRow = { id: 1, rank: `A` }
-      const childRow = { id: 10, parentId: 1, rank: `Z` }
-      const anchorRow = { id: 10 }
-      const parentsModel = new Map([[parentRow.id, parentRow]])
-      const childrenModel = new Map([[childRow.id, childRow]])
-      const anchorsModel = new Map([[anchorRow.id, anchorRow]])
-      const cases = ([`p`, `c`] as const).map((alias) => {
-        const parents = createScopedSource(
-          `projected-parent-${mode}-${alias}`,
-          [parentRow],
-          mode,
-        )
-        const children = createScopedSource(
-          `projected-child-${mode}-${alias}`,
-          [childRow],
-          mode,
-        )
-        const anchors = createScopedSource(
-          `projected-anchor-${mode}-${alias}`,
-          [anchorRow],
-          mode,
-        )
-        children.collection.createIndex((child) => child.id, {
-          indexType: BasicIndex,
-        })
-        anchors.collection.createIndex((anchor) => anchor.id, {
-          indexType: BasicIndex,
-        })
-        const query = new Query()
-          .from({ p: parents.collection })
-          .select(({ p: parent }) => {
-            const inner = new Query()
-              .from({ [alias]: children.collection })
-              .select((context: Context) => {
-                const child = context[alias] as Child
-                return {
-                  id: child.id,
-                  parentId: child.parentId,
-                  rank: parent.rank,
-                }
-              })
-            return {
-              id: parent.id,
-              matches: toArray(
-                new Query()
-                  .from({ q: inner })
-                  .innerJoin({ a: anchors.collection }, ({ q, a }) =>
-                    eq(q.id, a.id),
-                  )
-                  .where(({ q }) => eq(q.parentId, parent.id))
-                  .where(({ q }) => eq(q.rank, `A`))
-                  .select(({ q }) => ({ id: q.id })),
-              ),
-            }
-          })
-        return {
-          alias,
-          parents,
-          children,
-          anchors,
-          live: createLiveQueryCollection({ query }),
-        }
-      })
-
-      const check = (checkpoint: string) => {
-        const expected = model(parentsModel, childrenModel, anchorsModel)
-        for (const entry of cases) {
-          expect(
-            entry.live.toArray.map(({ id, matches }) => ({
-              id,
-              matches: matches.map((match) => match.id),
-            })),
-            `${checkpoint}: ${entry.alias} public rows`,
-          ).toEqual(expected)
-        }
-      }
-
-      await withHistoryCleanup(
-        async () => {
-          for (const entry of cases) await entry.live.preload()
-          check(`initial`)
-          if (mode === `onDemand`) {
-            for (const entry of cases) {
-              expect(
-                entry.children.collection.toArray.map((child) => child.id),
-                `${entry.alias}: initial child provider admission`,
-              ).toEqual([10])
-            }
-          }
-
-          const changedChild = { ...childRow, rank: `A` }
-          childrenModel.set(changedChild.id, changedChild)
-          for (const entry of cases) entry.children.put(changedChild)
-          await flushPromises()
-          check(`child rank changed`)
-
-          const changedParent = { ...parentRow, rank: `Z` }
-          parentsModel.set(changedParent.id, changedParent)
-          for (const entry of cases) entry.parents.put(changedParent)
-          await flushPromises()
-          check(`parent rank changed`)
-        },
-        () =>
-          cases.flatMap((entry) => [
-            () => entry.live.cleanup(),
-            () => entry.parents.collection.cleanup(),
-            () => entry.children.collection.cleanup(),
-            () => entry.anchors.collection.cleanup(),
-          ]),
+  // The former test body, unchanged.
+  async function judgeCapturedProjectionPushdown({
+    mode,
+  }: (typeof capturedProjectionPushdownCells)[number]): Promise<void> {
+    const parentRow = { id: 1, rank: `A` }
+    const childRow = { id: 10, parentId: 1, rank: `Z` }
+    const anchorRow = { id: 10 }
+    const parentsModel = new Map([[parentRow.id, parentRow]])
+    const childrenModel = new Map([[childRow.id, childRow]])
+    const anchorsModel = new Map([[anchorRow.id, anchorRow]])
+    const cases = ([`p`, `c`] as const).map((alias) => {
+      const parents = createScopedSource(
+        `projected-parent-${mode}-${alias}`,
+        [parentRow],
+        mode,
       )
+      const children = createScopedSource(
+        `projected-child-${mode}-${alias}`,
+        [childRow],
+        mode,
+      )
+      const anchors = createScopedSource(
+        `projected-anchor-${mode}-${alias}`,
+        [anchorRow],
+        mode,
+      )
+      children.collection.createIndex((child) => child.id, {
+        indexType: BasicIndex,
+      })
+      anchors.collection.createIndex((anchor) => anchor.id, {
+        indexType: BasicIndex,
+      })
+      const query = new Query()
+        .from({ p: parents.collection })
+        .select(({ p: parent }) => {
+          const inner = new Query()
+            .from({ [alias]: children.collection })
+            .select((context: Context) => {
+              const child = context[alias] as Child
+              return {
+                id: child.id,
+                parentId: child.parentId,
+                rank: parent.rank,
+              }
+            })
+          return {
+            id: parent.id,
+            matches: toArray(
+              new Query()
+                .from({ q: inner })
+                .innerJoin({ a: anchors.collection }, ({ q, a }) =>
+                  eq(q.id, a.id),
+                )
+                .where(({ q }) => eq(q.parentId, parent.id))
+                .where(({ q }) => eq(q.rank, `A`))
+                .select(({ q }) => ({ id: q.id })),
+            ),
+          }
+        })
+      return {
+        alias,
+        parents,
+        children,
+        anchors,
+        live: createLiveQueryCollection({ query }),
+      }
     })
+
+    const check = (checkpoint: string) => {
+      const expected = model(parentsModel, childrenModel, anchorsModel)
+      for (const entry of cases) {
+        expect(
+          entry.live.toArray.map(({ id, matches }) => ({
+            id,
+            matches: matches.map((match) => match.id),
+          })),
+          `${checkpoint}: ${entry.alias} public rows`,
+        ).toEqual(expected)
+      }
+    }
+
+    await withHistoryCleanup(
+      async () => {
+        for (const entry of cases) await entry.live.preload()
+        check(`initial`)
+        if (mode === `onDemand`) {
+          for (const entry of cases) {
+            expect(
+              entry.children.collection.toArray.map((child) => child.id),
+              `${entry.alias}: initial child provider admission`,
+            ).toEqual([10])
+          }
+        }
+
+        const changedChild = { ...childRow, rank: `A` }
+        childrenModel.set(changedChild.id, changedChild)
+        for (const entry of cases) entry.children.put(changedChild)
+        await flushPromises()
+        check(`child rank changed`)
+
+        const changedParent = { ...parentRow, rank: `Z` }
+        parentsModel.set(changedParent.id, changedParent)
+        for (const entry of cases) entry.parents.put(changedParent)
+        await flushPromises()
+        check(`parent rank changed`)
+      },
+      () =>
+        cases.flatMap((entry) => [
+          () => entry.live.cleanup(),
+          () => entry.parents.collection.cleanup(),
+          () => entry.children.collection.cleanup(),
+          () => entry.anchors.collection.cleanup(),
+        ]),
+    )
   }
+
+  const capturedProjectionPushdownLaw = `Captured projections keep their binding during predicate pushdown, so the parent rank controls the child result under both child aliases.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.captured-projection-pushdown`,
+    law: {
+      statement: capturedProjectionPushdownLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: capturedProjectionPushdownCells,
+    label: ({ mode }) =>
+      `${mode}: parent rank controls the child result under both child aliases`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        capturedProjectionPushdownLaw,
+        plan,
+        observe,
+        () => judgeCapturedProjectionPushdown(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -1136,94 +1379,126 @@ describe(`same-path group keys across alias scopes`, () => {
       })
       .sort((a, b) => a.id - b.id)
 
-  declareOracle({ model: [modelRowsForRanks] })
+  const samePathGroupKeysCells = ([`parent`, `child`] as const).flatMap(
+    (alias) =>
+      ([`parentFirst`, `childFirst`] as const).map((order) => ({
+        alias,
+        order,
+      })),
+  )
 
-  for (const alias of [`parent`, `child`] as const) {
-    for (const order of [`parentFirst`, `childFirst`] as const) {
-      test(`group values retain ${alias} child binding with ${order} keys`, async () => {
-        oracleRoute(`case`)
-        const parentRows = new Map(initialParents.map((row) => [row.id, row]))
-        const childRows = new Map(initialChildren.map((row) => [row.id, row]))
-        const parents = createScopedSource(
-          `rank-parents`,
-          initialParents,
-          `eager`,
-        )
-        const children = createScopedSource(
-          `rank-children`,
-          initialChildren,
-          `eager`,
-        )
-        const childAt = (context: Context) => context[alias] as RankChild
-        const live = createLiveQueryCollection({
-          query: new Query()
-            .from({ parent: parents.collection })
-            .select(({ parent }) => ({
-              id: parent.id,
-              groups: toArray(
-                new Query()
-                  .from({ [alias]: children.collection })
-                  .where((context: Context) =>
-                    eq(childAt(context).parentId, parent.id),
-                  )
-                  .groupBy((context: Context) =>
-                    order === `parentFirst`
-                      ? [parent.rank, childAt(context).rank]
-                      : [childAt(context).rank, parent.rank],
-                  )
-                  .select((context: Context) => ({
-                    parentRank: parent.rank,
-                    childRank: childAt(context).rank,
-                    total: count(childAt(context).id),
-                  })),
-              ),
-            })),
-        })
+  // The former test body, unchanged.
+  async function judgeSamePathGroupKeys({
+    alias,
+    order,
+  }: (typeof samePathGroupKeysCells)[number]): Promise<void> {
+    const parentRows = new Map(initialParents.map((row) => [row.id, row]))
+    const childRows = new Map(initialChildren.map((row) => [row.id, row]))
+    const parents = createScopedSource(`rank-parents`, initialParents, `eager`)
+    const children = createScopedSource(
+      `rank-children`,
+      initialChildren,
+      `eager`,
+    )
+    const childAt = (context: Context) => context[alias] as RankChild
+    const live = createLiveQueryCollection({
+      query: new Query()
+        .from({ parent: parents.collection })
+        .select(({ parent }) => ({
+          id: parent.id,
+          groups: toArray(
+            new Query()
+              .from({ [alias]: children.collection })
+              .where((context: Context) =>
+                eq(childAt(context).parentId, parent.id),
+              )
+              .groupBy((context: Context) =>
+                order === `parentFirst`
+                  ? [parent.rank, childAt(context).rank]
+                  : [childAt(context).rank, parent.rank],
+              )
+              .select((context: Context) => ({
+                parentRank: parent.rank,
+                childRank: childAt(context).rank,
+                total: count(childAt(context).id),
+              })),
+          ),
+        })),
+    })
 
-        // Observation: order between groups is unspecified, while each
-        // selected value and group multiplicity is part of the public row.
-        const check = (checkpoint: string) => {
-          const observed = live.toArray
-            .map(({ id, groups }) => ({
-              id,
-              groups: groups
-                .map(({ parentRank, childRank, total }) => ({
-                  parentRank,
-                  childRank,
-                  total,
-                }))
-                .sort((a, b) => a.childRank.localeCompare(b.childRank)),
+    // Observation: order between groups is unspecified, while each
+    // selected value and group multiplicity is part of the public row.
+    const check = (checkpoint: string) => {
+      const observed = live.toArray
+        .map(({ id, groups }) => ({
+          id,
+          groups: groups
+            .map(({ parentRank, childRank, total }) => ({
+              parentRank,
+              childRank,
+              total,
             }))
-            .sort((a, b) => a.id - b.id)
-          expect(observed, checkpoint).toEqual(
-            modelRowsForRanks(parentRows, childRows),
-          )
-        }
-
-        await withHistoryCleanup(
-          async () => {
-            await live.preload()
-            check(`after preload`)
-            const changedChild = { id: 11, parentId: 1, rank: `child-X` }
-            childRows.set(changedChild.id, changedChild)
-            children.put(changedChild)
-            await flushPromises()
-            check(`after child rank change`)
-            const changedParent = { id: 1, rank: `parent-A2` }
-            parentRows.set(changedParent.id, changedParent)
-            parents.put(changedParent)
-            await flushPromises()
-            check(`after parent rank change`)
-          },
-          () => [
-            () => live.cleanup(),
-            () => parents.collection.cleanup(),
-            () => children.collection.cleanup(),
-          ],
-        )
-      })
+            .sort((a, b) => a.childRank.localeCompare(b.childRank)),
+        }))
+        .sort((a, b) => a.id - b.id)
+      expect(observed, checkpoint).toEqual(
+        modelRowsForRanks(parentRows, childRows),
+      )
     }
+
+    await withHistoryCleanup(
+      async () => {
+        await live.preload()
+        check(`after preload`)
+        const changedChild = { id: 11, parentId: 1, rank: `child-X` }
+        childRows.set(changedChild.id, changedChild)
+        children.put(changedChild)
+        await flushPromises()
+        check(`after child rank change`)
+        const changedParent = { id: 1, rank: `parent-A2` }
+        parentRows.set(changedParent.id, changedParent)
+        parents.put(changedParent)
+        await flushPromises()
+        check(`after parent rank change`)
+      },
+      () => [
+        () => live.cleanup(),
+        () => parents.collection.cleanup(),
+        () => children.collection.cleanup(),
+      ],
+    )
   }
+
+  const samePathGroupKeysLaw = `Same-path group keys across alias scopes retain their own child binding.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.same-path-group-keys`,
+    law: {
+      statement: samePathGroupKeysLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: samePathGroupKeysCells,
+    label: ({ alias, order }) =>
+      `group values retain ${alias} child binding with ${order} keys`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(samePathGroupKeysLaw, plan, observe, () =>
+        judgeSamePathGroupKeys(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -1271,95 +1546,126 @@ describe(`group keys through nested source filtering`, () => {
     )
     return total ? [{ category: `A`, total }] : []
   }
-  declareOracle({ model: [expectedCategoryTotals] })
+  const nestedFilterGroupKeysCells = ([`x`, `u`] as const).flatMap(
+    (innerAlias) =>
+      ([`eager`, `onDemand`] as const).map((mode) => ({ innerAlias, mode })),
+  )
 
-  for (const innerAlias of [`x`, `u`] as const) {
-    for (const mode of [`eager`, `onDemand`] as const) {
-      test(`${mode} groups preserve the ${innerAlias} source through filtered joins and writes`, async () => {
-        oracleRoute(`case`)
-        const sourceRows = new Map(initialSources.map((row) => [row.id, row]))
-        const tagRows = new Map(initialTags.map((row) => [row.id, row]))
-        const source = createScopedSource(
-          `group-rewrite-source-${innerAlias}-${mode}`,
-          initialSources,
-          mode,
-        )
-        const tags = createScopedSource(
-          `group-rewrite-tags-${innerAlias}-${mode}`,
-          initialTags,
-          mode,
-        )
+  // The former test body, unchanged.
+  async function judgeNestedFilterGroupKeys({
+    innerAlias,
+    mode,
+  }: (typeof nestedFilterGroupKeysCells)[number]): Promise<void> {
+    const sourceRows = new Map(initialSources.map((row) => [row.id, row]))
+    const tagRows = new Map(initialTags.map((row) => [row.id, row]))
+    const source = createScopedSource(
+      `group-rewrite-source-${innerAlias}-${mode}`,
+      initialSources,
+      mode,
+    )
+    const tags = createScopedSource(
+      `group-rewrite-tags-${innerAlias}-${mode}`,
+      initialTags,
+      mode,
+    )
 
-        const inner = new Query()
-          .from({ [innerAlias]: source.collection })
-          .select((context: Context) => ({
-            id: (context[innerAlias] as Source).id,
-            category: (context[innerAlias] as Source).category,
-          }))
-        const live = createLiveQueryCollection({
-          query: new Query()
-            .from({ x: inner })
-            .innerJoin({ t: tags.collection }, ({ x, t }) =>
-              eq(x.id, t.sourceId),
-            )
-            .where(({ x }) => eq(x.category, `A`))
-            .groupBy(({ x }) => x.category)
-            .select(({ x }) => ({
-              category: x.category,
-              total: count(x.id),
-            })),
-        })
+    const inner = new Query()
+      .from({ [innerAlias]: source.collection })
+      .select((context: Context) => ({
+        id: (context[innerAlias] as Source).id,
+        category: (context[innerAlias] as Source).category,
+      }))
+    const live = createLiveQueryCollection({
+      query: new Query()
+        .from({ x: inner })
+        .innerJoin({ t: tags.collection }, ({ x, t }) => eq(x.id, t.sourceId))
+        .where(({ x }) => eq(x.category, `A`))
+        .groupBy(({ x }) => x.category)
+        .select(({ x }) => ({
+          category: x.category,
+          total: count(x.id),
+        })),
+    })
 
-        // The model counts joined matches afresh at each observation cut. It does
-        // not inspect the optimized plan or derive expectations from it.
-        const expected = () => expectedCategoryTotals(sourceRows, tagRows)
-        const check = (cut: string) =>
-          expect(
-            live.toArray.map(({ category, total }) => ({ category, total })),
-            cut,
-          ).toEqual(expected())
+    // The model counts joined matches afresh at each observation cut. It does
+    // not inspect the optimized plan or derive expectations from it.
+    const expected = () => expectedCategoryTotals(sourceRows, tagRows)
+    const check = (cut: string) =>
+      expect(
+        live.toArray.map(({ category, total }) => ({ category, total })),
+        cut,
+      ).toEqual(expected())
 
-        await withHistoryCleanup(
-          async () => {
-            await live.preload()
-            check(`after preload`)
-            if (mode === `onDemand`) {
-              expect(source.requests.length).toBeGreaterThan(0)
-              expect(tags.requests.length).toBeGreaterThan(0)
-            }
+    await withHistoryCleanup(
+      async () => {
+        await live.preload()
+        check(`after preload`)
+        if (mode === `onDemand`) {
+          expect(source.requests.length).toBeGreaterThan(0)
+          expect(tags.requests.length).toBeGreaterThan(0)
+        }
 
-            const added = { id: 3, category: `A` }
-            sourceRows.set(added.id, added)
-            source.put(added)
-            await flushPromises()
-            check(`after source enters the selected group`)
+        const added = { id: 3, category: `A` }
+        sourceRows.set(added.id, added)
+        source.put(added)
+        await flushPromises()
+        check(`after source enters the selected group`)
 
-            tagRows.delete(2)
-            tags.remove(2)
-            await flushPromises()
-            check(`after a joined tag is removed`)
+        tagRows.delete(2)
+        tags.remove(2)
+        await flushPromises()
+        check(`after a joined tag is removed`)
 
-            const repeated = { id: 4, sourceId: 3 }
-            tagRows.set(repeated.id, repeated)
-            tags.put(repeated)
-            await flushPromises()
-            check(`after a second tag joins one source`)
+        const repeated = { id: 4, sourceId: 3 }
+        tagRows.set(repeated.id, repeated)
+        tags.put(repeated)
+        await flushPromises()
+        check(`after a second tag joins one source`)
 
-            const removed = { id: 1, category: `B` }
-            sourceRows.set(removed.id, removed)
-            source.put(removed)
-            await flushPromises()
-            check(`after source leaves the selected group`)
-          },
-          () => [
-            () => live.cleanup(),
-            () => source.collection.cleanup(),
-            () => tags.collection.cleanup(),
-          ],
-        )
-      })
-    }
+        const removed = { id: 1, category: `B` }
+        sourceRows.set(removed.id, removed)
+        source.put(removed)
+        await flushPromises()
+        check(`after source leaves the selected group`)
+      },
+      () => [
+        () => live.cleanup(),
+        () => source.collection.cleanup(),
+        () => tags.collection.cleanup(),
+      ],
+    )
   }
+
+  const nestedFilterGroupKeysLaw = `Group keys through nested source filtering preserve their source through filtered joins and writes.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.nested-filter-group-keys`,
+    law: {
+      statement: nestedFilterGroupKeysLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: nestedFilterGroupKeysCells,
+    label: ({ innerAlias, mode }) =>
+      `${mode} groups preserve the ${innerAlias} source through filtered joins and writes`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(nestedFilterGroupKeysLaw, plan, observe, () =>
+        judgeNestedFilterGroupKeys(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 function expectedWrapperRows(
@@ -1369,8 +1675,6 @@ function expectedWrapperRows(
     .map(({ id, label }) => ({ id, label }))
     .sort((a, b) => a.id - b.id)
 }
-declareOracle({ model: [expectedWrapperRows] })
-
 /**
  * # A redundant wrapper does not change alpha-normalized identity
  *
@@ -1385,8 +1689,8 @@ declareOracle({ model: [expectedWrapperRows] })
  * This cell does not assert that every semantically equivalent query shape
  * has the same identity.
  */
-test(`optimized redundant wrappers erase alias spelling`, async () => {
-  oracleRoute(`fixed history`)
+// The former test body, unchanged.
+async function judgeRedundantWrappers(): Promise<void> {
   const initial = { id: 1, label: `first` }
   const source = createScopedSource(`wrapper-alpha`, [initial], `eager`)
   const model = new Map([[initial.id, initial]])
@@ -1435,6 +1739,36 @@ test(`optimized redundant wrappers erase alias spelling`, async () => {
       () => source.collection.cleanup(),
     ],
   )
+}
+
+const redundantWrappersLaw = `Optimized redundant wrappers erase alias spelling from query identity and results.`
+
+oracleProperty({
+  id: `includes-alias-shadowing.redundant-wrappers`,
+  law: {
+    statement: redundantWrappersLaw,
+    authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+    limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+  },
+  owns: [
+    `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+    `src/collection/index.ts#createCollection`,
+    `src/indexes/basic-index.ts`,
+    `src/query/builder/index.ts`,
+    `src/query/builder/query-ir.ts#getQueryIR`,
+    `src/query/ir-stable-identity.ts#getQueryIdentity`,
+    `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    `src/query/optimizer.ts#optimizeQuery`,
+  ],
+  histories: [`optimized redundant wrappers erase alias spelling`],
+  label: (name) => name,
+  resolve: (name) => ({ name }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(redundantWrappersLaw, plan, observe, () =>
+      judgeRedundantWrappers(),
+    ),
+  check: forwardAssertionJudgment,
 })
 
 /**
@@ -1536,8 +1870,6 @@ describe(`lazy join demand across nested alias scopes`, () => {
       })
       .sort((a, b) => a.anchorId - b.anchorId)
 
-  declareOracle({ model: [modelJoinedRows, requestMatches] })
-
   const buildCase = (postAlias: PostAlias, placement: PostPlacement) => {
     const anchors = createScopedSource(
       `lazy-alias-anchors-${postAlias}-${placement}`,
@@ -1590,8 +1922,8 @@ describe(`lazy join demand across nested alias scopes`, () => {
     return { anchors, users, posts, live, requestCount: 0 }
   }
 
-  test(`direct and wrapped shadowed includes preserve keyed user demand through writes`, async () => {
-    oracleRoute(`fixed history`)
+  // The former test body, unchanged.
+  async function judgeLazyJoinDemand(): Promise<void> {
     const anchors = new Map([[initialAnchor.id, initialAnchor]])
     const users = new Map(initialUsers.map((user) => [user.id, user]))
     // In this one-way history, a key requested at an earlier checkpoint is
@@ -1659,6 +1991,38 @@ describe(`lazy join demand across nested alias scopes`, () => {
           () => entry.posts.collection.cleanup(),
         ]),
     )
+  }
+
+  const lazyJoinDemandLaw = `Lazy join demand across nested alias scopes preserves keyed user demand through writes.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.lazy-join-demand`,
+    law: {
+      statement: lazyJoinDemandLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: [
+      `direct and wrapped shadowed includes preserve keyed user demand through writes`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(lazyJoinDemandLaw, plan, observe, () =>
+        judgeLazyJoinDemand(),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -1710,104 +2074,136 @@ describe(`lexical bindings through recursive joins and selections`, () => {
       })
       .sort((a, b) => (a.userId ?? Infinity) - (b.userId ?? Infinity))
 
-  declareOracle({ model: [expectedManagerRows] })
-
-  test.each([`eager`, `onDemand`] as const)(
-    `a shadowed FROM subquery preserves joined rows with %s loading`,
-    async (mode) => {
-      oracleRoute(`case`)
-      type Manager = { id: number; name: string }
-      type User = { id: number; managerId: number; name: string }
-      const managerRows: Array<Manager> = [
-        { id: 1, name: `one` },
-        { id: 2, name: `two` },
-      ]
-      const userRows: Array<User> = [
-        { id: 10, managerId: 1, name: `A` },
-        { id: 11, managerId: 1, name: `B` },
-        { id: 12, managerId: 2, name: `C` },
-      ]
-      const managers = createScopedSource(
-        `recursive-managers`,
-        managerRows,
-        `eager`,
-      )
-      const users = createScopedSource(`recursive-users`, userRows, mode)
-      const modelUsers = new Map(userRows.map((row) => [row.id, row]))
-      users.collection.createIndex((user) => user.managerId, {
-        indexType: BasicIndex,
-      })
-
-      const build = (innerAlias: `user` | `member`) => {
-        const inner = new Query()
-          .from({ [innerAlias]: managers.collection })
-          .select((context: Context) => ({
-            id: (context[innerAlias] as Manager).id,
-          }))
-        return createLiveQueryCollection({
-          query: new Query()
-            .from({ manager: inner })
-            .leftJoin({ user: users.collection }, ({ manager, user }) =>
-              eq(manager.id, user.managerId),
-            )
-            .select(({ manager, user }) => ({
-              managerId: manager.id,
-              userId: user.id,
-              userName: user.name,
-            })),
-        })
-      }
-      const shadowed = build(`user`)
-      const renamed = build(`member`)
-
-      // Model: each manager joins its matching users, regardless of spelling.
-      const expected = () => expectedManagerRows(managerRows, modelUsers)
-      const check = (checkpoint: string) => {
-        for (const live of [shadowed, renamed]) {
-          expect(
-            live.toArray
-              .map(({ managerId, userId, userName }) => ({
-                managerId,
-                userId,
-                userName,
-              }))
-              .sort((a, b) => (a.userId ?? Infinity) - (b.userId ?? Infinity)),
-            checkpoint,
-          ).toEqual(expected())
-        }
-      }
-
-      await withHistoryCleanup(
-        async () => {
-          await shadowed.preload()
-          // On-demand sources are shared; check shadowing before the renamed
-          // control can supply rows that conceal a missed source request.
-          expect(
-            shadowed.toArray
-              .map(({ managerId, userId, userName }) => ({
-                managerId,
-                userId,
-                userName,
-              }))
-              .sort((a, b) => (a.userId ?? Infinity) - (b.userId ?? Infinity)),
-          ).toEqual(expected())
-          await renamed.preload()
-          check(`after preload`)
-          const changed = { id: 12, managerId: 1, name: `C2` }
-          modelUsers.set(changed.id, changed)
-          users.put(changed)
-          await flushPromises()
-          check(`after user moves between managers`)
-        },
-        () => [
-          () => shadowed.cleanup(),
-          () => renamed.cleanup(),
-          () => managers.collection.cleanup(),
-          () => users.collection.cleanup(),
-        ],
-      )
-    },
+  const recursiveJoinBindingsCells = ([`eager`, `onDemand`] as const).map(
+    (mode) => ({ mode }),
   )
+
+  // The former test body, unchanged.
+  async function judgeRecursiveJoinBindings({
+    mode,
+  }: (typeof recursiveJoinBindingsCells)[number]): Promise<void> {
+    type Manager = { id: number; name: string }
+    type User = { id: number; managerId: number; name: string }
+    const managerRows: Array<Manager> = [
+      { id: 1, name: `one` },
+      { id: 2, name: `two` },
+    ]
+    const userRows: Array<User> = [
+      { id: 10, managerId: 1, name: `A` },
+      { id: 11, managerId: 1, name: `B` },
+      { id: 12, managerId: 2, name: `C` },
+    ]
+    const managers = createScopedSource(
+      `recursive-managers`,
+      managerRows,
+      `eager`,
+    )
+    const users = createScopedSource(`recursive-users`, userRows, mode)
+    const modelUsers = new Map(userRows.map((row) => [row.id, row]))
+    users.collection.createIndex((user) => user.managerId, {
+      indexType: BasicIndex,
+    })
+
+    const build = (innerAlias: `user` | `member`) => {
+      const inner = new Query()
+        .from({ [innerAlias]: managers.collection })
+        .select((context: Context) => ({
+          id: (context[innerAlias] as Manager).id,
+        }))
+      return createLiveQueryCollection({
+        query: new Query()
+          .from({ manager: inner })
+          .leftJoin({ user: users.collection }, ({ manager, user }) =>
+            eq(manager.id, user.managerId),
+          )
+          .select(({ manager, user }) => ({
+            managerId: manager.id,
+            userId: user.id,
+            userName: user.name,
+          })),
+      })
+    }
+    const shadowed = build(`user`)
+    const renamed = build(`member`)
+
+    // Model: each manager joins its matching users, regardless of spelling.
+    const expected = () => expectedManagerRows(managerRows, modelUsers)
+    const check = (checkpoint: string) => {
+      for (const live of [shadowed, renamed]) {
+        expect(
+          live.toArray
+            .map(({ managerId, userId, userName }) => ({
+              managerId,
+              userId,
+              userName,
+            }))
+            .sort((a, b) => (a.userId ?? Infinity) - (b.userId ?? Infinity)),
+          checkpoint,
+        ).toEqual(expected())
+      }
+    }
+
+    await withHistoryCleanup(
+      async () => {
+        await shadowed.preload()
+        // On-demand sources are shared; check shadowing before the renamed
+        // control can supply rows that conceal a missed source request.
+        expect(
+          shadowed.toArray
+            .map(({ managerId, userId, userName }) => ({
+              managerId,
+              userId,
+              userName,
+            }))
+            .sort((a, b) => (a.userId ?? Infinity) - (b.userId ?? Infinity)),
+        ).toEqual(expected())
+        await renamed.preload()
+        check(`after preload`)
+        const changed = { id: 12, managerId: 1, name: `C2` }
+        modelUsers.set(changed.id, changed)
+        users.put(changed)
+        await flushPromises()
+        check(`after user moves between managers`)
+      },
+      () => [
+        () => shadowed.cleanup(),
+        () => renamed.cleanup(),
+        () => managers.collection.cleanup(),
+        () => users.collection.cleanup(),
+      ],
+    )
+  }
+
+  const recursiveJoinBindingsLaw = `Lexical bindings survive recursive joins and selections: a shadowed FROM subquery preserves joined rows.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.recursive-join-bindings`,
+    law: {
+      statement: recursiveJoinBindingsLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: recursiveJoinBindingsCells,
+    label: ({ mode }) =>
+      `a shadowed FROM subquery preserves joined rows with ${mode} loading`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(recursiveJoinBindingsLaw, plan, observe, () =>
+        judgeRecursiveJoinBindings(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -1885,222 +2281,247 @@ describe(`nested source placement preserves captured outer rows`, () => {
       })
       .sort((a, b) => a.managerId - b.managerId)
 
-  declareOracle({ model: [model] })
+  const nestedSourcePlacementCells = ([`from`, `join`] as const).flatMap(
+    (placement) =>
+      ([`fields`, `spread`] as const).flatMap((capture) =>
+        ([`eager`, `onDemand`] as const).map((mode) => ({
+          placement,
+          capture,
+          mode,
+        })),
+      ),
+  )
 
-  for (const placement of [`from`, `join`] as const) {
-    for (const capture of [`fields`, `spread`] as const) {
-      for (const mode of [`eager`, `onDemand`] as const) {
-        test(`${placement}, ${capture}, ${mode}: shadowing and renaming agree at every write cut`, async () => {
-          oracleRoute(`case`)
-          const managersModel = new Map(
-            initialManagers.map((row) => [row.id, row]),
+  // The former test body, unchanged.
+  async function judgeNestedSourcePlacement({
+    placement,
+    capture,
+    mode,
+  }: (typeof nestedSourcePlacementCells)[number]): Promise<void> {
+    const managersModel = new Map(initialManagers.map((row) => [row.id, row]))
+    const assignmentsModel = new Map(
+      initialAssignments.map((row) => [row.id, row]),
+    )
+    const detailsModel = new Map(initialDetails.map((row) => [row.id, row]))
+    const cases = ([`user`, `detail`] as const).map((alias) => {
+      const managers = createScopedSource(
+        `placement-managers-${placement}-${capture}-${mode}-${alias}`,
+        initialManagers,
+        `eager`,
+      )
+      const assignments = createScopedSource(
+        `placement-assignments-${placement}-${capture}-${mode}-${alias}`,
+        initialAssignments,
+        mode,
+      )
+      const details = createScopedSource(
+        `placement-details-${placement}-${capture}-${mode}-${alias}`,
+        initialDetails,
+        mode,
+      )
+      const anchors = createScopedSource(
+        `placement-anchors-${placement}-${capture}-${mode}-${alias}`,
+        initialManagers.map(({ id }) => ({ id })),
+        `eager`,
+      )
+      managers.collection.createIndex((row) => row.id, {
+        indexType: BasicIndex,
+      })
+      assignments.collection.createIndex((row) => row.managerId, {
+        indexType: BasicIndex,
+      })
+      details.collection.createIndex((row) => row.managerId, {
+        indexType: BasicIndex,
+      })
+      anchors.collection.createIndex((row) => row.id, {
+        indexType: BasicIndex,
+      })
+      const live = createLiveQueryCollection({
+        query: new Query()
+          .from({ manager: managers.collection })
+          .innerJoin({ user: assignments.collection }, ({ manager, user }) =>
+            eq(manager.id, user.managerId),
           )
-          const assignmentsModel = new Map(
-            initialAssignments.map((row) => [row.id, row]),
-          )
-          const detailsModel = new Map(
-            initialDetails.map((row) => [row.id, row]),
-          )
-          const cases = ([`user`, `detail`] as const).map((alias) => {
-            const managers = createScopedSource(
-              `placement-managers-${placement}-${capture}-${mode}-${alias}`,
-              initialManagers,
-              `eager`,
-            )
-            const assignments = createScopedSource(
-              `placement-assignments-${placement}-${capture}-${mode}-${alias}`,
-              initialAssignments,
-              mode,
-            )
-            const details = createScopedSource(
-              `placement-details-${placement}-${capture}-${mode}-${alias}`,
-              initialDetails,
-              mode,
-            )
-            const anchors = createScopedSource(
-              `placement-anchors-${placement}-${capture}-${mode}-${alias}`,
-              initialManagers.map(({ id }) => ({ id })),
-              `eager`,
-            )
-            managers.collection.createIndex((row) => row.id, {
-              indexType: BasicIndex,
-            })
-            assignments.collection.createIndex((row) => row.managerId, {
-              indexType: BasicIndex,
-            })
-            details.collection.createIndex((row) => row.managerId, {
-              indexType: BasicIndex,
-            })
-            anchors.collection.createIndex((row) => row.id, {
-              indexType: BasicIndex,
-            })
-            const live = createLiveQueryCollection({
-              query: new Query()
-                .from({ manager: managers.collection })
-                .innerJoin(
-                  { user: assignments.collection },
-                  ({ manager, user }) => eq(manager.id, user.managerId),
-                )
-                .select(({ manager, user }) => {
-                  const project = (context: Context) => {
-                    const detail = context[alias] as Detail
-                    return capture === `fields`
-                      ? {
-                          outerAssignmentId: user.id,
-                          detailId: detail.id,
-                          label: detail.label,
-                        }
-                      : { ...user, ...detail }
+          .select(({ manager, user }) => {
+            const project = (context: Context) => {
+              const detail = context[alias] as Detail
+              return capture === `fields`
+                ? {
+                    outerAssignmentId: user.id,
+                    detailId: detail.id,
+                    label: detail.label,
                   }
-                  const child =
-                    placement === `from`
-                      ? new Query()
-                          .from({ [alias]: details.collection })
-                          .where((context: Context) =>
-                            eq(
-                              (context[alias] as Detail).managerId,
-                              manager.id,
-                            ),
-                          )
-                          .select(project)
-                      : new Query()
-                          .from({ anchor: anchors.collection })
-                          .innerJoin(
-                            { [alias]: details.collection },
-                            (context: Context) =>
-                              eq(
-                                (context[alias] as Detail).managerId,
-                                (context.anchor as { id: number }).id,
-                              ),
-                          )
-                          .where((context: Context) =>
-                            eq(
-                              (context.anchor as { id: number }).id,
-                              manager.id,
-                            ),
-                          )
-                          .select(project)
-                  return {
-                    managerId: manager.id,
-                    managerName: manager.name,
-                    assignmentId: user.id,
-                    details: toArray(child),
+                : { ...user, ...detail }
+            }
+            const child =
+              placement === `from`
+                ? new Query()
+                    .from({ [alias]: details.collection })
+                    .where((context: Context) =>
+                      eq((context[alias] as Detail).managerId, manager.id),
+                    )
+                    .select(project)
+                : new Query()
+                    .from({ anchor: anchors.collection })
+                    .innerJoin(
+                      { [alias]: details.collection },
+                      (context: Context) =>
+                        eq(
+                          (context[alias] as Detail).managerId,
+                          (context.anchor as { id: number }).id,
+                        ),
+                    )
+                    .where((context: Context) =>
+                      eq((context.anchor as { id: number }).id, manager.id),
+                    )
+                    .select(project)
+            return {
+              managerId: manager.id,
+              managerName: manager.name,
+              assignmentId: user.id,
+              details: toArray(child),
+            }
+          }),
+      })
+      return { alias, managers, assignments, details, anchors, live }
+    })
+
+    const observe = (live: (typeof cases)[number][`live`]) =>
+      live.toArray
+        .map((row) => ({
+          managerId: row.managerId,
+          managerName: row.managerName,
+          assignmentId: row.assignmentId,
+          details: (row.details as Array<Record<string, unknown>>)
+            .map((detail) =>
+              capture === `fields`
+                ? {
+                    outerAssignmentId: detail.outerAssignmentId as number,
+                    detailId: detail.detailId as number,
+                    label: detail.label as string,
                   }
-                }),
-            })
-            return { alias, managers, assignments, details, anchors, live }
-          })
+                : {
+                    id: detail.id as number,
+                    managerId: detail.managerId as number,
+                    ownerTag: detail.ownerTag as string,
+                    label: detail.label as string,
+                  },
+            )
+            .sort((a, b) => (a.detailId ?? a.id) - (b.detailId ?? b.id)),
+        }))
+        .sort((a, b) => a.managerId - b.managerId)
 
-          const observe = (live: (typeof cases)[number][`live`]) =>
-            live.toArray
-              .map((row) => ({
-                managerId: row.managerId,
-                managerName: row.managerName,
-                assignmentId: row.assignmentId,
-                details: (row.details as Array<Record<string, unknown>>)
-                  .map((detail) =>
-                    capture === `fields`
-                      ? {
-                          outerAssignmentId: detail.outerAssignmentId as number,
-                          detailId: detail.detailId as number,
-                          label: detail.label as string,
-                        }
-                      : {
-                          id: detail.id as number,
-                          managerId: detail.managerId as number,
-                          ownerTag: detail.ownerTag as string,
-                          label: detail.label as string,
-                        },
-                  )
-                  .sort((a, b) => (a.detailId ?? a.id) - (b.detailId ?? b.id)),
-              }))
-              .sort((a, b) => a.managerId - b.managerId)
-
-          await withHistoryCleanup(
-            async () => {
-              for (const entry of cases) await entry.live.preload()
-              const check = (cut: string) => {
-                const expected = model(
-                  managersModel,
-                  assignmentsModel,
-                  detailsModel,
-                  capture,
-                )
-                for (const entry of cases) {
-                  expect(
-                    observe(entry.live),
-                    `${entry.alias} at ${cut}`,
-                  ).toEqual(expected)
-                }
-                if (mode === `onDemand`) {
-                  for (const source of [`assignments`, `details`] as const) {
-                    expect(cases[0]![source].requests.length).toBeGreaterThan(0)
-                    expect(
-                      [...cases[0]![source].requests].sort(),
-                      `${source} requests at ${cut}`,
-                    ).toEqual([...cases[1]![source].requests].sort())
-                  }
-                }
-              }
-              check(`initial publication`)
-
-              detailsModel.delete(201)
-              for (const entry of cases) entry.details.remove(201)
-              await flushPromises()
-              check(`detail removal`)
-
-              const movedDetail = { id: 202, managerId: 1, label: `B2` }
-              detailsModel.set(movedDetail.id, movedDetail)
-              for (const entry of cases) entry.details.put(movedDetail)
-              await flushPromises()
-              check(`detail moves between managers`)
-
-              const changedAssignment = {
-                id: 101,
-                managerId: 1,
-                ownerTag: `OUTER2`,
-              }
-              assignmentsModel.set(changedAssignment.id, changedAssignment)
-              for (const entry of cases)
-                entry.assignments.put(changedAssignment)
-              await flushPromises()
-              check(`captured assignment changes`)
-
-              const movedAssignment = {
-                id: 101,
-                managerId: 2,
-                ownerTag: `OUTER2`,
-              }
-              assignmentsModel.set(movedAssignment.id, movedAssignment)
-              for (const entry of cases) entry.assignments.put(movedAssignment)
-              await flushPromises()
-              check(`outer joined row moves`)
-
-              const returnedDetail = { id: 202, managerId: 2, label: `B3` }
-              detailsModel.set(returnedDetail.id, returnedDetail)
-              for (const entry of cases) entry.details.put(returnedDetail)
-              await flushPromises()
-              check(`detail follows moved assignment`)
-
-              const renamedManager = { id: 2, name: `TWO2` }
-              managersModel.set(renamedManager.id, renamedManager)
-              for (const entry of cases) entry.managers.put(renamedManager)
-              await flushPromises()
-              check(`captured outer row changes`)
-            },
-            () =>
-              cases.flatMap((entry) => [
-                () => entry.live.cleanup(),
-                () => entry.managers.collection.cleanup(),
-                () => entry.assignments.collection.cleanup(),
-                () => entry.details.collection.cleanup(),
-                () => entry.anchors.collection.cleanup(),
-              ]),
+    await withHistoryCleanup(
+      async () => {
+        for (const entry of cases) await entry.live.preload()
+        const check = (cut: string) => {
+          const expected = model(
+            managersModel,
+            assignmentsModel,
+            detailsModel,
+            capture,
           )
-        })
-      }
-    }
+          for (const entry of cases) {
+            expect(observe(entry.live), `${entry.alias} at ${cut}`).toEqual(
+              expected,
+            )
+          }
+          if (mode === `onDemand`) {
+            for (const source of [`assignments`, `details`] as const) {
+              expect(cases[0]![source].requests.length).toBeGreaterThan(0)
+              expect(
+                [...cases[0]![source].requests].sort(),
+                `${source} requests at ${cut}`,
+              ).toEqual([...cases[1]![source].requests].sort())
+            }
+          }
+        }
+        check(`initial publication`)
+
+        detailsModel.delete(201)
+        for (const entry of cases) entry.details.remove(201)
+        await flushPromises()
+        check(`detail removal`)
+
+        const movedDetail = { id: 202, managerId: 1, label: `B2` }
+        detailsModel.set(movedDetail.id, movedDetail)
+        for (const entry of cases) entry.details.put(movedDetail)
+        await flushPromises()
+        check(`detail moves between managers`)
+
+        const changedAssignment = {
+          id: 101,
+          managerId: 1,
+          ownerTag: `OUTER2`,
+        }
+        assignmentsModel.set(changedAssignment.id, changedAssignment)
+        for (const entry of cases) entry.assignments.put(changedAssignment)
+        await flushPromises()
+        check(`captured assignment changes`)
+
+        const movedAssignment = {
+          id: 101,
+          managerId: 2,
+          ownerTag: `OUTER2`,
+        }
+        assignmentsModel.set(movedAssignment.id, movedAssignment)
+        for (const entry of cases) entry.assignments.put(movedAssignment)
+        await flushPromises()
+        check(`outer joined row moves`)
+
+        const returnedDetail = { id: 202, managerId: 2, label: `B3` }
+        detailsModel.set(returnedDetail.id, returnedDetail)
+        for (const entry of cases) entry.details.put(returnedDetail)
+        await flushPromises()
+        check(`detail follows moved assignment`)
+
+        const renamedManager = { id: 2, name: `TWO2` }
+        managersModel.set(renamedManager.id, renamedManager)
+        for (const entry of cases) entry.managers.put(renamedManager)
+        await flushPromises()
+        check(`captured outer row changes`)
+      },
+      () =>
+        cases.flatMap((entry) => [
+          () => entry.live.cleanup(),
+          () => entry.managers.collection.cleanup(),
+          () => entry.assignments.collection.cleanup(),
+          () => entry.details.collection.cleanup(),
+          () => entry.anchors.collection.cleanup(),
+        ]),
+    )
   }
+
+  const nestedSourcePlacementLaw = `Nested source placement preserves captured outer rows, and shadowing and renaming agree at every write cut.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.nested-source-placement`,
+    law: {
+      statement: nestedSourcePlacementLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: nestedSourcePlacementCells,
+    label: ({ placement, capture, mode }) =>
+      `${placement}, ${capture}, ${mode}: shadowing and renaming agree at every write cut`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(nestedSourcePlacementLaw, plan, observe, () =>
+        judgeNestedSourcePlacement(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -2196,204 +2617,241 @@ describe(`outer joins preserve absent source bindings under shadowing`, () => {
     )
   }
 
-  declareOracle({ model: [model] })
+  const outerJoinAbsenceCells = (
+    [
+      [`right`, `joined`],
+      [`right`, `main`],
+      [`full`, `joined`],
+      [`full`, `main`],
+    ] as const
+  ).flatMap(([kind, correlationSide]) =>
+    ([`eager`, `onDemand`] as const).map((mode) => ({
+      kind,
+      correlationSide,
+      mode,
+    })),
+  )
 
-  for (const [kind, correlationSide] of [
-    [`right`, `joined`],
-    [`right`, `main`],
-    [`full`, `joined`],
-    [`full`, `main`],
-  ] as const) {
-    for (const mode of [`eager`, `onDemand`] as const) {
-      test(`${kind} with ${correlationSide} correlation and ${mode} sources keeps absent sides absent`, async () => {
-        oracleRoute(`case`)
-        const parentRows = new Map<number, Parent>([
-          [1, { id: 1, marker: `PARENT` }],
-          [2, { id: 2, marker: `OTHER` }],
-        ])
-        const mainRows = new Map<number, Main>([
-          [10, { id: 10, parentId: 1, anchorId: 7, label: `MATCH` }],
-          [11, { id: 11, parentId: 1, anchorId: 9, label: `MAIN ONLY` }],
-          [21, { id: 21, parentId: 2, anchorId: 20, label: `OTHER MATCH` }],
-        ])
-        const anchorRows = new Map<number, Anchor>([
-          [7, { id: 7, parentId: 1 }],
-          [8, { id: 8, parentId: 1 }],
-          [20, { id: 20, parentId: 2 }],
-        ])
-        const cases = ([`queryRef`, `direct`] as const).flatMap((sourceForm) =>
-          ([`issue`, `child`] as const).map((alias) => {
-            const parents = createScopedSource(
-              `outer-parent-${kind}-${correlationSide}-${mode}-${sourceForm}-${alias}`,
-              [...parentRows.values()],
-              `eager`,
-            )
-            const mains = createScopedSource(
-              `outer-main-${kind}-${correlationSide}-${mode}-${sourceForm}-${alias}`,
-              [...mainRows.values()],
-              mode,
-            )
-            const anchors = createScopedSource(
-              `outer-anchor-${kind}-${correlationSide}-${mode}-${sourceForm}-${alias}`,
-              [...anchorRows.values()],
-              mode,
-            )
-            mains.collection.createIndex((row) => row.anchorId, {
-              indexType: BasicIndex,
-            })
-            mains.collection.createIndex((row) => row.parentId, {
-              indexType: BasicIndex,
-            })
-            anchors.collection.createIndex((row) => row.parentId, {
-              indexType: BasicIndex,
-            })
-            anchors.collection.createIndex((row) => row.id, {
-              indexType: BasicIndex,
-            })
-            const live = createLiveQueryCollection({
-              query: new Query()
-                .from({ issue: parents.collection })
-                .select(({ issue: parent }) => {
-                  const main = new Query().from({ [alias]: mains.collection })
-                  const scopedAnchors = new Query()
-                    .from({ source: anchors.collection })
-                    .where(({ source }) => eq(source.parentId, parent.id))
-                    .select(({ source }) => ({
-                      id: source.id,
-                      parentId: source.parentId,
-                    }))
-                  const on = (context: Context) =>
-                    eq(
-                      (context[alias] as Main).anchorId,
-                      (context.anchor as Anchor).id,
-                    )
-                  const anchorSource =
-                    sourceForm === `direct` ? anchors.collection : scopedAnchors
-                  const joined = main.join({ anchor: anchorSource }, on, kind)
-                  expect(getQueryIR(joined).join?.[0]?.from.type).toBe(
-                    sourceForm === `direct` ? `collectionRef` : `queryRef`,
-                  )
-                  return {
-                    id: parent.id,
-                    rows: toArray(
-                      joined
-                        .where((context: Context) =>
-                          correlationSide === `joined`
-                            ? eq((context.anchor as Anchor).parentId, parent.id)
-                            : eq((context[alias] as Main).parentId, parent.id),
-                        )
-                        .select((context: Context) => ({
-                          mainId: (context[alias] as Main).id,
-                          anchorId: (context.anchor as Anchor).id,
-                          label: (context[alias] as Main).label,
-                          marker: parent.marker,
-                          missingMain: isUndefined((context[alias] as Main).id),
-                          missingAnchor: isUndefined(
-                            (context.anchor as Anchor).id,
-                          ),
-                        })),
-                    ),
-                  }
-                }),
-            })
-            return { sourceForm, alias, parents, mains, anchors, live }
-          }),
+  // The former test body, unchanged.
+  async function judgeOuterJoinAbsence({
+    kind,
+    correlationSide,
+    mode,
+  }: (typeof outerJoinAbsenceCells)[number]): Promise<void> {
+    const parentRows = new Map<number, Parent>([
+      [1, { id: 1, marker: `PARENT` }],
+      [2, { id: 2, marker: `OTHER` }],
+    ])
+    const mainRows = new Map<number, Main>([
+      [10, { id: 10, parentId: 1, anchorId: 7, label: `MATCH` }],
+      [11, { id: 11, parentId: 1, anchorId: 9, label: `MAIN ONLY` }],
+      [21, { id: 21, parentId: 2, anchorId: 20, label: `OTHER MATCH` }],
+    ])
+    const anchorRows = new Map<number, Anchor>([
+      [7, { id: 7, parentId: 1 }],
+      [8, { id: 8, parentId: 1 }],
+      [20, { id: 20, parentId: 2 }],
+    ])
+    const cases = ([`queryRef`, `direct`] as const).flatMap((sourceForm) =>
+      ([`issue`, `child`] as const).map((alias) => {
+        const parents = createScopedSource(
+          `outer-parent-${kind}-${correlationSide}-${mode}-${sourceForm}-${alias}`,
+          [...parentRows.values()],
+          `eager`,
         )
-
-        /** Compare every public result after preload and each committed write. */
-        const observe = (live: (typeof cases)[number][`live`]) =>
-          sortRows(
-            live.toArray.flatMap(({ id, rows }) =>
-              rows.map((row) => ({
-                parentId: id,
-                mainId: row.mainId,
-                anchorId: row.anchorId,
-                label: row.label,
-                marker: row.marker,
-                missingMain: row.missingMain,
-                missingAnchor: row.missingAnchor,
-              })),
-            ),
-          )
-
-        await withHistoryCleanup(
-          async () => {
-            for (const entry of cases) await entry.live.preload()
-            const check = (cut: string) => {
-              const expected = model(
-                parentRows,
-                mainRows,
-                anchorRows,
-                kind,
-                correlationSide,
+        const mains = createScopedSource(
+          `outer-main-${kind}-${correlationSide}-${mode}-${sourceForm}-${alias}`,
+          [...mainRows.values()],
+          mode,
+        )
+        const anchors = createScopedSource(
+          `outer-anchor-${kind}-${correlationSide}-${mode}-${sourceForm}-${alias}`,
+          [...anchorRows.values()],
+          mode,
+        )
+        mains.collection.createIndex((row) => row.anchorId, {
+          indexType: BasicIndex,
+        })
+        mains.collection.createIndex((row) => row.parentId, {
+          indexType: BasicIndex,
+        })
+        anchors.collection.createIndex((row) => row.parentId, {
+          indexType: BasicIndex,
+        })
+        anchors.collection.createIndex((row) => row.id, {
+          indexType: BasicIndex,
+        })
+        const live = createLiveQueryCollection({
+          query: new Query()
+            .from({ issue: parents.collection })
+            .select(({ issue: parent }) => {
+              const main = new Query().from({ [alias]: mains.collection })
+              const scopedAnchors = new Query()
+                .from({ source: anchors.collection })
+                .where(({ source }) => eq(source.parentId, parent.id))
+                .select(({ source }) => ({
+                  id: source.id,
+                  parentId: source.parentId,
+                }))
+              const on = (context: Context) =>
+                eq(
+                  (context[alias] as Main).anchorId,
+                  (context.anchor as Anchor).id,
+                )
+              const anchorSource =
+                sourceForm === `direct` ? anchors.collection : scopedAnchors
+              const joined = main.join({ anchor: anchorSource }, on, kind)
+              expect(getQueryIR(joined).join?.[0]?.from.type).toBe(
+                sourceForm === `direct` ? `collectionRef` : `queryRef`,
               )
-              for (const entry of cases) {
-                expect(
-                  observe(entry.live),
-                  `${entry.sourceForm}, ${entry.alias} at ${cut}`,
-                ).toEqual(expected)
-                if (mode === `onDemand`) {
-                  expect(entry.mains.requests.length).toBeGreaterThan(0)
-                  expect(entry.anchors.requests.length).toBeGreaterThan(0)
-                }
+              return {
+                id: parent.id,
+                rows: toArray(
+                  joined
+                    .where((context: Context) =>
+                      correlationSide === `joined`
+                        ? eq((context.anchor as Anchor).parentId, parent.id)
+                        : eq((context[alias] as Main).parentId, parent.id),
+                    )
+                    .select((context: Context) => ({
+                      mainId: (context[alias] as Main).id,
+                      anchorId: (context.anchor as Anchor).id,
+                      label: (context[alias] as Main).label,
+                      marker: parent.marker,
+                      missingMain: isUndefined((context[alias] as Main).id),
+                      missingAnchor: isUndefined((context.anchor as Anchor).id),
+                    })),
+                ),
               }
+            }),
+        })
+        return { sourceForm, alias, parents, mains, anchors, live }
+      }),
+    )
+
+    /** Compare every public result after preload and each committed write. */
+    const observe = (live: (typeof cases)[number][`live`]) =>
+      sortRows(
+        live.toArray.flatMap(({ id, rows }) =>
+          rows.map((row) => ({
+            parentId: id,
+            mainId: row.mainId,
+            anchorId: row.anchorId,
+            label: row.label,
+            marker: row.marker,
+            missingMain: row.missingMain,
+            missingAnchor: row.missingAnchor,
+          })),
+        ),
+      )
+
+    await withHistoryCleanup(
+      async () => {
+        for (const entry of cases) await entry.live.preload()
+        const check = (cut: string) => {
+          const expected = model(
+            parentRows,
+            mainRows,
+            anchorRows,
+            kind,
+            correlationSide,
+          )
+          for (const entry of cases) {
+            expect(
+              observe(entry.live),
+              `${entry.sourceForm}, ${entry.alias} at ${cut}`,
+            ).toEqual(expected)
+            if (mode === `onDemand`) {
+              expect(entry.mains.requests.length).toBeGreaterThan(0)
+              expect(entry.anchors.requests.length).toBeGreaterThan(0)
             }
-            check(`initial publication`)
+          }
+        }
+        check(`initial publication`)
 
-            const changedMain = {
-              id: 10,
-              parentId: 1,
-              anchorId: 7,
-              label: `UPDATED`,
-            }
-            mainRows.set(10, changedMain)
-            for (const entry of cases) entry.mains.put(changedMain)
-            await flushPromises()
-            check(`matched main update`)
+        const changedMain = {
+          id: 10,
+          parentId: 1,
+          anchorId: 7,
+          label: `UPDATED`,
+        }
+        mainRows.set(10, changedMain)
+        for (const entry of cases) entry.mains.put(changedMain)
+        await flushPromises()
+        check(`matched main update`)
 
-            mainRows.delete(10)
-            for (const entry of cases) entry.mains.remove(10)
-            await flushPromises()
-            check(`main becomes absent`)
+        mainRows.delete(10)
+        for (const entry of cases) entry.mains.remove(10)
+        await flushPromises()
+        check(`main becomes absent`)
 
-            mainRows.set(10, changedMain)
-            for (const entry of cases) entry.mains.put(changedMain)
-            await flushPromises()
-            check(`main returns`)
+        mainRows.set(10, changedMain)
+        for (const entry of cases) entry.mains.put(changedMain)
+        await flushPromises()
+        check(`main returns`)
 
-            const secondMatch = {
-              id: 12,
-              parentId: 1,
-              anchorId: 8,
-              label: `SECOND`,
-            }
-            mainRows.set(12, secondMatch)
-            for (const entry of cases) entry.mains.put(secondMatch)
-            await flushPromises()
-            check(`second main arrives`)
+        const secondMatch = {
+          id: 12,
+          parentId: 1,
+          anchorId: 8,
+          label: `SECOND`,
+        }
+        mainRows.set(12, secondMatch)
+        for (const entry of cases) entry.mains.put(secondMatch)
+        await flushPromises()
+        check(`second main arrives`)
 
-            anchorRows.delete(7)
-            for (const entry of cases) entry.anchors.remove(7)
-            await flushPromises()
-            check(`joined side becomes absent`)
+        anchorRows.delete(7)
+        for (const entry of cases) entry.anchors.remove(7)
+        await flushPromises()
+        check(`joined side becomes absent`)
 
-            const changedParent = { id: 1, marker: `PARENT2` }
-            parentRows.set(1, changedParent)
-            for (const entry of cases) entry.parents.put(changedParent)
-            await flushPromises()
-            check(`ancestor updates`)
-          },
-          () =>
-            cases.flatMap((entry) => [
-              () => entry.live.cleanup(),
-              () => entry.parents.collection.cleanup(),
-              () => entry.mains.collection.cleanup(),
-              () => entry.anchors.collection.cleanup(),
-            ]),
-        )
-      })
-    }
+        const changedParent = { id: 1, marker: `PARENT2` }
+        parentRows.set(1, changedParent)
+        for (const entry of cases) entry.parents.put(changedParent)
+        await flushPromises()
+        check(`ancestor updates`)
+      },
+      () =>
+        cases.flatMap((entry) => [
+          () => entry.live.cleanup(),
+          () => entry.parents.collection.cleanup(),
+          () => entry.mains.collection.cleanup(),
+          () => entry.anchors.collection.cleanup(),
+        ]),
+    )
   }
+
+  const outerJoinAbsenceLaw = `Outer joins preserve absent source bindings under shadowing.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.outer-join-absence`,
+    law: {
+      statement: outerJoinAbsenceLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: outerJoinAbsenceCells,
+    label: ({ kind, correlationSide, mode }) =>
+      `${kind} with ${correlationSide} correlation and ${mode} sources keeps absent sides absent`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(outerJoinAbsenceLaw, plan, observe, () =>
+        judgeOuterJoinAbsence(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -2465,192 +2923,221 @@ describe(`chained joins keep an absent local source absent`, () => {
       )
       .sort((a, b) => a.parentId - b.parentId || a.commentId - b.commentId)
 
-  declareOracle({ model: [model] })
+  const chainedJoinAbsenceCells = ([`eager`, `onDemand`] as const).map(
+    (mode) => ({ mode }),
+  )
 
-  for (const mode of [`eager`, `onDemand`] as const) {
-    test(`${mode} chained joins preserve absence under shadowing and renaming`, async () => {
-      oracleRoute(`case`)
-      const parentRows = new Map<number, Issue>([
-        [1, { id: 1, label: `first parent` }],
-        [2, { id: 2, label: `second parent` }],
-      ])
-      const commentRows = new Map<number, Comment>([
-        [10, { id: 10, issueId: 1, localIssueId: 99, tagId: 7 }],
-        [20, { id: 20, issueId: 2, localIssueId: 2, tagId: 8 }],
-      ])
-      const localIssueRows = new Map<number, Issue>([
-        [2, { id: 2, label: `local issue` }],
-      ])
-      const tagRows = new Map<number, Tag>([
-        [7, { id: 7, issueId: 1 }],
-        [8, { id: 8, issueId: 2 }],
-      ])
-      const cases = ([`issue`, `localIssue`] as const).flatMap((alias) =>
-        ([`capturedOperand`, `queryRef`] as const).map((routeCause) => {
-          const parents = createScopedSource(
-            `chain-parent-${mode}-${alias}-${routeCause}`,
-            [...parentRows.values()],
-            `eager`,
-          )
-          const comments = createScopedSource(
-            `chain-comment-${mode}-${alias}-${routeCause}`,
-            [...commentRows.values()],
-            mode,
-          )
-          const localIssues = createScopedSource(
-            `chain-local-${mode}-${alias}-${routeCause}`,
-            [...localIssueRows.values()],
-            mode,
-          )
-          const tags = createScopedSource(
-            `chain-tag-${mode}-${alias}-${routeCause}`,
-            [...tagRows.values()],
-            mode,
-          )
-          comments.collection.createIndex((row) => row.issueId, {
-            indexType: BasicIndex,
-          })
-          localIssues.collection.createIndex((row) => row.id, {
-            indexType: BasicIndex,
-          })
-          tags.collection.createIndex((row) => row.id, {
-            indexType: BasicIndex,
-          })
-          const live = createLiveQueryCollection({
-            query: new Query()
-              .from({ issue: parents.collection })
-              .select(({ issue: parent }) => {
-                const scopedTags = new Query()
-                  .from({ source: tags.collection })
-                  .where(({ source }) => eq(source.issueId, parent.id))
-                  .select(({ source }) => ({
-                    id: source.id,
-                    issueId: source.issueId,
-                  }))
-                const tagSource =
-                  routeCause === `queryRef` ? scopedTags : tags.collection
-                return {
-                  id: parent.id,
-                  rows: toArray(
-                    new Query()
-                      .from({ comment: comments.collection })
-                      .leftJoin(
-                        { [alias]: localIssues.collection },
-                        (context: Context) =>
-                          eq(
-                            (context.comment as Comment).localIssueId,
-                            (context[alias] as Issue).id,
-                          ),
-                      )
-                      .leftJoin({ tag: tagSource }, (context: Context) =>
-                        routeCause === `queryRef`
-                          ? eq(
-                              (context.comment as Comment).tagId,
-                              (context.tag as Tag).id,
-                            )
-                          : eq(
-                              add(
-                                (context.comment as Comment).tagId,
-                                parent.id,
-                              ),
-                              add((context.tag as Tag).id, parent.id),
-                            ),
-                      )
-                      .where((context: Context) =>
-                        eq((context.comment as Comment).issueId, parent.id),
-                      )
-                      .select((context: Context) => ({
-                        parentLabel: parent.label,
-                        commentId: (context.comment as Comment).id,
-                        localIssueId: (context[alias] as Issue).id,
-                        tagId: (context.tag as Tag).id,
-                        missingLocalIssue: isUndefined(
+  // The former test body, unchanged.
+  async function judgeChainedJoinAbsence({
+    mode,
+  }: (typeof chainedJoinAbsenceCells)[number]): Promise<void> {
+    const parentRows = new Map<number, Issue>([
+      [1, { id: 1, label: `first parent` }],
+      [2, { id: 2, label: `second parent` }],
+    ])
+    const commentRows = new Map<number, Comment>([
+      [10, { id: 10, issueId: 1, localIssueId: 99, tagId: 7 }],
+      [20, { id: 20, issueId: 2, localIssueId: 2, tagId: 8 }],
+    ])
+    const localIssueRows = new Map<number, Issue>([
+      [2, { id: 2, label: `local issue` }],
+    ])
+    const tagRows = new Map<number, Tag>([
+      [7, { id: 7, issueId: 1 }],
+      [8, { id: 8, issueId: 2 }],
+    ])
+    const cases = ([`issue`, `localIssue`] as const).flatMap((alias) =>
+      ([`capturedOperand`, `queryRef`] as const).map((routeCause) => {
+        const parents = createScopedSource(
+          `chain-parent-${mode}-${alias}-${routeCause}`,
+          [...parentRows.values()],
+          `eager`,
+        )
+        const comments = createScopedSource(
+          `chain-comment-${mode}-${alias}-${routeCause}`,
+          [...commentRows.values()],
+          mode,
+        )
+        const localIssues = createScopedSource(
+          `chain-local-${mode}-${alias}-${routeCause}`,
+          [...localIssueRows.values()],
+          mode,
+        )
+        const tags = createScopedSource(
+          `chain-tag-${mode}-${alias}-${routeCause}`,
+          [...tagRows.values()],
+          mode,
+        )
+        comments.collection.createIndex((row) => row.issueId, {
+          indexType: BasicIndex,
+        })
+        localIssues.collection.createIndex((row) => row.id, {
+          indexType: BasicIndex,
+        })
+        tags.collection.createIndex((row) => row.id, {
+          indexType: BasicIndex,
+        })
+        const live = createLiveQueryCollection({
+          query: new Query()
+            .from({ issue: parents.collection })
+            .select(({ issue: parent }) => {
+              const scopedTags = new Query()
+                .from({ source: tags.collection })
+                .where(({ source }) => eq(source.issueId, parent.id))
+                .select(({ source }) => ({
+                  id: source.id,
+                  issueId: source.issueId,
+                }))
+              const tagSource =
+                routeCause === `queryRef` ? scopedTags : tags.collection
+              return {
+                id: parent.id,
+                rows: toArray(
+                  new Query()
+                    .from({ comment: comments.collection })
+                    .leftJoin(
+                      { [alias]: localIssues.collection },
+                      (context: Context) =>
+                        eq(
+                          (context.comment as Comment).localIssueId,
                           (context[alias] as Issue).id,
                         ),
-                      })),
-                  ),
-                }
-              }),
-          })
-          return {
-            alias,
-            routeCause,
-            parents,
-            comments,
-            localIssues,
-            tags,
-            live,
-          }
-        }),
-      )
+                    )
+                    .leftJoin({ tag: tagSource }, (context: Context) =>
+                      routeCause === `queryRef`
+                        ? eq(
+                            (context.comment as Comment).tagId,
+                            (context.tag as Tag).id,
+                          )
+                        : eq(
+                            add((context.comment as Comment).tagId, parent.id),
+                            add((context.tag as Tag).id, parent.id),
+                          ),
+                    )
+                    .where((context: Context) =>
+                      eq((context.comment as Comment).issueId, parent.id),
+                    )
+                    .select((context: Context) => ({
+                      parentLabel: parent.label,
+                      commentId: (context.comment as Comment).id,
+                      localIssueId: (context[alias] as Issue).id,
+                      tagId: (context.tag as Tag).id,
+                      missingLocalIssue: isUndefined(
+                        (context[alias] as Issue).id,
+                      ),
+                    })),
+                ),
+              }
+            }),
+        })
+        return {
+          alias,
+          routeCause,
+          parents,
+          comments,
+          localIssues,
+          tags,
+          live,
+        }
+      }),
+    )
 
-      await withHistoryCleanup(
-        async () => {
-          for (const entry of cases) await entry.live.preload()
-          const check = (cut: string) => {
-            for (const entry of cases) {
-              const expected = model(
-                parentRows,
-                commentRows,
-                localIssueRows,
-                tagRows,
-                entry.routeCause,
+    await withHistoryCleanup(
+      async () => {
+        for (const entry of cases) await entry.live.preload()
+        const check = (cut: string) => {
+          for (const entry of cases) {
+            const expected = model(
+              parentRows,
+              commentRows,
+              localIssueRows,
+              tagRows,
+              entry.routeCause,
+            )
+            const actual = entry.live.toArray
+              .flatMap(({ id, rows }) =>
+                rows.map((row) => ({ parentId: id, ...row })),
               )
-              const actual = entry.live.toArray
-                .flatMap(({ id, rows }) =>
-                  rows.map((row) => ({ parentId: id, ...row })),
-                )
-                .sort(
-                  (a, b) =>
-                    a.parentId - b.parentId || a.commentId - b.commentId,
-                )
-              expect(
-                actual,
-                `${entry.alias}, ${entry.routeCause} at ${cut}`,
-              ).toEqual(expected)
-            }
+              .sort(
+                (a, b) => a.parentId - b.parentId || a.commentId - b.commentId,
+              )
+            expect(
+              actual,
+              `${entry.alias}, ${entry.routeCause} at ${cut}`,
+            ).toEqual(expected)
           }
-          check(`initial publication`)
+        }
+        check(`initial publication`)
 
-          const changedParent = { id: 2, label: `changed parent` }
-          parentRows.set(2, changedParent)
-          for (const entry of cases) entry.parents.put(changedParent)
-          await flushPromises()
-          check(`parent label changes`)
+        const changedParent = { id: 2, label: `changed parent` }
+        parentRows.set(2, changedParent)
+        for (const entry of cases) entry.parents.put(changedParent)
+        await flushPromises()
+        check(`parent label changes`)
 
-          const matchedIssue = { id: 99, label: `new local issue` }
-          localIssueRows.set(99, matchedIssue)
-          for (const entry of cases) entry.localIssues.put(matchedIssue)
-          await flushPromises()
-          check(`local issue arrives`)
+        const matchedIssue = { id: 99, label: `new local issue` }
+        localIssueRows.set(99, matchedIssue)
+        for (const entry of cases) entry.localIssues.put(matchedIssue)
+        await flushPromises()
+        check(`local issue arrives`)
 
-          localIssueRows.delete(99)
-          for (const entry of cases) entry.localIssues.remove(99)
-          await flushPromises()
-          check(`local issue disappears`)
+        localIssueRows.delete(99)
+        for (const entry of cases) entry.localIssues.remove(99)
+        await flushPromises()
+        check(`local issue disappears`)
 
-          tagRows.delete(7)
-          for (const entry of cases) entry.tags.remove(7)
-          await flushPromises()
-          check(`second joined side disappears`)
+        tagRows.delete(7)
+        for (const entry of cases) entry.tags.remove(7)
+        await flushPromises()
+        check(`second joined side disappears`)
 
-          const returnedTag = { id: 7, issueId: 1 }
-          tagRows.set(7, returnedTag)
-          for (const entry of cases) entry.tags.put(returnedTag)
-          await flushPromises()
-          check(`second joined side returns`)
-        },
-        () =>
-          cases.flatMap((entry) => [
-            () => entry.live.cleanup(),
-            () => entry.parents.collection.cleanup(),
-            () => entry.comments.collection.cleanup(),
-            () => entry.localIssues.collection.cleanup(),
-            () => entry.tags.collection.cleanup(),
-          ]),
-      )
-    })
+        const returnedTag = { id: 7, issueId: 1 }
+        tagRows.set(7, returnedTag)
+        for (const entry of cases) entry.tags.put(returnedTag)
+        await flushPromises()
+        check(`second joined side returns`)
+      },
+      () =>
+        cases.flatMap((entry) => [
+          () => entry.live.cleanup(),
+          () => entry.parents.collection.cleanup(),
+          () => entry.comments.collection.cleanup(),
+          () => entry.localIssues.collection.cleanup(),
+          () => entry.tags.collection.cleanup(),
+        ]),
+    )
   }
+
+  const chainedJoinAbsenceLaw = `Chained joins keep an absent local source absent under shadowing and renaming.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.chained-join-absence`,
+    law: {
+      statement: chainedJoinAbsenceLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: chainedJoinAbsenceCells,
+    label: ({ mode }) =>
+      `${mode} chained joins preserve absence under shadowing and renaming`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(chainedJoinAbsenceLaw, plan, observe, () =>
+        judgeChainedJoinAbsence(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -2697,116 +3184,149 @@ describe(`joined QueryRef lazy targets retain lexical source identity`, () => {
       }
     })
 
-  declareOracle({ model: [model] })
+  const joinedQueryrefLazyTargetsCells = ([`u`, `post`] as const).map(
+    (alias) => ({ alias }),
+  )
 
-  for (const alias of [`u`, `post`] as const) {
-    test(`${alias} post alias: projected tag drives on-demand rows`, async () => {
-      oracleRoute(`case`)
-      const userRows = new Map<number, User>([
-        [1, { id: 1, tagId: 7, name: `USER` }],
-      ])
-      const postRows = new Map<number, Post>([
-        [10, { id: 10, tagId: 7, title: `POST` }],
-        [11, { id: 11, tagId: 8, title: `OTHER POST` }],
-      ])
-      const tagRows = new Map<number, Tag>([
-        [7, { id: 7, label: `MATCH` }],
-        [8, { id: 8, label: `OTHER` }],
-      ])
-      const users = createScopedSource(
-        `lazy-joined-users-${alias}`,
-        [...userRows.values()],
-        `onDemand`,
-      )
-      const posts = createScopedSource(
-        `lazy-joined-posts-${alias}`,
-        [...postRows.values()],
-        `onDemand`,
-      )
-      const tags = createScopedSource(
-        `lazy-joined-tags-${alias}`,
-        [...tagRows.values()],
-        `onDemand`,
-      )
-      users.collection.createIndex((row) => row.id, {
-        indexType: BasicIndex,
-      })
-      posts.collection.createIndex((row) => row.tagId, {
-        indexType: BasicIndex,
-      })
-      tags.collection.createIndex((row) => row.id, {
-        indexType: BasicIndex,
-      })
-      const joined = new Query()
-        .from({ [alias]: posts.collection })
-        .innerJoin({ tag: tags.collection }, (context: Context) =>
-          eq((context[alias] as Post).tagId, (context.tag as Tag).id),
-        )
-        .select((context: Context) => ({
-          tagId: (context.tag as Tag).id,
-          title: (context[alias] as Post).title,
-          label: (context.tag as Tag).label,
-        }))
-      const live = createLiveQueryCollection({
-        query: new Query()
-          .from({ u: users.collection })
-          .leftJoin({ p: joined }, ({ u, p }) => eq(u.tagId, p.tagId))
-          .select(({ u, p }) => ({
-            id: u.id,
-            name: u.name,
-            title: p.title,
-            label: p.label,
-          })),
-      })
-
-      await withHistoryCleanup(
-        async () => {
-          const check = (
-            cut: string,
-            expectedPosts: Array<number>,
-            expectedTags: Array<number>,
-          ) => {
-            expect(
-              live.toArray.map(({ id, name, title, label }) => ({
-                id,
-                name,
-                title,
-                label,
-              })),
-              `${alias} at ${cut}: public rows`,
-            ).toEqual(model(userRows, postRows, tagRows))
-            expect(
-              posts.collection.toArray.map((row) => row.id).sort(),
-              `${alias} at ${cut}: installed posts`,
-            ).toEqual(expectedPosts)
-            expect(
-              tags.collection.toArray.map((row) => row.id).sort(),
-              `${alias} at ${cut}: installed tags`,
-            ).toEqual(expectedTags)
-          }
-
-          await live.preload()
-          check(`preload`, [10], [7])
-          const moved = { id: 1, tagId: 8, name: `USER` }
-          userRows.set(1, moved)
-          users.put(moved)
-          await flushPromises()
-          check(`user changes tag`, [10, 11], [7, 8])
-          const changedTag = { id: 8, label: `CHANGED` }
-          tagRows.set(8, changedTag)
-          tags.put(changedTag)
-          await flushPromises()
-          check(`tag changes label`, [10, 11], [7, 8])
-        },
-        () => [
-          () => live.cleanup(),
-          () => users.collection.cleanup(),
-          () => posts.collection.cleanup(),
-          () => tags.collection.cleanup(),
-        ],
-      )
+  // The former test body, unchanged.
+  async function judgeJoinedQueryrefLazyTargets({
+    alias,
+  }: (typeof joinedQueryrefLazyTargetsCells)[number]): Promise<void> {
+    const userRows = new Map<number, User>([
+      [1, { id: 1, tagId: 7, name: `USER` }],
+    ])
+    const postRows = new Map<number, Post>([
+      [10, { id: 10, tagId: 7, title: `POST` }],
+      [11, { id: 11, tagId: 8, title: `OTHER POST` }],
+    ])
+    const tagRows = new Map<number, Tag>([
+      [7, { id: 7, label: `MATCH` }],
+      [8, { id: 8, label: `OTHER` }],
+    ])
+    const users = createScopedSource(
+      `lazy-joined-users-${alias}`,
+      [...userRows.values()],
+      `onDemand`,
+    )
+    const posts = createScopedSource(
+      `lazy-joined-posts-${alias}`,
+      [...postRows.values()],
+      `onDemand`,
+    )
+    const tags = createScopedSource(
+      `lazy-joined-tags-${alias}`,
+      [...tagRows.values()],
+      `onDemand`,
+    )
+    users.collection.createIndex((row) => row.id, {
+      indexType: BasicIndex,
     })
+    posts.collection.createIndex((row) => row.tagId, {
+      indexType: BasicIndex,
+    })
+    tags.collection.createIndex((row) => row.id, {
+      indexType: BasicIndex,
+    })
+    const joined = new Query()
+      .from({ [alias]: posts.collection })
+      .innerJoin({ tag: tags.collection }, (context: Context) =>
+        eq((context[alias] as Post).tagId, (context.tag as Tag).id),
+      )
+      .select((context: Context) => ({
+        tagId: (context.tag as Tag).id,
+        title: (context[alias] as Post).title,
+        label: (context.tag as Tag).label,
+      }))
+    const live = createLiveQueryCollection({
+      query: new Query()
+        .from({ u: users.collection })
+        .leftJoin({ p: joined }, ({ u, p }) => eq(u.tagId, p.tagId))
+        .select(({ u, p }) => ({
+          id: u.id,
+          name: u.name,
+          title: p.title,
+          label: p.label,
+        })),
+    })
+
+    await withHistoryCleanup(
+      async () => {
+        const check = (
+          cut: string,
+          expectedPosts: Array<number>,
+          expectedTags: Array<number>,
+        ) => {
+          expect(
+            live.toArray.map(({ id, name, title, label }) => ({
+              id,
+              name,
+              title,
+              label,
+            })),
+            `${alias} at ${cut}: public rows`,
+          ).toEqual(model(userRows, postRows, tagRows))
+          expect(
+            posts.collection.toArray.map((row) => row.id).sort(),
+            `${alias} at ${cut}: installed posts`,
+          ).toEqual(expectedPosts)
+          expect(
+            tags.collection.toArray.map((row) => row.id).sort(),
+            `${alias} at ${cut}: installed tags`,
+          ).toEqual(expectedTags)
+        }
+
+        await live.preload()
+        check(`preload`, [10], [7])
+        const moved = { id: 1, tagId: 8, name: `USER` }
+        userRows.set(1, moved)
+        users.put(moved)
+        await flushPromises()
+        check(`user changes tag`, [10, 11], [7, 8])
+        const changedTag = { id: 8, label: `CHANGED` }
+        tagRows.set(8, changedTag)
+        tags.put(changedTag)
+        await flushPromises()
+        check(`tag changes label`, [10, 11], [7, 8])
+      },
+      () => [
+        () => live.cleanup(),
+        () => users.collection.cleanup(),
+        () => posts.collection.cleanup(),
+        () => tags.collection.cleanup(),
+      ],
+    )
   }
+
+  const joinedQueryrefLazyTargetsLaw = `Joined QueryRef lazy targets retain lexical source identity, so the projected tag drives on-demand rows.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.joined-queryref-lazy-targets`,
+    law: {
+      statement: joinedQueryrefLazyTargetsLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: joinedQueryrefLazyTargetsCells,
+    label: ({ alias }) =>
+      `${alias} post alias: projected tag drives on-demand rows`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(joinedQueryrefLazyTargetsLaw, plan, observe, () =>
+        judgeJoinedQueryrefLazyTargets(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -2927,200 +3447,235 @@ describe(`mixed outer-join chains retain absent source roles`, () => {
     )
   }
 
-  declareOracle({ model: [model] })
+  const mixedOuterJoinChainsCells = chains.flatMap(
+    ({ first, second, correlation }) =>
+      ([`eager`, `onDemand`] as const).map((mode) => ({
+        first,
+        second,
+        correlation,
+        mode,
+      })),
+  )
 
-  for (const { first, second, correlation } of chains) {
-    for (const mode of [`eager`, `onDemand`] as const) {
-      test(`${first} then ${second}, ${correlation} correlation, ${mode} sources`, async () => {
-        oracleRoute(`case`)
-        const parentRows = new Map<number, Parent>([
-          [1, { id: 1, marker: `ONE` }],
-          [2, { id: 2, marker: `TWO` }],
-        ])
-        const mainRows = new Map<number, Main>([
-          [10, { id: 10, parentId: 1, anchorId: 7 }],
-          [11, { id: 11, parentId: 1, anchorId: 99 }],
-          [20, { id: 20, parentId: 2, anchorId: 20 }],
-        ])
-        const anchorRows = new Map<number, Anchor>([
-          [7, { id: 7, parentId: 1 }],
-          [8, { id: 8, parentId: 1 }],
-          [20, { id: 20, parentId: 2 }],
-        ])
-        const tagRows = new Map<number, Tag>([
-          [70, { id: 70, anchorId: 7, parentId: 1 }],
-          [80, { id: 80, anchorId: 8, parentId: 1 }],
-          [90, { id: 90, anchorId: 90, parentId: 1 }],
-          [200, { id: 200, anchorId: 20, parentId: 2 }],
-        ])
-        const cases = ([`shadowed`, `renamed`] as const).map((spelling) => {
-          const mainAlias =
-            correlation !== `main` && spelling === `shadowed` ? `issue` : `main`
-          const anchorAlias =
-            correlation === `main` && spelling === `shadowed`
-              ? `issue`
-              : `anchor`
-          const name = `mixed-chain-${first}-${second}-${correlation}-${mode}-${spelling}`
-          const parents = createScopedSource(
-            `${name}-parent`,
-            [...parentRows.values()],
-            `eager`,
-          )
-          const mains = createScopedSource(
-            `${name}-main`,
-            [...mainRows.values()],
-            mode,
-          )
-          const anchors = createScopedSource(
-            `${name}-anchor`,
-            [...anchorRows.values()],
-            mode,
-          )
-          const tags = createScopedSource(
-            `${name}-tag`,
-            [...tagRows.values()],
-            mode,
-          )
-          mains.collection.createIndex((row) => row.parentId, {
-            indexType: BasicIndex,
-          })
-          mains.collection.createIndex((row) => row.anchorId, {
-            indexType: BasicIndex,
-          })
-          anchors.collection.createIndex((row) => row.parentId, {
-            indexType: BasicIndex,
-          })
-          anchors.collection.createIndex((row) => row.id, {
-            indexType: BasicIndex,
-          })
-          tags.collection.createIndex((row) => row.anchorId, {
-            indexType: BasicIndex,
-          })
-          tags.collection.createIndex((row) => row.parentId, {
-            indexType: BasicIndex,
-          })
-          const live = createLiveQueryCollection({
-            query: new Query()
-              .from({ issue: parents.collection })
-              .select(({ issue: parent }) => ({
-                id: parent.id,
-                rows: toArray(
-                  new Query()
-                    .from({ [mainAlias]: mains.collection })
-                    .join(
-                      { [anchorAlias]: anchors.collection },
-                      (context: Context) =>
-                        eq(
-                          (context[mainAlias] as Main).anchorId,
-                          (context[anchorAlias] as Anchor).id,
-                        ),
-                      first,
-                    )
-                    .join(
-                      { tag: tags.collection },
-                      (context: Context) =>
-                        eq(
-                          (context[anchorAlias] as Anchor).id,
-                          (context.tag as Tag).anchorId,
-                        ),
-                      second,
-                    )
-                    .where((context: Context) =>
-                      correlation === `main`
-                        ? eq((context[mainAlias] as Main).parentId, parent.id)
-                        : correlation === `joined`
-                          ? eq(
-                              (context[anchorAlias] as Anchor).parentId,
-                              parent.id,
-                            )
-                          : eq((context.tag as Tag).parentId, parent.id),
-                    )
-                    .select((context: Context) => ({
-                      mainId: (context[mainAlias] as Main).id,
-                      anchorId: (context[anchorAlias] as Anchor).id,
-                      tagId: (context.tag as Tag).id,
-                      marker: parent.marker,
-                      missingMain: isUndefined((context[mainAlias] as Main).id),
-                      missingAnchor: isUndefined(
-                        (context[anchorAlias] as Anchor).id,
-                      ),
-                      missingTag: isUndefined((context.tag as Tag).id),
-                    })),
-                ),
-              })),
-          })
-          return { spelling, parents, mains, anchors, tags, live }
-        })
-
-        await withHistoryCleanup(
-          async () => {
-            for (const entry of cases) await entry.live.preload()
-            const check = (cut: string) => {
-              const expected = model(
-                parentRows,
-                mainRows,
-                anchorRows,
-                tagRows,
-                first,
-                second,
-                correlation,
-              )
-              for (const entry of cases) {
-                const actual = sortRows(
-                  entry.live.toArray.flatMap(({ id, rows }) =>
-                    rows.map((row) => ({ parentId: id, ...row })),
-                  ),
-                )
-                expect(actual, `${entry.spelling} at ${cut}`).toEqual(expected)
-              }
-            }
-            check(`initial publication`)
-
-            tagRows.delete(80)
-            for (const entry of cases) entry.tags.remove(80)
-            await flushPromises()
-            check(`second joined source disappears`)
-
-            const newMain = { id: 12, parentId: 1, anchorId: 8 }
-            mainRows.set(12, newMain)
-            for (const entry of cases) entry.mains.put(newMain)
-            await flushPromises()
-            check(`first joined source gains a match`)
-
-            mainRows.delete(12)
-            for (const entry of cases) entry.mains.remove(12)
-            await flushPromises()
-            check(`first joined source loses its match`)
-
-            const restoredTag = { id: 80, anchorId: 8, parentId: 1 }
-            tagRows.set(80, restoredTag)
-            for (const entry of cases) entry.tags.put(restoredTag)
-            await flushPromises()
-            check(`second joined source returns`)
-
-            anchorRows.delete(7)
-            for (const entry of cases) entry.anchors.remove(7)
-            await flushPromises()
-            check(`first joined source disappears`)
-
-            const changedParent = { id: 1, marker: `CHANGED` }
-            parentRows.set(1, changedParent)
-            for (const entry of cases) entry.parents.put(changedParent)
-            await flushPromises()
-            check(`ancestor value changes`)
-          },
-          () =>
-            cases.flatMap((entry) => [
-              () => entry.live.cleanup(),
-              () => entry.parents.collection.cleanup(),
-              () => entry.mains.collection.cleanup(),
-              () => entry.anchors.collection.cleanup(),
-              () => entry.tags.collection.cleanup(),
-            ]),
-        )
+  // The former test body, unchanged.
+  async function judgeMixedOuterJoinChains({
+    first,
+    second,
+    correlation,
+    mode,
+  }: (typeof mixedOuterJoinChainsCells)[number]): Promise<void> {
+    const parentRows = new Map<number, Parent>([
+      [1, { id: 1, marker: `ONE` }],
+      [2, { id: 2, marker: `TWO` }],
+    ])
+    const mainRows = new Map<number, Main>([
+      [10, { id: 10, parentId: 1, anchorId: 7 }],
+      [11, { id: 11, parentId: 1, anchorId: 99 }],
+      [20, { id: 20, parentId: 2, anchorId: 20 }],
+    ])
+    const anchorRows = new Map<number, Anchor>([
+      [7, { id: 7, parentId: 1 }],
+      [8, { id: 8, parentId: 1 }],
+      [20, { id: 20, parentId: 2 }],
+    ])
+    const tagRows = new Map<number, Tag>([
+      [70, { id: 70, anchorId: 7, parentId: 1 }],
+      [80, { id: 80, anchorId: 8, parentId: 1 }],
+      [90, { id: 90, anchorId: 90, parentId: 1 }],
+      [200, { id: 200, anchorId: 20, parentId: 2 }],
+    ])
+    const cases = ([`shadowed`, `renamed`] as const).map((spelling) => {
+      const mainAlias =
+        correlation !== `main` && spelling === `shadowed` ? `issue` : `main`
+      const anchorAlias =
+        correlation === `main` && spelling === `shadowed` ? `issue` : `anchor`
+      const name = `mixed-chain-${first}-${second}-${correlation}-${mode}-${spelling}`
+      const parents = createScopedSource(
+        `${name}-parent`,
+        [...parentRows.values()],
+        `eager`,
+      )
+      const mains = createScopedSource(
+        `${name}-main`,
+        [...mainRows.values()],
+        mode,
+      )
+      const anchors = createScopedSource(
+        `${name}-anchor`,
+        [...anchorRows.values()],
+        mode,
+      )
+      const tags = createScopedSource(
+        `${name}-tag`,
+        [...tagRows.values()],
+        mode,
+      )
+      mains.collection.createIndex((row) => row.parentId, {
+        indexType: BasicIndex,
       })
-    }
+      mains.collection.createIndex((row) => row.anchorId, {
+        indexType: BasicIndex,
+      })
+      anchors.collection.createIndex((row) => row.parentId, {
+        indexType: BasicIndex,
+      })
+      anchors.collection.createIndex((row) => row.id, {
+        indexType: BasicIndex,
+      })
+      tags.collection.createIndex((row) => row.anchorId, {
+        indexType: BasicIndex,
+      })
+      tags.collection.createIndex((row) => row.parentId, {
+        indexType: BasicIndex,
+      })
+      const live = createLiveQueryCollection({
+        query: new Query()
+          .from({ issue: parents.collection })
+          .select(({ issue: parent }) => ({
+            id: parent.id,
+            rows: toArray(
+              new Query()
+                .from({ [mainAlias]: mains.collection })
+                .join(
+                  { [anchorAlias]: anchors.collection },
+                  (context: Context) =>
+                    eq(
+                      (context[mainAlias] as Main).anchorId,
+                      (context[anchorAlias] as Anchor).id,
+                    ),
+                  first,
+                )
+                .join(
+                  { tag: tags.collection },
+                  (context: Context) =>
+                    eq(
+                      (context[anchorAlias] as Anchor).id,
+                      (context.tag as Tag).anchorId,
+                    ),
+                  second,
+                )
+                .where((context: Context) =>
+                  correlation === `main`
+                    ? eq((context[mainAlias] as Main).parentId, parent.id)
+                    : correlation === `joined`
+                      ? eq((context[anchorAlias] as Anchor).parentId, parent.id)
+                      : eq((context.tag as Tag).parentId, parent.id),
+                )
+                .select((context: Context) => ({
+                  mainId: (context[mainAlias] as Main).id,
+                  anchorId: (context[anchorAlias] as Anchor).id,
+                  tagId: (context.tag as Tag).id,
+                  marker: parent.marker,
+                  missingMain: isUndefined((context[mainAlias] as Main).id),
+                  missingAnchor: isUndefined(
+                    (context[anchorAlias] as Anchor).id,
+                  ),
+                  missingTag: isUndefined((context.tag as Tag).id),
+                })),
+            ),
+          })),
+      })
+      return { spelling, parents, mains, anchors, tags, live }
+    })
+
+    await withHistoryCleanup(
+      async () => {
+        for (const entry of cases) await entry.live.preload()
+        const check = (cut: string) => {
+          const expected = model(
+            parentRows,
+            mainRows,
+            anchorRows,
+            tagRows,
+            first,
+            second,
+            correlation,
+          )
+          for (const entry of cases) {
+            const actual = sortRows(
+              entry.live.toArray.flatMap(({ id, rows }) =>
+                rows.map((row) => ({ parentId: id, ...row })),
+              ),
+            )
+            expect(actual, `${entry.spelling} at ${cut}`).toEqual(expected)
+          }
+        }
+        check(`initial publication`)
+
+        tagRows.delete(80)
+        for (const entry of cases) entry.tags.remove(80)
+        await flushPromises()
+        check(`second joined source disappears`)
+
+        const newMain = { id: 12, parentId: 1, anchorId: 8 }
+        mainRows.set(12, newMain)
+        for (const entry of cases) entry.mains.put(newMain)
+        await flushPromises()
+        check(`first joined source gains a match`)
+
+        mainRows.delete(12)
+        for (const entry of cases) entry.mains.remove(12)
+        await flushPromises()
+        check(`first joined source loses its match`)
+
+        const restoredTag = { id: 80, anchorId: 8, parentId: 1 }
+        tagRows.set(80, restoredTag)
+        for (const entry of cases) entry.tags.put(restoredTag)
+        await flushPromises()
+        check(`second joined source returns`)
+
+        anchorRows.delete(7)
+        for (const entry of cases) entry.anchors.remove(7)
+        await flushPromises()
+        check(`first joined source disappears`)
+
+        const changedParent = { id: 1, marker: `CHANGED` }
+        parentRows.set(1, changedParent)
+        for (const entry of cases) entry.parents.put(changedParent)
+        await flushPromises()
+        check(`ancestor value changes`)
+      },
+      () =>
+        cases.flatMap((entry) => [
+          () => entry.live.cleanup(),
+          () => entry.parents.collection.cleanup(),
+          () => entry.mains.collection.cleanup(),
+          () => entry.anchors.collection.cleanup(),
+          () => entry.tags.collection.cleanup(),
+        ]),
+    )
   }
+
+  const mixedOuterJoinChainsLaw = `Mixed outer-join chains retain absent source roles.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.mixed-outer-join-chains`,
+    law: {
+      statement: mixedOuterJoinChainsLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: mixedOuterJoinChainsCells,
+    label: ({ first, second, correlation, mode }) =>
+      `${first} then ${second}, ${correlation} correlation, ${mode} sources`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(mixedOuterJoinChainsLaw, plan, observe, () =>
+        judgeMixedOuterJoinChains(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -3171,165 +3726,198 @@ describe(`captured ancestor join operands retain their bindings`, () => {
       }))
       .sort((a, b) => a.id - b.id)
 
-  declareOracle({ model: [model] })
+  const capturedJoinOperandsCells = ([`eager`, `onDemand`] as const).map(
+    (mode) => ({ mode }),
+  )
 
-  for (const mode of [`eager`, `onDemand`] as const) {
-    test(`${mode} sources preserve captured operands across alias and equality order`, async () => {
-      oracleRoute(`case`)
-      const parentRows = new Map<number, Parent>([[1, { id: 1, offset: 1 }]])
-      const childRows = new Map<number, Child>([
-        [10, { id: 10, parentId: 1, base: 6 }],
-      ])
-      const targetRows = new Map<number, Target>([
-        [1, { id: 1 }],
-        [2, { id: 2 }],
-        [3, { id: 3 }],
-        [4, { id: 4 }],
-        [5, { id: 5 }],
-        [7, { id: 7 }],
-        [8, { id: 8 }],
-      ])
-      const cases = ([`issue`, `target`] as const).flatMap((alias) =>
-        ([`childFirst`, `joinedFirst`] as const).flatMap((order) =>
-          ([`main`, `joined`, `soleMain`] as const).map((ancestorSide) => {
-            const parents = createScopedSource(
-              `operand-parent-${mode}-${alias}-${order}-${ancestorSide}`,
-              [...parentRows.values()],
-              `eager`,
-            )
-            const children = createScopedSource(
-              `operand-child-${mode}-${alias}-${order}-${ancestorSide}`,
-              [...childRows.values()],
-              mode,
-            )
-            const targets = createScopedSource(
-              `operand-target-${mode}-${alias}-${order}-${ancestorSide}`,
-              [...targetRows.values()],
-              mode,
-            )
-            children.collection.createIndex((row) => row.parentId, {
-              indexType: BasicIndex,
-            })
-            targets.collection.createIndex((row) => row.id, {
-              indexType: BasicIndex,
-            })
-            const live = createLiveQueryCollection({
-              query: new Query()
-                .from({ issue: parents.collection })
-                .select(({ issue: ancestor }) => ({
-                  id: ancestor.id,
-                  rows: toArray(
-                    new Query()
-                      .from({ child: children.collection })
-                      .innerJoin(
-                        { [alias]: targets.collection },
-                        (context: Context) => {
-                          const child = context.child as Child
-                          const target = context[alias] as Target
-                          const mainKey =
-                            ancestorSide === `main`
-                              ? add(child.base, ancestor.offset)
-                              : ancestorSide === `soleMain`
-                                ? ancestor.offset
-                                : child.base
-                          const joinedKey =
-                            ancestorSide === `joined`
-                              ? add(target.id, ancestor.offset)
-                              : target.id
-                          return order === `childFirst`
-                            ? eq(mainKey, joinedKey)
-                            : eq(joinedKey, mainKey)
-                        },
-                      )
-                      .where((context: Context) =>
-                        eq((context.child as Child).parentId, ancestor.id),
-                      )
-                      .select((context: Context) => ({
-                        parentId: ancestor.id,
-                        childId: (context.child as Child).id,
-                        targetId: (context[alias] as Target).id,
-                      })),
-                  ),
-                })),
-            })
-            return {
-              alias,
-              order,
-              ancestorSide,
-              parents,
-              children,
-              targets,
-              live,
-            }
-          }),
-        ),
-      )
-
-      const observe = (live: (typeof cases)[number][`live`]) =>
-        live.toArray
-          .map(({ id, rows }) => ({
-            id,
-            rows: rows
-              .map(({ parentId, childId, targetId }) => ({
-                parentId,
-                childId,
-                targetId,
-              }))
-              .sort((a, b) => a.childId - b.childId),
-          }))
-          .sort((a, b) => a.id - b.id)
-
-      await withHistoryCleanup(
-        async () => {
-          for (const entry of cases) await entry.live.preload()
-          const check = (cut: string) => {
-            for (const entry of cases) {
-              expect(
-                observe(entry.live),
-                `${entry.alias}, ${entry.order}, ${entry.ancestorSide} at ${cut}`,
-              ).toEqual(
-                model(parentRows, childRows, targetRows, entry.ancestorSide),
-              )
-            }
+  // The former test body, unchanged.
+  async function judgeCapturedJoinOperands({
+    mode,
+  }: (typeof capturedJoinOperandsCells)[number]): Promise<void> {
+    const parentRows = new Map<number, Parent>([[1, { id: 1, offset: 1 }]])
+    const childRows = new Map<number, Child>([
+      [10, { id: 10, parentId: 1, base: 6 }],
+    ])
+    const targetRows = new Map<number, Target>([
+      [1, { id: 1 }],
+      [2, { id: 2 }],
+      [3, { id: 3 }],
+      [4, { id: 4 }],
+      [5, { id: 5 }],
+      [7, { id: 7 }],
+      [8, { id: 8 }],
+    ])
+    const cases = ([`issue`, `target`] as const).flatMap((alias) =>
+      ([`childFirst`, `joinedFirst`] as const).flatMap((order) =>
+        ([`main`, `joined`, `soleMain`] as const).map((ancestorSide) => {
+          const parents = createScopedSource(
+            `operand-parent-${mode}-${alias}-${order}-${ancestorSide}`,
+            [...parentRows.values()],
+            `eager`,
+          )
+          const children = createScopedSource(
+            `operand-child-${mode}-${alias}-${order}-${ancestorSide}`,
+            [...childRows.values()],
+            mode,
+          )
+          const targets = createScopedSource(
+            `operand-target-${mode}-${alias}-${order}-${ancestorSide}`,
+            [...targetRows.values()],
+            mode,
+          )
+          children.collection.createIndex((row) => row.parentId, {
+            indexType: BasicIndex,
+          })
+          targets.collection.createIndex((row) => row.id, {
+            indexType: BasicIndex,
+          })
+          const live = createLiveQueryCollection({
+            query: new Query()
+              .from({ issue: parents.collection })
+              .select(({ issue: ancestor }) => ({
+                id: ancestor.id,
+                rows: toArray(
+                  new Query()
+                    .from({ child: children.collection })
+                    .innerJoin(
+                      { [alias]: targets.collection },
+                      (context: Context) => {
+                        const child = context.child as Child
+                        const target = context[alias] as Target
+                        const mainKey =
+                          ancestorSide === `main`
+                            ? add(child.base, ancestor.offset)
+                            : ancestorSide === `soleMain`
+                              ? ancestor.offset
+                              : child.base
+                        const joinedKey =
+                          ancestorSide === `joined`
+                            ? add(target.id, ancestor.offset)
+                            : target.id
+                        return order === `childFirst`
+                          ? eq(mainKey, joinedKey)
+                          : eq(joinedKey, mainKey)
+                      },
+                    )
+                    .where((context: Context) =>
+                      eq((context.child as Child).parentId, ancestor.id),
+                    )
+                    .select((context: Context) => ({
+                      parentId: ancestor.id,
+                      childId: (context.child as Child).id,
+                      targetId: (context[alias] as Target).id,
+                    })),
+                ),
+              })),
+          })
+          return {
+            alias,
+            order,
+            ancestorSide,
+            parents,
+            children,
+            targets,
+            live,
           }
-          check(`initial publication`)
+        }),
+      ),
+    )
 
-          const changedParent = { id: 1, offset: 2 }
-          parentRows.set(1, changedParent)
-          for (const entry of cases) entry.parents.put(changedParent)
-          await flushPromises()
-          check(`ancestor key update`)
+    const observe = (live: (typeof cases)[number][`live`]) =>
+      live.toArray
+        .map(({ id, rows }) => ({
+          id,
+          rows: rows
+            .map(({ parentId, childId, targetId }) => ({
+              parentId,
+              childId,
+              targetId,
+            }))
+            .sort((a, b) => a.childId - b.childId),
+        }))
+        .sort((a, b) => a.id - b.id)
 
-          const changedChild = { id: 10, parentId: 1, base: 5 }
-          childRows.set(10, changedChild)
-          for (const entry of cases) entry.children.put(changedChild)
-          await flushPromises()
-          check(`child key update`)
-
-          for (const id of [2, 3, 7]) targetRows.delete(id)
+    await withHistoryCleanup(
+      async () => {
+        for (const entry of cases) await entry.live.preload()
+        const check = (cut: string) => {
           for (const entry of cases) {
-            for (const id of [2, 3, 7]) entry.targets.remove(id)
+            expect(
+              observe(entry.live),
+              `${entry.alias}, ${entry.order}, ${entry.ancestorSide} at ${cut}`,
+            ).toEqual(
+              model(parentRows, childRows, targetRows, entry.ancestorSide),
+            )
           }
-          await flushPromises()
-          check(`joined row removal`)
+        }
+        check(`initial publication`)
 
-          for (const id of [2, 3, 7]) targetRows.set(id, { id })
-          for (const entry of cases) {
-            for (const id of [2, 3, 7]) entry.targets.put({ id })
-          }
-          await flushPromises()
-          check(`joined row return`)
-        },
-        () =>
-          cases.flatMap((entry) => [
-            () => entry.live.cleanup(),
-            () => entry.parents.collection.cleanup(),
-            () => entry.children.collection.cleanup(),
-            () => entry.targets.collection.cleanup(),
-          ]),
-      )
-    })
+        const changedParent = { id: 1, offset: 2 }
+        parentRows.set(1, changedParent)
+        for (const entry of cases) entry.parents.put(changedParent)
+        await flushPromises()
+        check(`ancestor key update`)
+
+        const changedChild = { id: 10, parentId: 1, base: 5 }
+        childRows.set(10, changedChild)
+        for (const entry of cases) entry.children.put(changedChild)
+        await flushPromises()
+        check(`child key update`)
+
+        for (const id of [2, 3, 7]) targetRows.delete(id)
+        for (const entry of cases) {
+          for (const id of [2, 3, 7]) entry.targets.remove(id)
+        }
+        await flushPromises()
+        check(`joined row removal`)
+
+        for (const id of [2, 3, 7]) targetRows.set(id, { id })
+        for (const entry of cases) {
+          for (const id of [2, 3, 7]) entry.targets.put({ id })
+        }
+        await flushPromises()
+        check(`joined row return`)
+      },
+      () =>
+        cases.flatMap((entry) => [
+          () => entry.live.cleanup(),
+          () => entry.parents.collection.cleanup(),
+          () => entry.children.collection.cleanup(),
+          () => entry.targets.collection.cleanup(),
+        ]),
+    )
   }
+
+  const capturedJoinOperandsLaw = `Captured ancestor join operands retain their bindings across alias and equality order.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.captured-join-operands`,
+    law: {
+      statement: capturedJoinOperandsLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: capturedJoinOperandsCells,
+    label: ({ mode }) =>
+      `${mode} sources preserve captured operands across alias and equality order`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(capturedJoinOperandsLaw, plan, observe, () =>
+        judgeCapturedJoinOperands(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -3372,118 +3960,149 @@ describe(`grouped includes keep valid ancestor references`, () => {
       })
       .sort((a, b) => a.id - b.id)
 
-  declareOracle({ model: [model] })
+  const groupedAncestorReferencesCells = ([`eager`, `onDemand`] as const).map(
+    (mode) => ({ mode }),
+  )
 
-  for (const mode of [`eager`, `onDemand`] as const) {
-    test(`${mode} grouped includes use ancestors across shadowing and updates`, async () => {
-      oracleRoute(`case`)
-      const parentRows = new Map<number, Parent>([
-        [1, { id: 1, threshold: 0, direction: 1 }],
-        [2, { id: 2, threshold: 0, direction: -1 }],
-      ])
-      const childRows = new Map<number, Child>([
-        [10, { id: 10, parentId: 1, score: 1 }],
-        [11, { id: 11, parentId: 1, score: 3 }],
-        [20, { id: 20, parentId: 2, score: 1 }],
-        [21, { id: 21, parentId: 2, score: 1 }],
-        [22, { id: 22, parentId: 2, score: 2 }],
-      ])
-      const cases = ([`issue`, `child`] as const).map((alias) => {
-        const name = `group-ancestor-${mode}-${alias}`
-        const parents = createScopedSource(
-          `${name}-parent`,
-          [...parentRows.values()],
-          `eager`,
-        )
-        const children = createScopedSource(
-          `${name}-child`,
-          [...childRows.values()],
-          mode,
-        )
-        children.collection.createIndex((row) => row.parentId, {
-          indexType: BasicIndex,
-        })
-        const live = createLiveQueryCollection({
-          query: new Query()
-            .from({ issue: parents.collection })
-            .select(({ issue: parent }) => ({
-              id: parent.id,
-              rows: toArray(
-                new Query()
-                  .from({ [alias]: children.collection })
-                  .where((context: Context) =>
-                    eq((context[alias] as Child).parentId, parent.id),
-                  )
-                  .groupBy(
-                    (context: Context) => (context[alias] as Child).score,
-                  )
-                  .select((context: Context) => ({
-                    score: (context[alias] as Child).score,
-                    total: count((context[alias] as Child).id),
-                  }))
-                  .having((context: Context) =>
-                    gt(count((context[alias] as Child).id), parent.threshold),
-                  )
-                  .orderBy(
-                    (context: Context) =>
-                      multiply(
-                        (context.$selected as Group).score,
-                        parent.direction,
-                      ),
-                    `asc`,
-                  ),
-              ),
-            })),
-        })
-        return { alias, parents, children, live }
-      })
-
-      await withHistoryCleanup(
-        async () => {
-          for (const entry of cases) await entry.live.preload()
-          const check = (cut: string) => {
-            const expected = model(parentRows, childRows)
-            for (const entry of cases) {
-              expect(
-                entry.live.toArray
-                  .map(({ id, rows }) => ({
-                    id,
-                    rows: rows.map(({ score, total }) => ({ score, total })),
-                  }))
-                  .sort((a, b) => a.id - b.id),
-                `${entry.alias} at ${cut}`,
-              ).toEqual(expected)
-            }
-          }
-          check(`initial publication`)
-
-          const stricterParent = { id: 2, threshold: 1, direction: -1 }
-          parentRows.set(2, stricterParent)
-          for (const entry of cases) entry.parents.put(stricterParent)
-          await flushPromises()
-          check(`ancestor threshold changes`)
-
-          const changedChild = { id: 22, parentId: 2, score: 1 }
-          childRows.set(22, changedChild)
-          for (const entry of cases) entry.children.put(changedChild)
-          await flushPromises()
-          check(`child changes group`)
-
-          const reversedParent = { id: 1, threshold: 0, direction: -1 }
-          parentRows.set(1, reversedParent)
-          for (const entry of cases) entry.parents.put(reversedParent)
-          await flushPromises()
-          check(`ancestor sort direction changes`)
-        },
-        () =>
-          cases.flatMap((entry) => [
-            () => entry.live.cleanup(),
-            () => entry.parents.collection.cleanup(),
-            () => entry.children.collection.cleanup(),
-          ]),
+  // The former test body, unchanged.
+  async function judgeGroupedAncestorReferences({
+    mode,
+  }: (typeof groupedAncestorReferencesCells)[number]): Promise<void> {
+    const parentRows = new Map<number, Parent>([
+      [1, { id: 1, threshold: 0, direction: 1 }],
+      [2, { id: 2, threshold: 0, direction: -1 }],
+    ])
+    const childRows = new Map<number, Child>([
+      [10, { id: 10, parentId: 1, score: 1 }],
+      [11, { id: 11, parentId: 1, score: 3 }],
+      [20, { id: 20, parentId: 2, score: 1 }],
+      [21, { id: 21, parentId: 2, score: 1 }],
+      [22, { id: 22, parentId: 2, score: 2 }],
+    ])
+    const cases = ([`issue`, `child`] as const).map((alias) => {
+      const name = `group-ancestor-${mode}-${alias}`
+      const parents = createScopedSource(
+        `${name}-parent`,
+        [...parentRows.values()],
+        `eager`,
       )
+      const children = createScopedSource(
+        `${name}-child`,
+        [...childRows.values()],
+        mode,
+      )
+      children.collection.createIndex((row) => row.parentId, {
+        indexType: BasicIndex,
+      })
+      const live = createLiveQueryCollection({
+        query: new Query()
+          .from({ issue: parents.collection })
+          .select(({ issue: parent }) => ({
+            id: parent.id,
+            rows: toArray(
+              new Query()
+                .from({ [alias]: children.collection })
+                .where((context: Context) =>
+                  eq((context[alias] as Child).parentId, parent.id),
+                )
+                .groupBy((context: Context) => (context[alias] as Child).score)
+                .select((context: Context) => ({
+                  score: (context[alias] as Child).score,
+                  total: count((context[alias] as Child).id),
+                }))
+                .having((context: Context) =>
+                  gt(count((context[alias] as Child).id), parent.threshold),
+                )
+                .orderBy(
+                  (context: Context) =>
+                    multiply(
+                      (context.$selected as Group).score,
+                      parent.direction,
+                    ),
+                  `asc`,
+                ),
+            ),
+          })),
+      })
+      return { alias, parents, children, live }
     })
+
+    await withHistoryCleanup(
+      async () => {
+        for (const entry of cases) await entry.live.preload()
+        const check = (cut: string) => {
+          const expected = model(parentRows, childRows)
+          for (const entry of cases) {
+            expect(
+              entry.live.toArray
+                .map(({ id, rows }) => ({
+                  id,
+                  rows: rows.map(({ score, total }) => ({ score, total })),
+                }))
+                .sort((a, b) => a.id - b.id),
+              `${entry.alias} at ${cut}`,
+            ).toEqual(expected)
+          }
+        }
+        check(`initial publication`)
+
+        const stricterParent = { id: 2, threshold: 1, direction: -1 }
+        parentRows.set(2, stricterParent)
+        for (const entry of cases) entry.parents.put(stricterParent)
+        await flushPromises()
+        check(`ancestor threshold changes`)
+
+        const changedChild = { id: 22, parentId: 2, score: 1 }
+        childRows.set(22, changedChild)
+        for (const entry of cases) entry.children.put(changedChild)
+        await flushPromises()
+        check(`child changes group`)
+
+        const reversedParent = { id: 1, threshold: 0, direction: -1 }
+        parentRows.set(1, reversedParent)
+        for (const entry of cases) entry.parents.put(reversedParent)
+        await flushPromises()
+        check(`ancestor sort direction changes`)
+      },
+      () =>
+        cases.flatMap((entry) => [
+          () => entry.live.cleanup(),
+          () => entry.parents.collection.cleanup(),
+          () => entry.children.collection.cleanup(),
+        ]),
+    )
   }
+
+  const groupedAncestorReferencesLaw = `Grouped includes keep valid ancestor references across shadowing and updates.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.grouped-ancestor-references`,
+    law: {
+      statement: groupedAncestorReferencesLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: groupedAncestorReferencesCells,
+    label: ({ mode }) =>
+      `${mode} grouped includes use ancestors across shadowing and updates`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(groupedAncestorReferencesLaw, plan, observe, () =>
+        judgeGroupedAncestorReferences(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -3526,101 +4145,132 @@ describe(`joined subqueries reject captured sibling sources`, () => {
       ),
     }))
 
-  declareOracle({ model: [expectedAncestorRows] })
+  const joinedSubqueryAncestorCells = ([`eager`, `onDemand`] as const).flatMap(
+    (mode) => ([`issue`, `inner`] as const).map((alias) => ({ mode, alias })),
+  )
 
-  for (const mode of [`eager`, `onDemand`] as const) {
-    for (const alias of [`issue`, `inner`] as const) {
-      test(`${mode} joined subquery may capture an actual ancestor with inner alias ${alias}`, async () => {
-        oracleRoute(`case`)
-        const parentRows = [{ id: 1 }, { id: 2 }]
-        const mainRows = [{ id: 1 }, { id: 2 }]
-        const innerRows = [{ id: 1 }, { id: 2 }]
-        const probeRows = [{ id: 1 }, { id: 2 }]
-        const expected = expectedAncestorRows(
-          parentRows,
-          mainRows,
-          innerRows,
-          probeRows,
-        )
-        const parent = createScopedSource(
-          `sibling-control-parent-${mode}-${alias}`,
-          parentRows,
-          `eager`,
-        )
-        const main = createScopedSource(
-          `sibling-control-main-${mode}-${alias}`,
-          mainRows,
-          mode,
-        )
-        const inner = createScopedSource(
-          `sibling-control-inner-${mode}-${alias}`,
-          innerRows,
-          mode,
-        )
-        const probe = createScopedSource(
-          `sibling-control-probe-${mode}-${alias}`,
-          probeRows,
-          mode,
-        )
-        const live = createLiveQueryCollection({
-          query: new Query()
-            .from({ issue: parent.collection })
-            .select(({ issue: ancestor }) => {
-              const joinedQuery = new Query()
-                .from({ [alias]: inner.collection })
-                .where((context: Context) =>
-                  eq((context[alias] as Row).id, ancestor.id),
+  // The former test body, unchanged.
+  async function judgeJoinedSubqueryAncestor({
+    mode,
+    alias,
+  }: (typeof joinedSubqueryAncestorCells)[number]): Promise<void> {
+    const parentRows = [{ id: 1 }, { id: 2 }]
+    const mainRows = [{ id: 1 }, { id: 2 }]
+    const innerRows = [{ id: 1 }, { id: 2 }]
+    const probeRows = [{ id: 1 }, { id: 2 }]
+    const expected = expectedAncestorRows(
+      parentRows,
+      mainRows,
+      innerRows,
+      probeRows,
+    )
+    const parent = createScopedSource(
+      `sibling-control-parent-${mode}-${alias}`,
+      parentRows,
+      `eager`,
+    )
+    const main = createScopedSource(
+      `sibling-control-main-${mode}-${alias}`,
+      mainRows,
+      mode,
+    )
+    const inner = createScopedSource(
+      `sibling-control-inner-${mode}-${alias}`,
+      innerRows,
+      mode,
+    )
+    const probe = createScopedSource(
+      `sibling-control-probe-${mode}-${alias}`,
+      probeRows,
+      mode,
+    )
+    const live = createLiveQueryCollection({
+      query: new Query()
+        .from({ issue: parent.collection })
+        .select(({ issue: ancestor }) => {
+          const joinedQuery = new Query()
+            .from({ [alias]: inner.collection })
+            .where((context: Context) =>
+              eq((context[alias] as Row).id, ancestor.id),
+            )
+            .innerJoin({ probe: probe.collection }, ({ probe: row }) =>
+              eq(ancestor.id, row.id),
+            )
+            .select((context: Context) => ({
+              id: (context[alias] as Row).id,
+              ancestorId: ancestor.id,
+            }))
+          return {
+            id: ancestor.id,
+            rows: toArray(
+              new Query()
+                .from({ local: main.collection })
+                .innerJoin({ nested: joinedQuery }, ({ local: row, nested }) =>
+                  eq(row.id, nested.id),
                 )
-                .innerJoin({ probe: probe.collection }, ({ probe: row }) =>
-                  eq(ancestor.id, row.id),
-                )
-                .select((context: Context) => ({
-                  id: (context[alias] as Row).id,
-                  ancestorId: ancestor.id,
-                }))
-              return {
-                id: ancestor.id,
-                rows: toArray(
-                  new Query()
-                    .from({ local: main.collection })
-                    .innerJoin(
-                      { nested: joinedQuery },
-                      ({ local: row, nested }) => eq(row.id, nested.id),
-                    )
-                    .where(({ local: row }) => eq(row.id, ancestor.id))
-                    .select(({ local: row, nested }) => ({
-                      localId: row.id,
-                      joinedId: nested.id,
-                      ancestorId: nested.ancestorId,
-                    })),
-                ),
-              }
-            }),
-        })
-
-        await withHistoryCleanup(
-          async () => {
-            await live.preload()
-            expect(
-              live.toArray.map(({ id, rows }) => ({
-                id,
-                rows: rows.map(({ localId, joinedId, ancestorId }) => ({
-                  localId,
-                  joinedId,
-                  ancestorId,
+                .where(({ local: row }) => eq(row.id, ancestor.id))
+                .select(({ local: row, nested }) => ({
+                  localId: row.id,
+                  joinedId: nested.id,
+                  ancestorId: nested.ancestorId,
                 })),
-              })),
-            ).toEqual(expected)
-          },
-          () => [
-            () => live.cleanup(),
-            () => parent.collection.cleanup(),
-            () => main.collection.cleanup(),
-            () => inner.collection.cleanup(),
-            () => probe.collection.cleanup(),
-          ],
-        )
-      })
-    }
+            ),
+          }
+        }),
+    })
+
+    await withHistoryCleanup(
+      async () => {
+        await live.preload()
+        expect(
+          live.toArray.map(({ id, rows }) => ({
+            id,
+            rows: rows.map(({ localId, joinedId, ancestorId }) => ({
+              localId,
+              joinedId,
+              ancestorId,
+            })),
+          })),
+        ).toEqual(expected)
+      },
+      () => [
+        () => live.cleanup(),
+        () => parent.collection.cleanup(),
+        () => main.collection.cleanup(),
+        () => inner.collection.cleanup(),
+        () => probe.collection.cleanup(),
+      ],
+    )
   }
+
+  const joinedSubqueryAncestorLaw = `A joined subquery may capture an actual ancestor, whatever its inner alias.`
+
+  oracleProperty({
+    id: `includes-alias-shadowing.joined-subquery-ancestor`,
+    law: {
+      statement: joinedSubqueryAncestorLaw,
+      authority: `The Identity section and normative law 1 (alpha-renaming) of packages/db/src/query/live/ARCHITECTURE.md: aliases are lexical names, a captured reference keeps its binding when a nested query shadows its alias, and source identity is preserved through plan rewrites, as stated at the start of this owner.`,
+      limits: `The enumerated cells of this fixture over controlled source Collections, as stated beside it; no other query shape or provider timing.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/builder/index.ts`,
+      `src/query/builder/query-ir.ts#getQueryIR`,
+      `src/query/ir-stable-identity.ts#getQueryIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/optimizer.ts#optimizeQuery`,
+    ],
+    histories: joinedSubqueryAncestorCells,
+    label: ({ mode, alias }) =>
+      `${mode} joined subquery may capture an actual ancestor with inner alias ${alias}`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(joinedSubqueryAncestorLaw, plan, observe, () =>
+        judgeJoinedSubqueryAncestor(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
