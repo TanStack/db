@@ -8252,7 +8252,13 @@ prefetch attempt counts toward the outage threshold, as any failed
 shape-log request does; no driver response spans several chunks, so no
 history prefetches. It declares reach
 for a subset request's five retried attempts, five live pauses, a live
-outage, and that restart. The retry-decision model
+outage, and that restart. Each snapshot campaign now constructs a fresh
+randomized history that reaches all seven declared states, including outages
+led and crossed by a synchronous throw. Per-history checks enforce the
+construction obligations for generated outputs as well as campaign examples;
+seven missing-state calibrations reject an omitted reach observation. The
+40-run budget, fixed seed, unconstrained arbitrary, and product comparisons
+remain. See [the reach repair evidence](oracle-reviews/2026-11-10-electric-snapshot-reach.md). The retry-decision model
 (`electric-retry-decision-model.ts`, shared by the controlled lane of
 `electric-oracle.property.test.ts` and the installed-client lane) now
 observes an `awaitTxId` and an `awaitMatch` that reject when the run fails

@@ -1,5 +1,11 @@
 # @tanstack/offline-transactions
 
+## 1.2.1
+
+### Patch Changes
+
+- Preserve pending callers and optimistic mutations when an offline executor is replaced. A successor over the same outbox settles the original callers when it retains the configured Collection objects in the same runtime. ([#2401](https://github.com/TanStack/db/pull/2401))
+
 ## 1.2.0
 
 ### Minor Changes
