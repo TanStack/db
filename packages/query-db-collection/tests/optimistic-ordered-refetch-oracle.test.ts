@@ -9,7 +9,6 @@ import { expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import { queryCollectionOptions } from '../src/query.js'
 import { applyPredicates } from '../e2e/query-filter.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleRoute } from '../../db/tests/oracle-config.js'
 import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
 import { withOracleCleanup } from '../../db/tests/utils'
@@ -354,12 +353,6 @@ function checkOrderedMutationObservation(
     ending.startsWith(`reject`) ? `failed` : `completed`,
   )
 }
-
-declareOracle({
-  check: [checkOrderedMutationTrace, checkOrderedMutationObservation],
-  model: [expectedPublicWindow],
-  grammar: [orderedMutationHistories],
-})
 
 // Recompute the original immediate and settled windows from the authored
 // operation and handler ending. Request shapes stay observations of the real

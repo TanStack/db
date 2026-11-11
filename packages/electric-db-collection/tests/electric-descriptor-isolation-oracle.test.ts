@@ -4,7 +4,6 @@ import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   checkExistingElectricComparison,
@@ -635,7 +634,3 @@ oracleProperty({
 // Reusing one wrapper itself is rejected before a second owner starts. The
 // public checkpoints are admission, the first receipt, and each Collection's
 // rows after only the first provider session acknowledges its transaction.
-
-declareOracle({
-  check: [runTagHistory, runOwnerHistory],
-})

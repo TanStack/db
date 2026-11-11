@@ -7,7 +7,6 @@ import { OfflineExecutor } from '../src/OfflineExecutor'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
 import { oracleRoute } from '../../db/tests/oracle-config'
 import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   FakeStorageAdapter,
   createTestOfflineEnvironment,
@@ -205,10 +204,6 @@ function storedCalls(count: number, payload: string) {
     metadata: { payload },
   }))
 }
-declareOracle({
-  check: [checkLeadershipTrace],
-  model: [foldReplayLedger],
-})
 
 describe.each([`construction`, `leadership`, `outbox read`, `retry hook`])(
   `disposed startup at %s`,

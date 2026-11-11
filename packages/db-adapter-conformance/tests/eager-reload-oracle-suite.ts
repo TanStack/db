@@ -44,6 +44,8 @@ function checkedReloadResult(
 export function registerEagerReloadConformance(
   property: string,
   adapter: EagerReloadAdapter,
+  /** The receiving adapter's production entry, forwarded to oracleProperty. */
+  { owns }: { owns?: ReadonlyArray<string> } = {},
 ) {
   let sequence = 0
   // Each construction keeps the generated coordinates that its premise does
@@ -181,6 +183,7 @@ export function registerEagerReloadConformance(
   }
   oracleProperty({
     id: property,
+    owns,
     law: {
       statement: `A complete eager source result replaces retained source membership and values; before source entry the previous public rows remain, and a persisting optimistic overlay follows the accepted-versus-applied sync contract until settlement.`,
       authority: `Glossary reload, snapshot transaction and accepted sync transaction; eager-source READY-3/PUB-7; optimistic-history-oracle.ts.`,

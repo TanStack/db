@@ -30,7 +30,6 @@ import {
 } from '../../db/tests/oracle-assertion-adapter'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import type {
@@ -44,9 +43,6 @@ type AssertionReach = {
   beginHistory: () => void
   reach: (state: string) => void
 }
-
-// Owns no convex source: this grammar drives @tanstack/db Collection receipts with its own adapter, not the convex pager.
-declareOracle({})
 
 type Row = { id: string; text: string }
 const gate = () => {

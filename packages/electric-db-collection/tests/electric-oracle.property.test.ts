@@ -20,7 +20,6 @@ import {
   oracleReplayTest,
   oracleRoute,
 } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   checkMutationConfirmation,
@@ -4544,7 +4543,6 @@ describe(`Electric adapter laws`, () => {
   // The former fast-check examples include authored retry schedules outside
   // the mapped arbitrary's shrink domain. Keep the same shared comparison and
   // both former campaign executions without changing the random generator.
-  declareOracle({ check: [checkRetryHistory] })
   oracleReplayTest(it).each(retryExamples)(
     `electric.retry-decision: retained fixed history %#`,
     checkRetryHistory,
@@ -5132,42 +5130,4 @@ describe(`Electric adapter laws`, () => {
     },
     check: checkExistingElectricComparison,
   })
-})
-
-// The checks run a history through production and compare each observation
-// with the model (or the authored snapshots they are given). The models are
-// independent folds of the same histories. The grammar generates the queued
-// presence and persistence interleaving campaigns.
-declareOracle({
-  check: [
-    checkMutationConfirmation,
-    runProcessGrammar,
-    runQueuedPresenceCampaign,
-    expectQueuedPresenceAtDurabilityHold,
-    checkInitialMoveOut,
-    runRejectedDurablePrefixWitness,
-    runPublicationBeforePersistenceWitness,
-    runPersistenceFailureCrashOnlyWitness,
-    assertPublicationEpochHistory,
-    runSchedulerPermutation,
-    runPersistenceInterleavingCampaign,
-    expectPersistenceInterleavingObservation,
-  ],
-  model: [
-    expectedSnapshots,
-    recomputeCommittedRows,
-    recomputedSnapshots,
-    expectedQueuedPresenceRows,
-    foldSourceLedgerThrough,
-    isSdkResetFramedPartition,
-    applyReferenceBatch,
-    createRetryModel,
-    applyRetryModel,
-    expectedRetryObservation,
-    expectedInitialMoveOutSnapshots,
-  ],
-  grammar: [
-    queuedPresenceArbitraries,
-    persistenceInterleavingCampaignArbitrary,
-  ],
 })

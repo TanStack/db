@@ -11,7 +11,6 @@
  * source delivery; accepted inputs additionally complete a real source result.
  * This owner checks protocol admission, not row replacement or I/O failure.
  */
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
 import type { PersistedCollectionPersistence } from '../../db-sqlite-persistence-core/src'
 import type { PersistedStartupAdapter } from './persisted-startup-driver'
@@ -115,8 +114,3 @@ export async function observeCapability(
     return error
   }, [() => source.dispose()])
 }
-declareOracle({
-  model: [capabilityMustAccept],
-  grammar: [capabilityHistories],
-  check: [capabilityViolations],
-})

@@ -15,7 +15,6 @@ import {
   oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   oracleProperty,
   violation as oracleViolation,
@@ -141,26 +140,6 @@ if (
 ) {
   throw new Error(`Unknown Electric SDK delivery oracle fault`)
 }
-
-// The checks are the drivers that run a finite history and compare production
-// with the model state at each checkpoint. The retry model is the shared
-// module `electric-retry-decision-model.ts`, which predicts each observation.
-declareOracle({
-  check: [
-    checkSnapshots,
-    checkMembership,
-    runClientRetryCell,
-    checkSourceRelease,
-    checkManagedRotation,
-    checkResumeCheckpoint,
-  ],
-  model: [
-    createRetryModel,
-    applyRetryModel,
-    expectedRetryObservation,
-    expectedResumeCheckpoint,
-  ],
-})
 
 // Scaled with the run multiplier, so stress campaigns keep their budget.
 const campaignTimeoutMs = oracleRuns(30_000)

@@ -27,7 +27,6 @@ import {
   getLoadSubsetDemandKey,
 } from '@tanstack/db'
 import { afterEach, vi } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   differs,
   oracleProperty,
@@ -297,16 +296,6 @@ const publishedOwnerHistories: Array<PublishedOwnerHistory> = (
  * dehydrate/hydrate histories. Neither family had a generated-run budget or
  * literal reach table to retire. Publication holds and row observations are
  * the original real QueryClient cuts, now judged by the framework check. */
-declareOracle({
-  model: [
-    modelReacquisition,
-    modelPublishedOwners,
-    lifetimeModel,
-    directOrderModel,
-    overlapModel,
-  ],
-  check: [checkCuts],
-})
 oracleProperty({
   id: 'query-db.ownership.reacquisition',
   law: {

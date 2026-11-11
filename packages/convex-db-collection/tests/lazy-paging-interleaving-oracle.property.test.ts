@@ -26,7 +26,6 @@ import {
 } from '../../db/tests/oracle-assertion-adapter'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import type { SyncAppliedReceipt, SyncConfig } from '@tanstack/db'
@@ -36,9 +35,6 @@ type AssertionReach = {
   beginHistory: () => void
   reach: (state: string) => void
 }
-
-// Owns no convex source: this grammar drives @tanstack/db Collection sync with its own SyncConfig, not the convex pager.
-declareOracle({})
 
 type Row = { id: string }
 const gate = () => {

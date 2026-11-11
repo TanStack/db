@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { DuplicateKeySyncError, createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleRoute } from '../../db/tests/oracle-config.js'
 import {
   checked,
@@ -448,15 +447,6 @@ async function compareWriteWithReference(
     actual.visible,
   )
 }
-
-declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
-  check: [
-    compareWriteWithReference,
-    compareLaterRefetchOrder,
-    compareDuplicateInsert,
-  ],
-})
 
 // A mutant that reports readiness but discards the first source transaction
 // commits its empty metadata transaction and must fail the same comparison.

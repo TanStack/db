@@ -7,14 +7,12 @@
  * separately from its primary law violation (ORC-010).
  */
 import { pass, violation } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   ConformanceViolation,
   checkEagerLiveSourceHistory,
   describeValue,
   eagerLiveSourceConstructedHistories,
   eagerLiveSourceDataHistoryArb,
-  eagerLiveSourceModel,
   reachStatesFor,
   resolveEagerLiveSourceHistory,
 } from '../src'
@@ -171,13 +169,3 @@ export function eagerLiveSourceOracle(driver: EagerLiveSourceDriver) {
     check: checkEagerLiveSourceObservations,
   }
 }
-
-declareOracle({
-  check: [checkEagerLiveSourceHistory, checkEagerLiveSourceObservations],
-  model: [
-    eagerLiveSourceModel.step,
-    eagerLiveSourceModel.expected,
-    eagerLiveSourceRequiredStates,
-  ],
-  grammar: [eagerLiveSourceDataHistoryArb, eagerLiveSourceConstructedHistories],
-})

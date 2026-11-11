@@ -20,7 +20,6 @@
 import { hashKey, isCancelledError } from '@tanstack/query-core'
 import { createCollection } from '@tanstack/db'
 import { afterEach, vi } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   differs,
   oracleProperty,
@@ -515,23 +514,6 @@ function invalidResultCheck(
     ) ?? pass
   )
 }
-declareOracle({
-  model: [
-    emptySettlementModel,
-    deferredSettlementModel,
-    cleanupSettlementModel,
-    recoveredSettlementModel,
-    eagerRecoveredSettlementModel,
-    retainedInvalidSettlementModel,
-    overlappingDeferralModel,
-    independentSettlementModel,
-    applicationFailureModel,
-    handlerFailureModel,
-    reentrantSettlementModel,
-    invalidResultModel,
-  ],
-  check: [checkCuts, invalidResultCheck],
-})
 oracleProperty({
   id: 'query-db.ownership.application-failure',
   law: {

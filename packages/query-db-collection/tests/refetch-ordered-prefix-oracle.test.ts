@@ -15,7 +15,6 @@ import {
   oracleReplayRequested,
   oracleRoute,
 } from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   observeComparison,
   recordedComparison,
@@ -1254,11 +1253,6 @@ async function withDeadline<T>(work: Promise<T>): Promise<T> {
 }
 
 const property = `query-db.refetch-ordered-prefix`
-declareOracle({
-  check: [checkCase],
-  model: [expectedWindow, expectedCoverage],
-  grammar: [caseArbitrary, heldCaseArbitrary, sameKeyEndCaseArbitrary],
-})
 
 describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () => {
   // The issue's trace (rank desc, limit 2). Removing rank 10's marker makes

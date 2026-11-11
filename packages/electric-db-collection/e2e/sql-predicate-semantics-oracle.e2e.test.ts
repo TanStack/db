@@ -18,7 +18,6 @@ import {
   oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   checkExistingElectricComparison,
@@ -275,10 +274,6 @@ function evaluate(value: Predicate, row: Row): Truth {
   return actual <= value.value
 }
 
-declareOracle({
-  model: [evaluate],
-})
-
 describe(`Electric predicate compiler semantics`, () => {
   let client: Client
   let table: string
@@ -375,7 +370,6 @@ describe(`Electric predicate compiler semantics`, () => {
     expect(result.rows.map(({ id }) => id)).toEqual(expected)
     executedCells++
   }
-  declareOracle({ check: [checkPostgresPredicate] })
 
   beforeEach(async ({ task }) => {
     if (task.suite?.name !== `electric.sql-predicate-semantics`) return

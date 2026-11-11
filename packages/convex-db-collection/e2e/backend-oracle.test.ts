@@ -43,7 +43,6 @@ import {
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexPaginatedCollectionOptions } from '../src/index'
 import { withTestCleanup } from '../tests/helpers'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { all, seed } from './backend-support'
 import type { Task } from './backend-support'
 import type { Value } from 'convex/values'
@@ -96,8 +95,6 @@ async function expectMirrorsAllTasks(
     ),
   )
 }
-
-declareOracle({ check: [expectMirrorsAllTasks] })
 
 describe.each([`javascript`, `react`] as const)(
   `real backend with %s client`,

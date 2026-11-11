@@ -33,7 +33,6 @@ import {
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexPaginatedCollectionOptions } from '../src/index'
 import { oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { copyRows, keyedRows, provider, query } from './pagination-support'
 import type { Row } from './pagination-support'
@@ -150,13 +149,6 @@ function expectRevisionTrace(
       )
   }
 }
-
-// The check below compares each observed snapshot with the model's prior and
-// current complete snapshots; the grammar draws the source histories.
-declareOracle({
-  check: [expectRevisionTrace],
-  grammar: [history, snapshot],
-})
 
 // Calibrate both recorders' shared trace relation without imposing one callback
 // per revision. Repeated old/new snapshots are legal; prefixes and rollback

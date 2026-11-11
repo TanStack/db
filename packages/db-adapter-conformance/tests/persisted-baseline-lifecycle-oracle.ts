@@ -17,7 +17,6 @@
  * bound, provider service, arbitrary concurrent mutation or I/O crash claim.
  */
 import fc from 'fast-check'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   expectedHydrationLifecycle,
   hydrationLifecycleRows,
@@ -264,12 +263,3 @@ export function baselineLifecycleViolations(
       )
   return violations
 }
-declareOracle({
-  grammar: [
-    baselineLifecycleHistoryArb,
-    baselineLifecycleArbitrary,
-    baselineLifecycleHistories,
-  ],
-  model: [baselineLifecycleExpected],
-  check: [baselineLifecycleViolations],
-})

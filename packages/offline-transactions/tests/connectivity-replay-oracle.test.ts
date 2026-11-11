@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleRoute } from '../../db/tests/oracle-config'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import {
@@ -47,17 +46,6 @@ function expectedAt(phase: `hidden` | `visible`): {
     ? { providerCalls: 0, outboxEntries: 1, callerState: `pending` }
     : { providerCalls: 1, outboxEntries: 0, callerState: `fulfilled` }
 }
-
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
-  owns: [
-    `src/OfflineExecutor.ts#OfflineExecutor.getOnlineDetector`,
-    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
-    `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
-  ],
-  model: [expectedAt],
-})
 
 let releaseClock: (() => void) | undefined
 beforeEach(() => {

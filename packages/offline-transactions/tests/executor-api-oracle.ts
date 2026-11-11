@@ -2,7 +2,6 @@ import fc from 'fast-check'
 import { createCollection } from '@tanstack/db'
 import { vi } from 'vitest'
 import { startOfflineExecutor } from '../src/OfflineExecutor'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
 import { FakeStorageAdapter, gate, turn } from './harness'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
@@ -747,9 +746,4 @@ oracleProperty<ControlHistory, ReturnType<typeof controlsModel>>({
         ),
     },
   ],
-})
-declareOracle({
-  grammar: [apiHistory, controlHistory],
-  model: [apiModel, controlsModel],
-  check: [checkApi, checkControls],
 })

@@ -9,7 +9,6 @@ import {
 import { crossSerializeStream, getCrossReferenceHeader } from 'seroval'
 import { describe, expect, it } from 'vitest'
 import { queryCollectionOptions } from '../src/query.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleRoute } from '../../db/tests/oracle-config.js'
 import type { DehydratedState } from '@tanstack/query-core'
 import type { LoadSubsetOptions } from '@tanstack/db'
@@ -118,13 +117,6 @@ function expectHydratedRow(
   if (expectedMeta) expect(hydratedMeta).toEqual(expectedMeta)
   browserClient.clear()
 }
-
-// What this oracle owns: the Query cache entries that queryCollectionOptions
-// creates and loads, which the SSR dehydration and stream checks observe.
-declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
-  check: [expectHydratedRow],
-})
 
 async function checkWithCleanup(
   check: () => Promise<void>,

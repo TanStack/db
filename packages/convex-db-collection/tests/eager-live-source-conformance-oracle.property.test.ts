@@ -1,11 +1,6 @@
 import { describe } from 'vitest'
 import { oracleProperty } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import {
-  checkEagerLiveSourceHistory,
-  eagerLiveSourceHistoryArb,
-  eagerLiveSourceModel,
-} from '../../db-adapter-conformance/src'
+import {} from '../../db-adapter-conformance/src'
 import {
   checkEagerLiveSourceObservations,
   eagerLiveSourceHistories,
@@ -35,7 +30,6 @@ import { convexConformanceDriver } from './conformance-driver'
 describe(`eager live-source conformance: convex`, () => {
   const property = `adapter-conformance.eager-live-source.convex`
   const driver = convexConformanceDriver()
-  const historyArb = eagerLiveSourceHistoryArb(driver)
   const runs = 400
   const campaignTimeoutMs = 120_000
 
@@ -69,10 +63,4 @@ describe(`eager live-source conformance: convex`, () => {
       timeout: campaignTimeoutMs,
     })
   }
-
-  declareOracle({
-    check: [checkEagerLiveSourceHistory],
-    model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-    grammar: [historyArb],
-  })
 })

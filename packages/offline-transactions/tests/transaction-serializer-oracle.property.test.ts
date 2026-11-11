@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
 import { oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   forwardAssertionJudgment,
@@ -86,8 +85,6 @@ import type {
  * they do not establish behavior with a native or polyfill Temporal runtime.
  * Retained-storage checks use FakeStorageAdapter, not browser storage.
  */
-
-declareOracle({ check: [checkRoundtrip, checkCodec] })
 
 it(`preserves marker-shaped user data through current wire encoding`, async () => {
   oracleRoute(`case`)

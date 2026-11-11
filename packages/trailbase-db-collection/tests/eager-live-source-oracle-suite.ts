@@ -20,7 +20,12 @@ type Receive = (
   corruptValues?: boolean,
 ) => Promise<EagerHistoryResult>
 export function registerTrailBaseEager(
-  campaign: { property: string; defaultRuns: number },
+  campaign: {
+    property: string
+    defaultRuns: number
+    /** The receiving adapter's production entry, forwarded to oracleProperty. */
+    owns?: ReadonlyArray<string>
+  },
   driver: EagerLiveSourceDriver,
   receive: Receive,
 ) {
@@ -50,6 +55,7 @@ export function registerTrailBaseEager(
     }
   oracleProperty({
     id: campaign.property,
+    owns: campaign.owns,
     law: {
       statement: `The eager source's initial gate, complete rows and field values, per-change publications, failure identity, post-ready health, restart and exactly-once resource release follow the shared eager live-source laws.`,
       authority: `db-adapter-conformance/src/eager-live-source-oracle.ts, adapter law set READY-2/3/4, HEALTH-1/5, PUB-1/2/3, FID-1/4, LIFE-2/5/10; TrailBase tests/ORACLE.md.`,

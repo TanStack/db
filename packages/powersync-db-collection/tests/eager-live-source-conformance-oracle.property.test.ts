@@ -9,11 +9,6 @@
  * builder returns fresh identities and preserves generated input variation.
  */
 import { oracleProperty } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import {
-  checkEagerLiveSourceHistory,
-  eagerLiveSourceModel,
-} from '../../db-adapter-conformance/src'
 import { eagerLiveSourceCampaign } from '../../db-adapter-conformance/tests/eager-live-source-oracle-suite'
 import { constructPowerSyncEagerHistory } from './eager-live-source-history-oracle'
 import { powerSyncConformanceDriver } from './conformance-driver'
@@ -42,9 +37,4 @@ oracleProperty({
   check: campaign.check,
   calibrations: campaign.calibrations,
   timeout: 600000,
-})
-declareOracle({
-  check: [checkEagerLiveSourceHistory, campaign.check],
-  model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-  grammar: [campaign.arbitrary],
 })

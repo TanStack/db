@@ -8,7 +8,6 @@ import {
 import { QueryClient } from '@tanstack/query-core'
 import { describe, expect, it } from 'vitest'
 import { evaluateReferenceExpression } from '../../db/tests/reference-expression-oracle'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleRoute } from '../../db/tests/oracle-config.js'
 import { queryCollectionOptions } from '../src/query'
 import type { Collection } from '@tanstack/db'
@@ -503,20 +502,6 @@ function expectIrrelevantBranchWork(
     canonicalTreeEntries(baseline.entries),
   )
 }
-
-// What this oracle owns: the source Query collections that queryCollectionOptions
-// builds for each level of the nested includes tree. Its model is the
-// reachable tree derived from the source foreign keys.
-declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
-  model: [expectedTreeEntries, expectedTreeCounts],
-  check: [
-    checkNestedTreeShape,
-    expectNestedTreeShape,
-    expectNestedTreeWork,
-    expectIrrelevantBranchWork,
-  ],
-})
 
 describe(`nested includes reachable-shape oracle`, () => {
   // Keep every value from the former fixed-seed sample (2, 3, 4, 13, 17),

@@ -8,7 +8,6 @@ import {
   oracleProperty,
   pass,
 } from '../../db/tests/oracle-property.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createLiveQueryWindowController } from '../../db/src/live-query-window-controller.js'
 import { createCursorPager, queryCollectionOptions } from '../src/index.js'
 import {
@@ -118,10 +117,6 @@ function checkManualWriteTrace(
     ) ?? pass
   )
 }
-
-declareOracle({
-  model: [expectedWindow],
-})
 
 describe(`cursor adapter through production pagination`, () => {
   // A handler-free direct write surgically changes an eager Query Collection's

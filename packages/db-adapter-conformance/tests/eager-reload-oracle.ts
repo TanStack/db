@@ -22,7 +22,6 @@
  * publication claim. Drivers record before-source and fulfillment cuts.
  */
 import fc from 'fast-check'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   expectedPersistedStartup,
   sortedStartupRows,
@@ -206,8 +205,3 @@ export function eagerReloadViolations(
   if (!equal(observed.final, expectedRows)) violations.push(`final rows`)
   return violations
 }
-declareOracle({
-  grammar: [eagerReloadHistoryArb, eagerReloadHistories],
-  model: [eagerReloadModel],
-  check: [eagerReloadViolations],
-})

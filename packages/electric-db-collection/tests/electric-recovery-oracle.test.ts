@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { oracleFixedSeed, oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   SQLiteCorePersistenceAdapter,
@@ -756,18 +755,6 @@ const assertPublicationHistory = async (
 function expectedReplacementRows(empty: boolean): Array<Item> {
   return empty ? [] : [freshRow]
 }
-
-declareOracle({
-  check: [observePersistedRestart, assertPublicationHistory],
-  model: [
-    expectedPostRestartObservation,
-    expectedDurableRow,
-    applyPublicationCommandToModel,
-    applyStreamUpdateToModel,
-    expectedReplacementRows,
-  ],
-  grammar: [publicationHistoryArbitrary],
-})
 
 describe(`persisted Electric recovery laws`, () => {
   // The Map adapter is the driver's durable boundary. It must enact SQLite's

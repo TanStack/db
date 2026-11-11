@@ -1,5 +1,4 @@
 import { expect } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { oracleFixedSeed } from '../../db/tests/oracle-config'
 import { parseFiniteArray } from './pg-serializer-finite-decoder'
@@ -47,8 +46,6 @@ export function expectFiniteArrayContents(
 ): void {
   expect(parseFiniteArray(output)).toEqual(input.map((value) => value ?? null))
 }
-
-declareOracle({ check: [expectFiniteArrayContents] })
 
 // Keep the moved calibration's original 25-candidate search visible to budget accounting.
 export const omissionCalibrationOptions: { numRuns: number; seed: number } =

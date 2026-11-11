@@ -19,7 +19,6 @@ import { makeFunctionReference } from 'convex/server'
 import { createCollection } from '@tanstack/db'
 import { expect, inject, it } from 'vitest'
 import { convexCollectionOptions } from '../src/index'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from '../tests/helpers'
 
 declare module 'vitest' {
@@ -76,8 +75,6 @@ function stepModel(
   }
   return { allowed, next }
 }
-
-declareOracle({ model: [stepModel] })
 
 const history: ReadonlyArray<Step> = [
   { role: `read`, operation: `send` },

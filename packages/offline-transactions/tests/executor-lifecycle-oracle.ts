@@ -2,7 +2,6 @@ import fc from 'fast-check'
 import { createCollection } from '@tanstack/db'
 import { vi } from 'vitest'
 import { startOfflineExecutor } from '../src/OfflineExecutor'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
 import { FakeStorageAdapter, gate, turn } from './harness'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
@@ -341,11 +340,6 @@ const lifecycleStates = [
   `duplicate report`,
   `stale report`,
 ]
-declareOracle({
-  grammar: [lifecycleHistory],
-  model: [lifecycleModel],
-  check: [checkLifecycle],
-})
 oracleProperty<LifecycleHistory, ReturnType<typeof lifecycleModel>>({
   id: `offline.executor-coordination-lifecycle`,
   law: {

@@ -12,7 +12,6 @@ import {
 import { NonRetriableError } from '../src/types'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import { oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   forwardAssertionJudgment,
@@ -2563,23 +2562,4 @@ oracleProperty({
       },
     ),
   check: forwardAssertionJudgment,
-})
-
-// The checks run generated histories and compare production with each model's
-// prediction at every checkpoint. The models state the settlement rules: the
-// retry decision table and FIFO local rows, and the visibility and provider
-// eligibility of a started peer. Fixed scenarios whose expectations are
-// written by hand are not oracle tests; they live in transaction-settlement.test.ts.
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
-  check: [
-    checkSettlement,
-    checkRetryDecision,
-    checkRetryRecordFailure,
-    checkDurableAdmissionFailure,
-    checkRestoredState,
-  ],
-  model: [expectedRetryDecision, expectedRestoredState, expectedStartedPeer],
-  grammar: [restoredRows, restoredHistories],
 })

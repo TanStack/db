@@ -1,5 +1,4 @@
 import fc from 'fast-check'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { differs, pass } from '../../db/tests/oracle-property'
 import type { Observation } from '../../db/tests/oracle-property'
 
@@ -141,8 +140,3 @@ export function checkBarrier(
   }
   return pass
 }
-declareOracle({
-  grammar: [barrierHistory],
-  model: [barrierModel],
-  check: [checkBarrier],
-})

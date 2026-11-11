@@ -7,7 +7,6 @@ import {
 } from '../../db/tests/oracle-property.js'
 import { createDeferred } from '../../db/src/deferred.js'
 import { oracleRoute } from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model-oracle.js'
 import { createCursorPager } from './cursor-pagination/pager.js'
@@ -403,11 +402,6 @@ describe(`opaque cursor adapter`, () => {
     },
     check: (_history, trace, expected) => checkPagerTrace(trace, expected),
   })
-})
-
-declareOracle({
-  check: [checkRead],
-  model: [expectedRows],
 })
 
 // ---------------------------------------------------------------------------

@@ -22,7 +22,6 @@ import {
 import { describe, expect, it } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import { createLiveQueryWindowController } from '../../db/src/live-query-window-controller.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleRoute } from '../../db/tests/oracle-config.js'
 import { expectedWindow } from './cursor-pagination/model-oracle.js'
 import { createNoPeekDemandModel } from './cursor-pagination/no-peek.js'
@@ -31,12 +30,6 @@ import type { Row } from './cursor-pagination/model-oracle.js'
 import type { PrefixPublication } from './cursor-pagination/no-peek.js'
 
 const scope = { group: undefined, descending: false }
-
-// What this oracle owns: nothing in src/. The candidate under test is the
-// test-only experiment in cursor-pagination/no-peek.ts, and the live-query window
-// controller it drives belongs to the db package. The file declares its
-// model only; its tests are enumerated fixed cases.
-declareOracle({ model: [expectedWindow] })
 
 /** Narrow bridge for one immutable source ordered by unique id. Facts are kept
  * outside production and admitted only after the real setWindow/preload gate.

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { serialize } from '../src/pg-serializer'
 import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { parseFiniteNumber } from './pg-serializer-finite-decoder'
 import {
   expectFiniteArrayContents,
@@ -52,11 +51,6 @@ const example = oracleReplayTest(it)
  * nonfinite numbers, unsupported objects, and provider casts are outside this
  * flat finite-value model. Malformed array text is a nearby rejected output.
  */
-
-declareOracle({
-  check: [expectFiniteArrayContents],
-  owns: [`src/pg-serializer.ts#serialize`],
-})
 
 describe(`pg-serializer property-based tests`, () => {
   describe(`string serialization`, () => {

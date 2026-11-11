@@ -1,10 +1,6 @@
 import { expect, it } from 'vitest'
 import { oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { LazyWriteModel } from './lazy-paging-write-model-oracle'
-
-// Owns no convex source: this file calibrates LazyWriteModel directly, without a production driver.
-declareOracle({})
 
 /** Calibration of the two-sided law, independently of a backend driver. The
  * same source row distinguishes a confirmed lost write from a rejected write

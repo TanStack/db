@@ -8,7 +8,6 @@ import {
   oracleProperty,
   pass,
 } from '../../db/tests/oracle-property.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createCursorPager } from '../src/index.js'
 import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model-oracle.js'
@@ -55,11 +54,6 @@ async function checkWindow(
     `window matches the permitted source snapshot`,
   ).toEqual(expectedRows(source, scope, { offset: 0, limit: width }))
 }
-
-declareOracle({
-  check: [checkWindow],
-  model: [expectedRows],
-})
 
 // The reference above still owns row truth. These native traces carry the
 // same values, identity witnesses and request counts at the old checkpoints.

@@ -1,13 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
-import {
-  checkEagerLiveSourceHistory,
-  eagerLiveSourceHistoryArb,
-  eagerLiveSourceModel,
-  reachStatesFor,
-} from '../src'
+import { checkEagerLiveSourceHistory, reachStatesFor } from '../src'
 import {
   checkEagerLiveSourceObservations,
   eagerLiveSourceHistories,
@@ -56,7 +50,6 @@ import type { ReferenceMutant } from './reference-adapter'
 describe(`eager live-source oracle campaigns`, () => {
   const property = `adapter-conformance.eager-live-source.reference`
   const driver = referenceDriver()
-  const historyArb = eagerLiveSourceHistoryArb(driver)
   const runs = 600
   const campaignTimeoutMs = 120_000
 
@@ -644,11 +637,4 @@ describe(`eager live-source oracle campaigns`, () => {
       step.kind === `snapshot` ? { kind: step.kind, rows: step.rows } : step,
     ),
   )
-
-  // Owns no production entry: the reference adapter is a test fixture.
-  declareOracle({
-    check: [checkEagerLiveSourceHistory, checkEagerLiveSourceObservations],
-    model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-    grammar: [historyArb],
-  })
 })

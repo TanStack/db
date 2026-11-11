@@ -1,15 +1,8 @@
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import { baselineLifecycleViolations } from '../../db-adapter-conformance/tests/persisted-baseline-lifecycle-oracle'
 import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
 import { createStartupHost } from '../../db-adapter-conformance/tests/persisted-startup-host'
 import { observeBaselineLifecycle } from '../../db-adapter-conformance/tests/persisted-baseline-lifecycle-driver'
 import { registerBaselineLifecycle } from '../../db-adapter-conformance/tests/persisted-baseline-lifecycle-oracle-suite'
 import { powerSyncBaselineLifecycleAdapter } from './persisted-baseline-lifecycle-driver'
-
-declareOracle({
-  owns: [`src/powersync.ts#powerSyncCollectionOptions`],
-  check: [baselineLifecycleViolations],
-})
 
 for (const { host, config } of [
   {
@@ -29,19 +22,22 @@ for (const { host, config } of [
     },
   },
 ] as const) {
-  registerBaselineLifecycle(config, async (h, id) => {
-    const storage = createStartupHost(host)
-    return withOracleCleanup(
-      () =>
-        observeBaselineLifecycle(
-          powerSyncBaselineLifecycleAdapter,
-          storage.persistence,
-          storage.holdBaseline,
-          h,
-          id,
-          process.env.TANSTACK_DB_BASELINE_EXPECT_HYDRATE !== `0`,
-        ),
-      [() => storage.close()],
-    )
-  })
+  registerBaselineLifecycle(
+    { ...config, owns: [`src/powersync.ts#powerSyncCollectionOptions`] },
+    async (h, id) => {
+      const storage = createStartupHost(host)
+      return withOracleCleanup(
+        () =>
+          observeBaselineLifecycle(
+            powerSyncBaselineLifecycleAdapter,
+            storage.persistence,
+            storage.holdBaseline,
+            h,
+            id,
+            process.env.TANSTACK_DB_BASELINE_EXPECT_HYDRATE !== `0`,
+          ),
+        [() => storage.close()],
+      )
+    },
+  )
 }
