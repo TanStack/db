@@ -17,7 +17,6 @@
  * ../e2e/electric-source-prefix-oracle.opfs.spec.ts and its page module.
  * Each driver calls this comparison after recovery and complete source delivery.
  */
-import { declareOracle } from '../../db/tests/oracle-declaration'
 
 type SourceRow = { id: string | number; label: string }
 
@@ -57,4 +56,3 @@ export function sourceHeadViolation(
 
 // Owns nothing: this module holds the model and check only. The production
 // path is driven by the multi-tab Electric test (multi-tab-electric-oracle.test.ts), which declares the owned entry.
-declareOracle({ check: [sourceHeadViolation] })

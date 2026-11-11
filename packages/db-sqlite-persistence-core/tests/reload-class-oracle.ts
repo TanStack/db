@@ -104,7 +104,6 @@
  */
 import fc from 'fast-check'
 import { createCollection, createLiveQueryCollection } from '@tanstack/db'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,
@@ -1693,7 +1692,3 @@ export const fixedReloadHistories: ReadonlyArray<[string, ReloadHistory]> = [
 
 // Owns nothing: this module holds the model and check only. The production
 // path is driven by the browser and Electron reload-class tests, which declare their own owned entries, which declares the owned entry.
-declareOracle({
-  check: [reloadViolations],
-  model: [expectedReload, expectedEagerRowScans],
-})

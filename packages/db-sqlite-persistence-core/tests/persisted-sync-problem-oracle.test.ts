@@ -1,6 +1,5 @@
 import { createCollection } from '@tanstack/db'
 import { afterAll, expect, vi } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { persistedCollectionOptions } from '../src/index.js'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
@@ -581,10 +580,6 @@ async function judgeHistory(history: (typeof histories)[number]) {
     await collection.cleanup().catch(() => undefined)
   }
 }
-declareOracle({
-  model: [expected],
-  grammar: [histories],
-})
 // The existing helper retains its independent expected() model and every
 // observation-time assertion. Native registration transports its judgment.
 oracleProperty({

@@ -21,7 +21,6 @@ import { onTestFinished } from 'vitest'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
 import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/node-driver'
 import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   expectedReload,
   fixedReloadHistories,
@@ -256,12 +255,6 @@ function checkRecordedReload(
     violation(`reload`, `reload observation is missing`, `reload work and rows`)
   )
 }
-
-declareOracle({
-  model: [model],
-  check: [check, checkRecordedReload],
-  grammar: [reloadHistoryArb],
-})
 
 oracleProperty({
   id: `sqlite-reload.class.electron`,

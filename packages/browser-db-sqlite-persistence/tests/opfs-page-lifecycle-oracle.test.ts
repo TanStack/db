@@ -7,7 +7,6 @@ import {
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { openBrowserWASQLiteOPFSDatabase } from '../src/opfs-database'
 import {
   ControlledWorker,
@@ -912,10 +911,6 @@ opfs.terminal-event, opfs.close, or opfs.failure-cleanup. A seed without a
 path reseeds the unseeded campaigns. Run it with this file's package-local
 Vitest command.
 */
-declareOracle({
-  check: [runFailureHistory],
-  model: [expectedCloseSettlements],
-})
 // Each named helper keeps its independent settlement model and assertions at
 // the original cuts; native registration changes only campaign mechanics.
 const lifecycleLaw = {

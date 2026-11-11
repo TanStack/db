@@ -1,4 +1,3 @@
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 /**
  * # Does an OPFS connection answer requests in order and close after them?
  *
@@ -231,7 +230,3 @@ export const requestOrderExamples: Array<RequestOrderHistory> = (
 
 // Owns nothing: this module holds the model and check only. The production
 // path is driven by opfs-request-order-oracle.test.ts, which declares the owned entry.
-declareOracle({
-  check: [findRequestOrderViolation],
-  model: [expectedRequestOrder],
-})

@@ -1,6 +1,5 @@
 import { createLiveQueryCollection } from '@tanstack/db'
 import { afterAll, afterEach, beforeEach, expect, vi } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   forwardAssertionJudgment,
@@ -419,10 +418,6 @@ function describe_(events: ReadonlyArray<Event>): string {
     )
     .join(` > `)
 }
-declareOracle({
-  model: [expected],
-  grammar: [histories],
-})
 // The existing helper retains its independent expected() model and every
 // observation-time assertion. Native registration transports its judgment.
 oracleProperty({
