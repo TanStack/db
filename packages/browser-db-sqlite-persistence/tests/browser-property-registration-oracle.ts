@@ -67,7 +67,7 @@ export function registerBrowserProperty<THistory>(
         model: recordedAssertionJudgment,
         driver: async (plan, observe) => {
           try {
-            await recordAssertionJudgment(statement, observe, () =>
+            await recordAssertionJudgment(statement, plan, observe, () =>
               judge(plan.history),
             )
           } catch (error) {
