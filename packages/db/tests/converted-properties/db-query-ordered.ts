@@ -29,6 +29,8 @@ const otherProperties: ReadonlyArray<string> = [
   `mixed-index-order.public-order`,
   `mixed-index-order.on-demand-window`,
   `derived-publication.queued-batches`,
+  `replay.ordered-window-regressions`,
+  `replay.ordered-window-fixed`,
 ]
 const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
@@ -70,6 +72,11 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/derived-delete-reconciliation-oracle.test.ts`,
     `derived-publication`,
     `queued-batches`,
+  ],
+  [
+    `db/tests/query/load-subset-replay-refinement-oracle.test.ts`,
+    `replay`,
+    `ordered-window-regressions ordered-window-fixed`,
   ],
 ]
 

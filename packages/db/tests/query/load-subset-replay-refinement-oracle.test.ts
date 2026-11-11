@@ -1,5 +1,5 @@
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import {
   createLiveQueryCollection,
@@ -12,7 +12,7 @@ import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { CollectionSubscription } from '../../src/collection/subscription.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
-import { oracleProperty, oracleRoute } from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -20,7 +20,6 @@ import {
   recordedAssertionJudgment,
   rejectAt,
 } from '../oracle-assertion-adapter.js'
-import { declareOracle } from '../oracle-declaration.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 /**
@@ -2084,9 +2083,6 @@ async function checkOrderedReplay(
 // the published window at each checkpoint with the expectation that the history
 // implies. Its expectation is computed inside the function body, not by a named
 // model part yet.
-declareOracle({
-  check: [checkOrderedReplay],
-})
 
 type GeneratedValue<T> = T extends fc.Arbitrary<infer Value> ? Value : never
 const orderedReplayLaw = {
@@ -2702,6 +2698,39 @@ function preloadConstructions() {
 const orderedReplayProperty = `replay.ordered-window-faults`
 const orderedFailureProperty = `replay.keyed-request-failures`
 
+type OrderedReplayRegression = {
+  name: string
+  history: Array<OrderedCommand>
+  scenario?: OrderedScenario
+  reaches?: keyof OrderedReach
+  // A fixed history that the law places in a recovery. The history also
+  // holds where the model cannot tell which subscription issued a load
+  // (see Limits).
+  recovers?: true
+  failureState?: ReplayDemandState
+}
+
+// One named replay regression: `checkOrderedReplay` judges it, and the
+// regression's own reach and recovery premises must hold.
+async function runOrderedReplayRegression({
+  history,
+  scenario,
+  ...replay
+}: OrderedReplayRegression): Promise<void> {
+  const entered = new Set<ReplayDemandState>()
+  const reach = await checkOrderedReplay(history, scenario, (state) =>
+    entered.add(state),
+  )
+  checkReplayDemandFailure(reach, entered)
+  if (`failureState` in replay) expect(entered).toContain(replay.failureState)
+  const reaches: keyof OrderedReach | undefined =
+    `reaches` in replay ? replay.reaches : undefined
+  if (reaches) expect(reach[reaches], reaches).toBeGreaterThan(0)
+  if (`recovers` in replay) {
+    expect(reach.terminalErrors, `recovery failure ends the query`).toBe(0)
+  }
+}
+
 describe(`Ordered windows across truncate replays`, () => {
   // Traces the campaigns found, kept as replays. Each failed before its fix:
   // - an unload that throws while a successful repair retires an older
@@ -2734,7 +2763,7 @@ describe(`Ordered windows across truncate replays`, () => {
   //   showed neither window);
   // - two window moves that a pending source recovery defers (both resumed
   //   after recovery, the older one last, so it replaced the newer window).
-  it.each([
+  const orderedReplayRegressions: Array<OrderedReplayRegression> = [
     {
       name: `a release that throws after a successful repair`,
       history: [
@@ -3280,35 +3309,30 @@ describe(`Ordered windows across truncate replays`, () => {
       },
       reaches: `failedLoads`,
     },
-  ] satisfies Array<{
-    name: string
-    history: Array<OrderedCommand>
-    scenario?: OrderedScenario
-    reaches?: keyof OrderedReach
-    // A fixed history that the law places in a recovery. The history also
-    // holds where the model cannot tell which subscription issued a load
-    // (see Limits).
-    recovers?: true
-    failureState?: ReplayDemandState
-  }>)(
-    `keeps the ordered window for $name (generated replay)`,
-    async ({ history, scenario, ...replay }) => {
-      oracleRoute(`case`)
-      const entered = new Set<ReplayDemandState>()
-      const reach = await checkOrderedReplay(history, scenario, (state) =>
-        entered.add(state),
-      )
-      checkReplayDemandFailure(reach, entered)
-      if (`failureState` in replay)
-        expect(entered).toContain(replay.failureState)
-      const reaches: keyof OrderedReach | undefined =
-        `reaches` in replay ? replay.reaches : undefined
-      if (reaches) expect(reach[reaches], reaches).toBeGreaterThan(0)
-      if (`recovers` in replay) {
-        expect(reach.terminalErrors, `recovery failure ends the query`).toBe(0)
-      }
+  ]
+  oracleProperty({
+    id: `replay.ordered-window-regressions`,
+    law: {
+      ...orderedReplayLaw,
+      limits: `The named replay regressions above, which the generated command grammar cannot take back; each replays through checkOrderedReplay with the same reach and recovery checks.`,
     },
-  )
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: orderedReplayRegressions,
+    label: ({ name }) =>
+      `keeps the ordered window for ${name} (generated replay)`,
+    resolve: (regression) => ({ regression }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`ordered replay refinement`, plan, observe, () =>
+        runOrderedReplayRegression(plan.regression),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   // Found by the failed-replay random campaign at five times its run count.
   // A join and an include share the marker source. One subscription's replay
@@ -3317,29 +3341,50 @@ describe(`Ordered windows across truncate replays`, () => {
   // marker change then retires the first replay's failed demand, which
   // discarded that replay and published an empty window while the second
   // failure held nothing; that failure now holds its own subscription.
-  it(`keeps the last publication when a marker change follows two failed replay loads`, async () => {
-    oracleRoute(`fixed history`)
-    await checkOrderedReplay(
-      [
-        { type: `hold` },
-        { type: `truncateMarkers` },
-        { type: `settle`, ok: true, keepHolding: true, newest: false },
-        { type: `settle`, ok: false, newest: true, keepHolding: true },
-        { type: `move`, id: 1, rank: 1 },
-        { type: `settle`, ok: false, newest: false },
-        { type: `hold` },
-        { type: `mark`, id: 4, on: false },
-      ],
+  oracleProperty({
+    id: `replay.ordered-window-fixed`,
+    law: {
+      ...orderedReplayLaw,
+      limits: `One named regression that the generated command grammar cannot take back; it replays through checkOrderedReplay.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [
       {
-        ...ordinaryOrderedScenario,
-        direction: `desc`,
-        offset: 1,
-        limit: 1,
-        joined: `some`,
-        markerMode: `on-demand`,
-        includes: true,
+        name: `keeps the last publication when a marker change follows two failed replay loads`,
+        history: [
+          { type: `hold` },
+          { type: `truncateMarkers` },
+          { type: `settle`, ok: true, keepHolding: true, newest: false },
+          { type: `settle`, ok: false, newest: true, keepHolding: true },
+          { type: `move`, id: 1, rank: 1 },
+          { type: `settle`, ok: false, newest: false },
+          { type: `hold` },
+          { type: `mark`, id: 4, on: false },
+        ] satisfies Array<OrderedCommand>,
+        scenario: {
+          ...ordinaryOrderedScenario,
+          direction: `desc`,
+          offset: 1,
+          limit: 1,
+          joined: `some`,
+          markerMode: `on-demand`,
+          includes: true,
+        } satisfies OrderedScenario,
       },
-    )
+    ],
+    label: ({ name }) => name,
+    resolve: (regression) => ({ regression }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`ordered replay refinement`, plan, observe, () =>
+        checkOrderedReplay(plan.regression.history, plan.regression.scenario),
+      ),
+    check: forwardAssertionJudgment,
   })
 
   // A window with no initial include demand can activate its first include
