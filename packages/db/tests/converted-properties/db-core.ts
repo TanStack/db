@@ -37,6 +37,9 @@ export const properties: ReadonlyArray<string> = [
   `btree-map.infinite-comparator`,
   `btree-map.long-campaign`,
   `btree-map.dense-cuts`,
+  `comparison.non-finite-witnesses`,
+  `comparison.signed-infinity-custom`,
+  `comparison.temporal-witnesses`,
   // transactions and mutations
   // IndexedDB and live-query observers
   // proxies and conformance
@@ -84,6 +87,11 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/btree-map-oracle.test.ts`,
     `btree-map`,
     `split-comparator infinite-comparator long-campaign dense-cuts`,
+  ],
+  [
+    `db/tests/comparison-oracle.property.test.ts`,
+    `comparison`,
+    `non-finite-witnesses signed-infinity-custom temporal-witnesses`,
   ],
   // transactions and mutations
   // IndexedDB and live-query observers
