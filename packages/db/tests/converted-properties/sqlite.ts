@@ -42,6 +42,24 @@ export const properties: ReadonlyArray<string> = [
   `browser-coordinator.fresh-init`,
   `browser-coordinator.write-ownership`,
   `browser-coordinator.real-tab-follower`,
+  `persistence.hydration-boundary-commit`,
+  `persistence.hydration-straddle-fifo`,
+  `persistence.hydration-straddle-abort`,
+  `persistence.buffered-abort-readiness`,
+  `persistence.queued-hydration-publication`,
+  `persistence.durable-row-shape`,
+  `persistence.targeted-partial-transition`,
+  `persistence.targeted-seed-replacement`,
+  `persistence.targeted-same-key-order`,
+  `persistence.rotated-reacquisition`,
+  `persistence.rotated-reacquisition-fixed`,
+  `persistence.on-demand-evidence-baseline`,
+  `persistence.on-demand-evidence-force-reload`,
+  `persistence.persisted-read-row-algebra`,
+  `persistence.persisted-read-re-reserve`,
+  `persistence.persisted-read-reservation`,
+  `persistence.hydration-source-routing`,
+  `persistence.buffered-receipt-causal-replay`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -90,5 +108,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `browser-db-sqlite-persistence/tests/per-collection-coordinator-oracle.test.ts`,
     `browser-coordinator`,
     `subset-wire subset-ack collection-scoped-lease remote-lease-takeover adapter-isolation fresh-init write-ownership real-tab-follower`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
+    `persistence`,
+    `hydration-boundary-commit hydration-straddle-fifo hydration-straddle-abort buffered-abort-readiness queued-hydration-publication durable-row-shape targeted-partial-transition targeted-seed-replacement targeted-same-key-order rotated-reacquisition rotated-reacquisition-fixed on-demand-evidence-baseline on-demand-evidence-force-reload persisted-read-row-algebra persisted-read-re-reserve persisted-read-reservation hydration-source-routing buffered-receipt-causal-replay`,
   ],
 ]
