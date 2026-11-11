@@ -1,7 +1,6 @@
 {
   "name": "@tanstack/supabase-db-collection",
-  "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0-rc.0",
   "description": "Supabase collection for TanStack DB",
   "author": "Supabase <support@supabase.com>",
   "license": "MIT",

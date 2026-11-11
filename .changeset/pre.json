@@ -36,6 +36,7 @@
     "@tanstack/react-router-with-db": "1.0.0-rc.0",
     "@tanstack/rxdb-db-collection": "1.0.0-rc.0",
     "@tanstack/solid-db": "1.0.0-rc.0",
+    "@tanstack/supabase-db-collection": "1.0.0-rc.0",
     "@tanstack/svelte-db": "1.0.0-rc.0",
     "@tanstack/tauri-db-sqlite-persistence": "1.0.0-rc.0",
     "@tanstack/tauri-db-sqlite-persistence-e2e-app": "0.0.49",

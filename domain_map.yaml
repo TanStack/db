@@ -95,7 +95,7 @@ skills:
         config_surface: 'recordApi, conversions'
       - name: 'Supabase adapter'
         package: '@tanstack/supabase-db-collection'
-        config_surface: 'tableName, keys, schema, supabase, queryClient, realtime, realtimeUseFilter, syncMode (on-demand default/eager)'
+        config_surface: 'tableName, keys, schema, supabase, queryClient, realtime, realtimeUseFilter, syncMode (on-demand default/eager), defaultStringCollation, parse, serialize'
       - name: 'Local-only'
         package: '@tanstack/db'
         config_surface: 'getKey, schema, initialData'

@@ -33,18 +33,20 @@ const todosCollection = createCollection(
 ```
 
 - `tableName` -- Postgres table name (PostgREST endpoint); also used as the collection id
-- `keys` -- column(s) that uniquely identify a row; match the primary key(s). Composite keys are joined with `-` to form the collection key
+- `keys` -- column(s) that uniquely identify a row; match the primary key(s). The collection key is the column value as a string (`6` becomes `'6'`); composite keys are a JSON array of the string values, such as `'["a","b"]'`. Pass that key to `get`, `update`, and `delete`
 - `schema` -- Standard Schema (Zod, Valibot, ...) describing one row
 - `supabase` -- `SupabaseClient` used for queries, mutations, and Realtime
 
 ## Optional Config
 
-| Option              | Default       | Description                                                                                                                                           |
-| ------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `syncMode`          | `'on-demand'` | `'on-demand'` loads only what live queries need (pushes where/orderBy/limit to PostgREST); `'eager'` loads the whole table, paging past `db-max-rows` |
-| `realtime`          | `false`       | Subscribe to Postgres changes and reconcile other clients' inserts/updates/deletes                                                                    |
-| `realtimeUseFilter` | `false`       | Experimental. Push each query's WHERE to Realtime as a `postgres_changes` filter to cut message volume                                                |
-| `queryClient`       | shared global | TanStack Query client used for the cache                                                                                                              |
+| Option                   | Default             | Description                                                                                                                                           |
+| ------------------------ | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `syncMode`               | `'on-demand'`       | `'on-demand'` loads only what live queries need (pushes where/orderBy/limit to PostgREST); `'eager'` loads the whole table, paging past `db-max-rows` |
+| `realtime`               | `false`             | Subscribe to Postgres changes and reconcile other clients' inserts/updates/deletes                                                                    |
+| `realtimeUseFilter`      | `false`             | Experimental. Push each query's WHERE to Realtime as a `postgres_changes` filter to cut message volume                                                |
+| `queryClient`            | shared client       | TanStack Query client used for the cache. Shared in the browser, new per call on the server; a `DbClient`'s `queryClient` dependency takes precedence |
+| `defaultStringCollation` | TanStack DB default | `StringCollationConfig` from `@tanstack/db`; orders strings to match the database collation                                                           |
+| `parse` / `serialize`    | none                | Per-column converters between PostgREST JSON and the schema type (e.g. `timestamptz` string to `Date`); skipped for `null`                            |
 
 ## Real-time Subscriptions
 
@@ -62,15 +64,15 @@ The adapter owns `onInsert`, `onUpdate`, and `onDelete`: they write through Post
 
 ## Query Pushdown
 
-Pushed to PostgREST: `where` (`eq`, `gt`, `gte`, `lt`, `lte`, `inArray`, `like`, `ilike`, `not`, `isNull`, `and`, `or`), `orderBy` on source columns, `limit`, and join keys (`in` filter). Evaluated client-side: computed selects, aggregates, `groupBy`, `having`, `distinct`. Reads page past PostgREST's `db-max-rows` (1000 by default) with `offset`; order by a unique column when a collection may exceed the cap.
+Pushed to PostgREST: `where` (`eq`, `gt`, `gte`, `lt`, `lte`, `inArray`, `like`, `ilike`, `not`, `isNull`, `and`, `or`), `orderBy` on source columns, `limit`, and join keys (`in` filter). Evaluated client-side: computed selects, aggregates, `groupBy`, `having`, `distinct`, except an aggregate-only `count`/`sum`/`avg` in `experimental_queryOnce`. Reads page past PostgREST's `db-max-rows` (1000 by default) with `offset`; a multi-page read also orders by the `keys` columns so the pages form one sequence.
 
-## queryOnce
+## experimental_queryOnce
 
 ```typescript
 import { eq } from '@tanstack/react-db'
-import { queryOnce } from '@tanstack/supabase-db-collection'
+import { experimental_queryOnce } from '@tanstack/supabase-db-collection'
 
-const completed = await queryOnce(
+const completed = await experimental_queryOnce(
   (q) =>
     q
       .from({ todo: todosCollection })
@@ -79,7 +81,37 @@ const completed = await queryOnce(
 )
 ```
 
-One-shot, non-reactive fetch. Aggregates (`count`, `sum`, `avg`, `min`, `max`) and `groupBy`/`having` run server-side in a single, non-paginated request.
+One-shot, non-reactive fetch. It always resolves to what TanStack DB's `queryOnce` returns, and it is experimental because it reads TanStack DB's internal query IR.
+
+A query runs as one PostgREST request only when its select holds just `count`, `sum`, or `avg` of a plain column of one Supabase table (not `sum`/`avg` over a `parse` column), every filter can be pushed, and it has no `groupBy`, `having`, join, `orderBy`, `limit`, `offset`, `distinct`, or functional clause. That path needs PostgREST aggregates:
+
+```sql
+alter role authenticator set pgrst.db_aggregates_enabled = 'true';
+notify pgrst, 'reload config';
+```
+
+Every other query, including `min`, `max`, `groupBy`, and `having`, runs through TanStack DB's `queryOnce` over the collections, which push filters, order, and limit to PostgREST. TanStack DB's aggregate rules apply: an empty match gives `[]` (`undefined` for `findOne`), and an all-null `sum` gives `0`.
+
+## Use with DbClient
+
+Under a `DbClient`, wrap the options in `collectionOptions` and materialize with `dbClient.collection`. The client's `queryClient` dependency is used for the cache.
+
+```typescript
+import { QueryClient } from '@tanstack/query-core'
+import { DbClient, collectionOptions } from '@tanstack/db'
+
+const todosDescriptor = collectionOptions(
+  supabaseCollectionOptions({
+    tableName: 'todos',
+    keys: ['id'],
+    schema: todoSchema,
+    supabase,
+  }),
+)
+
+const dbClient = new DbClient({ queryClient: new QueryClient() })
+const todos = dbClient.collection(todosDescriptor)
+```
 
 ## Complete Example
 
@@ -99,11 +131,12 @@ const todosCollection = createCollection(
 )
 
 function Todos() {
-  const { data } = useLiveQuery((q) =>
-    q
-      .from({ todo: todosCollection })
-      .where(({ todo }) => eq(todo.completed, false)),
-  )
+  const { data } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ todo: todosCollection })
+        .where(({ todo }) => eq(todo.completed, false)),
+  })
 
   const add = (title: string) =>
     todosCollection.insert({ id: crypto.randomUUID(), title, completed: false })
