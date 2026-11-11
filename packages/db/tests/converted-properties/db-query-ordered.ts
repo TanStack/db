@@ -108,6 +108,12 @@ const otherProperties: ReadonlyArray<string> = [
   `aggregate.select-fixed`,
   `load-subset.exact-axis-pairs`,
   `load-subset.rejected-waiter-fixed`,
+  `optimizer-semantics.aggregate-shapes`,
+  `optimizer-semantics.literal-field`,
+  `optimizer-semantics.group-key`,
+  `optimizer-semantics.residual-pushdown`,
+  `optimizer-semantics.preserved-join`,
+  `optimizer-semantics.two-active-chain`,
 ]
 const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
@@ -204,6 +210,36 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/load-subset-oracle.property.test.ts`,
     `load-subset`,
     `rejected-waiter-fixed`,
+  ],
+  [
+    `db/tests/query/optimizer-semantics-oracle.test.ts`,
+    `optimizer-semantics`,
+    `aggregate-shapes`,
+  ],
+  [
+    `db/tests/query/optimizer-semantics-oracle.test.ts`,
+    `optimizer-semantics`,
+    `literal-field`,
+  ],
+  [
+    `db/tests/query/optimizer-semantics-oracle.test.ts`,
+    `optimizer-semantics`,
+    `group-key`,
+  ],
+  [
+    `db/tests/query/optimizer-semantics-oracle.test.ts`,
+    `optimizer-semantics`,
+    `residual-pushdown`,
+  ],
+  [
+    `db/tests/query/optimizer-semantics-oracle.test.ts`,
+    `optimizer-semantics`,
+    `preserved-join`,
+  ],
+  [
+    `db/tests/query/optimizer-semantics-oracle.test.ts`,
+    `optimizer-semantics`,
+    `two-active-chain`,
   ],
 ]
 

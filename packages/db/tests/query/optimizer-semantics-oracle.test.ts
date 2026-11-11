@@ -24,7 +24,7 @@
  * The nested matching cases also reject an all-empty QueryRef implementation.
  */
 
-import { describe, expect, test } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { optimizeQuery } from '../../src/query/optimizer.js'
@@ -38,9 +38,13 @@ import {
   sum,
 } from '../../src/query/builder/functions.js'
 import { CollectionRef, Func, PropRef } from '../../src/query/ir.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
-import { oracleRoute } from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import {
   expectedTerms,
   inertCollection,
@@ -55,35 +59,67 @@ import type { Member, Row, Team } from './optimizer-semantics-support.js'
 import type { QueryIR, Where } from '../../src/query/ir.js'
 
 describe('optimizer aggregate semantics', () => {
-  for (const shape of [
+  const aggregateShapes = [
     `direct`,
     `wrapped`,
     `caseWhenCondition`,
     `caseWhenDefault`,
-  ] as const) {
-    test(`${shape} global aggregate keeps post-aggregate filtering`, () => {
-      oracleRoute(`case`)
-      const source = createCollection(
-        mockSyncCollectionOptions<Row>({
-          id: `optimizer-aggregate-source-${shape}`,
-          getKey: (row) => row.id,
-          initialData: rows,
-        }),
-      )
-      const anchor = createCollection(
-        mockSyncCollectionOptions({
-          id: `optimizer-aggregate-anchor-${shape}`,
-          getKey: (row: { id: number; target: number }) => row.id,
-          initialData: [{ id: 1, target: 30 }],
-        }),
-      )
-      const modelTotal = rows.reduce((total, row) => total + row.v, 0)
-      const expected = expectedAggregateTotals(shape, rows)
+  ] as const
+  // One global aggregate shape: the materialized and nested queries are
+  // compared with `expectedAggregateTotals`.
+  function runAggregateShape(shape: (typeof aggregateShapes)[number]): void {
+    const source = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `optimizer-aggregate-source-${shape}`,
+        getKey: (row) => row.id,
+        initialData: rows,
+      }),
+    )
+    const anchor = createCollection(
+      mockSyncCollectionOptions({
+        id: `optimizer-aggregate-anchor-${shape}`,
+        getKey: (row: { id: number; target: number }) => row.id,
+        initialData: [{ id: 1, target: 30 }],
+      }),
+    )
+    const modelTotal = rows.reduce((total, row) => total + row.v, 0)
+    const expected = expectedAggregateTotals(shape, rows)
 
-      const aggregate = createLiveQueryCollection({
+    const aggregate = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q.from({ b: source }).select(({ b }) => ({
+          k: max(b.k),
+          total:
+            shape === `direct`
+              ? sum(b.v)
+              : shape === `wrapped`
+                ? add(sum(b.v), 0)
+                : shape === `caseWhenCondition`
+                  ? caseWhen(eq(sum(b.v), modelTotal), 1, 0)
+                  : caseWhen(eq(1, 2), 0, sum(b.v)),
+        })),
+    })
+    expect(aggregate.toArray.map(stripVirtualProps)).toEqual(
+      expected.map((row) => ({ k: 2, ...row })),
+    )
+
+    const materialized = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ s: aggregate })
+          .leftJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
+          .where(({ s }) => eq(s.k, 2))
+          .select(({ s }) => ({ total: s.total })),
+    })
+    expect(materialized.toArray.map(stripVirtualProps)).toEqual(expected)
+
+    for (const outerPredicate of [`accept`, `reject`] as const) {
+      const nested = createLiveQueryCollection({
         startSync: true,
-        query: (q) =>
-          q.from({ b: source }).select(({ b }) => ({
+        query: (q) => {
+          const summary = q.from({ b: source }).select(({ b }) => ({
             k: max(b.k),
             total:
               shape === `direct`
@@ -93,60 +129,27 @@ describe('optimizer aggregate semantics', () => {
                   : shape === `caseWhenCondition`
                     ? caseWhen(eq(sum(b.v), modelTotal), 1, 0)
                     : caseWhen(eq(1, 2), 0, sum(b.v)),
-          })),
-      })
-      expect(aggregate.toArray.map(stripVirtualProps)).toEqual(
-        expected.map((row) => ({ k: 2, ...row })),
-      )
-
-      const materialized = createLiveQueryCollection({
-        startSync: true,
-        query: (q) =>
-          q
-            .from({ s: aggregate })
+          }))
+          return q
+            .from({ s: summary })
             .leftJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
-            .where(({ s }) => eq(s.k, 2))
-            .select(({ s }) => ({ total: s.total })),
+            .where(({ s }) =>
+              outerPredicate === `accept` ? eq(s.k, 2) : eq(s.k, 1),
+            )
+            .select(({ s }) => ({ total: s.total }))
+        },
       })
-      expect(materialized.toArray.map(stripVirtualProps)).toEqual(expected)
-
-      for (const outerPredicate of [`accept`, `reject`] as const) {
-        const nested = createLiveQueryCollection({
-          startSync: true,
-          query: (q) => {
-            const summary = q.from({ b: source }).select(({ b }) => ({
-              k: max(b.k),
-              total:
-                shape === `direct`
-                  ? sum(b.v)
-                  : shape === `wrapped`
-                    ? add(sum(b.v), 0)
-                    : shape === `caseWhenCondition`
-                      ? caseWhen(eq(sum(b.v), modelTotal), 1, 0)
-                      : caseWhen(eq(1, 2), 0, sum(b.v)),
-            }))
-            return q
-              .from({ s: summary })
-              .leftJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
-              .where(({ s }) =>
-                outerPredicate === `accept` ? eq(s.k, 2) : eq(s.k, 1),
-              )
-              .select(({ s }) => ({ total: s.total }))
-          },
-        })
-        expect(nested.toArray.map(stripVirtualProps)).toEqual(
-          outerPredicate === `accept` ? expected : [],
-        )
-      }
-    })
+      expect(nested.toArray.map(stripVirtualProps)).toEqual(
+        outerPredicate === `accept` ? expected : [],
+      )
+    }
   }
 
   // A literal field of an aggregate subquery has one value for every group,
   // but no source row holds it. Under a join the optimizer pushes outer
   // predicates toward sources; one on a literal field must stay outside the
   // aggregate subquery, where it would remove every source row.
-  test('literal-field filtering keeps each aggregate whole under a left join', () => {
-    oracleRoute(`fixed history`)
+  function runLiteralFieldHistory(): void {
     const source = createCollection(
       mockSyncCollectionOptions<Row>({
         id: `optimizer-literal-source`,
@@ -185,10 +188,9 @@ describe('optimizer aggregate semantics', () => {
         grouped ? `grouped` : `single group`,
       ).toEqual(expectedLiteralFieldRows(grouped, rows))
     }
-  })
+  }
 
-  test('group-key filtering keeps each grouped aggregate under a left join', () => {
-    oracleRoute(`fixed history`)
+  function runGroupKeyHistory(): void {
     const source = createCollection(
       mockSyncCollectionOptions<Row>({
         id: `optimizer-grouped-source`,
@@ -220,6 +222,80 @@ describe('optimizer aggregate semantics', () => {
     expect(grouped.toArray.map(stripVirtualProps)).toEqual(
       expectedGroupKeyRows(rows),
     )
+  }
+
+  oracleProperty({
+    id: `optimizer-semantics.aggregate-shapes`,
+    law: {
+      statement: `An outer predicate on an aggregate subquery's result runs after the aggregate, so a nested global aggregate publishes its one total row and an accepting outer predicate keeps it.`,
+      authority: `The optimizer's predicate-pushdown and outer-join contract stated above.`,
+      limits: `Direct, arithmetic-wrapped, conditional-branch, and conditional-default global aggregates, each with accepting and rejecting outer predicates.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/optimizer.ts#optimizeQuery',
+    ],
+    histories: aggregateShapes,
+    label: (shape) =>
+      `${shape} global aggregate keeps post-aggregate filtering`,
+    resolve: (shape) => ({ shape }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`optimizer semantics`, plan, observe, () =>
+        runAggregateShape(plan.shape),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `optimizer-semantics.literal-field`,
+    law: {
+      statement: `A predicate on a literal field of an aggregate subquery stays outside the aggregate, so each aggregate stays whole under a left join.`,
+      authority: `The optimizer's predicate-pushdown and outer-join contract stated above.`,
+      limits: `One grouped and one single-group summary under a left join.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/optimizer.ts#optimizeQuery',
+    ],
+    histories: [
+      `literal-field filtering keeps each aggregate whole under a left join`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`optimizer semantics`, plan, observe, () =>
+        runLiteralFieldHistory(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `optimizer-semantics.group-key`,
+    law: {
+      statement: `Filtering on the grouping key keeps that group's whole total under a left join.`,
+      authority: `The optimizer's predicate-pushdown and outer-join contract stated above.`,
+      limits: `One grouped summary under a left join.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/optimizer.ts#optimizeQuery',
+    ],
+    histories: [
+      `group-key filtering keeps each grouped aggregate under a left join`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`optimizer semantics`, plan, observe, () =>
+        runGroupKeyHistory(),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -262,147 +338,146 @@ describe(`optimizer residual convergence`, () => {
     { type: `full`, teamPush: false, memberPush: false, residual: false },
   ] as const
 
-  for (const join of joins) {
-    for (const form of [`separate`, `and`] as const) {
-      for (const reversed of [false, true]) {
-        for (const twoActive of [false, true]) {
-          test(`${join.type} ${form} reversed=${reversed} twoActive=${twoActive} preserves each predicate once`, () => {
-            oracleRoute(`case`)
-            const teamKeys = [`team.active=true`]
-            const memberKeys = [`member.userId=100`]
-            const clauses = [
-              predicate(`team`, `active`, true),
-              predicate(`member`, `userId`, 100),
-            ]
-            if (twoActive) {
-              if (join.type === `right`) {
-                memberKeys.push(`member.role="admin"`)
-                clauses.push(predicate(`member`, `role`, `admin`))
-              } else {
-                teamKeys.push(`team.region="west"`)
-                clauses.push(predicate(`team`, `region`, `west`))
-              }
-            }
-            const ordered = reversed ? [...clauses].reverse() : clauses
-            const where: Array<Where> =
-              form === `and` ? [new Func(`and`, ordered)] : ordered
-            const collection = inertCollection(`residual-oracle`)
-            const query: QueryIR = {
-              from: new CollectionRef(collection, `team`),
-              join: [
-                {
-                  type: join.type,
-                  from: new CollectionRef(collection, `member`),
-                  on: new Func('eq', [
-                    new PropRef([`team`, `id`]),
-                    new PropRef([`member`, `teamId`]),
-                  ]),
-                },
-              ],
-              where,
-            }
-
-            const result = optimizeQuery(query)
-            const optimized = result.optimizedQuery
-            const shape = expectedPushdownShape(join, teamKeys, memberKeys)
-            expect([...result.sourceWhereClauses.keys()].sort()).toEqual(
-              shape.sourceAliases,
-            )
-            for (const [alias, keys] of [
-              [`team`, teamKeys],
-              [`member`, memberKeys],
-            ] as const) {
-              const clause = result.sourceWhereClauses.get(alias)
-              if (clause) {
-                expect(observedTerms([clause])).toEqual(
-                  expectedTerms(keys, false),
-                )
-              }
-            }
-            const laterPass = optimizeQuery(optimized).optimizedQuery
-            for (const actual of [optimized, laterPass]) {
-              expect(sourceTerms(actual.from)).toEqual(shape.teamSource)
-              expect(sourceTerms(actual.join![0]!.from)).toEqual(
-                shape.memberSource,
-              )
-              expect(observedTerms(actual.where)).toEqual(shape.where)
-              expect(actual.where).toHaveLength(shape.whereLength)
-            }
-          })
-        }
+  const residualCells = joins.flatMap((join) =>
+    ([`separate`, `and`] as const).flatMap((form) =>
+      [false, true].flatMap((reversed) =>
+        [false, true].map((twoActive) => ({ join, form, reversed, twoActive })),
+      ),
+    ),
+  )
+  // One structural cell: `optimizeQuery` output, and a later pass over it,
+  // compared with `expectedPushdownShape`.
+  function runResidualCell({
+    join,
+    form,
+    reversed,
+    twoActive,
+  }: (typeof residualCells)[number]): void {
+    const teamKeys = [`team.active=true`]
+    const memberKeys = [`member.userId=100`]
+    const clauses = [
+      predicate(`team`, `active`, true),
+      predicate(`member`, `userId`, 100),
+    ]
+    if (twoActive) {
+      if (join.type === `right`) {
+        memberKeys.push(`member.role="admin"`)
+        clauses.push(predicate(`member`, `role`, `admin`))
+      } else {
+        teamKeys.push(`team.region="west"`)
+        clauses.push(predicate(`team`, `region`, `west`))
       }
+    }
+    const ordered = reversed ? [...clauses].reverse() : clauses
+    const where: Array<Where> =
+      form === `and` ? [new Func(`and`, ordered)] : ordered
+    const collection = inertCollection(`residual-oracle`)
+    const query: QueryIR = {
+      from: new CollectionRef(collection, `team`),
+      join: [
+        {
+          type: join.type,
+          from: new CollectionRef(collection, `member`),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`member`, `teamId`]),
+          ]),
+        },
+      ],
+      where,
+    }
+
+    const result = optimizeQuery(query)
+    const optimized = result.optimizedQuery
+    const shape = expectedPushdownShape(join, teamKeys, memberKeys)
+    expect([...result.sourceWhereClauses.keys()].sort()).toEqual(
+      shape.sourceAliases,
+    )
+    for (const [alias, keys] of [
+      [`team`, teamKeys],
+      [`member`, memberKeys],
+    ] as const) {
+      const clause = result.sourceWhereClauses.get(alias)
+      if (clause) {
+        expect(observedTerms([clause])).toEqual(expectedTerms(keys, false))
+      }
+    }
+    const laterPass = optimizeQuery(optimized).optimizedQuery
+    for (const actual of [optimized, laterPass]) {
+      expect(sourceTerms(actual.from)).toEqual(shape.teamSource)
+      expect(sourceTerms(actual.join![0]!.from)).toEqual(shape.memberSource)
+      expect(observedTerms(actual.where)).toEqual(shape.where)
+      expect(actual.where).toHaveLength(shape.whereLength)
     }
   }
 
-  for (const joinType of [`left`, `right`] as const) {
-    test(`${joinType} join publishes the independently joined rows`, () => {
-      oracleRoute(`case`)
-      const teamCollection = createCollection(
-        mockSyncCollectionOptions<Team>({
-          id: `optimizer-residual-${joinType}-teams`,
-          getKey: (row) => row.id,
-          initialData: teams,
-        }),
-      )
-      const memberCollection = createCollection(
-        mockSyncCollectionOptions<Member>({
-          id: `optimizer-residual-${joinType}-members`,
-          getKey: (row) => row.id,
-          initialData: members,
-        }),
-      )
+  // One outer join's first public snapshot, compared with
+  // `expectedPreservedJoinRows`.
+  function runPreservedJoin(joinType: `left` | `right`): void {
+    const teamCollection = createCollection(
+      mockSyncCollectionOptions<Team>({
+        id: `optimizer-residual-${joinType}-teams`,
+        getKey: (row) => row.id,
+        initialData: teams,
+      }),
+    )
+    const memberCollection = createCollection(
+      mockSyncCollectionOptions<Member>({
+        id: `optimizer-residual-${joinType}-members`,
+        getKey: (row) => row.id,
+        initialData: members,
+      }),
+    )
 
-      const expected = expectedPreservedJoinRows(joinType, teams, members)
+    const expected = expectedPreservedJoinRows(joinType, teams, members)
 
-      const result =
-        joinType === `left`
-          ? createLiveQueryCollection({
-              startSync: true,
-              query: (q) =>
-                q
-                  .from({ team: teamCollection })
-                  .leftJoin({ member: memberCollection }, ({ team, member }) =>
-                    eq(team.id, member.teamId),
-                  )
-                  .where(({ team }) => eq(team.active, true))
-                  .where(({ member }) =>
-                    or(isUndefined(member.id), eq(member.userId, 100)),
-                  )
-                  .select(({ team, member }) => ({
-                    teamId: team.id,
-                    memberId: member.id,
-                  })),
-            })
-          : createLiveQueryCollection({
-              startSync: true,
-              query: (q) =>
-                q
-                  .from({ team: teamCollection })
-                  .rightJoin({ member: memberCollection }, ({ team, member }) =>
-                    eq(team.id, member.teamId),
-                  )
-                  .where(({ member }) => eq(member.userId, 100))
-                  .where(({ team }) =>
-                    or(isUndefined(team.id), eq(team.active, true)),
-                  )
-                  .select(({ team, member }) => ({
-                    teamId: team.id,
-                    memberId: member.id,
-                  })),
-            })
-      const actual = result.toArray
-        .map(stripVirtualProps)
-        .map((row) => {
-          if (row === undefined) throw new Error(`Missing joined result row`)
-          return [row.teamId ?? null, row.memberId ?? null]
-        })
-        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
-      expect(actual).toEqual(expected)
-    })
+    const result =
+      joinType === `left`
+        ? createLiveQueryCollection({
+            startSync: true,
+            query: (q) =>
+              q
+                .from({ team: teamCollection })
+                .leftJoin({ member: memberCollection }, ({ team, member }) =>
+                  eq(team.id, member.teamId),
+                )
+                .where(({ team }) => eq(team.active, true))
+                .where(({ member }) =>
+                  or(isUndefined(member.id), eq(member.userId, 100)),
+                )
+                .select(({ team, member }) => ({
+                  teamId: team.id,
+                  memberId: member.id,
+                })),
+          })
+        : createLiveQueryCollection({
+            startSync: true,
+            query: (q) =>
+              q
+                .from({ team: teamCollection })
+                .rightJoin({ member: memberCollection }, ({ team, member }) =>
+                  eq(team.id, member.teamId),
+                )
+                .where(({ member }) => eq(member.userId, 100))
+                .where(({ team }) =>
+                  or(isUndefined(team.id), eq(team.active, true)),
+                )
+                .select(({ team, member }) => ({
+                  teamId: team.id,
+                  memberId: member.id,
+                })),
+          })
+    const actual = result.toArray
+      .map(stripVirtualProps)
+      .map((row) => {
+        if (row === undefined) throw new Error(`Missing joined result row`)
+        return [row.teamId ?? null, row.memberId ?? null]
+      })
+      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+    expect(actual).toEqual(expected)
   }
 
-  test(`two active sources publish the independently joined rows`, () => {
-    oracleRoute(`fixed history`)
+  function runTwoActiveSourcesHistory(): void {
     const tags = [
       { id: 20, teamId: 1, region: `west` },
       { id: 21, teamId: 2, region: `west` },
@@ -462,6 +537,77 @@ describe(`optimizer residual convergence`, () => {
       })
       .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
     expect(actual).toEqual(expected)
+  }
+
+  oracleProperty({
+    id: `optimizer-semantics.residual-pushdown`,
+    law: {
+      statement: `A predicate enters a nonnullable source once, its outer copy stays residual where an outer join applies it, and a nullable-side predicate stays regular, at optimizeQuery return and after a later pass.`,
+      authority: `The optimizer's predicate-pushdown and outer-join contract stated above.`,
+      limits: `LEFT, RIGHT, INNER, and FULL joins with one or two pushable predicates, separate or AND clauses, and both clause orders.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/optimizer.ts#optimizeQuery',
+    ],
+    histories: residualCells,
+    label: ({ join, form, reversed, twoActive }) =>
+      `${join.type} ${form} reversed=${reversed} twoActive=${twoActive} preserves each predicate once`,
+    resolve: (cell) => ({ cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`optimizer semantics`, plan, observe, () =>
+        runResidualCell(plan.cell),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `optimizer-semantics.preserved-join`,
+    law: {
+      statement: `An outer join with residual predicates publishes the independently joined rows at its first public snapshot.`,
+      authority: `The optimizer's predicate-pushdown and outer-join contract stated above.`,
+      limits: `One LEFT and one RIGHT join with an OR predicate that accepts an unmatched row.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/optimizer.ts#optimizeQuery',
+    ],
+    histories: [`left`, `right`] as const,
+    label: (joinType) =>
+      `${joinType} join publishes the independently joined rows`,
+    resolve: (joinType) => ({ joinType }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`optimizer semantics`, plan, observe, () =>
+        runPreservedJoin(plan.joinType),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `optimizer-semantics.two-active-chain`,
+    law: {
+      statement: `A LEFT/INNER chain with two distinct pushable sources publishes the independently joined rows.`,
+      authority: `The optimizer's predicate-pushdown and outer-join contract stated above.`,
+      limits: `One LEFT then INNER join chain.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/optimizer.ts#optimizeQuery',
+    ],
+    histories: [`two active sources publish the independently joined rows`],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`optimizer semantics`, plan, observe, () =>
+        runTwoActiveSourcesHistory(),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -603,19 +749,3 @@ function expectedChainRows(
     })
     .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
 }
-
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/optimizer.ts#optimizeQuery',
-  ],
-  model: [
-    expectedAggregateTotals,
-    expectedLiteralFieldRows,
-    expectedGroupKeyRows,
-    expectedPushdownShape,
-    expectedPreservedJoinRows,
-    expectedChainRows,
-  ],
-})
