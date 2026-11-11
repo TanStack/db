@@ -4,8 +4,8 @@ import * as adapters from './adapters.js'
 import * as dbCollection from './db-collection.js'
 import * as dbCollectionE2e from './db-collection-e2e.js'
 import * as dbCore from './db-core.js'
-import * as dbIndexeddbConformance from './db-indexeddb-conformance.js'
-import * as dbQuery from './db-query.js'
+import * as dbQueryIncludes from './db-query-includes.js'
+import * as dbQueryOrdered from './db-query-ordered.js'
 import * as frameworksIvm from './frameworks-ivm.js'
 import * as sqlite from './sqlite.js'
 
@@ -18,8 +18,8 @@ const groups = [
   dbCollection,
   dbCollectionE2e,
   dbCore,
-  dbIndexeddbConformance,
-  dbQuery,
+  dbQueryIncludes,
+  dbQueryOrdered,
   frameworksIvm,
   sqlite,
 ]
