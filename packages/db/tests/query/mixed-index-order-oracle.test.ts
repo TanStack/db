@@ -24,16 +24,20 @@
  * public-prefix comparison; a same-type step checks that the repair still
  * permits indexed traversal when its order agrees with the query.
  */
-import { expect, it, vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { PropRef } from '../../src/query/ir.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
-import { oracleRoute } from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import type { Collection } from '../../src/collection/index.js'
 import type {
   LoadSubsetOptions,
@@ -253,26 +257,47 @@ async function expectIndexedPublicOrder(
   ])
 }
 
-declareOracle({
+const indexTypes = { BasicIndex, BTreeIndex }
+const scenarios = new Map(
+  histories.map((scenario) => [scenario.name, scenario]),
+)
+
+oracleProperty({
+  id: `mixed-index-order.public-order`,
+  law: {
+    statement: `An index is a physical route for an orderBy query: it returns the same exact ordered public IDs as a full-source scan of the same query, on the first read and after a source value changes kind.`,
+    authority: `The orderBy/limit contract in docs/guides/live-queries.md.`,
+    limits: `The finite mixed-kind histories above, on BasicIndex and BTreeIndex, ascending and descending, plus one on-demand provider history; no order is prescribed for every mixed-kind combination.`,
+  },
   owns: [
     'src/collection/index.ts#createCollection',
     'src/indexes/basic-index.ts',
     'src/indexes/btree-index.ts',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
-  check: [expectIndexedPublicOrder],
+  histories: histories.flatMap((scenario) =>
+    ([`BasicIndex`, `BTreeIndex`] as const).flatMap((index) =>
+      ([`asc`, `desc`] as const).map((direction) => ({
+        scenario: scenario.name,
+        index,
+        direction,
+      })),
+    ),
+  ),
+  label: ({ scenario, index, direction }) =>
+    `${index} preserves ${scenario} ${direction} public order across kind changes`,
+  resolve: (cell) => ({ cell }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`mixed index public order`, plan, observe, () =>
+      expectIndexedPublicOrder(
+        scenarios.get(plan.cell.scenario)!,
+        indexTypes[plan.cell.index],
+        plan.cell.direction,
+      ),
+    ),
+  check: forwardAssertionJudgment,
 })
-
-for (const scenario of histories) {
-  for (const IndexType of [BasicIndex, BTreeIndex]) {
-    for (const direction of [`asc`, `desc`] as const) {
-      it(`${IndexType.name} preserves ${scenario.name} ${direction} public order across kind changes`, () => {
-        oracleRoute(`case`)
-        return expectIndexedPublicOrder(scenario, IndexType, direction)
-      })
-    }
-  }
-}
 
 /**
  * The eager histories above do not cross provider demand. This receiving
@@ -330,8 +355,9 @@ function evaluateNumericRequest(
   return evaluateReferenceExpression(expression, row)
 }
 
-it(`preserves a retained on-demand window after its index domain becomes mixed`, async () => {
-  oracleRoute(`fixed history`)
+// The production driver for the on-demand receiving history: the provider
+// and the model that sorts its source rows are the independent reference.
+async function runRetainedMixedWindowHistory(): Promise<void> {
   const initial: Array<NumericRow> = [
     { id: `three`, value: 3 },
     { id: `five`, value: 5 },
@@ -464,4 +490,30 @@ it(`preserves a retained on-demand window after its index domain becomes mixed`,
       requests.slice(requestsBeforePage).some((request) => request.cursor),
     ).toBe(true)
   }, [() => take?.mockRestore(), () => live?.cleanup(), () => source.cleanup()])
+}
+
+oracleProperty({
+  id: `mixed-index-order.on-demand-window`,
+  law: {
+    statement: `An index is a physical route for an orderBy query: it returns the same exact ordered public IDs as a full-source scan of the same query, on the first read and after a source value changes kind.`,
+    authority: `The orderBy/limit contract in docs/guides/live-queries.md.`,
+    limits: `The finite mixed-kind histories above, on BasicIndex and BTreeIndex, ascending and descending, plus one on-demand provider history; no order is prescribed for every mixed-kind combination.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/basic-index.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: [
+    `preserves a retained on-demand window after its index domain becomes mixed`,
+  ],
+  label: (name) => name,
+  resolve: (name) => ({ name }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`mixed index public order`, plan, observe, () =>
+      runRetainedMixedWindowHistory(),
+    ),
+  check: forwardAssertionJudgment,
 })

@@ -1,18 +1,16 @@
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { stripVirtualProps } from '../utils.js'
+import { oracleProperty, pass, violation } from '../oracle-config.js'
 import {
-  oracleProperty,
-  oracleReplayTest,
-  oracleRoute,
-  pass,
-  violation,
-} from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import type { Observation, Verdict } from '../oracle-config.js'
 import type { SyncConfig } from '../../src/types.js'
 
@@ -22,7 +20,7 @@ import type { SyncConfig } from '../../src/types.js'
 // downstream hold the source's committed rows, whatever the batches'
 // membership deltas and whether the delete was acknowledged or rolled back.
 // Membership lookups run only for batches that carry an update. The check
-// (runFlushHistory) runs generated queue histories and compares the output
+// (checkFlushHistory) judges generated queue histories and compares the output
 // with the source rows it wrote. The model predicts the final rows of the
 // parameter grid. Unit tests for the same subsystem are in
 // derived-delete-reconciliation.test.ts.
@@ -136,26 +134,6 @@ function expectedRowsAfterQueuedBatches(batches: number): Array<Row> {
   ]
 }
 
-declareOracle({
-  check: [checkFlushHistory],
-  model: [expectedRowsAfterQueuedBatches, modelFlushHistory],
-})
-
-oracleReplayTest(it).each([`initial`, `update`, `insert`] as const)(
-  `detects driver-only row mutation at the %s boundary`,
-  async (phase) => {
-    oracleRoute(`calibration`)
-    const steps = [{ inserts: 2, update: phase === `update` }]
-    await expect(
-      runFlushHistory(steps, (row, at) => {
-        if (at === phase) row.value += 100
-        return row
-      }),
-    ).rejects.toMatchObject({ name: `AssertionError` })
-    await runFlushHistory(steps)
-  },
-)
-
 // The independent reference owns the source rows implied by the history.
 // Each held flush commits, queues once, and stays invisible; only an update
 // needs a membership lookup. Settlement exposes all committed source rows.
@@ -226,21 +204,6 @@ function checkFlushHistory(
   }
   return pass
 }
-async function runFlushHistory(
-  steps: FlushHistory,
-  prepareDriverRow?: (row: Row, phase: WritePhase) => Row,
-) {
-  const trace: Array<Observation> = []
-  await driveFlushHistory(
-    steps,
-    (checkpoint, value) => trace.push({ checkpoint, value }),
-    prepareDriverRow,
-  )
-  const verdict = checkFlushHistory(steps, trace, modelFlushHistory(steps))
-  if (verdict.kind === `violation`)
-    throw verdict.cause ?? new Error(verdict.difference)
-}
-
 // The old fixed and fresh campaigns had different run budgets (40 and 60).
 // Separate registrations retain both. The fixed-budget registration also gets
 // the framework's standard fresh campaign; neither old budget is reduced.
@@ -267,8 +230,24 @@ oracleProperty({
     fixedSeeds: [41703],
     states: [],
     constructed: [],
+    // The histories that the driver-row calibrations below mutate.
+    fixed: [false, true].map((update) => ({
+      name: `two inserts${update ? ` and a row-one update` : ``}`,
+      history: [{ inserts: 2, update }],
+    })),
   },
   check: checkFlushHistory,
+  // A driver that changes the row it writes at one boundary must fail the
+  // settled-row comparison.
+  calibrations: ([`initial`, `update`, `insert`] as const).map((phase) => ({
+    name: `detects driver-only row mutation at the ${phase} boundary`,
+    law: `membership work`,
+    driver: (steps: FlushHistory, observe) =>
+      driveFlushHistory(steps, observe, (row, at) => {
+        if (at === phase) row.value += 100
+        return row
+      }),
+  })),
 })
 oracleProperty({
   ...flushOptions,
@@ -288,91 +267,117 @@ oracleProperty({
   check: checkFlushHistory,
 })
 
-describe(`derived updates beneath optimistic deletes`, () => {
-  oracleReplayTest(it).each(cases)(
-    `$shape / layered=$layered / $outcome / $batches batches`,
-    async ({ shape, layered, outcome, batches }) => {
-      oracleRoute(`case`)
-      let sync!: Parameters<SyncConfig<Row>[`sync`]>[0]
-      const source = createCollection<Row>({
-        getKey: (row) => row.id,
-        sync: {
-          sync: (params) => {
-            sync = params
-            params.begin()
-            params.write({ type: `insert`, value: { id: 1, value: 10 } })
-            params.commit()
-            params.markReady()
-          },
-        },
-      })
-      const middle = createLiveQueryCollection({
-        query: (q) => q.from({ row: source }),
-      })
-      const derived = createLiveQueryCollection({
-        query: (q) => {
-          const query = q.from({ row: layered ? middle : source })
-          if (shape === `order`) return query.orderBy(({ row }) => row.value)
-          if (shape === `select`)
-            return query.fn.select(({ row }) => ({ ...row }))
-          return query
-        },
-      })
-      const downstream = createLiveQueryCollection({
-        query: (q) => q.from({ row: derived }),
-      })
-      const done = createDeferred<void>()
-      const tx = createTransaction({ mutationFn: () => done.promise })
-      const settled = tx.when(`settled`).catch((error: unknown) => error)
-      const read = (collection: { values: () => Iterable<Row> }) =>
-        [...collection.values()]
-          .map((row) => ({ id: row.id, value: row.value }))
-          .sort((a, b) => a.id - b.id)
-      try {
-        await downstream.preload()
-        tx.mutate(() => derived.delete(1))
-        const reconstructed = new Map<string | number, Row>()
-        const subscription = derived.subscribeChanges((changes) => {
-          for (const change of changes) {
-            if (change.type === `delete`) reconstructed.delete(change.key)
-            else reconstructed.set(change.key, stripVirtualProps(change.value))
-          }
-          expect(
-            [...reconstructed.values()].sort((a, b) => a.id - b.id),
-          ).toEqual(read(derived))
-        })
-        try {
-          for (let index = 0; index < batches; index++) {
-            sync.begin()
-            sync.write({ type: `update`, value: { id: 1, value: 20 + index } })
-            if (index > 0)
-              sync.write({ type: `update`, value: { id: 2, value: 40 } })
-            sync.write({
-              type: `insert`,
-              value: { id: 2 + index, value: 30 + index },
-            })
-            expect(sync.commit()).toBe(true)
-            // The whole graph-output batch remains queued, including the insert.
-            expect(read(derived)).toEqual([])
-            expect(read(downstream)).toEqual([])
-          }
-          if (outcome === `rollback`) done.reject(new Error(`Rejected delete`))
-          else done.resolve()
-          await settled
-          const expected = expectedRowsAfterQueuedBatches(batches)
-          expect(read(derived)).toEqual(expected)
-          expect(read(downstream)).toEqual(expected)
-        } finally {
-          subscription.unsubscribe()
-        }
-      } finally {
-        done.resolve()
-        await settled
-        await downstream.cleanup()
-        await derived.cleanup()
-        await middle.cleanup()
-        await source.cleanup()
-      }
+// The production driver for one cell of the shape/outcome matrix: queued
+// batches stay invisible, then publish `expectedRowsAfterQueuedBatches`.
+async function runQueuedBatchCase({
+  shape,
+  layered,
+  outcome,
+  batches,
+}: (typeof cases)[number]): Promise<void> {
+  let sync!: Parameters<SyncConfig<Row>[`sync`]>[0]
+  const source = createCollection<Row>({
+    getKey: (row) => row.id,
+    sync: {
+      sync: (params) => {
+        sync = params
+        params.begin()
+        params.write({ type: `insert`, value: { id: 1, value: 10 } })
+        params.commit()
+        params.markReady()
+      },
     },
-  )
+  })
+  const middle = createLiveQueryCollection({
+    query: (q) => q.from({ row: source }),
+  })
+  const derived = createLiveQueryCollection({
+    query: (q) => {
+      const query = q.from({ row: layered ? middle : source })
+      if (shape === `order`) return query.orderBy(({ row }) => row.value)
+      if (shape === `select`) return query.fn.select(({ row }) => ({ ...row }))
+      return query
+    },
+  })
+  const downstream = createLiveQueryCollection({
+    query: (q) => q.from({ row: derived }),
+  })
+  const done = createDeferred<void>()
+  const tx = createTransaction({ mutationFn: () => done.promise })
+  const settled = tx.when(`settled`).catch((error: unknown) => error)
+  const read = (collection: { values: () => Iterable<Row> }) =>
+    [...collection.values()]
+      .map((row) => ({ id: row.id, value: row.value }))
+      .sort((a, b) => a.id - b.id)
+  try {
+    await downstream.preload()
+    tx.mutate(() => derived.delete(1))
+    const reconstructed = new Map<string | number, Row>()
+    const subscription = derived.subscribeChanges((changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) reconstructed.delete(change.key)
+        else reconstructed.set(change.key, stripVirtualProps(change.value))
+      }
+      expect([...reconstructed.values()].sort((a, b) => a.id - b.id)).toEqual(
+        read(derived),
+      )
+    })
+    try {
+      for (let index = 0; index < batches; index++) {
+        sync.begin()
+        sync.write({ type: `update`, value: { id: 1, value: 20 + index } })
+        if (index > 0)
+          sync.write({ type: `update`, value: { id: 2, value: 40 } })
+        sync.write({
+          type: `insert`,
+          value: { id: 2 + index, value: 30 + index },
+        })
+        expect(sync.commit()).toBe(true)
+        // The whole graph-output batch remains queued, including the insert.
+        expect(read(derived)).toEqual([])
+        expect(read(downstream)).toEqual([])
+      }
+      if (outcome === `rollback`) done.reject(new Error(`Rejected delete`))
+      else done.resolve()
+      await settled
+      const expected = expectedRowsAfterQueuedBatches(batches)
+      expect(read(derived)).toEqual(expected)
+      expect(read(downstream)).toEqual(expected)
+    } finally {
+      subscription.unsubscribe()
+    }
+  } finally {
+    done.resolve()
+    await settled
+    await downstream.cleanup()
+    await derived.cleanup()
+    await middle.cleanup()
+    await source.cleanup()
+  }
+}
+
+describe(`derived updates beneath optimistic deletes`, () => {
+  oracleProperty({
+    id: `derived-publication.queued-batches`,
+    law: {
+      statement: `While an optimistic delete hides a derived row, synced source batches are queued and publish nothing until the transaction settles; after settlement the derived collection and its downstream hold the source's committed rows.`,
+      authority: `The existing derived-publication law stated at the start of this owner.`,
+      limits: `The finite shape (pass-through, order, select), layering, outcome (acknowledge, rollback), and one-or-two-batch matrix.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/transactions.ts#createTransaction',
+    ],
+    histories: cases,
+    label: ({ shape, layered, outcome, batches }) =>
+      `${shape} / layered=${layered} / ${outcome} / ${batches} batches`,
+    resolve: (cell) => ({ cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`queued derived batches`, plan, observe, () =>
+        runQueuedBatchCase(plan.cell),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

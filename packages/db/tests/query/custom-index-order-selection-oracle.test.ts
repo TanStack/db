@@ -26,7 +26,7 @@
  * all three are already installed. This witness does not cover provider paging
  * from an incomplete source or later source changes.
  */
-import { expect, it, vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -35,25 +35,28 @@ import {
   liveQueryCollectionOptions,
 } from '../../src/query/live-query-collection.js'
 import { PropRef } from '../../src/query/ir.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 import {
   expectIndexingAdmission,
   expectIndexingConfiguration,
   expectedIndexing,
-  indexConfigurations,
 } from '../conformance/indexing-config-oracle.js'
-import { oracleProperty, oracleRoute } from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../oracle-assertion-adapter.js'
+import {
+  configurations,
+  expectMaterializedIndexes,
+  expectMaterializedWindow,
+  expectedMaterializedIndexes,
+  orderedReads,
+} from './custom-index-order-selection-model-oracle.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
-
-import type { IndexSettings } from '../conformance/indexing-config-oracle.js'
 
 type Row = { id: number; rank: number }
 
@@ -78,23 +81,6 @@ function expectRankWindow(actualIds: unknown): void {
     expect(actualIds).toEqual(expectedRankWindowIds()),
   )
 }
-
-declareOracle({
-  check: [
-    expectRankWindow,
-    expectMaterializedWindow,
-    expectMaterializedIndexes,
-    expectIndexingAdmission,
-    expectIndexingConfiguration,
-  ],
-  model: [
-    expectedRankWindowIds,
-    expectedMaterializedWindow,
-    expectedMaterializedIndexes,
-    expectedIndexing,
-  ],
-  grammar: [indexConfigurations],
-})
 
 function makeSource(
   mode: `eager` | `on-demand`,
@@ -136,51 +122,52 @@ function makeSource(
   })
 }
 
-it.each(
-  ([`eager`, `on-demand`] as const).flatMap((mode) =>
-    ([`scan`, `reverse manual index`] as const).map((path) => ({ mode, path })),
-  ),
-)(
-  `keeps bounded public rank order with $mode $path`,
-  async ({ mode, path }) => {
-    oracleRoute(`case`)
-    const source = makeSource(mode, path)
-    let live: ReturnType<typeof createLiveQueryCollection> | undefined
-    await withOracleCleanup(async () => {
-      if (mode === `eager`) await source.stateWhenReady()
-      else expect(source.isReady()).toBe(true)
-      if (path === `reverse manual index`) {
-        source.createIndex((row) => row.rank, {
-          indexType: BTreeIndex,
-          options: { compareFn: (a: number, b: number) => b - a },
-        })
-      }
-
-      const direct = source.currentStateAsChanges({
-        orderBy: [
-          {
-            expression: new PropRef([`rank`]),
-            compareOptions: { direction: `asc`, nulls: `first` },
-          },
-        ],
-        limit: 2,
-      })!
-      expectRankWindow(direct.map((change) => change.value.id))
-
-      live = createLiveQueryCollection((q) =>
-        q
-          .from({ row: source })
-          .orderBy(({ row }) => row.rank)
-          .limit(2),
-      )
-      await live.preload()
-      expectRankWindow([...live.values()].map((row) => row.id))
-    }, [() => live?.cleanup(), () => source.cleanup()])
-  },
+const rankWindowCells = ([`eager`, `on-demand`] as const).flatMap((mode) =>
+  ([`scan`, `reverse manual index`] as const).map((path) => ({ mode, path })),
 )
 
-it(`uses a later eligible index after an unusable matching index`, async () => {
-  oracleRoute(`fixed history`)
+// The production driver of one rank-window cell: a direct ordered snapshot
+// and a live query, each compared with `expectedRankWindowIds`.
+async function runRankWindowCell({
+  mode,
+  path,
+}: (typeof rankWindowCells)[number]): Promise<void> {
+  const source = makeSource(mode, path)
+  let live: ReturnType<typeof createLiveQueryCollection> | undefined
+  await withOracleCleanup(async () => {
+    if (mode === `eager`) await source.stateWhenReady()
+    else expect(source.isReady()).toBe(true)
+    if (path === `reverse manual index`) {
+      source.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+        options: { compareFn: (a: number, b: number) => b - a },
+      })
+    }
+
+    const direct = source.currentStateAsChanges({
+      orderBy: [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ],
+      limit: 2,
+    })!
+    expectRankWindow(direct.map((change) => change.value.id))
+
+    live = createLiveQueryCollection((q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    )
+    await live.preload()
+    expectRankWindow([...live.values()].map((row) => row.id))
+  }, [() => live?.cleanup(), () => source.cleanup()])
+}
+
+// A named history: an unusable matching index registered before a usable one.
+async function runLaterEligibleIndexHistory(): Promise<void> {
   const requests: Array<LoadSubsetOptions> = []
   const source = makeSource(`on-demand`, `scan`, (request) =>
     requests.push(request),
@@ -245,10 +232,10 @@ it(`uses a later eligible index after an unusable matching index`, async () => {
     () => live?.cleanup(),
     () => source.cleanup(),
   ])
-})
+}
 
-it(`eager indexing creates an ordered reader when only a custom reader exists`, async () => {
-  oracleRoute(`fixed history`)
+// A named history: eager indexing beside a custom-order reader.
+async function runEagerOrderedReaderHistory(): Promise<void> {
   const source = createCollection(
     mockSyncCollectionOptions<Row>({
       id: `custom-index-order-selection-eager-auto`,
@@ -291,6 +278,85 @@ it(`eager indexing creates an ordered reader when only a custom reader exists`, 
     })
     expectRankWindow(direct?.map((change) => change.value.id))
   }, [() => live?.cleanup(), () => source.cleanup()])
+}
+
+// Reader selection: a bounded public window follows the query's declared
+// rank order, whatever index traversal a source offers.
+const rankWindowLaw = {
+  statement: `A bounded ordered read returns the query's declared rank order, whatever custom-order or later-registered indexes the source holds.`,
+  authority: `The orderBy/limit contract in docs/guides/live-queries.md; an index is a physical route, not a result contract.`,
+}
+oracleProperty({
+  id: `custom-index-order.rank-window`,
+  law: {
+    ...rankWindowLaw,
+    limits: `Eager and on-demand sources, each scanned or read through a reverse manual index.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/basic-index.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/live-query-collection.ts#liveQueryCollectionOptions',
+  ],
+  histories: rankWindowCells,
+  label: ({ mode, path }) =>
+    `keeps bounded public rank order with ${mode} ${path}`,
+  resolve: (cell) => ({ cell }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`custom index order selection`, plan, observe, () =>
+      runRankWindowCell(plan.cell),
+    ),
+  check: forwardAssertionJudgment,
+})
+oracleProperty({
+  id: `custom-index-order.later-eligible`,
+  law: {
+    ...rankWindowLaw,
+    limits: `One on-demand history with an unusable matching index registered before a usable one.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/basic-index.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/live-query-collection.ts#liveQueryCollectionOptions',
+  ],
+  histories: [`uses a later eligible index after an unusable matching index`],
+  label: (name) => name,
+  resolve: (name) => ({ name }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`custom index order selection`, plan, observe, () =>
+      runLaterEligibleIndexHistory(),
+    ),
+  check: forwardAssertionJudgment,
+})
+oracleProperty({
+  id: `custom-index-order.eager-reader`,
+  law: {
+    ...rankWindowLaw,
+    limits: `One eager-indexing history whose only rank index has a custom order.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/basic-index.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/live-query-collection.ts#liveQueryCollectionOptions',
+  ],
+  histories: [
+    `eager indexing creates an ordered reader when only a custom reader exists`,
+  ],
+  label: (name) => name,
+  resolve: (name) => ({ name }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`custom index order selection`, plan, observe, () =>
+      runEagerOrderedReaderHistory(),
+    ),
+  check: forwardAssertionJudgment,
 })
 
 /**
@@ -309,72 +375,6 @@ it(`eager indexing creates an ordered reader when only a custom reader exists`, 
  * This does not measure elapsed time, incomplete providers, or arbitrary
  * comparators; the existing selection witnesses above cover reader admission.
  */
-type MaterializedRow = { id: number; rank: number | null; score: number | null }
-const configurations = indexConfigurations({
-  indexTypes: { basic: BasicIndex, btree: BTreeIndex },
-}).flatMap((settings) =>
-  ([`direct`, `options`] as const).map((path) => ({ ...settings, path })),
-)
-const orderedReads = [
-  [`rank`, `first`],
-  [`rank`, `last`],
-  [`score`, `first`],
-  [`score`, `last`],
-  [`rank`, `first`],
-] as const
-
-// One automatic index serves each distinct ordered specification. Repeating a
-// read or updating source rows must not allocate another index. Off admits no
-// optimized reader until a caller explicitly creates an index.
-function expectedMaterializedIndexes(settings: IndexSettings) {
-  const indexing = expectedIndexing(settings)
-  return {
-    optimized: indexing.mode === `eager`,
-    count:
-      indexing.automaticIndexes *
-      new Set(orderedReads.map(([field, nulls]) => `${field}/${nulls}`)).size,
-  }
-}
-function expectMaterializedIndexes(count: number, settings: IndexSettings) {
-  oracleAssertion(`expectMaterializedIndexes comparison 2`, () =>
-    expect(count).toBe(expectedMaterializedIndexes(settings).count),
-  )
-}
-
-// Full recomputation uses only the projected values and the declared null
-// placement. Distinct non-null values avoid an unrelated tie-order promise.
-function expectedMaterializedWindow(
-  values: ReadonlyArray<MaterializedRow>,
-  field: `rank` | `score`,
-  nulls: `first` | `last`,
-) {
-  return [...values]
-    .sort((a, b) => {
-      const left = a[field]
-      const right = b[field]
-      if (left === right) return 0
-      if (left === null) return nulls === `first` ? -1 : 1
-      if (right === null) return nulls === `first` ? 1 : -1
-      return left - right
-    })
-    .slice(0, 2)
-    .map(({ id }) => id)
-}
-
-function expectMaterializedWindow(
-  actual: unknown,
-  values: ReadonlyArray<MaterializedRow>,
-  field: `rank` | `score`,
-  nulls: `first` | `last`,
-  optimized = true,
-) {
-  oracleAssertion(`expectMaterializedWindow comparison 3`, () =>
-    expect(actual).toEqual(
-      optimized ? expectedMaterializedWindow(values, field, nulls) : undefined,
-    ),
-  )
-}
-
 async function runMaterializedIndexHistory(
   settings: (typeof configurations)[number],
   reached: (state: string) => void,
@@ -428,7 +428,7 @@ async function runMaterializedIndexHistory(
     } else {
       await cached!.preload()
       oracleAssertion(`output indexing configuration`, () =>
-        expectIndexingConfiguration(cached!, settings),
+        expectIndexingConfiguration(cached, settings),
       )
       for (const updated of [false, true]) {
         if (updated) {
@@ -509,6 +509,9 @@ async function runMaterializedIndexHistory(
 // Constructor identities stay in the resolved production plan. Enumerated
 // histories name the exact position in the existing mode/constructor/path
 // grammar, preserving its order and all eighteen combinations as plain data.
+// The grammar, model, and comparisons live in
+// custom-index-order-selection-model-oracle.ts; their checker calibration is
+// in custom-index-order-selection-model.test.ts.
 oracleProperty({
   id: `live-query.output-indexing`,
   law: {
@@ -553,33 +556,4 @@ oracleProperty({
       },
     ),
   check: forwardAssertionJudgment,
-})
-
-// Calibrate the policy comparisons independently of a production path: an
-// extra index and the opposite optimized-read availability must be rejected.
-it.each(
-  configurations.filter((settings) => !expectedIndexing(settings).rejects),
-)(`rejects wrong output-indexing observations: %j`, (settings) => {
-  oracleRoute(`calibration`)
-  const expected = expectedMaterializedIndexes(settings)
-  expect(() =>
-    expectMaterializedIndexes(expected.count + 1, settings),
-  ).toThrow()
-  const values: Array<MaterializedRow> = [
-    { id: 1, rank: 3, score: 1 },
-    { id: 2, rank: null, score: 3 },
-    { id: 3, rank: 1, score: null },
-  ]
-  const wrong = expected.optimized
-    ? undefined
-    : expectedMaterializedWindow(values, `rank`, `first`)
-  expect(() =>
-    expectMaterializedWindow(
-      wrong,
-      values,
-      `rank`,
-      `first`,
-      expected.optimized,
-    ),
-  ).toThrow()
 })

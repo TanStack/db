@@ -1,5 +1,5 @@
 import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { stripVirtualProps } from '../utils.js'
 import {
   forwardAssertionJudgment,
@@ -7,8 +7,7 @@ import {
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../oracle-assertion-adapter.js'
-import { oracleProperty, oracleRoute } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+import { oracleProperty } from '../oracle-config.js'
 import {
   BUCKETS,
   Driver,
@@ -805,15 +804,249 @@ const step = fc.record({
   settleLocal: fc.integer({ min: 0, max: 5 }).map((n) => n === 0),
 })
 const history = fc.array(step, { minLength: 1, maxLength: 8 })
-// The parts this file declares. runHistory runs one generated or fixed
-// history through the real adapter and compares it with the model after each
-// flush; checkEvents is its exactly-once publication comparison. The model
-// predicts the rows that each flush owes, which events it may name, and which
-// layout revision it owes.
-declareOracle({
-  check: [runHistory, checkEvents],
-  model: [applyOps, layoutExpectation, shownLayoutExpectation, touchedIds],
-})
+// runHistory runs one generated or fixed history through the real adapter and
+// compares it with the model after each flush; checkEvents is its
+// exactly-once publication comparison. The model predicts the rows that each
+// flush owes, which events it may name, and which layout revision it owes.
+
+// Shared optional fields of the last named history below.
+const plainStep = {
+  throwPick: 0,
+  local: 0,
+  hold: 0,
+  holdFor: 0,
+  shareId: false,
+  settleLocal: true,
+}
+
+// Fixed histories and regressions of generated and CI failures.
+const fixedRollbackHistories: Array<{
+  name: string
+  steps: Parameters<typeof runHistory>[0]
+}> = [
+  // Fixed history: a flush that reorders a shown row throws. The retried flush must
+  // still publish the layout change, so the failed flush must not leave its
+  // new order behind as the facade's current order.
+  {
+    name: `publishes a reorder on retry after a failed reordering flush`,
+    steps: [
+      {
+        choices: [
+          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
+          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
+          { kind: 0, bucket: 0, id: 1, v: 2, rank: 2 },
+        ],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 1, rank: 5 }],
+        outcome: `throw`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 1, id: 0, v: 0, rank: 0 }],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+    ],
+  },
+  // Fixed history: a reorder rolled back after `prepare()`, then sent again. The
+  // rollback must restore the facade's current order, or the second flush
+  // sees no order change and owes a layout revision it does not publish.
+  {
+    name: `publishes a reorder sent again after a rolled-back reorder`,
+    steps: [
+      {
+        choices: [
+          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
+          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
+          { kind: 0, bucket: 0, id: 1, v: 2, rank: 2 },
+        ],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 1, rank: 5 }],
+        outcome: `rollback`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 1, rank: 5 }],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+    ],
+  },
+  // Fixed history: a failed root commit, then a retry that carries only changes to
+  // other buckets, as a parent-only write would. The retry must still publish
+  // the facade change that was pending when the root commit failed.
+  {
+    name: `publishes a pending facade change after a failed root commit`,
+    steps: [
+      {
+        choices: [
+          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
+          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
+        ],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 2, rank: 1 }],
+        outcome: `rollback`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 1, id: 0, v: 0, rank: 0 }],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+    ],
+  },
+  // A retired facade can still show rows the graph never sent: an optimistic
+  // row from a pending user transaction, or a held sync commit behind a
+  // persisting one. Retiring the bucket must not fail the flush.
+  {
+    name: `retires a bucket whose facade shows an optimistic row`,
+    steps: [
+      {
+        choices: [
+          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
+          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
+        ],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 4, bucket: 0, id: 0, v: 0, rank: 0 }],
+        outcome: `publish`,
+        throwPick: 0,
+        local: 0,
+      },
+    ],
+  },
+  // Fixed history: a failed flush that writes two existing buckets and retires a
+  // third restores all three, then the retried flush applies everything.
+  {
+    name: `restores two written buckets and a retired bucket, then retries`,
+    steps: [
+      {
+        choices: [
+          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
+          { kind: 0, bucket: 1, id: 0, v: 1, rank: 1 },
+          { kind: 0, bucket: 2, id: 0, v: 1, rank: 1 },
+          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
+          { kind: 0, bucket: 1, id: 1, v: 2, rank: 0 },
+          { kind: 0, bucket: 2, id: 0, v: 1, rank: 1 },
+        ],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+      {
+        choices: [
+          { kind: 0, bucket: 0, id: 0, v: 5, rank: 9 },
+          { kind: 3, bucket: 1, id: 1, v: 0, rank: 0 },
+          { kind: 4, bucket: 2, id: 0, v: 0, rank: 0 },
+        ],
+        outcome: `throw`,
+        throwPick: 1,
+      },
+      {
+        choices: [{ kind: 0, bucket: 3, id: 2, v: 3, rank: 2 }],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+    ],
+  },
+  // Fixed regression of a generated failure: an update to a row that an earlier
+  // flush wrote behind a still-persisting transaction keeps the row.
+  {
+    name: `updates a row that a persisting transaction still holds`,
+    steps: [
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 0, rank: 0 }],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 1, rank: 0 }],
+        outcome: `publish`,
+        throwPick: 0,
+        hold: 0,
+        holdFor: 1,
+      },
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 2, rank: 0 }],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+    ],
+  },
+  // Fixed regression of a CI failure: a rollback restores a row that an earlier
+  // flush wrote behind a still-persisting transaction. The restore must write
+  // it as an update, because the held insert lands first.
+  {
+    name: `restores a held row after a rolled-back update`,
+    steps: [
+      {
+        choices: [{ kind: 0, bucket: 3, id: 0, v: 0, rank: 0 }],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+      {
+        choices: [
+          { kind: 0, bucket: 3, id: 5, v: 0, rank: 0 },
+          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
+        ],
+        outcome: `publish`,
+        throwPick: 0,
+        hold: 3,
+        holdFor: 1,
+      },
+      {
+        choices: [{ kind: 0, bucket: 3, id: 5, v: 1, rank: 0 }],
+        outcome: `rollback`,
+        throwPick: 0,
+      },
+    ],
+  },
+  // Fixed regression of a generated failure: an optimistic row shares a graph
+  // id, is rolled back, and then a flush fails while writing the facade. The
+  // failed flush publishes nothing.
+  {
+    name: `publishes nothing from a failed flush after a shared optimistic row leaves`,
+    steps: [
+      {
+        ...plainStep,
+        cleanup: 0,
+        choices: [{ kind: 0, bucket: 1, id: 0, v: 0, rank: 0 }],
+        outcome: `publish`,
+      },
+      {
+        ...plainStep,
+        cleanup: 0,
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 0, rank: 0 }],
+        outcome: `publish`,
+      },
+      {
+        ...plainStep,
+        shareId: true,
+        choices: [
+          { kind: 0, bucket: 0, id: 2, v: 0, rank: 0 },
+          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
+        ],
+        outcome: `publish`,
+      },
+      {
+        ...plainStep,
+        cleanup: 1,
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 0, rank: 0 }],
+        outcome: `throwWrite`,
+      },
+    ],
+  },
+]
 
 describe(`bucket facade rollback`, () => {
   // Keep the complete independent model and its comparisons at each flush.
@@ -846,241 +1079,29 @@ describe(`bucket facade rollback`, () => {
     check: forwardAssertionJudgment,
   })
 
-  // Fixed history: a flush that reorders a shown row throws. The retried flush must
-  // still publish the layout change, so the failed flush must not leave its
-  // new order behind as the facade's current order.
-  it(`publishes a reorder on retry after a failed reordering flush`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
-      {
-        choices: [
-          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
-          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
-          { kind: 0, bucket: 0, id: 1, v: 2, rank: 2 },
-        ],
-        outcome: `publish`,
-        throwPick: 0,
-      },
-      {
-        choices: [{ kind: 0, bucket: 0, id: 0, v: 1, rank: 5 }],
-        outcome: `throw`,
-        throwPick: 0,
-      },
-      {
-        choices: [{ kind: 0, bucket: 1, id: 0, v: 0, rank: 0 }],
-        outcome: `publish`,
-        throwPick: 0,
-      },
-    ])
-  })
-
-  // Fixed history: a reorder rolled back after `prepare()`, then sent again. The
-  // rollback must restore the facade's current order, or the second flush
-  // sees no order change and owes a layout revision it does not publish.
-  it(`publishes a reorder sent again after a rolled-back reorder`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
-      {
-        choices: [
-          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
-          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
-          { kind: 0, bucket: 0, id: 1, v: 2, rank: 2 },
-        ],
-        outcome: `publish`,
-        throwPick: 0,
-      },
-      {
-        choices: [{ kind: 0, bucket: 0, id: 0, v: 1, rank: 5 }],
-        outcome: `rollback`,
-        throwPick: 0,
-      },
-      {
-        choices: [{ kind: 0, bucket: 0, id: 0, v: 1, rank: 5 }],
-        outcome: `publish`,
-        throwPick: 0,
-      },
-    ])
-  })
-
-  // Fixed history: a failed root commit, then a retry that carries only changes to
-  // other buckets, as a parent-only write would. The retry must still publish
-  // the facade change that was pending when the root commit failed.
-  it(`publishes a pending facade change after a failed root commit`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
-      {
-        choices: [
-          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
-          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
-        ],
-        outcome: `publish`,
-        throwPick: 0,
-      },
-      {
-        choices: [{ kind: 0, bucket: 0, id: 0, v: 2, rank: 1 }],
-        outcome: `rollback`,
-        throwPick: 0,
-      },
-      {
-        choices: [{ kind: 0, bucket: 1, id: 0, v: 0, rank: 0 }],
-        outcome: `publish`,
-        throwPick: 0,
-      },
-    ])
-  })
-
-  // A retired facade can still show rows the graph never sent: an optimistic
-  // row from a pending user transaction, or a held sync commit behind a
-  // persisting one. Retiring the bucket must not fail the flush.
-  it(`retires a bucket whose facade shows an optimistic row`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
-      {
-        choices: [
-          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
-          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
-        ],
-        outcome: `publish`,
-        throwPick: 0,
-      },
-      {
-        choices: [{ kind: 4, bucket: 0, id: 0, v: 0, rank: 0 }],
-        outcome: `publish`,
-        throwPick: 0,
-        local: 0,
-      },
-    ])
-  })
-
-  // Fixed history: a failed flush that writes two existing buckets and retires a
-  // third restores all three, then the retried flush applies everything.
-  it(`restores two written buckets and a retired bucket, then retries`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
-      {
-        choices: [
-          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
-          { kind: 0, bucket: 1, id: 0, v: 1, rank: 1 },
-          { kind: 0, bucket: 2, id: 0, v: 1, rank: 1 },
-          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
-          { kind: 0, bucket: 1, id: 1, v: 2, rank: 0 },
-          { kind: 0, bucket: 2, id: 0, v: 1, rank: 1 },
-        ],
-        outcome: `publish`,
-        throwPick: 0,
-      },
-      {
-        choices: [
-          { kind: 0, bucket: 0, id: 0, v: 5, rank: 9 },
-          { kind: 3, bucket: 1, id: 1, v: 0, rank: 0 },
-          { kind: 4, bucket: 2, id: 0, v: 0, rank: 0 },
-        ],
-        outcome: `throw`,
-        throwPick: 1,
-      },
-      {
-        choices: [{ kind: 0, bucket: 3, id: 2, v: 3, rank: 2 }],
-        outcome: `publish`,
-        throwPick: 0,
-      },
-    ])
-  })
-
-  // Fixed regression of a generated failure: an update to a row that an earlier
-  // flush wrote behind a still-persisting transaction keeps the row.
-  it(`updates a row that a persisting transaction still holds`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
-      {
-        choices: [{ kind: 0, bucket: 0, id: 0, v: 0, rank: 0 }],
-        outcome: `publish`,
-        throwPick: 0,
-      },
-      {
-        choices: [{ kind: 0, bucket: 0, id: 0, v: 1, rank: 0 }],
-        outcome: `publish`,
-        throwPick: 0,
-        hold: 0,
-        holdFor: 1,
-      },
-      {
-        choices: [{ kind: 0, bucket: 0, id: 0, v: 2, rank: 0 }],
-        outcome: `publish`,
-        throwPick: 0,
-      },
-    ])
-  })
-
-  // Fixed regression of a CI failure: a rollback restores a row that an earlier
-  // flush wrote behind a still-persisting transaction. The restore must write
-  // it as an update, because the held insert lands first.
-  it(`restores a held row after a rolled-back update`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
-      {
-        choices: [{ kind: 0, bucket: 3, id: 0, v: 0, rank: 0 }],
-        outcome: `publish`,
-        throwPick: 0,
-      },
-      {
-        choices: [
-          { kind: 0, bucket: 3, id: 5, v: 0, rank: 0 },
-          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
-        ],
-        outcome: `publish`,
-        throwPick: 0,
-        hold: 3,
-        holdFor: 1,
-      },
-      {
-        choices: [{ kind: 0, bucket: 3, id: 5, v: 1, rank: 0 }],
-        outcome: `rollback`,
-        throwPick: 0,
-      },
-    ])
-  })
-
-  // Fixed regression of a generated failure: an optimistic row shares a graph
-  // id, is rolled back, and then a flush fails while writing the facade. The
-  // failed flush publishes nothing.
-  it(`publishes nothing from a failed flush after a shared optimistic row leaves`, async () => {
-    oracleRoute(`fixed history`)
-    const plain = {
-      throwPick: 0,
-      local: 0,
-      hold: 0,
-      holdFor: 0,
-      shareId: false,
-      settleLocal: true,
-    }
-    await runHistory([
-      {
-        ...plain,
-        cleanup: 0,
-        choices: [{ kind: 0, bucket: 1, id: 0, v: 0, rank: 0 }],
-        outcome: `publish`,
-      },
-      {
-        ...plain,
-        cleanup: 0,
-        choices: [{ kind: 0, bucket: 0, id: 0, v: 0, rank: 0 }],
-        outcome: `publish`,
-      },
-      {
-        ...plain,
-        shareId: true,
-        choices: [
-          { kind: 0, bucket: 0, id: 2, v: 0, rank: 0 },
-          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
-        ],
-        outcome: `publish`,
-      },
-      {
-        ...plain,
-        cleanup: 1,
-        choices: [{ kind: 0, bucket: 0, id: 0, v: 0, rank: 0 }],
-        outcome: `throwWrite`,
-      },
-    ])
+  // The named histories above lie outside the generated grammar: they leave
+  // out optional step fields, which the grammar's records always hold. Each
+  // replays through `runHistory`, the shared driver and comparison, under its
+  // old test name.
+  oracleProperty({
+    id: `bucket-facade.rollback-fixed`,
+    law: {
+      statement: `Failed facade flushes restore all written facades without unrelated row reads, events, or layout revisions; successful flushes publish pending changes once.`,
+      authority: `ARCHITECTURE.md Coherent publication and the three facade laws stated above.`,
+      limits: `Named regressions that the generated step grammar cannot take back; each replays through the same driver and comparison.`,
+    },
+    owns: [
+      'src/query/live/bucket-facade-adapter.ts',
+      'src/transactions.ts#createTransaction',
+    ],
+    histories: fixedRollbackHistories,
+    label: ({ name }) => name,
+    resolve: ({ steps }) => ({ steps }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { steps: Parameters<typeof runHistory>[0] }, observe) =>
+      recordAssertionJudgment(PROPERTY, plan, observe, () =>
+        runHistory(plan.steps),
+      ),
+    check: forwardAssertionJudgment,
   })
 })

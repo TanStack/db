@@ -1,18 +1,9 @@
+import { isDeepStrictEqual } from 'node:util'
 import { fc } from '@fast-check/vitest'
-import {
-  afterAll,
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from 'vitest'
-import { toArray } from '../../src/query/index.js'
+import { afterAll, afterEach, beforeEach, describe, expect, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import { createDeferred } from '../../src/deferred.js'
-import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
@@ -23,10 +14,8 @@ import {
   oracleFixedSeed,
   oracleProperty,
   oracleReplayRequested,
-  oracleRoute,
   readOracleRunConfig,
 } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
@@ -34,6 +23,7 @@ import {
   compareAt,
   observeComparison,
   recordedComparison,
+  rejectAt,
 } from './ordered-comparison-oracle.js'
 import { receiveOrderedCompilerCacheHistory } from './ordered-compiler-cache-driver.js'
 import { receiveOrderedJoinedPlanHistory } from './ordered-joined-plan-driver.js'
@@ -46,9 +36,41 @@ import {
   requestFingerprint,
   rowsForScenario,
 } from './ordered-work-support.js'
+import { copiedRow } from './ordered-work-fixtures.js'
+import {
+  FULL_JOIN_SEED,
+  MAX_OPTIMISTIC_WINDOW_REQUESTS,
+  OPTIMISTIC_ACQUISITION_OBSERVATION_TURNS,
+  boundaryRanks,
+  copyOptimisticWindowPublication,
+  eagerCase,
+  eagerFullJoinCase,
+  eagerHeldCase,
+  eagerJoinedCase,
+  eagerJoinedGapCase,
+  eagerOrder,
+  eagerProvenReportCase,
+  eagerWindow,
+  exhaustiveScenarios,
+  expectEagerWindow,
+  fillerRows,
+  isJoinedFilter,
+  optimisticWindowViolations,
+  prefixLeavesWindowShort,
+  referenceOptimisticWindow,
+  scenarioArbitrary,
+} from './ordered-work-model-oracle.js'
 import type { Marker, Row, Scenario } from './ordered-work-support.js'
+import type {
+  EagerCase,
+  EagerCommand,
+  OptimisticWindowCase,
+  OptimisticWindowExtent,
+  OptimisticWindowObservation,
+  OptimisticWindowPublication,
+} from './ordered-work-model-oracle.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
-import type { DeltaEvent } from '../../src/query/effect.js'
+import type { Observation } from '../oracle-config.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 /**
@@ -130,55 +152,11 @@ type ConsumerObservation = {
   live: boolean
 }
 
-// Grammar for the generated consumer-parity law: zero to three middle rows,
-// either marker eligibility for middle and last rows, equal versus distinct
-// middle ranks, and both order directions. Every combination is legal and the
-// exhaustive matrix reconstructs all 64 cells before random sampling. Removing
-// middleCount loses empty and refill histories; removing either eligibility
-// bit loses matched/underfilled alternatives; removing tied loses the leading
-// tie boundary; removing direction loses descending continuation. Counts four
-// and 40 are an adjacent fixed range probe and a larger stress probe below.
-// Negative counts, duplicate row IDs, and directions other than asc/desc are
-// invalid in this grammar.
-// "Scenario" is a model-only input description, not a runtime demand state.
-const scenarioArbitrary: fc.Arbitrary<Scenario> = fc.record({
-  middleCount: fc.constantFrom(0 as const, 1 as const, 2 as const, 3 as const),
-  middleEligible: fc.boolean(),
-  lastEligible: fc.boolean(),
-  tied: fc.boolean(),
-  direction: fc.constantFrom(`asc` as const, `desc` as const),
-})
-
-const exhaustiveScenarios: ReadonlyArray<Scenario> = (
-  [0, 1, 2, 3] as const
-).flatMap((middleCount) =>
-  [false, true].flatMap((middleEligible) =>
-    [false, true].flatMap((lastEligible) =>
-      [false, true].flatMap((tied) =>
-        ([`asc`, `desc`] as const).map((direction) => ({
-          middleCount,
-          middleEligible,
-          lastEligible,
-          tied,
-          direction,
-        })),
-      ),
-    ),
-  ),
-)
-
 function matchesJoinFilter(row: Row, joinFilter: JoinFilter): boolean {
   return joinFilter === `none` ? !row.eligible : row.eligible
 }
 
 let harnessId = 0
-
-function copiedRow(row: Row): Row {
-  const copy: Record<string, unknown> = { ...row }
-  for (const field of [`$key`, `$collectionId`, `$origin`, `$hasPendingWrites`])
-    delete copy[field]
-  return copy as Row
-}
 
 async function observeConsumer(
   kind: `collection` | `effect`,
@@ -875,764 +853,29 @@ async function observeFinitePrefixMutation(
   )
 }
 
-async function observeMutationDuringBoundedRepair(): Promise<{
-  rows: Array<number>
-  requests: number
-  publications: Array<Array<number>>
-}> {
-  const truth = new Map<number, Row>([
-    [1, { id: 1, rank: 1, eligible: true, label: `first` }],
-    [2, { id: 2, rank: 2, eligible: true, label: `second` }],
-    [3, { id: 3, rank: 3, eligible: true, label: `third` }],
-  ])
-  const delivered = new Set<number>()
-  const repairPrefixStarted = createDeferred<void>()
-  const releaseRepairPrefix = createDeferred<void>()
-  const repairTieStarted = createDeferred<void>()
-  const releaseRepairTie = createDeferred<void>()
-  const publications: Array<Array<number>> = []
-  let heldRepairPrefix = false
-  let heldRepairTie = false
-  let requests = 0
-  let begin!: () => void
-  let write!: (message: {
-    type: `insert` | `update` | `delete`
-    value: Row
-  }) => void
-  let commit!: () => true | Promise<void>
-
-  const source = createCollection<Row, number>({
-    id: `ordered-mutation-during-repair-${harnessId++}`,
-    getKey: ({ id }) => id,
-    syncMode: `on-demand`,
-    startSync: true,
-    autoIndex: `eager`,
-    defaultIndexType: BTreeIndex,
-    sync: {
-      sync: (operations) => {
-        begin = operations.begin
-        write = operations.write
-        commit = operations.commit
-        operations.markReady()
-        const apply = async (options: LoadSubsetOptions) => {
-          let selected = [...truth.values()].filter(
-            (row) =>
-              (!options.where ||
-                evaluateReferenceExpression(options.where, row) === true) &&
-              (!options.cursor ||
-                evaluateReferenceExpression(options.cursor.whereFrom, row) ===
-                  true),
-          )
-          selected.sort(
-            (left, right) => left.rank - right.rank || left.id - right.id,
-          )
-          const offset = options.cursor ? 0 : (options.offset ?? 0)
-          selected = selected.slice(
-            offset,
-            options.limit === undefined ? undefined : offset + options.limit,
-          )
-          const additions = selected.filter(({ id }) => !delivered.has(id))
-          if (additions.length === 0) return
-          begin()
-          for (const row of additions) {
-            delivered.add(row.id)
-            write({ type: `insert`, value: { ...row } })
-          }
-          const receipt = commit()
-          if (receipt !== true) await receipt
-        }
-        return {
-          loadSubset: (options: LoadSubsetOptions) => {
-            requests++
-            const isRepairPrefix =
-              options.refetch === true &&
-              options.orderBy !== undefined &&
-              options.cursor === undefined
-            if (isRepairPrefix && !heldRepairPrefix) {
-              heldRepairPrefix = true
-              repairPrefixStarted.resolve()
-              return releaseRepairPrefix.promise.then(() => apply(options))
-            }
-            const isRepairTie =
-              options.refetch === true &&
-              options.orderBy === undefined &&
-              options.where !== undefined
-            if (isRepairTie && !heldRepairTie) {
-              heldRepairTie = true
-              repairTieStarted.resolve()
-              return releaseRepairTie.promise.then(() => apply(options))
-            }
-            return apply(options)
-          },
-        }
-      },
-    },
-  })
-  const live = createLiveQueryCollection((q) =>
-    q
-      .from({ row: source })
-      .orderBy(({ row }) => row.rank)
-      .limit(1),
-  )
-  const subscription = live.subscribeChanges(() => {
-    publications.push(live.toArray.map(({ id }) => id))
-  })
-
-  return withHistoryCleanup(
-    async () => {
-      await live.preload()
-      expect(live.toArray.map(({ id }) => id)).toEqual([1])
-      publications.length = 0
-
-      const first = { ...truth.get(1)!, rank: 10 }
-      truth.set(1, first)
-      begin()
-      write({ type: `update`, value: { ...first } })
-      const firstReceipt = commit()
-      if (firstReceipt !== true) await firstReceipt
-      await repairPrefixStarted.promise
-      expect(live.toArray.map(({ id }) => id)).toEqual([1])
-
-      releaseRepairPrefix.resolve()
-      await repairTieStarted.promise
-
-      const second = { ...truth.get(2)!, rank: 20 }
-      truth.set(2, second)
-      begin()
-      write({ type: `update`, value: { ...second } })
-      const secondReceipt = commit()
-      if (secondReceipt !== true) await secondReceipt
-      expect(live.toArray.map(({ id }) => id)).toEqual([1])
-
-      releaseRepairTie.resolve()
-      await vi.waitFor(() =>
-        expect(live.toArray.map(({ id }) => id)).toEqual([3]),
-      )
-      expect(publications).toEqual([[3]])
-      expect(requests).toBeGreaterThanOrEqual(6)
-      return {
-        rows: live.toArray.map(({ id }) => id),
-        requests,
-        publications: publications.map((rows) => [...rows]),
-      }
-    },
-    () => [
-      () => releaseRepairPrefix.resolve(),
-      () => releaseRepairTie.resolve(),
-      () => subscription.unsubscribe(),
-      () => live.cleanup(),
-      () => source.cleanup(),
-    ],
-  )
-}
-
-async function observeHeldEffectRepair(
-  repairPrefix: `synchronous` | `asynchronous`,
-): Promise<Array<Array<number>>> {
-  const truth: Array<Row> = [
-    { id: 1, rank: 1, eligible: true, label: `first` },
-    { id: 2, rank: 2, eligible: true, label: `second` },
-  ]
-  const repairStarted = createDeferred<void>()
-  const releaseRepair = createDeferred<void>()
-  const effectRows = new Set<number>()
-  const publications: Array<Array<number>> = []
-  let recovering = false
-  let loadCount = 0
-  let begin!: () => void
-  let write!: (message: {
-    type: `insert` | `update` | `delete`
-    value: Row
-  }) => void
-  let commit!: () => void
-
-  const source = createCollection<Row, number>({
-    id: `ordered-held-effect-repair-${harnessId++}`,
-    getKey: ({ id }) => id,
-    syncMode: `on-demand`,
-    startSync: true,
-    autoIndex: `eager`,
-    defaultIndexType: BTreeIndex,
-    sync: {
-      sync: (operations) => {
-        begin = operations.begin
-        write = operations.write
-        commit = operations.commit
-        operations.markReady()
-        const apply = (options: LoadSubsetOptions) => {
-          const selected = truth
-            .filter(
-              (row) =>
-                (!options.where ||
-                  evaluateReferenceExpression(options.where, row) === true) &&
-                (!options.cursor ||
-                  evaluateReferenceExpression(options.cursor.whereFrom, row) ===
-                    true),
-            )
-            .sort((left, right) => left.rank - right.rank || left.id - right.id)
-            .slice(
-              options.offset ?? 0,
-              options.limit === undefined
-                ? undefined
-                : (options.offset ?? 0) + options.limit,
-            )
-          begin()
-          for (const row of selected) {
-            write({ type: `insert`, value: { ...row } })
-          }
-          commit()
-        }
-        return {
-          loadSubset: (options) => {
-            loadCount++
-            const isRepair =
-              recovering &&
-              options.orderBy !== undefined &&
-              options.limit === 1 &&
-              options.cursor === undefined
-            if (!isRepair) {
-              apply(options)
-              return true
-            }
-            if (repairPrefix === `synchronous`) {
-              apply(options)
-              return true
-            }
-            repairStarted.resolve()
-            return releaseRepair.promise.then(() => apply(options))
-          },
-        }
-      },
-    },
-  })
-  const effect = createEffect<Row, number>({
-    query: (q) =>
-      q
-        .from({ row: source })
-        .orderBy(({ row }) => row.rank)
-        .limit(1),
-    onBatch: (events) => {
-      for (const event of events) {
-        if (event.type === `exit`) effectRows.delete(event.key)
-        else effectRows.add(event.key)
-      }
-      publications.push([...effectRows].sort((left, right) => left - right))
-    },
-  })
-
-  return withHistoryCleanup(
-    async () => {
-      await vi.waitFor(() => expect([...effectRows]).toEqual([1]))
-      await vi.waitFor(() => expect(loadCount).toBeGreaterThanOrEqual(2))
-      await flushPromises()
-      publications.length = 0
-      recovering = true
-      const removed = truth.shift()!
-      begin()
-      write({ type: `delete`, value: removed })
-      commit()
-      if (repairPrefix === `asynchronous`) {
-        await repairStarted.promise
-        await flushPromises()
-
-        expect(
-          [...effectRows],
-          `last complete effect result while held`,
-        ).toEqual([1])
-        expect(publications, `no intermediate effect publication`).toEqual([])
-
-        releaseRepair.resolve()
-      }
-      await vi.waitFor(() => expect([...effectRows]).toEqual([2]))
-      expect(publications).toEqual([[2]])
-      return publications.map((rows) => [...rows])
-    },
-    () => [
-      () => releaseRepair.resolve(),
-      () => effect.dispose(),
-      () => source.cleanup(),
-    ],
-  )
-}
-
-async function observeEffectAfterObsoleteRepairAbort(): Promise<{
-  rows: Array<number>
-  batches: Array<Array<string>>
-  finalLabel: string | undefined
-}> {
-  const truth = new Map<number, Row>([
-    [1, { id: 1, rank: 1, eligible: true, label: `first` }],
-    [2, { id: 2, rank: 2, eligible: true, label: `second` }],
-  ])
-  const installed = new Set<number>()
-  const effectRows = new Map<number, Row>()
-  const batches: Array<Array<string>> = []
-  let repairHeld = false
-  let requests = 0
-  let begin!: () => void
-  let write!: (message: {
-    type: `insert` | `update` | `delete`
-    value: Row
-  }) => void
-  let truncate!: () => void
-  let commit!: () => true | Promise<void>
-
-  const source = createCollection<Row, number>({
-    id: `ordered-obsolete-effect-repair-${harnessId++}`,
-    getKey: ({ id }) => id,
-    syncMode: `on-demand`,
-    startSync: true,
-    autoIndex: `eager`,
-    defaultIndexType: BTreeIndex,
-    sync: {
-      sync: (operations) => {
-        begin = operations.begin
-        write = operations.write
-        truncate = operations.truncate
-        commit = operations.commit
-        operations.markReady()
-        const apply = async (options: LoadSubsetOptions) => {
-          let selected = [...truth.values()].filter(
-            (row) =>
-              (!options.where ||
-                evaluateReferenceExpression(options.where, row) === true) &&
-              (!options.cursor ||
-                evaluateReferenceExpression(options.cursor.whereFrom, row) ===
-                  true),
-          )
-          selected.sort(
-            (left, right) => left.rank - right.rank || left.id - right.id,
-          )
-          const offset = options.cursor ? 0 : (options.offset ?? 0)
-          selected = selected.slice(
-            offset,
-            options.limit === undefined ? undefined : offset + options.limit,
-          )
-          const additions = selected.filter(({ id }) => !installed.has(id))
-          if (additions.length === 0) return
-          begin()
-          for (const row of additions) {
-            installed.add(row.id)
-            write({ type: `insert`, value: { ...row } })
-          }
-          const receipt = commit()
-          if (receipt !== true) await receipt
-        }
-        return {
-          loadSubset: (options: LoadSubsetOptions) => {
-            requests++
-            const isRepairPrefix =
-              options.refetch === true &&
-              options.orderBy !== undefined &&
-              options.cursor === undefined
-            if (isRepairPrefix && !repairHeld) {
-              repairHeld = true
-              return new Promise<void>((_resolve, reject) => {
-                const abort = () =>
-                  reject(new LoadSubsetOperationAbortedError())
-                if (options.signal?.aborted) abort()
-                else {
-                  options.signal?.addEventListener(`abort`, abort, {
-                    once: true,
-                  })
-                }
-              })
-            }
-            return apply(options)
-          },
-        }
-      },
-    },
-  })
-  const effect = createEffect<Row, number>({
-    query: (q) =>
-      q
-        .from({ row: source })
-        .orderBy(({ row }) => row.rank)
-        .limit(1),
-    onBatch: (events) => {
-      const labels: Array<string> = []
-      for (const event of events) {
-        labels.push(`${event.type}:${event.key}`)
-        if (event.type === `exit`) effectRows.delete(event.key)
-        else effectRows.set(event.key, copiedRow(event.value))
-      }
-      batches.push(labels)
-    },
-  })
-
-  return withHistoryCleanup(
-    async () => {
-      await vi.waitFor(() => expect([...effectRows.keys()]).toEqual([1]))
-      await vi.waitFor(() => expect(requests).toBeGreaterThanOrEqual(2))
-      await flushPromises()
-      batches.length = 0
-
-      const removed = truth.get(1)!
-      truth.delete(1)
-      installed.delete(1)
-      begin()
-      write({ type: `delete`, value: removed })
-      const deleteReceipt = commit()
-      if (deleteReceipt !== true) await deleteReceipt
-      await vi.waitFor(() => expect(repairHeld).toBe(true))
-
-      installed.clear()
-      begin()
-      truncate()
-      const truncateReceipt = commit()
-      if (truncateReceipt !== true) await truncateReceipt
-      await vi.waitFor(() => expect(requests).toBeGreaterThanOrEqual(5))
-      await flushPromises()
-
-      const replacement = truth.get(2)!
-      const updated = { ...replacement, label: `updated after replay` }
-      truth.set(2, updated)
-      begin()
-      write({ type: `update`, value: updated })
-      const updateReceipt = commit()
-      if (updateReceipt !== true) await updateReceipt
-      await vi.waitFor(() =>
-        expect(effectRows.get(2)?.label).toBe(`updated after replay`),
-      )
-
-      return {
-        rows: [...effectRows.keys()],
-        batches: batches.map((batch) => [...batch]),
-        finalLabel: effectRows.get(2)?.label,
-      }
-    },
-    () => [() => effect.dispose(), () => source.cleanup()],
-  )
-}
-
-async function observeSkipInitialOrderedLoad(): Promise<{
-  initialEvents: Array<string>
-  laterEvents: Array<string>
-}> {
-  const truth: Array<Row> = [
-    { id: 1, rank: 1, eligible: true, label: `first` },
-    { id: 2, rank: 2, eligible: true, label: `second` },
-  ]
-  const firstRequest = createDeferred<void>()
-  const installed = new Set<number>()
-  const events: Array<string> = []
-  let requests = 0
-  let begin!: () => void
-  let write!: (message: {
-    type: `insert` | `update` | `delete`
-    value: Row
-  }) => void
-  let commit!: () => true | Promise<void>
-
-  const source = createCollection<Row, number>({
-    id: `ordered-skip-initial-${harnessId++}`,
-    getKey: ({ id }) => id,
-    syncMode: `on-demand`,
-    startSync: true,
-    autoIndex: `eager`,
-    defaultIndexType: BTreeIndex,
-    sync: {
-      sync: (operations) => {
-        begin = operations.begin
-        write = operations.write
-        commit = operations.commit
-        operations.markReady()
-        return {
-          loadSubset: async (options: LoadSubsetOptions) => {
-            requests++
-            if (requests === 1) await firstRequest.promise
-            let selected = truth.filter(
-              (row) =>
-                (!options.where ||
-                  evaluateReferenceExpression(options.where, row) === true) &&
-                (!options.cursor ||
-                  evaluateReferenceExpression(options.cursor.whereFrom, row) ===
-                    true),
-            )
-            selected.sort(
-              (left, right) => left.rank - right.rank || left.id - right.id,
-            )
-            const offset = options.cursor ? 0 : (options.offset ?? 0)
-            selected = selected.slice(
-              offset,
-              options.limit === undefined ? undefined : offset + options.limit,
-            )
-            const additions = selected.filter(({ id }) => !installed.has(id))
-            if (additions.length === 0) return
-            begin()
-            for (const row of additions) {
-              installed.add(row.id)
-              write({ type: `insert`, value: { ...row } })
-            }
-            const receipt = commit()
-            if (receipt !== true) await receipt
-          },
-        }
-      },
-    },
-  })
-  const effect = createEffect<Row, number>({
-    query: (q) =>
-      q
-        .from({ row: source })
-        .orderBy(({ row }) => row.rank)
-        .limit(1),
-    skipInitial: true,
-    onBatch: (batch) => {
-      events.push(...batch.map((event) => `${event.type}:${event.key}`))
-    },
-  })
-
-  return withHistoryCleanup(
-    async () => {
-      await vi.waitFor(() => expect(requests).toBe(1))
-      firstRequest.resolve()
-      await vi.waitFor(() => expect(requests).toBeGreaterThanOrEqual(2))
-      await flushPromises()
-      const initialEvents = [...events]
-      events.length = 0
-
-      const inserted: Row = {
-        id: 3,
-        rank: 0,
-        eligible: true,
-        label: `later`,
-      }
-      truth.push(inserted)
-      installed.add(inserted.id)
-      begin()
-      write({ type: `insert`, value: inserted })
-      const receipt = commit()
-      if (receipt !== true) await receipt
-      await vi.waitFor(() => expect(events.length).toBeGreaterThan(0))
-
-      return { initialEvents, laterEvents: [...events] }
-    },
-    () => [
-      () => firstRequest.resolve(),
-      () => effect.dispose(),
-      () => source.cleanup(),
-    ],
-  )
-}
-
-async function observeHeldEffectDelta(
-  history: `absent-cycle` | `present-update-exit`,
-): Promise<{
-  batches: Array<Array<string>>
-  rows: Array<number>
-  exitedValues: Map<number, Row>
-}> {
-  const limit = history === `absent-cycle` ? 1 : 2
-  const truth = new Map<number, Row>(
-    (history === `absent-cycle`
-      ? [
-          { id: 1, rank: 1, eligible: true, label: `first` },
-          { id: 3, rank: 3, eligible: true, label: `third` },
-        ]
-      : [
-          { id: 1, rank: 1, eligible: true, label: `first` },
-          { id: 2, rank: 2, eligible: true, label: `second` },
-          { id: 3, rank: 3, eligible: true, label: `third` },
-          { id: 4, rank: 4, eligible: true, label: `fourth` },
-        ]
-    ).map((row) => [row.id, row]),
-  )
-  const delivered = new Set<number>()
-  const repairStarted = createDeferred<void>()
-  const releaseRepair = createDeferred<void>()
-  const effectRows = new Map<number, Row>()
-  const batches: Array<Array<string>> = []
-  const exitedValues = new Map<number, Row>()
-  let heldRepair = false
-  let loadCount = 0
-  let begin!: () => void
-  let write!: (message: {
-    type: `insert` | `update` | `delete`
-    value: Row
-  }) => void
-  let commit!: () => true | Promise<void>
-
-  const source = createCollection<Row, number>({
-    id: `ordered-held-effect-delta-${history}-${harnessId++}`,
-    getKey: ({ id }) => id,
-    syncMode: `on-demand`,
-    startSync: true,
-    autoIndex: `eager`,
-    defaultIndexType: BTreeIndex,
-    sync: {
-      sync: (operations) => {
-        begin = operations.begin
-        write = operations.write
-        commit = operations.commit
-        operations.markReady()
-        const apply = async (options: LoadSubsetOptions) => {
-          let selected = [...truth.values()].filter(
-            (row) =>
-              (!options.where ||
-                evaluateReferenceExpression(options.where, row) === true) &&
-              (!options.cursor ||
-                evaluateReferenceExpression(options.cursor.whereFrom, row) ===
-                  true),
-          )
-          selected.sort(
-            (left, right) => left.rank - right.rank || left.id - right.id,
-          )
-          const offset = options.cursor ? 0 : (options.offset ?? 0)
-          selected = selected.slice(
-            offset,
-            options.limit === undefined ? undefined : offset + options.limit,
-          )
-          const additions = selected.filter(({ id }) => !delivered.has(id))
-          if (additions.length === 0) return
-          begin()
-          for (const row of additions) {
-            delivered.add(row.id)
-            write({ type: `insert`, value: { ...row } })
-          }
-          const receipt = commit()
-          if (receipt !== true) await receipt
-        }
-        return {
-          loadSubset: (options: LoadSubsetOptions) => {
-            loadCount++
-            const isRepairPrefix =
-              options.refetch === true &&
-              options.orderBy !== undefined &&
-              options.cursor === undefined
-            if (isRepairPrefix && !heldRepair) {
-              heldRepair = true
-              repairStarted.resolve()
-              return releaseRepair.promise.then(() => apply(options))
-            }
-            return apply(options)
-          },
-        }
-      },
-    },
-  })
-  const effect = createEffect<Row, number>({
-    query: (q) =>
-      q
-        .from({ row: source })
-        .orderBy(({ row }) => row.rank)
-        .limit(limit),
-    onBatch: (events: Array<DeltaEvent<Row, number>>) => {
-      const labels: Array<string> = []
-      for (const event of events) {
-        labels.push(`${event.type}:${String(event.key)}`)
-        if (event.type === `exit`) {
-          exitedValues.set(event.key, copiedRow(event.value))
-          effectRows.delete(event.key)
-        } else {
-          effectRows.set(event.key, { ...event.value })
-        }
-      }
-      batches.push(labels)
-    },
-  })
-
-  const applySourceChange = async (
-    type: `insert` | `update` | `delete`,
-    row: Row,
-  ) => {
-    begin()
-    write({ type, value: { ...row } })
-    const receipt = commit()
-    if (receipt !== true) await receipt
+// Registration transports an existing judgment. The named function runs
+// production with its authored comparisons and models; observeComparison
+// forwards only a comparison marked with compareAt as a verdict, and keeps any
+// other error as a driver error. Each history is wrapped in a plan object,
+// which keys that judgment.
+function orderedWorkJudgment<THistory>(
+  judge: (history: THistory) => Promise<void>,
+) {
+  return {
+    resolve: (history: THistory) => ({ history }),
+    model: (
+      plan: { history: THistory },
+      observations: ReadonlyArray<Observation>,
+    ) => recordedComparison(plan, observations),
+    driver: (
+      plan: { history: THistory },
+      observe: (checkpoint: string, value: unknown) => void,
+    ) => observeComparison(plan, observe, () => judge(plan.history)),
   }
-
-  return withHistoryCleanup(
-    async () => {
-      const initialIds = history === `absent-cycle` ? [1] : [1, 2]
-      await vi.waitFor(() =>
-        expect([...effectRows.keys()].sort((a, b) => a - b)).toEqual(
-          initialIds,
-        ),
-      )
-      await vi.waitFor(() => expect(loadCount).toBeGreaterThanOrEqual(2))
-      await flushPromises()
-      batches.length = 0
-
-      const first = truth.get(1)!
-      truth.delete(1)
-      delivered.delete(1)
-      await applySourceChange(`delete`, first)
-      await repairStarted.promise
-
-      if (history === `absent-cycle`) {
-        const transient: Row = {
-          id: 2,
-          rank: 2,
-          eligible: true,
-          label: `transient`,
-        }
-        delivered.add(transient.id)
-        await applySourceChange(`insert`, transient)
-        delivered.delete(transient.id)
-        await applySourceChange(`delete`, transient)
-      } else {
-        const previous = truth.get(2)!
-        const updated = { ...previous, rank: 20, label: `updated` }
-        truth.set(2, updated)
-        await applySourceChange(`update`, updated)
-        truth.delete(2)
-        delivered.delete(2)
-        await applySourceChange(`delete`, updated)
-      }
-
-      expect(batches).toEqual([])
-      releaseRepair.resolve()
-      const expectedIds = history === `absent-cycle` ? [3] : [3, 4]
-      await vi.waitFor(() =>
-        expect([...effectRows.keys()].sort((a, b) => a - b)).toEqual(
-          expectedIds,
-        ),
-      )
-
-      expect(batches).toHaveLength(1)
-      const flattened = batches.flat()
-      if (history === `absent-cycle`) {
-        expect(flattened).not.toContain(`update:2`)
-        expect(flattened).not.toContain(`enter:2`)
-        expect(flattened).not.toContain(`exit:2`)
-      } else {
-        expect(flattened).toContain(`exit:2`)
-        expect(flattened).not.toContain(`update:2`)
-        expect(exitedValues.get(2)).toEqual({
-          id: 2,
-          rank: 2,
-          eligible: true,
-          label: `second`,
-        })
-      }
-      return {
-        batches: batches.map((batch) => [...batch]),
-        rows: [...effectRows.keys()].sort((a, b) => a - b),
-        exitedValues,
-      }
-    },
-    () => [
-      () => releaseRepair.resolve(),
-      () => effect.dispose(),
-      () => source.cleanup(),
-    ],
-  )
 }
 
 describe(`ordered source work oracle`, () => {
-  it(`reconstructs every legal small scenario exactly once`, () => {
-    oracleRoute(`case`)
-    expect(exhaustiveScenarios).toHaveLength(64)
-    expect(
-      new Set(exhaustiveScenarios.map((scenario) => JSON.stringify(scenario)))
-        .size,
-    ).toBe(64)
-  })
-
-  it(`keeps later order-term invalidation equal across consumers`, async () => {
-    oracleRoute(`fixed history`)
+  async function runOrderTermParity(): Promise<void> {
     const [collection, effect] = await Promise.all([
       observeLaterOrderTermMutation(`collection`),
       observeLaterOrderTermMutation(`effect`),
@@ -1641,222 +884,68 @@ describe(`ordered source work oracle`, () => {
     // The two graph entry points may take a different bounded number of
     // refinement passes, but they must exercise the same demand forms.
     expect(new Set(effect.requests)).toEqual(new Set(collection.requests))
-  })
-
-  it.each([`move`, `delete`] as const)(
-    `recovers a finite source prefix equally across consumers after %s`,
-    async (mutation) => {
-      oracleRoute(`case`)
-      const [collection, effect] = await Promise.all([
-        observeFinitePrefixMutation(`collection`, mutation),
-        observeFinitePrefixMutation(`effect`, mutation),
-      ])
-
-      expect(effect.rows).toEqual(collection.rows)
-      expect(effect.publications.at(-1)).toEqual(collection.publications.at(-1))
+  }
+  oracleProperty({
+    id: `ordered-work.work-order-term-parity`,
+    law: {
+      statement: `A live Collection and an Effect keep equal rows and exercise the same demand forms after a later order-term invalidation.`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `One fixed history through the controlled on-demand adapter.`,
     },
-  )
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: [`keeps later order-term invalidation equal across consumers`],
+    label: (name) => name,
+    ...orderedWorkJudgment(runOrderTermParity),
+    check: (_plan, _observations, verdict) => verdict,
+  })
 
-  it(`holds the last complete Effect result across an asynchronous prefix and synchronous tie repair`, async () => {
-    oracleRoute(`fixed history`)
-    await expect(observeHeldEffectRepair(`asynchronous`)).resolves.toEqual([
-      [2],
+  const finitePrefixParityHistories = [`move`, `delete`] as const
+  async function runFinitePrefixParity(
+    mutation: (typeof finitePrefixParityHistories)[number],
+  ): Promise<void> {
+    const [collection, effect] = await Promise.all([
+      observeFinitePrefixMutation(`collection`, mutation),
+      observeFinitePrefixMutation(`effect`, mutation),
     ])
+
+    expect(effect.rows).toEqual(collection.rows)
+    expect(effect.publications.at(-1)).toEqual(collection.publications.at(-1))
+  }
+  oracleProperty({
+    id: `ordered-work.work-finite-prefix-parity`,
+    law: {
+      statement: `A live Collection and an Effect recover a finite source prefix to equal rows and an equal final publication after a move or a delete.`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The move and delete histories through the controlled on-demand adapter.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: finitePrefixParityHistories,
+    label: (mutation) =>
+      `recovers a finite source prefix equally across consumers after ${mutation}`,
+    ...orderedWorkJudgment(runFinitePrefixParity),
+    check: (_plan, _observations, verdict) => verdict,
   })
 
-  it(`publishes one Effect replacement when ordered repair settles synchronously`, async () => {
-    oracleRoute(`fixed history`)
-    await expect(observeHeldEffectRepair(`synchronous`)).resolves.toEqual([[2]])
-  })
-
-  it(`publishes the repaired ordered Effect delta when a source changes during startup`, async () => {
-    oracleRoute(`fixed history`)
-    // Fixed history: the first ordered page contains row 1. Subscribing to
-    // the sibling updates row 1 before the Effect can run its initial graph.
-    // The independent final rank order is row 2, then row 1. At the first
-    // callback checkpoint, only row 2 may enter the width-one result.
-    type Sync = Parameters<SyncConfig<Row, number>[`sync`]>[0]
-    const truth = new Map<number, Row>([
-      [1, { id: 1, rank: 1, eligible: true, label: `first` }],
-      [2, { id: 2, rank: 2, eligible: true, label: `second` }],
-    ])
-    let rootSync!: Sync
-    const delivered = new Set<number>()
-    const requests: Array<LoadSubsetOptions> = []
-    const root = createCollection<Row, number>({
-      id: `ordered-effect-start-root-${harnessId++}`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          rootSync = operations
-          operations.markReady()
-          return {
-            loadSubset: (options) => {
-              requests.push(options)
-              const selected = [...truth.values()]
-                .filter(
-                  (row) =>
-                    (!options.where ||
-                      evaluateReferenceExpression(options.where, row) ===
-                        true) &&
-                    (!options.cursor ||
-                      evaluateReferenceExpression(
-                        options.cursor.whereFrom,
-                        row,
-                      ) === true),
-                )
-                .sort((a, b) => a.rank - b.rank || a.id - b.id)
-                .slice(
-                  options.offset ?? 0,
-                  options.limit === undefined
-                    ? undefined
-                    : (options.offset ?? 0) + options.limit,
-                )
-              operations.begin()
-              for (const row of selected) {
-                if (!delivered.has(row.id)) {
-                  delivered.add(row.id)
-                  operations.write({ type: `insert`, value: { ...row } })
-                }
-              }
-              expect(
-                operations.commit(),
-                `ordered page applies synchronously`,
-              ).toBe(true)
-              return true
-            },
-          }
-        },
-      },
-    })
-    const marker = createCollection<Marker, number>({
-      id: `ordered-effect-start-marker-${harnessId++}`,
-      getKey: ({ id }) => id,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          operations.markReady()
-        },
-      },
-    })
-    const originalSubscribe = marker.subscribeChanges.bind(marker)
-    let changedDuringStart = false
-    vi.spyOn(marker, `subscribeChanges`).mockImplementation(((...args) => {
-      const subscription = originalSubscribe(...args)
-      // Only the first subscription after the ordered page can drive this
-      // history; other subscribers must not repeat or preempt the update.
-      if (changedDuringStart || requests.length === 0) return subscription
-      expect(requests[0]?.orderBy, `first request is ordered`).toBeDefined()
-      expect(requests[0]?.limit, `first request loads one row`).toBe(1)
-      expect(delivered.has(1), `first page installed row 1`).toBe(true)
-      expect(root.get(1)?.rank, `row 1 is present before its update`).toBe(1)
-      changedDuringStart = true
-      const updated = { ...truth.get(1)!, rank: 3, label: `moved` }
-      truth.set(1, updated)
-      rootSync.begin()
-      rootSync.write({ type: `update`, value: updated })
-      expect(rootSync.commit(), `startup update applies synchronously`).toBe(
-        true,
-      )
-      return subscription
-    }) as typeof marker.subscribeChanges)
-
-    const batches: Array<Array<DeltaEvent<Row, string>>> = []
-    let effect: ReturnType<typeof createEffect> | undefined
-    // Drain the scheduled callback queue at the assertion checkpoint. A single
-    // event-loop turn can miss a later duplicate batch.
-    vi.useFakeTimers()
-    try {
-      await withHistoryCleanup(
-        async () => {
-          effect = createEffect<Row, string>({
-            query: (q) =>
-              q
-                .from({ row: root })
-                .leftJoin({ marker }, ({ row, marker: child }) =>
-                  eq(row.id, child.rowId),
-                )
-                .orderBy(({ row }) => row.rank)
-                .limit(1)
-                .select(({ row }) => ({
-                  id: row.id,
-                  rank: row.rank,
-                  eligible: row.eligible,
-                  label: row.label,
-                })),
-            onBatch: (events) => {
-              batches.push(events)
-            },
-          })
-          expect(changedDuringStart).toBe(true)
-          await vi.runAllTimersAsync()
-          expect(batches).toEqual([
-            [{ type: `enter`, key: `[2,null]`, value: truth.get(2) }],
-          ])
-          expect(requests.some((options) => options.refetch === true)).toBe(
-            true,
-          )
-        },
-        () => [
-          () => effect?.dispose(),
-          () => root.cleanup(),
-          () => marker.cleanup(),
-        ],
-      )
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it(`keeps an Effect live when truncate replay aborts an obsolete repair participant`, async () => {
-    oracleRoute(`fixed history`)
-    await expect(
-      observeEffectAfterObsoleteRepairAbort(),
-    ).resolves.toMatchObject({
-      rows: [2],
-      finalLabel: `updated after replay`,
-    })
-  })
-
-  it(`suppresses an asynchronous initial ordered window when skipInitial is set`, async () => {
-    oracleRoute(`fixed history`)
-    await expect(observeSkipInitialOrderedLoad()).resolves.toEqual({
-      initialEvents: [],
-      laterEvents: expect.arrayContaining([`enter:3`, `exit:1`]),
-    })
-  })
-
-  it(`restarts bounded repair when another order mutation arrives during its tie request`, async () => {
-    oracleRoute(`fixed history`)
-    await expect(observeMutationDuringBoundedRepair()).resolves.toMatchObject({
-      rows: [3],
-      publications: [[3]],
-    })
-  })
-
-  it(`emits no Effect delta for a row that enters and exits during held repair`, async () => {
-    oracleRoute(`fixed history`)
-    await expect(observeHeldEffectDelta(`absent-cycle`)).resolves.toMatchObject(
-      {
-        rows: [3],
-      },
-    )
-  })
-
-  it(`emits the published value when an updated row exits during held repair`, async () => {
-    oracleRoute(`fixed history`)
-    await expect(
-      observeHeldEffectDelta(`present-update-exit`),
-    ).resolves.toMatchObject({ rows: [3, 4] })
-  })
-
-  it.each(
-    ([`collection`, `effect`] as const).flatMap((consumer) =>
+  const valueUpdateHistories = ([`collection`, `effect`] as const).flatMap(
+    (consumer) =>
       [2, 5].flatMap((limit) =>
         ([`first`, `last`] as const).flatMap((position) =>
           ([`asc`, `desc`] as const).map((direction) => ({
@@ -1867,558 +956,25 @@ describe(`ordered source work oracle`, () => {
           })),
         ),
       ),
-    ),
-  )(
-    `does not refetch when a visible row changes outside the ordering key: %j`,
-    async ({ consumer, limit, position, direction }) => {
-      oracleRoute(`case`)
-      let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-      let loads = 0
-      const rows = rowsForScenario({
-        middleCount: 1,
-        middleEligible: true,
-        lastEligible: true,
-        tied: false,
-        direction,
-      })
-      const source = createCollection<Row, number>({
-        id: `ordered-value-update`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        sync: {
-          sync: (operations) => {
-            sync = operations
-            operations.markReady()
-            return {
-              loadSubset: async () => {
-                loads++
-                if (loads > 1) return
-                operations.begin()
-                for (const row of rows) {
-                  operations.write({ type: `insert`, value: { ...row } })
-                }
-                const receipt = operations.commit()
-                if (receipt !== true) await receipt
-              },
-            }
-          },
-        },
-      })
-      const query = (q: InitialQueryBuilder) =>
-        q
-          .from({ row: source })
-          .orderBy(({ row }) => row.rank, direction)
-          .limit(limit)
-      const effectRows = new Map<number, Row>()
-      const live =
-        consumer === `collection` ? createLiveQueryCollection(query) : undefined
-      const effect =
-        consumer === `effect`
-          ? createEffect<Row, number>({
-              query,
-              onBatch: (events) => {
-                for (const event of events) {
-                  if (event.type === `exit`) effectRows.delete(event.key)
-                  else effectRows.set(event.key, event.value)
-                }
-              },
-            })
-          : undefined
-      const readRows = () =>
-        (live ? [...live.values()] : [...effectRows.values()])
-          .map(({ id, rank, eligible, label }) => ({
-            id,
-            rank,
-            eligible,
-            label,
-          }))
-          .sort(compareRows(direction))
-
-      try {
-        if (live) await live.preload()
-        await flushPromises()
-        const expected = expectedVisibleWindow(rows, direction, limit)
-        expect(readRows()).toEqual(expected)
-        const loadCount = loads
-        const row = position === `first` ? expected[0]! : expected.at(-1)!
-        sync.begin()
-        sync.write({ type: `update`, value: { ...row, label: `changed` } })
-        sync.commit()
-        await flushPromises()
-
-        expect(readRows()).toEqual(
-          expected.map((value) =>
-            value.id === row.id ? { ...value, label: `changed` } : value,
-          ),
-        )
-        expect(loads).toBe(loadCount)
-      } finally {
-        if (effect) await effect.dispose()
-        if (live) await live.cleanup()
-        await source.cleanup()
-      }
-    },
   )
-
-  it.each([
-    {
-      name: `matching`,
-      secondaryRows: [
-        { id: `c-child`, joinKey: `c` },
-        { id: `d-child`, joinKey: `d` },
-      ],
-      expected: [`c:c-child`, `d:d-child`],
-    },
-    {
-      name: `empty`,
-      secondaryRows: [] as Array<{ id: string; joinKey: string }>,
-      expected: [] as Array<string>,
-    },
-  ])(
-    `waits for a $name joined source after exhausting tied ordered rows`,
-    async ({ name, secondaryRows, expected }) => {
-      oracleRoute(`case`)
-      type Primary = { id: string; rank: number; joinKey: string }
-      type Secondary = { id: string; joinKey: string }
-      const primaryRows: Array<Primary> = [`a`, `b`, `c`, `d`].map((id) => ({
-        id,
-        rank: 0,
-        joinKey: id,
-      }))
-      const deliveredPrimary = new Set<string>()
-      const deliveredSecondary = new Set<string>()
-      const secondaryLoads: Array<{
-        options: LoadSubsetOptions
-        gate: ReturnType<typeof createDeferred<void>>
-      }> = []
-      let primaryExhausted = false
-
-      const primary = createCollection<Primary>({
-        id: `ordered-late-join-primary-${name}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            markReady()
-            return {
-              loadSubset: async (options) => {
-                const rows = options.orderBy
-                  ? [
-                      primaryRows[
-                        options.cursor?.lastKey
-                          ? primaryRows.findIndex(
-                              ({ id }) => id === options.cursor?.lastKey,
-                            ) + 1
-                          : 0
-                      ],
-                    ].filter((row): row is Primary => row !== undefined)
-                  : primaryRows.filter(
-                      (row) =>
-                        !options.where ||
-                        evaluateReferenceExpression(options.where, row) ===
-                          true,
-                    )
-                const fresh = rows.filter(({ id }) => !deliveredPrimary.has(id))
-                if (fresh.length > 0) {
-                  begin()
-                  for (const row of fresh) {
-                    deliveredPrimary.add(row.id)
-                    write({ type: `insert`, value: row })
-                  }
-                  const receipt = commit(options.signal)
-                  if (receipt !== true) await receipt
-                }
-                primaryExhausted = deliveredPrimary.size === primaryRows.length
-              },
-            }
-          },
-        },
-      })
-      const secondary = createCollection<Secondary>({
-        id: `ordered-late-join-secondary-${name}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            markReady()
-            return {
-              loadSubset: async (options) => {
-                const gate = createDeferred<void>()
-                secondaryLoads.push({ options, gate })
-                await gate.promise
-                const fresh = secondaryRows.filter(
-                  (row) =>
-                    !deliveredSecondary.has(row.id) &&
-                    (!options.where ||
-                      evaluateReferenceExpression(options.where, row) === true),
-                )
-                for (const row of fresh) {
-                  deliveredSecondary.add(row.id)
-                  begin()
-                  write({ type: `insert`, value: row })
-                  const receipt = commit(options.signal)
-                  if (receipt !== true) await receipt
-                }
-              },
-            }
-          },
-        },
-      })
-      const live = createLiveQueryCollection((q) =>
-        q
-          .from({ primaryRow: primary })
-          .innerJoin(
-            { secondaryRow: secondary },
-            ({ primaryRow, secondaryRow }) =>
-              eq(primaryRow.joinKey, secondaryRow.joinKey),
-          )
-          .orderBy(({ primaryRow }) => primaryRow.rank)
-          .limit(2),
-      )
-
-      try {
-        const preload = live.preload()
-        let settled = false
-        void preload.finally(() => {
-          settled = true
-        })
-        await vi.waitFor(() =>
-          expect(
-            primaryExhausted,
-            JSON.stringify({
-              deliveredPrimary: [...deliveredPrimary],
-              secondaryLoads: secondaryLoads.length,
-            }),
-          ).toBe(true),
-        )
-        expect(secondaryLoads.length).toBeGreaterThan(0)
-        expect(settled).toBe(false)
-
-        for (const load of [...secondaryLoads].reverse()) {
-          load.gate.resolve()
-          await flushPromises()
-        }
-        await preload
-
-        expect(
-          live.toArray.map(
-            ({ primaryRow, secondaryRow }) =>
-              `${primaryRow.id}:${secondaryRow.id}`,
-          ),
-        ).toEqual(expected)
-        expect(live.isLoadingSubset).toBe(false)
-        expect(live.utils.lastSubsetError).toBeUndefined()
-      } finally {
-        for (const { gate } of secondaryLoads) gate.resolve()
-        await Promise.all([
-          live.cleanup(),
-          primary.cleanup(),
-          secondary.cleanup(),
-        ])
-      }
-    },
-  )
-
-  it(`keeps independent joined loads isolated when they settle in reverse`, async () => {
-    oracleRoute(`fixed history`)
-    type Primary = { id: string; rank: number; joinKey: string }
-    type Secondary = { id: string; joinKey: string }
-    const pending: Array<{
-      options: LoadSubsetOptions
-      gate: ReturnType<typeof createDeferred<void>>
-    }> = []
-    const completionOrder: Array<number> = []
-    const primary = createCollection<Primary>({
-      id: `ordered-independent-primary`,
-      getKey: ({ id }) => id,
-      syncMode: `eager`,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          begin()
-          write({ type: `insert`, value: { id: `a`, rank: 1, joinKey: `a` } })
-          write({ type: `insert`, value: { id: `b`, rank: 2, joinKey: `b` } })
-          commit()
-          markReady()
-        },
-      },
-    })
-    const secondaryRows: Array<Secondary> = [
-      { id: `a-child`, joinKey: `a` },
-      { id: `b-child`, joinKey: `b` },
-    ]
-    const delivered = new Set<string>()
-    const secondary = createCollection<Secondary>({
-      id: `ordered-independent-secondary`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          markReady()
-          return {
-            loadSubset: async (options) => {
-              const index = pending.length
-              const gate = createDeferred<void>()
-              pending.push({ options, gate })
-              await gate.promise
-              const rows = secondaryRows.filter(
-                (candidate) =>
-                  !delivered.has(candidate.id) &&
-                  (!options.where ||
-                    evaluateReferenceExpression(options.where, candidate) ===
-                      true),
-              )
-              for (const row of rows) {
-                delivered.add(row.id)
-                begin()
-                write({ type: `insert`, value: row })
-                const receipt = commit(options.signal)
-                if (receipt !== true) await receipt
-              }
-              completionOrder.push(index)
-            },
-          }
-        },
-      },
-    })
-    const createJoined = (id: `a` | `b`) =>
-      createLiveQueryCollection((q) =>
-        q
-          .from({ primaryRow: primary })
-          .where(({ primaryRow }) => eq(primaryRow.id, id))
-          .innerJoin(
-            { secondaryRow: secondary },
-            ({ primaryRow, secondaryRow }) =>
-              eq(primaryRow.joinKey, secondaryRow.joinKey),
-          )
-          .orderBy(({ primaryRow }) => primaryRow.rank)
-          .limit(1),
-      )
-    const first = createJoined(`a`)
-    const second = createJoined(`b`)
-
-    try {
-      const firstPreload = first.preload()
-      await vi.waitFor(() => expect(pending).toHaveLength(1))
-      const secondPreload = second.preload()
-      await vi.waitFor(() => expect(pending).toHaveLength(2))
-      let firstSettled = false
-      void firstPreload.finally(() => {
-        firstSettled = true
-      })
-
-      pending[1]!.gate.resolve()
-      await secondPreload
-      await flushPromises()
-      expect(firstSettled).toBe(false)
-      expect(
-        second.toArray.map(
-          ({ primaryRow, secondaryRow }) =>
-            `${primaryRow.id}:${secondaryRow.id}`,
-        ),
-      ).toEqual([`b:b-child`])
-
-      pending[0]!.gate.resolve()
-      await firstPreload
-      expect(completionOrder).toEqual([1, 0])
-      expect(
-        first.toArray.map(
-          ({ primaryRow, secondaryRow }) =>
-            `${primaryRow.id}:${secondaryRow.id}`,
-        ),
-      ).toEqual([`a:a-child`])
-      expect(first.utils.lastSubsetError).toBeUndefined()
-      expect(second.utils.lastSubsetError).toBeUndefined()
-    } finally {
-      for (const { gate } of pending) gate.resolve()
-      await Promise.all([
-        first.cleanup(),
-        second.cleanup(),
-        primary.cleanup(),
-        secondary.cleanup(),
-      ])
-    }
-  })
-
-  it(`keeps one source's replay from suppressing another source's recovery`, async () => {
-    oracleRoute(`fixed history`)
-    type Primary = { id: number; rank: number }
-    type Secondary = { id: number; primaryId: number }
-    const primaryTruth = new Map<number, Primary>([
-      [1, { id: 1, rank: 0 }],
-      [2, { id: 2, rank: 1 }],
-    ])
-    const deliveredPrimary = new Set<number>()
-    const secondaryReplay = createDeferred<void>()
-    let primaryRequests = 0
-    let replayingSecondary = false
-    let primarySync!: Parameters<SyncConfig<Primary, number>[`sync`]>[0]
-    let secondarySync!: Parameters<SyncConfig<Secondary, number>[`sync`]>[0]
-    let secondaryReplayCalls = 0
-
-    const primary = createCollection<Primary, number>({
-      id: `ordered-independent-recovery-primary`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          primarySync = operations
-          operations.markReady()
-          return {
-            loadSubset: async (options) => {
-              primaryRequests++
-              let selected = [...primaryTruth.values()].sort(
-                (left, right) => left.rank - right.rank || left.id - right.id,
-              )
-              if (options.where) {
-                selected = selected.filter(
-                  (row) =>
-                    evaluateReferenceExpression(options.where!, row) === true,
-                )
-              }
-              if (options.cursor) {
-                selected = selected.filter(
-                  (row) =>
-                    evaluateReferenceExpression(
-                      options.cursor!.whereFrom,
-                      row,
-                    ) === true,
-                )
-              } else if (options.offset) {
-                selected = selected.slice(options.offset)
-              }
-              if (options.limit !== undefined) {
-                selected = selected.slice(0, options.limit)
-              }
-              const fresh = selected.filter(
-                ({ id }) => !deliveredPrimary.has(id),
-              )
-              if (fresh.length === 0) return
-              operations.begin()
-              for (const row of fresh) {
-                deliveredPrimary.add(row.id)
-                operations.write({ type: `insert`, value: { ...row } })
-              }
-              const receipt = operations.commit(options.signal)
-              if (receipt !== true) await receipt
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const secondary = createCollection<Secondary, number>({
-      id: `ordered-independent-recovery-secondary`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          secondarySync = operations
-          operations.markReady()
-          return {
-            loadSubset: async (options) => {
-              if (replayingSecondary) {
-                secondaryReplayCalls++
-                await secondaryReplay.promise
-              }
-              operations.begin()
-              operations.write({
-                type: `insert`,
-                value: { id: 1, primaryId: 1 },
-              })
-              const receipt = operations.commit(options.signal)
-              if (receipt !== true) await receipt
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ row: primary })
-        .leftJoin({ child: secondary }, ({ row, child }) =>
-          eq(row.id, child.primaryId),
-        )
-        .orderBy(({ row }) => row.rank)
-        .limit(1)
-        .select(({ row, child }) => ({
-          id: row.id,
-          rank: row.rank,
-          childId: child.id,
-        })),
-    )
-
-    try {
-      await live.preload()
-      expect(live.toArray.map(({ id }) => id)).toEqual([1])
-
-      replayingSecondary = true
-      secondarySync.begin()
-      secondarySync.truncate()
-      const truncateReceipt = secondarySync.commit()
-      if (truncateReceipt !== true) await truncateReceipt
-      await vi.waitFor(() => expect(secondaryReplayCalls).toBeGreaterThan(0))
-
-      const requestsBeforeMutation = primaryRequests
-      const moved = { id: 1, rank: 10 }
-      primaryTruth.set(1, moved)
-      primarySync.begin()
-      primarySync.write({ type: `update`, value: moved })
-      const mutationReceipt = primarySync.commit()
-      if (mutationReceipt !== true) await mutationReceipt
-      await vi.waitFor(() =>
-        expect(primaryRequests).toBeGreaterThan(requestsBeforeMutation),
-      )
-      expect(live.toArray.map(({ id }) => id)).toEqual([1])
-
-      secondaryReplay.resolve()
-      await vi.waitFor(() =>
-        expect(live.toArray.map(({ id }) => id)).toEqual([2]),
-      )
-      expect(primaryRequests).toBeGreaterThan(requestsBeforeMutation)
-    } finally {
-      secondaryReplay.resolve()
-      await Promise.all([
-        live.cleanup(),
-        primary.cleanup(),
-        secondary.cleanup(),
-      ])
-    }
-  })
-
-  it(`publishes one complete batch after an indexed loader fills a window`, async () => {
-    oracleRoute(`fixed history`)
-    const remoteRows: ReadonlyArray<Row> = [
-      { id: 1, rank: 1, eligible: true, label: `one` },
-      { id: 2, rank: 2, eligible: true, label: `two` },
-    ]
-    const batches: Array<Array<number>> = []
-    const callbackReads: Array<Array<number>> = []
-    let loads = 0
-    const delivered = new Set<number>()
+  async function runValueUpdate({
+    consumer,
+    limit,
+    position,
+    direction,
+  }: (typeof valueUpdateHistories)[number]): Promise<void> {
     let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+    let loads = 0
+    const rows = rowsForScenario({
+      middleCount: 1,
+      middleEligible: true,
+      lastEligible: true,
+      tied: false,
+      direction,
+    })
     const source = createCollection<Row, number>({
-      id: `ordered-atomic-indexed-window`,
-      getKey: ({ id }) => id,
+      id: `ordered-value-update`,
+      getKey: (row) => row.id,
       syncMode: `on-demand`,
       startSync: true,
       autoIndex: `eager`,
@@ -2428,1067 +984,497 @@ describe(`ordered source work oracle`, () => {
           sync = operations
           operations.markReady()
           return {
-            loadSubset: (options) => {
+            loadSubset: async () => {
               loads++
-              const row = remoteRows.find(
-                (candidate) =>
-                  !delivered.has(candidate.id) &&
-                  (!options.where ||
-                    evaluateReferenceExpression(options.where, candidate) ===
-                      true),
-              )
-              if (!row) return true
-              delivered.add(row.id)
-              sync.begin()
-              sync.write({ type: `insert`, value: row })
-              const receipt = sync.commit()
-              if (receipt !== true) {
-                throw new Error(`Expected synchronous source application`)
+              if (loads > 1) return
+              operations.begin()
+              for (const row of rows) {
+                operations.write({ type: `insert`, value: { ...row } })
               }
-              return true
+              const receipt = operations.commit()
+              if (receipt !== true) await receipt
             },
           }
         },
       },
     })
-    const live = createLiveQueryCollection((q) =>
+    const query = (q: InitialQueryBuilder) =>
       q
         .from({ row: source })
-        .orderBy(({ row }) => row.rank)
-        .limit(0),
-    )
-    const readIds = () => live.toArray.map(({ id }) => id)
-    const subscription = live.subscribeChanges(
-      (changes) => {
-        batches.push(changes.map(({ key }) => Number(key)).sort())
-        callbackReads.push(readIds())
-      },
-      { includeInitialState: false },
-    )
-
-    await withHistoryCleanup(
-      async () => {
-        await live.preload()
-        await live.utils.setWindow({ offset: 0, limit: 2 })
-        await flushPromises()
-
-        // Each page turn is followed by a tie-boundary request. The source
-        // returns one row at a time while honoring both predicates.
-        expect(loads).toBe(4)
-        expect(readIds()).toEqual([1, 2])
-        expect(batches).toEqual([[1, 2]])
-        expect(callbackReads).toEqual([[1, 2]])
-      },
-      () => [
-        () => subscription.unsubscribe(),
-        () => live.cleanup(),
-        () => source.cleanup(),
-      ],
-    )
-  })
-
-  it(`keeps live collections and Effects equal across the exhaustive small domain`, async () => {
-    oracleRoute(`case`)
-    for (const scenario of exhaustiveScenarios) {
-      await assertConsumerParity(scenario)
-    }
-  })
-
-  it(`keeps the collection anti-join result when the joined row exists`, async () => {
-    oracleRoute(`fixed history`)
-    const observed = await observeConsumer(
-      `collection`,
-      exhaustiveScenarios[0]!,
-      `none`,
-    )
-    expect(observed.rows.map(({ id }) => id)).toEqual([2])
-  })
-
-  it(`removes a matched parent from the anti-join Effect`, async () => {
-    oracleRoute(`fixed history`)
-    const observed = await observeConsumer(
-      `effect`,
-      exhaustiveScenarios[0]!,
-      `none`,
-    )
-    expect(observed.rows.map(({ id }) => id)).toEqual([2])
-  })
-
-  it(`processes a synchronous root refill before joined publication`, async () => {
-    oracleRoute(`fixed history`)
-    type Root = { id: number; rank: number }
-    type Child = { id: number; rootId: number }
-    const truth: Array<Root> = [
-      { id: 1, rank: 1 },
-      { id: 2, rank: 2 },
-    ]
-    const installed = new Set<number>()
-    const rootRequests: Array<LoadSubsetOptions> = []
-    const firstChildGate = createDeferred<void>()
-    let childLoads = 0
-    const rootCollection = createCollection<Root, number>({
-      id: `ordered-synchronous-refill-root`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          operations.markReady()
-          return {
-            loadSubset: (options) => {
-              rootRequests.push(options)
-              let selected = truth
-                .filter(
-                  (row) =>
-                    !options.where ||
-                    evaluateReferenceExpression(options.where, row) === true,
-                )
-                .filter(
-                  (row) =>
-                    !options.cursor ||
-                    evaluateReferenceExpression(
-                      options.cursor.whereFrom,
-                      row,
-                    ) === true,
-                )
-                .sort((left, right) => left.rank - right.rank)
-              if (!options.cursor && options.offset) {
-                selected = selected.slice(options.offset)
+        .orderBy(({ row }) => row.rank, direction)
+        .limit(limit)
+    const effectRows = new Map<number, Row>()
+    const live =
+      consumer === `collection` ? createLiveQueryCollection(query) : undefined
+    const effect =
+      consumer === `effect`
+        ? createEffect<Row, number>({
+            query,
+            onBatch: (events) => {
+              for (const event of events) {
+                if (event.type === `exit`) effectRows.delete(event.key)
+                else effectRows.set(event.key, event.value)
               }
-              if (options.limit !== undefined) {
-                selected = selected.slice(0, options.limit)
-              }
-              const fresh = selected.filter(({ id }) => !installed.has(id))
-              if (fresh.length > 0) {
-                operations.begin()
-                for (const row of fresh) {
-                  installed.add(row.id)
-                  operations.write({ type: `insert`, value: row })
-                }
-                const receipt = operations.commit(options.signal)
-                if (receipt !== true) {
-                  throw new Error(`Expected synchronous root application`)
-                }
-              }
-              return true
             },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const childCollection = createCollection<Child, number>({
-      id: `ordered-synchronous-refill-child`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          operations.begin()
-          operations.write({
-            type: `insert`,
-            value: { id: 20, rootId: 2 },
           })
-          if (operations.commit() !== true) {
-            throw new Error(`Expected synchronous child application`)
-          }
-          operations.markReady()
-          return {
-            loadSubset: () => {
-              childLoads++
-              return childLoads === 1 ? firstChildGate.promise : true
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const live = createLiveQueryCollection({
-      id: `ordered-synchronous-refill-live`,
-      startSync: false,
-      query: (q) =>
-        q
-          .from({ root: rootCollection })
-          .leftJoin({ child: childCollection }, ({ root, child }) =>
-            eq(root.id, child.rootId),
-          )
-          .where(({ child }) => not(isUndefined(child.rootId)))
-          .orderBy(({ root }) => root.rank)
-          .limit(1)
-          .select(({ root }) => ({ id: root.id })),
-    })
+        : undefined
+    const readRows = () =>
+      (live ? [...live.values()] : [...effectRows.values()])
+        .map(({ id, rank, eligible, label }) => ({
+          id,
+          rank,
+          eligible,
+          label,
+        }))
+        .sort(compareRows(direction))
 
-    await withHistoryCleanup(
-      async () => {
-        const preload = live.preload()
-        await vi.waitFor(() => {
-          expect(childLoads).toBe(1)
-          expect(rootRequests).toHaveLength(1)
-        })
-        expect(live.toArray).toEqual([])
+    try {
+      if (live) await live.preload()
+      await flushPromises()
+      const expected = expectedVisibleWindow(rows, direction, limit)
+      expect(readRows()).toEqual(expected)
+      const loadCount = loads
+      const row = position === `first` ? expected[0]! : expected.at(-1)!
+      sync.begin()
+      sync.write({ type: `update`, value: { ...row, label: `changed` } })
+      sync.commit()
+      await flushPromises()
 
-        firstChildGate.resolve()
-        await preload
-        expect(childLoads).toBe(2)
-        expect(live.toArray.map(({ id }) => id)).toEqual([2])
-        expect(rootRequests.some(({ cursor }) => cursor !== undefined)).toBe(
-          true,
-        )
-      },
-      () => [
-        () => firstChildGate.resolve(),
-        () => live.cleanup(),
-        () => rootCollection.cleanup(),
-        () => childCollection.cleanup(),
-      ],
-    )
-  })
-
-  it(`resumes bounded ordered repair after joined demand settles`, async () => {
-    oracleRoute(`fixed history`)
-    type Root = { id: number; rank: number }
-    type Child = { id: number; rootId: number }
-    const truth: Array<Root> = [
-      { id: 1, rank: 1 },
-      { id: 2, rank: 2 },
-      { id: 3, rank: 3 },
-    ]
-    const installed = new Set<number>()
-    const rootRequests: Array<LoadSubsetOptions> = []
-    const secondChildGate = createDeferred<void>()
-    let childLoads = 0
-    let rootSync!: Parameters<SyncConfig<Root, number>[`sync`]>[0]
-    const rootCollection = createCollection<Root, number>({
-      id: `ordered-held-repair-root`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          rootSync = operations
-          operations.markReady()
-          return {
-            loadSubset: async (options) => {
-              rootRequests.push(options)
-              let selected = truth
-                .filter(
-                  (row) =>
-                    !options.where ||
-                    evaluateReferenceExpression(options.where, row) === true,
-                )
-                .filter(
-                  (row) =>
-                    !options.cursor ||
-                    evaluateReferenceExpression(
-                      options.cursor.whereFrom,
-                      row,
-                    ) === true,
-                )
-                .sort((left, right) => left.rank - right.rank)
-              if (!options.cursor && options.offset) {
-                selected = selected.slice(options.offset)
-              }
-              if (options.limit !== undefined) {
-                selected = selected.slice(0, options.limit)
-              }
-              const fresh = selected.filter(({ id }) => !installed.has(id))
-              if (fresh.length > 0) {
-                operations.begin()
-                for (const row of fresh) {
-                  installed.add(row.id)
-                  operations.write({ type: `insert`, value: row })
-                }
-                const receipt = operations.commit(options.signal)
-                if (receipt !== true) await receipt
-              }
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const childCollection = createCollection<Child, number>({
-      id: `ordered-held-repair-child`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return {
-            loadSubset: () => {
-              childLoads++
-              return childLoads === 2 ? secondChildGate.promise : true
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const live = createLiveQueryCollection({
-      id: `ordered-held-repair-live`,
-      startSync: false,
-      query: (q) =>
-        q
-          .from({ root: rootCollection })
-          .leftJoin({ child: childCollection }, ({ root, child }) =>
-            eq(root.id, child.rootId),
-          )
-          .where(({ child }) => isUndefined(child.rootId))
-          .orderBy(({ root }) => root.rank)
-          .limit(1)
-          .select(({ root }) => ({ id: root.id })),
-    })
-
-    const deleteRoot = async (id: number) => {
-      const row = truth.find((candidate) => candidate.id === id)!
-      truth.splice(truth.indexOf(row), 1)
-      installed.delete(id)
-      rootSync.begin()
-      rootSync.write({ type: `delete`, value: row })
-      const receipt = rootSync.commit()
-      if (receipt !== true) await receipt
+      expect(readRows()).toEqual(
+        expected.map((value) =>
+          value.id === row.id ? { ...value, label: `changed` } : value,
+        ),
+      )
+      expect(loads).toBe(loadCount)
+    } finally {
+      if (effect) await effect.dispose()
+      if (live) await live.cleanup()
+      await source.cleanup()
     }
-
-    await withHistoryCleanup(
-      async () => {
-        await live.preload()
-        expect(live.toArray.map(({ id }) => id)).toEqual([1])
-
-        await deleteRoot(1)
-        await vi.waitFor(() => {
-          expect(childLoads).toBe(2)
-          expect(rootRequests.filter(({ refetch }) => refetch)).toHaveLength(2)
-        })
-        expect(live.toArray.map(({ id }) => id)).toEqual([1])
-
-        secondChildGate.resolve()
-        await vi.waitFor(() =>
-          expect(live.toArray.map(({ id }) => id)).toEqual([2]),
-        )
-
-        await deleteRoot(2)
-        await vi.waitFor(() =>
-          expect(live.toArray.map(({ id }) => id)).toEqual([3]),
-        )
-        expect(
-          rootRequests.filter(({ refetch }) => refetch).length,
-        ).toBeGreaterThan(2)
-      },
-      () => [
-        () => secondChildGate.resolve(),
-        () => live.cleanup(),
-        () => rootCollection.cleanup(),
-        () => childCollection.cleanup(),
-      ],
-    )
+  }
+  oracleProperty({
+    id: `ordered-work.work-value-update`,
+    law: {
+      statement: `A value change outside the ordering key keeps the visible window equal to the model window with the changed value and starts no request.`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `Both consumers, limits 2 and 5, the first and last window row, and both directions.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: valueUpdateHistories,
+    label: (history) =>
+      `does not refetch when a visible row changes outside the ordering key: ${JSON.stringify(history)}`,
+    ...orderedWorkJudgment(runValueUpdate),
+    check: (_plan, _observations, verdict) => verdict,
   })
 
-  it(`bounds ordered root acquisition for a none left-join filter`, async () => {
-    oracleRoute(`fixed history`)
+  const antiJoinExistingRowHistories = [
+    {
+      name: `keeps the collection anti-join result when the joined row exists`,
+      consumer: `collection`,
+    },
+    {
+      name: `removes a matched parent from the anti-join Effect`,
+      consumer: `effect`,
+    },
+  ] as const
+  async function runAntiJoinExistingRow({
+    consumer,
+  }: (typeof antiJoinExistingRowHistories)[number]): Promise<void> {
+    const observed = await observeConsumer(
+      consumer,
+      exhaustiveScenarios[0]!,
+      `none`,
+    )
+    expect(observed.rows.map(({ id }) => id)).toEqual([2])
+  }
+  oracleProperty({
+    id: `ordered-work.work-anti-join-existing-row`,
+    law: {
+      statement: `A none-filtered anti-join keeps only the unmatched row when the joined row exists, for a live Collection and an Effect.`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The first exhaustive scenario through the shared consumer driver and its window model, for both consumers.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: antiJoinExistingRowHistories,
+    label: ({ name }) => name,
+    ...orderedWorkJudgment(runAntiJoinExistingRow),
+    check: (_plan, _observations, verdict) => verdict,
+  })
+
+  async function runNoneFilterBound(): Promise<void> {
     for (const scenario of exhaustiveScenarios) {
       const observed = await observeConsumer(`collection`, scenario, `none`)
       expect(observed.requests.length).toBeGreaterThan(0)
       expect(observed.requests[0]?.kind).toBe(`with-order`)
       expect(observed.requests[0]?.limit).toBeGreaterThan(0)
     }
+  }
+  oracleProperty({
+    id: `ordered-work.work-none-filter-bound`,
+    law: {
+      statement: `A direct LEFT-joined none filter keeps finite ordered root acquisition across the exhaustive small domain.`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The 64 exhaustive scenarios in one history, through the shared consumer driver and its window model.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: [`bounds ordered root acquisition for a none left-join filter`],
+    label: (name) => name,
+    ...orderedWorkJudgment(runNoneFilterBound),
+    check: (_plan, _observations, verdict) => verdict,
   })
 
-  it.each([`joined-only`, `some`, `to-one`] as const)(
-    `bounds ordered root acquisition for a %s left-join filter`,
-    async (joinFilter) => {
-      oracleRoute(`case`)
-      for (const scenario of exhaustiveScenarios) {
-        const [collection, effect] = await Promise.all([
-          observeConsumer(`collection`, scenario, joinFilter),
-          observeConsumer(`effect`, scenario, joinFilter),
-        ])
-        expect(collection.rows).toEqual(effect.rows)
-        expect(collection.errors).toEqual([])
-        expect(effect.errors).toEqual([])
-
-        // A direct LEFT-joined filter retains finite root acquisition.
-        for (const observation of [collection, effect]) {
-          expect(observation.requests.length).toBeGreaterThan(0)
-          expect(observation.requests[0]?.kind).toBe(`with-order`)
-          expect(observation.requests[0]?.limit).toBeGreaterThan(0)
-        }
-      }
-    },
-  )
-
-  it.each(
-    ([`collection`, `effect`] as const).flatMap((consumer) =>
-      ([`unindexed`, `custom`] as const).map((loadingMode) => ({
-        consumer,
-        loadingMode,
-      })),
-    ),
-  )(
-    `settles joined demand and publishes a complete $loadingMode $consumer window`,
-    async ({ consumer, loadingMode }) => {
-      oracleRoute(`case`)
-      const observed = await observeConsumer(
-        consumer,
-        {
-          middleCount: 1,
-          middleEligible: false,
-          lastEligible: true,
-          tied: false,
-          direction: `asc`,
-        },
-        `none`,
-        true,
-        false,
-        loadingMode,
-      )
-      expect(observed.rows.map(({ id }) => id)).toEqual([3])
-      expect(observed.errors).toEqual([])
-      if (loadingMode === `custom`) {
-        // The full-source acquisition uses the without-order request shape.
-        expect(observed.requests).toHaveLength(1)
-        expect(observed.requests[0]?.kind).toBe(`without-order`)
-        expect(observed.requests[0]?.limit).toBeUndefined()
-        expect(observed.requests[0]?.hasCursor).toBe(false)
-        expect(observed.requests[0]?.offset).toBeUndefined()
-      } else {
-        expect(observed.requests[0]?.kind).toBe(`with-order`)
-        expect(observed.requests.some(({ limit }) => limit === undefined)).toBe(
-          true,
-        )
-      }
-    },
-  )
-
-  it.each(
-    ([`collection`, `effect`] as const).flatMap((consumer) =>
-      ([`some`, `none`] as const).map((joinFilter) => ({
-        consumer,
-        joinFilter,
-      })),
-    ),
-  )(
-    `waits for a $joinFilter joined demand before requesting another root page in a $consumer`,
-    async ({ consumer, joinFilter }) => {
-      oracleRoute(`case`)
-      const observed = await observeConsumer(
-        consumer,
-        {
-          middleCount: 1,
-          middleEligible: false,
-          lastEligible: true,
-          tied: false,
-          direction: `asc`,
-        },
-        joinFilter,
-        true,
-      )
-      expect(observed.errors).toEqual([])
-      expect(observed.requests[0]?.kind).toBe(`with-order`)
-    },
-  )
-
-  it.each([`collection`, `effect`] as const)(
-    `refills a joined-filter %s window after a child leaves`,
-    async (consumer) => {
-      oracleRoute(`case`)
-      const observed = await observeConsumer(
-        consumer,
-        {
-          middleCount: 1,
-          middleEligible: true,
-          lastEligible: true,
-          tied: false,
-          direction: `asc`,
-        },
-        `some`,
-        false,
-        true,
-      )
-      expect(observed.rows.map(({ id }) => id)).toEqual([3, 2])
-      expect(observed.requests.some(({ hasCursor }) => hasCursor)).toBe(true)
-    },
-  )
-
-  it.each([`collection`, `effect`] as const)(
-    `stops a joined-filter %s after the needed root prefix`,
-    async (consumer) => {
-      oracleRoute(`case`)
-      const observed = await observeConsumer(
-        consumer,
-        {
-          middleCount: 40,
-          middleEligible: true,
-          lastEligible: true,
-          tied: false,
-          direction: `asc`,
-        },
-        `some`,
-      )
-      expect(observed.requests.length).toBeLessThan(10)
-      expect(
-        observed.requests.every(
-          ({ kind, key }) => kind === `with-order` || key !== undefined,
-        ),
-      ).toBe(true)
-    },
-  )
-
-  it.each(
-    [0, 1, 2, 3, 4].flatMap((middleCount) =>
-      ([`asc`, `desc`] as const).flatMap((direction) =>
-        [false, true].map((tied) => ({ middleCount, direction, tied })),
-      ),
-    ),
-  )(
-    `settles an underfilled source without repeating a continuation: %j`,
-    async ({ middleCount, direction, tied }) => {
-      oracleRoute(`case`)
-      const scenario: Scenario = {
-        middleCount,
-        middleEligible: false,
-        lastEligible: false,
-        tied,
-        direction,
-      }
+  const leftJoinBoundHistories = [`joined-only`, `some`, `to-one`] as const
+  async function runLeftJoinBound(
+    joinFilter: (typeof leftJoinBoundHistories)[number],
+  ): Promise<void> {
+    for (const scenario of exhaustiveScenarios) {
       const [collection, effect] = await Promise.all([
-        observeConsumer(`collection`, scenario),
-        observeConsumer(`effect`, scenario),
+        observeConsumer(`collection`, scenario, joinFilter),
+        observeConsumer(`effect`, scenario, joinFilter),
       ])
+      expect(collection.rows).toEqual(effect.rows)
+      expect(collection.errors).toEqual([])
+      expect(effect.errors).toEqual([])
 
-      expect(collection.rows.map(({ id }) => id)).toEqual([1])
-      expect(effect.rows).toEqual(collection.rows)
-      expect(effect.errors).toEqual(collection.errors)
-      expect(effect.live).toBe(collection.live)
+      // A direct LEFT-joined filter retains finite root acquisition.
       for (const observation of [collection, effect]) {
-        expect(observation.errors).toEqual([])
-        expect(observation.live).toBe(true)
-        // At most one page and one tie-boundary load per source row, including
-        // the final empty page. A fixed cap mistakes longer finite walks for loops.
-        const sourceSize = rowsForScenario(scenario).length
-        expect(
-          observation.requests.length,
-          JSON.stringify(observation.requests),
-        ).toBeLessThanOrEqual(2 * sourceSize)
-        expect(
-          observation.requests.filter(({ kind }) => kind === `with-order`)
-            .length,
-        ).toBeLessThanOrEqual(sourceSize)
-        expect(
-          observation.requests.filter(({ kind }) => kind === `without-order`)
-            .length,
-        ).toBeLessThanOrEqual(sourceSize)
-        expect(
-          new Set(observation.requests.map(({ key }) => key)).size,
-          JSON.stringify(observation.requests),
-        ).toBe(observation.requests.length)
-        expectDistinctRequests(observation.requests)
+        expect(observation.requests.length).toBeGreaterThan(0)
+        expect(observation.requests[0]?.kind).toBe(`with-order`)
+        expect(observation.requests[0]?.limit).toBeGreaterThan(0)
       }
-    },
-  )
-
-  it(`replaces an ordered snapshot after truncate without repeating void loads`, async () => {
-    oracleRoute(`fixed history`)
-    const initial: ReadonlyArray<Row> = [
-      { id: 1, rank: 1, eligible: true, label: `old-one` },
-      { id: 2, rank: 2, eligible: true, label: `old-two` },
-    ]
-    const replacement: ReadonlyArray<Row> = [
-      { id: 3, rank: 3, eligible: true, label: `new-three` },
-      { id: 4, rank: 4, eligible: true, label: `new-four` },
-    ]
-    let truth = initial
-    let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-    let loads = 0
-    const installed = new Set<number>()
-    const source = createCollection<Row, number>({
-      id: `ordered-void-truncate`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          sync = operations
-          operations.markReady()
-          return {
-            loadSubset: async (options) => {
-              loads++
-              if (loads > 12) {
-                throw new Error(
-                  `ordered void loading did not reach a fixed point`,
-                )
-              }
-              const matching = options.where
-                ? truth.filter(
-                    (row) =>
-                      evaluateReferenceExpression(options.where!, row) === true,
-                  )
-                : truth
-              const rows = matching
-                .slice(
-                  options.offset ?? 0,
-                  options.limit === undefined
-                    ? undefined
-                    : (options.offset ?? 0) + options.limit,
-                )
-                .filter(({ id }) => !installed.has(id))
-              if (rows.length === 0) return
-              sync.begin()
-              for (const row of rows) {
-                installed.add(row.id)
-                sync.write({ type: `insert`, value: row })
-              }
-              const receipt = sync.commit()
-              if (receipt !== true) await receipt
-            },
-            unloadSubset: () => {},
-          }
-        },
-      },
-    })
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ row: source })
-        .orderBy(({ row }) => row.rank)
-        .limit(2),
-    )
-
-    try {
-      await live.preload()
-      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
-
-      truth = replacement
-      installed.clear()
-      sync.begin()
-      sync.truncate()
-      const receipt = sync.commit()
-      if (receipt !== true) await receipt
-      await flushPromises()
-
-      expect(live.toArray.map(({ id }) => id)).toEqual([3, 4])
-      expect(loads).toBeLessThanOrEqual(8)
-    } finally {
-      await Promise.all([live.cleanup(), source.cleanup()])
     }
+  }
+  oracleProperty({
+    id: `ordered-work.work-left-join-bound`,
+    law: {
+      statement: `A direct LEFT-joined filter keeps finite ordered root acquisition, equal rows across consumers, and no errors across the exhaustive small domain.`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The joined-only, some, and to-one filters, each over the 64 exhaustive scenarios.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: leftJoinBoundHistories,
+    label: (joinFilter) =>
+      `bounds ordered root acquisition for a ${joinFilter} left-join filter`,
+    ...orderedWorkJudgment(runLeftJoinBound),
+    check: (_plan, _observations, verdict) => verdict,
   })
 
-  it.each([
-    { name: `until full-source recovery settles`, failure: undefined },
-    {
-      name: `when full-source recovery throws synchronously`,
-      failure: {
-        mode: `sync` as const,
-        attempts: 1,
-        error: new Error(`full-source recovery failed`),
+  const joinedDemandSettlesHistories = (
+    [`collection`, `effect`] as const
+  ).flatMap((consumer) =>
+    ([`unindexed`, `custom`] as const).map((loadingMode) => ({
+      consumer,
+      loadingMode,
+    })),
+  )
+  async function runJoinedDemandSettles({
+    consumer,
+    loadingMode,
+  }: (typeof joinedDemandSettlesHistories)[number]): Promise<void> {
+    const observed = await observeConsumer(
+      consumer,
+      {
+        middleCount: 1,
+        middleEligible: false,
+        lastEligible: true,
+        tied: false,
+        direction: `asc`,
       },
-    },
-    {
-      name: `after two synchronous full-source recovery failures`,
-      failure: {
-        mode: `sync` as const,
-        attempts: 2,
-        error: new Error(`full-source recovery failed twice`),
-      },
-    },
-    {
-      name: `after asynchronous full-source recovery retries`,
-      failure: {
-        mode: `async` as const,
-        attempts: 1,
-        error: new Error(`full-source recovery rejected`),
-      },
-    },
-    {
-      name: `after two asynchronous full-source recovery failures`,
-      failure: {
-        mode: `async` as const,
-        attempts: 2,
-        error: new Error(`full-source recovery rejected twice`),
-      },
-    },
-  ])(`keeps an ordered snapshot unchanged $name`, async ({ failure }) => {
-    oracleRoute(`case`)
-    const makeRows = (ranks: ReadonlyArray<number>): Array<Row> =>
-      ranks.map((rank, index) => ({
-        id: index + 1,
-        rank,
-        eligible: true,
-        label: `row-${rank}`,
-      }))
-    let truth = makeRows([1, 2, 3, 4, 5])
-    let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-    let recovering = false
-    let fullSourceRequests = 0
-    const fullSource = createDeferred<void>()
-    const installed = new Set<number>()
-    const publications: Array<Array<number>> = []
-    const escapedErrors: Array<unknown> = []
-    const acquisitions: Array<LoadSubsetOptions> = []
-    const releases: Array<LoadSubsetOptions> = []
-    const enqueueMicrotask = globalThis.queueMicrotask.bind(globalThis)
-    const queueMicrotaskSpy =
-      failure?.mode === `sync`
-        ? vi
-            .spyOn(globalThis, `queueMicrotask`)
-            .mockImplementation((callback) =>
-              enqueueMicrotask(() => {
-                try {
-                  callback()
-                } catch (error) {
-                  escapedErrors.push(error)
-                }
-              }),
-            )
-        : undefined
-
-    const source = createCollection<Row, number>({
-      id: `delayed-full-source-recovery`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          sync = operations
-          operations.markReady()
-          return {
-            loadSubset: (options) => {
-              const isFullSource =
-                options.where === undefined && options.limit === undefined
-              if (recovering && isFullSource) {
-                fullSourceRequests++
-                if (failure && fullSourceRequests <= failure.attempts) {
-                  // A synchronous throw is a rejection (maintainer
-                  // decision): an acquisition that core releases.
-                  acquisitions.push(options)
-                  if (failure.mode === `sync`) throw failure.error
-                  return Promise.reject(failure.error)
-                }
-              }
-              acquisitions.push(options)
-
-              return (async () => {
-                if (recovering && isFullSource && !failure) {
-                  await fullSource.promise
-                }
-
-                let selected = options.where
-                  ? truth.filter(
-                      (row) =>
-                        evaluateReferenceExpression(options.where!, row) ===
-                        true,
-                    )
-                  : [...truth]
-                if (options.cursor) {
-                  selected = selected.filter(
-                    (row) =>
-                      evaluateReferenceExpression(
-                        options.cursor!.whereFrom,
-                        row,
-                      ) === true,
-                  )
-                }
-                selected.sort((left, right) => left.rank - right.rank)
-                if (!options.cursor && options.offset) {
-                  selected = selected.slice(options.offset)
-                }
-                if (options.limit !== undefined) {
-                  selected = selected.slice(0, options.limit)
-                }
-
-                const fresh = selected.filter(({ id }) => !installed.has(id))
-                if (fresh.length === 0) return
-                sync.begin()
-                for (const row of fresh) {
-                  installed.add(row.id)
-                  sync.write({ type: `insert`, value: row })
-                }
-                const receipt = sync.commit()
-                if (receipt !== true) await receipt
-              })()
-            },
-            unloadSubset: (options) => {
-              releases.push(options)
-            },
-          }
-        },
-      },
-    })
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ row: source })
-        .orderBy(({ row }) => row.rank)
-        .limit(2),
+      `none`,
+      true,
+      false,
+      loadingMode,
     )
-    const subscription = live.subscribeChanges(() => {
-      publications.push(live.toArray.map(({ rank }) => rank))
-    })
-
-    try {
-      await live.preload()
-      await live.utils.setWindow({ offset: 0, limit: 4 })
-      await flushPromises()
-      expect(live.toArray.map(({ rank }) => rank)).toEqual([1, 2, 3, 4])
-      const publicationCount = publications.length
-
-      truth = makeRows([0, 0.5, 1, 1.5, 2, 3])
-      installed.clear()
-      recovering = true
-      sync.begin()
-      sync.truncate()
-      const receipt = sync.commit()
-      if (receipt !== true) await receipt
-      await vi.waitFor(() => expect(fullSourceRequests).toBe(1))
-      for (let index = 0; index < 4; index++) await flushPromises()
-
-      expect(live.toArray.map(({ rank }) => rank)).toEqual([1, 2, 3, 4])
-      expect(publications).toHaveLength(publicationCount)
-
-      if (failure) {
-        expect(live.utils.lastSubsetError).toBe(failure.error)
-        expect(escapedErrors).toEqual([])
-        truth[0] = { ...truth[0]!, label: `updated during failed recovery` }
-        sync.begin()
-        sync.write({ type: `update`, value: truth[0] })
-        const updateReceipt = sync.commit()
-        if (updateReceipt !== true) await updateReceipt
-        await flushPromises()
-        expect(live.toArray.map(({ rank }) => rank)).toEqual([1, 2, 3, 4])
-        expect(live.get(1)?.label).toBe(`row-1`)
-        expect(publications).toHaveLength(publicationCount)
-        expect(fullSourceRequests).toBe(1)
-        const retryCount = failure.attempts
-        for (let retry = 0; retry < retryCount; retry++) {
-          installed.clear()
-          sync.begin()
-          sync.truncate()
-          const retryReceipt = sync.commit()
-          if (retryReceipt !== true) await retryReceipt
-          await vi.waitFor(() => expect(fullSourceRequests).toBe(retry + 2))
-          if (retry + 1 < retryCount) {
-            for (let index = 0; index < 4; index++) await flushPromises()
-            expect(live.toArray.map(({ rank }) => rank)).toEqual([1, 2, 3, 4])
-            expect(publications).toHaveLength(publicationCount)
-            expect(live.utils.lastSubsetError).toBe(failure.error)
-            expect(escapedErrors).toEqual([])
-          }
-        }
-        await vi.waitFor(() =>
-          expect(source.toArray.map(({ rank }) => rank).sort()).toEqual([
-            0, 0.5, 1, 1.5, 2, 3,
-          ]),
-        )
-        await vi.waitFor(() =>
-          expect(live.toArray.map(({ rank }) => rank)).toEqual([
-            0, 0.5, 1, 1.5,
-          ]),
-        )
-        expect(fullSourceRequests).toBe(retryCount + 1)
-        expect(live.get(1)?.label).toBe(`updated during failed recovery`)
-      } else {
-        fullSource.resolve()
-        await flushPromises()
-        expect(live.toArray.map(({ rank }) => rank)).toEqual([0, 0.5, 1, 1.5])
-      }
-      expect(publications.slice(publicationCount)).toEqual([[0, 0.5, 1, 1.5]])
-      expect(escapedErrors).toEqual([])
-      await live.utils.setWindow({ offset: 0, limit: 2 })
-      expect(live.toArray.map(({ rank }) => rank)).toEqual([0, 0.5])
-      const loadsBeforeReplay = fullSourceRequests
-      installed.clear()
-      sync.begin()
-      sync.truncate()
-      const nextReplay = sync.commit()
-      if (nextReplay !== true) await nextReplay
-      await flushPromises()
-      expect(fullSourceRequests).toBeGreaterThan(loadsBeforeReplay)
-      expect(live.toArray.map(({ rank }) => rank)).toEqual([0, 0.5])
-    } finally {
-      queueMicrotaskSpy?.mockRestore()
-      fullSource.resolve()
-      subscription.unsubscribe()
-      await Promise.all([live.cleanup(), source.cleanup()])
+    expect(observed.rows.map(({ id }) => id)).toEqual([3])
+    expect(observed.errors).toEqual([])
+    if (loadingMode === `custom`) {
+      // The full-source acquisition uses the without-order request shape.
+      expect(observed.requests).toHaveLength(1)
+      expect(observed.requests[0]?.kind).toBe(`without-order`)
+      expect(observed.requests[0]?.limit).toBeUndefined()
+      expect(observed.requests[0]?.hasCursor).toBe(false)
+      expect(observed.requests[0]?.offset).toBeUndefined()
+    } else {
+      expect(observed.requests[0]?.kind).toBe(`with-order`)
+      expect(observed.requests.some(({ limit }) => limit === undefined)).toBe(
+        true,
+      )
     }
-    expect(releases).toHaveLength(acquisitions.length)
-    for (const acquisition of acquisitions) {
+  }
+  oracleProperty({
+    id: `ordered-work.work-joined-demand-settles`,
+    law: {
+      statement: `Unindexed and custom-collation loading settle joined demand before one complete window publishes.`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `Both consumers and both loading modes over one fixed scenario.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: joinedDemandSettlesHistories,
+    label: (history) =>
+      `settles joined demand and publishes a complete ${history.loadingMode} ${history.consumer} window`,
+    ...orderedWorkJudgment(runJoinedDemandSettles),
+    check: (_plan, _observations, verdict) => verdict,
+  })
+
+  const joinedDemandWaitsHistories = (
+    [`collection`, `effect`] as const
+  ).flatMap((consumer) =>
+    ([`some`, `none`] as const).map((joinFilter) => ({
+      consumer,
+      joinFilter,
+    })),
+  )
+  async function runJoinedDemandWaits({
+    consumer,
+    joinFilter,
+  }: (typeof joinedDemandWaitsHistories)[number]): Promise<void> {
+    const observed = await observeConsumer(
+      consumer,
+      {
+        middleCount: 1,
+        middleEligible: false,
+        lastEligible: true,
+        tied: false,
+        direction: `asc`,
+      },
+      joinFilter,
+      true,
+    )
+    expect(observed.errors).toEqual([])
+    expect(observed.requests[0]?.kind).toBe(`with-order`)
+  }
+  oracleProperty({
+    id: `ordered-work.work-joined-demand-waits`,
+    law: {
+      statement: `Joined demand settles before the ordered root requests another page.`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `Both consumers and the some and none filters over one fixed scenario.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: joinedDemandWaitsHistories,
+    label: (history) =>
+      `waits for a ${history.joinFilter} joined demand before requesting another root page in a ${history.consumer}`,
+    ...orderedWorkJudgment(runJoinedDemandWaits),
+    check: (_plan, _observations, verdict) => verdict,
+  })
+
+  const joinedFilterRefillHistories = [`collection`, `effect`] as const
+  async function runJoinedFilterRefill(
+    consumer: (typeof joinedFilterRefillHistories)[number],
+  ): Promise<void> {
+    const observed = await observeConsumer(
+      consumer,
+      {
+        middleCount: 1,
+        middleEligible: true,
+        lastEligible: true,
+        tied: false,
+        direction: `asc`,
+      },
+      `some`,
+      false,
+      true,
+    )
+    expect(observed.rows.map(({ id }) => id)).toEqual([3, 2])
+    expect(observed.requests.some(({ hasCursor }) => hasCursor)).toBe(true)
+  }
+  oracleProperty({
+    id: `ordered-work.work-joined-filter-refill`,
+    law: {
+      statement: `A joined-filter window refills through a cursor after a child leaves.`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `Both consumers over one fixed scenario.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: joinedFilterRefillHistories,
+    label: (consumer) =>
+      `refills a joined-filter ${consumer} window after a child leaves`,
+    ...orderedWorkJudgment(runJoinedFilterRefill),
+    check: (_plan, _observations, verdict) => verdict,
+  })
+
+  const joinedFilterStopsHistories = [`collection`, `effect`] as const
+  async function runJoinedFilterStops(
+    consumer: (typeof joinedFilterStopsHistories)[number],
+  ): Promise<void> {
+    const observed = await observeConsumer(
+      consumer,
+      {
+        middleCount: 40,
+        middleEligible: true,
+        lastEligible: true,
+        tied: false,
+        direction: `asc`,
+      },
+      `some`,
+    )
+    expect(observed.requests.length).toBeLessThan(10)
+    expect(
+      observed.requests.every(
+        ({ kind, key }) => kind === `with-order` || key !== undefined,
+      ),
+    ).toBe(true)
+  }
+  oracleProperty({
+    id: `ordered-work.work-joined-filter-stops`,
+    law: {
+      statement: `A joined-filter window stops acquisition after the root prefix that its result needs.`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `Both consumers over one fixed 40-row scenario.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: joinedFilterStopsHistories,
+    label: (consumer) =>
+      `stops a joined-filter ${consumer} after the needed root prefix`,
+    ...orderedWorkJudgment(runJoinedFilterStops),
+    check: (_plan, _observations, verdict) => verdict,
+  })
+
+  const underfilledSourceHistories = [0, 1, 2, 3, 4].flatMap((middleCount) =>
+    ([`asc`, `desc`] as const).flatMap((direction) =>
+      [false, true].map((tied) => ({ middleCount, direction, tied })),
+    ),
+  )
+  async function runUnderfilledSource({
+    middleCount,
+    direction,
+    tied,
+  }: (typeof underfilledSourceHistories)[number]): Promise<void> {
+    const scenario: Scenario = {
+      middleCount,
+      middleEligible: false,
+      lastEligible: false,
+      tied,
+      direction,
+    }
+    const [collection, effect] = await Promise.all([
+      observeConsumer(`collection`, scenario),
+      observeConsumer(`effect`, scenario),
+    ])
+
+    expect(collection.rows.map(({ id }) => id)).toEqual([1])
+    expect(effect.rows).toEqual(collection.rows)
+    expect(effect.errors).toEqual(collection.errors)
+    expect(effect.live).toBe(collection.live)
+    for (const observation of [collection, effect]) {
+      expect(observation.errors).toEqual([])
+      expect(observation.live).toBe(true)
+      // At most one page and one tie-boundary load per source row, including
+      // the final empty page. A fixed cap mistakes longer finite walks for loops.
+      const sourceSize = rowsForScenario(scenario).length
       expect(
-        releases.filter((release) => release === acquisition),
-      ).toHaveLength(1)
+        observation.requests.length,
+        JSON.stringify(observation.requests),
+      ).toBeLessThanOrEqual(2 * sourceSize)
+      expect(
+        observation.requests.filter(({ kind }) => kind === `with-order`).length,
+      ).toBeLessThanOrEqual(sourceSize)
+      expect(
+        observation.requests.filter(({ kind }) => kind === `without-order`)
+          .length,
+      ).toBeLessThanOrEqual(sourceSize)
+      expect(
+        new Set(observation.requests.map(({ key }) => key)).size,
+        JSON.stringify(observation.requests),
+      ).toBe(observation.requests.length)
+      expectDistinctRequests(observation.requests)
     }
-  })
-
-  it.each([`collection`, `effect`] as const)(
-    `continues an ordered anti-join %s while an unrelated include demand is pending`,
-    async (kind) => {
-      oracleRoute(`case`)
-      const rows = [
-        { id: 1, rank: 1 },
-        { id: 2, rank: 2 },
-        { id: 3, rank: 3 },
-      ]
-      const delivered = new Set<number>()
-      const rootRequests: Array<{ cursor: boolean; limit?: number }> = []
-      const extraGate = createDeferred<void>()
-      let extraLoads = 0
-
-      const root = createCollection({
-        id: `ordered-unrelated-root-${harnessId++}`,
-        getKey: (row: (typeof rows)[number]) => row.id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            markReady()
-            return {
-              loadSubset: async (options) => {
-                rootRequests.push({
-                  cursor: !!options.cursor,
-                  limit: options.limit,
-                })
-                if (rootRequests.length > 15) throw new Error(`request loop`)
-                const matching = options.where
-                  ? rows.filter(
-                      (row) =>
-                        evaluateReferenceExpression(options.where!, row) ===
-                        true,
-                    )
-                  : rows
-                const candidates = options.cursor
-                  ? matching.filter(
-                      (row) =>
-                        evaluateReferenceExpression(
-                          options.cursor!.whereFrom,
-                          row,
-                        ) === true,
-                    )
-                  : matching.slice(options.offset ?? 0)
-                const fresh = candidates
-                  .slice(0, options.limit)
-                  .filter((row) => !delivered.has(row.id))
-                if (fresh.length === 0) return
-                begin()
-                for (const row of fresh) {
-                  delivered.add(row.id)
-                  write({ type: `insert`, value: row })
-                }
-                const receipt = commit()
-                if (receipt !== true) await receipt
-              },
-              unloadSubset: () => {},
-            }
-          },
-        },
-      })
-      const markerSource = createCollection({
-        id: `ordered-unrelated-marker-${harnessId++}`,
-        getKey: (row: { id: number; rowId: number }) => row.id,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            begin()
-            write({ type: `insert`, value: { id: 2, rowId: 2 } })
-            commit()
-            markReady()
-          },
-        },
-      })
-      const extraSource = createCollection({
-        id: `ordered-unrelated-extra-${harnessId++}`,
-        getKey: (row: { id: number; rowId: number }) => row.id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        sync: {
-          sync: ({ markReady }) => {
-            markReady()
-            return {
-              loadSubset: async () => {
-                extraLoads++
-                await extraGate.promise
-              },
-              unloadSubset: () => {},
-            }
-          },
-        },
-      })
-      const query = (q: InitialQueryBuilder) =>
-        q
-          .from({ row: root })
-          .leftJoin({ marker: markerSource }, ({ row, marker }) =>
-            eq(row.id, marker.rowId),
-          )
-          .where(({ marker }) => isUndefined(marker.rowId))
-          .orderBy(({ row }) => row.rank)
-          .limit(2)
-          .select(({ row }) => ({
-            id: row.id,
-            extras: toArray(
-              q
-                .from({ extra: extraSource })
-                .where(({ extra }) => eq(extra.rowId, row.id)),
-            ),
-          }))
-      const live =
-        kind === `collection` ? createLiveQueryCollection(query) : undefined
-      const effectRows = new Set<number>()
-      const effect =
-        kind === `effect`
-          ? createEffect<{ id: number; extras: Array<unknown> }>({
-              query,
-              onBatch: (events) => {
-                for (const event of events) {
-                  if (event.type === `exit`) effectRows.delete(event.value.id)
-                  else effectRows.add(event.value.id)
-                }
-              },
-            })
-          : undefined
-      const preload = live?.preload()
-
-      try {
-        await vi.waitFor(() => expect(extraLoads).toBeGreaterThan(0))
-        for (let i = 0; i < 12; i++) await flushPromises()
-        expect(
-          rootRequests.some((request) => request.cursor),
-          JSON.stringify({
-            rootRequests,
-            extraLoads,
-            rows: live?.toArray ?? [...effectRows],
-          }),
-        ).toBe(true)
-        extraGate.resolve()
-        await preload
-        await vi.waitFor(() =>
-          expect(rootRequests.some((request) => request.cursor)).toBe(true),
-        )
-        expect(live?.toArray.map(({ id }) => id) ?? [...effectRows]).toEqual([
-          1, 3,
-        ])
-      } finally {
-        extraGate.resolve()
-        await Promise.all([
-          effect?.dispose(),
-          live?.cleanup(),
-          root.cleanup(),
-          markerSource.cleanup(),
-          extraSource.cleanup(),
-        ])
-      }
+  }
+  oracleProperty({
+    id: `ordered-work.work-underfilled-source`,
+    law: {
+      statement: `An underfilled source settles to equal rows across consumers without repeating a continuation, within the per-row request bound.`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `Zero to four middle rows, both directions, and tied or distinct ranks.`,
     },
-  )
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: underfilledSourceHistories,
+    label: (history) =>
+      `settles an underfilled source without repeating a continuation: ${JSON.stringify(history)}`,
+    ...orderedWorkJudgment(runUnderfilledSource),
+    check: (_plan, _observations, verdict) => verdict,
+  })
 
   oracleProperty({
     id: `ordered-work.consumer-parity`,
@@ -3507,7 +1493,17 @@ describe(`ordered source work oracle`, () => {
       'src/query/live/ordered-source-loader.ts',
       'src/query/subset-dedupe.ts',
     ],
-    histories: { arbitrary: scenarioArbitrary, runs: 20, fixedSeeds: [17801] },
+    histories: {
+      arbitrary: scenarioArbitrary,
+      runs: 20,
+      fixedSeeds: [17801],
+      // The exhaustive small domain: every legal scenario, replayed through
+      // the same consumer-parity judgment.
+      fixed: exhaustiveScenarios.map((scenario) => ({
+        name: `keeps live collections and Effects equal across the exhaustive small domain: ${JSON.stringify(scenario)}`,
+        history: scenario,
+      })),
+    },
     model: (history, observations) => recordedComparison(history, observations),
     driver: async (history, observe) =>
       observeComparison(history, observe, async () => {
@@ -3697,590 +1693,6 @@ describe(`ordered source work oracle`, () => {
  * LEFT-joined filter and a full join keep one result row per matched
  * (row, marker) pair, and an anti-join keeps a row once.
  */
-type EagerCommand =
-  | { type: `upsert`; id: number; rank: number; eligible: boolean }
-  | { type: `delete`; id: number }
-  // Changes only the label, so a row outside the window enters the query's
-  // input without changing which rows are eligible or their order.
-  | { type: `touch`; id: number }
-  // Changes only eligibility. The order value stays, so a joined plan sees
-  // the row leave or return only through the join.
-  | { type: `flip`; id: number }
-  // Adds another marker to a row that already has one, so a join matches
-  // the row more than once.
-  | { type: `dup`; id: number }
-  | { type: `delete-visible` }
-  // A refetching provider re-runs every request it served and sends the
-  // results; any other path skips it.
-  | { type: `refetch` }
-  // A holding provider answers its oldest held request; `drain` answers
-  // every held request, including the ones answers start, until none is
-  // left. Any other provider skips both. (Not the glossary's acquisition
-  // release, which aborts and unloads.)
-  | { type: `answer` }
-  // Cleans up the peer while its loads may be held. Its acquisition
-  // release aborts each held request and gives the adapter an unload.
-  | { type: `release-peer` }
-  | { type: `drain` }
-  // Moves the first query's window with `setWindow`. The Effect and the peer
-  // keep their windows.
-  | { type: `move`; offset: number; limit: number }
-
-type EagerCase = {
-  // How rows reach the source: sync writes to an eager source, local-only
-  // direct writes, or an on-demand source whose provider serves each
-  // request from the rows and installs only what it returns.
-  path: `sync` | `local-only` | `on-demand`
-  // How an on-demand provider delivers later changes. `forward` sends each
-  // change to a row it sent, or to a row that matches a subset it served.
-  // `refetch` sends nothing until a refetch, which keeps every served
-  // ordered range whole: rows that now sort inside one arrive then, and rows
-  // in no range leave. `refetch-signal` also waits for a refetch, but re-runs
-  // each served request alone, as query-db-collection does, and then reports
-  // `invalidateLoadedSubsets()` when any answer changed. Omitted means
-  // `forward`.
-  provider?: `forward` | `refetch` | `refetch-signal`
-  // When an on-demand provider answers a load. `immediate` answers within
-  // the request. `held` answers only at an `answer` or `drain` step, from the
-  // rows at that moment, so live changes can arrive while a load is in flight.
-  // Initial loads answer immediately. Omitted means `immediate`.
-  latency?: `immediate` | `held`
-  // What a holding provider does with an aborted or unloaded held request:
-  // `cooperative` installs none of its rows and fulfills at once; `late`
-  // cannot cancel it, so it answers it anyway. Omitted means `cooperative`.
-  cancellation?: `cooperative` | `late`
-  // A second live query over the same sources, with its own window: the
-  // first `offset + limit + 1` rows. Its window law holds beside the first
-  // query's, and the work laws, which count one consumer, do not apply.
-  peer?: boolean
-  // Where eligibility is decided: a predicate on the ordered source itself,
-  // a JavaScript function filter, or a filter on a LEFT-joined marker, where
-  // a marker admits its row (`joined`) or excludes it (`anti-joined`). The
-  // last three drop rows only after the source's limit. `full-joined` keeps
-  // every root row and adds a rootless row for each marker no root row
-  // matches; deleting a matched root row leaves its marker behind.
-  filter: `source` | `function` | `joined` | `anti-joined` | `full-joined`
-  // How a joined plan changes a row's eligibility: by inserting or deleting
-  // its marker, or by pointing the row's join key at a marker or at none.
-  // A join-key change leaves the row's order value as it was.
-  via?: `marker` | `link`
-  indexed: boolean
-  direction: `asc` | `desc`
-  // Where null ranks sort, and a full join's rootless rows with them. The
-  // index uses the same placement. Omitted means first, the default.
-  nulls?: `first` | `last`
-  // Filler rows sort after every domain row. Omitted means 200; a full-join
-  // case may have none, so its window can reach the null group.
-  fillers?: number
-  // Full join only: markers whose id names no root row.
-  orphans?: Array<number>
-  terms: 1 | 2
-  limit: number
-  offset: number
-  initial: Array<{ id: number; rank: number; eligible: boolean }>
-  history: Array<EagerCommand>
-}
-
-const EAGER_FILLER = 200
-
-function fillerRows(
-  direction: `asc` | `desc`,
-  count: number = EAGER_FILLER,
-): Array<Row> {
-  // Eligible rows that sort after every domain row, so a correct window never
-  // needs them and a full rescan must deliver them.
-  return Array.from({ length: count }, (_, index) => ({
-    id: 1000 + index,
-    rank: direction === `asc` ? 100 + index : -100 - index,
-    eligible: true,
-    label: `filler`,
-  }))
-}
-
-function eagerRowOf(maxId: number) {
-  return fc.record({
-    id: fc.integer({ min: 0, max: maxId }),
-    // NaN and null exercise comparator placement outside the integer order.
-    rank: fc.oneof(
-      { weight: 6, arbitrary: fc.integer({ min: 0, max: 15 }) },
-      { weight: 1, arbitrary: fc.constant(Number.NaN) },
-      { weight: 1, arbitrary: fc.constant(null as unknown as number) },
-      { weight: 1, arbitrary: fc.constant(undefined as unknown as number) },
-    ),
-    eligible: fc.boolean(),
-  })
-}
-
-const eagerRow = eagerRowOf(29)
-
-function eagerHistory(
-  flipWeight: number,
-  maxId: number,
-): fc.Arbitrary<Array<EagerCommand>> {
-  return fc.array(
-    fc.oneof(
-      eagerRowOf(maxId).map((row) => ({ type: `upsert` as const, ...row })),
-      fc.record({
-        type: fc.constant(`delete` as const),
-        id: fc.integer({ min: 0, max: maxId }),
-      }),
-      fc.record({
-        type: fc.constant(`touch` as const),
-        id: fc.integer({ min: 0, max: maxId }),
-      }),
-      {
-        weight: flipWeight,
-        arbitrary: fc.record({
-          type: fc.constant(`flip` as const),
-          id: fc.integer({ min: 0, max: maxId }),
-        }),
-      },
-      fc.record({
-        type: fc.constant(`dup` as const),
-        id: fc.integer({ min: 0, max: maxId }),
-      }),
-      // Deletes the first visible row, so a repair runs on most histories.
-      fc.constant({ type: `delete-visible` as const }),
-      fc.constant({ type: `refetch` as const }),
-      fc.constant({ type: `answer` as const }),
-      fc.record({
-        type: fc.constant(`move` as const),
-        offset: fc.integer({ min: 0, max: 2 }),
-        limit: fc.integer({ min: 1, max: 4 }),
-      }),
-    ),
-    { minLength: 1, maxLength: 12 },
-  )
-}
-
-// Every dimension, before the campaign exclusion below. Derived campaigns
-// start from this and apply the exclusion after their own maps.
-const eagerCaseBase: fc.Arbitrary<EagerCase> = fc.record({
-  path: fc.constantFrom(
-    `sync` as const,
-    `local-only` as const,
-    `on-demand` as const,
-  ),
-  provider: fc.constantFrom(
-    `forward` as const,
-    `refetch` as const,
-    `refetch-signal` as const,
-  ),
-  latency: fc.constantFrom(`immediate` as const, `held` as const),
-  cancellation: fc.constantFrom(`cooperative` as const, `late` as const),
-  // One case in four has a peer, so most cases keep the work laws.
-  peer: fc.oneof(
-    { weight: 3, arbitrary: fc.constant(false) },
-    { weight: 1, arbitrary: fc.constant(true) },
-  ),
-  filter: fc.constantFrom(
-    `source` as const,
-    `function` as const,
-    `joined` as const,
-    `anti-joined` as const,
-    `full-joined` as const,
-  ),
-  via: fc.constantFrom(`marker` as const, `link` as const),
-  indexed: fc.boolean(),
-  direction: fc.constantFrom(`asc` as const, `desc` as const),
-  nulls: fc.constantFrom(`first` as const, `last` as const),
-  terms: fc.constantFrom(1 as const, 2 as const),
-  limit: fc.integer({ min: 1, max: 3 }),
-  offset: fc.integer({ min: 0, max: 1 }),
-  initial: fc.uniqueArray(eagerRow, {
-    selector: (row) => row.id,
-    maxLength: 20,
-  }),
-  history: eagerHistory(1, 29),
-})
-
-// A peer over a refetching on-demand provider can keep a short joined window
-// after a refetch (#2155). An indexed plan's trace is kept as a fixed history below,
-// but an unindexed one still fails (a peer shows [100] where the model shows
-// [100, 101]). Each campaign excludes only a joined, anti-joined, or full-joined
-// filter in that pairing, as its last map, until the fix; a source filter
-// keeps its peer.
-function withoutPeerRefetch(testCase: EagerCase): EagerCase {
-  return testCase.path === `on-demand` &&
-    (testCase.provider === `refetch` ||
-      testCase.provider === `refetch-signal`) &&
-    testCase.peer &&
-    testCase.filter !== `source`
-    ? { ...testCase, peer: false }
-    : testCase
-}
-
-const eagerCase = eagerCaseBase.map(withoutPeerRefetch)
-
-// The premise of the joined-filter law: an indexed single-term plan whose
-// filter drops rows after the bounded read.
-// A repair before the gap forms reads the whole source for a joined plan, so
-// no row can be missing afterwards. These histories therefore insert fresh
-// keys (10 to 19), which can land past the bounded prefix, and change initial
-// rows (0 to 9) mostly by eligibility alone, so a window row leaves only
-// through the join.
-const eagerJoinedHistory: fc.Arbitrary<Array<EagerCommand>> = fc.array(
-  fc.oneof(
-    {
-      weight: 2,
-      // Ids 10 to 29: fresh rows, and the root rows of a full join's orphan
-      // markers (20 to 29), so an orphan can become matched.
-      arbitrary: eagerRowOf(19).map((row) => ({
-        type: `upsert` as const,
-        ...row,
-        id: row.id + 10,
-      })),
-    },
-    {
-      weight: 3,
-      arbitrary: fc.record({
-        type: fc.constant(`flip` as const),
-        id: fc.integer({ min: 0, max: 9 }),
-      }),
-    },
-    fc.record({
-      type: fc.constant(`dup` as const),
-      id: fc.integer({ min: 0, max: 9 }),
-    }),
-    fc.record({
-      type: fc.constant(`touch` as const),
-      id: fc.integer({ min: 0, max: 19 }),
-    }),
-    fc.record({
-      type: fc.constant(`delete` as const),
-      id: fc.integer({ min: 0, max: 19 }),
-    }),
-    fc.constant({ type: `delete-visible` as const }),
-    fc.constant({ type: `refetch` as const }),
-    fc.constant({ type: `answer` as const }),
-    fc.record({
-      type: fc.constant(`move` as const),
-      offset: fc.integer({ min: 0, max: 2 }),
-      limit: fc.integer({ min: 1, max: 4 }),
-    }),
-  ),
-  { minLength: 1, maxLength: 8 },
-)
-
-// Its histories favor eligibility-only changes: a row inserted past the
-// bounded prefix, then a window row leaving only through the join.
-const eagerJoinedCase: fc.Arbitrary<EagerCase> = fc
-  .tuple(
-    eagerCaseBase,
-    fc.constantFrom(
-      `joined` as const,
-      `anti-joined` as const,
-      `full-joined` as const,
-    ),
-    fc.uniqueArray(eagerRowOf(9), {
-      selector: (row) => row.id,
-      minLength: 4,
-      maxLength: 8,
-    }),
-    eagerJoinedHistory,
-  )
-  .map(([testCase, filter, initial, history]) => ({
-    ...testCase,
-    filter,
-    indexed: true,
-    terms: 1 as const,
-    initial,
-    history,
-  }))
-  .map(withoutPeerRefetch)
-
-// The law's premise directly: eligible rows at distinct ranks, so the bounded
-// prefix leaves rows unsent; a fresh row that may land past the prefix; then
-// an initial row changes eligibility alone, so it can leave the window only
-// through the join. Random commands may follow.
-const gapRank: fc.Arbitrary<number> = fc.oneof(
-  { weight: 6, arbitrary: fc.integer({ min: 0, max: 15 }) },
-  { weight: 1, arbitrary: fc.constant(Number.NaN) },
-  { weight: 1, arbitrary: fc.constant(null as unknown as number) },
-  { weight: 1, arbitrary: fc.constant(undefined as unknown as number) },
-)
-
-const eagerJoinedGapCase: fc.Arbitrary<EagerCase> = fc
-  .record({
-    base: eagerJoinedCase,
-    // A null or NaN rank can end the bounded prefix. Neither is an
-    // expressible cursor, so the loader takes its prefix fallback there.
-    ranks: fc.uniqueArray(gapRank, {
-      minLength: 4,
-      maxLength: 8,
-      selector: String,
-    }),
-    insertRank: gapRank,
-    flipped: fc.nat(7),
-    rest: eagerJoinedHistory,
-  })
-  .map(({ base, ranks, insertRank, flipped, rest }) => ({
-    ...base,
-    initial: ranks.map((rank, id) => ({ id, rank, eligible: true })),
-    history: [
-      { type: `upsert` as const, id: 10, rank: insertRank, eligible: true },
-      { type: `flip` as const, id: flipped % ranks.length },
-      ...rest,
-    ],
-  }))
-  .map(withoutPeerRefetch)
-
-// The full-join law's premise: a window that can reach the null group, where
-// rootless rows and root rows with a null rank tie on the first order term.
-// Cases favor no filler rows, so a few domain rows fill the window. Initial
-// orphan markers (ids 20 to 29) start as rootless rows; root deletes and
-// eligibility changes create and remove more.
-const eagerFullJoinCase: fc.Arbitrary<EagerCase> = fc
-  .record({
-    base: eagerCaseBase,
-    fillers: fc.oneof(
-      { weight: 3, arbitrary: fc.constant(0) },
-      { weight: 1, arbitrary: fc.constant(EAGER_FILLER) },
-    ),
-    initial: fc.uniqueArray(
-      fc.record({ id: fc.nat(9), rank: gapRank, eligible: fc.boolean() }),
-      { minLength: 2, maxLength: 8, selector: (row) => row.id },
-    ),
-    orphans: fc.uniqueArray(fc.integer({ min: 20, max: 29 }), {
-      minLength: 1,
-      maxLength: 3,
-    }),
-    history: eagerJoinedHistory,
-  })
-  .map(({ base, fillers, initial, orphans, history }) => ({
-    ...base,
-    filter: `full-joined` as const,
-    via: `marker` as const,
-    indexed: true,
-    fillers,
-    // Every case has a matched root row with a null rank and at least one
-    // orphan marker, so the null group holds both kinds of row.
-    initial: [
-      ...initial.filter(({ id }) => id !== 9),
-      { id: 9, rank: null as unknown as number, eligible: true },
-    ],
-    orphans,
-    history,
-  }))
-  .map(withoutPeerRefetch)
-
-// The in-flight premise: a holding on-demand provider, and a history that
-// first deletes a visible row, so the refill request is in flight while the
-// later commands change rows. Releases answer it from the rows at that
-// moment, between those changes.
-// The proven-report premise: a peer over a signalling refetch provider and a
-// source filter, so the peer installs the row after the first query's page.
-// Histories upsert rows that tie with the peer's end or sort past both
-// windows, then refetch, so a report fires while the first query's own page
-// and tie stay the same; later moves check that it owes no repair.
-const eagerProvenReportCase: fc.Arbitrary<EagerCase> = fc
-  .record({
-    base: eagerCaseBase,
-    ranks: fc.uniqueArray(fc.integer({ min: 0, max: 15 }), {
-      minLength: 3,
-      maxLength: 6,
-    }),
-    upserts: fc.array(
-      fc.record({ id: fc.integer({ min: 10, max: 19 }), offset: fc.nat(3) }),
-      { minLength: 1, maxLength: 3 },
-    ),
-    rest: eagerJoinedHistory,
-  })
-  .map(({ base, ranks, upserts, rest }) => {
-    const sorted = [...ranks].sort((left, right) => left - right)
-    const size = base.offset + base.limit
-    // Ranks at or after the peer's end, so the first query's page keeps its
-    // rows while the peer's answers change.
-    const peerEnd = sorted[Math.min(size, sorted.length - 1)]!
-    return {
-      ...base,
-      path: `on-demand` as const,
-      provider: `refetch-signal` as const,
-      latency: `immediate` as const,
-      peer: true,
-      filter: `source` as const,
-      indexed: true,
-      direction: `asc` as const,
-      terms: 1 as const,
-      initial: sorted.map((rank, id) => ({ id, rank, eligible: true })),
-      history: [
-        ...upserts.map(({ id, offset }) => ({
-          type: `upsert` as const,
-          id,
-          rank: peerEnd + offset,
-          eligible: true,
-        })),
-        { type: `refetch` as const },
-        ...rest,
-      ],
-    }
-  })
-
-const eagerHeldCase: fc.Arbitrary<EagerCase> = fc
-  .tuple(
-    eagerCaseBase,
-    // A change that lands while the refill is in flight: an eligible row
-    // with an id no other command uses (40 to 49), so the forwarding
-    // provider always sends it.
-    eagerRowOf(9).map((row) => ({
-      type: `upsert` as const,
-      ...row,
-      id: row.id + 40,
-      eligible: true,
-    })),
-    fc.array(
-      fc.oneof(
-        { weight: 3, arbitrary: eagerHistory(1, 29).map(([first]) => first!) },
-        { weight: 2, arbitrary: fc.constant({ type: `answer` as const }) },
-        {
-          weight: 1,
-          arbitrary: fc.constant({ type: `release-peer` as const }),
-        },
-        {
-          weight: 1,
-          arbitrary: fc.constant({ type: `delete-visible` as const }),
-        },
-      ),
-      { minLength: 2, maxLength: 10 },
-    ),
-  )
-  .map(([testCase, change, rest]) => ({
-    ...testCase,
-    path: `on-demand` as const,
-    // A forwarding provider sends the delete, and an indexed source filter
-    // or a joined filter refills from the provider, so the refill is a held
-    // request. An unindexed source filter issues no held request. With the
-    // provider fixed, this campaign needs no peer exclusion (#2155 concerns
-    // only a refetching provider).
-    provider: `forward` as const,
-    filter:
-      testCase.filter === `function` || testCase.filter === `full-joined`
-        ? (`source` as const)
-        : testCase.filter,
-    indexed:
-      testCase.filter === `function` ||
-      testCase.filter === `full-joined` ||
-      testCase.filter === `source`
-        ? true
-        : testCase.indexed,
-    // One order term, so the refill pages by cursor.
-    terms: 1 as const,
-    latency: `held` as const,
-    // A loaded prefix can hold headroom rows, so three visible deletes make
-    // a refill request likely before the change.
-    history: [
-      { type: `delete-visible` as const },
-      { type: `delete-visible` as const },
-      { type: `delete-visible` as const },
-      change,
-      ...rest,
-    ],
-  }))
-
-function isJoinedFilter({ filter }: EagerCase): boolean {
-  return filter === `joined` || filter === `anti-joined`
-}
-
-function eagerOrder(
-  rows: ReadonlyMap<number, Row>,
-  { direction, nulls }: EagerCase,
-): Array<Row> {
-  // Documented order (live-queries guide): nulls first in either direction
-  // unless the query asks for them last; NaN is greater than every other
-  // non-null value; ties by ascending id. `null` and `undefined` are both
-  // nullish, so they tie with each other.
-  const position = (rank: number | null | undefined): [number, number] => {
-    if (rank == null) return [nulls === `last` ? 3 : 0, 0]
-    if (Number.isNaN(rank)) return [direction === `asc` ? 2 : 1, 0]
-    return [direction === `asc` ? 1 : 2, direction === `asc` ? rank : -rank]
-  }
-  return [...rows.values()]
-    .filter((row) => row.eligible)
-    .sort((left, right) => {
-      const [leftGroup, leftValue] = position(left.rank)
-      const [rightGroup, rightValue] = position(right.rank)
-      return (
-        leftGroup - rightGroup || leftValue - rightValue || left.id - right.id
-      )
-    })
-}
-
-function eagerWindow(
-  rows: ReadonlyMap<number, Row>,
-  testCase: EagerCase,
-): Array<number> {
-  return eagerOrder(rows, testCase)
-    .slice(testCase.offset, testCase.offset + testCase.limit)
-    .map((row) => row.id)
-}
-
-/**
- * The visible window agrees with the model. The guide promises order only by
- * the query's `orderBy` terms; rows that tie on every term may appear in any
- * order. A source-filter plan's ties follow the source key, which the model
- * also uses, so its window must match exactly. A joined plan's ties follow the
- * joined result key, so its window must be any valid first `limit` rows: the
- * same order values in sequence, each from an eligible row with that value.
- */
-function expectEagerWindow(
-  actual: Array<number>,
-  rows: ReadonlyMap<number, Row>,
-  testCase: EagerCase,
-  label: string,
-): void {
-  const expected = eagerWindow(rows, testCase)
-  if (!isJoinedFilter(testCase) && testCase.filter !== `full-joined`) {
-    compareAt(label, () => expect(actual, label).toEqual(expected))
-    return
-  }
-  // `null` and `undefined` tie, so either may come first among nullish rows.
-  const rank = (id: number) => {
-    const row = rows.get(id)
-    return row?.eligible
-      ? ((row.rank as number | null | undefined) ?? null)
-      : `ineligible ${id}`
-  }
-  compareAt(label, () =>
-    expect(actual.map(rank), label).toEqual(expected.map(rank)),
-  )
-  compareAt(`${label}: distinct rows`, () =>
-    expect(new Set(actual).size, `${label}: distinct rows`).toBe(actual.length),
-  )
-}
-
-/**
- * Whether a bounded prefix of the source leaves the window short. The prefix
- * is the first `offset + limit` source rows in the query's order. A source
- * filter runs inside the request, so its prefix holds only eligible rows. A
- * joined or function filter drops rows only after the source's limit, so its
- * prefix can hold fewer eligible rows than the window needs.
- */
-function prefixLeavesWindowShort(
-  rows: ReadonlyMap<number, Row>,
-  testCase: EagerCase,
-): boolean {
-  const size = testCase.offset + testCase.limit
-  const candidates =
-    testCase.filter === `source`
-      ? rows
-      : new Map(
-          [...rows].map(([rowId, row]) => [rowId, { ...row, eligible: true }]),
-        )
-  const prefix = eagerOrder(candidates, testCase).slice(0, size)
-  return prefix.filter(({ id }) => rows.get(id)!.eligible).length < size
-}
-
-/** Ranks of the last window row and the first row after the window. */
-function boundaryRanks(
-  rows: ReadonlyMap<number, Row>,
-  testCase: EagerCase,
-): Array<number | null> {
-  const end = testCase.offset + testCase.limit
-  // Generated rows may carry a null rank behind the `number` row type.
-  return eagerOrder(rows, testCase)
-    .slice(end - 1, end + 1)
-    .map((row): number | null => row.rank)
-}
 
 // Properties take this as their predicate, which must return nothing;
 // runEagerWindow also returns the held-load reach counts.
@@ -5679,131 +3091,6 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   }
 }
 
-type OptimisticWindowShape = `source` | `joined` | `anti-joined`
-type OptimisticWindowMutation = `update` | `delete`
-type OptimisticWindowConsumer = `collection` | `effect`
-type OptimisticWindowOutcome = `acknowledge` | `rollback`
-type OptimisticWindowExtent = `missing` | `installed` | `non-prefix`
-type OptimisticWindowAcquisition = `required` | `forbidden` | `allowed`
-type OptimisticWindowCheckpoint =
-  `initial` | `optimistic` | `settled` | `restored`
-const MAX_OPTIMISTIC_WINDOW_REQUESTS = 8
-const OPTIMISTIC_ACQUISITION_OBSERVATION_TURNS = 8
-
-// The most rows a bounded refill may ask for. An indexed plan pages past
-// the window. An unindexed plan grows its prefix to twice the rows it
-// installed (ARCHITECTURE.md, "an underfilled unindexed prefix grows"), and
-// a request also covers the one row that the pending transaction overlays.
-function refillBound({ indexed, width, installedIds }: OptimisticWindowCase) {
-  return indexed ? width + 2 : 2 * installedIds.length + 1
-}
-
-type OptimisticWindowCase = {
-  shape: OptimisticWindowShape
-  mutation: OptimisticWindowMutation
-  consumer: OptimisticWindowConsumer
-  outcome: OptimisticWindowOutcome
-  width: 1 | 2
-  indexed: boolean
-  extent: OptimisticWindowExtent
-  installedIds: Array<number>
-  acquisition: OptimisticWindowAcquisition
-  answerTiming?: `before-settlement` | `after-settlement`
-  mutationSource?: `root` | `marker`
-  rankMove?: boolean
-  rankDeparture?: boolean
-  direction?: `asc` | `desc`
-}
-
-type OptimisticWindowPublication = {
-  rows: Array<number>
-}
-
-function copyOptimisticWindowPublication(
-  publication: OptimisticWindowPublication,
-): OptimisticWindowPublication {
-  return { rows: [...publication.rows] }
-}
-
-type OptimisticWindowObservation = {
-  initial: Array<number>
-  immediate: Array<number>
-  acquiring: Array<number>
-  answerQueued: Array<number>
-  settled: Array<number>
-  afterAnswer?: Array<number>
-  afterRestore?: Array<number>
-  afterRestorePublications?: Array<OptimisticWindowPublication>
-  rowsAfterFirstTurn: Array<number>
-  rowsAfterSecondTurn: Array<number>
-  immediatePublications: Array<OptimisticWindowPublication>
-  preSettlementPublications: Array<OptimisticWindowPublication>
-  publicationsAtSettlement: Array<OptimisticWindowPublication>
-  publicationsAfterSettlement: Array<OptimisticWindowPublication>
-  attempts: Array<{
-    submittedRows: Array<number>
-    limit: number | undefined
-    direction: string | undefined
-    // The request had a limit or a predicate, so it read no full source.
-    bounded?: boolean
-    appliedReceiptPending: boolean
-    providerPending: boolean
-  }>
-  acquisitionStartedBeforeSettlement?: boolean
-  requestHistory?: Array<{
-    identity: string
-    newRows: number
-    phase?: string
-    submittedRows?: Array<number>
-    limit?: number
-    direction?: string
-    allowsRejectedRoot?: boolean
-    selectedRanks?: Array<number>
-  }>
-  settlementOutcome: `fulfilled` | `rejected`
-}
-
-function referenceOptimisticWindow(
-  testCase: OptimisticWindowCase,
-  checkpoint: OptimisticWindowCheckpoint,
-): Array<number> {
-  // All three predicates accept 1, 2, and 3 in the remote ledger; 4 is the
-  // rejected leading root. The model starts from installed keys, applies the
-  // one overlay, and recomputes the window without the loader's prefix logic.
-  const authoritative =
-    (checkpoint === `settled` || checkpoint === `restored`) &&
-    testCase.outcome === `acknowledge`
-  const installed = authoritative
-    ? testCase.rankMove
-      ? [1, 2, 3, 4]
-      : testCase.mutationSource === `marker`
-        ? [1, 2, 3, 4]
-        : [1, 2, 4]
-    : testCase.installedIds
-  const overlayActive = checkpoint === `optimistic`
-  const markerDeparturePersisted =
-    checkpoint === `settled` &&
-    testCase.outcome === `acknowledge` &&
-    testCase.mutationSource === `marker`
-  return installed
-    .filter(
-      (id) =>
-        id !== 4 &&
-        !(
-          (overlayActive || markerDeparturePersisted) &&
-          id === 3 &&
-          (!testCase.rankMove || testCase.rankDeparture)
-        ),
-    )
-    .sort((left, right) => {
-      const moved = (overlayActive || authoritative) && testCase.rankMove
-      const leftRank = moved && left === 3 ? 0 : left
-      const rightRank = moved && right === 3 ? 0 : right
-      return rightRank - leftRank
-    })
-    .slice(0, testCase.width)
-}
-
 async function observeAcquisitionAcrossTaskTurns(
   initialRequests: number,
   currentRequests: () => number,
@@ -6362,217 +3649,58 @@ async function checkOptimisticWindow(
   )
 }
 
-function optimisticWindowViolations(
-  observation: OptimisticWindowObservation,
-  testCase: OptimisticWindowCase,
-): Array<string> {
-  const violations: Array<string> = []
-  const { outcome, width } = testCase
-  const optimistic = referenceOptimisticWindow(testCase, `optimistic`)
-  const settled = referenceOptimisticWindow(testCase, `settled`)
-  const lateAnswer = testCase.answerTiming === `after-settlement`
-  const expectedAtSettlement =
-    lateAnswer && outcome === `acknowledge` ? optimistic : settled
-  const compare = (label: string, actual: unknown, expected: unknown) => {
-    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-      violations.push(
-        `${label}: ${JSON.stringify(actual)} instead of ${JSON.stringify(expected)}`,
-      )
-    }
-  }
-  compare(`immediate rows`, observation.immediate, optimistic)
-  compare(
-    `immediate publications`,
-    observation.immediatePublications.map(({ rows }) => rows),
-    [optimistic],
-  )
-  compare(`acquiring rows`, observation.acquiring, optimistic)
-  compare(`queued-answer rows`, observation.answerQueued, optimistic)
-  compare(
-    `first optimistic publication`,
-    observation.preSettlementPublications[0]?.rows,
-    optimistic,
-  )
-  compare(
-    `other pre-settlement publications`,
-    observation.preSettlementPublications.slice(1).map(({ rows }) => rows),
-    [],
-  )
-  compare(`settled rows`, observation.settled, expectedAtSettlement)
-  if (lateAnswer)
-    compare(`rows after late answer`, observation.afterAnswer, settled)
-  if (testCase.mutationSource === `marker` && outcome === `acknowledge`) {
-    compare(
-      `rows after marker restoration`,
-      observation.afterRestore,
-      referenceOptimisticWindow(testCase, `restored`),
-    )
-    compare(
-      `marker restoration publications`,
-      observation.afterRestorePublications?.map(({ rows }) => rows),
-      [referenceOptimisticWindow(testCase, `restored`)],
-    )
-  }
-  compare(
-    `rows after first settlement turn`,
-    observation.rowsAfterFirstTurn,
-    settled,
-  )
-  compare(
-    `rows after second settlement turn`,
-    observation.rowsAfterSecondTurn,
-    settled,
-  )
-  const expectedSettledPublications =
-    JSON.stringify(optimistic) === JSON.stringify(expectedAtSettlement)
-      ? []
-      : [expectedAtSettlement]
-  compare(
-    `settled publications`,
-    observation.publicationsAtSettlement
-      .slice(observation.preSettlementPublications.length)
-      .map(({ rows }) => rows),
-    expectedSettledPublications,
-  )
-  compare(
-    `post-settlement publications`,
-    observation.publicationsAfterSettlement.map(({ rows }) => rows),
-    lateAnswer && outcome === `acknowledge` ? [settled] : [],
-  )
-  const needsAcquisition = testCase.acquisition === `required`
-  if (
-    needsAcquisition &&
-    observation.acquisitionStartedBeforeSettlement === false
-  ) {
-    violations.push(`refill acquisition did not start before settlement`)
-  }
-  if (needsAcquisition && observation.attempts.length === 0) {
-    violations.push(`refill acquisition did not start`)
-  }
-  const refillId = width === 1 ? 2 : 1
-  const refillAttempt = observation.attempts.find(({ submittedRows }) =>
-    submittedRows.includes(refillId),
-  )
-  if (needsAcquisition && !refillAttempt) {
-    violations.push(`refill answer did not submit row ${refillId}`)
-  } else if (
-    needsAcquisition &&
-    (refillAttempt?.direction !== (testCase.direction ?? `desc`) ||
-      refillAttempt.limit === undefined ||
-      refillAttempt.limit > refillBound(testCase))
-  ) {
-    violations.push(`refill used an unbounded provider request`)
-  } else if (
-    !lateAnswer &&
-    refillAttempt &&
-    !refillAttempt.appliedReceiptPending
-  ) {
-    violations.push(`applied receipt was not pending at the queued-answer cut`)
-  }
-  if (!lateAnswer && refillAttempt && !refillAttempt.providerPending) {
-    violations.push(`provider was not pending at the queued-answer cut`)
-  }
-  if (testCase.acquisition === `forbidden` && observation.attempts.length > 0) {
-    violations.push(`refill acquisition started with complete local extent`)
-  }
-  // A refill the case allows but does not require is still bounded: an
-  // ordered read within the refill bound, or a predicate read, never the
-  // full source.
-  if (testCase.acquisition === `allowed`) {
-    for (const attempt of observation.attempts) {
-      if (
-        attempt.bounded === false ||
-        (attempt.direction !== undefined &&
-          (attempt.limit === undefined ||
-            attempt.limit > refillBound(testCase)))
-      ) {
-        violations.push(`an allowed refill used an unbounded provider request`)
-        break
-      }
-    }
-  }
-  const requested = new Set<string>()
-  for (const request of observation.requestHistory ?? []) {
-    if (request.phase === `pending` && testCase.indexed) {
-      const finiteOrdered =
-        request.direction === (testCase.direction ?? `desc`) &&
-        request.limit !== undefined &&
-        request.limit <= width + 2
-      const boundaryTie =
-        request.direction === undefined &&
-        request.selectedRanks !== undefined &&
-        new Set(request.selectedRanks).size === 1
-      if (!finiteOrdered && !boundaryTie) {
-        violations.push(`optimistic acquisition used a broad provider request`)
-      }
-      if (testCase.shape === `source` && request.allowsRejectedRoot) {
-        violations.push(`source refill omitted the source predicate`)
-      }
-    }
-    if (requested.has(request.identity) && request.newRows === 0) {
-      violations.push(`repeated an unchanged provider request without progress`)
-      break
-    }
-    requested.add(request.identity)
-  }
-  compare(
-    `settlement outcome`,
-    observation.settlementOutcome,
-    outcome === `acknowledge` ? `fulfilled` : `rejected`,
-  )
-  return violations
-}
-
 describe(`eager indexed ordered windows`, () => {
   const { multiplier } = readOracleRunConfig()
   const runs = 40 * multiplier
 
-  it(`places null ranks first in an indexed descending window`, async () => {
-    oracleRoute(`fixed history`)
-    await checkEagerWindow({
-      path: `sync`,
-      filter: `source`,
-      indexed: true,
-      direction: `desc`,
-      terms: 1,
-      limit: 1,
-      offset: 0,
-      initial: [{ id: 0, rank: null as unknown as number, eligible: true }],
-      history: [{ type: `upsert`, id: 1, rank: 2, eligible: true }],
-    })
-  })
-
-  it(`refills after a visible delete without resending the source`, async () => {
-    oracleRoute(`fixed history`)
-    await checkEagerWindow({
-      path: `local-only`,
-      filter: `source`,
-      indexed: true,
-      direction: `desc`,
-      terms: 1,
-      limit: 2,
-      offset: 0,
-      initial: [
-        { id: 0, rank: 3, eligible: true },
-        { id: 1, rank: 2, eligible: true },
-        { id: 2, rank: 1, eligible: true },
-      ],
-      history: [
-        { type: `upsert`, id: 5, rank: 3, eligible: true },
-        { type: `delete`, id: 5 },
-        { type: `delete`, id: 0 },
-        { type: `upsert`, id: 1, rank: 0, eligible: true },
-      ],
-    })
-  })
-
-  it.each([`sync`, `local-only`] as const)(
-    `publishes one complete window when a repair reaches a NaN tie group (%s)`,
-    async (path) => {
-      oracleRoute(`case`)
-      // The bounded prefix ends inside a NaN tie group, which cannot be a
-      // cursor, so the repair falls back to a full-source read.
-      await checkEagerWindow({
+  // Named eager regressions, each replayed through the same checkEagerWindow
+  // driver and its row, work, and scan comparisons. The eager campaign
+  // arbitraries end in maps without unmappers, so they cannot take these
+  // histories back; they run as one enumerated source.
+  type EagerNamedHistory = { name: string; testCase: EagerCase }
+  const eagerNamedHistories: Array<EagerNamedHistory> = [
+    {
+      name: `places null ranks first in an indexed descending window`,
+      testCase: {
+        path: `sync`,
+        filter: `source`,
+        indexed: true,
+        direction: `desc`,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+        initial: [{ id: 0, rank: null as unknown as number, eligible: true }],
+        history: [{ type: `upsert`, id: 1, rank: 2, eligible: true }],
+      },
+    },
+    {
+      name: `refills after a visible delete without resending the source`,
+      testCase: {
+        path: `local-only`,
+        filter: `source`,
+        indexed: true,
+        direction: `desc`,
+        terms: 1,
+        limit: 2,
+        offset: 0,
+        initial: [
+          { id: 0, rank: 3, eligible: true },
+          { id: 1, rank: 2, eligible: true },
+          { id: 2, rank: 1, eligible: true },
+        ],
+        history: [
+          { type: `upsert`, id: 5, rank: 3, eligible: true },
+          { type: `delete`, id: 5 },
+          { type: `delete`, id: 0 },
+          { type: `upsert`, id: 1, rank: 0, eligible: true },
+        ],
+      },
+    },
+    // The bounded prefix ends inside a NaN tie group, which cannot be a
+    // cursor, so the repair falls back to a full-source read.
+    ...([`sync`, `local-only`] as const).map((path): EagerNamedHistory => ({
+      name: `publishes one complete window when a repair reaches a NaN tie group (${path})`,
+      testCase: {
         path,
         filter: `source`,
         indexed: true,
@@ -6590,424 +3718,608 @@ describe(`eager indexed ordered windows`, () => {
           { type: `delete`, id: 3 },
           { type: `upsert`, id: 6, rank: Number.NaN, eligible: true },
         ],
-      })
-    },
-  )
-
-  it(`refills a joined window over several pages after a refetch empties it`, async () => {
-    oracleRoute(`fixed history`)
+      },
+    })),
     // Every row the window held changes while the refetching provider lags.
     // The final refetch empties the window, and the loader refills it one
     // page at a time, publishing [], then one row, then the final two (#2131).
-    await checkEagerWindow({
-      path: `on-demand`,
-      provider: `refetch`,
-      filter: `joined`,
-      via: `link`,
-      indexed: true,
-      direction: `asc`,
-      nulls: `first`,
-      terms: 1,
-      limit: 2,
-      offset: 1,
-      initial: [
-        { id: 0, rank: 1, eligible: true },
-        { id: 1, rank: 2, eligible: true },
-        { id: 2, rank: 0, eligible: true },
-        { id: 3, rank: 3, eligible: true },
-      ],
-      history: [
-        { type: `upsert`, id: 10, rank: 0, eligible: true },
-        { type: `flip`, id: 1 },
-        { type: `flip`, id: 3 },
-        { type: `delete`, id: 0 },
-        { type: `flip`, id: 2 },
-      ],
-    })
-  })
-
-  it(`shows a row that moved between two served pages after a refetch`, async () => {
-    oracleRoute(`fixed history`)
+    {
+      name: `refills a joined window over several pages after a refetch empties it`,
+      testCase: {
+        path: `on-demand`,
+        provider: `refetch`,
+        filter: `joined`,
+        via: `link`,
+        indexed: true,
+        direction: `asc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 2,
+        offset: 1,
+        initial: [
+          { id: 0, rank: 1, eligible: true },
+          { id: 1, rank: 2, eligible: true },
+          { id: 2, rank: 0, eligible: true },
+          { id: 3, rank: 3, eligible: true },
+        ],
+        history: [
+          { type: `upsert`, id: 10, rank: 0, eligible: true },
+          { type: `flip`, id: 1 },
+          { type: `flip`, id: 3 },
+          { type: `delete`, id: 0 },
+          { type: `flip`, id: 2 },
+        ],
+      },
+    },
     // The loader pages the top two rows, then one more after a cursor. Rows
     // 10 and 11 arrive while the provider lags; the refetched first page now
     // ends at row 11, so row 10 sorts between the pages. A provider that
     // keeps served ranges whole sends it; one that re-runs each page alone
     // (query-db-collection today) never does, and the window shows [4, 1].
-    await checkEagerWindow({
-      path: `on-demand`,
-      provider: `refetch`,
-      filter: `joined`,
-      via: `marker`,
-      indexed: true,
-      direction: `desc`,
-      nulls: `first`,
-      terms: 1,
-      limit: 2,
-      offset: 0,
-      initial: [
-        { id: 0, rank: Number.NaN, eligible: true },
-        { id: 1, rank: 0, eligible: true },
-        { id: 2, rank: 4, eligible: true },
-        { id: 3, rank: 1, eligible: true },
-      ],
-      history: [
-        { type: `upsert`, id: 10, rank: 5, eligible: true },
-        { type: `flip`, id: 0 },
-        { type: `upsert`, id: 11, rank: 6, eligible: false },
-        { type: `refetch` },
-      ],
-    })
-  })
-
-  // The same trace with a provider that refetches each page alone and then
-  // reports the shift. Row 10 is in no answer after the refetch; the
-  // report makes the loader re-establish the window with a bounded repair.
-  it(`shows a row that moved between two served pages after a signalling refetch`, async () => {
-    oracleRoute(`fixed history`)
-    await checkEagerWindow({
-      path: `on-demand`,
-      provider: `refetch-signal`,
-      filter: `joined`,
-      via: `marker`,
-      indexed: true,
-      direction: `desc`,
-      nulls: `first`,
-      terms: 1,
-      limit: 2,
-      offset: 0,
-      initial: [
-        { id: 0, rank: Number.NaN, eligible: true },
-        { id: 1, rank: 0, eligible: true },
-        { id: 2, rank: 4, eligible: true },
-        { id: 3, rank: 1, eligible: true },
-      ],
-      history: [
-        { type: `upsert`, id: 10, rank: 5, eligible: true },
-        { type: `flip`, id: 0 },
-        { type: `upsert`, id: 11, rank: 6, eligible: false },
-        { type: `refetch` },
-      ],
-    })
-  })
-
-  // An unindexed joined window whose only domain row is ineligible. After a
-  // signalling refetch the repair's bounded prefix holds just that row, so
-  // the window is short. The refill grows the prefix instead of reading the
-  // full source, which the refetch law forbids.
-  it(`grows the prefix of a short unindexed window after a signalling refetch`, async () => {
-    oracleRoute(`fixed history`)
-    await checkEagerWindow({
-      path: `on-demand`,
-      provider: `refetch-signal`,
-      latency: `immediate`,
-      cancellation: `cooperative`,
-      peer: false,
-      filter: `joined`,
-      via: `marker`,
-      indexed: false,
-      direction: `asc`,
-      nulls: `first`,
-      terms: 1,
-      limit: 1,
-      offset: 0,
-      initial: [],
-      history: [
-        { type: `upsert`, id: 0, rank: 0, eligible: false },
-        { type: `dup`, id: 0 },
-        { type: `refetch` },
-      ],
-    })
-  })
-
-  // The trace from #2221. A descending, nulls-first, unindexed window behind
-  // an anti-joined marker has a NaN rank, so its boundary has no cursor.
-  // After a signalling refetch the loader read the full source twice: the
-  // short prefix took the full-source fallback. The prefix now grows, so the
-  // refetch law, which allows no full-source read here, holds.
-  it(`reads no full source after a signalling refetch past a NaN boundary`, async () => {
-    oracleRoute(`fixed history`)
-    await checkEagerWindow({
-      path: `on-demand`,
-      provider: `refetch-signal`,
-      latency: `immediate`,
-      cancellation: `cooperative`,
-      peer: false,
-      filter: `anti-joined`,
-      via: `marker`,
-      indexed: false,
-      direction: `desc`,
-      nulls: `first`,
-      terms: 1,
-      limit: 2,
-      offset: 0,
-      initial: [
-        { id: 0, rank: 0, eligible: true },
-        { id: 2, rank: Number.NaN, eligible: true },
-        { id: 1, rank: 0, eligible: false },
-      ],
-      history: [
-        { type: `delete-visible` },
-        { type: `move`, offset: 0, limit: 1 },
-      ],
-    })
-  })
-
-  // Trace 1 from a comment on #2221: an ascending unindexed window behind an
-  // anti-joined marker whose only row is ineligible. Before prefix growth the
-  // short prefix took the full-source fallback, twice, after a signalling
-  // refetch; the refetch law allows none.
-  it(`reads no full source after a signalling refetch of a short anti-joined window`, async () => {
-    oracleRoute(`fixed history`)
-    await checkEagerWindow({
-      path: `on-demand`,
-      provider: `refetch-signal`,
-      latency: `immediate`,
-      cancellation: `cooperative`,
-      peer: false,
-      filter: `anti-joined`,
-      via: `marker`,
-      indexed: false,
-      direction: `asc`,
-      nulls: `first`,
-      terms: 1,
-      limit: 1,
-      offset: 0,
-      initial: [],
-      history: [
-        { type: `upsert`, id: 0, rank: 0, eligible: false },
-        { type: `refetch` },
-      ],
-    })
-  })
-
-  // Found by the unindexed-refetch random campaign. A refetch report moves
-  // the page's end onto a null rank, which no cursor can express. Reading
-  // that end's tie would take the boundary's full-source fallback, so the
-  // loader repairs with its bounded prefix instead; a loader that read the
-  // tie broke the refetch law.
-  it(`repairs instead of reading an unexpressible end's tie after a signalling refetch`, async () => {
-    oracleRoute(`fixed history`)
-    await checkEagerWindow({
-      path: `on-demand`,
-      provider: `refetch-signal`,
-      latency: `immediate`,
-      cancellation: `cooperative`,
-      peer: false,
-      filter: `joined`,
-      via: `marker`,
-      indexed: false,
-      direction: `desc`,
-      nulls: `first`,
-      terms: 1,
-      limit: 2,
-      offset: 1,
-      initial: [
-        { id: 0, rank: null as unknown as number, eligible: true },
-        { id: 2, rank: Number.NaN, eligible: true },
-        { id: 1, rank: 0, eligible: true },
-        { id: 3, rank: 0, eligible: true },
-      ],
-      history: [
-        {
-          type: `upsert`,
-          id: 10,
-          rank: null as unknown as number,
-          eligible: false,
-        },
-        { type: `dup`, id: 0 },
-      ],
-    })
-  })
-
-  // A peer's tie answer changes, so the provider reports, but the first
-  // query's page and tie answers stay the same and the peer installed the
-  // row after its page. That page proves the window, so the report must
-  // start no request for the first query and leave it owing no repair: the
-  // window move that follows continues from its boundary instead.
-  it(`starts no request for a window its own first page still proves after a report`, async () => {
-    oracleRoute(`fixed history`)
-    await checkEagerWindow({
-      path: `on-demand`,
-      provider: `refetch-signal`,
-      latency: `immediate`,
-      cancellation: `cooperative`,
-      peer: true,
-      filter: `source`,
-      via: `marker`,
-      indexed: true,
-      direction: `asc`,
-      nulls: `first`,
-      terms: 1,
-      limit: 1,
-      offset: 0,
-      initial: [
-        { id: 0, rank: 1, eligible: true },
-        { id: 1, rank: 2, eligible: true },
-        { id: 2, rank: 3, eligible: true },
-      ],
-      history: [
-        { type: `upsert`, id: 10, rank: 2, eligible: true },
-        { type: `refetch` },
-        { type: `move`, offset: 0, limit: 3 },
-      ],
-    })
-  })
-
-  // A signalling refetch moves the first page's end earlier, to a rank that
-  // a row the provider never sent ties with. The window is still inside the
-  // page, but the rank-2 row past it is local only because the old tie
-  // request read it, so it proves nothing about the rows that now tie with
-  // the end. The loader must read the new end's tie; ignoring the report
-  // made a later window move read the local rows and skip row 11.
-  it(`repairs a signalling refetch before a window move reads past its page`, async () => {
-    oracleRoute(`fixed history`)
-    await checkEagerWindow({
-      path: `on-demand`,
-      provider: `refetch-signal`,
-      latency: `immediate`,
-      cancellation: `cooperative`,
-      peer: false,
-      filter: `joined`,
-      via: `marker`,
-      indexed: true,
-      direction: `asc`,
-      nulls: `first`,
-      terms: 1,
-      limit: 2,
-      offset: 0,
-      initial: [
-        { id: 0, rank: null as unknown as number, eligible: true },
-        { id: 1, rank: 2, eligible: true },
-        { id: 2, rank: 3, eligible: true },
-        { id: 3, rank: Number.NaN, eligible: true },
-      ],
-      history: [
-        { type: `upsert`, id: 10, rank: 0, eligible: true },
-        { type: `flip`, id: 2 },
-        { type: `upsert`, id: 11, rank: 0, eligible: true },
-        { type: `refetch` },
-        { type: `move`, offset: 0, limit: 3 },
-        { type: `delete`, id: 0 },
-      ],
-    })
-  })
-
-  // A page with no later page whose end moves earlier. Two rank-0 rows
-  // arrive while the provider lags; the refetched page ends at rank 0, but
-  // the tie request still holds the rank-1 row, so the loader sees no
-  // delete. The report repairs the window.
-  it(`repairs a signalling refetch whose page now ends before its tie`, async () => {
-    oracleRoute(`fixed history`)
-    await checkEagerWindow({
-      path: `on-demand`,
-      provider: `refetch-signal`,
-      filter: `anti-joined`,
-      via: `marker`,
-      indexed: true,
-      direction: `asc`,
-      nulls: `first`,
-      terms: 1,
-      limit: 3,
-      offset: 0,
-      initial: [
-        { id: 0, rank: 0, eligible: true },
-        { id: 1, rank: 0, eligible: true },
-        { id: 2, rank: 1, eligible: true },
-        { id: 5, rank: 13, eligible: false },
-      ],
-      history: [
-        { type: `upsert`, id: 10, rank: 0, eligible: false },
-        { type: `upsert`, id: 11, rank: 0, eligible: true },
-        { type: `refetch` },
-      ],
-    })
-  })
-
-  // A second live-query Collection over a refetched on-demand source kept a
-  // short joined window (#2155): after the refetch the peer showed ranks
-  // [0, 0] where the model shows [0, 0, 100]. The loader fix that resumes a
-  // staged continuation after a synchronous answer the graph already
-  // processed closed this trace.
-  it(`shows a peer's full joined window after a refetch removes a tied row`, async () => {
-    oracleRoute(`fixed history`)
-    await checkEagerWindow({
-      path: `on-demand`,
-      provider: `refetch`,
-      latency: `immediate`,
-      peer: true,
-      filter: `joined`,
-      via: `link`,
-      indexed: true,
-      direction: `asc`,
-      nulls: `first`,
-      terms: 1,
-      limit: 2,
-      offset: 0,
-      initial: [
-        { id: 9, rank: 0, eligible: true },
-        { id: 0, rank: 0, eligible: true },
-        { id: 1, rank: 0, eligible: true },
-        { id: 2, rank: 1, eligible: false },
-      ],
-      history: [
-        { type: `upsert`, id: 10, rank: 1, eligible: false },
-        { type: `flip`, id: 0 },
-      ],
-    })
-  })
-
-  it(`publishes a full-join window that only loses a row`, async () => {
-    oracleRoute(`fixed history`)
+    {
+      name: `shows a row that moved between two served pages after a refetch`,
+      testCase: {
+        path: `on-demand`,
+        provider: `refetch`,
+        filter: `joined`,
+        via: `marker`,
+        indexed: true,
+        direction: `desc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 2,
+        offset: 0,
+        initial: [
+          { id: 0, rank: Number.NaN, eligible: true },
+          { id: 1, rank: 0, eligible: true },
+          { id: 2, rank: 4, eligible: true },
+          { id: 3, rank: 1, eligible: true },
+        ],
+        history: [
+          { type: `upsert`, id: 10, rank: 5, eligible: true },
+          { type: `flip`, id: 0 },
+          { type: `upsert`, id: 11, rank: 6, eligible: false },
+          { type: `refetch` },
+        ],
+      },
+    },
+    // The same trace with a provider that refetches each page alone and then
+    // reports the shift. Row 10 is in no answer after the refetch; the
+    // report makes the loader re-establish the window with a bounded repair.
+    {
+      name: `shows a row that moved between two served pages after a signalling refetch`,
+      testCase: {
+        path: `on-demand`,
+        provider: `refetch-signal`,
+        filter: `joined`,
+        via: `marker`,
+        indexed: true,
+        direction: `desc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 2,
+        offset: 0,
+        initial: [
+          { id: 0, rank: Number.NaN, eligible: true },
+          { id: 1, rank: 0, eligible: true },
+          { id: 2, rank: 4, eligible: true },
+          { id: 3, rank: 1, eligible: true },
+        ],
+        history: [
+          { type: `upsert`, id: 10, rank: 5, eligible: true },
+          { type: `flip`, id: 0 },
+          { type: `upsert`, id: 11, rank: 6, eligible: false },
+          { type: `refetch` },
+        ],
+      },
+    },
+    // An unindexed joined window whose only domain row is ineligible. After a
+    // signalling refetch the repair's bounded prefix holds just that row, so
+    // the window is short. The refill grows the prefix instead of reading the
+    // full source, which the refetch law forbids.
+    {
+      name: `grows the prefix of a short unindexed window after a signalling refetch`,
+      testCase: {
+        path: `on-demand`,
+        provider: `refetch-signal`,
+        latency: `immediate`,
+        cancellation: `cooperative`,
+        peer: false,
+        filter: `joined`,
+        via: `marker`,
+        indexed: false,
+        direction: `asc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+        initial: [],
+        history: [
+          { type: `upsert`, id: 0, rank: 0, eligible: false },
+          { type: `dup`, id: 0 },
+          { type: `refetch` },
+        ],
+      },
+    },
+    // The trace from #2221. A descending, nulls-first, unindexed window behind
+    // an anti-joined marker has a NaN rank, so its boundary has no cursor.
+    // After a signalling refetch the loader read the full source twice: the
+    // short prefix took the full-source fallback. The prefix now grows, so the
+    // refetch law, which allows no full-source read here, holds.
+    {
+      name: `reads no full source after a signalling refetch past a NaN boundary`,
+      testCase: {
+        path: `on-demand`,
+        provider: `refetch-signal`,
+        latency: `immediate`,
+        cancellation: `cooperative`,
+        peer: false,
+        filter: `anti-joined`,
+        via: `marker`,
+        indexed: false,
+        direction: `desc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 2,
+        offset: 0,
+        initial: [
+          { id: 0, rank: 0, eligible: true },
+          { id: 2, rank: Number.NaN, eligible: true },
+          { id: 1, rank: 0, eligible: false },
+        ],
+        history: [
+          { type: `delete-visible` },
+          { type: `move`, offset: 0, limit: 1 },
+        ],
+      },
+    },
+    // Trace 1 from a comment on #2221: an ascending unindexed window behind an
+    // anti-joined marker whose only row is ineligible. Before prefix growth the
+    // short prefix took the full-source fallback, twice, after a signalling
+    // refetch; the refetch law allows none.
+    {
+      name: `reads no full source after a signalling refetch of a short anti-joined window`,
+      testCase: {
+        path: `on-demand`,
+        provider: `refetch-signal`,
+        latency: `immediate`,
+        cancellation: `cooperative`,
+        peer: false,
+        filter: `anti-joined`,
+        via: `marker`,
+        indexed: false,
+        direction: `asc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+        initial: [],
+        history: [
+          { type: `upsert`, id: 0, rank: 0, eligible: false },
+          { type: `refetch` },
+        ],
+      },
+    },
+    // Found by the unindexed-refetch random campaign. A refetch report moves
+    // the page's end onto a null rank, which no cursor can express. Reading
+    // that end's tie would take the boundary's full-source fallback, so the
+    // loader repairs with its bounded prefix instead; a loader that read the
+    // tie broke the refetch law.
+    {
+      name: `repairs instead of reading an unexpressible end's tie after a signalling refetch`,
+      testCase: {
+        path: `on-demand`,
+        provider: `refetch-signal`,
+        latency: `immediate`,
+        cancellation: `cooperative`,
+        peer: false,
+        filter: `joined`,
+        via: `marker`,
+        indexed: false,
+        direction: `desc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 2,
+        offset: 1,
+        initial: [
+          { id: 0, rank: null as unknown as number, eligible: true },
+          { id: 2, rank: Number.NaN, eligible: true },
+          { id: 1, rank: 0, eligible: true },
+          { id: 3, rank: 0, eligible: true },
+        ],
+        history: [
+          {
+            type: `upsert`,
+            id: 10,
+            rank: null as unknown as number,
+            eligible: false,
+          },
+          { type: `dup`, id: 0 },
+        ],
+      },
+    },
+    // A peer's tie answer changes, so the provider reports, but the first
+    // query's page and tie answers stay the same and the peer installed the
+    // row after its page. That page proves the window, so the report must
+    // start no request for the first query and leave it owing no repair: the
+    // window move that follows continues from its boundary instead.
+    {
+      name: `starts no request for a window its own first page still proves after a report`,
+      testCase: {
+        path: `on-demand`,
+        provider: `refetch-signal`,
+        latency: `immediate`,
+        cancellation: `cooperative`,
+        peer: true,
+        filter: `source`,
+        via: `marker`,
+        indexed: true,
+        direction: `asc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+        initial: [
+          { id: 0, rank: 1, eligible: true },
+          { id: 1, rank: 2, eligible: true },
+          { id: 2, rank: 3, eligible: true },
+        ],
+        history: [
+          { type: `upsert`, id: 10, rank: 2, eligible: true },
+          { type: `refetch` },
+          { type: `move`, offset: 0, limit: 3 },
+        ],
+      },
+    },
+    // A signalling refetch moves the first page's end earlier, to a rank that
+    // a row the provider never sent ties with. The window is still inside the
+    // page, but the rank-2 row past it is local only because the old tie
+    // request read it, so it proves nothing about the rows that now tie with
+    // the end. The loader must read the new end's tie; ignoring the report
+    // made a later window move read the local rows and skip row 11.
+    {
+      name: `repairs a signalling refetch before a window move reads past its page`,
+      testCase: {
+        path: `on-demand`,
+        provider: `refetch-signal`,
+        latency: `immediate`,
+        cancellation: `cooperative`,
+        peer: false,
+        filter: `joined`,
+        via: `marker`,
+        indexed: true,
+        direction: `asc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 2,
+        offset: 0,
+        initial: [
+          { id: 0, rank: null as unknown as number, eligible: true },
+          { id: 1, rank: 2, eligible: true },
+          { id: 2, rank: 3, eligible: true },
+          { id: 3, rank: Number.NaN, eligible: true },
+        ],
+        history: [
+          { type: `upsert`, id: 10, rank: 0, eligible: true },
+          { type: `flip`, id: 2 },
+          { type: `upsert`, id: 11, rank: 0, eligible: true },
+          { type: `refetch` },
+          { type: `move`, offset: 0, limit: 3 },
+          { type: `delete`, id: 0 },
+        ],
+      },
+    },
+    // A page with no later page whose end moves earlier. Two rank-0 rows
+    // arrive while the provider lags; the refetched page ends at rank 0, but
+    // the tie request still holds the rank-1 row, so the loader sees no
+    // delete. The report repairs the window.
+    {
+      name: `repairs a signalling refetch whose page now ends before its tie`,
+      testCase: {
+        path: `on-demand`,
+        provider: `refetch-signal`,
+        filter: `anti-joined`,
+        via: `marker`,
+        indexed: true,
+        direction: `asc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 3,
+        offset: 0,
+        initial: [
+          { id: 0, rank: 0, eligible: true },
+          { id: 1, rank: 0, eligible: true },
+          { id: 2, rank: 1, eligible: true },
+          { id: 5, rank: 13, eligible: false },
+        ],
+        history: [
+          { type: `upsert`, id: 10, rank: 0, eligible: false },
+          { type: `upsert`, id: 11, rank: 0, eligible: true },
+          { type: `refetch` },
+        ],
+      },
+    },
+    // A second live-query Collection over a refetched on-demand source kept a
+    // short joined window (#2155): after the refetch the peer showed ranks
+    // [0, 0] where the model shows [0, 0, 100]. The loader fix that resumes a
+    // staged continuation after a synchronous answer the graph already
+    // processed closed this trace.
+    {
+      name: `shows a peer's full joined window after a refetch removes a tied row`,
+      testCase: {
+        path: `on-demand`,
+        provider: `refetch`,
+        latency: `immediate`,
+        peer: true,
+        filter: `joined`,
+        via: `link`,
+        indexed: true,
+        direction: `asc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 2,
+        offset: 0,
+        initial: [
+          { id: 9, rank: 0, eligible: true },
+          { id: 0, rank: 0, eligible: true },
+          { id: 1, rank: 0, eligible: true },
+          { id: 2, rank: 1, eligible: false },
+        ],
+        history: [
+          { type: `upsert`, id: 10, rank: 1, eligible: false },
+          { type: `flip`, id: 0 },
+        ],
+      },
+    },
     // The delete leaves fewer result rows than the offset, so the window
     // only loses its row. A subscriber that did not start with that key
     // receives no removal; this one starts with every visible key and must
     // receive the change.
-    await checkEagerWindow({
-      path: `sync`,
-      filter: `full-joined`,
-      via: `marker`,
-      indexed: true,
-      direction: `asc`,
-      nulls: `first`,
-      terms: 1,
-      limit: 1,
-      offset: 1,
-      initial: [
-        { id: 0, rank: 0, eligible: false },
-        { id: 1, rank: Number.NaN, eligible: false },
-      ],
-      history: [
-        { type: `delete`, id: 0 },
-        { type: `flip`, id: 0 },
-      ],
-      fillers: 0,
-      orphans: [],
-    })
-  })
-
-  it(`refills an unindexed on-demand anti-join window after a visible delete`, async () => {
-    oracleRoute(`fixed history`)
+    {
+      name: `publishes a full-join window that only loses a row`,
+      testCase: {
+        path: `sync`,
+        filter: `full-joined`,
+        via: `marker`,
+        indexed: true,
+        direction: `asc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 1,
+        offset: 1,
+        initial: [
+          { id: 0, rank: 0, eligible: false },
+          { id: 1, rank: Number.NaN, eligible: false },
+        ],
+        history: [
+          { type: `delete`, id: 0 },
+          { type: `flip`, id: 0 },
+        ],
+        fillers: 0,
+        orphans: [],
+      },
+    },
     // The plan pages without an index; the anti-join drops row 0 after the
     // provider's limit. Before the compiler counted the rows this window
     // needs, the window stayed empty after the delete instead of reading the
     // full source.
-    await checkEagerWindow({
-      path: `on-demand`,
-      filter: `anti-joined`,
-      via: `marker`,
-      indexed: false,
-      direction: `asc`,
-      nulls: `first`,
-      terms: 1,
-      limit: 1,
-      offset: 0,
-      initial: [],
-      history: [
-        { type: `upsert`, id: 0, rank: 0, eligible: false },
-        { type: `delete-visible` },
-        { type: `dup`, id: 0 },
-      ],
-    })
+    {
+      name: `refills an unindexed on-demand anti-join window after a visible delete`,
+      testCase: {
+        path: `on-demand`,
+        filter: `anti-joined`,
+        via: `marker`,
+        indexed: false,
+        direction: `asc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+        initial: [],
+        history: [
+          { type: `upsert`, id: 0, rank: 0, eligible: false },
+          { type: `delete-visible` },
+          { type: `dup`, id: 0 },
+        ],
+      },
+    },
+    // Nulls last. Row 2 and the marker of row 3 tie on rank in the null
+    // group. A full join reads its full source, so row 3's marker is
+    // matched. A loader that paged this plan and ended its prefix inside
+    // the null group would leave row 3 unloaded and could show its marker
+    // as a rootless row; restoring the old join rule fails this case.
+    ...(
+      [
+        [`sync`, 1],
+        [`local-only`, 1],
+        [`sync`, 2],
+        [`local-only`, 2],
+      ] as const
+    ).map(([path, terms]): EagerNamedHistory => ({
+      name: `shows no rootless full-join row for a null-ranked root past the prefix (${path}, ${terms} terms)`,
+      testCase: {
+        path,
+        filter: `full-joined`,
+        via: `marker`,
+        indexed: true,
+        direction: `asc`,
+        nulls: `last`,
+        fillers: 0,
+        terms,
+        limit: 2,
+        offset: 0,
+        initial: [
+          { id: 1, rank: 1, eligible: false },
+          { id: 2, rank: null as unknown as number, eligible: false },
+          { id: 3, rank: null as unknown as number, eligible: true },
+        ],
+        history: [{ type: `touch`, id: 1 }],
+      },
+    })),
+    // Every domain row has a marker, and nulls sort first. A bounded root
+    // prefix of one row would leave the other markers unmatched in the
+    // graph, and their null-ranked rootless rows would take the window
+    // from the first root row.
+    ...([`sync`, `local-only`] as const).map((path): EagerNamedHistory => ({
+      name: `shows no rootless full-join row whose root row is past the prefix (${path})`,
+      testCase: {
+        path,
+        filter: `full-joined`,
+        via: `marker`,
+        indexed: true,
+        direction: `asc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+        initial: [0, 1, 2, 3, 4, 5].map((id) => ({
+          id,
+          rank: id,
+          eligible: true,
+        })),
+        history: [{ type: `delete-visible` }],
+      },
+    })),
+    // The bounded prefix holds rows 3 and 1; row 0 then enters the query's
+    // input past it. Row 3 loses its marker without a root delete, so row 0
+    // must not stand in for row 4, which the prefix never sent.
+    // Shrunk from seed -1253945411.
+    ...([`sync`, `local-only`] as const).map((path): EagerNamedHistory => ({
+      name: `refills a joined-filter window when a row leaves only through the join (${path})`,
+      testCase: {
+        path,
+        filter: `joined`,
+        indexed: true,
+        direction: `asc`,
+        terms: 1,
+        limit: 1,
+        offset: 1,
+        initial: [
+          { id: 1, rank: 0, eligible: true },
+          { id: 3, rank: null as unknown as number, eligible: true },
+          { id: 4, rank: 1, eligible: true },
+        ],
+        history: [
+          { type: `upsert`, id: 0, rank: 2, eligible: true },
+          {
+            type: `upsert`,
+            id: 3,
+            rank: null as unknown as number,
+            eligible: false,
+          },
+        ],
+      },
+    })),
+    // A label update brings eligible row 10 into the query's input. After
+    // row 2 leaves, a prefix of one root row (row 1) fails the joined
+    // filter, and row 10 must not stand in for row 4.
+    ...([`sync`, `local-only`] as const).map((path): EagerNamedHistory => ({
+      name: `refills a joined-filter window past a retained distant row (${path})`,
+      testCase: {
+        path,
+        filter: `joined`,
+        indexed: true,
+        direction: `asc`,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+        initial: Array.from({ length: 10 }, (_, index) => ({
+          id: index + 1,
+          rank: index + 1,
+          eligible: (index + 1) % 2 === 0,
+        })),
+        history: [
+          { type: `touch`, id: 10 },
+          { type: `delete`, id: 2 },
+        ],
+      },
+    })),
+    ...[false, true].map((indexed): EagerNamedHistory => ({
+      name: `revalidates an empty joined prefix after an ineligible insert (indexed: ${indexed})`,
+      testCase: {
+        path: `on-demand`,
+        provider: `refetch-signal`,
+        latency: `immediate`,
+        cancellation: `cooperative`,
+        peer: false,
+        filter: `joined`,
+        via: `marker`,
+        indexed,
+        direction: `asc`,
+        nulls: `first`,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+        initial: [],
+        history: [
+          { type: `upsert`, id: 0, rank: 0, eligible: false },
+          { type: `flip`, id: 1 },
+        ],
+      },
+    })),
+    // A local null-ranked row can appear to fill the window while the settled
+    // provider prefix ends before a better row. Held answers must not let that
+    // local row stand in for source coverage after earlier visible deletes.
+    {
+      name: `keeps a joined window within its settled source prefix after held answers`,
+      testCase: {
+        path: `on-demand`,
+        provider: `forward`,
+        latency: `held`,
+        cancellation: `cooperative`,
+        peer: false,
+        filter: `joined`,
+        via: `marker`,
+        indexed: false,
+        direction: `desc`,
+        nulls: `last`,
+        terms: 1,
+        limit: 2,
+        offset: 0,
+        initial: [
+          { id: 0, rank: 0, eligible: false },
+          { id: 1, rank: 0, eligible: true },
+          { id: 2, rank: Number.NaN, eligible: true },
+        ],
+        history: [
+          { type: `delete-visible` },
+          { type: `delete-visible` },
+          { type: `delete-visible` },
+          {
+            type: `upsert`,
+            id: 40,
+            rank: null as unknown as number,
+            eligible: true,
+          },
+          { type: `delete-visible` },
+          { type: `delete`, id: 1 },
+        ],
+      },
+    },
+  ]
+  oracleProperty({
+    id: `ordered-work.work-eager-fixed`,
+    law: {
+      statement: `keeps rows and per-change work bounded for each named eager history`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `Named regressions outside the generated eager arbitraries, through the same driver and comparisons as the eager campaigns.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: eagerNamedHistories,
+    label: ({ name }) => name,
+    ...orderedWorkJudgment(({ testCase }: EagerNamedHistory) =>
+      checkEagerWindow(testCase),
+    ),
+    check: (_plan, _observations, verdict) => verdict,
   })
 
   const baseOptimisticWindowCases = (
@@ -7147,337 +4459,230 @@ describe(`eager indexed ordered windows`, () => {
     },
   ]
 
-  it.each(optimisticWindowCases)(
-    `characterizes a width-$width $indexed indexed optimistic $shape $mutation from $mutationSource with $extent replacement extent for a $consumer before $outcome ($answerTiming)`,
-    async (testCase) => {
-      oracleRoute(`case`)
-      const observation = await checkOptimisticWindow(testCase)
-      const actual = optimisticWindowViolations(observation, testCase)
-      // Each legal history must refine the independent public-window model.
-      expect(actual).toEqual([])
-    },
-  )
-
-  it(`refills an optimistic rank move that leaves a full installed window`, async () => {
-    oracleRoute(`fixed history`)
+  // Every optimistic-window history replays through the same production
+  // driver and the independent public-window check.
+  type OptimisticNamedHistory = {
+    name: string
+    testCase: OptimisticWindowCase
+  }
+  const optimisticNamedHistories: Array<OptimisticNamedHistory> = [
+    ...optimisticWindowCases.map((testCase) => ({
+      name: `characterizes a width-${testCase.width} ${testCase.indexed} indexed optimistic ${testCase.shape} ${testCase.mutation} from ${testCase.mutationSource} with ${testCase.extent} replacement extent for a ${testCase.consumer} before ${testCase.outcome} (${testCase.answerTiming})`,
+      testCase,
+    })),
     // Moving the leading row below a missing source row does not shrink the
     // installed window. A local row-count check alone cannot discover that
     // the remote ordered prefix now contains row 1.
-    const testCase: OptimisticWindowCase = {
-      shape: `source`,
-      mutation: `update`,
-      consumer: `collection`,
-      outcome: `acknowledge`,
-      width: 2,
-      indexed: true,
-      extent: `missing`,
-      installedIds: [3, 2],
-      acquisition: `required`,
-      rankMove: true,
-    }
-    const observation = await checkOptimisticWindow(testCase)
-    expect(optimisticWindowViolations(observation, testCase)).toEqual([])
-  })
-
-  it(`restores an optimistic membership departure with a rank change on rollback`, async () => {
-    oracleRoute(`fixed history`)
+    {
+      name: `refills an optimistic rank move that leaves a full installed window`,
+      testCase: {
+        shape: `source`,
+        mutation: `update`,
+        consumer: `collection`,
+        outcome: `acknowledge`,
+        width: 2,
+        indexed: true,
+        extent: `missing`,
+        installedIds: [3, 2],
+        acquisition: `required`,
+        rankMove: true,
+      },
+    },
     // This is a membership departure, so the short-window law applies even
     // though its source row also changes order. Rollback must remove both
     // overlay effects at the same public cut.
-    const testCase: OptimisticWindowCase = {
-      shape: `source`,
-      mutation: `update`,
-      consumer: `collection`,
-      outcome: `rollback`,
-      width: 2,
-      indexed: true,
-      extent: `missing`,
-      installedIds: [3, 2],
-      acquisition: `required`,
-      rankMove: true,
-      rankDeparture: true,
-    }
-    const observation = await checkOptimisticWindow(testCase)
-    expect(optimisticWindowViolations(observation, testCase)).toEqual([])
-  })
-
-  it.each(
-    ([`joined`, `anti-joined`] as const).flatMap((shape) =>
-      ([`acknowledge`, `rollback`] as const).map((outcome) => ({
-        shape,
-        outcome,
-      })),
-    ),
-  )(
-    `publishes an ascending $shape limit-one optimistic delete before $outcome`,
-    async ({ shape, outcome }) => {
-      oracleRoute(`case`)
-      // Negated ranks make row 3 the ascending head and row 2 its provider
-      // successor. The leading rejected row 4 remains ahead of both.
-      const testCase: OptimisticWindowCase = {
-        shape,
-        mutation: `delete`,
+    {
+      name: `restores an optimistic membership departure with a rank change on rollback`,
+      testCase: {
+        shape: `source`,
+        mutation: `update`,
         consumer: `collection`,
-        outcome,
-        width: 1,
+        outcome: `rollback`,
+        width: 2,
         indexed: true,
         extent: `missing`,
-        installedIds: [4, 3],
+        installedIds: [3, 2],
         acquisition: `required`,
-        direction: `asc`,
-      }
-      const observation = await checkOptimisticWindow(testCase)
-      expect(optimisticWindowViolations(observation, testCase)).toEqual([])
+        rankMove: true,
+        rankDeparture: true,
+      },
     },
-  )
-
-  it(`rejects a hostile optimistic observation that makes no refill progress`, () => {
-    oracleRoute(`calibration`)
-    const testCase: OptimisticWindowCase = {
-      shape: `joined`,
-      mutation: `delete`,
-      consumer: `collection`,
-      outcome: `acknowledge`,
-      width: 2,
-      indexed: true,
-      extent: `missing`,
-      installedIds: [4, 3, 2],
-      acquisition: `required`,
-    }
-    const observation: OptimisticWindowObservation = {
-      initial: [3, 2],
-      immediate: [2],
-      acquiring: [2],
-      answerQueued: [2],
-      settled: [2, 1],
-      rowsAfterFirstTurn: [2, 1],
-      rowsAfterSecondTurn: [2, 1],
-      immediatePublications: [{ rows: [2] }],
-      preSettlementPublications: [{ rows: [2] }],
-      publicationsAtSettlement: [{ rows: [2] }, { rows: [2, 1] }],
-      publicationsAfterSettlement: [],
-      attempts: [],
-      settlementOutcome: `fulfilled`,
-    }
-
-    expect(optimisticWindowViolations(observation, testCase)).toEqual([
-      `refill acquisition did not start`,
-      `refill answer did not submit row 1`,
-    ])
-  })
-
-  it(`rejects a delayed Collection publication`, () => {
-    oracleRoute(`calibration`)
-    const testCase: OptimisticWindowCase = {
-      shape: `joined`,
-      mutation: `update`,
-      consumer: `collection`,
-      outcome: `acknowledge`,
-      width: 2,
-      indexed: true,
-      extent: `missing`,
-      installedIds: [4, 3, 2],
-      acquisition: `required`,
-    }
-    const observation: OptimisticWindowObservation = {
-      initial: [3, 2],
-      immediate: [2],
-      acquiring: [2],
-      answerQueued: [2],
-      settled: [2, 1],
-      rowsAfterFirstTurn: [2, 1],
-      rowsAfterSecondTurn: [2, 1],
-      immediatePublications: [],
-      preSettlementPublications: [{ rows: [2] }],
-      publicationsAtSettlement: [{ rows: [2] }, { rows: [2, 1] }],
-      publicationsAfterSettlement: [],
-      attempts: [
-        {
-          submittedRows: [1],
-          limit: 2,
-          direction: `desc`,
-          appliedReceiptPending: true,
-          providerPending: true,
+    // Negated ranks make row 3 the ascending head and row 2 its provider
+    // successor. The leading rejected row 4 remains ahead of both.
+    ...([`joined`, `anti-joined`] as const)
+      .flatMap((shape) =>
+        ([`acknowledge`, `rollback`] as const).map((outcome) => ({
+          shape,
+          outcome,
+        })),
+      )
+      .map(({ shape, outcome }): OptimisticNamedHistory => ({
+        name: `publishes an ascending ${shape} limit-one optimistic delete before ${outcome}`,
+        testCase: {
+          shape,
+          mutation: `delete`,
+          consumer: `collection`,
+          outcome,
+          width: 1,
+          indexed: true,
+          extent: `missing`,
+          installedIds: [4, 3],
+          acquisition: `required`,
+          direction: `asc`,
         },
-      ],
-      settlementOutcome: `fulfilled`,
-    }
-
-    expect(optimisticWindowViolations(observation, testCase)).toEqual([
-      `immediate publications: [] instead of [[2]]`,
-    ])
-  })
-
-  it(`rejects a stale publication after transaction settlement`, () => {
-    oracleRoute(`calibration`)
-    const testCase: OptimisticWindowCase = {
-      shape: `joined`,
-      mutation: `update`,
-      consumer: `collection`,
-      outcome: `acknowledge`,
-      width: 2,
-      indexed: true,
-      extent: `missing`,
-      installedIds: [4, 3, 2],
-      acquisition: `required`,
-    }
-    const observation: OptimisticWindowObservation = {
-      initial: [3, 2],
-      immediate: [2],
-      acquiring: [2],
-      answerQueued: [2],
-      settled: [2, 1],
-      rowsAfterFirstTurn: [2, 1],
-      rowsAfterSecondTurn: [2],
-      immediatePublications: [{ rows: [2] }],
-      preSettlementPublications: [{ rows: [2] }],
-      publicationsAtSettlement: [{ rows: [2] }, { rows: [2, 1] }],
-      publicationsAfterSettlement: [{ rows: [2] }],
-      attempts: [
-        {
-          submittedRows: [1],
-          limit: 2,
-          direction: `desc`,
-          appliedReceiptPending: true,
-          providerPending: true,
-        },
-      ],
-      settlementOutcome: `fulfilled`,
-    }
-
-    expect(optimisticWindowViolations(observation, testCase)).toEqual([
-      `rows after second settlement turn: [2] instead of [2,1]`,
-      `post-settlement publications: [[2]] instead of []`,
-    ])
-  })
-
-  it(`rejects a full-source refill disguised as useful bounded progress`, () => {
-    oracleRoute(`calibration`)
-    const testCase: OptimisticWindowCase = {
-      shape: `joined`,
-      mutation: `delete`,
-      consumer: `collection`,
-      outcome: `acknowledge`,
-      width: 2,
-      indexed: true,
-      extent: `missing`,
-      installedIds: [4, 3, 2],
-      acquisition: `required`,
-    }
-    const observation: OptimisticWindowObservation = {
-      initial: [3, 2],
-      immediate: [2],
-      acquiring: [2],
-      answerQueued: [2],
-      settled: [2, 1],
-      rowsAfterFirstTurn: [2, 1],
-      rowsAfterSecondTurn: [2, 1],
-      immediatePublications: [{ rows: [2] }],
-      preSettlementPublications: [{ rows: [2] }],
-      publicationsAtSettlement: [{ rows: [2] }, { rows: [2, 1] }],
-      publicationsAfterSettlement: [],
-      attempts: [
-        {
-          submittedRows: [4, 3, 2, 1, 0, -1],
-          limit: 6,
-          direction: `desc`,
-          appliedReceiptPending: true,
-          providerPending: true,
-        },
-      ],
-      settlementOutcome: `fulfilled`,
-    }
-
-    expect(optimisticWindowViolations(observation, testCase)).toEqual([
-      `refill used an unbounded provider request`,
-    ])
-    const repeated = {
-      ...observation,
-      attempts: [{ ...observation.attempts[0]!, limit: 2 }],
-      requestHistory: [
-        { identity: `same ordered page`, newRows: 1 },
-        { identity: `same ordered page`, newRows: 0 },
-      ],
-    }
-    expect(optimisticWindowViolations(repeated, testCase)).toEqual([
-      `repeated an unchanged provider request without progress`,
-    ])
-  })
-
-  it(`rejects a source refill that omits eligibility or adds broad work`, async () => {
-    oracleRoute(`calibration`)
-    const testCase: OptimisticWindowCase = {
-      shape: `source`,
-      mutation: `delete`,
-      consumer: `collection`,
-      outcome: `acknowledge`,
-      width: 2,
-      indexed: true,
-      extent: `missing`,
-      installedIds: [3, 2],
-      acquisition: `required`,
-    }
+      })),
+  ]
+  async function judgeOptimisticWindow({
+    testCase,
+  }: OptimisticNamedHistory): Promise<void> {
     const observation = await checkOptimisticWindow(testCase)
-    expect(optimisticWindowViolations(observation, testCase)).toEqual([])
-    const refill = observation.requestHistory!.find(
-      ({ phase, submittedRows }) =>
-        phase === `pending` && submittedRows?.includes(1),
-    )!
+    const actual = optimisticWindowViolations(observation, testCase)
+    // Each legal history must refine the independent public-window model.
+    expect(actual).toEqual([])
+  }
+  oracleProperty({
+    id: `ordered-work.work-optimistic-window`,
+    law: {
+      statement: `An optimistic departure from an on-demand ordered window is public before settlement, starts one useful bounded acquisition when extent is missing, keeps a pending answer private, and settles to the acknowledged or restored window.`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The finite optimistic-window grammar and named histories over one six-row ledger; callback payload coherence is owned elsewhere.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: optimisticNamedHistories,
+    label: ({ name }) => name,
+    ...orderedWorkJudgment(judgeOptimisticWindow),
+    check: (_plan, _observations, verdict) => verdict,
+    calibrations: [
+      {
+        name: `rejects a source refill that omits eligibility or adds broad work`,
+        law: `calibration: source refill eligibility and broad work`,
+        // The old calibration ran this exact case; any other history runs
+        // the clean judgment alone. Its matchers stay as they were: only when
+        // they all hold has the check rejected the corrupted observation.
+        driver: (
+          plan: { history: OptimisticNamedHistory },
+          observe: (checkpoint: string, value: unknown) => void,
+        ) =>
+          observeComparison(plan, observe, async () => {
+            const { testCase } = plan.history
+            const observation = await checkOptimisticWindow(testCase)
+            expect(optimisticWindowViolations(observation, testCase)).toEqual(
+              [],
+            )
+            if (
+              !isDeepStrictEqual(testCase, {
+                shape: `source`,
+                mutation: `delete`,
+                consumer: `collection`,
+                outcome: `acknowledge`,
+                width: 2,
+                indexed: true,
+                extent: `missing`,
+                installedIds: [3, 2],
+                acquisition: `required`,
+              })
+            )
+              return
+            const refill = observation.requestHistory!.find(
+              ({ phase, submittedRows }) =>
+                phase === `pending` && submittedRows?.includes(1),
+            )!
 
-    // A finite, ordered request that drops the source predicate still returns
-    // the needed row, but a rejected peer at the same rank exposes the omission.
-    const missingPredicate: OptimisticWindowObservation = {
-      ...observation,
-      requestHistory: observation.requestHistory!.map((request) =>
-        request === refill ? { ...request, allowsRejectedRoot: true } : request,
-      ),
-    }
-    expect(optimisticWindowViolations(missingPredicate, testCase)).toContain(
-      `source refill omitted the source predicate`,
-    )
+            // A finite, ordered request that drops the source predicate still returns
+            // the needed row, but a rejected peer at the same rank exposes the omission.
+            const missingPredicate: OptimisticWindowObservation = {
+              ...observation,
+              requestHistory: observation.requestHistory!.map((request) =>
+                request === refill
+                  ? { ...request, allowsRejectedRoot: true }
+                  : request,
+              ),
+            }
+            expect(
+              optimisticWindowViolations(missingPredicate, testCase),
+            ).toContain(`source refill omitted the source predicate`)
 
-    // Useful progress from the first page cannot license a later, unrelated
-    // full-source fetch while the optimistic transaction remains pending.
-    const extraBroadRequest: OptimisticWindowObservation = {
-      ...observation,
-      requestHistory: [
-        ...observation.requestHistory!,
-        {
-          identity: `distinct full-source request`,
-          phase: `pending`,
-          newRows: 0,
-          submittedRows: [4, 3, 2, 1, 0, -1],
-          selectedRanks: [4, 3, 2, 1, 0, -1],
-          allowsRejectedRoot: true,
-        },
-      ],
-    }
-    expect(optimisticWindowViolations(extraBroadRequest, testCase)).toContain(
-      `optimistic acquisition used a broad provider request`,
-    )
-  })
-
-  it(`rejects acquisition deferred until after optimistic settlement`, async () => {
-    oracleRoute(`calibration`)
-    const testCase: OptimisticWindowCase = {
-      shape: `source`,
-      mutation: `delete`,
-      consumer: `collection`,
-      outcome: `acknowledge`,
-      width: 2,
-      indexed: true,
-      extent: `missing`,
-      installedIds: [3, 2],
-      acquisition: `required`,
-    }
-    const observation = await checkOptimisticWindow(testCase)
-    expect(optimisticWindowViolations(observation, testCase)).toEqual([])
-    expect(
-      optimisticWindowViolations(
-        { ...observation, acquisitionStartedBeforeSettlement: false },
-        testCase,
-      ),
-    ).toContain(`refill acquisition did not start before settlement`)
+            // Useful progress from the first page cannot license a later, unrelated
+            // full-source fetch while the optimistic transaction remains pending.
+            const extraBroadRequest: OptimisticWindowObservation = {
+              ...observation,
+              requestHistory: [
+                ...observation.requestHistory!,
+                {
+                  identity: `distinct full-source request`,
+                  phase: `pending`,
+                  newRows: 0,
+                  submittedRows: [4, 3, 2, 1, 0, -1],
+                  selectedRanks: [4, 3, 2, 1, 0, -1],
+                  allowsRejectedRoot: true,
+                },
+              ],
+            }
+            expect(
+              optimisticWindowViolations(extraBroadRequest, testCase),
+            ).toContain(`optimistic acquisition used a broad provider request`)
+            rejectAt(
+              `calibration: source refill eligibility and broad work`,
+              new Error(
+                `the optimistic window check reported the corrupted observation`,
+              ),
+            )
+          }),
+      },
+      {
+        name: `rejects acquisition deferred until after optimistic settlement`,
+        law: `calibration: acquisition deferred until settlement`,
+        // The old calibration ran this exact case; any other history runs
+        // the clean judgment alone. Its matchers stay as they were: only when
+        // they all hold has the check rejected the corrupted observation.
+        driver: (
+          plan: { history: OptimisticNamedHistory },
+          observe: (checkpoint: string, value: unknown) => void,
+        ) =>
+          observeComparison(plan, observe, async () => {
+            const { testCase } = plan.history
+            const observation = await checkOptimisticWindow(testCase)
+            expect(optimisticWindowViolations(observation, testCase)).toEqual(
+              [],
+            )
+            if (
+              !isDeepStrictEqual(testCase, {
+                shape: `source`,
+                mutation: `delete`,
+                consumer: `collection`,
+                outcome: `acknowledge`,
+                width: 2,
+                indexed: true,
+                extent: `missing`,
+                installedIds: [3, 2],
+                acquisition: `required`,
+              })
+            )
+              return
+            expect(
+              optimisticWindowViolations(
+                { ...observation, acquisitionStartedBeforeSettlement: false },
+                testCase,
+              ),
+            ).toContain(`refill acquisition did not start before settlement`)
+            rejectAt(
+              `calibration: acquisition deferred until settlement`,
+              new Error(
+                `the optimistic window check reported the corrupted observation`,
+              ),
+            )
+          }),
+      },
+    ],
   })
 
   /**
@@ -7487,256 +4692,128 @@ describe(`eager indexed ordered windows`, () => {
    * whichever equal-ranked key the initial window selected; the remaining
    * peer is then the only valid top row, independent of tie-breaking policy.
    */
-  it.each(
-    [
-      {
-        name: `ascending head`,
-        ranks: [1, 2, 3],
-        direction: `asc` as const,
-        offset: 0,
-        limit: 1,
-      },
-      {
-        name: `descending offset`,
-        ranks: [1, 2, 3, 4],
-        direction: `desc` as const,
-        offset: 1,
-        limit: 1,
-      },
-      {
-        name: `tied head`,
-        ranks: [2, 3, 3],
-        direction: `desc` as const,
-        offset: 0,
-        limit: 1,
-      },
-      {
-        name: `exhausted window`,
-        ranks: [1, 2, 3],
-        direction: `desc` as const,
-        offset: 0,
-        limit: 4,
-      },
-    ].flatMap((window) =>
-      ([`acknowledge`, `rollback`] as const).map((outcome) => ({
-        ...window,
-        outcome,
-      })),
-    ),
-  )(
-    `publishes an optimistic departure in an installed $name before $outcome`,
-    async ({ ranks, direction, offset, limit, outcome }) => {
-      oracleRoute(`case`)
-      const persistence = createDeferred<void>()
-      const rows = ranks.map((rank, index) => ({ id: index + 1, rank }))
-      const source = createCollection(
-        localOnlyCollectionOptions({
-          id: `optimistic-installed-${Math.random()}`,
-          getKey: (row) => row.id,
-          initialData: rows,
-          onDelete: async () => {
-            await persistence.promise
-          },
-        }),
+  const installedDepartureHistories = [
+    {
+      name: `ascending head`,
+      ranks: [1, 2, 3],
+      direction: `asc` as const,
+      offset: 0,
+      limit: 1,
+    },
+    {
+      name: `descending offset`,
+      ranks: [1, 2, 3, 4],
+      direction: `desc` as const,
+      offset: 1,
+      limit: 1,
+    },
+    {
+      name: `tied head`,
+      ranks: [2, 3, 3],
+      direction: `desc` as const,
+      offset: 0,
+      limit: 1,
+    },
+    {
+      name: `exhausted window`,
+      ranks: [1, 2, 3],
+      direction: `desc` as const,
+      offset: 0,
+      limit: 4,
+    },
+  ].flatMap((window) =>
+    ([`acknowledge`, `rollback`] as const).map((outcome) => ({
+      ...window,
+      outcome,
+    })),
+  )
+  async function runInstalledDeparture({
+    ranks,
+    direction,
+    offset,
+    limit,
+    outcome,
+  }: (typeof installedDepartureHistories)[number]): Promise<void> {
+    const persistence = createDeferred<void>()
+    const rows = ranks.map((rank, index) => ({ id: index + 1, rank }))
+    const source = createCollection(
+      localOnlyCollectionOptions({
+        id: `optimistic-installed-${Math.random()}`,
+        getKey: (row) => row.id,
+        initialData: rows,
+        onDelete: async () => {
+          await persistence.promise
+        },
+      }),
+    )
+    source.createIndex((row) => row.rank, { indexType: BTreeIndex })
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, direction)
+          .offset(offset)
+          .limit(limit),
+    })
+    const ids = () => query.toArray.map(({ id }) => id)
+    const order = (removed?: number) =>
+      expectedInstalledWindow(rows, { direction, offset, limit }, removed)
+    let unsubscribe: (() => void) | undefined
+    try {
+      await query.preload()
+      const initial = ids()
+      if (ranks[1] !== ranks[2]) expect(initial).toEqual(order())
+      const departed = initial[0]!
+      const publications: Array<Array<number>> = []
+      const subscription = query.subscribeChanges(
+        () => publications.push(ids()),
+        { includeInitialState: true },
       )
-      source.createIndex((row) => row.rank, { indexType: BTreeIndex })
-      const query = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ row: source })
-            .orderBy(({ row }) => row.rank, direction)
-            .offset(offset)
-            .limit(limit),
-      })
-      const ids = () => query.toArray.map(({ id }) => id)
-      const order = (removed?: number) =>
-        expectedInstalledWindow(rows, { direction, offset, limit }, removed)
-      let unsubscribe: (() => void) | undefined
-      try {
-        await query.preload()
-        const initial = ids()
-        if (ranks[1] !== ranks[2]) expect(initial).toEqual(order())
-        const departed = initial[0]!
-        const publications: Array<Array<number>> = []
-        const subscription = query.subscribeChanges(
-          () => publications.push(ids()),
-          { includeInitialState: true },
-        )
-        unsubscribe = () => subscription.unsubscribe()
-        publications.length = 0
+      unsubscribe = () => subscription.unsubscribe()
+      publications.length = 0
 
-        const transaction = source.delete(departed)
-        const expected = order(departed)
-        expect(ids(), `immediate installed rows`).toEqual(expected)
-        expect(publications, `synchronous installed publication`).toEqual([
-          expected,
-        ])
-        if (outcome === `acknowledge`) persistence.resolve()
-        else persistence.reject(new Error(`rollback`))
-        await transaction.when(`settled`).catch(() => undefined)
-        expect(ids(), `settled installed rows`).toEqual(
-          outcome === `acknowledge` ? expected : initial,
-        )
-      } finally {
-        persistence.resolve()
-        unsubscribe?.()
-        await query.cleanup()
-        await source.cleanup()
-      }
+      const transaction = source.delete(departed)
+      const expected = order(departed)
+      expect(ids(), `immediate installed rows`).toEqual(expected)
+      expect(publications, `synchronous installed publication`).toEqual([
+        expected,
+      ])
+      if (outcome === `acknowledge`) persistence.resolve()
+      else persistence.reject(new Error(`rollback`))
+      await transaction.when(`settled`).catch(() => undefined)
+      expect(ids(), `settled installed rows`).toEqual(
+        outcome === `acknowledge` ? expected : initial,
+      )
+    } finally {
+      persistence.resolve()
+      unsubscribe?.()
+      await query.cleanup()
+      await source.cleanup()
+    }
+  }
+  oracleProperty({
+    id: `ordered-work.work-installed-departure`,
+    law: {
+      statement: `An optimistic departure from a complete installed window publishes the model window at once, and settlement keeps it or restores the initial window.`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `Four installed windows crossed with acknowledgement and rollback.`,
     },
-  )
-
-  it.each([
-    [`sync`, 1],
-    [`local-only`, 1],
-    [`sync`, 2],
-    [`local-only`, 2],
-  ] as const)(
-    `shows no rootless full-join row for a null-ranked root past the prefix (%s, %s terms)`,
-    async (path, terms) => {
-      oracleRoute(`case`)
-      // Nulls last. Row 2 and the marker of row 3 tie on rank in the null
-      // group. A full join reads its full source, so row 3's marker is
-      // matched. A loader that paged this plan and ended its prefix inside
-      // the null group would leave row 3 unloaded and could show its marker
-      // as a rootless row; restoring the old join rule fails this case.
-      await checkEagerWindow({
-        path,
-        filter: `full-joined`,
-        via: `marker`,
-        indexed: true,
-        direction: `asc`,
-        nulls: `last`,
-        fillers: 0,
-        terms,
-        limit: 2,
-        offset: 0,
-        initial: [
-          { id: 1, rank: 1, eligible: false },
-          { id: 2, rank: null as unknown as number, eligible: false },
-          { id: 3, rank: null as unknown as number, eligible: true },
-        ],
-        history: [{ type: `touch`, id: 1 }],
-      })
-    },
-  )
-
-  it.each([`sync`, `local-only`] as const)(
-    `shows no rootless full-join row whose root row is past the prefix (%s)`,
-    async (path) => {
-      oracleRoute(`case`)
-      // Every domain row has a marker, and nulls sort first. A bounded root
-      // prefix of one row would leave the other markers unmatched in the
-      // graph, and their null-ranked rootless rows would take the window
-      // from the first root row.
-      await checkEagerWindow({
-        path,
-        filter: `full-joined`,
-        via: `marker`,
-        indexed: true,
-        direction: `asc`,
-        nulls: `first`,
-        terms: 1,
-        limit: 1,
-        offset: 0,
-        initial: [0, 1, 2, 3, 4, 5].map((id) => ({
-          id,
-          rank: id,
-          eligible: true,
-        })),
-        history: [{ type: `delete-visible` }],
-      })
-    },
-  )
-
-  it.each([`sync`, `local-only`] as const)(
-    `refills a joined-filter window when a row leaves only through the join (%s)`,
-    async (path) => {
-      oracleRoute(`case`)
-      // The bounded prefix holds rows 3 and 1; row 0 then enters the query's
-      // input past it. Row 3 loses its marker without a root delete, so row 0
-      // must not stand in for row 4, which the prefix never sent.
-      // Shrunk from seed -1253945411.
-      await checkEagerWindow({
-        path,
-        filter: `joined`,
-        indexed: true,
-        direction: `asc`,
-        terms: 1,
-        limit: 1,
-        offset: 1,
-        initial: [
-          { id: 1, rank: 0, eligible: true },
-          { id: 3, rank: null as unknown as number, eligible: true },
-          { id: 4, rank: 1, eligible: true },
-        ],
-        history: [
-          { type: `upsert`, id: 0, rank: 2, eligible: true },
-          {
-            type: `upsert`,
-            id: 3,
-            rank: null as unknown as number,
-            eligible: false,
-          },
-        ],
-      })
-    },
-  )
-
-  it.each([`sync`, `local-only`] as const)(
-    `refills a joined-filter window past a retained distant row (%s)`,
-    async (path) => {
-      oracleRoute(`case`)
-      // A label update brings eligible row 10 into the query's input. After
-      // row 2 leaves, a prefix of one root row (row 1) fails the joined
-      // filter, and row 10 must not stand in for row 4.
-      await checkEagerWindow({
-        path,
-        filter: `joined`,
-        indexed: true,
-        direction: `asc`,
-        terms: 1,
-        limit: 1,
-        offset: 0,
-        initial: Array.from({ length: 10 }, (_, index) => ({
-          id: index + 1,
-          rank: index + 1,
-          eligible: (index + 1) % 2 === 0,
-        })),
-        history: [
-          { type: `touch`, id: 10 },
-          { type: `delete`, id: 2 },
-        ],
-      })
-    },
-  )
-
-  it.each([false, true])(
-    `revalidates an empty joined prefix after an ineligible insert (indexed: %s)`,
-    async (indexed) => {
-      oracleRoute(`case`)
-      await checkEagerWindow({
-        path: `on-demand`,
-        provider: `refetch-signal`,
-        latency: `immediate`,
-        cancellation: `cooperative`,
-        peer: false,
-        filter: `joined`,
-        via: `marker`,
-        indexed,
-        direction: `asc`,
-        nulls: `first`,
-        terms: 1,
-        limit: 1,
-        offset: 0,
-        initial: [],
-        history: [
-          { type: `upsert`, id: 0, rank: 0, eligible: false },
-          { type: `flip`, id: 1 },
-        ],
-      })
-    },
-  )
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/local-only.ts#localOnlyCollectionOptions',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/subset-dedupe.ts',
+    ],
+    histories: installedDepartureHistories,
+    label: (history) =>
+      `publishes an optimistic departure in an installed ${history.name} before ${history.outcome}`,
+    ...orderedWorkJudgment(runInstalledDeparture),
+    check: (_plan, _observations, verdict) => verdict,
+  })
 
   oracleProperty({
     id: `ordered-work.eager-indexed-window`,
@@ -7764,52 +4841,6 @@ describe(`eager indexed ordered windows`, () => {
         await checkEagerWindow(scenario)
       }),
     check: (_history, _observations, verdict) => verdict,
-  })
-
-  // Reconstruction: the fixed-seed campaign reaches the premise. Sampling
-  // its arbitrary with its seed and run count yields exactly the cases it
-  // executes. Their initial windows include rootless rows and, separately,
-  // windows that hold a rootless row beside a root row with a null rank.
-  const FULL_JOIN_SEED = 2073
-  it(`generates full-join windows that reach the null group`, () => {
-    oracleRoute(`fixed seed`)
-    let rootless = 0
-    let mixedNullGroup = 0
-    for (const [testCase] of fc.sample(
-      fc.tuple(eagerFullJoinCase),
-      oracleFixedSeed(FULL_JOIN_SEED, { numRuns: runs }),
-    )) {
-      const roots = [
-        ...fillerRows(testCase.direction, testCase.fillers),
-        ...testCase.initial,
-      ]
-      const model = new Map<number, Row>()
-      for (const row of roots) {
-        model.set(row.id, { label: `row`, ...row, eligible: true })
-      }
-      for (const markerId of testCase.orphans ?? []) {
-        model.set(-1 - markerId, {
-          id: -1 - markerId,
-          rank: null as unknown as number,
-          eligible: true,
-          label: `marker`,
-        })
-      }
-      const window = eagerWindow(model, testCase)
-      const hasRootless = window.some((id) => id < 0)
-      if (hasRootless) rootless++
-      if (
-        hasRootless &&
-        window.some(
-          (id) => id >= 0 && (model.get(id)!.rank as number | null) == null,
-        )
-      ) {
-        mixedNullGroup++
-      }
-    }
-    // At one times the run count: 19 and 7 of 40 cases.
-    expect(rootless).toBeGreaterThanOrEqual(10)
-    expect(mixedNullGroup).toBeGreaterThanOrEqual(5)
   })
 
   oracleProperty({
@@ -8050,46 +5081,6 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
-  // A local null-ranked row can appear to fill the window while the settled
-  // provider prefix ends before a better row. Held answers must not let that
-  // local row stand in for source coverage after earlier visible deletes.
-  it(`keeps a joined window within its settled source prefix after held answers`, async () => {
-    oracleRoute(`fixed history`)
-    await checkEagerWindow({
-      path: `on-demand`,
-      provider: `forward`,
-      latency: `held`,
-      cancellation: `cooperative`,
-      peer: false,
-      filter: `joined`,
-      via: `marker`,
-      indexed: false,
-      direction: `desc`,
-      nulls: `last`,
-      terms: 1,
-      limit: 2,
-      offset: 0,
-      initial: [
-        { id: 0, rank: 0, eligible: false },
-        { id: 1, rank: 0, eligible: true },
-        { id: 2, rank: Number.NaN, eligible: true },
-      ],
-      history: [
-        { type: `delete-visible` },
-        { type: `delete-visible` },
-        { type: `delete-visible` },
-        {
-          type: `upsert`,
-          id: 40,
-          rank: null as unknown as number,
-          eligible: true,
-        },
-        { type: `delete-visible` },
-        { type: `delete`, id: 1 },
-      ],
-    })
-  })
-
   oracleProperty({
     id: `ordered-work.eager-joined-gap`,
     law: {
@@ -8184,20 +5175,6 @@ function expectedInstalledWindow(
     .map(({ id }) => id)
 }
 
-// Each check compares production with the model it names. The grammar parts
-// are the generators of legal histories: the exhaustive small domain and the
-// full-join case that the null-group calibration samples.
-declareOracle({
-  check: [expectEagerWindow, optimisticWindowViolations, assertConsumerParity],
-  model: [
-    eagerWindow,
-    referenceOptimisticWindow,
-    expectedVisibleWindow,
-    expectedInstalledWindow,
-  ],
-  grammar: [exhaustiveScenarios, eagerFullJoinCase],
-})
-
 /** A source's ordered acquisition must serve every compiled window that reads
  * that lexical source. Authored/source metadata modes may have separate result
  * streams; overwriting one window's demand with the other's cannot change the
@@ -8257,66 +5234,83 @@ afterAll(() => {
       `compiled ordered cache windows`,
     ).toEqual([])
 })
-declareOracle({
-  model: [expectedInstalledWindow],
-  grammar: [compilerCacheWindows],
-})
-it.each(compilerCacheWindows)(
-  `serves every metadata-mode window of one ordered source: %j`,
-  async (history) => {
-    oracleRoute(`case`)
-    compilerWindowEntered = true
-    const entered = new Set<string>()
-    const rows = [
-      { id: 1, rank: 1 },
-      { id: 2, rank: 2 },
-      { id: 3, rank: 3 },
-    ]
-    const failures: Array<unknown> = []
-    const traces: Array<unknown> = []
-    await receiveOrderedCompilerCacheHistory(history, rows, (cut, actual) => {
-      const window = cut === `moved` ? history.moved : history.initial
-      const expected = {
-        authored: expectedInstalledWindow(rows, {
-          ...window,
-          direction: history.direction,
-        }),
-        callback: expectedInstalledWindow(rows, {
-          ...history.initial,
-          direction: history.direction,
-        }),
-      }
-      // Compare signed-bag occurrences, not D2 output delivery order. Rank order
-      // is independently exercised by the enclosing ordered-work owner.
-      const byId = (ids: Array<number>) => [...ids].sort((a, b) => a - b)
-      try {
-        expect(
-          { authored: byId(actual.authored), callback: byId(actual.callback) },
-          `${compilerWindowKey(history)}/${cut}`,
-        ).toStrictEqual({
-          authored: byId(expected.authored),
-          callback: byId(expected.callback),
-        })
-      } catch (error) {
-        failures.push(error)
-        traces.push({ cut, actual, expected })
-      }
-      const state = `${compilerWindowKey(history)}/${cut}`
-      if (!compilerWindowCounts.has(state))
-        throw new Error(`Undeclared compiled window cut: ${state}`)
-      if (!entered.has(state)) {
-        entered.add(state)
-        compilerWindowCounts.set(state, compilerWindowCounts.get(state)! + 1)
-      }
-    })
-    if (failures.length)
-      throw new AggregateError(
-        failures,
-        `ordered compiler cache window mismatch: ${JSON.stringify(traces)}`,
-        { cause: failures[0] },
-      )
+async function runCompilerCacheWindow(
+  history: (typeof compilerCacheWindows)[number],
+): Promise<void> {
+  compilerWindowEntered = true
+  const entered = new Set<string>()
+  const rows = [
+    { id: 1, rank: 1 },
+    { id: 2, rank: 2 },
+    { id: 3, rank: 3 },
+  ]
+  const failures: Array<unknown> = []
+  const traces: Array<unknown> = []
+  await receiveOrderedCompilerCacheHistory(history, rows, (cut, actual) => {
+    const window = cut === `moved` ? history.moved : history.initial
+    const expected = {
+      authored: expectedInstalledWindow(rows, {
+        ...window,
+        direction: history.direction,
+      }),
+      callback: expectedInstalledWindow(rows, {
+        ...history.initial,
+        direction: history.direction,
+      }),
+    }
+    // Compare signed-bag occurrences, not D2 output delivery order. Rank order
+    // is independently exercised by the enclosing ordered-work owner.
+    const byId = (ids: Array<number>) => [...ids].sort((a, b) => a - b)
+    try {
+      expect(
+        { authored: byId(actual.authored), callback: byId(actual.callback) },
+        `${compilerWindowKey(history)}/${cut}`,
+      ).toStrictEqual({
+        authored: byId(expected.authored),
+        callback: byId(expected.callback),
+      })
+    } catch (error) {
+      failures.push(error)
+      traces.push({ cut, actual, expected })
+    }
+    const state = `${compilerWindowKey(history)}/${cut}`
+    if (!compilerWindowCounts.has(state))
+      throw new Error(`Undeclared compiled window cut: ${state}`)
+    if (!entered.has(state)) {
+      entered.add(state)
+      compilerWindowCounts.set(state, compilerWindowCounts.get(state)! + 1)
+    }
+  })
+  if (failures.length)
+    throw new AggregateError(
+      failures,
+      `ordered compiler cache window mismatch: ${JSON.stringify(traces)}`,
+      { cause: failures[0] },
+    )
+}
+oracleProperty({
+  id: `ordered-work.work-compiler-cache`,
+  law: {
+    statement: `An ordered source acquisition serves every compiled window that reads that lexical source, as the independent sorted slice.`,
+    authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+    limits: `The finite compiler-cache window grammar through the exported compiler and real loader; no universal operator-count bound.`,
   },
-)
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/local-only.ts#localOnlyCollectionOptions',
+    'src/query/compiler/index.ts#compileQuery',
+    'src/query/effect.ts#createEffect',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/live/ordered-source-loader.ts',
+    'src/query/subset-dedupe.ts',
+  ],
+  histories: compilerCacheWindows,
+  label: (history) =>
+    `serves every metadata-mode window of one ordered source: ${JSON.stringify(history)}`,
+  ...orderedWorkJudgment(runCompilerCacheWindow),
+  check: (_plan, _observations, verdict) => verdict,
+})
 
 /** Ordered publication waits for every joined dependency that any retained
  * source plan requires (ARCHITECTURE.md, atomic window publication). A QueryRef
@@ -8379,10 +5373,6 @@ function expectedJoinedPlanWindow(
     limit: history.width,
   })
 }
-declareOracle({
-  model: [expectedJoinedPlanWindow],
-  grammar: [joinedPlanHistories],
-})
 const joinedPlanCounts = new Map<string, number>(
   joinedPlanHistories.flatMap((history) =>
     [
@@ -8399,54 +5389,75 @@ afterAll(() => {
       `ordered joined plan publication`,
     ).toEqual([])
 })
-it.each(joinedPlanHistories)(
-  `retains every joined dependency through ordered plans: %j`,
-  async (history) => {
-    oracleRoute(`case`)
-    joinedPlanEntered = true
-    const entered = new Set<string>()
-    const reach = (state: string) => {
-      if (!joinedPlanCounts.has(state))
-        throw new Error(`Undeclared joined plan cut: ${state}`)
-      if (!entered.has(state)) {
-        entered.add(state)
-        joinedPlanCounts.set(state, joinedPlanCounts.get(state)! + 1)
-      }
+async function runJoinedPlan(
+  history: (typeof joinedPlanHistories)[number],
+): Promise<void> {
+  joinedPlanEntered = true
+  const entered = new Set<string>()
+  const reach = (state: string) => {
+    if (!joinedPlanCounts.has(state))
+      throw new Error(`Undeclared joined plan cut: ${state}`)
+    if (!entered.has(state)) {
+      entered.add(state)
+      joinedPlanCounts.set(state, joinedPlanCounts.get(state)! + 1)
     }
-    const failures: Array<unknown> = []
-    const traces: Array<unknown> = []
-    await receiveOrderedJoinedPlanHistory(history, (observation) => {
-      const added = observation.cut !== `initial` && observation.pending === 0
-      const expected = expectedJoinedPlanWindow(history, added)
-      try {
-        expect(
-          observation.rows,
-          `${JSON.stringify(history)}/${observation.cut}`,
-        ).toEqual(expected)
-        // Ordinary Effect startup may deliver progressive callbacks
-        // (ARCHITECTURE.md, atomic window publication). This history starts its
-        // publication claim after readiness; the initial settled rows establish
-        // the preceding complete result.
-        if (observation.cut !== `initial`)
-          for (const publication of observation.publications)
-            expect(
-              publication,
-              `complete ${observation.cut} publication`,
-            ).toEqual(expected)
-      } catch (error) {
-        failures.push(error)
-        traces.push({ ...observation, expected })
-      }
-      if (observation.cut === `held` && observation.pending > 0)
-        reach(`${JSON.stringify(history)}/held`)
-      if (observation.cut === `settled` && observation.pending === 0)
-        reach(`${JSON.stringify(history)}/settled`)
-    })
-    if (failures.length)
-      throw new AggregateError(
-        failures,
-        `ordered joined plan publication mismatch: ${JSON.stringify(traces)}`,
-        { cause: failures[0] },
-      )
+  }
+  const failures: Array<unknown> = []
+  const traces: Array<unknown> = []
+  await receiveOrderedJoinedPlanHistory(history, (observation) => {
+    const added = observation.cut !== `initial` && observation.pending === 0
+    const expected = expectedJoinedPlanWindow(history, added)
+    try {
+      expect(
+        observation.rows,
+        `${JSON.stringify(history)}/${observation.cut}`,
+      ).toEqual(expected)
+      // Ordinary Effect startup may deliver progressive callbacks
+      // (ARCHITECTURE.md, atomic window publication). This history starts its
+      // publication claim after readiness; the initial settled rows establish
+      // the preceding complete result.
+      if (observation.cut !== `initial`)
+        for (const publication of observation.publications)
+          expect(
+            publication,
+            `complete ${observation.cut} publication`,
+          ).toEqual(expected)
+    } catch (error) {
+      failures.push(error)
+      traces.push({ ...observation, expected })
+    }
+    if (observation.cut === `held` && observation.pending > 0)
+      reach(`${JSON.stringify(history)}/held`)
+    if (observation.cut === `settled` && observation.pending === 0)
+      reach(`${JSON.stringify(history)}/settled`)
+  })
+  if (failures.length)
+    throw new AggregateError(
+      failures,
+      `ordered joined plan publication mismatch: ${JSON.stringify(traces)}`,
+      { cause: failures[0] },
+    )
+}
+oracleProperty({
+  id: `ordered-work.work-joined-plan`,
+  law: {
+    statement: `Ordered publication waits for every joined dependency that a retained source plan requires, and each public read and callback keeps the preceding complete result.`,
+    authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+    limits: `The finite joined-plan grammar with controlled adapters; no provider or framework timing claim.`,
   },
-)
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/local-only.ts#localOnlyCollectionOptions',
+    'src/query/compiler/index.ts#compileQuery',
+    'src/query/effect.ts#createEffect',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/live/ordered-source-loader.ts',
+    'src/query/subset-dedupe.ts',
+  ],
+  histories: joinedPlanHistories,
+  label: (history) =>
+    `retains every joined dependency through ordered plans: ${JSON.stringify(history)}`,
+  ...orderedWorkJudgment(runJoinedPlan),
+  check: (_plan, _observations, verdict) => verdict,
+})

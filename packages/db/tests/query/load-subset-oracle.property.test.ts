@@ -1,26 +1,23 @@
 import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createDeferred } from '../../src/deferred.js'
-import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
-import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../oracle-assertion-adapter.js'
-import {
-  oracleFixedSeed,
-  oracleProperty,
-  oracleReplayRequested,
-  oracleRoute,
-} from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+import { oracleProperty } from '../oracle-config.js'
 import {
   exactDemandAxisPairs,
   toLoadSubsetOptions,
 } from './load-subset-support.js'
+import {
+  exactDemandArbitrary,
+  exactDemandFingerprint,
+  exactDemandTraceArbitrary,
+} from './load-subset-grammar-oracle.js'
 import type { ExactDemand } from './load-subset-support.js'
 import type {
   LoadSubsetOptions,
@@ -56,46 +53,6 @@ type ConcurrentExactScenario = {
   trace: ReadonlyArray<ExactDemand>
   settlementOrder: `forward` | `reverse`
 }
-
-const exactDemandArbitrary: fc.Arbitrary<ExactDemand> = fc
-  .record({
-    values: fc.uniqueArray(fc.integer({ min: -3, max: 3 }), {
-      minLength: 1,
-      maxLength: 5,
-    }),
-    orderField: fc.constantFrom(`rank` as const, `score` as const),
-    direction: fc.constantFrom(`asc` as const, `desc` as const),
-    nulls: fc.constantFrom(`first` as const, `last` as const),
-    stringSort: fc.constantFrom(`lexical` as const, `locale` as const),
-    offset: fc.integer({ min: 0, max: 4 }),
-    limit: fc.option(fc.integer({ min: 0, max: 5 }), { nil: undefined }),
-    cursorBoundary: fc.option(fc.integer({ min: -3, max: 3 }), {
-      nil: undefined,
-    }),
-  })
-  .map((demand) => ({
-    ...demand,
-    values: [...demand.values].sort((left, right) => left - right),
-  }))
-
-function exactDemandFingerprint(demand: ExactDemand): string {
-  return JSON.stringify(demand)
-}
-
-const exactDemandTraceArbitrary = fc
-  .uniqueArray(exactDemandArbitrary, {
-    minLength: 1,
-    maxLength: 6,
-    selector: exactDemandFingerprint,
-  })
-  .chain((pool) =>
-    fc
-      .array(fc.integer({ min: 0, max: pool.length - 1 }), {
-        minLength: 1,
-        maxLength: 20,
-      })
-      .map((indices) => indices.map((index) => pool[index]!)),
-  )
 
 const concurrentExactScenarioArbitrary: fc.Arbitrary<ConcurrentExactScenario> =
   fc.record({
@@ -332,64 +289,40 @@ async function expectExactWaitersShareRejection({
 // demand-identity model: a completed demand starts once, and only identical
 // in-flight demands share a promise. The rejected-waiter driver compares each
 // attempt with the transports that it expects. The grammar is the exact-demand
-// trace arbitrary, which the calibration test below reads for coverage.
-declareOracle({
-  check: [
-    assertCompletedExactDemandTrace,
-    assertConcurrentExactDemandTrace,
-    expectExactWaitersShareRejection,
-  ],
-  grammar: [exactDemandTraceArbitrary],
-})
+// trace arbitrary in load-subset-grammar-oracle.ts; its coverage check and the
+// independent model's nullish rule are checked in load-subset-model.test.ts.
 
 describe(`exact loadSubset demand oracle`, () => {
-  it.each(exactDemandAxisPairs)(
-    `distinguishes a change to %s in completed and concurrent demands`,
-    async (_axis, first, second) => {
-      oracleRoute(`case`)
-      assertCompletedExactDemandTrace([first, second, first])
-      await assertConcurrentExactDemandTrace({
-        trace: [first, second, first],
-        settlementOrder: `reverse`,
-      })
+  // One demand pair per identity axis, each through both exact-demand
+  // drivers: the completed trace and the reverse-settled concurrent trace.
+  oracleProperty({
+    id: `load-subset.exact-axis-pairs`,
+    law: {
+      statement: `A change to any one exact-demand axis makes a distinct demand: a completed demand starts once, and only identical in-flight demands share a promise.`,
+      authority: `ARCHITECTURE.md Demand grouping and ownership; the exact-demand law above.`,
+      limits: `One demand pair per identity axis in exactDemandAxisPairs, as the trace [first, second, first], completed and concurrent with reverse settlement.`,
     },
-  )
-
-  it(`uses SQL unknown for nullish comparisons in the independent model`, () => {
-    oracleRoute(`fixed history`)
-    const missing = new PropRef<number | null>([`missing`])
-
-    expect(
-      evaluateReferenceExpression(
-        new Func(`lte`, [missing, new Value(null)]),
-        {},
+    owns: ['src/query/subset-dedupe.ts'],
+    histories: exactDemandAxisPairs,
+    label: ([axis]) =>
+      `distinguishes a change to ${axis} in completed and concurrent demands`,
+    resolve: (pair) => ({ pair }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `load-subset.exact-axis-pairs`,
+        plan,
+        observe,
+        async () => {
+          const [, first, second] = plan.pair
+          assertCompletedExactDemandTrace([first, second, first])
+          await assertConcurrentExactDemandTrace({
+            trace: [first, second, first],
+            settlementOrder: `reverse`,
+          })
+        },
       ),
-    ).toBeNull()
-    expect(
-      evaluateReferenceExpression(new Func(`lt`, [missing, new Value(0)]), {}),
-    ).toBeNull()
-  })
-
-  it(`generates repeated, cursor, empty, and unbounded exact demands`, () => {
-    oracleRoute(`fixed seed`)
-    const traces = fc.sample(
-      exactDemandTraceArbitrary,
-      oracleFixedSeed(1656, { numRuns: 200 }),
-    )
-    const demands = traces.flat()
-
-    expect(
-      traces.some(
-        (trace) =>
-          new Set(trace.map(exactDemandFingerprint)).size < trace.length,
-      ),
-    ).toBe(true)
-    expect(
-      demands.some(({ cursorBoundary }) => cursorBoundary !== undefined),
-    ).toBe(true)
-    expect(demands.some(({ limit }) => limit === 0)).toBe(true)
-    expect(demands.some(({ limit }) => limit === undefined)).toBe(true)
-    expect(new Set(demands.map(({ offset }) => offset)).size).toBeGreaterThan(1)
+    check: forwardAssertionJudgment,
   })
 
   // All three native registrations retain the existing independent helpers.
@@ -445,47 +378,6 @@ describe(`exact loadSubset demand oracle`, () => {
     check: forwardAssertionJudgment,
   })
 
-  it(`reports one rejection to every exact waiter and then retries`, async () => {
-    oracleRoute(`fixed history`)
-    await expectExactWaitersShareRejection({
-      demand: {
-        values: [1, 2],
-        orderField: `rank`,
-        direction: `asc`,
-        nulls: `last`,
-        stringSort: `lexical`,
-        offset: 0,
-        limit: 2,
-        cursorBoundary: undefined,
-      },
-      failures: 1,
-      waiters: 2,
-      failureKind: `error`,
-    })
-  })
-
-  // This was the fixed-seed campaign's explicit example. It still runs the
-  // same helper once, separately from the unchanged generated campaign.
-  if (!oracleReplayRequested()) {
-    it(`retries an undefined rejection through a fresh successful acquisition`, () => {
-      oracleRoute(`fixed history`)
-      return expectExactWaitersShareRejection({
-        demand: {
-          values: [1, 2],
-          orderField: `rank`,
-          direction: `asc`,
-          nulls: `last`,
-          stringSort: `lexical`,
-          offset: 0,
-          limit: 2,
-          cursorBoundary: undefined,
-        },
-        failures: 3,
-        waiters: 4,
-        failureKind: `undefined`,
-      })
-    })
-  }
   oracleProperty({
     id: `load-subset.rejected-waiter`,
     law: {
@@ -504,6 +396,61 @@ describe(`exact loadSubset demand oracle`, () => {
     resolve: (scenario) => ({ scenario }),
     model: recordedAssertionJudgment,
     driver: (plan: { scenario: RejectedWaiterScenario }, observe) =>
+      recordAssertionJudgment(
+        `load-subset.rejected-waiter`,
+        plan,
+        observe,
+        () => expectExactWaitersShareRejection(plan.scenario),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  // Named rejected-waiter scenarios. The generated demand grammar maps its
+  // values without an unmapper, so it cannot take them back; each replays
+  // through the same helper under its old test name. The second was the
+  // fixed-seed campaign's explicit example.
+  const rejectedWaiterDemand: ExactDemand = {
+    values: [1, 2],
+    orderField: `rank`,
+    direction: `asc`,
+    nulls: `last`,
+    stringSort: `lexical`,
+    offset: 0,
+    limit: 2,
+    cursorBoundary: undefined,
+  }
+  oracleProperty({
+    id: `load-subset.rejected-waiter-fixed`,
+    law: {
+      statement: `Every exact waiter receives the same rejection and each later attempt starts fresh work until success is cached.`,
+      authority: `ARCHITECTURE.md Demand grouping and ownership; the rejection and retry law above.`,
+      limits: `Two named scenarios: one Error rejection with two waiters, and three undefined rejections with four waiters.`,
+    },
+    owns: ['src/query/subset-dedupe.ts'],
+    histories: [
+      {
+        name: `reports one rejection to every exact waiter and then retries`,
+        scenario: {
+          demand: rejectedWaiterDemand,
+          failures: 1,
+          waiters: 2,
+          failureKind: `error`,
+        },
+      },
+      {
+        name: `retries an undefined rejection through a fresh successful acquisition`,
+        scenario: {
+          demand: rejectedWaiterDemand,
+          failures: 3,
+          waiters: 4,
+          failureKind: `undefined`,
+        },
+      },
+    ] satisfies Array<{ name: string; scenario: RejectedWaiterScenario }>,
+    label: ({ name }) => name,
+    resolve: ({ scenario }) => ({ scenario }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
       recordAssertionJudgment(
         `load-subset.rejected-waiter`,
         plan,

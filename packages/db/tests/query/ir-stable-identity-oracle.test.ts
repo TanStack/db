@@ -7,7 +7,7 @@
 // The generated properties check canonical boolean forms, IN candidates as a
 // set, alias renaming, and reference-valued captures against inputs they read.
 // Fixed scenarios and literal identities live in ir-stable-identity.test.ts.
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import fc from 'fast-check'
 import {
   BaseQueryBuilder,
@@ -29,14 +29,13 @@ import {
   getQueryIdentity,
 } from '../../src/query/ir-stable-identity.js'
 import { Func, IncludesSubquery, PropRef, Value } from '../../src/query/ir.js'
+import { oracleProperty, pass, violation } from '../oracle-config.js'
 import {
-  oracleProperty,
-  oracleReplayTest,
-  oracleRoute,
-  pass,
-  violation,
-} from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from '../oracle-assertion-adapter.js'
 import {
   createAlphaRenamedIncludesQuery,
   createAlphaRenamedJoinQuery,
@@ -53,8 +52,6 @@ import {
 } from './ir-stable-identity-support.js'
 import type { Observation, Verdict } from '../oracle-config.js'
 import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
-
-const test = oracleReplayTest(it)
 
 // These metamorphic laws specify relations, rather than one literal identity.
 // Production identity strings can contain process-local reference handles, so
@@ -340,15 +337,6 @@ const outputProgramArbitrary: fc.Arbitrary<OutputProgram> = fc.record({
     ),
     { minLength: 1, maxLength: 3 },
   ),
-})
-
-declareOracle({
-  check: [
-    expectIdentitySharingMatchesOutcome,
-    checkIdentityRelations,
-    checkOutputProgram,
-  ],
-  model: [interpretOutputProgram, modelOutcome, modelOutputProgram],
 })
 
 describe(`semantic expression identity`, () => {
@@ -711,27 +699,6 @@ describe(`stable QueryIR identity smoke test`, () => {
     check: checkIdentityRelations,
   })
 
-  test(`preserves signed zero through coalesce and binary conversion through conditional output`, () => {
-    oracleRoute(`fixed history`)
-    assertOutputProgram(
-      observeOutputProgram({
-        literals: { kind: `signed-zero` },
-        wrappers: [{ kind: `coalesce` }],
-      }),
-    )
-    for (const condition of [false, true]) {
-      assertOutputProgram(
-        observeOutputProgram({
-          literals: { kind: `binary`, bytes: [65], same: false },
-          wrappers: [
-            { kind: `concat`, suffix: `` },
-            { kind: `caseWhen`, condition },
-          ],
-        }),
-      )
-    }
-  })
-
   oracleProperty({
     id: `ir-identity.output-denotation`,
     law: {
@@ -780,24 +747,85 @@ describe(`stable QueryIR identity smoke test`, () => {
     check: checkOutputProgram,
   })
 
-  test.each([`shared-wrong-output`, `constant-identity`] as const)(
-    `rejects ${`%s`} despite mutual agreement`,
-    (fault) => {
-      oracleRoute(`calibration`)
-      const observations = observeOutputProgram({
-        literals: { kind: `signed-zero` },
-        wrappers: [{ kind: `coalesce` }],
-      })
-      assertOutputProgram(observations)
-      if (fault === `shared-wrong-output`) {
-        for (const observation of observations) observation.actual = 99
-      } else {
-        for (const observation of observations)
-          observation.identity = `constant`
-      }
-      expect(() => assertOutputProgram(observations)).toThrowError(/expected/)
+  // Named programs: signed zero through coalesce, and binary conversion
+  // through a conditional output on both branches. Each is judged by
+  // `assertOutputProgram`, the program's own denotation comparison.
+  const namedOutputPrograms: Array<OutputProgram> = [
+    { literals: { kind: `signed-zero` }, wrappers: [{ kind: `coalesce` }] },
+    ...[false, true].map((condition): OutputProgram => ({
+      literals: { kind: `binary`, bytes: [65], same: false },
+      wrappers: [
+        { kind: `concat`, suffix: `` },
+        { kind: `caseWhen`, condition },
+      ],
+    })),
+  ]
+  const outputProgramLaw = `output denotation`
+  oracleProperty({
+    id: `ir-identity.output-denotation-fixed`,
+    law: {
+      statement: `Each compiled literal/wrapper program matches its independent denotation, and equal projected identities preserve its exact output.`,
+      authority: `The existing interpretOutputProgram denotation and output-sensitive identity law stated above.`,
+      limits: `Three named programs: signed zero through coalesce, and binary conversion through a conditional output with each condition.`,
     },
-  )
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
+    histories: [
+      {
+        name: `preserves signed zero through coalesce and binary conversion through conditional output`,
+        programs: namedOutputPrograms,
+      },
+    ],
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(outputProgramLaw, plan, observe, () => {
+        for (const program of plan.history.programs)
+          assertOutputProgram(observeOutputProgram(program))
+      }),
+    check: forwardAssertionJudgment,
+    // The comparison must reject a wrong output that both literals share, and
+    // a constant identity, despite their mutual agreement, on the signed-zero
+    // coalesce program.
+    calibrations: ([`shared-wrong-output`, `constant-identity`] as const).map(
+      (fault) => ({
+        name: `rejects ${fault} despite mutual agreement`,
+        law: outputProgramLaw,
+        driver: (
+          plan: { history: { programs: Array<OutputProgram> } },
+          observe: Parameters<typeof recordAssertionJudgment>[2],
+        ) =>
+          recordAssertionJudgment(outputProgramLaw, plan, observe, () => {
+            const observations = observeOutputProgram(plan.history.programs[0]!)
+            assertOutputProgram(observations)
+            if (fault === `shared-wrong-output`) {
+              for (const observation of observations) observation.actual = 99
+            } else {
+              for (const observation of observations)
+                observation.identity = `constant`
+            }
+            try {
+              assertOutputProgram(observations)
+            } catch (error) {
+              // Exactly the old matcher: an error whose message matches
+              // /expected/ is the comparison rejecting the wrong answer.
+              if (error instanceof Error && /expected/.test(error.message))
+                rejectAt(`calibration ${fault}`, error)
+              throw error
+            }
+          }),
+      }),
+    ),
+  })
 
   oracleProperty({
     id: `ir-identity.union-output-aliases`,
@@ -1017,8 +1045,8 @@ describe(`operator-code identity`, () => {
     ),
   )
 
-  test(`keeps queries whose operator code changes the compile outcome distinct`, () => {
-    oracleRoute(`fixed history`)
+  // The narrow product, judged by `modelOutcome` and the identity law.
+  function runOperatorCodeOutcomes(): void {
     const results = cases.map(({ groupBy, agg, inc }) => {
       const ir = buildIR(groupBy, agg, inc)
       const label = `${groupBy} groupBy, ${agg} aggregate, ${inc} include`
@@ -1030,7 +1058,7 @@ describe(`operator-code identity`, () => {
       for (const b of results)
         if (a.outcome !== b.outcome)
           expect(a.identity, `${a.label} vs ${b.label}`).not.toBe(b.identity)
-  })
+  }
 
   /**
    * The wide product: every way the query can hold operator code, each
@@ -1190,8 +1218,8 @@ describe(`operator-code identity`, () => {
                   poolable,
                 })
 
-  test(`keeps every operator-code variant with a different compile outcome distinct`, () => {
-    oracleRoute(`case`)
+  // The wide product, judged by `expectIdentitySharingMatchesOutcome`.
+  function runWideOperatorCodeProduct(): void {
     const identities = {
       ir: (ir: QueryIR) => getQueryIdentity(ir),
       pooled: (ir: QueryIR) =>
@@ -1215,5 +1243,66 @@ describe(`operator-code identity`, () => {
     ])
       expect(outcomes, `reaches ${expected}`).toContain(expected)
     expectIdentitySharingMatchesOutcome(built, identities)
+  }
+
+  const operatorCodeLaw = {
+    statement: `Queries whose operator code changes the compile outcome have distinct identities, for the IR identity and for the prepared identity with a pool.`,
+    authority: `The output-sensitive identity law stated above.`,
+  }
+  oracleProperty({
+    id: `ir-identity.operator-code-outcome`,
+    law: {
+      ...operatorCodeLaw,
+      limits: `The groupBy, aggregate, and include product with the independent compile-outcome model.`,
+    },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
+    histories: [
+      `keeps queries whose operator code changes the compile outcome distinct`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`operator-code identity`, plan, observe, () =>
+        runOperatorCodeOutcomes(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+  oracleProperty({
+    id: `ir-identity.operator-code-wide`,
+    law: {
+      ...operatorCodeLaw,
+      limits: `The wide product of operator-code slots, each present or missing, with production's own compile outcome.`,
+    },
+    owns: [
+      'src/collection/index.ts',
+      'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/includes-runtime.ts',
+      'src/query/pooled-live-query.ts',
+    ],
+    histories: [
+      `keeps every operator-code variant with a different compile outcome distinct`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`operator-code identity`, plan, observe, () =>
+        runWideOperatorCodeProduct(),
+      ),
+    check: forwardAssertionJudgment,
   })
 })

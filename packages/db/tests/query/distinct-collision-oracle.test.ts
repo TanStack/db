@@ -21,7 +21,6 @@ import {
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { oracleProperty } from '../oracle-config.js'
 import type {
   DistinctHistory,
@@ -34,10 +33,6 @@ import type {
 } from '../oracle-config.js'
 
 const values = distinctCollisionValues(hash)
-declareOracle({
-  check: [checkDistinctSnapshot],
-  grammar: [distinctRecipe],
-})
 
 type Plan = { worlds: DistinctHistory; requiredStates: ReadonlyArray<string> }
 type ReceivingOptions = Omit<
