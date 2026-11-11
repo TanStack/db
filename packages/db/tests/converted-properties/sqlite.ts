@@ -9,6 +9,7 @@ export const properties: ReadonlyArray<string> = [
   `opfs.open-outcome`,
   `electron.ipc-readiness`,
   `electron.follower-settlement`,
+  `sqlite-reload.class.electron-app`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -21,5 +22,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `electron-db-sqlite-persistence/tests/electron-ipc-readiness-oracle.test.ts`,
     `electron`,
     `ipc-readiness follower-settlement`,
+  ],
+  [
+    `electron-db-sqlite-persistence/tests/reload-class-oracle.electron.e2e.test.ts`,
+    `sqlite-reload`,
+    `class.electron-app`,
   ],
 ]
