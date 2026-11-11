@@ -56,6 +56,11 @@
   "peerDependencies": {
     "typescript": ">=4.7"
   },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/debug": "^4.1.13",
     "@vitest/coverage-istanbul": "^5.1.0"

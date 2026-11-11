@@ -24,9 +24,8 @@
  * recovery whose result applies late is an ordinary example in query.test.ts.
  */
 import { createCollection } from '@tanstack/db'
-import { expect, it, vi } from 'vitest'
+import { vi } from 'vitest'
 import { QueryClient } from '@tanstack/query-core'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   differs,
   oracleProperty,
@@ -148,9 +147,10 @@ export function modelFailingQueries(
 /**
  * Declared reach: the states a fetch enters, read from the model before it.
  * They are model-derived, so whether the exhaustive enumeration enters each
- * one is a fact about the grammar and the model alone. The grammar
- * calibration at the end of this file checks it without production, until
- * oracleProperty declares states on enumerated sources.
+ * one is a fact about the grammar and the model alone. The property declares
+ * them on its enumerated source and reads each history's states from this
+ * classifier, so its `reach` test fails when no enumerated history enters
+ * one of them.
  */
 export const failingQueryStates = [
   `a Query recovers while another's failure stays listed`,
@@ -423,34 +423,16 @@ oracleProperty({
     limits: `One Collection, two subsets, every history of four fetches, on Query Collection and behind the persisted wrapper. A recovery whose result applies late is an ordinary example in query.test.ts.`,
   },
   owns: [`src/query.ts#queryCollectionOptions`],
-  histories: failingQueryHistories(),
+  histories: {
+    enumerated: failingQueryHistories(),
+    states: failingQueryStates,
+  },
   label: ({ persisted, fetches }) =>
     `${persisted ? `persisted` : `plain`} ${fetches
       .map(({ subset, fails }) => `${subset}:${fails || `ok`}`)
       .join(` `)}`,
   model: modelFailingQueries,
+  reached: ({ fetches }) => failingQueryReach(fetches),
   driver: recordFailingQueries,
   check: checkFailingQueries,
-})
-
-/**
- * Grammar calibration: the enumeration enters every declared state. It runs
- * the model's reach classifier over the oracle's own enumeration, with no
- * production, and names each state that no history enters.
- */
-it(`grammar calibration: the four-fetch enumeration enters every declared state`, () => {
-  const reached = new Set(
-    failingQueryFetches().flatMap((fetches) => [...failingQueryReach(fetches)]),
-  )
-  expect(
-    failingQueryStates.filter((state) => !reached.has(state)),
-    `declared states that no enumerated history enters`,
-  ).toEqual([])
-})
-
-declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
-  model: [modelFailingQueries],
-  check: [checkFailingQueries],
-  grammar: [failingQueryFetches, failingQueryHistories, failingQueryReach],
 })
