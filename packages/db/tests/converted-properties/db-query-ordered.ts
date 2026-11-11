@@ -31,6 +31,13 @@ const otherProperties: ReadonlyArray<string> = [
   `derived-publication.queued-batches`,
   `replay.ordered-window-regressions`,
   `replay.ordered-window-fixed`,
+  `index-path-collision.predicate`,
+  `index-path-collision.subscription`,
+  `index-path-collision.selected-order`,
+  `index-path-collision.live-query`,
+  `custom-index-order.rank-window`,
+  `custom-index-order.later-eligible`,
+  `custom-index-order.eager-reader`,
 ]
 const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
@@ -77,6 +84,41 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/load-subset-replay-refinement-oracle.test.ts`,
     `replay`,
     `ordered-window-regressions ordered-window-fixed`,
+  ],
+  [
+    `db/tests/query/index-path-collision-oracle.test.ts`,
+    `index-path-collision`,
+    `predicate`,
+  ],
+  [
+    `db/tests/query/index-path-collision-oracle.test.ts`,
+    `index-path-collision`,
+    `subscription`,
+  ],
+  [
+    `db/tests/query/index-path-collision-oracle.test.ts`,
+    `index-path-collision`,
+    `selected-order`,
+  ],
+  [
+    `db/tests/query/index-path-collision-oracle.test.ts`,
+    `index-path-collision`,
+    `live-query`,
+  ],
+  [
+    `db/tests/query/custom-index-order-selection-oracle.test.ts`,
+    `custom-index-order`,
+    `rank-window`,
+  ],
+  [
+    `db/tests/query/custom-index-order-selection-oracle.test.ts`,
+    `custom-index-order`,
+    `later-eligible`,
+  ],
+  [
+    `db/tests/query/custom-index-order-selection-oracle.test.ts`,
+    `custom-index-order`,
+    `eager-reader`,
   ],
 ]
 
