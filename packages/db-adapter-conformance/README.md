@@ -144,7 +144,7 @@ are necessary: persistence's own snapshot choice can mask a broken retained-row
 predicate. After mutation settlement and applied receipts, source rows must equal
 the complete result. Readiness alone proves acceptance, so fulfillment during a
 persisting mutation can still expose the coherent retained baseline and overlay.
-Chromium's `eager-gap-conformance-oracle.opfs.spec.ts` receives the same 24
+Chromium's `eager-gap-conformance-witness.opfs.spec.ts` receives the same 24
 histories per adapter, plus 104 eager Query precedence, 48 on-demand Query scope,
 two cached-peer claims, and 24 TrailBase lifecycle histories from their primary owners. These 226 histories enforce separate reach
 and share their owners' comparisons.
@@ -152,7 +152,7 @@ and share their owners' comparisons.
 ```sh
 pnpm --filter @tanstack/query-db-collection exec vitest run --coverage.enabled=false --typecheck.enabled=false tests/persisted-startup-conformance-oracle.test.ts
 pnpm --filter @tanstack/convex-db-collection exec vitest run --coverage.enabled=false --typecheck.enabled=false tests/persisted-startup-conformance-oracle.property.test.ts
-pnpm --filter @tanstack/browser-db-sqlite-persistence exec playwright test --config playwright.opfs.config.ts persisted-startup-conformance-oracle.opfs.spec.ts
+pnpm --filter @tanstack/browser-db-sqlite-persistence exec playwright test --config playwright.opfs.config.ts persisted-startup-conformance-witness.opfs.spec.ts
 ```
 
 Restoring the original Query implementation fails startup at these receiving

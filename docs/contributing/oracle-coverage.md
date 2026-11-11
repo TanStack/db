@@ -1136,7 +1136,7 @@ completion, public rows rebuilt from the scenario seeds, persist FIFO order,
 the non-preemptible running persist, and the K=1 cut at each hydrate. The K=1
 reference bounds completed persists only from above, so a synthetic preempted
 running persist passes it and fails only the non-preemptible law. The
-[Chromium OPFS receiving spec](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/shared-driver-fairness-oracle.opfs.spec.ts)
+[Chromium OPFS receiving spec](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/shared-driver-fairness-witness.opfs.spec.ts)
 states no expected results of its own and adds a cold SQL read. It runs a
 neutral history, a held-BEGIN storm with every persist before the hydrates, and
 an interleaved storm with hydrates queued ahead of later persists. The
@@ -3267,7 +3267,7 @@ settlement, started and terminated workers, the steps that production reached,
 and a later open after an interruption. The
 [jsdom driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-open-outcome-oracle.test.ts)
 reaches worker start, initialization, and the worker's WASM failure response.
-The [Chromium driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-open-outcome-oracle.e2e.test.ts)
+The [Chromium driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-open-outcome-witness.e2e.test.ts)
 reaches the lookup, the real worker's WASM fetch, and worker start against a
 Vite dev server that pre-bundles the built package, for Vite 7 and Vite 8
 consumers. Under Vite 8 the copy's asset URLs point at the original install, so
@@ -3294,7 +3294,7 @@ interrupt an open in the same turn as a failing step, because no law orders
 those causes yet.
 
 The
-[install-layout oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/install-layout-oracle.e2e.test.ts)
+[install-layout oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/install-layout-witness.e2e.test.ts)
 models which installs open in Vite development and production: direct,
 hoisted, pnpm, transitive, npm-alias, and two-copy installs, three cache
 directories, and exclusion by import name or package name. Vite 7 and Vite 8 each run all
@@ -3370,7 +3370,7 @@ comparison. Two drivers run it. The
 runs the real worker module and wa-sqlite WASM build behind a bridge Worker,
 over an in-memory VFS with OPFSCoopSyncVFS's lock protocol, with fixed,
 random, and SEED/PATH campaigns. The
-[Chromium driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-request-order-oracle.opfs.spec.ts)
+[Chromium driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-request-order-witness.opfs.spec.ts)
 runs every fixed example against real OPFS and takes the access handle through
 the VFS's own BroadcastChannel and Web Lock handoff. Histories vary one to
 three inserts and selects, which execute meets a taken handle, whether the
@@ -4788,7 +4788,7 @@ a mutant wrong-answer control, and an explicit statement of remaining limits.
       duplicate endpoints fails the SQLite law. Bypassing startup provenance
       validation fails the Browser owner.
       The real installed SDK/HTTP/PostgreSQL/Chromium OPFS receiving driver
-      `e2e/electric-source-prefix-oracle.opfs.spec.ts` shares the source-head
+      `e2e/electric-source-prefix-witness.opfs.spec.ts` shares the source-head
       judgment. The original ten cells cover both membership directions, empty/disjoint
       advancement and drain/no-drain, plus missing legacy provenance with
       disjoint advancement. Each declares held earlier response, stale commit,
@@ -7868,7 +7868,7 @@ durable rows afterward, and rows after a local-only reopen. Scoped Query
 snapshots also check exact ownership at all four snapshot cuts. Startup checks
 the reload owner's one-full-row-read law before its own durable observation.
 Query's receiving driver preserves exact fetch-count and pending-fetch premises.
-The [Chromium OPFS receiver](../../packages/browser-db-sqlite-persistence/e2e/persisted-startup-conformance-oracle.opfs.spec.ts)
+The [Chromium OPFS receiver](../../packages/browser-db-sqlite-persistence/e2e/persisted-startup-conformance-witness.opfs.spec.ts)
 runs 116 Query histories, 104 PowerSync histories, 32 RxDB histories and 26
 complete-result histories for each of Convex, Electric and TrailBase through
 the same composition and check on real worker/OPFS. It
@@ -7964,7 +7964,7 @@ four direct-write operations, before-result and before/after captured baseline
 reads, early insert/upsert before persisted restore, writes before the first
 physical fetch, cached results without a physical fetch, and a later fetch.
 Each Node host runs 104 fixed histories and fixed/fresh campaigns of 80 histories;
-the [Chromium receiving page](../../packages/browser-db-sqlite-persistence/e2e/eager-gap-conformance-oracle.opfs.spec.ts)
+the [Chromium receiving page](../../packages/browser-db-sqlite-persistence/e2e/eager-gap-conformance-witness.opfs.spec.ts)
 runs the same 104 histories and judgment. Comparisons cover the accepted write
 when its baseline is already public, first-result public/durable/cache state,
 and public/durable state at later fetch settlement. The original derived-baseline

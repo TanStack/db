@@ -1029,7 +1029,7 @@ supply the entry point, access-handle control, database names, and result
 reporting. The Node driver also generates random histories from the same
 grammar. Neither production driver states expected results, and both feed the
 same comparison. The
-[Chromium spec](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-request-order-oracle.opfs.spec.ts)
+[Chromium spec](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-request-order-witness.opfs.spec.ts)
 checks for page errors, a completed run, one result per example, and no
 violations. It states no expected results either. A witness that restates
 expected results needs the record that ORC-014 describes.
