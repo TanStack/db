@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import fc from 'fast-check'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -142,7 +143,10 @@ function tieValue(options: RequestOptions): unknown {
  * - a repair prefix is a step of a running chain, not a start, when it is
  *   issued while a chain member settles or by the continuation such a
  *   settlement left staged (a synchronous answer) or deferred (joined work),
- *   as an optimistic refill or a shrunk window's prefix is;
+ *   as an optimistic refill or a shrunk window's prefix is. A graph pass that
+ *   a release callback runs does not consume that continuation: the loader
+ *   blocks ordered refinement until its release pass unwinds
+ *   (ARCHITECTURE.md), so the refinement resumes on a later pass;
  * - a truncate replay that settles while the subscription holds a
  *   full-source lease, even a failed one, covers the source and counts as a
  *   successful start after every earlier request; the leases it reacquired
@@ -216,7 +220,10 @@ function tieValue(options: RequestOptions): unknown {
  *
  * ## Checkpoints
  *
- * Held, one request at a time, and release are checked after every step.
+ * Held, one request at a time, and release are checked after every step,
+ * and inside the drain after each replay settlement and each request it
+ * settles: replay retirement can release a lease that a later read in the
+ * same drain covers.
  * A release that throws is an adapter bug: the loader reports it uncaught
  * from a microtask and changes nothing else, so each one must be reported
  * that way exactly once, and no other error may escape a microtask.
@@ -948,7 +955,8 @@ async function checkAuthorityCase(
       | `late-release-invalidation`
       | `completed-repair-release`
       | `deferred-refill`
-      | `reset-continuation`,
+      | `reset-continuation`
+      | `release-pass-continuation`,
   ) => void,
   observeRejection?: (reason: unknown) => unknown,
   observeRelease: (released: boolean) => boolean = (released) => released,
@@ -1258,10 +1266,18 @@ async function checkAuthorityCase(
         return
       }
       if (testCase.releaseReenters && !reentering) {
+        // A release callback runs a graph pass while a repair continuation
+        // is still owed: the state where a pass that issues nothing must not
+        // be read as consuming that continuation.
+        if (continuationOwed) reached?.(`release-pass-continuation`)
         reentering = true
         reentrantPasses++
         try {
-          run(() => loader.loadMore())
+          // The loader blocks ordered refinement until its release pass
+          // unwinds (ARCHITECTURE.md, Ordered requests, continuation, and
+          // recovery), so this pass consumes no owed continuation. The
+          // refinement it asked for resumes on a later pass as the same chain.
+          run(() => loader.loadMore(), false)
         } finally {
           reentering = false
         }
@@ -1488,7 +1504,7 @@ async function checkAuthorityCase(
       observe(error)
     }
     // A pass that issues nothing consumed or finished an owed continuation,
-    // unless joined work deferred it.
+    // unless joined work deferred it or a release pass blocked it.
     if (consumesContinuation && ledger.length === before && !joinedPending) {
       continuationOwed = false
     }
@@ -1704,10 +1720,16 @@ async function checkAuthorityCase(
     joinedPending = false
     for (let round = 0; round < 40; round++) {
       // A release during the drain can start a truncate of its own.
-      if (truncatePending) settleReplay()
+      if (truncatePending) {
+        settleReplay()
+        // Replay retirement can release leases that a later read in this
+        // drain covers, so the held law is checked at each drain event.
+        checkHeld(`after the drain's replay settles`)
+      }
       const next = inflight()[0]
       if (next) {
         await settle(next, true)
+        checkHeld(`after the drain settles request ${next.index}`)
         continue
       }
       const before = ledger.length
@@ -2565,9 +2587,10 @@ describe(`Ordered source request authority`, () => {
   //   start error replaced the request's own error in its participant);
   // A superseded page that fails before a covering replay settles reaches
   // the failed-lease law through a replay, which the campaigns rarely do.
-  // Two fixed regressions keep traces that first failed the generated
+  // Four fixed regressions keep traces that first failed the generated
   // campaign's own model: a chain step it took for a chain start (an optimistic
-  // refill, and a shrunk window's prefix deferred by joined work).
+  // refill, a shrunk window's prefix deferred by joined work, and two refills
+  // deferred across a release pass during replay retirement).
   it.each([
     {
       name: `a throwing release during a window move that resumes a repair`,
@@ -2973,6 +2996,59 @@ describe(`Ordered source request authority`, () => {
         ],
       },
     },
+    // A release callback ran a graph pass during replay retirement while
+    // joined work deferred the repair's refill. The driver took that blocked
+    // pass for one that consumed the refill, so the refill that resumed later
+    // counted as a new repair start and its chain's own leases as a leak.
+    // CI random seed -1691316941; an on-demand source.
+    {
+      name: `a release pass during replay retirement while a refill is deferred`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: false,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        joined: true,
+        releaseReenters: true,
+        releaseInvalidates: false,
+        history: [
+          { type: `settle`, pick: 0, ok: true },
+          { type: `report`, react: false },
+          { type: `truncate` },
+          { type: `move`, delta: -1 },
+          { type: `joinedBusy` },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `settleNewest` },
+        ],
+      },
+    },
+    // The same misclassification after a synchronous repair answer, from the
+    // 2026-11-03 coverage-map entry (CI run 41699469835).
+    {
+      name: `a release pass during replay retirement after a synchronous repair answer`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: true,
+        ...ordinaryScenario,
+        joined: true,
+        releaseReenters: true,
+        releaseInvalidates: false,
+        history: [
+          { type: `truncate` },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `invalidateThenFailOldest` },
+          { type: `move`, delta: -1 },
+          { type: `joinedBusy` },
+          { type: `settle`, pick: 0, ok: true },
+        ],
+      },
+    },
     {
       // Without the settled check, a report before the first page settled
       // forced a full-source read.
@@ -3024,46 +3100,91 @@ describe(`Ordered source request authority`, () => {
   // The broad grammar already generated the source trace. This directed
   // grammar makes its replay/continuation handoff frequent enough to measure,
   // while index-free prefix size, local rows, joined deferral, synchronous
-  // answers, and release-triggered truncation vary independently. Without
-  // joined deferral there is no held continuation; without the release truncate
-  // there is no replay bookkeeping to distinguish from a graph pass.
-  // `deferred-refill` needs a synchronous answer and a release-triggered
-  // truncate together: 6 of the 96 inputs. An eager source never reaches its
-  // adapter on release, so production cannot pair them; the campaign calibrates
-  // the driver's continuation provenance rather than a reachable product state.
-  // Random draws run twice the fixed count so that rare state stays above its
-  // minimum (expected 25 of 400).
+  // answers, release-triggered truncation, a graph pass inside each release
+  // callback, the truncate's place, and one or two provider answers vary
+  // independently. Without joined deferral there is no held continuation;
+  // without a truncate there is no replay bookkeeping to distinguish from a
+  // graph pass. A synchronous answer settles the repair prefix and issues its
+  // tie at once; an asynchronous one needs a second answer before joined work
+  // can defer the refill. A truncate before the repair hands the pre-truncate
+  // leases to replay retirement, so an on-demand source, whose release reaches
+  // the adapter, reaches `deferred-refill` and a release pass during it.
+  // Each declared state has a constructed history that fixes only the axes it
+  // needs. The campaign-local minima stay as they were. Random draws run twice
+  // the fixed count.
   const handoffProperty = `ordered-loader.replay-continuation`
-  const handoffCase = fc
+  const handoffResets = [
+    `none` as const,
+    `before-repair` as const,
+    `before-settle` as const,
+    `after-settle` as const,
+  ]
+  type HandoffAxes = {
+    limit: 1 | 2
+    snapshotRows: 1 | 3
+    syncRepair: boolean
+    joined: boolean
+    releaseTruncates: boolean
+    releaseReenters: boolean
+    reset: (typeof handoffResets)[number]
+    answers: 1 | 2
+  }
+  const handoffHistory = ({
+    reset,
+    answers,
+    ...axes
+  }: HandoffAxes): AuthorityCase => ({
+    ...ordinaryScenario,
+    indexed: false,
+    settledFirst: true,
+    releaseFault: false,
+    ...axes,
+    history: [
+      { type: `settle`, pick: 0, ok: true },
+      { type: `settle`, pick: 0, ok: true },
+      { type: `report`, react: false },
+      ...(reset === `before-repair` ? [{ type: `truncate` as const }] : []),
+      { type: `move`, delta: -1 },
+      { type: `joinedBusy` },
+      ...(reset === `before-settle` ? [{ type: `truncate` as const }] : []),
+      ...Array.from({ length: answers }, () => ({
+        type: `settleNewest` as const,
+      })),
+      ...(reset === `after-settle` ? [{ type: `truncate` as const }] : []),
+    ],
+  })
+  // The unmapper takes a history back to its axes, so constructed histories
+  // stay inside this grammar and shrink like generated ones.
+  const handoffAxes = (value: unknown): HandoffAxes => {
+    const candidate = value as AuthorityCase
+    for (const reset of handoffResets)
+      for (const answers of [1, 2] as const) {
+        const axes: HandoffAxes = {
+          limit: candidate.limit,
+          snapshotRows: candidate.snapshotRows,
+          syncRepair: candidate.syncRepair,
+          joined: candidate.joined,
+          releaseTruncates: candidate.releaseTruncates,
+          releaseReenters: candidate.releaseReenters,
+          reset,
+          answers,
+        }
+        if (isDeepStrictEqual(handoffHistory(axes), value)) return axes
+      }
+    throw new Error(`not a replay-continuation history`)
+  }
+  const handoffCase: fc.Arbitrary<AuthorityCase> = fc
     .record({
       limit: fc.constantFrom(1 as const, 2 as const),
       snapshotRows: fc.constantFrom(1 as const, 3 as const),
       syncRepair: fc.boolean(),
       joined: fc.boolean(),
       releaseTruncates: fc.boolean(),
-      reset: fc.constantFrom(
-        `none` as const,
-        `before-settle` as const,
-        `after-settle` as const,
-      ),
+      releaseReenters: fc.boolean(),
+      reset: fc.constantFrom(...handoffResets),
+      answers: fc.constantFrom(1 as const, 2 as const),
     })
-    .map(({ reset, ...axes }): AuthorityCase => ({
-      ...ordinaryScenario,
-      indexed: false,
-      settledFirst: true,
-      releaseFault: false,
-      ...axes,
-      history: [
-        { type: `settle`, pick: 0, ok: true },
-        { type: `settle`, pick: 0, ok: true },
-        { type: `report`, react: false },
-        { type: `move`, delta: -1 },
-        { type: `joinedBusy` },
-        ...(reset === `before-settle` ? [{ type: `truncate` as const }] : []),
-        { type: `settleNewest` },
-        ...(reset === `after-settle` ? [{ type: `truncate` as const }] : []),
-      ],
-    }))
+    .map(handoffHistory, handoffAxes)
 
   describe(`preserves repair continuation identity across replay bookkeeping`, () => {
     // Campaign-local counters preserve the legacy history minima; fixed examples
@@ -3073,12 +3194,52 @@ describe(`Ordered source request authority`, () => {
     let counts = new Map<State, number>()
     let executed = 0
 
+    // A release callback that runs a graph pass while the repair's deferred
+    // refill is still owed. The loader blocks refinement until its release
+    // pass unwinds, so that pass consumes nothing, and the refill that
+    // resumes later is still a step of the repair chain. An on-demand source
+    // reaches it: an explicit truncate before the repair hands the
+    // pre-truncate leases to replay retirement, and two asynchronous answers
+    // settle the repair prefix and its tie while joined work defers the
+    // refill. The release reaches the adapter, so this pairing is one that
+    // production can produce.
+    const releasePassState = `release-pass-continuation`
+
     // The pinned runner reads this object at execution. Keep the existing
     // fixed/random asymmetry without adding or widening a campaign.
     const histories = {
       arbitrary: handoffCase,
       runs: 400,
       fixedSeeds: [20261029],
+      states: [...states, releasePassState],
+      // Each builder keeps the generated limit, local rows, and release
+      // truncate, and fixes only the axes its states need.
+      constructed: [
+        {
+          name: `a release pass during replay retirement while an on-demand refill is deferred`,
+          enters: [`deferred-refill`, releasePassState],
+          build: (generated: AuthorityCase) =>
+            handoffHistory({
+              ...handoffAxes(generated),
+              syncRepair: false,
+              joined: true,
+              releaseReenters: true,
+              reset: `before-repair`,
+              answers: 2,
+            }),
+        },
+        {
+          name: `a truncate after the repair's refill is deferred`,
+          enters: [`reset-continuation`],
+          build: (generated: AuthorityCase) =>
+            handoffHistory({
+              ...handoffAxes(generated),
+              joined: true,
+              reset: `after-settle`,
+              answers: 2,
+            }),
+        },
+      ],
     }
     beforeEach(({ task }) => {
       counts = new Map(states.map((state) => [state, 0]))
@@ -3107,7 +3268,7 @@ describe(`Ordered source request authority`, () => {
       law: {
         statement: `preserves repair continuation identity across replay bookkeeping`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
-        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+        limits: `One unindexed loader over a fake subscription, limit 1/2, offset 0, one fixed history shape around a deferred refill, and the request-ledger laws at their checkpoints. A loader that drops a deferred refill during a blocked pass, then issues it as an ordinary page, is not rejected (coverage map, ordered-loader authority).`,
       },
       owns: [
         'src/collection/index.ts#createCollection',
@@ -3119,8 +3280,9 @@ describe(`Ordered source request authority`, () => {
       histories: histories,
       model: (history, observations) =>
         recordedComparison(history, observations),
-      driver: async (history, observe) =>
-        observeComparison(history, observe, async () => {
+      driver: async (history, observe) => {
+        const reached = new Set<string>()
+        await observeComparison(history, observe, async () => {
           executed++
           const entered = new Set<State>()
           const enter = (state: State) => {
@@ -3136,8 +3298,17 @@ describe(`Ordered source request authority`, () => {
           await checkAuthorityCase(testCase, (state) => {
             if (state === `deferred-refill` || state === `reset-continuation`)
               enter(state)
+            if (
+              state === `deferred-refill` ||
+              state === `reset-continuation` ||
+              state === releasePassState
+            )
+              reached.add(state)
           })
-        }),
+        })
+        // The comparison's verdict is the first observation, so reach follows it.
+        for (const state of reached) observe(`reach`, state)
+      },
       check: (_history, _observations, verdict) => verdict,
     })
   })
