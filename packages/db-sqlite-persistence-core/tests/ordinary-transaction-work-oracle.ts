@@ -1254,113 +1254,101 @@ export function runOrdinaryTransactionWorkOracle(): void {
     // The fixed process and design cases, each through the real adapter and
     // the model, then the work bound over all of them, so the RED identifies
     // work after every semantic comparison.
-    async function refineFixedCases(): Promise<void> {
-      const workObservations: Array<{
-        case: string
-        calls: number
-        bound: number
-        maxParams: number
-      }> = []
-      for (const item of [
-        ...workCases,
-        ...additionalWorkCases,
-        ...semanticCases,
-      ]) {
-        const host = fixture(item.cap)
-        const collectionId = `oracle-${item.name}`
-        let primary: unknown
-        try {
-          await host.adapter.loadResumeSnapshot({
-            kind: `eager`,
-            collectionId: collectionId,
-          }) // schema setup outside work count
-          const history: Array<Tx> = []
-          if (item.seed) {
-            history.push(clone(item.seed))
-            await host.adapter.applyCommittedTx(
-              { kind: `eager`, collectionId: collectionId },
-              item.seed,
-            )
-          }
-          host.counts.query = 0
-          host.counts.run = 0
-          host.counts.transactions = 0
-          host.counts.maxParams = 0
-          history.push(clone(item.candidate))
+    // The fixed size, parameter-cap, and semantic cases, each its own
+    // enumerated history through its own adapter. A case's work is checked
+    // after its semantic comparisons, so a RED names the semantic failure
+    // first; a size at the parameter cap also checks its call count and
+    // largest parameter list.
+    const fixedCases = [...workCases, ...additionalWorkCases, ...semanticCases]
+    const capChecks: Record<string, { calls: number; maxParams: number }> = {
+      'unique-124-500-parameter-cap': { calls: 10, maxParams: 496 },
+      'unique-125-500-parameter-cap': { calls: 10, maxParams: 500 },
+      'unique-126-500-parameter-cap': { calls: 15, maxParams: 500 },
+    }
+    for (const name of Object.keys(capChecks))
+      if (!fixedCases.some((item) => item.name === name))
+        throw new Error(`parameter-cap check names no fixed case: ${name}`)
+    async function refineFixedCase(item: Case): Promise<void> {
+      let work:
+        | { case: string; calls: number; bound: number; maxParams: number }
+        | undefined
+      const host = fixture(item.cap)
+      const collectionId = `oracle-${item.name}`
+      let primary: unknown
+      try {
+        await host.adapter.loadResumeSnapshot({
+          kind: `eager`,
+          collectionId: collectionId,
+        }) // schema setup outside work count
+        const history: Array<Tx> = []
+        if (item.seed) {
+          history.push(clone(item.seed))
           await host.adapter.applyCommittedTx(
             { kind: `eager`, collectionId: collectionId },
-            item.candidate,
+            item.seed,
           )
-          const calls = host.counts.query + host.counts.run
-          const candidateTransactions = host.counts.transactions
-          const maxParams = host.counts.maxParams
-          const actual = await observe(host.adapter, host.driver, collectionId)
-          const expected = modelAfter(history)
-          oracleAssertion('existing comparison at 1245', () =>
-            expect(
-              actual,
-              `${item.name}: complete durable observation`,
-            ).toEqual(expected),
-          )
-          oracleAssertion('existing comparison at 1248', () =>
-            expect(
-              candidateTransactions,
-              `${item.name}: one SQLite transaction`,
-            ).toBe(1),
-          )
-          if (item.workSize !== undefined) {
-            const chunk = Math.min(125, Math.floor(item.cap / 4))
-            const bound =
-              12 +
-              6 * (item.workFamilies ?? 1) * Math.ceil(item.workSize / chunk)
-            workObservations.push({ case: item.name, calls, bound, maxParams })
-          }
-        } catch (error) {
-          primary = error
         }
-        try {
-          host.close()
-        } catch (cleanup) {
-          if (primary !== undefined)
-            throw new AggregateError(
-              [primary, cleanup],
-              `${item.name}: primary and cleanup failed`,
-              { cause: primary },
-            )
-          throw cleanup
-        }
-        if (primary !== undefined) throw primary
-      }
-      // Check work after every semantic comparison, so the RED identifies work.
-      console.log('ORDINARY_SQLITE_WORK', JSON.stringify(workObservations))
-      for (const row of workObservations) {
-        oracleAssertion('existing comparison at 1278', () =>
-          expect(row.calls, `${row.case}: work checkpoint`).toBeLessThanOrEqual(
-            row.bound,
+        host.counts.query = 0
+        host.counts.run = 0
+        host.counts.transactions = 0
+        host.counts.maxParams = 0
+        history.push(clone(item.candidate))
+        await host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          item.candidate,
+        )
+        const calls = host.counts.query + host.counts.run
+        const candidateTransactions = host.counts.transactions
+        const maxParams = host.counts.maxParams
+        const actual = await observe(host.adapter, host.driver, collectionId)
+        const expected = modelAfter(history)
+        oracleAssertion('existing comparison at 1245', () =>
+          expect(actual, `${item.name}: complete durable observation`).toEqual(
+            expected,
           ),
         )
+        oracleAssertion('existing comparison at 1248', () =>
+          expect(
+            candidateTransactions,
+            `${item.name}: one SQLite transaction`,
+          ).toBe(1),
+        )
+        if (item.workSize !== undefined) {
+          const chunk = Math.min(125, Math.floor(item.cap / 4))
+          const bound =
+            12 + 6 * (item.workFamilies ?? 1) * Math.ceil(item.workSize / chunk)
+          work = { case: item.name, calls, bound, maxParams }
+        }
+      } catch (error) {
+        primary = error
       }
-      const atSize = (size: number) =>
-        workObservations.find(
-          (row) => row.case === `unique-${size}-500-parameter-cap`,
-        )!
+      try {
+        host.close()
+      } catch (cleanup) {
+        if (primary !== undefined)
+          throw new AggregateError(
+            [primary, cleanup],
+            `${item.name}: primary and cleanup failed`,
+            { cause: primary },
+          )
+        throw cleanup
+      }
+      if (primary !== undefined) throw primary
+      if (work === undefined) return
+      const row = work
+      console.log('ORDINARY_SQLITE_WORK', JSON.stringify(row))
+      oracleAssertion('existing comparison at 1278', () =>
+        expect(row.calls, `${row.case}: work checkpoint`).toBeLessThanOrEqual(
+          row.bound,
+        ),
+      )
+      const cap = capChecks[row.case]
+      if (cap === undefined) return
       oracleAssertion('existing comparison at 1286', () =>
-        expect(atSize(124).calls).toBeLessThanOrEqual(10),
+        expect(row.calls).toBeLessThanOrEqual(cap.calls),
       )
       oracleAssertion('existing comparison at 1287', () =>
-        expect(atSize(124).maxParams).toBe(496),
-      )
-      oracleAssertion('existing comparison at 1288', () =>
-        expect(atSize(125).calls).toBeLessThanOrEqual(10),
-      )
-      oracleAssertion('existing comparison at 1289', () =>
-        expect(atSize(125).maxParams).toBe(500),
-      )
-      oracleAssertion('existing comparison at 1290', () =>
-        expect(atSize(126).calls).toBeLessThanOrEqual(15),
-      )
-      oracleAssertion('existing comparison at 1291', () =>
-        expect(atSize(126).maxParams).toBe(500),
+        expect(row.maxParams).toBe(cap.maxParams),
       )
     }
     // A hostile writer that discards existing metadata while batching: the
@@ -1664,19 +1652,17 @@ export function runOrdinaryTransactionWorkOracle(): void {
       id: `sqlite-ordinary.fixed-cases`,
       law: {
         ...ordinaryLaw,
-        limits: `The fixed size, parameter-cap, and semantic cases, each through its own adapter in order, then the work bound over all of them.`,
+        limits: `The fixed size, parameter-cap, and semantic cases, each through its own adapter, with its work bound.`,
       },
       owns: [`src/sqlite-core-adapter.ts`],
-      histories: [
-        {
-          name: `refines durable semantics for the bounded process and design grammar; ordinary large writes are chunk-bounded`,
-        },
-      ],
-      label: ({ name }) => name,
+      histories: fixedCases.map((item) => item.name),
+      label: (name) =>
+        `refines durable semantics and bounds the work of ${name}`,
+      resolve: (name) => ({ item: fixedCases.find((c) => c.name === name)! }),
       model: recordedAssertionJudgment,
       driver: (plan, observe) =>
         recordAssertionJudgment(ordinaryJudgment, plan, observe, () =>
-          refineFixedCases(),
+          refineFixedCase(plan.item),
         ),
       check: forwardAssertionJudgment,
     })
