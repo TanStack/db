@@ -327,11 +327,6 @@ const ownerGroups: ReadonlyArray<
   ],
 
   [
-    `../scripts/legacy-campaign-baseline-oracle.property.test.js`,
-    `scripts`,
-    `legacy-campaign-baseline`,
-  ],
-  [
     `db/tests/query/pagination-oracle.property.test.ts`,
     `pagination`,
     `limit-admission-replay-pending-negative limit-admission-replay-pending-valid limit-admission-builder-negative limit-admission-builder-valid limit-admission-unstarted-negative limit-admission-unstarted-valid limit-admission-ready-negative limit-admission-ready-valid limit-admission-initial-pending-negative limit-admission-initial-pending-valid limit-admission-move-pending-negative limit-admission-move-pending-valid`,
@@ -1691,10 +1686,6 @@ const replayTestNames = new Map([
   [
     `sqlite-persistence.binding-capacity`,
     `sqlite-persistence\\.binding-capacity > random seed`,
-  ],
-  [
-    `scripts.legacy-campaign-baseline`,
-    `scripts\\.legacy-campaign-baseline > random seed`,
   ],
   ...ownerGroups
     .filter(([, prefix]) => prefix === `adapter-conformance.eager-live-source`)

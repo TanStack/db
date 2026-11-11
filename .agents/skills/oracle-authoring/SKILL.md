@@ -104,8 +104,7 @@ is required. When changing repository coverage, update the existing oracle owner
 and coverage map to reflect the changed scope. A scratch law-design experiment
 retains its proposals and limits without claiming new repository coverage.
 
-For a bug fix or feature, convert its owning legacy oracles to `oracleProperty`
-and remove their `legacyCampaigns` entries. Close gaps in changed functions by
+For a bug fix or feature, close gaps in changed functions by
 an oracle kill or an explicit maintainer allowance for the anchored gaps. A
 coverage-map entry, equivalent-mutant claim, or unobservable-effect claim does
 not close a gap. For a pure conversion, compare before/after gap reports with

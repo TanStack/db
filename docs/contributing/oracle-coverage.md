@@ -4432,10 +4432,12 @@ helpers and their self-tests are deleted (maintainer decision, 2026-11-10).
 The framework's own self-oracle owns the declared-reach, replay and
 shrink-fidelity laws for every `oracleProperty`.
 
-The `legacyCampaigns` list in `scripts/oracle-lint-settings.mjs` is empty: no
-file keeps a raw or legacy campaign. `scripts/check-legacy-oracle-campaigns.mjs`
-still rejects any addition relative to the merge-base, so the empty list cannot
-regrow; the setting itself leaves with the framework's later removal of it.
+No file keeps a raw or legacy campaign. The framework removed the
+`legacyCampaigns` setting (TanStack/oracles #23), so `oracle/oracle-property-only`
+exempts no file and reports a raw campaign or legacy import wherever it
+appears. `scripts/oracle-lint-settings.mjs` no longer sets it, and the
+merge-base gate that kept the empty list from regrowing is deleted (see
+"Legacy oracle campaign migration" below).
 
 The last callers converted as follows. A per-history reach on an enumerated
 source (the documented-mutations receivers, the Query reload-housekeeping
@@ -4443,10 +4445,13 @@ kinds in `packages/query-db-collection/tests/reload-housekeeping-oracle.test.ts`
 (`query-db.reload-housekeeping`), and the real Electric GC receiver
 `collection-lifecycle.gc-retention-boundaries.electric-postgres`) is a check law, `declared reach`,
 because an enumerated source runs every history. The one aggregate reach over
-an enumeration, the four model-derived states of the failing-Query histories,
-is a grammar calibration in `failing-queries-oracle.test.ts` that runs the
-model's reach classifier over the oracle's own enumeration without production,
-until `oracleProperty` declares states on enumerated sources. The SQLite
+an enumeration, the four model-derived states of the failing-Query histories
+in `failing-queries-oracle.test.ts`, is declared on the enumerated source,
+`histories: { enumerated, states }` (TanStack/oracles #19). The property's
+`reached` reads each history's states from the model's reach classifier, and
+its `reach` test fails when no enumerated history enters a declared state.
+It replaced a grammar calibration that ran the same classifier over the same
+enumeration without production. The SQLite
 sync-metadata session campaigns declare their states with constructed
 histories; the persisted nesting-and-seeds campaigns' "at least five random
 histories per state" became "at least one constructed history per state, plus
@@ -8406,53 +8411,26 @@ value/key contracts and their stated limits.
 
 The commit-pinned `@tanstack/oracles` framework supplies `oracleProperty` as
 its only campaign API. DB retained the two removed helpers and their self-tests
-locally while the explicit `legacyCampaigns` baseline shrank. The baseline
+locally while an explicit `legacyCampaigns` baseline shrank. The baseline
 contained 199 files at adoption, including three restored compatibility test
-files. It is now empty, and the vendored helpers and their self-tests are
-deleted (2026-11-10). `node scripts/oracle-campaign-inventory.mjs` surveys the current files
-with the lint plugin's own legacy-use classifier; its shape and fixed-history
-flags are planning hints, not evidence of a completed conversion.
-
+files. Every file converted, and the vendored helpers and their self-tests are
+deleted (2026-11-10). The framework then removed the setting (TanStack/oracles
+#23, maintainer decision 2026-11-10): `oracle/oracle-property-only` reports any
+value of `settings.oracles.legacyCampaigns`, `[]` included, in every oracle
+file, and exempts no file. TanStack DB no longer sets it. The merge-base gate
+`scripts/check-legacy-oracle-campaigns.mjs` and its oracle,
 `scripts/legacy-campaign-baseline-oracle.property.test.js`
-(`scripts.legacy-campaign-baseline`) owns the migration gate in
-`scripts/check-legacy-oracle-campaigns.mjs`. AGENTS.md's migration ratchet is its
-authority: an adopted baseline may only lose exact file identities. The model
-uses membership in a four-file universe. The driver commits base settings in a
-temporary Git repository, writes head settings, runs the actual CLI, and
-compares the full additions report and exit status after process completion.
-The grammar also varies the setting's presence and the gate's presence at base.
-Fixture histories cross inherited pre-commit/prepare-commit-msg hooks with
-plain or strict CRLF global configuration. A constructed no-hook history with
-strict CRLF settings requires fixture setup and the completed gate report to
-remain independent of developer global configuration.
-Only absence of both permits initial adoption; after the setting is removed,
-the gate's presence preserves an empty allowed set. Constructed histories cover
-an addition, an addition after an empty adopted baseline, an addition after the
-setting was removed, a removal, and initial adoption. Both 20-history campaigns
-run these same laws and constructions. A local association records each
-builder's declared states on every invocation. The shared check compares those
-declarations with actual state observations for seeded, generated, and shrunk
-constructed outputs; it does not depend on the pinned framework's seeded-only
-association. The checker rejects both an always-accept report and a trace that
-omits a required constructed state at the virtual `constructed states`
-checkpoint. This checkpoint is unrecorded, so an incomplete driver trace keeps
-its actual driver failure primary rather than inventing an earlier state
-omission. Actual gate-report mismatches still use `completed`. Production
-mutants that always accept or allow a removed baseline
-to restart fail the named `only shrinks` law at `completed`, including direct
-seed/path replay.
+(`scripts.legacy-campaign-baseline`, two 20-history campaigns), are deleted
+with it: they guarded a list that no longer exists. Without an exemption list,
+`oracle/oracle-property-only` reports every raw campaign and legacy campaign
+import in every oracle file that `pnpm lint:oracles` lints, so no file can
+regrow one. `node scripts/oracle-campaign-inventory.mjs` surveys the current
+files with the rule's own classifier; its shape and fixed-history flags are
+planning hints, not evidence of a completed conversion.
 
-Limits: valid settings with unique file names; the settings module exists at
-base and exports literal settings without imports. The external lint plugin
-owns malformed entries, stale entries in files that still exist, and the
-classification of legacy API uses. Deleted files have no lint invocation;
-remove their baseline entries when deleting them. The gate compares file
-identities and permits reason edits. No existing
-product law or campaign is converted by the repin. Each later conversion needs
-its own same-seed before/after gap comparison; this adoption does not supply
-that evidence. Gaps in changed functions close by a kill or an explicit
-maintainer allowance for their anchored gaps; a coverage-map entry alone does
-not close them.
+Each conversion needs its own same-seed before/after gap comparison. Gaps in
+changed functions close by a kill or an explicit maintainer allowance for
+their anchored gaps; a coverage-map entry alone does not close them.
 
 The reversed-index owner now registers generated reads through
 `reverse-index.reads` and its four existing large histories through the finite
