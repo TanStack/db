@@ -2,7 +2,6 @@ import { expect } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash.js'
 import { differs, pass } from '../../db/tests/oracle-property.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import type { Observation, Verdict } from '../../db/tests/oracle-property.js'
 import type { HashValue } from './hash-support.js'
 
@@ -109,9 +108,3 @@ export function expectPermutedHashes(
     verdict.kind === `violation` ? verdict.difference : undefined,
   ).toEqual(pass)
 }
-
-declareOracle({
-  check: [checkHashComparisons, expectPermutedHashes],
-  model: [comparisonReferences],
-  grammar: [arbitraryNonIndexEntries],
-})

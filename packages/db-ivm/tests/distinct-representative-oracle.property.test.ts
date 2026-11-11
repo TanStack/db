@@ -13,7 +13,6 @@ import { expect, it } from 'vitest'
 import { D2 } from '../src/d2.js'
 import { hash } from '../src/hashing/hash.js'
 import { distinct } from '../src/operators/distinct.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleReplayTest } from '../../db/tests/oracle-config.js'
 import { oracleProperty } from '../../db/tests/oracle-property.js'
 import {
@@ -40,11 +39,6 @@ import type {
 import type { Weighted } from './incrementalization-law-oracle.js'
 
 const family = distinctCollisionFamily(hash)
-
-declareOracle({
-  check: [checkDistinctRepresentatives],
-  grammar: [distinctBucketRecipe],
-})
 
 function drive(worlds: DistinctBucketHistory, split: boolean) {
   const graph = new D2()

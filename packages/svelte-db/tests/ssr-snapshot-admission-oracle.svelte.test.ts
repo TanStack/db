@@ -7,7 +7,6 @@ import {
   pass,
   violation,
 } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   expectedSsrSnapshot,
   ssrSnapshotExamples,
@@ -270,9 +269,4 @@ oracleProperty({
   model: expectedSsrSnapshot,
   driver: recordHistory,
   check: checkHistory,
-})
-declareOracle({
-  model: [expectedSsrSnapshot],
-  grammar: [ssrSnapshotHistoryArbitrary],
-  check: [checkHistory],
 })

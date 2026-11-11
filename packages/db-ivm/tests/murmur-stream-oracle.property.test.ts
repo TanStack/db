@@ -1,11 +1,10 @@
-import { afterAll, beforeAll, expect, vi } from 'vitest'
+import { afterAll, beforeAll, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import {
   differs,
   oracleProperty,
   pass,
 } from '../../db/tests/oracle-property.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 /**
  * # Does the murmur stream hash the bytes it is given?
@@ -85,19 +84,6 @@ function digests(
     return stream.digest()
   })
 }
-
-// The law of the byte framing: the stream digests each history as the
-// byte-at-a-time reference stream does, for every prefix.
-function expectDigestsMatchReference(
-  Stream: typeof Current,
-  Model: typeof Current,
-  chunks: Array<Chunk>,
-): void {
-  expect(digests(Stream, chunks)).toEqual(digests(Model, chunks))
-}
-declareOracle({
-  check: [expectDigestsMatchReference],
-})
 
 oracleProperty({
   id: `ivm.murmur-stream`,

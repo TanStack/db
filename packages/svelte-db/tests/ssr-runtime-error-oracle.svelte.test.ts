@@ -28,7 +28,6 @@ import {
   pass,
   violation,
 } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import SsrDbApp from './SsrDbApp.svelte'
 import type { Observation, Verdict } from '../../db/tests/oracle-config'
 import type { createServer } from 'vite'
@@ -353,9 +352,4 @@ oracleProperty({
   driver: recordRuntimeHistory,
   check: checkRuntimeTrace,
   timeout: 30_000,
-})
-declareOracle({
-  model: [expectedSsrRuntimeErrorViews],
-  check: [checkRuntimeTrace],
-  grammar: [ssrRuntimeErrorHistoryArbitrary],
 })

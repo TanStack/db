@@ -28,7 +28,6 @@ import {
   ssrSnapshotExamples,
   ssrSnapshotHistoryArbitrary,
 } from '../../db/tests/ssr-snapshot-admission-oracle'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   OracleCheckpointFailure,
   differs,
@@ -174,10 +173,6 @@ function checkRender(
   })
 }
 
-declareOracle({
-  check: [checkRender],
-  grammar: [histories],
-})
 // The child process records native server facts. The same admission/diagnostic
 // judgment runs afterward, with runtime identity checked first as before.
 function checkEffects(

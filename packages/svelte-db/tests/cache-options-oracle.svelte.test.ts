@@ -18,7 +18,6 @@ import {
   conflictingCacheOptions,
 } from '../../db/tests/live-query-cache-options-oracle'
 import { withOracleCleanup } from '../../db/tests/utils'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty, pass, violation } from '../../db/tests/oracle-config'
 import type { Observation, Verdict } from '../../db/tests/oracle-config'
 import type {
@@ -26,11 +25,6 @@ import type {
   CacheRow,
 } from '../../db/tests/live-query-cache-options-oracle'
 
-declareOracle({
-  check: [checkCacheOptionAdmission, checkCacheOptionRows],
-  model: [conflictingCacheOptions],
-  grammar: [cacheOptionHistories],
-})
 async function recordHistory(
   history: CacheOptionHistory,
   observe: (checkpoint: string, value: unknown) => void,

@@ -130,7 +130,6 @@ import {
   modelSubscriberStartCleanup,
   subscriberStartCleanupHistories,
 } from '../../db/tests/collection-subscription-lifecycle-grammar-oracle'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { renderSsr } from './descriptor-query-binding-support'
 import type { Row } from './descriptor-query-binding-support'
 import type { DehydratedRouterDbState } from '../../react-router-with-db/src'
@@ -182,10 +181,6 @@ function expectedRows(rows: ReadonlyMap<string, Row>): Array<Row> {
 function applyModelWrite(model: Map<string, Row>, next: Row): void {
   model.set(next.id, { ...next })
 }
-declareOracle({
-  check: [checkStreamCut],
-  model: [expectedRows, applyModelWrite],
-})
 describe(`standalone descriptor query binding`, () => {
   // A suspended render owns no provider demand. A later independent reader
   // does: ordinary subscriptions and preloads start exactly one sync run,

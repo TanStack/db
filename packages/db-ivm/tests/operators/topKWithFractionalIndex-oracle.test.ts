@@ -6,7 +6,6 @@ import { MultiSet } from '../../src/multiset.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
 import { groupedTopKWithFractionalIndex } from '../../src/operators/groupedTopKWithFractionalIndex.js'
 import { join, map, output } from '../../src/operators/index.js'
-import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 import { oracleProperty } from '../../../db/tests/oracle-property.js'
 import { TopKRelation } from './topk-relation-oracle.js'
 import {
@@ -25,10 +24,6 @@ import {
  * collisions. Multiple groups and downstream acquisition remain outside this
  * owner. The ordinary examples live in topKWithFractionalIndex-examples.test.ts.
  */
-declareOracle({
-  check: [TopKRelation, checkTopKComparisons],
-  model: [topKReferences],
-})
 
 afterEach(() => vi.restoreAllMocks())
 

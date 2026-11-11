@@ -11,7 +11,6 @@ import {
   oracleReplayTest,
   oracleRoute,
 } from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   differs,
   oracleProperty,
@@ -870,27 +869,10 @@ function checkCyclicPair(
   return pass
 }
 
-function expectCyclicPair(plan: CyclicPair): void {
-  const trace: Array<Observation> = []
-  driveCyclicPair(plan, (checkpoint, value) =>
-    trace.push({ checkpoint, value }),
-  )
-  const verdict = checkCyclicPair(plan, trace, expectedCyclicPair())
-  if (verdict.kind === `violation`)
-    expect(verdict.values?.actual, verdict.difference).toBe(
-      verdict.values?.expected,
-    )
-}
-
 // The model is `identity` (and its encoding `canon`): equal identities must
 // share a verdict and hash. The grammar `pairArb` is calibrated below.
 // What this oracle owns: the gap report judges these entries, and their
 // reference trees within the package, by this file's tests.
-declareOracle({
-  check: [expectPair, expectCyclicPair, checkPair, checkCyclicPair],
-  model: [identity, canon, expectedPair, expectedCyclicPair],
-  grammar: [pairArb, cyclicArb],
-})
 
 // ---------------------------------------------------------------------------
 // Campaigns. Each generated property has a fixed campaign and a random

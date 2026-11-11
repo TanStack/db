@@ -38,7 +38,6 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection, debounceStrategy } from '@tanstack/db'
 import { usePacedMutations } from '../src/usePacedMutations'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleRoute } from '../../db/tests/oracle-config'
 import {
   mockSyncCollectionOptions,
@@ -304,9 +303,3 @@ describe.each([false, true])(
     })
   },
 )
-
-declareOracle({
-  owns: [`src/usePacedMutations.ts#usePacedMutations`],
-  check: [driveHistory],
-  model: [expectedOutcome],
-})

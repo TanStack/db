@@ -59,7 +59,6 @@ import {
   oracleReplayTest,
   oracleRoute,
 } from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   differs,
   oracleProperty,
@@ -307,11 +306,6 @@ function expectRefinement(
 // key, and its grammar, the generated addition histories.
 // What this oracle owns: the gap report judges these entries, and their
 // reference trees within the package, by this file's tests.
-declareOracle({
-  check: [expectRefinement, checkIndex],
-  model: [expectedIndex, indexExpectations],
-  grammar: [historyArbitrary],
-})
 
 // ---------------------------------------------------------------------------
 // Campaigns. The fixed and random campaigns run the same property, grammar,

@@ -8,7 +8,6 @@ import {
   output,
   serializeValue,
 } from '../src/index.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleRoute } from '../../db/tests/oracle-config.js'
 
 /**
@@ -80,10 +79,6 @@ function expectedGroupCounts(classes: ReadonlyArray<string>): Array<number> {
 }
 // What this oracle owns: the gap report judges these entries, and their
 // reference trees within the package, by this file's tests.
-declareOracle({
-  owns: [`src/operators/groupBy.ts#groupBy`],
-  model: [expectedGroupCounts],
-})
 
 function observedGroupCounts(rows: Array<{ date: object }>): Array<number> {
   const graph = new D2()

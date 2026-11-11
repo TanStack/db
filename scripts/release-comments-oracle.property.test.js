@@ -27,7 +27,6 @@ import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, test } from 'vitest'
 import { oracleRoute } from '../packages/db/tests/oracle-config.js'
-import { declareOracle } from '../packages/db/tests/oracle-declaration.js'
 
 // The grammar authors structured releases before serializing Markdown. Removing
 // version suffixes loses the reported RC witness; removing neighboring sections
@@ -777,11 +776,6 @@ if (args[0] === 'api' && args[1] === 'graphql') {
 // Owns nothing: comment-on-release.ts is a repository script outside any
 // package, and the driver runs it in a child process, where the gap report
 // cannot place mutants.
-declareOracle({
-  model: [expectedNotifications],
-  check: [checkNotifications],
-  grammar: [histories],
-})
 const replay = process.env.TANSTACK_DB_RELEASE_COMMENT_CASE
 if (
   replay !== undefined &&

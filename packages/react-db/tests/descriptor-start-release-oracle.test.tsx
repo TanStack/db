@@ -16,7 +16,6 @@ import {
   descriptorStartHistories,
   expectedDescriptorStart,
 } from '../../db/tests/descriptor-start-release-oracle'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   differs,
   oracleProperty,
@@ -168,10 +167,4 @@ it.each([
   if (fault === `leaked-resource`) actual.cleanups[2] = 0
   if (fault === `wrong-row`) actual.rows[2] = [{ id: `bad`, value: `bad` }]
   expect(() => checkDescriptorStart(actual, history, `cleaned`)).toThrow()
-})
-
-declareOracle({
-  check: [checkDescriptorStart, checkRecordedHistory],
-  model: [expectedDescriptorStart],
-  grammar: [descriptorStartHistories],
 })

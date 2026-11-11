@@ -15,7 +15,6 @@ import {
   runCallbackHistory,
 } from '../../db/tests/query/effect-callback-oracle'
 import { checkWithCleanup } from '../../db/tests/query/virtual-row-fields-support'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleRoute } from '../../db/tests/oracle-config'
 import { flushPromises, mockSyncCollectionOptions } from '../../db/tests/utils'
 import type {
@@ -104,8 +103,3 @@ test.each(callbackHistories)(
     )
   },
 )
-
-declareOracle({
-  owns: [`src/useLiveQueryEffect.ts#useLiveQueryEffect`],
-  grammar: [callbackHistories],
-})

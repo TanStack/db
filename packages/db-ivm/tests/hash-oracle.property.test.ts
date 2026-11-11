@@ -2,7 +2,6 @@ import { describe } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
 import { oracleProperty } from '../../db/tests/oracle-property.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   arbitraryNonIndexEntries,
   checkHashComparisons,
@@ -51,11 +50,6 @@ const arbitrarySimpleArray = fc.array(fc.integer(), { maxLength: 10 })
 
 // The flat-value law remains a differential comparison between independent
 // equivalent constructors; each cell records its original pair of results.
-declareOracle({
-  check: [checkHashComparisons],
-  model: [comparisonReferences],
-  grammar: [arbitraryNonIndexEntries],
-})
 
 // The reusable value laws run with identical generators and checks in a
 // fixed campaign and a random campaign. A path replay of `ivm.hash-value`

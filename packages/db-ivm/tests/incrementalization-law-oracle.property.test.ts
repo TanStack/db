@@ -21,7 +21,6 @@ import {
   oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   differs,
   oracleProperty,
@@ -553,11 +552,6 @@ const orderedHistory: fc.Arbitrary<Array<Weighted<Keyed>>> = fc
 // generated steps reach row promotions, which the ordered laws need.
 // What this oracle owns: the gap report judges these entries, and their
 // reference trees within the package, by this file's tests.
-declareOracle({
-  grammar: [orderedHistory],
-  check: [checkIncrementalization],
-  model: [incrementalizationReferences],
-})
 
 function firstThree(input: Weighted<Keyed>): Weighted<Keyed> {
   return keyedIdentity(input)

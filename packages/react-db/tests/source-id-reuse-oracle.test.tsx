@@ -62,11 +62,7 @@ import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
-import {
-  declareOracle,
-  oracleProperty,
-  oracleRoute,
-} from '../../db/tests/oracle-config'
+import { oracleProperty, oracleRoute } from '../../db/tests/oracle-config'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -286,11 +282,6 @@ function checkRerender(
     )
   }
 }
-declareOracle({
-  check: [checkRerender, checkReleaseHistory, checkBoundOptions],
-  model: [expectedCollision],
-  grammar: [boundOptionHistories],
-})
 /*
  * Release law. A hook in one DbClient scope first reads only its own source,
  * then rerenders into a rejected query that also reads a shared descriptor.
@@ -926,11 +917,6 @@ it.each([
         ),
       ).toThrow(),
   )
-})
-declareOracle({
-  check: [checkReleaseObservation],
-  model: [expectedReleaseObservation],
-  grammar: [releaseCauses, releaseHooks, releaseReaders],
 })
 describe(`React source ID reuse`, () => {
   it(`rejects a different active source with the same ID before exposing stale rows`, async () => {

@@ -2,7 +2,6 @@ import { describe, expect, it as vitestIt } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { equalHashValues, structuralIdentity } from '../src/hashing/hash.js'
 import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   differs,
   oracleProperty,
@@ -430,12 +429,6 @@ function expectAgreement(
       verdict.values?.expected,
     )
 }
-
-declareOracle({
-  check: [expectAgreement, checkAgreement],
-  model: [normal, expectedAgreement],
-  grammar: [specArbitrary, equalSpecPairArbitrary],
-})
 
 function decisions(...values: Array<boolean>): () => boolean {
   let index = 0

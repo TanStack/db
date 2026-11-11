@@ -39,7 +39,6 @@ import {
   createLiveQueryCollection,
 } from '@tanstack/db'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleRoute } from '../../db/tests/oracle-config'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveQuery } from '../src/useLiveQuery'
@@ -184,14 +183,6 @@ async function checkAbandonedRenderAcquisitions(
   )
 }
 
-declareOracle({
-  owns: [
-    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
-    `src/useLiveQuery.ts#useLiveQuery`,
-  ],
-  check: [checkAbandonedRenderAcquisitions],
-})
-
 describe(`on-demand sources match useLiveQuery`, () => {
   it.each([
     { form: `query` as const, wrapped: false },
@@ -225,8 +216,6 @@ function expectedReadyFirstCommit(count: number): {
 } {
   return { status: `ready`, ids: rows(count).map((row) => row.id) }
 }
-
-declareOracle({ model: [expectedReadyFirstCommit] })
 
 describe(`agreement with useLiveQuery`, () => {
   it(`commits the same ready rows first as useLiveQuery for a synchronous source`, async () => {

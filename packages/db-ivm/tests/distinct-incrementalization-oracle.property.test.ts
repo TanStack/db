@@ -11,7 +11,6 @@ import { hash } from '../src/hashing/hash.js'
 import { distinct } from '../src/operators/distinct.js'
 import { map } from '../src/operators/map.js'
 import { oracleRoute } from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleProperty } from '../../db/tests/oracle-property.js'
 import {
   assertUnaryIncrementalization,
@@ -47,10 +46,6 @@ const policy = {
   identity: distinctValueIdentity,
   clone: (value: DistinctValue) => ({ ...value }),
 }
-
-declareOracle({
-  check: [assertUnaryIncrementalization, checkDistinctSnapshot],
-})
 
 type Plan = { worlds: DistinctHistory; requiredStates: ReadonlyArray<string> }
 type CellOptions = Omit<

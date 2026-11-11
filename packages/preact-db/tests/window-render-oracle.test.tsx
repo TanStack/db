@@ -26,7 +26,6 @@ import {
 } from '../../db/tests/conformance/window-history-oracle'
 import {
   OracleCheckpointFailure,
-  declareOracle,
   differs,
   oracleProperty,
   pass,
@@ -417,9 +416,3 @@ for (const [id, remote, keyed, move] of renderProperties) {
     ],
   })
 }
-
-declareOracle({
-  grammar: [renderHistoryArbitrary],
-  model: [expectedRender],
-  check: [checkRender],
-})

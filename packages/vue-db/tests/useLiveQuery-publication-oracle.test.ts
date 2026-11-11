@@ -30,7 +30,6 @@
 import { createCollection } from '@tanstack/db'
 import { effectScope, watch } from 'vue'
 import { expect, it, vi } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleRoute } from '../../db/tests/oracle-config'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
@@ -198,8 +197,3 @@ it.each(cases)(
     if (primaryFailure !== undefined) throw primaryFailure
   },
 )
-
-declareOracle({
-  owns: [`src/useLiveQuery.ts#useLiveQuery`],
-  check: [expectCoherentPublication],
-})

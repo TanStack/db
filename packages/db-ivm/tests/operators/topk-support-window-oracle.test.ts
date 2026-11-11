@@ -11,7 +11,6 @@ import {
   oracleReplayTest,
   oracleRoute,
 } from '../../../db/tests/oracle-config.js'
-import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 import { oracleProperty } from '../../../db/tests/oracle-property.js'
 import { atOracleCheckpoint } from '../../../db/tests/oracle-failure-fidelity.js'
 import {
@@ -22,11 +21,6 @@ import {
 import { TopKRelation } from './topk-relation-oracle.js'
 import type { TopKComparisonRecorder } from './topk-relation-oracle.js'
 import type { TopKWithFractionalIndexOptions } from '../../src/operators/topKWithFractionalIndex.js'
-
-declareOracle({
-  check: [TopKRelation, checkNumericWindow],
-  model: [selectedWindowKeys, requestedWindowChanged],
-})
 
 /**
  * A top-K window selects support from a signed, typed-key relation.
@@ -384,8 +378,6 @@ class NumericWindowMismatch extends Error {
   }
 }
 
-declareOracle({ grammar: [numericWindowInput] })
-
 describe.each([
   { name: `array`, operator: topKWithFractionalIndex },
   { name: `grouped`, operator: grouped },
@@ -731,11 +723,6 @@ function checkNegativeWindowHistory(
       cause: failures[0],
     })
 }
-
-declareOracle({
-  grammar: [negativeWindowHistory],
-  check: [checkNegativeWindowHistory],
-})
 
 // Rival interpretations must disagree with the rank predicate. Feed their
 // wrong rows to the same signed-output checker; no production helper supplies

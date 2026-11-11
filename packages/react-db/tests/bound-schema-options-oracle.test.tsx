@@ -10,11 +10,7 @@ import { act, renderHook } from '@testing-library/react'
 import { expect, test } from 'vitest'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
-import {
-  declareOracle,
-  oracleProperty,
-  oracleRoute,
-} from '../../db/tests/oracle-config'
+import { oracleProperty, oracleRoute } from '../../db/tests/oracle-config'
 import {
   boundSchemaGrammar,
   boundSchemaHistories,
@@ -344,13 +340,3 @@ test.each(boundSchemaHistories)(
     }
   },
 )
-declareOracle({
-  grammar: [histories, boundSchemaHistories],
-  model: [modelBoundSchemaReceiver],
-  check: [
-    checkBoundSchemaReceiver,
-    checkBoundSchemaMutation,
-    checkBoundSchemaRows,
-    checkBoundSchemaValues,
-  ],
-})

@@ -1,5 +1,4 @@
 import { fc } from '@fast-check/vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { D2 } from '../src/d2.js'
 import { MultiSet } from '../src/multiset.js'
 import { output } from '../src/operators/output.js'
@@ -545,7 +544,3 @@ export function assertBinaryIncrementalization<Left, Right, Output>(
     splitDeliveries: split.deliveries,
   }
 }
-
-declareOracle({
-  check: [assertUnaryIncrementalization, assertBinaryIncrementalization],
-})
