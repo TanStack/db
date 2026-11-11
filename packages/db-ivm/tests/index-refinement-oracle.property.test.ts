@@ -51,24 +51,20 @@
  * payloads other than numbers and strings are outside this owner; the join
  * operator tests and the incrementalization law own the operators.
  */
-import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe } from 'vitest'
 import { Index } from '../src/indexes.js'
-import {
-  oracleFixedSeed,
-  oracleReplayTest,
-  oracleRoute,
-} from '../../db/tests/oracle-config.js'
 import {
   differs,
   oracleProperty,
   pass,
 } from '../../db/tests/oracle-property.js'
+import { historyArbitrary } from './index-refinement-grammar-oracle.js'
 import type { Observation, Verdict } from '../../db/tests/oracle-property.js'
-
-type Prefix = number | string | bigint
-type Value = [Prefix, number | string] | number | string
-type Addition = { key: `k1` | `k2`; value: Value; multiplicity: number }
+import type {
+  Addition,
+  Prefix,
+  Value,
+} from './index-refinement-grammar-oracle.js'
 
 // ---------------------------------------------------------------------------
 // Model
@@ -109,59 +105,9 @@ function expectedIndex(
 }
 
 // ---------------------------------------------------------------------------
-// History grammar
+// History grammar: `historyArbitrary`, in index-refinement-grammar-oracle.ts.
+// Its fixed-seed census is in index-refinement-grammar.test.ts.
 // ---------------------------------------------------------------------------
-
-const prefixes: ReadonlyArray<Prefix> = [
-  Number.NaN,
-  0,
-  -0,
-  1,
-  `1`,
-  BigInt(1),
-  `a`,
-]
-
-const valueArbitrary: fc.Arbitrary<Value> = fc.oneof(
-  {
-    weight: 3,
-    arbitrary: fc
-      .tuple(fc.constantFrom(...prefixes), fc.constantFrom(0, 1, `x`))
-      .map(([prefix, payload]): Value => [prefix, payload]),
-  },
-  fc.constantFrom<Value>(5, 6, `u`),
-)
-
-// Reusing earlier values lets histories cancel what they added.
-const historyArbitrary: fc.Arbitrary<Array<Addition>> = fc
-  .array(
-    fc.record({
-      key: fc.constantFrom(`k1` as const, `k2` as const),
-      value: valueArbitrary,
-      multiplicity: fc.constantFrom(-2, -1, 1, 2),
-      repeat: fc.option(fc.nat({ max: 11 }), { nil: undefined }),
-    }),
-    { maxLength: 12 },
-  )
-  .map((steps) => {
-    const additions: Array<Addition> = []
-    for (const { key, value, multiplicity, repeat } of steps) {
-      const earlier =
-        repeat === undefined
-          ? undefined
-          : additions[repeat % (additions.length || 1)]
-      additions.push(
-        earlier === undefined
-          ? { key, value, multiplicity }
-          : {
-              key: earlier.key,
-              value: earlier.value,
-              multiplicity: -earlier.multiplicity,
-            },
-      )
-    }
-    return additions
-  })
 
 const add = (value: Value, multiplicity: number): Addition => ({
   key: `k1`,
@@ -285,23 +231,6 @@ function checkIndex(
   return pass
 }
 
-// Fixed regressions use the same production driver, model and comparison as
-// the generated native campaign, with no hand-written expected answer.
-function expectRefinement(
-  additions: ReadonlyArray<Addition>,
-  mode: Mode = `structural`,
-): void {
-  const trace: Array<Observation> = []
-  driveIndex(additions, [mode], (checkpoint, value) =>
-    trace.push({ checkpoint, value }),
-  )
-  const verdict = checkIndex(trace, indexExpectations(additions, [mode]))
-  if (verdict.kind === `violation`)
-    expect(verdict.values?.actual, verdict.difference).toEqual(
-      verdict.values?.expected,
-    )
-}
-
 // The refinement law is declared with its model, the multiset of values per
 // key, and its grammar, the generated addition histories.
 // What this oracle owns: the gap report judges these entries, and their
@@ -314,14 +243,6 @@ function expectRefinement(
 // test in this file stands aside.
 
 describe(`Index refinement oracle`, () => {
-  for (const { name, additions } of fixedHistories) {
-    oracleReplayTest(it)(`matches the multiset model when ${name}`, () => {
-      oracleRoute(`fixed history`)
-      expectRefinement(additions)
-      expectRefinement(additions, `prefixIdentity`)
-    })
-  }
-
   // Preserve both storage modes and every get/has/iterator cut. The model
   // recomputes each prefix without reading the production Index.
   oracleProperty({
@@ -349,25 +270,29 @@ describe(`Index refinement oracle`, () => {
     check: (_additions, trace, expected) => checkIndex(trace, expected),
   })
 
-  // Positive execution witness: generated histories reach a NaN prefix that
-  // cancels after another value joined its key.
-  it(`reaches cancelled NaN-prefixed values beside other values`, () => {
-    oracleRoute(`fixed seed`)
-    const sample = fc.sample(
-      historyArbitrary,
-      oracleFixedSeed(20260930, { numRuns: 300 }),
-    )
-    const reached = sample.filter((additions) =>
-      additions.some(
-        (addition, step) =>
-          Array.isArray(addition.value) &&
-          Number.isNaN(addition.value[0]) &&
-          addition.multiplicity < 0 &&
-          additions
-            .slice(0, step)
-            .some((earlier) => earlier.value !== addition.value),
-      ),
-    )
-    expect(reached.length).toBeGreaterThan(10)
+  // The fixed regressions run through the same production driver, model, and
+  // comparison as the generated campaign, with no hand-written expected
+  // answer. The mapped grammar cannot take them back, so they form one
+  // enumerated property.
+  oracleProperty({
+    id: `ivm.index-refinement-fixed`,
+    law: {
+      statement: `After each addition the Index get/has observations equal independently summed multiplicities, and get agrees with getIterator in order, in both structural and prefixIdentity modes.`,
+      authority: `Existing Index multiset and prefixIdentity contract documented above.`,
+      limits: `The named NaN-prefix cancellation and merge regressions only.`,
+    },
+    owns: [
+      `src/indexes.ts#Index.addValue`,
+      `src/indexes.ts#Index.get`,
+      `src/indexes.ts#Index.has`,
+      `src/indexes.ts#Index.getIterator`,
+    ],
+    histories: fixedHistories,
+    label: ({ name }) => `matches the multiset model when ${name}`,
+    model: ({ additions }) =>
+      indexExpectations(additions, [`structural`, `prefixIdentity`]),
+    driver: ({ additions }, observe) =>
+      driveIndex(additions, [`structural`, `prefixIdentity`], observe),
+    check: (_history, trace, expected) => checkIndex(trace, expected),
   })
 })

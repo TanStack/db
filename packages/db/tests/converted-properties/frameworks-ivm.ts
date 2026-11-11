@@ -14,6 +14,7 @@ export const properties: ReadonlyArray<string> = [
   `structural-identity.representation-fixed`,
   `structural-identity.independent-values-fixed`,
   `ivm.distinct-representatives-fixed`,
+  `ivm.index-refinement-fixed`,
   // react-db
   `react.convex-lazy-paging`,
   `react.effect-callback`,
@@ -25,6 +26,8 @@ export const properties: ReadonlyArray<string> = [
   `react.ssr-ordinary-examples`,
   `react.ssr-infinite-examples`,
   `react.ssr-stream-cut-fixed`,
+  `react.source-id-reuse-fixed`,
+  `react.source-id-reuse-infinite-fixed`,
   // vue-db and scripts
 ]
 
@@ -54,6 +57,11 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db-ivm/tests/distinct-representative-oracle.property.test.ts`,
     `ivm`,
     `distinct-representatives-fixed`,
+  ],
+  [
+    `db-ivm/tests/index-refinement-oracle.property.test.ts`,
+    `ivm`,
+    `index-refinement-fixed`,
   ],
   // react-db
   [
@@ -105,6 +113,16 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `react-db/tests/descriptor-query-binding-oracle.test.tsx`,
     `react`,
     `ssr-stream-cut-fixed`,
+  ],
+  [
+    `react-db/tests/source-id-reuse-oracle.test.tsx`,
+    `react`,
+    `source-id-reuse-fixed`,
+  ],
+  [
+    `react-db/tests/source-id-reuse-oracle.test.tsx`,
+    `react`,
+    `source-id-reuse-infinite-fixed`,
   ],
   // vue-db and scripts
 ]
