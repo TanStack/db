@@ -3,7 +3,7 @@
  * a value that a person wrote down: a rejection message, an error the test
  * created itself, a subscriber count of zero, or a fetch order recorded as
  * booleans. None compares with the source rows or with a model, so none is
- * oracle coverage. The page-ledger laws are in infinite-suite-oracle.ts, and
+ * oracle coverage. The page-ledger laws are in infinite-suite.ts, and
  * the shared machinery is in infinite-suite-harness.ts.
  */
 import { expect, it } from 'vitest'
