@@ -41,11 +41,14 @@ export type InferPowerSyncKey<TOutput> = TOutput extends { id: infer TId }
  * schema converts `id` to a number, as for a backend with integer primary
  * keys. Predicates on `id` then compare numbers, and the collection key is
  * the number. The option is required exactly when the output `id` is a number.
+ * An `id` that may be a string or a number fits neither mode and is rejected.
  */
 export type NumericIdsConfig<TOutput> =
   InferPowerSyncKey<TOutput> extends number
     ? { numericIds: true }
-    : { numericIds?: false }
+    : InferPowerSyncKey<TOutput> extends string
+      ? { numericIds?: false }
+      : { numericIds: never }
 
 /**
  * A mapping type for custom serialization of object properties to SQLite-compatible values.

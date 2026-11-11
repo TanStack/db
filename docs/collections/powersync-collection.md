@@ -404,6 +404,12 @@ task.due_date.getTime() // OK - TypeScript knows this is a Date
 SQLite stores every PowerSync `id` as text. If your backend uses integer primary keys, convert `id` to a number in `deserializationSchema` and set `numericIds: true`. The collection key is then a number, so integer foreign keys match it, for example in `eq(part.id, line.partId)`. Predicates on `id`, such as `gt(product.id, 2)`, compare numbers in on-demand loads, change tracking, and eviction.
 
 ```typescript
+const APP_SCHEMA = new Schema({
+  products: new Table({
+    name: column.text,
+  }),
+})
+
 const productSchema = z.object({
   id: z.number(),
   name: z.string().nullable(),
@@ -427,7 +433,7 @@ const products = createCollection(
 products.get(5)
 ```
 
-TypeScript requires `numericIds: true` when the schema outputs a number `id`, and rejects it otherwise. Numeric IDs must be safe JavaScript integers, and converting the number back to text must reproduce the stored ID exactly. Keep IDs as strings if they can exceed the safe integer range or contain leading zeros. Updates and deletes use the text form of the key to find the SQLite row.
+TypeScript requires `numericIds: true` when the schema outputs a number `id`, and rejects it otherwise. An `id` that may be either a string or a number is not supported. Equality and `in` predicates on a numeric `id` use SQLite's `id` index; range predicates such as `gt` scan the table. Numeric IDs must be safe JavaScript integers, and converting the number back to text must reproduce the stored ID exactly. Keep IDs as strings if they can exceed the safe integer range or contain leading zeros. Updates and deletes use the text form of the key to find the SQLite row.
 
 ### Optimistic Updates
 
@@ -555,6 +561,9 @@ interface PowerSyncCollectionConfig<TTable extends Table, TSchema> {
   serializer?: {
     [Key in keyof TOutput]?: (value: TOutput[Key]) => SQLiteCompatibleType
   }
+
+  // Integer primary keys: required when the schema outputs a number id
+  numericIds?: boolean
 
   // Performance tuning
   syncBatchSize?: number // Control batch size for initial sync, defaults to 1000

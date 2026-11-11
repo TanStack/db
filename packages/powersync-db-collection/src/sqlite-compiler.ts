@@ -1,4 +1,5 @@
-import type { IR, LoadSubsetOptions } from '@tanstack/db'
+import { IR } from '@tanstack/db'
+import type { LoadSubsetOptions } from '@tanstack/db'
 
 /**
  * Result of compiling LoadSubsetOptions to SQLite
@@ -192,9 +193,35 @@ function compileFunction(
     }
   }
 
+  // A numeric id equals a number exactly when its stored text is the number's
+  // canonical form, which every loaded numeric id is. Comparing that text,
+  // instead of CAST(id), lets SQLite look the id up in its primary key index.
+  const [column, value] = args
+  const idText =
+    compileOptions?.numericId &&
+    (name === `eq` || name === `in`) &&
+    column?.type === `ref` &&
+    column.path.join() === `id` &&
+    value?.type === `val`
+
   // Compile arguments
-  const compiledArgs = args.map((arg: IR.BasicExpression) =>
-    compileExpression(arg, params, compileOptions),
+  const compiledArgs = (
+    idText
+      ? [
+          column,
+          new IR.Value(
+            Array.isArray(value.value)
+              ? value.value.map(String)
+              : String(value.value),
+          ),
+        ]
+      : args
+  ).map((arg: IR.BasicExpression) =>
+    compileExpression(
+      arg,
+      params,
+      idText ? { ...compileOptions, numericId: false } : compileOptions,
+    ),
   )
 
   // Handle different operator types

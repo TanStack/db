@@ -120,5 +120,17 @@ describe(`PowerSync collection type tests`, () => {
       // @ts-expect-error a text id cannot use numericIds
       numericIds: true,
     })
+
+    // An id that may be either type fits neither mode.
+    const mixed = schema.extend({ id: z.union([z.string(), z.number()]) })
+    const mixedBase = {
+      ...base,
+      schema: mixed,
+      deserializationSchema: mixed.extend({ id: z.string() }),
+    }
+    // @ts-expect-error a mixed id cannot omit numericIds
+    powerSyncCollectionOptions(mixedBase)
+    // @ts-expect-error a mixed id cannot use numericIds
+    powerSyncCollectionOptions({ ...mixedBase, numericIds: true })
   })
 })

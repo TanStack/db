@@ -488,14 +488,19 @@ function createPowerSyncCollectionConfig<
             beforeCreate: async (context) => {
               // A retained reload uses one snapshot across its source reads.
               // Other initial loads and subset loads keep batch commits. A
-              // transaction begins only once its rows are read and
-              // deserialized, so a batch that fails leaves none open.
+              // transaction begins only once its rows are read, deserialized,
+              // and keyed, so a batch that fails leaves none open.
               const batches: Array<Array<TableType>> = []
               const apply = () => {
-                const values = batches.splice(0).flat().map(deserializeSyncRow)
+                const entries = batches
+                  .splice(0)
+                  .flat()
+                  .map((row) => {
+                    const value = deserializeSyncRow(row)
+                    return [getKey(value), value] as const
+                  })
                 begin({ snapshot })
-                for (const value of values) {
-                  const key = getKey(value)
+                for (const [key, value] of entries) {
                   onInitialRow?.(key)
                   write({ type: writeType(key), value })
                 }
@@ -575,6 +580,9 @@ function createPowerSyncCollectionConfig<
               id,
               ...JSON.parse(value),
             })
+            // write() derives the key inside the transaction; a key getKey
+            // rejects must fail here, before the transaction opens.
+            getKey(parsedValue)
             const parsedPreviousValue =
               op.operation == DiffTriggerOperation.UPDATE
                 ? deserializeSyncRow({

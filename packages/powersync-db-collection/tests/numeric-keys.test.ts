@@ -10,7 +10,7 @@ import {
 import { IR, createCollection } from '@tanstack/db'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { z } from 'zod'
-import { powerSyncCollectionOptions } from '../src'
+import { compileSQLite, powerSyncCollectionOptions } from '../src'
 import type { PowerSyncLogger } from '@powersync/node'
 
 // SQLite stores every PowerSync id as text. A backend with integer primary
@@ -39,6 +39,10 @@ const categoryEquals = (category: string) =>
 
 const idGreaterThan = (id: number) =>
   new IR.Func<boolean>(`gt`, [new IR.PropRef([`id`]), new IR.Value(id)])
+const idEquals = (id: number) =>
+  new IR.Func<boolean>(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)])
+const idIn = (ids: Array<number>) =>
+  new IR.Func<boolean>(`in`, [new IR.PropRef([`id`]), new IR.Value(ids)])
 
 async function createDatabase() {
   const errors: Array<string> = []
@@ -153,29 +157,59 @@ describe(`numeric collection keys`, () => {
     expect(errors).toEqual([])
   })
 
-  // As text, '10' < '2'. The subset load, the trigger that tracks later
-  // writes, and eviction must all compare ids as numbers.
-  it(`compares ids as numbers when loading, tracking, and evicting`, async () => {
-    const { db, errors } = await createDatabase()
-    await db.execute(
-      `INSERT INTO products (id, name, category) VALUES ('10', 'E', 'z')`,
-    )
-    const collection = createNumericCollection(db, `on-demand`)
-    const subset = { where: idGreaterThan(2) }
-    await collection._sync.loadSubset(subset)
-    expect([...collection.keys()].sort((a, b) => a - b)).toEqual([3, 10])
+  // As text, '10' < '2', and a stored text id is never equal to a number.
+  // The subset load, the trigger that tracks later writes, and eviction must
+  // all compare ids as numbers. Each predicate below matches 3, 10, and 100
+  // among the ids 1, 2, 3, 10, then 0 and 100.
+  it.each([
+    [`gt(id, 2)`, idGreaterThan(2), [3, 10]],
+    [`in(id, [3, 10, 100])`, idIn([3, 10, 100]), [3, 10]],
+    [`eq(id, 100)`, idEquals(100), []],
+  ])(
+    `compares ids as numbers when loading, tracking, and evicting: %s`,
+    async (_, where, loaded) => {
+      const { db, errors } = await createDatabase()
+      await db.execute(
+        `INSERT INTO products (id, name, category) VALUES ('10', 'E', 'z')`,
+      )
+      const collection = createNumericCollection(db, `on-demand`)
+      const subset = { where }
+      await collection._sync.loadSubset(subset)
+      expect([...collection.keys()].sort((a, b) => a - b)).toEqual(loaded)
 
-    // One write, so once 100 arrives the tracking has judged 0 as well.
-    await db.execute(
-      `INSERT INTO products (id, name, category) VALUES ('0', 'F', 'z'), ('100', 'G', 'z')`,
-    )
-    await vi.waitFor(() => expect(collection.has(100)).toBe(true))
-    expect(collection.has(0)).toBe(false)
+      // One write, so once 100 arrives the tracking has judged 0 as well.
+      await db.execute(
+        `INSERT INTO products (id, name, category) VALUES ('0', 'F', 'z'), ('100', 'G', 'z')`,
+      )
+      await vi.waitFor(() => expect(collection.has(100)).toBe(true))
+      expect(collection.has(0)).toBe(false)
 
-    collection._sync.unloadSubset(subset)
-    await vi.waitFor(() => expect(collection.size).toBe(0))
-    expect(errors).toEqual([])
-  })
+      collection._sync.unloadSubset(subset)
+      await vi.waitFor(() => expect(collection.size).toBe(0))
+      expect(errors).toEqual([])
+    },
+  )
+
+  // `id` is SQLite's text primary key. Equality on a numeric id compares the
+  // stored text, so a load by id, such as a join's `in`, uses the index.
+  // A numeric range needs the CAST and scans.
+  it.each([
+    [`eq(id, 5)`, idEquals(5)],
+    [`in(id, [1, 2])`, idIn([1, 2])],
+  ])(
+    `looks up numeric id equality through the id index: %s`,
+    async (_, where) => {
+      const { db } = await createDatabase()
+      const compiled = compileSQLite({ where }, { numericId: true })
+      const plan = await db.getAll<{ detail: string }>(
+        `EXPLAIN QUERY PLAN SELECT * FROM products WHERE ${compiled.where}`,
+        compiled.params,
+      )
+      expect(plan.map(({ detail }) => detail).join(` | `)).toMatch(
+        /USING INDEX/,
+      )
+    },
+  )
 
   it(`keeps held rows after a tracking outage`, async () => {
     vi.useFakeTimers()
@@ -274,6 +308,50 @@ describe(`a row that fails deserialization`, () => {
     invalid.clear()
     await collection._sync.loadSubset({ where: categoryEquals(`x`) })
     expect(collection.size).toBe(2)
+  })
+
+  // A JavaScript caller can omit numericIds for a schema that outputs number
+  // ids. Each row then deserializes but getKey rejects its key. The key is
+  // derived before a sync transaction opens, on the load path and on the path
+  // that syncs tracked writes.
+  it(`rejects a key without leaving a sync transaction open`, async () => {
+    const { db, errors } = await createDatabase()
+    const options = {
+      database: db,
+      table: APP_SCHEMA.props.products,
+      schema: row,
+      deserializationSchema: sqliteRow,
+      onDeserializationError: () => {},
+      syncMode: `on-demand` as const,
+    }
+    // @ts-expect-error a number id needs numericIds
+    const config = powerSyncCollectionOptions(options)
+    const collection = createCollection(config)
+    onTestFinished(() => collection.cleanup())
+    const openTransactions = () =>
+      collection._state.pendingSyncedTransactions.filter(
+        (transaction) => !transaction.committed,
+      ).length
+
+    // A tracked write. The subset starts empty, so its load succeeds.
+    await collection._sync.loadSubset({ where: categoryEquals(`new`) })
+    await db.execute(
+      `INSERT INTO products (id, name, category) VALUES ('4', 'D', 'new')`,
+    )
+    await vi.waitFor(() =>
+      expect(errors).toContain(
+        `An error has been detected in the sync handler`,
+      ),
+    )
+    expect(openTransactions()).toBe(0)
+
+    // A load of existing rows.
+    await expect(
+      Promise.resolve(
+        collection._sync.loadSubset({ where: categoryEquals(`x`) }),
+      ),
+    ).rejects.toThrow(/set numericIds/)
+    expect(openTransactions()).toBe(0)
   })
 
   it.each([`numeric`, `string`] as const)(
