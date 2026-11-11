@@ -1,14 +1,12 @@
-import { describe, expect, it as vitestIt } from 'vitest'
+import { describe, expect } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { withChangeTracking } from '../src/proxy'
+import { oracleProperty, pass, violation } from './oracle-config.js'
 import {
-  oracleProperty,
-  oracleReplayTest,
-  oracleRoute,
-  pass,
-  violation,
-} from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 
 /**
  * # Do built-in array and typed-array methods behave on a draft as natively?
@@ -76,15 +74,11 @@ import {
 import type { ArrayRow, TypedRow } from './proxy-native-methods-fixture.js'
 import type { Verdict } from './oracle-config.js'
 
-const it = oracleReplayTest(vitestIt)
-
 // The model is native array and typed-array behavior. observeArray and
-// observeTyped record a call on either side, so they are not declared.
+// observeTyped record a call on either side. expectArrayCall and
+// expectTypedCall are the shared native-differential checks of the fixed rows.
 // What this oracle owns: the gap report judges the built-in array and typed
 // array method behavior of drafts in proxy.ts by this file's tests.
-declareOracle({
-  check: [expectArrayCall, expectTypedCall],
-})
 
 // Detached native containers use the fixture's existing encodings. Only the
 // emptiness of the changes object is judged, so enumerable keys retain that
@@ -115,10 +109,29 @@ function assertionVerdict(checkpoint: string, compare: () => void): Verdict {
 
 describe(`array methods behave like native arrays`, () => {
   // The row of the original fixed table, for every method.
-  it.each(arrayMethods)(`%s on a fixed row gives the native result`, (m) => {
-    oracleRoute(`case`)
-    for (const k of [0, 1, 3])
-      expectArrayCall([{ x: 1 }, 2, [{ x: 3 }], { x: 0 }], m, k)
+  oracleProperty({
+    id: `proxy.native-array-fixed-row`,
+    law: {
+      statement: `Each draft array method on the original fixed row returns the native result, preserves original-object identity relations, and detaches the native final field value.`,
+      authority: `src/proxy.ts draft contract and tests/proxy-oracle.test.ts native differential laws`,
+      limits: `Every Array.prototype method on one fixed row of objects, a number and a nested array, at indices 0, 1 and 3.`,
+    },
+    owns: [`src/proxy.ts`],
+    histories: arrayMethods,
+    label: (m) => `${m} on a fixed row gives the native result`,
+    resolve: (m) => ({ m }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `proxy.native-array-fixed-row`,
+        plan,
+        observe,
+        () => {
+          for (const k of [0, 1, 3])
+            expectArrayCall([{ x: 1 }, 2, [{ x: 3 }], { x: 0 }], plan.m, k)
+        },
+      ),
+    check: forwardAssertionJudgment,
   })
 
   oracleProperty({
@@ -190,16 +203,55 @@ describe(`array methods behave like native arrays`, () => {
 })
 describe(`typed-array methods behave like native typed arrays`, () => {
   // The row of the original fixed table, for every method.
-  it.each(typedMethods)(`%s on a fixed row gives the native result`, (m) => {
-    oracleRoute(`case`)
-    for (const write of [false, true]) expectTypedCall([3, 1, 2], m, 1, write)
+  oracleProperty({
+    id: `proxy.native-typed-fixed-row`,
+    law: {
+      statement: `Each draft typed-array method on the original fixed row returns the native result and self relation, and detaches the native final field value with and without a write through the result.`,
+      authority: `src/proxy.ts draft contract and tests/proxy-oracle.test.ts native differential laws`,
+      limits: `Every TypedArray.prototype method on one fixed Float64Array row [3, 1, 2] at index 1.`,
+    },
+    owns: [`src/proxy.ts`],
+    histories: typedMethods,
+    label: (m) => `${m} on a fixed row gives the native result`,
+    resolve: (m) => ({ m }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `proxy.native-typed-fixed-row`,
+        plan,
+        observe,
+        () => {
+          for (const write of [false, true])
+            expectTypedCall([3, 1, 2], plan.m, 1, write)
+        },
+      ),
+    check: forwardAssertionJudgment,
   })
 
   // Reversal swaps distinct signed-zero values. The native comparison checks
   // their final positions, including the detached change-set value.
-  it(`reversing signed zeros preserves their native positions`, () => {
-    oracleRoute(`case`)
-    expectTypedCall([-0, 0], `reverse`, 0, false)
+  oracleProperty({
+    id: `proxy.native-typed-signed-zero`,
+    law: {
+      statement: `Reversing a draft typed array of signed zeros preserves their native positions, including the detached change-set value.`,
+      authority: `src/proxy.ts draft contract and tests/proxy-oracle.test.ts native differential laws`,
+      limits: `One fixed Float64Array row [-0, 0] reversed without a write.`,
+    },
+    owns: [`src/proxy.ts`],
+    histories: [`reversing signed zeros preserves their native positions`],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `proxy.native-typed-signed-zero`,
+        plan,
+        observe,
+        () => {
+          expectTypedCall([-0, 0], `reverse`, 0, false)
+        },
+      ),
+    check: forwardAssertionJudgment,
   })
 
   oracleProperty({

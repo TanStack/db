@@ -18,6 +18,9 @@ export const properties: ReadonlyArray<string> = [
   `proxy.iteration-nested-membership`,
   `proxy.iteration-set-clear-readd`,
   `proxy.iteration-persisted-writes`,
+  `proxy.native-array-fixed-row`,
+  `proxy.native-typed-fixed-row`,
+  `proxy.native-typed-signed-zero`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -34,5 +37,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/proxy-iteration-contract-oracle.test.ts`,
     `proxy`,
     `iteration-array-edits iteration-insertion-values iteration-nested-membership iteration-set-clear-readd iteration-persisted-writes`,
+  ],
+  [
+    `db/tests/proxy-native-methods-oracle.property.test.ts`,
+    `proxy`,
+    `native-array-fixed-row native-typed-fixed-row native-typed-signed-zero`,
   ],
 ]
