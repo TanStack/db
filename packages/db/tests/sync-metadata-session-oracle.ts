@@ -1187,8 +1187,23 @@ const peerOf = (key: SessionRowKey, notice: PeerNotice): SessionAction => ({
   key,
   notice,
 })
+// Two transactions committed during a core hold stay held there. The second
+// begins over the first, and the release follows both.
+const heldPair = (grammar: SessionGrammar): Array<SessionAction> => [
+  sessionHold(grammar, `core`),
+  begin,
+  upsert(1, false),
+  commit,
+  begin,
+  upsert(2, false),
+  commit,
+  release,
+]
 export const regimeConstructions = {
   'store hold': (grammar) => [sessionHold(grammar, `store`)],
+  'core hold': (grammar) => [sessionHold(grammar, `core`), release],
+  'open transaction over a held transaction': heldPair,
+  'read with two held transactions': heldPair,
   seed: () => [seedOf(1)],
   'nested commit': () => [begin, begin, commit, commit],
   'nested commit during a hold': (grammar) => [

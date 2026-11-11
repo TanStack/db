@@ -61,6 +61,11 @@
   "peerDependencies": {
     "typescript": ">=4.7"
   },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@playwright/test": "^1.65.0",
     "@tanstack/config": "^0.22.2",

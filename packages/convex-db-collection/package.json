@@ -67,6 +67,11 @@
     "convex": "^1.47.0",
     "typescript": ">=4.7"
   },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^5.1.0",
     "convex": "^1.49.0"

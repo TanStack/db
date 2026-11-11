@@ -73,6 +73,11 @@
   "peerDependencies": {
     "typescript": ">=4.7"
   },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^5.1.0",
     "electron": "^42.11.18"
