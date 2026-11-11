@@ -4306,6 +4306,17 @@ keys and the fixed seed 271828 as removed, although both campaigns still run in
 the oracle file. Owner: `scripts.run-budget`. Needed witness: a campaign whose
 budget a helper computes and passes in as parameters.
 
+A budget that a loop variable carries is not tracked for the same reason.
+`sync-metadata-session-persisted-oracle.test.ts` registers eleven persisted
+production paths (`persisted-flat` through `persisted-peers-on-demand`) in one
+`oracleProperty` loop over an array of `{ property, seed, runs }` entries.
+The call reads `id`, `fixedSeeds`, and `runs` from the loop's variables, so a
+lowered `runs` in an entry is not reported (checked on 2026-11-11 by lowering
+the `persisted-flat` entry from 50 to 49). The file's literal campaigns, such
+as `persisted-queued-metadata-repair`, are tracked. Owner:
+`scripts.run-budget`. Needed witness: a campaign whose id, seed, and count come
+from an array entry that a loop destructures.
+
 `scripts/strip-oracle-probes-oracle.property.test.js` owns the build-time removal of the
 oracle state probes from published builds (`scripts.strip-oracle-probes`, maintainer decision of
 2026-11-09). Its grammar draws one-function programs with the guard in the placements that the
@@ -4369,27 +4380,72 @@ documentation. Constructions in each campaign draw a missing install (no
 delegate through the launch checkout's script. They also draw a session
 checkout whose installed plugin lacks its entry file, lacks its subpath rule
 module, imports a package that is not installed, or has a cut-off entry file.
-It does not draw a broken ESLint or parser, a missing dependency deeper in the
-tree, or a stop hook input with `stop_hook_active`.
+It does not draw a broken ESLint or parser, or a missing dependency deeper in
+the tree. A stop hook input with `stop_hook_active` is drawn only in the stops
+of an unknown option and a missing `main` (`unknown-option-continued-stop` and
+`no-main-continued-stop`, constructed in each campaign). Such a stop already
+continued the turn once, so it must be silent, with `{}` for Codex. The script
+reads a hook's input before it judges the options, so a bad option keeps that
+guard. The missing-install
+histories also run `pnpm lint:run-budgets`
+(`scripts/check-oracle-run-counts.mjs`), which loads the parser with a dynamic
+import and writes the same skip line with exit status 1. A broken plugin
+leaves that report clean.
 
-Open limit of `scripts.lint-scope` (reachable, older than the missing-install
-rule; owner: `scripts/lint-scope-oracle.property.test.js`; needs a maintainer
-decision). A worktree under `.worktrees/` with no `node_modules` of its own,
-inside an installed launch checkout, resolves ESLint, the parser, and the
-plugin by walking up to the launch checkout's `node_modules`. So it lints with
-the launch checkout's plugin, not the one its own lockfile pins, which breaks
-this oracle's law that each report uses the session checkout's installed rule.
-Trace (reproduced 2026-11-11): commit a launch checkout with the script and an
-undeclared oracle file, install it with a plugin whose `no-unit-test` message
-carries a mark, add `.worktrees/wt` with `git worktree add` and no install, edit
-the oracle file there, and run `node scripts/agent-lint-feedback.mjs` in the
-worktree. It exits 1 with a report that carries the launch checkout's mark. The
-grammar does not draw this state: every installed worktree history copies the
-plugin into the worktree, and the missing-install histories leave the launch
-checkout uninstalled too. Needed witness: a worktree-install dimension (own or
-none) under an installed launch checkout, with the decided law. The two
-candidate laws are to skip as not installed, or to lint with the launch
-checkout's rule and say so.
+The same owner covers the remaining failure paths of review finding F26, under
+the same 2026-11-10 decision. An unknown `--format`, `--event`, or other
+option, a hook input that is not a JSON object, a checkout with no `main` branch for the
+merge-base, and an error that the rule throws while it lints each end with one
+`oracle lint failed: <message>` line. A hook format exits 0 and hands the line
+to the agent on its harness's channel; with an unknown event, that is the edit
+channel. The script reads the format and event leniently before it judges the
+other options, so an unknown option beside a hook format also answers on the
+agent channel. Every other run writes the line to stderr and exits nonzero, and so
+does `pnpm lint:run-budgets` without `main`. A fault dimension draws each
+failure, and a construction in each campaign enters it (`unknown-format-fault`,
+`unknown-event-fault`, `unknown-option-fault`, `invalid-input-fault`,
+`no-main-fault`, and `lint-error-fault`). The model predicts the line in each
+form that the failure reaches, and a clean run for a form that lints no file
+when the rule throws. A failure is drawn only with a full install. A worktree
+that lints with an outer plugin also draws a missing `main` and a lint error,
+which happen after the plugin loads. There the line that names the plugin
+comes before the failure line, so a lint-time throw says which plugin threw
+(`outer-plugin-lint-error`, constructed in each campaign). Without
+`main`, only the forms that always need the merge-base run: the changed scope,
+the four stop hooks, and the run-budget report. An edit hook or a named scope
+that names the lockfile also reads the merge-base; that is not drawn. The
+values are three unknown formats, three unknown events, three unknown options
+(`--bogus`, `--all=yes`, and `-x`), two texts that are not JSON, and three JSON values that are not objects. The lint error is one that
+the rule throws on every file. A git failure other than a missing `main`, and
+an error in the delegated copy of the script, are not drawn.
+
+The outer-plugin rule closes a former open limit of `scripts.lint-scope`
+(maintainer decision, 2026-11-11: "using outer checkout's plugin seems fine").
+A worktree under `.worktrees/` with no `node_modules` of its own, inside an
+installed launch checkout, resolves ESLint, the parser, and the plugin by
+walking up to the launch checkout's `node_modules`. It lints with the launch
+checkout's plugin, not the one its own lockfile pins, and every form says so
+in one line: `oracle lint used the plugin installed at <location>, outside
+<checkout>`. A command-line run writes the line to stderr and keeps its exit
+status. A hook puts the line before its report. With no report, an edit hook
+hands it to the agent and exits 0, as a skip does. The line never blocks a
+stop (coordinator decision, 2026-11-11): the lint ran, so only lint reports
+and a line that says the lint did not run may block one. With no report, the
+Claude Code, Codex, and Gemini CLI stop hooks show the line as
+`systemMessage`, which their hook documentation describes as a message to
+the user that does not block. Copilot's `agentStop` documents only
+`decision` and `reason`, so its stop is silent. A worktree-install dimension
+(own or none) draws this state under an installed launch checkout, and a
+construction in each campaign enters it (`worktree-outer-plugin`). Another
+construction gives such a worktree a stop and an edit with no report
+(`outer-plugin-quiet-stop` and `outer-plugin-quiet-edit`). The model predicts
+the launch checkout's unmarked rule for such a worktree, even when its branch
+changed the plugin, and the line in every form. In each harness, it predicts
+whether the stop blocks and what it shows, and the whole edit hook output
+when the edit has no report: the agent channel, never `systemMessage`, which
+reaches only the user. A checkout whose own plugin loads must print no such line. It
+does not draw a launch checkout whose plugin is linked from outside every
+checkout.
 
 It does not draw `.js` support modules or drivers,
 although the rule now resolves a `.js` test module when no TypeScript source
@@ -5220,8 +5276,8 @@ reload after a named notice keeps a seed's metadata (decision 18).
 | Owner | Production paths | Observations and checkpoint |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [sync metadata session oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-session-oracle.ts) (`flat`, `nested`, `seeds`, `nested-seeds`, `seeds-full`, `nested-conflicts` grammars) | `DbClient` Collection, core hold, `DbClient.hydrate` seeds | `metadata.row.get`, `metadata.collection.get`, `list()`, `list(prefix)`, `collection.base`, each commit receipt's state, thrown errors; after every action and after settlement |
-| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted-driver.ts) and its [campaigns](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`, `persisted-reads`, `persisted-reads-seeds`, `persisted-peers`, `persisted-peers-full`, `persisted-peers-on-demand`) | `persistedCollectionOptions` over an in-memory adapter, store hold, core hold, and a storage read held in flight; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup; a peer's notices, eager, under full row updates, and on demand | the same source reads after every action; `collection.base` and receipts after settlement; in the peer production paths, stored rows after settlement and stored row metadata at every completed durable action cut and after settlement |
-| [native SQLite/coordinator receiver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite-driver.ts) and its [campaigns](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite.test.ts) | two real Collections and coordinators, node:sqlite, BroadcastChannel and Web Locks; partial/full/on-demand grammar | shared model and source reads after correlated commit/notice/recovery cuts; rows, metadata and applied receipts after settlement; direct durable metadata after each correlated action and durable rows after settlement |
+| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted-driver.ts) and its [campaigns](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted-oracle.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`, `persisted-reads`, `persisted-reads-seeds`, `persisted-peers`, `persisted-peers-full`, `persisted-peers-on-demand`) | `persistedCollectionOptions` over an in-memory adapter, store hold, core hold, and a storage read held in flight; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup; a peer's notices, eager, under full row updates, and on demand | the same source reads after every action; `collection.base` and receipts after settlement; in the peer production paths, stored rows after settlement and stored row metadata at every completed durable action cut and after settlement |
+| [native SQLite/coordinator receiver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite-driver.ts) and its [campaigns](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite-oracle.test.ts) | two real Collections and coordinators, node:sqlite, BroadcastChannel and Web Locks; partial/full/on-demand grammar | shared model and source reads after correlated commit/notice/recovery cuts; rows, metadata and applied receipts after settlement; direct durable metadata after each correlated action and durable rows after settlement |
 | [recovery schedules](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-recovery-oracle.ts) using the same session model and native receiver | response delivery, storage reading and captured-row application held separately; bare/non-bare seeds, a second tab's source write, or cleanup during one recovery on demand | source metadata before application, after the interruption and after completion; stale source reads at cleanup start and after late work; direct durable metadata after completion |
 | paired properties and boundary witnesses in the core driver file | production against itself: holds removed, row 2's actions removed, or seeds performed first; stale run; write without a transaction; cleanup with a held seed | source reads (and row 1's view) at each shared checkpoint, or every observation after settlement for seed order; thrown errors; unhandled rejections |
 | [row metadata composition oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-row-metadata-composition-oracle.test.ts) held-window and nested grammar | Collection, core hold, a transaction begun inside an open one, `DbClient.hydrate` | implicit row-metadata rules during a hold, and for an outer transaction whose inserts are reclassified after an inner write applies first, with and without a hold |
@@ -5281,8 +5337,23 @@ original seed/re-insert/reload grammar, fixed/random 40 budgets and its
 completed fixed-branch guards remain; the new constructive batch supplies
 guaranteed bare-key-1 implicit histories independently of seed. Both hosts share
 the 40-run sibling and 8-run durability campaign mechanics in
-`sync-metadata-session-campaign.ts`; production setup, recovery observations and
+`sync-metadata-session-campaign-oracle.ts`; production setup, recovery observations and
 direct replay selection remain in their receiving files.
+
+The campaign module and the files that host these campaigns carry `oracle` in
+their names, so `pnpm lint:run-budgets` tracks their budgets, except the
+loop-carried entries recorded under `scripts.run-budget`: the persisted
+driver's `sync-metadata-session-persisted-oracle.test.ts`, the native
+receiver's `sync-metadata-session-sqlite-oracle.test.ts`,
+`sync-metadata-recovery-oracle.test.ts`, and
+`sync-metadata-missing-row-oracle.test.ts` (review finding F28). The
+persisted flat property was two raw fast-check campaigns of 50 histories and
+a sample test of its fixed-seed reach. It is now an `oracleProperty` with the
+same seed (2220011), budget, model, driver, and comparison. Its four regimes
+(`read with two held transactions`, `open transaction over a held
+transaction`, `store hold`, and `core hold`) are required by constructed
+histories, whose prefixes are in the session oracle's `regimeConstructions`
+(maintainer decision, 2026-11-11, to remove every legacy campaign form).
 
 The native on-demand path can receive a successful recovery response that
 crosses an earlier cache version without transaction replay details. The shared
