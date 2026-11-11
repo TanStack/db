@@ -4318,7 +4318,11 @@ The gap report (`pnpm gap-report`) is the `oracle-gaps` CLI of
 `@tanstack/oracles`. Its own oracles (`oracle-gaps.report`, and the static and
 classify oracles) and their limits live in the TanStack/oracles repository,
 under `packages/oracles/oracle-gaps/`. TanStack DB passes its prefix with
-`--env-prefix TANSTACK_DB_ORACLE`.
+`--env-prefix TANSTACK_DB_ORACLE`. The report reads each oracle file's owned
+code from the `owns` list of its `oracleProperty` calls. A file with no inline
+`oracleProperty` call, such as one that registers through a production driver,
+keeps the list in `declareOracle({ owns })` until the oracles package removes
+that API. The report reads both.
 
 `scripts/lint-scope-oracle.property.test.js` owns lint selection after an
 edit (`scripts.lint-scope`): the changed scope, the named (pre-commit) scope,

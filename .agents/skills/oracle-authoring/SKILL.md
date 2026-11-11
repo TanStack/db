@@ -52,6 +52,11 @@ concepts. Delegated agents must do the reading relevant to their own scope.
 
 Follow the subsystem reading requirements in AGENTS.md.
 
+Name the production code that the oracle judges in `owns` on each
+`oracleProperty` call, as an inline literal array; the law has no owner field.
+The [oracle guide](../../../docs/contributing/oracle-rubric.md#name-oracle-files-consistently)
+states the form that the gap report reads.
+
 Keep unit tests and standalone concrete type assertions out of oracle files
 (ORC-016). Fixed regressions are inputs to the same model, production driver,
 and comparison as the broader campaign, without their own expected answers.

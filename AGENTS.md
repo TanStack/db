@@ -780,6 +780,12 @@ property that states its law inline. A test that compares production with a
 hand-written value is a unit test: put it in an ordinary test file. The
 `oracle/no-unit-test` lint rule reports a test that does neither.
 
+Name the production code that an oracle file judges in the `owns` list of each
+`oracleProperty` call, written inline as a literal array. A law has no owner
+field; code ownership belongs to CODEOWNERS. The oracle rubric's
+[naming section](docs/contributing/oracle-rubric.md#name-oracle-files-consistently)
+states the form that the gap report reads.
+
 Ordinary example tests, type assertions, fixtures, registration wrappers, and
 runner utilities keep their ordinary names. A module that only drives production
 or records observations is not an oracle definition. Report oracle owners and
