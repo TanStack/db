@@ -17,10 +17,14 @@
  * Collections without replacing their rows; reuse requires a fresh descriptor.
  * These are bounded controlled histories, not browser scheduling evidence.
  */
-import { expect, it } from 'vitest'
+import { expect } from 'vitest'
 import { executeTransaction } from '../../src'
-import { declareOracle } from '../oracle-declaration'
-import { oracleRoute } from '../oracle-config'
+import { oracleProperty } from '../oracle-config'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter'
 import { Channel, assertRows, readStore, seed, withHarness } from './harness'
 import type { Row } from './harness'
 
@@ -40,57 +44,85 @@ function expectedAfterReplacement(
   return replacement === 'clear' ? [inserted] : [imported, inserted]
 }
 
-for (const replacement of ['clear', 'import'] as const) {
-  for (const delivery of ['FIFO', 'reverse', 'duplicate'] as const) {
-    it(
-      'retains a later local insert after ' +
-        replacement +
-        ' with ' +
-        delivery +
-        ' notifications',
-      async () => {
-        oracleRoute(`case`)
-        await withHarness(async (h) => {
-          await seed(h.db, 'items', [{ id: 'old', name: 'replaced' }])
-          const source = await h.open()
-          const receiver = await h.open()
-          const imported = { id: 'imported', name: 'replacement' }
-          if (replacement === 'clear') await source.utils.clearObjectStore()
-          else await source.utils.importData([imported])
-          const inserted = { id: 'later', name: 'accepted after replacement' }
-          await receiver.insert(inserted).when('settled')
-          const expected = expectedAfterReplacement(
-            replacement,
-            imported,
-            inserted,
-          )
-          const pending = Channel.pending.length
-          expect(
-            pending,
-            'held replacement and insertion notifications',
-          ).toBeGreaterThan(1)
-          if (delivery === 'reverse') Channel.pending.reverse()
-          if (delivery === 'duplicate') Channel.pending.push(...Channel.pending)
-          expect(await Channel.deliver(), 'receiver work completed').toBe(
-            delivery === 'duplicate' ? pending * 2 : pending,
-          )
-          assertRows(
-            (await readStore<Row>(h.db, 'items')).rows,
-            expected,
-            'authored durable operation order',
-          )
-          assertRows((await h.open()).values(), expected, 'fresh restore')
-          assertRows(source.values(), expected, 'first writer convergence')
-          assertRows(
-            receiver.values(),
-            expected,
-            'later writer survives delayed replacement',
-          )
-        })
-      },
-    )
-  }
+type ReplacementHistory = {
+  replacement: 'clear' | 'import'
+  delivery: 'FIFO' | 'reverse' | 'duplicate'
 }
+
+async function laterInsertAfterReplacement({
+  replacement,
+  delivery,
+}: ReplacementHistory) {
+  await withHarness(async (h) => {
+    await seed(h.db, 'items', [{ id: 'old', name: 'replaced' }])
+    const source = await h.open()
+    const receiver = await h.open()
+    const imported = { id: 'imported', name: 'replacement' }
+    if (replacement === 'clear') await source.utils.clearObjectStore()
+    else await source.utils.importData([imported])
+    const inserted = { id: 'later', name: 'accepted after replacement' }
+    await receiver.insert(inserted).when('settled')
+    const expected = expectedAfterReplacement(replacement, imported, inserted)
+    const pending = Channel.pending.length
+    expect(
+      pending,
+      'held replacement and insertion notifications',
+    ).toBeGreaterThan(1)
+    if (delivery === 'reverse') Channel.pending.reverse()
+    if (delivery === 'duplicate') Channel.pending.push(...Channel.pending)
+    expect(await Channel.deliver(), 'receiver work completed').toBe(
+      delivery === 'duplicate' ? pending * 2 : pending,
+    )
+    assertRows(
+      (await readStore<Row>(h.db, 'items')).rows,
+      expected,
+      'authored durable operation order',
+    )
+    assertRows((await h.open()).values(), expected, 'fresh restore')
+    assertRows(source.values(), expected, 'first writer convergence')
+    assertRows(
+      receiver.values(),
+      expected,
+      'later writer survives delayed replacement',
+    )
+  })
+}
+
+oracleProperty({
+  id: `indexeddb.transport-replacement`,
+  law: {
+    statement: `A disjoint write that commits after a replacement stays authoritative: after every notification is delivered, durable rows, a fresh restore and both writers equal the authored operation order.`,
+    authority: `The controlled IndexedDB transport contract stated above; the authored reference array, not the adapter's version cache`,
+    limits: `Clear and import replacements crossed with FIFO, reverse and duplicate controlled delivery; not native BroadcastChannel scheduling.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db-wrapper.ts#executeTransaction',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+  ],
+  histories: (['clear', 'import'] as const).flatMap((replacement) =>
+    (['FIFO', 'reverse', 'duplicate'] as const).map(
+      (delivery): ReplacementHistory => ({ replacement, delivery }),
+    ),
+  ),
+  label: ({ replacement, delivery }) =>
+    'retains a later local insert after ' +
+    replacement +
+    ' with ' +
+    delivery +
+    ' notifications',
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `indexeddb.transport-replacement`,
+      plan,
+      observe,
+      () => laterInsertAfterReplacement(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
 
 // Peer edit model. The reference applies one authored peer update or delete to the
 // initial rows; metadata completeness does not change this membership.
@@ -104,66 +136,83 @@ function expectedAfterPeerEdit(
     : initial.slice(1)
 }
 
-declareOracle({
+// Restored source membership does not depend on adapter metadata. The model
+// applies an authored peer edit to initial rows; metadata completeness is an
+// independent grammar axis. Raw wrapper rows reach the production restore path.
+type PeerEditHistory = {
+  metadata: 'none' | 'mixed' | 'all'
+  key: number | string
+  action: 'update' | 'delete'
+}
+
+async function reconcilePeerEdit({ metadata, key, action }: PeerEditHistory) {
+  await withHarness(async (h) => {
+    const initial = [
+      { id: key, name: 'legacy' },
+      { id: 'anchor', name: 'untouched' },
+    ]
+    await executeTransaction(h.db.db, 'items', 'readwrite', (_, stores) => {
+      for (const row of initial) stores.items!.put(row, row.id)
+    })
+    if (metadata !== 'none')
+      await seed(h.db, 'items', metadata === 'all' ? initial : initial.slice(1))
+    const receiver = await h.open()
+    const sender = await h.open('items', { db: await h.connect() })
+    if (action === 'update')
+      await sender
+        .update(key, (row) => {
+          row.name = 'new'
+        })
+        .when(`settled`)
+    else await sender.delete(key).when(`settled`)
+    // Repeat delivery: missing versions cannot turn an update into a second
+    // insert, and repeated deletes must leave the independent anchor intact.
+    Channel.pending.push(...Channel.pending)
+    await Channel.deliver()
+    const expected = expectedAfterPeerEdit(initial, key, action)
+    expect(receiver.status).toBe('ready')
+    for (const subject of [receiver, sender, await h.open()])
+      assertRows(subject.values(), expected, 'unversioned reconciliation')
+    assertRows(
+      (await readStore<Row>(h.db, 'items')).rows,
+      expected,
+      'unversioned durable',
+    )
+  })
+}
+
+oracleProperty({
+  id: `indexeddb.transport-unversioned-reconciliation`,
+  law: {
+    statement: `Restored source membership does not depend on adapter metadata: after repeated delivery of one peer update or delete, every Collection, a fresh restore and the durable rows equal the authored edit of the initial rows.`,
+    authority: `The controlled IndexedDB transport contract stated above; the authored reference array, not the adapter's version cache`,
+    limits: `No, mixed and complete initial version records, number and string keys, and one peer update or delete with duplicated notifications.`,
+  },
   owns: [
     'src/collection/index.ts#createCollection',
     'src/indexed-db-wrapper.ts#executeTransaction',
     'src/indexed-db.ts#createIndexedDB',
     'src/indexed-db.ts#indexedDBCollectionOptions',
   ],
-  model: [expectedAfterReplacement, expectedAfterPeerEdit],
+  histories: (['none', 'mixed', 'all'] as const).flatMap((metadata) =>
+    [1, '1'].flatMap((key) =>
+      (['update', 'delete'] as const).map((action): PeerEditHistory => ({
+        metadata,
+        key,
+        action,
+      })),
+    ),
+  ),
+  label: ({ metadata, key, action }) =>
+    `reconciles ${action} of ${typeof key} keys with ${metadata} initial versions`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `indexeddb.transport-unversioned-reconciliation`,
+      plan,
+      observe,
+      () => reconcilePeerEdit(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })
-
-// Restored source membership does not depend on adapter metadata. The model
-// applies an authored peer edit to initial rows; metadata completeness is an
-// independent grammar axis. Raw wrapper rows reach the production restore path.
-for (const metadata of ['none', 'mixed', 'all'] as const) {
-  for (const key of [1, '1'])
-    for (const action of ['update', 'delete'] as const) {
-      it(`reconciles ${action} of ${typeof key} keys with ${metadata} initial versions`, async () => {
-        oracleRoute(`case`)
-        await withHarness(async (h) => {
-          const initial = [
-            { id: key, name: 'legacy' },
-            { id: 'anchor', name: 'untouched' },
-          ]
-          await executeTransaction(
-            h.db.db,
-            'items',
-            'readwrite',
-            (_, stores) => {
-              for (const row of initial) stores.items!.put(row, row.id)
-            },
-          )
-          if (metadata !== 'none')
-            await seed(
-              h.db,
-              'items',
-              metadata === 'all' ? initial : initial.slice(1),
-            )
-          const receiver = await h.open()
-          const sender = await h.open('items', { db: await h.connect() })
-          if (action === 'update')
-            await sender
-              .update(key, (row) => {
-                row.name = 'new'
-              })
-              .when(`settled`)
-          else await sender.delete(key).when(`settled`)
-          // Repeat delivery: missing versions cannot turn an update into a second
-          // insert, and repeated deletes must leave the independent anchor intact.
-          Channel.pending.push(...Channel.pending)
-          await Channel.deliver()
-          const expected = expectedAfterPeerEdit(initial, key, action)
-          expect(receiver.status).toBe('ready')
-          for (const subject of [receiver, sender, await h.open()])
-            assertRows(subject.values(), expected, 'unversioned reconciliation')
-          assertRows(
-            (await readStore<Row>(h.db, 'items')).rows,
-            expected,
-            'unversioned durable',
-          )
-        })
-      })
-    }
-}
