@@ -1,5 +1,4 @@
 import { expect } from 'vitest'
-import { declareOracle } from './oracle-declaration.js'
 
 /**
  * A handler's Promise decides its transaction outcome. Its discarded return
@@ -236,9 +235,3 @@ export function checkMutationConfirmation(
     error: undefined,
   })
 }
-
-declareOracle({
-  check: [checkMutationConfirmation],
-  model: [expectedMutationConfirmation, mutationConfirmationRows],
-  grammar: [mutationConfirmationHistories],
-})

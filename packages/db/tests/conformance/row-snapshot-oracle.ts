@@ -15,7 +15,6 @@
  * symbols and callback atomicity are not judged.
  */
 import { expect } from 'vitest'
-import { declareOracle } from '../oracle-declaration'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { selectedRow } from './result-laws'
 import type {
@@ -590,8 +589,3 @@ export async function runRowSnapshotHistories(
 // Owns no production entry in packages/db: this module checks the public
 // observations that each framework driver passes it, so the framework packages
 // that run it own the entries it judges.
-declareOracle({
-  model: [facts, rowFacts],
-  grammar: [histories],
-  check: [expectRowSnapshot, expectSnapshots, expectFact],
-})

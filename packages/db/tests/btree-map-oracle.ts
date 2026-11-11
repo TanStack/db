@@ -8,7 +8,6 @@ import { expect } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { BTree } from '../src/utils/btree.js'
 import { oracleAssertion } from './oracle-assertion-adapter.js'
-import { declareOracle } from './oracle-declaration.js'
 
 export type Payload = { v: number }
 export type Stored = Readonly<{ reference: Payload; v: number }>
@@ -211,6 +210,3 @@ export function expectRefinement(
   expectPair(tree.nextHigherPair(undefined), sorted[0], model)
   expectPair(tree.nextLowerPair(undefined), sorted[sorted.length - 1], model)
 }
-
-// The shared definition is used by both the product driver and calibration.
-declareOracle({ check: [expectRefinement], model: [stepModel] })

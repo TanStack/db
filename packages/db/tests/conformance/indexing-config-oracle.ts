@@ -15,7 +15,6 @@
  * not judge ordering, rendering before flush, or changes to mounted options.
  */
 import { expect } from 'vitest'
-import { declareOracle } from '../oracle-declaration'
 import { expectUnorderedRows } from './result-laws'
 import { ScenarioLifetime } from './scenario-lifetime'
 import type { Collection, CollectionConfig } from '@tanstack/db'
@@ -140,20 +139,6 @@ function expectIndexing(
 // Owns no production entry in packages/db: this module checks the public
 // observations that each framework driver passes it, so the framework packages
 // that run it own the entries it judges.
-declareOracle({
-  grammar: [
-    indexConfigurations,
-    indexConfigurationPairs,
-    indexOptionAbsencePairs,
-  ],
-  model: [expectedIndexing],
-  check: [
-    expectIndexing,
-    expectIndexingAdmission,
-    expectIndexingConfiguration,
-    expectIndependentIndexingOutputs,
-  ],
-})
 
 export function registerIndexingConfigScenarios(
   driver: LiveQueryDriver,

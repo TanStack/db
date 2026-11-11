@@ -12,7 +12,6 @@
  * changes. A version field makes every stage a distinct source update.
  */
 import { expect } from 'vitest'
-import { declareOracle } from '../oracle-declaration'
 import { expectRowSnapshot } from './row-snapshot-oracle'
 import { ScenarioLifetime } from './scenario-lifetime'
 import type {
@@ -693,21 +692,3 @@ export async function runPublicFieldOverlapHistories(
 // Owns no production entry in packages/db: this module checks the public
 // observations that each framework driver passes it, so the framework packages
 // that run it own the entries it judges.
-declareOracle({
-  model: [
-    expectedPublicField,
-    expectedSelectedPublicField,
-    expectedPublicFieldOverlapSource,
-    expectedSelectedPublicFieldOverlap,
-  ],
-  grammar: [
-    publicFieldCells,
-    publicFieldOverlapCells,
-    publicFieldOverlapFunctionalCells,
-  ],
-  check: [
-    runPublicFieldHistories,
-    runPublicFieldOverlapCell,
-    runPublicFieldOverlapHistories,
-  ],
-})

@@ -23,7 +23,6 @@ import {
   arbitraryExtraProperty,
   ringArbitrary,
 } from './utils-campaign-grammar-oracle.js'
-import { declareOracle } from './oracle-declaration.js'
 import {
   makeSparseArray,
   sparseArrayCarriers,
@@ -1110,11 +1109,6 @@ function checkSetBag(
       cause: errors[0],
     })
 }
-declareOracle({
-  model: [setBag, setBagsEqual],
-  check: [checkSetBag],
-  grammar: [ambiguousSets],
-})
 // Match the existing describe registration order to preserve IDs: utils.42.
 describe(`object Set matching work`, () => {
   utilsProperty([ambiguousSets])(
@@ -1190,7 +1184,6 @@ const pairedSets = fc.record({
   width: fc.integer({ min: 1024, max: 3072 }),
   value: fc.integer({ min: 1, max: 5 }),
 })
-declareOracle({ grammar: [pairedSets] })
 const pairedReachStates = [
   ...setReachStates.filter((state) =>
     [

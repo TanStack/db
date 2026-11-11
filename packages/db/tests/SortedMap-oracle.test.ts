@@ -8,7 +8,6 @@ import {
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from './oracle-assertion-adapter'
-import { declareOracle } from './oracle-declaration'
 import { expectMap, expectView, modelOrder } from './sorted-map-support'
 import type { ModelKey, Order, Row } from './sorted-map-support'
 
@@ -416,12 +415,6 @@ function withDeferredChange(actions: Array<Action>): Array<Action> {
     ...actions,
   ]
 }
-
-declareOracle({
-  check: [expectMap, expectView],
-  model: [modelOrder, restoreBound],
-  grammar: [withDeferredChange],
-})
 
 // Native campaigns keep their own ledgers. Their original four examples run
 // through the unchanged helper before that campaign's generated histories, so
