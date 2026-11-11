@@ -33,7 +33,7 @@ import {
   windowRows,
 } from '../../db/tests/conformance/window-history-oracle'
 import { ScenarioLifetime } from '../../db/tests/conformance/scenario-lifetime'
-import { declareOracle, oracleProperty } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-config'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -471,8 +471,4 @@ describe(`client page identity`, () => {
               check: forwardAssertionJudgment,
             })
           })
-})
-declareOracle({
-  grammar: [clientWindowArbitrary],
-  check: [checkClientWindowHistory, checkClientSwitch],
 })

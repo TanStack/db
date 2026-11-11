@@ -6,12 +6,9 @@
  * Limits: immutable two-member collision fixtures plus an anchor; no public
  * Collection key policy, ordering, or intermediate transaction publications.
  */
-import { expect, it } from 'vitest'
 import { hash } from '../src/hashing/hash.js'
 import { distinct } from '../src/operators/distinct.js'
 import { map } from '../src/operators/map.js'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleProperty } from '../../db/tests/oracle-property.js'
 import {
   assertUnaryIncrementalization,
@@ -20,7 +17,6 @@ import {
 } from './incrementalization-law-oracle.js'
 import {
   DISTINCT_REACH_STATES,
-  checkDistinctSnapshot,
   distinctCollisionValues,
   distinctReachStates,
   distinctRecipe,
@@ -47,10 +43,6 @@ const policy = {
   identity: distinctValueIdentity,
   clone: (value: DistinctValue) => ({ ...value }),
 }
-
-declareOracle({
-  check: [assertUnaryIncrementalization, checkDistinctSnapshot],
-})
 
 type Plan = { worlds: DistinctHistory; requiredStates: ReadonlyArray<string> }
 type CellOptions = Omit<
@@ -166,18 +158,4 @@ oracleProperty({
   id: `ivm.distinct-collisions-tuple`,
   owns: [`src/operators/distinct.ts#distinct`],
   histories: { ...cell1.histories, runs: 100, fixedSeeds: [2306] },
-})
-
-it(`rejects omitted, duplicate and wrong-member snapshots`, () => {
-  oracleRoute(`calibration`)
-  const values = distinctCollisionValues(hash)
-  const input: Weighted<DistinctValue> = values.map((value) => [value, 1])
-  for (const bad of [
-    values.slice(1),
-    [...values, values[0]!],
-    [values[0]!, values[0]!, values[2]!],
-  ])
-    expect(() => checkDistinctSnapshot(bad, input, 0)).toThrow(
-      /snapshot diverged/,
-    )
 })

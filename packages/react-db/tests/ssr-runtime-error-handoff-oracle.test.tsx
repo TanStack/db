@@ -29,7 +29,6 @@ import {
   pass,
   violation,
 } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveQuery } from '../src/useLiveQuery'
@@ -302,12 +301,6 @@ function checkRuntimeTrace(
   }
   return pass
 }
-
-declareOracle({
-  model: [expectedSsrRuntimeErrorViews],
-  check: [checkRuntimeTrace],
-  grammar: [ssrRuntimeErrorHistoryArbitrary],
-})
 
 for (const hook of [`ordinary`, `infinite`] as const) {
   const law = {

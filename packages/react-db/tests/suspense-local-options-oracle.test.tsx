@@ -30,7 +30,6 @@ import {
   equalLocalDeclarations,
   localOptionPairs,
 } from '../../db/tests/live-query-cache-options-oracle'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-config'
 import {
   forwardAssertionJudgment,
@@ -43,10 +42,6 @@ import type { Collection, Context, InitialQueryBuilder } from '@tanstack/db'
 import type { UseLiveQueryConfig } from '../src/useLiveQuery'
 import type { ReactNode } from 'react'
 
-declareOracle({
-  grammar: [localOptionPairs],
-  check: [checkLocalOutputOwnership],
-})
 const histories = localOptionPairs.flatMap((history, cell) =>
   // Callback/reference and scalar equality are distinct premises. Keep the
   // full ready matrix; cross only these representatives with held delivery.

@@ -30,7 +30,7 @@ import {
   windowRows,
 } from '../../db/tests/conformance/window-history-oracle'
 import { atOracleCheckpoint } from '../../db/tests/oracle-failure-fidelity'
-import { declareOracle, oracleProperty } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-config'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -342,10 +342,6 @@ describe(`window changes at React commit`, () => {
                 check: forwardAssertionJudgment,
               })
             })
-})
-declareOracle({
-  grammar: [renderHistoryArbitrary],
-  check: [checkRenderHistory],
 })
 /** A mounted binding can suspend on a replacement while another hook finishes
  * that same preload first. React preserves the mounted binding's refs in this
@@ -718,7 +714,3 @@ for (const client of [false, true])
             check: forwardAssertionJudgment,
           })
         })
-declareOracle({
-  grammar: [renderHistoryArbitrary],
-  check: [checkRetryOwnershipHistory],
-})

@@ -12,7 +12,6 @@
  * ordering, readiness, or intermediate source-transaction publications.
  */
 import { fc } from '@fast-check/vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { OracleComparisonMismatch } from './incrementalization-law-oracle.js'
 import type { Weighted } from './incrementalization-law-oracle.js'
 
@@ -168,12 +167,6 @@ export function checkDistinctSnapshot(
     )
 }
 
-declareOracle({
-  model: [recomputeDistinct],
-  grammar: [distinctHistory],
-  check: [checkDistinctSnapshot],
-})
-
 /**
  * Wider bucket histories separate selected identity from the emitted payload.
  * The model's member numbers name fixture-defined unequal selections; variant
@@ -233,10 +226,6 @@ export function resolveDistinctBucketRecipe([
     [],
   ]
 }
-
-export const distinctBucketHistory = distinctBucketRecipe.map(
-  resolveDistinctBucketRecipe,
-)
 
 export const DISTINCT_BUCKET_REACH_STATES = [
   `unequal unselected payloads`,
@@ -360,8 +349,3 @@ export function checkDistinctRepresentatives(
       expected,
     )
 }
-
-declareOracle({
-  grammar: [distinctBucketHistory],
-  check: [checkDistinctRepresentatives],
-})

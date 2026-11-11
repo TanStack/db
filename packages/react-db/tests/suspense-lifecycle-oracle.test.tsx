@@ -44,7 +44,7 @@ import {
   expectUnorderedRows,
 } from '../../db/tests/conformance/result-laws'
 import { atOracleCheckpoint } from '../../db/tests/oracle-failure-fidelity'
-import { declareOracle, oracleProperty } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-config'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -923,11 +923,6 @@ async function checkPreload(
     reach.reach(`restart ready`)
   })
 }
-declareOracle({
-  model: [advance],
-  grammar: [retryArbitrary, replacementArbitrary, preloadArbitrary],
-  check: [compare, checkRetry, checkReplacement, checkPreload],
-})
 // Registration adapts the complete original helpers. Their model transitions,
 // public observations and assertions stay at the original host cuts.
 describe(`Suspense lifecycle histories`, () => {
@@ -1986,12 +1981,3 @@ for (const scope of [`none`, `provider`, `explicit`] as const)
         timeout: 60000,
       })
     })
-declareOracle({
-  grammar: [siblingsArbitrary, siblingHistories],
-  check: [
-    checkSiblings,
-    checkSiblingOwnership,
-    checkSiblingHealth,
-    checkSiblingRequestIsolation,
-  ],
-})

@@ -11,7 +11,6 @@
  */
 import fc from 'fast-check'
 import { hash } from '../src/hashing/hash'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   differs,
   oracleProperty,
@@ -162,11 +161,6 @@ function enforceConstructed(
     },
   }))
 }
-
-declareOracle({
-  model: [expectedFailedReads, expectedSuccessReads, expectedTrace],
-  check: [checkRetryTrace],
-})
 
 // Hash the same root on every attempt, then at the successful and cached
 // checkpoints. The rejecting getter throws the exact source error. Observing

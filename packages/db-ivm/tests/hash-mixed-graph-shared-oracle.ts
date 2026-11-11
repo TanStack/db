@@ -30,7 +30,6 @@
 import fc from 'fast-check'
 import { expect } from 'vitest'
 import { hash } from '../src/hashing/hash'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { differs, pass, violation } from '../../db/tests/oracle-property.js'
 import type { Observation, Verdict } from '../../db/tests/oracle-property.js'
 
@@ -270,9 +269,3 @@ export function expectMixedGraph(
     `pass`,
   )
 }
-
-declareOracle({
-  model: [isAcyclic, unfoldGraph, expectedMixedGraph],
-  check: [checkMixedGraph],
-  grammar: [graphArbitrary],
-})

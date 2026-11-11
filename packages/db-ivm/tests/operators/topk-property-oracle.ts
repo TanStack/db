@@ -1,4 +1,3 @@
-import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 import { differs, pass } from '../../../db/tests/oracle-property.js'
 import type { Observation, Verdict } from '../../../db/tests/oracle-property.js'
 import type { TopKComparisonRecorder } from './topk-relation-oracle.js'
@@ -69,4 +68,3 @@ export function topKRecorder(
     },
   }
 }
-declareOracle({ check: [checkTopKComparisons], model: [topKReferences] })

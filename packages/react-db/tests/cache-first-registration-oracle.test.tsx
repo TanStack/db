@@ -36,7 +36,6 @@ import {
   checkCacheOptionRows,
   conflictingCacheOptions,
 } from '../../db/tests/live-query-cache-options-oracle'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-config'
 import {
   forwardAssertionJudgment,
@@ -409,14 +408,4 @@ oracleProperty({
       checkFirstRegistrationHistory(plan.history, observe),
     ),
   check: forwardAssertionJudgment,
-})
-declareOracle({
-  check: [
-    checkFirstRegistrationHistory,
-    checkCacheOptionAdmission,
-    checkCacheOptionPromise,
-    checkCacheOptionRows,
-  ],
-  model: [conflictingCacheOptions],
-  grammar: [cacheOptionHistories, firstReaders, secondReaders],
 })

@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
-import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 import { oracleRoute } from '../../../db/tests/oracle-config.js'
 import { TopKRelation } from './topk-relation-oracle.js'
 
 // What this oracle owns: nothing. It calibrates the TopKRelation checker
 // against planted wrong answers and drives no production operator, so no
 // `owns` entry applies.
-declareOracle({ check: [TopKRelation] })
 
 /**
  * # How do we know the top-K oracle can detect a fault?
