@@ -31,7 +31,7 @@ import { createPersistedDriver } from './sync-metadata-session-persisted-driver'
 import {
   registerKeptMetadataDurabilityProperty,
   registerSeedReinsertReloadProperty,
-} from './sync-metadata-session-campaign'
+} from './sync-metadata-session-campaign-oracle'
 import {
   checkSessionRuns,
   completedSessionRuns,

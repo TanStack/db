@@ -1366,17 +1366,17 @@ const ownerGroups: ReadonlyArray<
     `persisted-flat persisted-nested persisted-seeds persisted-conflicts persisted-cached persisted-nested-seeds persisted-reads persisted-reads-seeds persisted-peers persisted-peers-full persisted-peers-on-demand persisted-seed-reinsert-reload persisted-kept-metadata-durability persisted-queued-metadata-repair`,
   ],
   [
-    `db-sqlite-persistence-core/tests/sync-metadata-session-sqlite.test.ts`,
+    `db-sqlite-persistence-core/tests/sync-metadata-session-sqlite-oracle.test.ts`,
     `sync-metadata-session`,
     `sqlite-seed-reinsert-reload sqlite-kept-metadata-durability`,
   ],
   [
-    `db-sqlite-persistence-core/tests/sync-metadata-recovery.test.ts`,
+    `db-sqlite-persistence-core/tests/sync-metadata-recovery-oracle.test.ts`,
     `sync-metadata-session`,
     `sqlite-recovery-schedules`,
   ],
   [
-    `db-sqlite-persistence-core/tests/sync-metadata-missing-row.test.ts`,
+    `db-sqlite-persistence-core/tests/sync-metadata-missing-row-oracle.test.ts`,
     `sync-metadata-session`,
     `persisted-missing-row-metadata sqlite-missing-row-metadata`,
   ],
