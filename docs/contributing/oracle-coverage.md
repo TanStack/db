@@ -4445,10 +4445,13 @@ kinds in `packages/query-db-collection/tests/reload-housekeeping-oracle.test.ts`
 (`query-db.reload-housekeeping`), and the real Electric GC receiver
 `collection-lifecycle.gc-retention-boundaries.electric-postgres`) is a check law, `declared reach`,
 because an enumerated source runs every history. The one aggregate reach over
-an enumeration, the four model-derived states of the failing-Query histories,
-is a grammar calibration in `failing-queries-oracle.test.ts` that runs the
-model's reach classifier over the oracle's own enumeration without production,
-until `oracleProperty` declares states on enumerated sources. The SQLite
+an enumeration, the four model-derived states of the failing-Query histories
+in `failing-queries-oracle.test.ts`, is declared on the enumerated source,
+`histories: { enumerated, states }` (TanStack/oracles #19). The property's
+`reached` reads each history's states from the model's reach classifier, and
+its `reach` test fails when no enumerated history enters a declared state.
+It replaced a grammar calibration that ran the same classifier over the same
+enumeration without production. The SQLite
 sync-metadata session campaigns declare their states with constructed
 histories; the persisted nesting-and-seeds campaigns' "at least five random
 histories per state" became "at least one constructed history per state, plus
