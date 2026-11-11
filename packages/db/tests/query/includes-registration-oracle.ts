@@ -13,6 +13,8 @@ export type IncludesCampaign<THistory extends ReadonlyArray<unknown>> = {
   runs: number
   fixedSeed: number
   examples?: ReadonlyArray<THistory>
+  /** The calling owner's production code, forwarded unchanged to oracleProperty. */
+  owns?: ReadonlyArray<string>
   beforeCampaign?: () => void
   afterCampaign?: () => void
 }
@@ -59,6 +61,7 @@ export function registerIncludesProperty<THistory extends Array<unknown>>(
           authority: `The existing independent includes judgments and the live-query materialization architecture cited by the calling owner.`,
           limits: `The calling owner's unchanged histories, production paths, comparison checkpoints, and stated limits. This registration migration adds no semantic coverage.`,
         },
+        owns: campaign.owns,
         histories,
         label: (history) =>
           `retained history ${campaign.examples!.indexOf(history) + 1}`,

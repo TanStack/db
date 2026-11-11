@@ -12,6 +12,11 @@ export const properties: ReadonlyArray<string> = [
   `includes-functional-projection.operator`,
   `includes-functional-projection.renamed`,
   `includes-functional-projection.boundary`,
+  `includes-optimistic.held-repair`,
+  `includes-optimistic.sibling-delivery`,
+  `includes-optimistic.failed-cleanup`,
+  `includes-optimistic.apply-checkpoint`,
+  `includes-optimistic.immediate-route`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -34,5 +39,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/includes-functional-projection-oracle.test.ts`,
     `includes-functional-projection`,
     `operator renamed boundary`,
+  ],
+  [
+    `db/tests/query/includes-optimistic-oracle.property.test.ts`,
+    `includes-optimistic`,
+    `held-repair sibling-delivery failed-cleanup apply-checkpoint immediate-route`,
   ],
 ]
