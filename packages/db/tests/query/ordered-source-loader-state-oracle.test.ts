@@ -52,13 +52,17 @@ function tieValue(options: RequestOptions): unknown {
  * ARCHITECTURE.md, "Ordered requests, continuation, and recovery", gives the
  * loader authority rules for requests that overlap an ordering invalidation:
  *
- * - **Held:** a successful bounded repair holds the acquisitions it read.
- *   Only a later read that covers them may retire them: a newer repair, a
- *   full-source read, or a truncate replay that covers the source, or a
- *   prefix read issued after the repair that reaches every repair row still
- *   inside the window. That prefix counts once it succeeds or once a
- *   successful replay reacquires its demand while it is still in flight. A request issued before the invalidation proves no
- *   current coverage, so it never retires them.
+ * - **Held:** a successful bounded repair holds the acquisitions it read:
+ *   its prefix, its ties, and its refills. Only a later read that covers
+ *   them may retire them: a newer repair, a full-source read, or a truncate
+ *   replay that covers the source. A prefix read issued after one of the
+ *   chain's prefixes that reaches every one of its rows still inside the
+ *   window may also retire that prefix, but no tie or cursor page
+ *   (ARCHITECTURE.md: a larger prefix does not retire ties or cursor
+ *   suffixes). That prefix counts once it succeeds or once a successful
+ *   replay reacquires its demand while it is still in flight. A request
+ *   issued before the invalidation proves no current coverage, so it never
+ *   retires them.
  * - **No leak:** once loading is quiet and no failure blocks it, the loader
  *   holds nothing issued before its last successful authoritative read.
  *   Otherwise every later refetch would read that request again. A
@@ -143,10 +147,15 @@ function tieValue(options: RequestOptions): unknown {
  * - a repair prefix is a step of a running chain, not a start, when it is
  *   issued while a chain member settles or by the continuation such a
  *   settlement left staged (a synchronous answer) or deferred (joined work),
- *   as an optimistic refill or a shrunk window's prefix is. A graph pass that
- *   a release callback runs does not consume that continuation: the loader
- *   blocks ordered refinement until its release pass unwinds
- *   (ARCHITECTURE.md), so the refinement resumes on a later pass;
+ *   as an optimistic refill or a shrunk window's prefix is. The chain's start
+ *   and its steps are the chain's acquisitions. A graph pass that a release
+ *   callback runs does not consume that continuation: the loader blocks
+ *   ordered refinement until its release pass unwinds (ARCHITECTURE.md), so
+ *   the refinement resumes on a later pass. The one release outside a
+ *   release pass is a stale finite request that settles after its repair
+ *   finished and is released at once; the ledger sees it as the request
+ *   being settled, issued before the current epoch, in this truncate
+ *   generation, with no full-source lease, and its graph pass is ordinary;
  * - a truncate replay that settles while the subscription holds a
  *   full-source lease, even a failed one, covers the source and counts as a
  *   successful start after every earlier request; the leases it reacquired
@@ -278,6 +287,13 @@ type LedgerRequest = {
   issuedTruncates: number
   failedTruncates: number
   failedAt: number
+  // How the loader asked for it, and the epoch moves before it was issued. A
+  // finite request issued before the current epoch is stale.
+  method: Observed[`method`]
+  issuedEpochMoves: number
+  // The repair chain the request belongs to: the ledger index of that chain's
+  // start. A full-source read and an ordinary page belong to none.
+  chain: number | undefined
 }
 
 type AuthorityCommand =
@@ -539,6 +555,9 @@ type AuthorityObservation = {
   hungRequests: number
   offsetWindows: number
   releaseInvalidations: number
+  // Graph passes in the stale self-release, which runs outside a release
+  // pass, while a continuation was owed.
+  unblockedReleasePasses: number
   retirementSuccessorChains: number
   replayContinuationHandoffs: number
   // Current failed requests whose participant reason reached the identity cut.
@@ -956,7 +975,8 @@ async function checkAuthorityCase(
       | `completed-repair-release`
       | `deferred-refill`
       | `reset-continuation`
-      | `release-pass-continuation`,
+      | `release-pass-continuation`
+      | `release-pass-refill-resumed`,
   ) => void,
   observeRejection?: (reason: unknown) => unknown,
   observeRelease: (released: boolean) => boolean = (released) => released,
@@ -1060,6 +1080,29 @@ async function checkAuthorityCase(
   // continuation survives bookkeeping, while cursor reset discards its
   // boundary and every pre-reset request belongs to truncate replay.
   let continuationOwed = false
+  // The repair chain of the latest start, the request being settled, and a
+  // blocked release pass that ran while a continuation was owed.
+  let currentChain: number | undefined
+  let settlingRequest: LedgerRequest | undefined
+  let deferredByReleasePass:
+    { epochMoves: number; truncates: number } | undefined
+  let unblockedReleasePasses = 0
+  const sameDemand = (a: LedgerRequest, b: LedgerRequest) =>
+    a.method === b.method &&
+    isDeepStrictEqual(
+      [
+        a.options.orderBy,
+        a.options.limit,
+        a.options.where,
+        a.options.minValues,
+      ],
+      [
+        b.options.orderBy,
+        b.options.limit,
+        b.options.where,
+        b.options.minValues,
+      ],
+    )
   let invalidateNextPage = false
   let releaseFaults = 0
   let releaseInvalidations = 0
@@ -1120,6 +1163,9 @@ async function checkAuthorityCase(
       issuedTruncates: truncates,
       failedTruncates: -1,
       failedAt: -1,
+      method,
+      issuedEpochMoves: epochMoves,
+      chain: undefined,
     }
     ledger.push(request)
     // No cursor expresses a NaN or infinite rank, so the loader reads the
@@ -1161,7 +1207,32 @@ async function checkAuthorityCase(
     if (startsAuthority(request)) {
       epochMovesAtLastStart = epochMoves
       repairOwed = false
+      currentChain = fullSource ? undefined : request.index
     }
+    if (startsAuthority(request) || request.chainStep)
+      request.chain = currentChain
+    // A blocked release pass deferred a pending refill, and a later graph pass
+    // resumed it: a refetch step of the same chain, in the same epoch, that
+    // reads a demand the chain has not read. Only a staged or blocked
+    // continuation issues such a step from a pass; a new start, or a restart
+    // inside the chain, would read the chain's first prefix again.
+    if (
+      deferredByReleasePass &&
+      request.chainStep &&
+      ledger.every(
+        (other) =>
+          other === request ||
+          other.chain !== request.chain ||
+          !sameDemand(other, request),
+      ) &&
+      settlingRequest === undefined &&
+      !settlingChainMember &&
+      deferredByReleasePass.epochMoves === epochMoves &&
+      deferredByReleasePass.truncates === truncates
+    ) {
+      reached?.(`release-pass-refill-resumed`)
+    }
+    deferredByReleasePass = undefined
     // An issued request consumes an owed continuation. An ordinary page also
     // shows the chain finished, since none is issued while a repair runs.
     continuationOwed = false
@@ -1230,6 +1301,19 @@ async function checkAuthorityCase(
       if (truncatePending && !explicitRetrying && !coveredBySource) {
         releaseViolation ??= `request ${request.index} was released while a truncate replay was pending`
       }
+      // Every release the loader makes runs inside a release pass, which
+      // blocks ordered refinement until it unwinds, except one: a stale
+      // finite request that settles after its repair finished is released at
+      // once, from its own settlement (ARCHITECTURE.md, ordered repair). The
+      // driver sees that case directly: the request is the one it is
+      // settling, it was issued before the current epoch, in this truncate
+      // generation, and no full-source lease covers the source.
+      const selfRelease =
+        request === settlingRequest &&
+        !request.authoritative &&
+        request.issuedEpochMoves !== epochMoves &&
+        request.issuedTruncates === truncates &&
+        !coveredBySource
       request.released = true
       const invalidate = () => {
         if (!testCase.releaseInvalidates || releaseInvalidations > 0) return
@@ -1269,15 +1353,21 @@ async function checkAuthorityCase(
         // A release callback runs a graph pass while a repair continuation
         // is still owed: the state where a pass that issues nothing must not
         // be read as consuming that continuation.
-        if (continuationOwed) reached?.(`release-pass-continuation`)
+        if (continuationOwed && selfRelease) unblockedReleasePasses++
+        if (continuationOwed && !selfRelease) {
+          reached?.(`release-pass-continuation`)
+          deferredByReleasePass = { epochMoves, truncates }
+        }
         reentering = true
         reentrantPasses++
         try {
           // The loader blocks ordered refinement until its release pass
           // unwinds (ARCHITECTURE.md, Ordered requests, continuation, and
-          // recovery), so this pass consumes no owed continuation. The
+          // recovery), so that pass consumes no owed continuation. The
           // refinement it asked for resumes on a later pass as the same chain.
-          run(() => loader.loadMore(), false)
+          // The stale self-release runs no pass, so its graph pass is an
+          // ordinary one.
+          run(() => loader.loadMore(), selfRelease)
         } finally {
           reentering = false
         }
@@ -1517,6 +1607,8 @@ async function checkAuthorityCase(
   const replayPending = () => truncatePending
   function truncate() {
     truncates++
+    currentChain = undefined
+    deferredByReleasePass = undefined
     // Reset discards any staged continuation. A later settlement may stage a
     // new one only for a request issued in this replay generation.
     if (continuationOwed) reached?.(`reset-continuation`)
@@ -1547,6 +1639,7 @@ async function checkAuthorityCase(
     const chainMember = request.authoritative && !request.fullSource
     const before = ledger.length
     settlingChainMember = chainMember
+    settlingRequest = request
     if (ok) request.deferred.resolve()
     else {
       request.error = new Error(`request ${request.index} failed`)
@@ -1555,6 +1648,7 @@ async function checkAuthorityCase(
     settlingFailure = !ok
     answeringRepair = ok && chainMember
     await flush()
+    settlingRequest = undefined
     settlingFailure = false
     answeringRepair = false
     // The chain completed in this settlement when it issued no further step:
@@ -1689,29 +1783,43 @@ async function checkAuthorityCase(
       lastAuthoritativeSuccess() > repair.index
     )
       return
-    // A prefix read issued after the repair covers the repair's rows that are
-    // still inside the window when it reaches as far; it may retire the
-    // repair's prefix. One issued before the repair proves no current
-    // coverage and may not.
-    const windowRows = Math.min(
-      repair.options.limit ?? 0,
-      info.offset + info.limit,
-    )
-    const coveredByLaterPrefix = ledger.some(
-      (request) =>
-        request.index > repair.index &&
-        (request.outcome === `ok` || request.replayed) &&
-        request.options.orderBy !== undefined &&
-        request.options.where === undefined &&
-        request.options.minValues === undefined &&
-        (request.options.limit ?? 0) >= windowRows,
-    )
-    if (coveredByLaterPrefix) return
-    if (repair.released) {
+    // Every successful acquisition of that chain stays held: its prefix,
+    // ties, and refills (ARCHITECTURE.md: only the new repair acquisitions
+    // remain, and a larger prefix does not retire ties or cursor suffixes).
+    // A prefix read issued after a prefix member covers that member's rows
+    // still inside the window when it reaches as far; it may retire it. One
+    // issued before it proves no current coverage and may not.
+    const isPrefix = (request: LedgerRequest) =>
+      request.options.orderBy !== undefined &&
+      request.options.where === undefined &&
+      request.options.minValues === undefined
+    for (const member of ledger) {
+      if (
+        member.chain !== repair.index ||
+        member.outcome !== `ok` ||
+        !member.released
+      )
+        continue
+      const windowRows = Math.min(
+        member.options.limit ?? 0,
+        info.offset + info.limit,
+      )
+      const coveredByLaterPrefix =
+        isPrefix(member) &&
+        ledger.some(
+          (request) =>
+            request.index > member.index &&
+            (request.outcome === `ok` || request.replayed) &&
+            isPrefix(request) &&
+            (request.options.limit ?? 0) >= windowRows,
+        )
+      if (coveredByLaterPrefix) continue
       rejectAt(
         `ordered-source-loader-state-oracle.test.ts:1638`,
         new Error(
-          `held ${checkpoint}: request ${repair.index}, a successful repair prefix, was released before a later authoritative read succeeded`,
+          member === repair
+            ? `held ${checkpoint}: request ${repair.index}, a successful repair prefix, was released before a later authoritative read succeeded`
+            : `held ${checkpoint}: request ${member.index}, a successful acquisition of repair chain ${repair.index}, was released before a later authoritative read succeeded`,
         ),
       )
     }
@@ -2438,6 +2546,7 @@ async function checkAuthorityCase(
     hungRequests,
     offsetWindows: testCase.offset > 0 && ledger.length > 0 ? 1 : 0,
     releaseInvalidations,
+    unblockedReleasePasses,
     retirementSuccessorChains: ledger.filter(
       (request) =>
         startsAuthority(request) &&
@@ -3194,16 +3303,22 @@ describe(`Ordered source request authority`, () => {
     let counts = new Map<State, number>()
     let executed = 0
 
-    // A release callback that runs a graph pass while the repair's deferred
-    // refill is still owed. The loader blocks refinement until its release
-    // pass unwinds, so that pass consumes nothing, and the refill that
-    // resumes later is still a step of the repair chain. An on-demand source
-    // reaches it: an explicit truncate before the repair hands the
+    // A release callback runs a graph pass while the repair's deferred
+    // refill may still be pending. The loader blocks refinement until its
+    // release pass unwinds, so that pass consumes nothing, and the refill
+    // that resumes later is still a step of the repair chain. An on-demand
+    // source reaches it: an explicit truncate before the repair hands the
     // pre-truncate leases to replay retirement, and two asynchronous answers
     // settle the repair prefix and its tie while joined work defers the
     // refill. The release reaches the adapter, so this pairing is one that
     // production can produce.
+    // `release-pass-continuation` counts the passes where the driver's
+    // provenance owes a continuation, which over-approximates a pending one,
+    // so it is measured only. `release-pass-refill-resumed` is the required
+    // state: production then resumed the pending refill on a later graph pass
+    // as a step of the same chain that reads a new demand.
     const releasePassState = `release-pass-continuation`
+    const resumedState = `release-pass-refill-resumed`
 
     // The pinned runner reads this object at execution. Keep the existing
     // fixed/random asymmetry without adding or widening a campaign.
@@ -3211,13 +3326,14 @@ describe(`Ordered source request authority`, () => {
       arbitrary: handoffCase,
       runs: 400,
       fixedSeeds: [20261029],
-      states: [...states, releasePassState],
+      states: [...states, resumedState],
+      measured: [releasePassState],
       // Each builder keeps the generated limit, local rows, and release
       // truncate, and fixes only the axes its states need.
       constructed: [
         {
           name: `a release pass during replay retirement while an on-demand refill is deferred`,
-          enters: [`deferred-refill`, releasePassState],
+          enters: [`deferred-refill`, resumedState],
           build: (generated: AuthorityCase) =>
             handoffHistory({
               ...handoffAxes(generated),
@@ -3268,7 +3384,7 @@ describe(`Ordered source request authority`, () => {
       law: {
         statement: `preserves repair continuation identity across replay bookkeeping`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
-        limits: `One unindexed loader over a fake subscription, limit 1/2, offset 0, one fixed history shape around a deferred refill, and the request-ledger laws at their checkpoints. A loader that drops a deferred refill during a blocked pass, then issues it as an ordinary page, is not rejected (coverage map, ordered-loader authority).`,
+        limits: `One unindexed loader over a fake subscription, limit 1/2, offset 0, one fixed history shape around a deferred refill, and the request-ledger laws at their checkpoints. A loader that drops a deferred refill during a blocked pass, or restarts the repair from it, fails only the constructed history's required reach, not a law; elsewhere in the grammar it passes (coverage map, ordered-loader authority, awaiting a maintainer decision).`,
       },
       owns: [
         'src/collection/index.ts#createCollection',
@@ -3301,7 +3417,8 @@ describe(`Ordered source request authority`, () => {
             if (
               state === `deferred-refill` ||
               state === `reset-continuation` ||
-              state === releasePassState
+              state === releasePassState ||
+              state === resumedState
             )
               reached.add(state)
           })
@@ -3725,6 +3842,8 @@ describe(`Ordered source request authority`, () => {
     let releaseFaults = 0
     let syncRepairs = 0
     let invalidatingPages = 0
+    // Measured, not gated: graph passes in the stale self-release.
+    let unblockedReleasePasses = 0
     let later = {
       unexpressibleBoundaries: 0,
       joinedDeferrals: 0,
@@ -3760,6 +3879,7 @@ describe(`Ordered source request authority`, () => {
       releaseFaults = 0
       syncRepairs = 0
       invalidatingPages = 0
+      unblockedReleasePasses = 0
       later = {
         unexpressibleBoundaries: 0,
         joinedDeferrals: 0,
@@ -3791,7 +3911,7 @@ describe(`Ordered source request authority`, () => {
       )
         return
       process.stderr.write(
-        `${authorityProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts) })}\n`,
+        `${authorityProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts), unblockedReleasePasses })}\n`,
       )
       if (oracleReplayRequested()) return
       for (const state of states)
@@ -3885,6 +4005,7 @@ describe(`Ordered source request authority`, () => {
           releaseFaults += observation.releaseFaults
           syncRepairs += observation.syncRepairs
           invalidatingPages += observation.invalidatingPages
+          unblockedReleasePasses += observation.unblockedReleasePasses
           for (const key of Object.keys(later) as Array<keyof typeof later>) {
             later[key] += observation[key]
           }
