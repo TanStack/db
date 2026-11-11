@@ -421,35 +421,36 @@ state model, differential or metamorphic comparison, or reusable law checker.
 A separate module that defines that model, checker, or its history grammar also
 qualifies. Identify the mechanism in the code before applying the name.
 
-An oracle file holds only oracle tests. It names its parts with
-`declareOracle({ check: [...], model: [...], grammar: [...] })` from
-[`oracle-declaration.ts`](../../packages/db/tests/oracle-declaration.ts), which
-imports nothing so that browser and native-app modules can use it: the check
-compares production observations with the model or with a second
-formulation, and the grammar is the generators that produce legal histories.
-Each part is optional. Every test in the file uses a declared part, directly
-or through a production driver:
+An oracle file holds only oracle tests, and it registers them only through
+`oracleProperty` (maintainer decision, 2026-11-11). The property takes the
+parts: the check compares production observations with the model or with a
+second formulation, and the grammar is the generators that produce legal
+histories. Each kind of oracle test has its place in the property:
 
-- A generated property or a fixed history runs through the check.
-- A fixed history steps the model and checks one rule against its authority.
-- A calibration shows that the check rejects a wrong answer (ORC-006).
+- A generated history runs through the check in the property's campaigns.
+- A fixed history, such as a fixed regression, is a `histories.fixed` entry.
+  When the grammar cannot produce it, it is a history of an enumerated
+  property with the same driver, model, and check, and that property's
+  limits say so.
+- A case of a finite table is an enumerated history.
+- A calibration shows that the check rejects a wrong answer (ORC-006). It is
+  a `calibrations` entry: a corrupted trace or a mutant driver.
 - A grammar calibration shows that the generators reach the states that the
-  laws need (ORC-004, ORC-015).
-- A generated property can state its law inline: its predicate relates
-  production to inputs that nobody wrote down. A property whose arbitraries
-  are all constants, or whose predicate ignores its input, checks written
-  values instead.
-- A type-level test compares an inferred type with a type model. A type has no
-  value to pass, so the file names its model types in
-  `declareOracle({ typeModel: [...] })`. Each name is a type alias or
-  interface in the same file, and a type built from one counts as using it.
+  laws need (ORC-004, ORC-015). It is a declared state, in `states` with a
+  constructed history, or in `measured`.
+- A type-level law runs the type checker in the property's driver, over
+  generated TypeScript inputs.
 
-A test that uses none of them compares production with a hand-written value. It
-is a unit test, even when it asserts a contract, and it belongs in an
-ordinary test file beside the oracle. A finite table of hand-written expected
-values selected by a test's parameters is not a model. The `oracle/no-unit-test` lint rule
-reports such a test. Files named `oracle-*`, such as `oracle-config.ts`, are
-the shared oracle machinery and declare no parts.
+Any other test is an ordinary test, even when it asserts a contract, and it
+belongs in an ordinary test file beside the oracle. That includes a test that
+compares production with a hand-written value, and a model-rule expectation
+that steps the model and checks one rule against its authority: it runs no
+production, so it can never kill a production mutant. A finite table of
+hand-written expected values selected by a test's parameters is not a model.
+The `oracle/no-unit-test` lint rule reports every registration in an oracle
+file other than a complete `oracleProperty` call. Files named `oracle-*`,
+such as `oracle-config.ts`, are the shared oracle machinery and register no
+oracle.
 
 An oracle file also registers no test through a helper from an ordinary module.
 The rule reports a call to such a helper, because the helper's tests then appear
@@ -464,13 +465,15 @@ each `oracleProperty` call: `oracleProperty({ id, law, owns: [...], ... })`.
 An entry is a source path relative to the package (`src/x.ts`), or one of its
 functions with its static call tree (`src/x.ts#fn`, `src/x.ts#Class.method`).
 The gap report (`pnpm gap-report`) reads the list without running the file, so
-write it in the call as a non-empty array of string or template literals: no
-spread, variable, computed list, or quoted key, and call the function by the
-name `oracleProperty`, not an alias. A file with several `oracleProperty` calls
-repeats the list on each call; the gap report judges ownership per file. A file
-that registers only through a production driver or wrapper, with no inline
-`oracleProperty` call, keeps its list in `declareOracle({ owns: [...] })`
-while the migration lasts. The gap report reads both.
+write it in the call as a non-empty array of string or template literals,
+under the key `owns`: no spread, variable, computed list, or quoted key. A
+file with several calls repeats the
+list on each call; the gap report judges ownership per file, as the union of
+its lists. A file that registers through a wrapper, such as a shared
+conformance suite, passes the list in the wrapper call's options literal
+(`registerX({ property, owns: [...], ... })`). The gap report reads `owns`
+from an object-literal argument of any call, and the wrapper forwards it
+unchanged to `oracleProperty`.
 
 A law has no owner field. Code ownership by people and teams belongs to
 CODEOWNERS (maintainer decision, 2026-11-10). The coverage map's oracle owner
