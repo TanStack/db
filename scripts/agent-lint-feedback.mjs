@@ -99,7 +99,9 @@ const argumentOptions = {
  * they cannot be used, if one does. A lenient first reading takes the format
  * and event that report a failure: a known format, or the command line, and
  * the stop event, or the edit event. So any other bad argument with a
- * harness's format answers on that harness's channel.
+ * harness's format answers on that harness's channel. A hook's input is read
+ * before the options are judged, so a failed stop still sees
+ * `stop_hook_active` and blocks a turn only once.
  */
 function readInvocation() {
   const lenient = parseArgs({
@@ -114,7 +116,10 @@ function readInvocation() {
       all: false,
     },
     positionals: [],
-    inputText: ``,
+    inputText:
+      formats.has(lenient.format) && lenient.format !== `text`
+        ? readFileSync(0, `utf8`)
+        : ``,
     input: {},
   }
   try {
@@ -128,12 +133,14 @@ function readInvocation() {
       throw new Error(`--event must be edit or stop`)
     invocation.options = values
     invocation.positionals = positionals
-    if (values.format !== `text`) {
-      invocation.inputText = readFileSync(0, `utf8`)
-      invocation.input = parseHookInput(invocation.inputText)
-    }
+    invocation.input = parseHookInput(invocation.inputText)
   } catch (error) {
     invocation.failure = failureLine(error)
+    try {
+      invocation.input = parseHookInput(invocation.inputText)
+    } catch {
+      // Input that is not a JSON object has no guard to read.
+    }
   }
   return invocation
 }

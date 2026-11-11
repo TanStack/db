@@ -132,8 +132,12 @@
  * fails the run instead of entering the state. A partial or broken install
  * breaks only the session checkout's plugin: its entry file, its subpath rule
  * module, a package that it imports, or its entry file's text. A broken ESLint
- * or parser, a missing dependency deeper in the tree, and a stop hook input
- * with `stop_hook_active` are not drawn. A worktree session under an installed
+ * or parser, and a missing dependency deeper in the tree, are not drawn. A stop
+ * hook input with `stop_hook_active` is drawn only in the stops of an unknown
+ * option and a missing `main`. The harness sets it when a stop hook already
+ * continued the turn, so the stop must not block again: the run is silent,
+ * and Codex gets `{}`. The script reads the hook input before it judges the
+ * options, so even a bad option keeps this continue-once guard. A worktree session under an installed
  * launch checkout has its own copy of the plugin or none; with none, ESLint,
  * the parser, and the plugin all come from the launch checkout. A launch
  * checkout's plugin linked from outside every checkout is not drawn. A failure
@@ -386,6 +390,9 @@ const skeletonArbitrary = fc.record({
     ...FAULTS.map((fault) => ({ weight: 1, arbitrary: fc.constant(fault) })),
   ),
   faultValue: fc.nat({ max: 5 }),
+  // Whether a failure's stop hook input says that a stop hook already
+  // continued this turn. Drawn last, so the fields above keep their draws.
+  stopHookActive: fc.boolean(),
 })
 
 function programOf({ shape, ...skeleton }) {
@@ -490,6 +497,13 @@ const constructions = [
     worktreeInstall: `none`,
     fault: `lint-error`,
   }),
+  ...[`unknown-option`, `no-main`].map((fault) => (skeleton) => ({
+    ...skeleton,
+    dependencies: `installed`,
+    worktreeInstall: `own`,
+    fault,
+    stopHookActive: true,
+  })),
 ]
 
 function quietOuter(skeleton) {
@@ -724,6 +738,7 @@ function buildProgram(skeleton) {
         ? skeleton.fault
         : `none`,
     faultValue: skeleton.faultValue,
+    stopHookActive: skeleton.stopHookActive,
     edges,
     reexports,
     modules,
@@ -963,6 +978,19 @@ function predictSkips(program) {
 // selection is not empty; `--all` lints every oracle file, so it always
 // fails, and the run-budget report runs no rule.
 
+/**
+ * Whether a failure's stop already continued the turn once, so it owes a
+ * silent run. Only the stops of an unknown option and a missing `main` draw
+ * the input that says so.
+ */
+function continuedStop(program, event) {
+  return (
+    event === `stop` &&
+    program.stopHookActive &&
+    [`unknown-option`, `no-main`].includes(program.fault)
+  )
+}
+
 /** The run that each failure owes, by the form's name. */
 function predictFaults(program) {
   const runs = {}
@@ -978,7 +1006,9 @@ function predictFaults(program) {
   for (const format of HOOK_FORMATS) {
     for (const event of HOOK_EVENTS) {
       if (fault === `invalid-input` || fault === `unknown-option`)
-        runs[`${format}-${event}`] = hookFailure(format, event)
+        runs[`${format}-${event}`] = continuedStop(program, event)
+          ? cleanRun(format, event)
+          : hookFailure(format, event)
     }
   }
   // A failure after the outer plugin loads names it first.
@@ -990,7 +1020,9 @@ function predictFaults(program) {
     runs.changed = cliThrown
     runs[`run-budgets`] = CLI_FAILURE
     for (const format of HOOK_FORMATS)
-      runs[`${format}-stop`] = hookFailure(format, `stop`, thrown)
+      runs[`${format}-stop`] = continuedStop(program, `stop`)
+        ? cleanRun(format, `stop`)
+        : hookFailure(format, `stop`, thrown)
   }
   if (fault === `lint-error`) {
     const scopes = editedByScope(program)
@@ -1587,7 +1619,12 @@ function observedFaults(program, repository) {
             cwd: checkout,
             tool_input: { file_path: pathOf(program.hookTarget) },
           }
-        : { cwd: checkout },
+        : {
+            cwd: checkout,
+            ...(continuedStop(program, event)
+              ? { stop_hook_active: true }
+              : {}),
+          },
     )
   const hook = (format, event, input = hookInput(event)) =>
     runRaw(
@@ -1837,6 +1874,9 @@ function comparePluginLocation(notices, expected) {
 //     each harness hands only the line to the agent.
 //   outer-plugin-lint-error: the outer plugin's rule throws while it lints,
 //     so the failure line follows the line that names the plugin.
+//   unknown-option-continued-stop, no-main-continued-stop: that failure's
+//     stop input says that a stop hook already continued the turn, so the
+//     stop must be silent.
 //   scratch-directory: a launch session's checkout holds a scratch directory
 //     under `.worktrees/`.
 //   missing-dependencies-launch, missing-dependencies-worktree: the checkouts
@@ -1882,6 +1922,8 @@ const STATES = [
   `outer-plugin-quiet-stop`,
   `outer-plugin-quiet-edit`,
   `outer-plugin-lint-error`,
+  `unknown-option-continued-stop`,
+  `no-main-continued-stop`,
   `scratch-directory`,
   `missing-dependencies-launch`,
   `missing-dependencies-worktree`,
@@ -1934,6 +1976,8 @@ function recordStates(program, observe) {
     states.add(`${program.fault}-fault`)
     if (program.outerInstall && program.fault === `lint-error`)
       states.add(`outer-plugin-lint-error`)
+    if (continuedStop(program, `stop`))
+      states.add(`${program.fault}-continued-stop`)
     countStates(states, observe)
     return
   }
@@ -2087,6 +2131,8 @@ const constructedStates = [
   `outer-plugin-quiet-stop`,
   `outer-plugin-quiet-edit`,
   `outer-plugin-lint-error`,
+  `unknown-option-continued-stop`,
+  `no-main-continued-stop`,
 ]
 
 oracleProperty({

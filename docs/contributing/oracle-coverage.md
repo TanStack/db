@@ -4380,8 +4380,13 @@ documentation. Constructions in each campaign draw a missing install (no
 delegate through the launch checkout's script. They also draw a session
 checkout whose installed plugin lacks its entry file, lacks its subpath rule
 module, imports a package that is not installed, or has a cut-off entry file.
-It does not draw a broken ESLint or parser, a missing dependency deeper in the
-tree, or a stop hook input with `stop_hook_active`. The missing-install
+It does not draw a broken ESLint or parser, or a missing dependency deeper in
+the tree. A stop hook input with `stop_hook_active` is drawn only in the stops
+of an unknown option and a missing `main` (`unknown-option-continued-stop` and
+`no-main-continued-stop`, constructed in each campaign). Such a stop already
+continued the turn once, so it must be silent, with `{}` for Codex. The script
+reads a hook's input before it judges the options, so a bad option keeps that
+guard. The missing-install
 histories also run `pnpm lint:run-budgets`
 (`scripts/check-oracle-run-counts.mjs`), which loads the parser with a dynamic
 import and writes the same skip line with exit status 1. A broken plugin
