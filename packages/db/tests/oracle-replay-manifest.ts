@@ -19,6 +19,11 @@ const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
   [
+    `db/tests/oracle-campaign-units.test.ts`,
+    `oracle-campaign-units`,
+    `contract`,
+  ],
+  [
     `query-db-collection/tests/documented-mutations-oracle.test.ts`,
     `documented-mutations`,
     `query`,
