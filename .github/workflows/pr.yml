@@ -77,6 +77,8 @@ jobs:
   test-db:
     name: Test (${{ matrix.group }})
     runs-on: ubuntu-latest
+    # A job gets its timeout when it fits the budget.
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -105,6 +107,9 @@ jobs:
   test-packages:
     name: Test (${{ matrix.group }})
     runs-on: ubuntu-latest
+    # A job gets its timeout when it fits the budget. sqlite-core and
+    # collections have no timeout until their cost cuts land.
+    timeout-minutes: ${{ contains(fromJSON('["sqlite-core","collections"]'), matrix.group) && 360 || 12 }}
     strategy:
       fail-fast: false
       matrix:
