@@ -878,7 +878,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/ordered-work-oracle.property.test.ts`,
     `ordered-work`,
-    `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load eager-proven-report eager-unindexed-refetch`,
+    `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load eager-proven-report eager-unindexed-refetch eager-window-move`,
   ],
   [
     `db/tests/query/load-subset-replay-refinement-oracle.test.ts`,
@@ -888,7 +888,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/pagination-oracle.property.test.ts`,
     `pagination`,
-    `multi-order nullable-cursor pending-mutation pending-history ordered-window window-transition async-cursor`,
+    `multi-order nullable-cursor pending-mutation pending-history ordered-window window-transition async-cursor offset-continuation`,
   ],
   [
     `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
@@ -948,7 +948,7 @@ const ownerGroups: ReadonlyArray<
   [
     `query-db-collection/tests/refetch-ordered-prefix-oracle.test.ts`,
     `query-db`,
-    `refetch-ordered-prefix refetch-held-page-end refetch-held-report`,
+    `refetch-ordered-prefix refetch-held-page-end refetch-held-report refetch-offset-hold`,
   ],
   [
     `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
@@ -1709,6 +1709,10 @@ const replayTestNames = new Map([
   [
     `query-db.refetch-held-report`,
     `query-db\\.refetch-held-report > random seed`,
+  ],
+  [
+    `query-db.refetch-offset-hold`,
+    `query-db\\.refetch-offset-hold > random seed`,
   ],
   [`svelte.client-window`, `svelte\\.client-window > random seed`],
   [

@@ -1049,6 +1049,16 @@ must leave room for those rows, including during ordered repair. An optimistic
 insert or rank move may fill a visible window, but it does not establish a
 provider offset or cursor boundary. The loader therefore counts source-derived
 rows for continuation even when optimistic rows make the visible window full.
+A continuation's offset counts every applied source row that passes the
+subscription's filter and sorts at or before the boundary, past the window's
+end too, because an offset-only provider skips that many rows. A row that an
+optimistic delete or update hides or overlays still counts at its applied
+position; an optimistic insert does not. The count reads the visible prefix
+through the boundary with an indexed ordered read, then reads only the
+overlaid keys at their applied values, so its work grows with the prefix and
+the overlay, not with the source. Rows that a held sync transaction has
+accepted but not applied are not counted; the provider can then repeat them,
+which a later read deduplicates.
 The extra provider limit used for optimistic headroom does not enlarge the
 local count from which a settled boundary is inferred; a held mutation may
 become authoritative before that request settles. Starting that
@@ -1405,10 +1415,11 @@ and explicit window failures do not auto-retry. Cleanup, truncate, and explicit
 retry supersede queued repair work. A successful repair resets the budget.
 
 An explicit window move counts current rows at or before that boundary in the
-requested prefix. It acquires only the missing portion, with both cursor and
-offset derived from that confirmed range, not from all observed rows. These
-reads reuse the Collection's indexed snapshot code; they retain no page list
-or second row index. Transfer checks and local-read work are separate costs:
+requested prefix. It acquires only the missing portion: its cursor is the
+confirmed boundary, and its offset counts the applied source rows through that
+boundary as described above, not every observed row. These reads reuse the
+Collection's indexed snapshot code; they retain no page list or second row
+index. Transfer checks and local-read work are separate costs:
 counting a long prefix can still revisit its rows. Boundary-read failures use
 the same authoritative recovery path as failed acquisitions. Deletes and
 source-order changes invalidate finite coverage as described below. Cleanup

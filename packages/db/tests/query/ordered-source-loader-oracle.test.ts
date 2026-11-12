@@ -8,6 +8,7 @@ import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.
 import { oracleRoute } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
+  countSnapshotRows,
   createDeferred,
   createOrderByInfo,
 } from './ordered-source-loader-support.js'
@@ -84,6 +85,9 @@ describe(`OrderedSourceLoader`, () => {
         setOrderByIndex: () => {},
         readOrderedSnapshot: () =>
           boundary === `present` ? [{ value: { rank: 1 } }] : [],
+        countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+          return countSnapshotRows(this, included)
+        },
         requestLimitedSnapshot: (options: RequestOptions) =>
           request(`page`, options),
         requestSnapshot: (options: RequestOptions) =>

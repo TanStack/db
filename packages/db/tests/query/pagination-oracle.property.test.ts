@@ -1,5 +1,5 @@
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { BTreeIndex } from '../../src/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
@@ -7,7 +7,11 @@ import { createLiveQueryCollection } from '../../src/query/live-query-collection
 import { and, eq } from '../../src/query/builder/functions.js'
 import { PropRef } from '../../src/query/ir.js'
 import { makeComparator } from '../../src/utils/comparison.js'
-import { oracleProperty, oracleRoute } from '../oracle-config.js'
+import {
+  oracleProperty,
+  oracleReplayRequested,
+  oracleRoute,
+} from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { TraceAssertionError } from '../trace-runner.js'
@@ -3049,6 +3053,364 @@ async function expectInflightRequestFillsNewWindow(): Promise<void> {
     await cleanupAll(live, source)
   }
 }
+
+/**
+ * ## Does an offset continuation count the applied source rows?
+ *
+ * A provider may honor `cursor` or only `offset` (`LoadSubsetOptions`), so a
+ * continuation's offset must skip exactly the source rows the cursor has
+ * passed: the rows that match the request's `where` and sort at or before
+ * the boundary (ARCHITECTURE.md, Ordered requests). Rows that an optimistic
+ * delete or update hides or moves are still source rows at their applied
+ * positions; an optimistic insert is not a source row (maintainer decision,
+ * 2026-11-11, #2182).
+ *
+ * Law, at every continuation (a request with a cursor): its `offset` equals
+ * the number of backend rows that pass the request's `where` and do not pass
+ * its `cursor.whereFrom`. The backend never changes during a history. A row
+ * the provider writes while an optimistic write persists is accepted but
+ * held back until the write settles, so it is not yet applied and the loader
+ * cannot count it; a continuation whose cursor has passed such a row is not
+ * judged. Every other continuation is. With one order term the loader's
+ * boundary comparison and the cursor's leading-value comparison agree, so the
+ * count is exact. A second law checks the public window against the visible
+ * rows: the backend with every pending optimistic write applied, filtered and
+ * sorted. While rows are held no window is owed, so the release is that
+ * law's checkpoint.
+ *
+ * The history grammar: up to twelve backend rows with ranks 0..4 (ties) and
+ * a `keep` flag that a root `where` filters on, an optional peer live query
+ * over the whole source (it loads rows the `where` rejects, which the offset
+ * must not count), an ascending or descending
+ * window that starts at limit 1 or 2, then steps that grow the window,
+ * insert a row optimistically, move a loaded row's rank or flip its `keep`
+ * optimistically, delete a loaded row optimistically, or release every
+ * pending write. A write persists until its release; the backend never
+ * accepts it, so a released write leaves the visible rows.
+ *
+ * The provider is offset-only: it filters the backend with `where`, sorts by
+ * the request's order, and slices by `offset` and `limit`, ignoring the
+ * cursor. Tie rows by id, as the window's tie-breaker does.
+ */
+type OffsetRow = { id: number; rank: number; keep: boolean }
+type OffsetStep =
+  | { type: `grow`; by: number }
+  | { type: `insert`; rank: number; keep: boolean }
+  | { type: `move`; pick: number; rank: number }
+  | { type: `flip`; pick: number }
+  | { type: `delete`; pick: number }
+  | { type: `release` }
+type OffsetContinuationCase = {
+  rows: Array<OffsetRow>
+  // A peer live query over the whole source loads rows the window's `where`
+  // rejects, so the source holds applied rows that the offset must not count.
+  peer: boolean
+  direction: `asc` | `desc`
+  limit: number
+  steps: Array<OffsetStep>
+}
+
+const offsetContinuationCaseArbitrary: fc.Arbitrary<OffsetContinuationCase> =
+  fc.record({
+    rows: fc
+      .array(
+        fc.record({
+          rank: fc.integer({ min: 0, max: 4 }),
+          keep: fc.boolean(),
+        }),
+        { minLength: 4, maxLength: 12 },
+      )
+      .map((rows) => rows.map((row, index) => ({ id: index + 1, ...row }))),
+    peer: fc.boolean(),
+    direction: fc.constantFrom(`asc` as const, `desc` as const),
+    limit: fc.integer({ min: 1, max: 2 }),
+    steps: fc.array(
+      fc.oneof(
+        {
+          weight: 3,
+          arbitrary: fc.record({
+            type: fc.constant(`grow` as const),
+            by: fc.integer({ min: 1, max: 3 }),
+          }),
+        },
+        {
+          weight: 2,
+          arbitrary: fc.record({
+            type: fc.constant(`insert` as const),
+            rank: fc.integer({ min: 0, max: 4 }),
+            keep: fc.boolean(),
+          }),
+        },
+        {
+          weight: 2,
+          arbitrary: fc.record({
+            type: fc.constant(`move` as const),
+            pick: fc.nat({ max: 11 }),
+            rank: fc.integer({ min: 0, max: 4 }),
+          }),
+        },
+        {
+          weight: 1,
+          arbitrary: fc.record({
+            type: fc.constant(`flip` as const),
+            pick: fc.nat({ max: 11 }),
+          }),
+        },
+        {
+          weight: 2,
+          arbitrary: fc.record({
+            type: fc.constant(`delete` as const),
+            pick: fc.nat({ max: 11 }),
+          }),
+        },
+        { weight: 1, arbitrary: fc.constant({ type: `release` as const }) },
+      ),
+      { minLength: 2, maxLength: 10 },
+    ),
+  })
+
+// The model's order: rank in the window's direction, then id.
+function compareOffsetRows(
+  left: OffsetRow,
+  right: OffsetRow,
+  direction: `asc` | `desc`,
+): number {
+  const byRank =
+    direction === `asc` ? left.rank - right.rank : right.rank - left.rank
+  return byRank !== 0 ? byRank : left.id - right.id
+}
+
+// The visible window: the backend with the pending writes applied, kept,
+// sorted, and cut to the limit.
+function referenceOffsetWindow(
+  backend: ReadonlyMap<number, OffsetRow>,
+  pending: ReadonlyMap<number, OffsetRow | null>,
+  direction: `asc` | `desc`,
+  limit: number,
+): Array<OffsetRow> {
+  const visible = new Map(backend)
+  for (const [id, row] of pending) {
+    if (row === null) visible.delete(id)
+    else visible.set(id, row)
+  }
+  return [...visible.values()]
+    .filter((row) => row.keep)
+    .sort((left, right) => compareOffsetRows(left, right, direction))
+    .slice(0, limit)
+}
+
+// The offset a continuation owes: backend rows that pass `where` and that the
+// cursor has passed.
+function referenceContinuationOffset(
+  backend: ReadonlyMap<number, OffsetRow>,
+  options: LoadSubsetOptions,
+): number {
+  return [...backend.values()].filter(
+    (row) =>
+      (options.where === undefined ||
+        evaluateReferenceExpression(options.where, row) === true) &&
+      evaluateReferenceExpression(options.cursor!.whereFrom, row) !== true,
+  ).length
+}
+
+/** Runs one history; returns how many continuations passed a pending write. */
+async function runOffsetContinuationCase(
+  testCase: OffsetContinuationCase,
+): Promise<{ continuationsPastPendingWrites: number }> {
+  const backend = new Map(testCase.rows.map((row) => [row.id, { ...row }]))
+  // Pending optimistic writes: a row's visible value, or null when deleted.
+  const pending = new Map<number, OffsetRow | null>()
+  let hold = createDeferred<void>()
+  // Each pending write's settlement.
+  const transactions: Array<Promise<unknown>> = []
+  const offsetFailures: Array<string> = []
+  let continuationsPastPendingWrites = 0
+  const sent = new Set<number>()
+  // Rows the provider wrote while an optimistic write persisted. Core holds
+  // such a sync transaction back until the write settles, so these rows are
+  // accepted but not yet applied.
+  const heldRows = new Map<number, OffsetRow>()
+  const source = createCollection<OffsetRow, number>({
+    id: `offset-continuation-${Math.random()}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            const passed = (row: OffsetRow) =>
+              (options.where === undefined ||
+                evaluateReferenceExpression(options.where, row) === true) &&
+              evaluateReferenceExpression(options.cursor!.whereFrom, row) !==
+                true
+            // Judged while every row the cursor has passed is applied: a
+            // held row is in the provider's count but not yet in the
+            // Collection, so the loader cannot count it.
+            if (
+              options.cursor !== undefined &&
+              [...heldRows.values()].every((row) => !passed(row))
+            ) {
+              const expected = referenceContinuationOffset(backend, options)
+              if (options.offset !== expected)
+                offsetFailures.push(
+                  `a continuation sent offset ${options.offset}; the cursor has passed ${expected} source rows`,
+                )
+              if (
+                [...pending].some(
+                  ([id, row]) =>
+                    (row !== null && passed(row)) ||
+                    (backend.has(id) && passed(backend.get(id)!)),
+                )
+              )
+                continuationsPastPendingWrites++
+            }
+            let page = [...backend.values()].filter(
+              (row) =>
+                options.where === undefined ||
+                evaluateReferenceExpression(options.where, row) === true,
+            )
+            if (options.orderBy)
+              page.sort((left, right) =>
+                compareOffsetRows(left, right, testCase.direction),
+              )
+            page = page.slice(options.offset ?? 0)
+            if (options.limit !== undefined) page = page.slice(0, options.limit)
+            const fresh = page.filter((row) => !sent.has(row.id))
+            if (fresh.length > 0) {
+              begin()
+              for (const row of fresh) {
+                sent.add(row.id)
+                if (pending.size > 0) heldRows.set(row.id, row)
+                write({ type: `insert`, value: { ...row } })
+              }
+              commit()
+            }
+            return true
+          },
+        }
+      },
+    },
+    onInsert: () => hold.promise,
+    onUpdate: () => hold.promise,
+    onDelete: () => hold.promise,
+  })
+  let limit = testCase.limit
+  const live = createLiveQueryCollection((q) =>
+    q
+      .from({ row: source })
+      .where(({ row }) => eq(row.keep, true))
+      .orderBy(({ row }) => row.rank, testCase.direction)
+      .limit(limit),
+  )
+  const settle = async () => {
+    for (let turn = 0; turn < 5; turn++) await flushPromises()
+  }
+  const check = (checkpoint: string) => {
+    if (offsetFailures.length > 0)
+      throw new Error(`offset agreement ${checkpoint}: ${offsetFailures[0]}`)
+    // While rows are held, no window is owed; the release is the checkpoint.
+    if (heldRows.size > 0) return
+    const expected = referenceOffsetWindow(
+      backend,
+      pending,
+      testCase.direction,
+      limit,
+    )
+    const actual = [...live.values()]
+    // Ties may resolve either way at the window's end, so compare ranks in
+    // order and require every shown row to be a distinct visible row.
+    const visible = new Map(
+      referenceOffsetWindow(backend, pending, testCase.direction, Infinity).map(
+        (row) => [row.id, row],
+      ),
+    )
+    const sameRanks =
+      JSON.stringify(actual.map((row) => row.rank)) ===
+      JSON.stringify(expected.map((row) => row.rank))
+    const shownVisible =
+      new Set(actual.map((row) => row.id)).size === actual.length &&
+      actual.every((row) => visible.get(row.id)?.rank === row.rank)
+    if (!sameRanks || !shownVisible)
+      throw new Error(
+        `window ${checkpoint} was ${JSON.stringify(actual.map((row) => [row.id, row.rank]))}; expected ${JSON.stringify(expected.map((row) => [row.id, row.rank]))}`,
+      )
+  }
+  const loaded = () =>
+    [...source.values()]
+      .map((row) => row.id)
+      .filter((id) => backend.has(id) && !pending.has(id))
+      .sort((left, right) => left - right)
+  const peer = testCase.peer
+    ? createLiveQueryCollection((q) => q.from({ row: source }))
+    : undefined
+  try {
+    await peer?.preload()
+    await live.preload()
+    await settle()
+    check(`after preload`)
+    let nextId = 100
+    for (const [index, step] of testCase.steps.entries()) {
+      const at = `at step ${index} (${step.type})`
+      if (step.type === `grow`) {
+        limit += step.by
+        const moved = live.utils.setWindow({ offset: 0, limit })
+        if (moved !== true) await moved
+      } else if (step.type === `release`) {
+        hold.resolve()
+        await Promise.allSettled(transactions.splice(0))
+        pending.clear()
+        hold = createDeferred<void>()
+        await settle()
+        heldRows.clear()
+      } else if (step.type === `insert`) {
+        const row = { id: nextId++, rank: step.rank, keep: step.keep }
+        pending.set(row.id, row)
+        transactions.push(source.insert(row).when(`settled`))
+      } else {
+        const ids = loaded()
+        if (ids.length === 0) continue
+        const id = ids[step.pick % ids.length]!
+        const current = backend.get(id)!
+        if (step.type === `delete`) {
+          pending.set(id, null)
+          transactions.push(source.delete(id).when(`settled`))
+        } else {
+          const next =
+            step.type === `move`
+              ? { ...current, rank: step.rank }
+              : { ...current, keep: !current.keep }
+          pending.set(id, next)
+          transactions.push(
+            source
+              .update(id, (draft) => {
+                draft.rank = next.rank
+                draft.keep = next.keep
+              })
+              .when(`settled`),
+          )
+        }
+      }
+      await settle()
+      check(at)
+    }
+    return { continuationsPastPendingWrites }
+  } finally {
+    hold.resolve()
+    await Promise.allSettled(transactions)
+    await peer?.cleanup()
+    await cleanupAll(live, source)
+  }
+}
+
+declareOracle({
+  check: [runOffsetContinuationCase],
+  model: [referenceOffsetWindow, referenceContinuationOffset],
+  grammar: [offsetContinuationCaseArbitrary],
+})
 
 registerLimitAdmissionOracle()
 
@@ -6923,6 +7285,56 @@ describe(`pagination recomputation oracle`, () => {
         await runOnDemandPaginationScenario(scenario)
       }),
     check: (_history, _observations, verdict) => verdict,
+  })
+
+  // The offset-continuation campaign must pass pending optimistic writes:
+  // a moved or deleted row, or an inserted one, at or before the cursor.
+  describe(`offset continuations past pending writes`, () => {
+    let reached = 0
+    beforeEach(() => {
+      reached = 0
+    })
+    afterEach(({ task }) => {
+      if (
+        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        task.result?.state === `fail` ||
+        oracleReplayRequested()
+      )
+        return
+      process.stdout.write(
+        `pagination.offset-continuation ${task.name} continuations past pending writes ${reached}\n`,
+      )
+      expect(
+        reached,
+        `histories with a continuation past a pending write`,
+      ).toBeGreaterThanOrEqual(20)
+    })
+    oracleProperty({
+      id: `pagination.offset-continuation`,
+      law: {
+        statement: `A continuation's offset equals the source rows that pass its where and that its cursor has passed, counting rows that a pending optimistic write hides or moves at their applied positions and not counting optimistic inserts; the window equals the visible rows.`,
+        authority: `LoadSubsetOptions (a provider may honor the cursor or only the offset); query/live/ARCHITECTURE.md, Ordered requests; maintainer decision, 2026-11-11 (#2182).`,
+        limits: `An offset-only provider whose backend does not change during a history, one order term (rank, ascending or descending), a root where on one flag, an optional unfiltered peer, window growth from offset 0, and optimistic inserts, rank moves, flag flips and deletes that persist until released and that the backend never accepts. A continuation whose cursor has passed a row held behind a persisting write is not judged.`,
+      },
+      owns: [
+        'src/collection/subscription.ts',
+        'src/query/live/ordered-source-loader.ts',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+      ],
+      histories: {
+        arbitrary: offsetContinuationCaseArbitrary,
+        runs: 40,
+        fixedSeeds: [2182],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          const observed = await runOffsetContinuationCase(history)
+          if (observed.continuationsPastPendingWrites > 0) reached++
+        }),
+      check: (_history, _observations, verdict) => verdict,
+    })
   })
 
   it.each([`forward`, `reverse`] as const)(

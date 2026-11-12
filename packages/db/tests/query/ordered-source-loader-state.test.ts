@@ -12,6 +12,7 @@ import { PropRef } from '../../src/query/ir.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
+  countSnapshotRows,
   createDeferred,
   createOrderByInfo,
 } from './ordered-source-loader-support.js'
@@ -56,6 +57,9 @@ describe(`Ordered source request ownership`, () => {
     const subscription = {
       readOrderedSnapshot: () => [{ value: { id: 1, rank: 1 } }],
       setOrderByIndex: () => {},
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: request,
       requestSnapshot: request,
     } as unknown as CollectionSubscription
@@ -160,6 +164,9 @@ describe(`Ordered source request ownership`, () => {
         },
       ],
       setOrderByIndex: () => {},
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: (options: RequestOptions) =>
         request(`limited`, options),
       requestSnapshot: (options: RequestOptions) =>
@@ -413,6 +420,9 @@ describe(`Ordered source request ownership`, () => {
       hasPendingTruncateReplacement: false,
       readOrderedSnapshot: () => [{ value: { id: 1, rank: 1 } }],
       setOrderByIndex: () => {},
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: request,
       requestSnapshot: request,
     } as unknown as CollectionSubscription

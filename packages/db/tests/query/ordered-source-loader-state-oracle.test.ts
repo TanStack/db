@@ -25,6 +25,7 @@ import {
   rejectAt,
 } from './ordered-comparison-oracle.js'
 import {
+  countSnapshotRows,
   createDeferred,
   createOrderByInfo,
 } from './ordered-source-loader-support.js'
@@ -1528,6 +1529,9 @@ async function checkAuthorityCase(
     hasHeldSyncTransaction: false,
     get hasPendingTruncateReplacement() {
       return truncatePending
+    },
+    countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+      return countSnapshotRows(this, included)
     },
     requestLimitedSnapshot: (options: RequestOptions) =>
       record(`limited`, options),

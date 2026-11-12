@@ -62,6 +62,19 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  * requested. The window law sees such a row only once it joins the window;
  * the coverage law sees it while it is latent.
  *
+ * Offset-agreement law, at every offset continuation that a `loadSubset` call
+ * fetches while the source Collection's applied rows through its cursor match
+ * the backend: `cursor` and `offset` name one continuation, so an offset-only
+ * reply starts after the cursor. A row at or before the cursor in that reply
+ * means the offset under-counted the source; an over-count skips a row, which
+ * the coverage law sees. Rows that an optimistic write hides or overlays are
+ * still source rows and count (maintainer decision, 2026-11-11, #2182).
+ * Two fetches are not judged. A Query refetch or invalidation re-runs a
+ * page's stored request with its issue-time offset: request data is immutable
+ * and a refetch revalidates the same demand (`LoadSubsetFn`). And while a
+ * refetch or a held sync transaction has not applied newer rows, the loader
+ * cannot count them.
+ *
  * Neighboring laws bound how the refetch does its work:
  * - A refetch or invalidation never starts a new full-source request.
  *   Full-source reads can be very expensive, and the repair always has a
@@ -111,11 +124,12 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  * so a `queryFn` may read either one.
  *
  * Limits:
- * - The generated campaigns use a provider that honors `cursor`. A provider
- *   that honors only `offset` already gets a wrong window at preload under a
- *   joined filter: the loader repeats a continuation offset capped at the
- *   window size. That loader defect is separate from #2136 and is recorded as
- *   open in the coverage map. The named fixed histories still run both encodings.
+ * - The general campaign draws a provider that honors `cursor` or only
+ *   `offset`. An offset-only provider skips `offset` rows of the filtered
+ *   source, so the offset must count every source row through the cursor,
+ *   including rows that an optimistic write hides or overlays (#2182). The
+ *   offset-agreement law judges this while the provider is current; the
+ *   `query-db.refetch-offset-hold` campaign constructs the held-row case.
  * - It does not check the window after a marker flip, even when the provider
  *   is current. The loader used to stop refilling after a joined-side
  *   removal; a named fixed history now checks that trace, but the campaigns do not
@@ -306,7 +320,7 @@ const backendChange: fc.Arbitrary<Command> = fc.oneof(
 
 const caseArbitrary: fc.Arbitrary<Case> = fc.record({
   scenario: fc.record({
-    encoding: fc.constant(`cursor` as const),
+    encoding: fc.constantFrom(`cursor` as const, `offset` as const),
     functionKey: fc.boolean(),
     terms: fc.constantFrom(1 as const, 2 as const),
     orderKey: fc.constantFrom(`rank` as const, `label` as const),
@@ -521,6 +535,67 @@ const sameKeyEndCaseArbitrary = sameKeyEndInputArbitrary.map((input) =>
   pageEndCase(input, `delete`),
 )
 
+// ### Offset continuations past a held row
+//
+// An offset-only provider skips `offset` rows of the filtered source, so a
+// continuation's offset must count every source row through its cursor,
+// including one that an optimistic write holds (ARCHITECTURE.md, Ordered
+// requests: a provider may honor either encoding). The window starts full on
+// a marked row behind unmarked rows. A held write lands on an earlier row,
+// then a marker flip empties the window, so the loader pages on while the
+// write persists. A held update keeps its row visible and in order, so its
+// release starts no other load: a miscounted offset would leave the window
+// short after it. The history varies order arity, window, the held row, the
+// hold kind and the rows after the window.
+type OffsetHoldInput = {
+  terms: 1 | 2
+  limit: number
+  held: number
+  kind: `update` | `delete`
+  tail: number
+}
+
+function offsetHoldCase(input: OffsetHoldInput): Case {
+  // Rows 0..3 lead with ranks 6..3; row 3 is the marked window row. The tail
+  // rows sort after it, and the last tail row is marked.
+  const lead = [0, 1, 2, 3].map((id) => ({
+    id,
+    rank: 6 - id,
+    marked: id === 3,
+  }))
+  const tail = Array.from({ length: input.tail }, (_, index) => ({
+    id: 4 + index,
+    rank: 2 - index,
+    marked: index === input.tail - 1,
+  }))
+  return {
+    scenario: {
+      encoding: `offset`,
+      functionKey: false,
+      terms: input.terms,
+      orderKey: `rank`,
+      pageCap: undefined,
+      limit: input.limit,
+      offset: 0,
+    },
+    initial: [...lead, ...tail],
+    history: [
+      { type: `hold`, kind: input.kind, id: input.held },
+      { type: `flip`, id: 3 },
+      { type: `release` },
+    ],
+  }
+}
+
+const offsetHoldInputArbitrary: fc.Arbitrary<OffsetHoldInput> = fc.record({
+  terms: fc.constantFrom(1 as const, 2 as const),
+  limit: fc.integer({ min: 1, max: 2 }),
+  held: fc.integer({ min: 0, max: 2 }),
+  kind: fc.constantFrom(`update` as const, `delete` as const),
+  tail: fc.integer({ min: 1, max: 3 }),
+})
+const offsetHoldCaseArbitrary = offsetHoldInputArbitrary.map(offsetHoldCase)
+
 // ## Production driver
 //
 // A real QueryClient backs an on-demand Query Collection with an eager B-tree
@@ -560,6 +635,15 @@ type Run = {
   sameKeyEarlierEnds: () => number
   // Same-key earlier ends on the deleted held boundary with an omitted gap.
   deleteHeldGaps: () => number
+  // Offset continuations answered while a hold hid a row before the cursor.
+  offsetsPastHiddenRows: () => number
+  // Offset continuations whose agreement the law judged, and those that a
+  // `refetch: true` call started.
+  judgedOffsetContinuations: () => number
+  judgedRefetchingContinuations: () => number
+  // Offset continuations whose reply repeated a row at or before the cursor
+  // while the provider was current.
+  offsetRepeats: () => ReadonlyArray<string>
   // Request offsets at which the public report reached the core receiver.
   reportRequestOffsets: () => ReadonlyArray<number>
   // Make the next change application fail once: a change subscriber throws
@@ -608,6 +692,47 @@ async function startRun(testCase: Case): Promise<Run> {
   let sameKeyEarlierEnds = 0
   let deleteHeldGaps = 0
   let heldRow: { kind: `update` | `delete`; id: number } | undefined
+  // Judged offset continuations that an offset-only provider answered while
+  // a held optimistic write hid or overlaid a backend row at or before the
+  // cursor. The offset must count that row: it is in the source.
+  let offsetsPastHiddenRows = 0
+  let judgedOffsetContinuations = 0
+  // Offset agreement: `cursor` and `offset` describe one continuation
+  // (LoadSubsetOptions), so an offset-only provider's reply starts after the
+  // cursor. A row at or before the cursor in that reply means the offset
+  // under-counted the source. The law is judged under two premises:
+  // - The fetch started inside a `loadSubset` call. A Query refetch or
+  //   invalidation re-runs a page's stored request, whose offset counted the
+  //   source when the loader issued it. Request data is immutable and a
+  //   refetch revalidates the same demand (`LoadSubsetFn`), so a re-run may
+  //   repeat rows; an adapter that refetches pages alone must report instead.
+  // - The Collection's applied rows through the cursor equal the backend's.
+  //   While a refetch or a held sync transaction has not applied newer rows,
+  //   the loader cannot count them.
+  let loadSubsetCalls = 0
+  // `refetch: true` calls in progress: a repair revalidates on purpose, and
+  // its fetch is judged like any other the loader starts.
+  let refetchingCalls = 0
+  let judgedRefetchingContinuations = 0
+  // The applied value of the held row, which its optimistic write hides or
+  // overlays.
+  let heldApplied: Item | undefined
+  const appliedThrough = (rows: Iterable<Item>, options: LoadSubsetOptions) =>
+    [...rows]
+      .filter(
+        (row) =>
+          (options.where === undefined ||
+            evaluateReferenceExpression(options.where, row) === true) &&
+          evaluateReferenceExpression(options.cursor!.whereFrom, row) !== true,
+      )
+      .map((row) => JSON.stringify([row.id, row.rank, row.label]))
+      .sort()
+      .join(`|`)
+  const localRows = (): Array<Item> => [
+    ...[...items.values()].filter((row) => row.id !== heldApplied?.id),
+    ...(heldApplied === undefined ? [] : [heldApplied]),
+  ]
+  const offsetRepeats: Array<string> = []
   const serve = (options: LoadSubsetOptions): Array<Item> => {
     const page = answer(options)
     if (options.orderBy) {
@@ -659,6 +784,25 @@ async function startRun(testCase: Case): Promise<Run> {
     if (failFrom !== undefined && requests.length > failFrom) {
       throw new Error(`provider unavailable`)
     }
+    const judgesOffset =
+      encoding === `offset` &&
+      options.cursor !== undefined &&
+      loadSubsetCalls > 0 &&
+      appliedThrough(backend.values(), options) ===
+        appliedThrough(localRows(), options)
+    if (judgesOffset) {
+      judgedOffsetContinuations++
+      if (refetchingCalls > 0) judgedRefetchingContinuations++
+      if (
+        heldRow !== undefined &&
+        backend.has(heldRow.id) &&
+        evaluateReferenceExpression(
+          options.cursor!.whereFrom,
+          backend.get(heldRow.id)!,
+        ) !== true
+      )
+        offsetsPastHiddenRows++
+    }
     const usesCursor = encoding === `cursor` && options.cursor
     const predicates = [
       options.where,
@@ -678,6 +822,16 @@ async function startRun(testCase: Case): Promise<Run> {
       if (scenario.pageCap !== undefined) page = page.slice(0, scenario.pageCap)
     }
     servedRows += page.length
+    if (judgesOffset) {
+      const repeated = page.find(
+        (row) =>
+          evaluateReferenceExpression(options.cursor!.whereFrom, row) !== true,
+      )
+      if (repeated)
+        offsetRepeats.push(
+          `an offset continuation (offset ${options.offset}) repeated row ${repeated.id}, which sorts at or before its cursor`,
+        )
+    }
     return page.map((row) => ({ ...row }))
   }
 
@@ -730,7 +884,16 @@ async function startRun(testCase: Case): Promise<Run> {
         ...handlers,
         loadSubset: (options) => {
           acquisitions.push(options)
-          return load(options)
+          const refetching =
+            (options as { refetch?: boolean }).refetch === true ? 1 : 0
+          loadSubsetCalls++
+          refetchingCalls += refetching
+          try {
+            return load(options)
+          } finally {
+            loadSubsetCalls--
+            refetchingCalls -= refetching
+          }
         },
       }
     },
@@ -745,6 +908,8 @@ async function startRun(testCase: Case): Promise<Run> {
     heldWrite = new Promise((resolve) => {
       release = resolve
     })
+    const applied = items.get(rowId)!
+    heldApplied = { id: applied.id, rank: applied.rank, label: applied.label }
     const transaction =
       kind === `update`
         ? items.update(rowId, (draft) => {
@@ -878,6 +1043,7 @@ async function startRun(testCase: Case): Promise<Run> {
         releaseHold = undefined
         heldRow = undefined
         await release?.()
+        heldApplied = undefined
         await Promise.all(heldPreloads.splice(0))
         await settle()
         return
@@ -911,6 +1077,10 @@ async function startRun(testCase: Case): Promise<Run> {
     changedReanswers: () => changedReanswers,
     sameKeyEarlierEnds: () => sameKeyEarlierEnds,
     deleteHeldGaps: () => deleteHeldGaps,
+    offsetsPastHiddenRows: () => offsetsPastHiddenRows,
+    judgedOffsetContinuations: () => judgedOffsetContinuations,
+    judgedRefetchingContinuations: () => judgedRefetchingContinuations,
+    offsetRepeats: () => offsetRepeats,
     reportRequestOffsets: () => reportRequestOffsets,
     failNextApplication: () => {
       failApplication = true
@@ -977,6 +1147,13 @@ type Observation = {
   // judges whether its own first page still proves the window, and repairs
   // when a moved end leaves it unproven.
   reachedReportOverFullWindow: boolean
+  // An offset-only provider answered a continuation while a held write hid a
+  // backend row at or before its cursor.
+  reachedOffsetPastHiddenRow: boolean
+  // The offset-agreement law judged at least one continuation, and one that
+  // a `refetch: true` repair call started.
+  reachedJudgedOffset: boolean
+  reachedJudgedRefetchingOffset: boolean
   // Reports over the whole run.
   reports: number
 }
@@ -1040,6 +1217,13 @@ async function checkCase(testCase: Case): Promise<Observation> {
         new Error(
           `coverage ${checkpoint}: rows ${JSON.stringify(uncovered)} sort at or before the window's end but are ${JSON.stringify(uncovered.map((row) => loaded.get(row.id) ?? null))} in the source Collection`,
         ),
+      )
+    }
+    const repeats = run.offsetRepeats()
+    if (repeats.length > 0) {
+      rejectAt(
+        `refetch-ordered-prefix-oracle.test.ts:offset-agreement`,
+        new Error(`offset agreement ${checkpoint}: ${repeats[0]}`),
       )
     }
   }
@@ -1229,6 +1413,9 @@ async function checkCase(testCase: Case): Promise<Observation> {
     reachedLaggingRefetchDuringHold,
     reachedReportDuringHold,
     reachedReportOverFullWindow,
+    reachedOffsetPastHiddenRow: run.offsetsPastHiddenRows() > 0,
+    reachedJudgedOffset: run.judgedOffsetContinuations() > 0,
+    reachedJudgedRefetchingOffset: run.judgedRefetchingContinuations() > 0,
     reports: run.reports(),
   }
 }
@@ -1257,7 +1444,12 @@ const property = `query-db.refetch-ordered-prefix`
 declareOracle({
   check: [checkCase],
   model: [expectedWindow, expectedCoverage],
-  grammar: [caseArbitrary, heldCaseArbitrary, sameKeyEndCaseArbitrary],
+  grammar: [
+    caseArbitrary,
+    heldCaseArbitrary,
+    sameKeyEndCaseArbitrary,
+    offsetHoldCaseArbitrary,
+  ],
 })
 
 describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () => {
@@ -1866,14 +2058,14 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     },
   )
 
-  // Known loader defects outside #2136. These witnesses fail today and
-  // reproduce on main; `it.fails` turns green work into a red signal once the
-  // ordered loader is fixed, so the limits above can be removed.
-  it.fails(
-    `an offset-only provider fills a joined window at preload (known loader defect)`,
-    async () => {
-      oracleRoute(`case`)
-      const run = await startRun({
+  // An offset-only provider at preload, replayed through the shared model and
+  // comparison (#2182). The loader used to send each continuation with an
+  // offset capped at the window size, so the provider re-served the same row
+  // and the joined window stayed empty.
+  it(`an offset-only provider fills a joined window at preload`, async () => {
+    oracleRoute(`fixed history`)
+    await withDeadline(
+      checkCase({
         scenario: {
           encoding: `offset`,
           functionKey: false,
@@ -1889,14 +2081,9 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
           { id: 2, rank: 0, marked: false },
         ],
         history: [],
-      })
-      try {
-        expect(run.windowIds()).toEqual([0])
-      } finally {
-        await run.cleanup()
-      }
-    },
-  )
+      }),
+    )
+  })
 
   // This trace was a known defect: after a joined-side removal the loader
   // stopped refilling. A repair's retirement removed a row the loader had
@@ -1947,6 +2134,9 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     }
   })
 
+  // A known loader defect outside #2136 (#2183). This witness fails today and
+  // reproduces on main; `it.fails` turns green work into a red signal once the
+  // ordered loader is fixed, so the limits above can be removed.
   it.fails(
     `a capped provider keeps a moved row in the window after a refetch (known loader defect)`,
     async () => {
@@ -2171,6 +2361,55 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   })
 
   const endProperty = `query-db.refetch-held-page-end`
+  // The offset-continuation campaign (#2182). Every history pages on with an
+  // offset continuation while a held write hides or overlays a source row
+  // before its cursor.
+  describe(`generated offset continuations past a held row`, () => {
+    let reachedHiddenRow = 0
+    beforeEach(() => {
+      reachedHiddenRow = 0
+    })
+    afterEach(({ task }) => {
+      if (
+        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        task.result?.state === `fail` ||
+        oracleReplayRequested()
+      )
+        return
+      process.stdout.write(
+        `query-db.refetch-offset-hold ${task.name} reached ${reachedHiddenRow}\n`,
+      )
+      // The construction reaches the premise in every history.
+      expect(
+        reachedHiddenRow,
+        `offset continuations past a held row`,
+      ).toBeGreaterThanOrEqual(36)
+    })
+    oracleProperty({
+      id: `query-db.refetch-offset-hold`,
+      law: {
+        statement: `An offset continuation skips exactly the source rows through its cursor, including rows that an optimistic write hides or overlays, so it neither repeats nor skips a row.`,
+        authority: `LoadSubset contract and query/live/ARCHITECTURE.md, Ordered requests: a provider may honor the cursor or the offset; the offset counts source rows. Maintainer decision, 2026-11-11 (#2182): the offset counts rows hidden by optimism.`,
+        limits: `An offset-only provider without page caps, numeric order with one or two terms, limits 1-2, one held update or delete on one of the first three rows, and the public window, source-prefix and offset-agreement checkpoints. Offset agreement is judged for fetches that a loadSubset call starts while the applied rows through the cursor match the backend; a Query refetch re-runs the issue-time offset (LoadSubsetFn).`,
+      },
+      owns: [`src/query.ts#queryCollectionOptions`],
+      histories: {
+        arbitrary: offsetHoldCaseArbitrary,
+        runs: 40,
+        fixedSeeds: [20261111],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          const observation = await withDeadline(checkCase(history))
+          if (observation.reachedOffsetPastHiddenRow) reachedHiddenRow++
+        }),
+      check: (_history, _observations, verdict) => verdict,
+      timeout: 120_000,
+    })
+  })
+
   describe(`generated same-key page shifts`, () => {
     const states = [
       `earlier end during hold`,
@@ -2359,11 +2598,15 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   })
 
   describe(`generated refetch histories`, () => {
-    // These are the unchanged premises of the gap and the loader's report skip.
+    // These are the unchanged premises of the gap and the loader's report
+    // skip, and a continuation whose offset agreement the law judged. The
+    // `query-db.refetch-offset-hold` property owns the held-row premise.
     const states = [
       `reachedLaggingRefetchAfterContinuation`,
       `reachedLaggingRefetchDuringHold`,
       `reachedReportOverFullWindow`,
+      `reachedJudgedOffset`,
+      `reachedJudgedRefetchingOffset`,
     ] as const
     let counts = new Map<(typeof states)[number], number>()
     beforeEach(() => {
@@ -2381,14 +2624,16 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
           counts.get(state),
           `${state} history minimum`,
         ).toBeGreaterThanOrEqual(3)
-      console.info(property, task.name, Object.fromEntries(counts))
+      process.stdout.write(
+        `${property} ${task.name} ${JSON.stringify(Object.fromEntries(counts))}\n`,
+      )
     })
     oracleProperty({
       id: property,
       law: {
-        statement: `After refetch and Query invalidation settle, the public window and source prefix match the current backend rows.`,
-        authority: `LoadSubset contract and query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery.`,
-        limits: `The existing controlled Query provider, bounded histories, and public window/source-prefix checkpoints; no new generator dimensions.`,
+        statement: `After refetch and Query invalidation settle, the public window and source prefix match the current backend rows, and an offset continuation that a loadSubset call fetches while the applied rows through its cursor match the backend repeats no row at or before its cursor.`,
+        authority: `LoadSubset contract and query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; LoadSubsetOptions (a provider may honor the cursor or the offset). LoadSubsetFn: request data is immutable and a refetch revalidates the same demand, so a Query refetch re-runs the issue-time offset.`,
+        limits: `The controlled Query provider honors the cursor or only the offset, without page caps; bounded histories; public window/source-prefix checkpoints. Offset agreement is not judged for Query-initiated refetches of stored requests, nor while a refetch or a held sync transaction leaves the applied rows through the cursor behind the backend.`,
       },
       owns: [`src/query.ts#queryCollectionOptions`],
       histories: { arbitrary: caseArbitrary, runs: 80, fixedSeeds: [20261013] },

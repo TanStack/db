@@ -12,6 +12,7 @@ import { getQueryIR } from '../../src/query/builder/index.js'
 import { QueryRef, UnionAll } from '../../src/query/ir.js'
 import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.js'
 import { withOracleCleanup } from '../utils.js'
+import { countSnapshotRows } from './ordered-source-loader-support.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { OrderByOptimizationInfo } from '../../src/query/compiler/order-by.js'
 import type {
@@ -197,6 +198,9 @@ export async function receiveOrderedCompilerCacheHistory(
           )
           .slice(0, options.limit ?? source.size)
           .map((value) => ({ key: value.id, value })),
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: (options: Request) => request(options, false),
       // All ranks are unique. A tie request adds no row beyond the installed
       // boundary; it still settles its real loader continuation.

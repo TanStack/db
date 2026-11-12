@@ -1575,6 +1575,58 @@ export class CollectionSubscription
     this.options.truncateReplayPublication?.succeed()
   }
 
+  /**
+   * Count the applied source rows that pass this subscription's filter and
+   * sort at or before an ordered boundary (`through`). Rows that an optimistic
+   * write hides or overlays still count, at their applied positions: they are
+   * in the source, which a provider's offset counts. An optimistic insert is
+   * not in the source and does not count.
+   *
+   * The visible rows come from an indexed ordered read that starts at
+   * `limit` rows and doubles until it passes the boundary, so the work grows
+   * with the prefix, not with the source. Only the overlaid keys are then
+   * read at their applied values.
+   */
+  countAppliedRows(
+    through: (row: Record<string, unknown>) => boolean,
+    { orderBy, limit }: { orderBy: OrderBy; limit: number },
+  ): number {
+    const where = this.options.whereExpression
+    let rows: Array<ChangeMessage<Record<string, unknown>, string | number>>
+    for (let size = Math.max(limit, 1); ; size *= 2) {
+      const snapshot = this.collection.currentStateAsChanges({
+        orderBy,
+        limit: size,
+        where,
+      })
+      rows = Array.isArray(snapshot) ? snapshot : []
+      const last = rows.at(-1)
+      if (rows.length < size || last === undefined || !through(last.value))
+        break
+    }
+    let count = rows.filter(
+      ({ key, value }) =>
+        !this.collection._hasOptimisticOverlay(key) && through(value),
+    ).length
+    const { optimisticDeletes, optimisticUpserts, syncedData } =
+      this.collection._state
+    if (optimisticDeletes.size + optimisticUpserts.size === 0) return count
+    const filter = where ? createFilterFunctionFromExpression(where) : undefined
+    for (const key of new Set([
+      ...optimisticDeletes,
+      ...optimisticUpserts.keys(),
+    ])) {
+      const applied = syncedData.get(key) as Record<string, unknown> | undefined
+      if (
+        applied !== undefined &&
+        (filter?.(applied) ?? true) &&
+        through(applied)
+      )
+        count++
+    }
+    return count
+  }
+
   /** Read source-derived ordered rows without starting demand. */
   readOrderedSnapshot(
     options: LoadSubsetOptions,
