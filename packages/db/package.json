@@ -69,7 +69,7 @@
   "devDependencies": {
     "@playwright/test": "^1.65.0",
     "@tanstack/config": "^0.22.2",
-    "@tanstack/oracles": "https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@f8a58a3",
+    "@tanstack/oracles": "https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@e2af13a",
     "@vitest/coverage-istanbul": "^5.1.0",
     "arktype": "^2.2.9",
     "fake-indexeddb": "^6.2.8",

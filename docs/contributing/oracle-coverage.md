@@ -8034,6 +8034,15 @@ Chromium receiver uses the same 104/32 histories and comparison. This is no
 latency or total-memory threshold. See the
 [batching evidence](oracle-reviews/2026-11-10-persisted-startup-batching.md).
 
+Startup calibrations bind directly to their randomized constructed histories.
+The two persistence-loss controls construct a changed overlapping row before
+restore or after fallback, so even peer-only saved ownership requires a source
+write. Missing-state controls select their own constructions; fallback,
+durability and batching controls select distinguishing premises. All six
+receivers retain their fixed histories, observation cuts, declared states and
+80-history fixed/random budgets. See the
+[binding and timing evidence](oracle-reviews/2026-11-12-constructed-startup-calibrations.md).
+
 The independent
 [hydration lifecycle owner](../../packages/db-adapter-conformance/tests/persisted-baseline-lifecycle-oracle.ts)
 holds the adapter's hydration continuation across cleanup, reload and terminal
