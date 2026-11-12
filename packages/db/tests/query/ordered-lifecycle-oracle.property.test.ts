@@ -1024,7 +1024,7 @@ describe(`ordered lifecycle product`, () => {
     resolve: (history) => ({ history }),
     model: (plan, observations) => recordedComparison(plan, observations),
     driver: async (plan, observe) => {
-      let coordinates: Array<string> | undefined
+      let coordinates: ReadonlyArray<string | undefined> | undefined
       await observeComparison(plan, observe, async () => {
         const result = await assertHistory(plan.history)
         coordinates = result.coordinates

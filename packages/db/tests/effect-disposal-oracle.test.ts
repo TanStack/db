@@ -3,6 +3,7 @@ import { createCollection, createEffect } from '../src/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { captureMicrotaskErrors, flushPromises } from './utils.js'
 import { oracleProperty } from './oracle-config.js'
+import type { Verdict } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
@@ -200,7 +201,7 @@ async function runDisposalScenario({
 }
 
 describe(`Effect disposal outcome oracle`, () => {
-  oracleProperty({
+  oracleProperty<(typeof scenarios)[number], Verdict>({
     id: `effect-disposal.joined-callers`,
     law: {
       statement: `Every dispose() call during one cleanup attempt stays pending until the handler settles, then fulfills with the same outcome; the source is released once, and a release that throws is reported uncaught once with its own identity.`,

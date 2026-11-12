@@ -19,6 +19,7 @@ import { expect } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { oracleProperty } from './oracle-config.js'
+import type { Verdict } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
@@ -145,7 +146,7 @@ async function runReplacementCell({
 // What this oracle owns: the gap report judges how a truncate's replacement
 // rows set the Collection's readiness, in the sync path of sync.ts, by this
 // file's tests.
-oracleProperty({
+oracleProperty<(typeof cells)[number], Verdict>({
   id: `truncate-readiness.replacement-intent`,
   law: {
     statement: `A truncate's replacement makes the Collection ready unless its final authored intent is markReady:false, which keeps the current status, at every publication and after commit.`,
@@ -223,7 +224,7 @@ async function runReentrantPair({
   }
 }
 
-oracleProperty({
+oracleProperty<(typeof reentrantPairs)[number], Verdict>({
   id: `truncate-readiness.reentrant-batches`,
   law: {
     statement: `Reentrant replacement commits queue behind the current publication, and the final replacement's readiness intent alone decides the next batch's status.`,

@@ -7298,25 +7298,27 @@ describe(`lazy join demand grammar`, () => {
     // covers nothing), so the next demand change retires it, and the older
     // load that still covers the held key decides it: its failure is the
     // key's request error now. The twins must agree.
-    ...([`throws`, `rejects`] as const).map((replacement) => ({
-      name: `a churn replacement that ${replacement} leaves its key to the older load after the next demand change`,
-      steps: [
-        { kind: `settle-ok` },
-        { kind: `parent`, key: 2 },
-        { kind: `parent`, key: 3 },
-        ...(replacement === `throws`
-          ? [
-              { kind: `throw-next` } as const,
-              { kind: `unparent`, key: 2 } as const,
-            ]
-          : [
-              { kind: `unparent`, key: 2 } as const,
-              { kind: `settle-last-fail` } as const,
-            ]),
-        { kind: `unparent`, key: 1 },
-        { kind: `settle-first-fail` },
-      ],
-    })),
+    ...([`throws`, `rejects`] as const).map(
+      (replacement): LazyFixedHistory => ({
+        name: `a churn replacement that ${replacement} leaves its key to the older load after the next demand change`,
+        steps: [
+          { kind: `settle-ok` },
+          { kind: `parent`, key: 2 },
+          { kind: `parent`, key: 3 },
+          ...(replacement === `throws`
+            ? [
+                { kind: `throw-next` } as const,
+                { kind: `unparent`, key: 2 } as const,
+              ]
+            : [
+                { kind: `unparent`, key: 2 } as const,
+                { kind: `settle-last-fail` } as const,
+              ]),
+          { kind: `unparent`, key: 1 },
+          { kind: `settle-first-fail` },
+        ],
+      }),
+    ),
     // Law 9: the replay succeeds only as a replacement for the demand that
     // remains. A replay load of the churn replacement for {1, 2} loads both
     // keys, then the replay load of {2} fails, and the query releases the

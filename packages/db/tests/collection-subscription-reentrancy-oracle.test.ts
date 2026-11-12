@@ -5,6 +5,7 @@ import { Func, PropRef, Value } from '../src/query/ir.js'
 import { where } from './collection-subscription-reentrancy-fixture.js'
 import { reentrantSnapshotHistories } from './collection-subscription-lifecycle-grammar-oracle.js'
 import { oracleProperty } from './oracle-config.js'
+import type { Verdict } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
@@ -169,7 +170,7 @@ async function runSnapshotReentry({
 }
 
 describe(`Collection subscription callback reentry oracle`, () => {
-  oracleProperty({
+  oracleProperty<(typeof reentrantSnapshotHistories)[number], Verdict>({
     id: `subscription-reentrancy.direct-snapshot`,
     law: {
       statement: `Once a callback that interrupts a direct snapshot retires its demand or subscription, the request returns false, publishes no local snapshot, releases an accepted acquisition once, and starts no fallback read.`,

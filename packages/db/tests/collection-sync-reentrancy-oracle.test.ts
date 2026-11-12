@@ -468,7 +468,7 @@ describe(`sync publication reentrancy`, () => {
     }
   }
 
-  oracleProperty({
+  oracleProperty<(typeof readyCases)[number], Verdict>({
     id: `collection-sync.ready-truncate`,
     law: {
       statement: `A ready callback that writes during a truncate publishes, with the truncate batch, valid messages for every subscriber after the Collection is ready, ending at the overlay of active intents on the replacement rows.`,

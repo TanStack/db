@@ -3381,8 +3381,16 @@ describe(`Ordered windows across truncate replays`, () => {
     resolve: (regression) => ({ regression }),
     model: recordedAssertionJudgment,
     driver: (plan, observe) =>
-      recordAssertionJudgment(`ordered replay refinement`, plan, observe, () =>
-        checkOrderedReplay(plan.regression.history, plan.regression.scenario),
+      recordAssertionJudgment(
+        `ordered replay refinement`,
+        plan,
+        observe,
+        async () => {
+          await checkOrderedReplay(
+            plan.regression.history,
+            plan.regression.scenario,
+          )
+        },
       ),
     check: forwardAssertionJudgment,
   })

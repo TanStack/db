@@ -24,6 +24,7 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
 import { createTransaction } from '../../src'
 import { oracleProperty } from '../oracle-config'
+import type { Verdict } from '../oracle-config'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -284,7 +285,7 @@ describe('settled histories', () => {
   // A fixed campaign and a random campaign share one grammar and budget. A path
   // replay of this property selects only its random campaign.
   const settledProperty = `indexeddb.settled-history`
-  oracleProperty({
+  oracleProperty<Array<Step>, Verdict, { steps: Array<Step> }>({
     id: settledProperty,
     law: {
       statement: `Each settled authored history reconstructs the same public, subscription, durable, export, peer and reopened rows with key-owned versions.`,

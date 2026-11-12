@@ -1070,9 +1070,10 @@ function predictFaults(program) {
 
 const WORKTREE = `.worktrees/wt`
 const SCRATCH = `.worktrees/scratch/${APP}/tests/scratch-oracle.test.ts`
-// The rule's message for these generated files, and the mark that an edited
-// copy of the rule adds to it.
-const RULE_MESSAGE = `registers tests and declares no oracle part.`
+// The rule's message for these generated files, whose plain tests an oracle
+// file may not register (an oracle file registers its tests only through
+// oracleProperty), and the mark that an edited copy of the rule adds to it.
+const RULE_MESSAGE = `registers its tests only through oracleProperty.`
 const RULE_MARK = `[branch rule]`
 // The start of the rule's `create`, where a lint error is thrown.
 const RULE_CREATE = `create(context) {`

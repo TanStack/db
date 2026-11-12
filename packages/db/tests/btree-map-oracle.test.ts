@@ -2,6 +2,7 @@ import { describe, expect, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { BTree } from '../src/utils/btree.js'
 import { oracleProperty } from './oracle-config.js'
+import type { Verdict } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
@@ -201,7 +202,11 @@ describe(`BTree Map oracle`, () => {
     timeout: 30_000,
   })
 
-  oracleProperty({
+  oracleProperty<
+    [number, Array<Action>],
+    Verdict,
+    { nodeSize: number; actions: Array<Action> }
+  >({
     id: `btree-map.history`,
     law: {
       statement: `Numeric BTree point, range, fallback and neighbor observations agree with the independent sorted Map after every action.`,

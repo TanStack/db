@@ -912,7 +912,9 @@ oracleProperty({
       `collection-state.optimistic-fixed`,
       plan,
       observe,
-      () => runOptimisticHistory(plan.history.initial, plan.history.steps),
+      async () => {
+        await runOptimisticHistory(plan.history.initial, plan.history.steps)
+      },
     ),
   check: forwardAssertionJudgment,
 })

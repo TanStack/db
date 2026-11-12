@@ -1267,7 +1267,7 @@ const listenerReachStates = [
 // It returns that rejection, so the caller can check its premises first.
 async function mutantRejection(
   name: string,
-  mutantRun: () => Promise<void>,
+  mutantRun: () => Promise<unknown>,
 ): Promise<Error | undefined> {
   try {
     await mutantRun()
