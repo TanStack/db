@@ -404,6 +404,11 @@ task.due_date.getTime() // OK - TypeScript knows this is a Date
 SQLite stores every PowerSync `id` as text. If your backend uses integer primary keys, convert `id` to a number in `deserializationSchema` and set `numericIds: true`. The collection key is then a number, so integer foreign keys match it, for example in `eq(part.id, line.partId)`. Predicates on `id`, such as `gt(product.id, 2)`, compare numbers in on-demand loads, change tracking, and eviction.
 
 ```typescript
+import { Schema, Table, column } from "@powersync/web"
+import { createCollection } from "@tanstack/react-db"
+import { powerSyncCollectionOptions } from "@tanstack/powersync-db-collection"
+import { z } from "zod"
+
 const APP_SCHEMA = new Schema({
   products: new Table({
     name: column.text,
@@ -547,6 +552,8 @@ class Connector implements PowerSyncBackendConnector {
 The `powerSyncCollectionOptions` function accepts the following options:
 
 ```ts
+import type { StandardSchemaV1 } from "@standard-schema/spec"
+
 interface PowerSyncCollectionConfig<TTable extends Table, TSchema> {
   // Required options
   database: PowerSyncDatabase
