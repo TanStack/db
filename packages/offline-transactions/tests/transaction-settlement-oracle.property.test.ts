@@ -170,8 +170,9 @@ import type { OfflineConfig } from '../src/types'
  * outbox. Outbox replay resumes unfinished durable work, including terminal-phase
  * deletion; neither operation is a Collection sync restart or truncate replay.
  * To replay one oracle shrink directly, set TANSTACK_DB_ORACLE_SEED,
- * TANSTACK_DB_ORACLE_PATH, and TANSTACK_DB_ORACLE_PROPERTY to the failing
- * campaign's property (`offline.settlement.*`). The other campaigns in this
+ * TANSTACK_DB_ORACLE_PATH, TANSTACK_DB_ORACLE_PROPERTY, and, for a generated
+ * source, TANSTACK_DB_ORACLE_UNIT from the complete printed Replay: coordinates
+ * (`offline.settlement.*`). Enumerated sources leave UNIT unset. Other campaigns in this
  * file stand aside.
  */
 

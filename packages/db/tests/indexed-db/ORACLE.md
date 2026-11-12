@@ -212,7 +212,11 @@ outcome. Fast-check reports counterexample and shrink path; verbose output
 retains failed histories. A reduced trace proves its reported checkpoint; do not
 label a reduction a reproduction of a different facet without replaying both.
 
-From this package directory:
+The command below retains the original failure's coordinates. With the current
+generated-unit runner, also set `TANSTACK_DB_ORACLE_UNIT='random seed: generated'`.
+This owner has no constructed-history prefix, so that path needs no index
+translation. For new failures, copy all coordinates from the printed `Replay:`
+line. Run from this package directory:
 
 ```sh
 TANSTACK_DB_ORACLE_SEED=1179001 TANSTACK_DB_ORACLE_PATH=0:1:0:0:2:2 \
@@ -364,9 +368,10 @@ TANSTACK_INDEXEDDB_ORACLE_PROFILE=stress pnpm test:indexed-db:oracles
 pnpm exec playwright install chromium firefox webkit
 pnpm test:indexed-db:browser
 # Direct selected cross-tab history; the fixed campaign does not run first:
-TANSTACK_DB_ORACLE_SEED=<seed> TANSTACK_DB_ORACLE_PATH=<path> TANSTACK_DB_ORACLE_PROPERTY=indexeddb.cross-tab-history pnpm test:indexed-db:oracles
+TANSTACK_DB_ORACLE_SEED=<seed> TANSTACK_DB_ORACLE_PATH=<path> TANSTACK_DB_ORACLE_PROPERTY=indexeddb.cross-tab-history TANSTACK_DB_ORACLE_UNIT='random seed: generated' pnpm test:indexed-db:oracles
 # Direct selected pending history; the fixed and other tests stand aside:
-TANSTACK_DB_ORACLE_SEED=<seed> TANSTACK_DB_ORACLE_PATH=<path> TANSTACK_DB_ORACLE_PROPERTY=indexeddb.pending-history pnpm test:indexed-db:oracles
+TANSTACK_DB_ORACLE_SEED=<seed> TANSTACK_DB_ORACLE_PATH=<path> TANSTACK_DB_ORACLE_PROPERTY=indexeddb.pending-history TANSTACK_DB_ORACLE_UNIT='random seed: generated' pnpm test:indexed-db:oracles
+# This native Playwright receiving witness runs fast-check directly and needs no UNIT:
 TANSTACK_DB_ORACLE_SEED=<seed> TANSTACK_DB_ORACLE_PATH=<path> TANSTACK_DB_ORACLE_PROPERTY=indexeddb.browser-native-history pnpm test:indexed-db:browser --project=chromium
 ```
 

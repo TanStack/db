@@ -11,6 +11,7 @@ import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { eq, gte, isUndefined, not } from '../../src/query/builder/functions.js'
 import {
+  isGeneratedOracleCampaign,
   oracleFixedSeed,
   oracleProperty,
   oracleReplayRequested,
@@ -4888,7 +4889,7 @@ describe(`eager indexed ordered windows`, () => {
     })
     afterEach(({ task }) => {
       if (
-        task.name !== `determinism` &&
+        isGeneratedOracleCampaign(task.name) &&
         task.result?.state !== `fail` &&
         !oracleReplayRequested()
       )
@@ -4954,7 +4955,7 @@ describe(`eager indexed ordered windows`, () => {
     })
     afterEach(({ task }) => {
       if (
-        task.name !== `determinism` &&
+        isGeneratedOracleCampaign(task.name) &&
         task.result?.state !== `fail` &&
         !oracleReplayRequested()
       )
@@ -5007,7 +5008,7 @@ describe(`eager indexed ordered windows`, () => {
       Awaited<ReturnType<typeof runEagerWindow>>
     >()
     beforeEach(({ task }) => {
-      fixedCampaign = task.name === `fixed seed ${HELD_SEED}`
+      fixedCampaign = task.name === `fixed seed ${HELD_SEED}: generated`
       heldReach = new Map()
     })
     afterEach(({ task }) => {

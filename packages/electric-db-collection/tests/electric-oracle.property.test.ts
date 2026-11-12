@@ -96,7 +96,10 @@ import type {
   RetryWait,
 } from './electric-retry-decision-model'
 
-// Replays one generated law directly with the shared oracle variables:
+// Replay a generated law by copying its complete printed Replay: coordinates,
+// including TANSTACK_DB_ORACLE_UNIT='<reported random unit>'. The old command
+// below records the pre-unit interface; current Vitest selection uses the
+// reported unit rather than its former '(replay)' test-name suffix:
 // TANSTACK_DB_ORACLE_PROPERTY=<property>
 // TANSTACK_DB_ORACLE_SEED=<reported seed>
 // TANSTACK_DB_ORACLE_PATH=<reported path>

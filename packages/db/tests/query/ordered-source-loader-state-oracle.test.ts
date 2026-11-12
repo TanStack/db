@@ -7,7 +7,11 @@ import {
 } from '../../src/query/live/ordered-source-loader.js'
 import { PropRef } from '../../src/query/ir.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
-import { oracleProperty, oracleReplayRequested } from '../oracle-config.js'
+import {
+  isGeneratedOracleCampaign,
+  oracleProperty,
+  oracleReplayRequested,
+} from '../oracle-config.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
@@ -3518,7 +3522,7 @@ describe(`Ordered source request authority`, () => {
     })
     afterEach(({ task }) => {
       if (
-        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        !isGeneratedOracleCampaign(task.name) ||
         task.result?.state === `fail`
       )
         return
@@ -3646,7 +3650,7 @@ describe(`Ordered source request authority`, () => {
     })
     afterEach(({ task }) => {
       if (
-        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        !isGeneratedOracleCampaign(task.name) ||
         task.result?.state === `fail`
       )
         return
@@ -3825,7 +3829,7 @@ describe(`Ordered source request authority`, () => {
     })
     afterEach(({ task }) => {
       if (
-        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        !isGeneratedOracleCampaign(task.name) ||
         task.result?.state === `fail`
       )
         return
@@ -4114,7 +4118,7 @@ describe(`Ordered source request authority`, () => {
     })
     afterEach(({ task }) => {
       if (
-        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        !isGeneratedOracleCampaign(task.name) ||
         task.result?.state === `fail`
       )
         return
@@ -4373,7 +4377,7 @@ describe(`Ordered source request authority`, () => {
     })
     afterEach(({ task }) => {
       if (
-        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        !isGeneratedOracleCampaign(task.name) ||
         task.result?.state === `fail`
       )
         return

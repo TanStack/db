@@ -12,6 +12,7 @@ import {
 } from './transaction-serializer-oracle'
 
 // This runner calibration preserves raw RunDetails and shrink-path identity.
+// This direct fc.check capture uses no TANSTACK_DB_ORACLE_UNIT coordinate.
 // Production value laws use native oracleProperty in the owner runner.
 oracleReplayTest(it, MUTATION_WIRE_PROPERTY)(
   `replays a shrunk mutation-wire failure at the same checkpoint`,

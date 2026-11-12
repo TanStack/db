@@ -53,7 +53,11 @@ const arbitrarySimpleArray = fc.array(fc.integer(), { maxLength: 10 })
 
 // The reusable value laws run with identical generators and checks in a
 // fixed campaign and a random campaign. A path replay of `ivm.hash-value`
-// selects only its random campaign. Replay it with Vitest, for example:
+// selects only its reported random unit. For a current replay, copy all printed
+// Replay: coordinates, including TANSTACK_DB_ORACLE_UNIT. The following example
+// preserves the original pre-unit coordinates; no constructions preceded this
+// generated stream, so add UNIT='random seed: generated' without shifting its
+// path when replaying that source revision:
 // TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0:1 \
 //   TANSTACK_DB_ORACLE_PROPERTY=ivm.hash-value \
 //   pnpm exec vitest --run tests/hash-oracle.property.test.ts -t 'cloned arrays have same hash'

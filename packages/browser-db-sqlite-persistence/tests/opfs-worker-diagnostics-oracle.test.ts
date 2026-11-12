@@ -312,6 +312,7 @@ cause; the absent-cause examples reject an invented cause. Fixed histories run
 separately so both generated campaigns share one property and budget, and a
 reported shrink path selects its generated case directly. Verbose FastCheck
 output retains original/reduced traces. Set
+Copy the complete printed Replay: coordinates, including TANSTACK_DB_ORACLE_UNIT,
 TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
 TANSTACK_DB_ORACLE_PROPERTY=opfs-worker.diagnostics for direct replay.
 TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the generated campaign.

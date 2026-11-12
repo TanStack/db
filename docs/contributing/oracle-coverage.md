@@ -51,6 +51,26 @@ The [project glossary](glossary.md) owns terms shared by these executable
 models and their production subsystems. A coverage owner may define narrower
 local terms, but it must not silently rename a production concept.
 
+## Oracle campaign-unit migration, 2026-11-12
+
+The e2af13a oracle dependency registers each constructed history and each
+campaign's generated histories as separate tests. Current generated path
+replays include `TANSTACK_DB_ORACLE_UNIT`; copy the complete printed `Replay:`
+coordinates. Existing records below retain their original commands and paths
+for their named source revisions. For an older path whose first index is k
+and whose campaign had n constructed histories, k < n selects construction k
+with first index 0; otherwise it selects `random seed: generated` with first
+index k - n. Preserve the remaining shrink-path components. Fixed histories,
+enumerated sources, and direct fast-check receiving witnesses have separate
+selection rules; do not add a guessed unit to their commands.
+
+Campaign-local sampling minima run on generated units. Each constructed unit
+retains its own declared-state judgment. Script-wide ledgers keep their prior
+counting scope and exclude the newly suffixed determinism units. Fixed/random
+budgets and existing thresholds remain unchanged. The
+[compatibility follow-up](oracle-reviews/2026-11-12-constructed-startup-calibrations.md#dependency-compatibility-follow-up)
+records the pre-edit failures and repaired receiving paths.
+
 The [2026-10-10 owner-overlap review](oracle-reviews/2026-10-10-owner-overlap-audit.md)
 distinguishes canonical laws from their receiving witnesses across packages.
 
@@ -957,7 +977,10 @@ every TS version, arbitrary extra-property structural assignment, or the
 internal semantics of trusted PendingMutation/LoadSubsetOptions carriers.
 The [type-preservation audit](oracle-reviews/pr-2259-persisted-option-types.md)
 and `scripts/calibrate-persisted-option-types.mjs` preserve parent RED, GREEN,
-legacy-suite survival, mutant-mutant evidence, and runnable overlay recipes.
+legacy-suite survival, mutant-mutant evidence, and overlay recipes for their
+recorded source revisions. The audit's
+[helper compatibility note](oracle-reviews/pr-2259-persisted-option-types.md#helper-compatibility-follow-up-2026-11-12)
+distinguishes historical owner selection from current source compatibility.
 The readonly-row overlay strips user-property readonly modifiers from get's
 return while retaining readonly virtual fields. The prior grammar accepted it;
 the modifier histories reject it at the shared exact published-row comparison.
@@ -8033,6 +8056,15 @@ work. Both Node campaigns enforce randomized constructed reach. The actual
 Chromium receiver uses the same 104/32 histories and comparison. This is no
 latency or total-memory threshold. See the
 [batching evidence](oracle-reviews/2026-11-10-persisted-startup-batching.md).
+
+Startup calibrations bind directly to their randomized constructed histories.
+The two persistence-loss controls construct a changed overlapping row before
+restore or after fallback, so even peer-only saved ownership requires a source
+write. Missing-state controls select their own constructions; fallback,
+durability and batching controls select distinguishing premises. All six
+receivers retain their fixed histories, observation cuts, declared states and
+80-history fixed/random budgets. See the
+[binding and timing evidence](oracle-reviews/2026-11-12-constructed-startup-calibrations.md).
 
 The independent
 [hydration lifecycle owner](../../packages/db-adapter-conformance/tests/persisted-baseline-lifecycle-oracle.ts)

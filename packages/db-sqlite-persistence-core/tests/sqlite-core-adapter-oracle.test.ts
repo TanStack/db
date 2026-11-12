@@ -846,7 +846,8 @@ export function runSQLiteResetResumeOracleTests(
  * fails the public result/binding comparison. The legacy CLI test interpolates
  * literals, so it cannot exercise this boundary.
  *
- * Replay: `TANSTACK_DB_ORACLE_PATH` with `TANSTACK_DB_ORACLE_SEED` and
+ * Replay: copy the complete printed Replay: coordinates, including
+ * `TANSTACK_DB_ORACLE_UNIT`. `TANSTACK_DB_ORACLE_PATH` with `TANSTACK_DB_ORACLE_SEED` and
  * `TANSTACK_DB_ORACLE_PROPERTY=sqlite-persistence.binding-capacity` replays the
  * recorded random-campaign history. The normal package test runs fixed and
  * random campaigns.

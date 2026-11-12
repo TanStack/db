@@ -9,7 +9,11 @@ import {
   gcDeadline,
   stepGcModel,
 } from './collection-gc-retention-oracle.js'
-import { oracleProperty, oracleReplayRequested } from './oracle-config.js'
+import {
+  isGeneratedOracleCampaign,
+  oracleProperty,
+  oracleReplayRequested,
+} from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -389,7 +393,7 @@ describe(`mutation retention campaign reach`, () => {
   })
   afterEach(({ task }) => {
     if (
-      task.name !== `determinism` &&
+      isGeneratedOracleCampaign(task.name) &&
       task.result?.state !== `fail` &&
       !oracleReplayRequested()
     ) {

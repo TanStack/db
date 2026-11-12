@@ -813,6 +813,15 @@ When replay inputs are present, run only the requested replay. Do not spend
 time on the fixed campaign before reaching the failure the developer asked to
 reproduce.
 
+The pinned `oracleProperty` registers each constructed history and the generated
+histories as separate campaign units. A generated source's path replay also
+requires `TANSTACK_DB_ORACLE_UNIT`, copied from the failure's `Replay:` line.
+For example, `random seed: generated` selects the generated histories; a named
+construction has its own unit. A path belongs to that unit's stream. Adding a
+unit to an older command can require translating its path; retain the original
+coordinates as historical evidence. Enumerated sources and direct fast-check
+receiving witnesses do not use these generated-unit coordinates.
+
 The fixed and random campaigns must use the same property, generators,
 observation recorder, refinement check, and run budget. Only their seed source
 may differ. This keeps a random failure eligible for promotion into a fixed
@@ -822,8 +831,9 @@ history or the fixed-seed campaign.
 shows this shape. Its fixed-seed campaign preserves one scheduler campaign. Its
 second campaign uses a random campaign seed by default. To replay its recorded
 failure, set `TANSTACK_DB_ORACLE_PROPERTY=offline.fifo-retry` with
-`TANSTACK_DB_ORACLE_SEED` and `TANSTACK_DB_ORACLE_PATH`. The fixed-seed campaign
-stands aside, and the random campaign runs the recorded path once. The offline
+`TANSTACK_DB_ORACLE_SEED`, `TANSTACK_DB_ORACLE_PATH`, and the reported
+`TANSTACK_DB_ORACLE_UNIT`. The fixed-seed campaign stands aside, and the selected
+random unit runs the recorded path once. The offline
 oracle owners' other properties use the same variables and name their own
 properties, such as `offline.leadership.stale-read` and
 `offline.settlement.retry-decision`.

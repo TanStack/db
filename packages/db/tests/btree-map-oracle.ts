@@ -31,7 +31,8 @@ export const arbitraryAction: fc.Arbitrary<Action> = fc.oneof(
 
 // A fixed campaign and a random campaign run the same history grammar. A path
 // replay of this property runs only its random campaign from the recorded seed
-// and shrink path: TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
+// and shrink path. Copy complete printed Replay: coordinates, including
+// TANSTACK_DB_ORACLE_UNIT, TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
 // TANSTACK_DB_ORACLE_PROPERTY=btree-map.history with
 // `pnpm exec vitest run packages/db/tests/btree-map-oracle.test.ts`.
 

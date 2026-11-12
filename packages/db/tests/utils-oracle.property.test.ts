@@ -53,8 +53,9 @@ import type { Verdict } from './oracle-property.js'
  */
 // Every generated law below uses the same property in a fixed and a fresh
 // campaign. Set TANSTACK_DB_ORACLE_PROPERTY to `utils.<number>` from the test
-// label, with TANSTACK_DB_ORACLE_SEED and TANSTACK_DB_ORACLE_PATH, to replay
-// its fast-check shrink directly, for example with
+// label, with TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and the reported
+// TANSTACK_DB_ORACLE_UNIT. Copy the complete printed Replay: coordinates to
+// select the original construction/generated stream, for example with
 // `vitest run tests/utils-oracle.property.test.ts`.
 const fixedSeed = 20260911
 

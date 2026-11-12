@@ -1,6 +1,7 @@
 import { setImmediate } from 'node:timers/promises'
 import { fc } from '@fast-check/vitest'
 import { afterEach, beforeEach, describe, expect } from 'vitest'
+import { isGeneratedOracleCampaign } from '../../db/tests/oracle-config.js'
 import {
   consolidate,
   groupBy,
@@ -236,10 +237,7 @@ function registerIncrementalization<T>(
     // Preserve the original per-campaign aggregate delivery guard. The native
     // determinism check samples histories separately and is not a campaign.
     afterEach(({ task }) => {
-      if (
-        (task.name === `random seed` || task.name.startsWith(`fixed seed `)) &&
-        !task.result?.errors?.length
-      )
+      if (isGeneratedOracleCampaign(task.name) && !task.result?.errors?.length)
         reach.expectBothDeliveries()
     })
     oracleProperty<T, Array<Array<[string, number]>>>({

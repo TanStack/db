@@ -188,6 +188,7 @@ import fc from 'fast-check'
 import { afterAll, beforeAll, expect } from 'vitest'
 import {
   differs,
+  isOracleDeterminismUnit,
   oracleProperty,
   oracleReplayRequested,
   pass,
@@ -2079,7 +2080,7 @@ function recordStates(program, observe) {
 function countStates(states, observe) {
   for (const state of states) {
     observe(`reach`, state)
-    if (!expect.getState().currentTestName.endsWith(`determinism`))
+    if (!isOracleDeterminismUnit(expect.getState().currentTestName))
       counts.set(state, counts.get(state) + 1)
   }
 }

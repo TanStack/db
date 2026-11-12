@@ -447,7 +447,9 @@ oracleProperty({
 })
 
 // The two campaigns use the same grammar, checker, and budget. A path replay
-// of the property runs only the random campaign. Reproduce a saved failure with:
+// selects only its reported random unit. Copy the complete printed Replay:
+// coordinates, including TANSTACK_DB_ORACLE_UNIT, for this generated property:
+// TANSTACK_DB_ORACLE_UNIT='<reported random unit>'
 // TANSTACK_DB_ORACLE_PROPERTY=electric.persisted-tag-history
 // TANSTACK_DB_ORACLE_SEED=<seed> TANSTACK_DB_ORACLE_PATH=<path>
 // pnpm exec vitest run tests/electric-descriptor-isolation-oracle.test.ts

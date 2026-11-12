@@ -1,6 +1,6 @@
 import fc from 'fast-check'
 import { afterEach, beforeEach, describe } from 'vitest'
-import { oracleProperty } from '../oracle-config.js'
+import { isGeneratedOracleCampaign, oracleProperty } from '../oracle-config.js'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
@@ -48,15 +48,13 @@ export function registerIncludesProperty<THistory extends Array<unknown>>(
     [generated]
   if (campaign.examples?.length) sources.push(campaign.examples)
   describe(statement, () => {
-    const isGeneratedCampaign = (name: string) =>
-      name === `random seed` || name.startsWith(`fixed seed `)
     beforeEach(({ task }) => {
-      if (!isGeneratedCampaign(task.name)) return
+      if (!isGeneratedOracleCampaign(task.name)) return
       campaignFailed = false
       campaign.beforeCampaign?.()
     })
     afterEach(({ task }) => {
-      if (isGeneratedCampaign(task.name) && !campaignFailed)
+      if (isGeneratedOracleCampaign(task.name) && !campaignFailed)
         campaign.afterCampaign?.()
     })
     for (const histories of sources)

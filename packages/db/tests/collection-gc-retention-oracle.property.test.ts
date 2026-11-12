@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
-import { oracleProperty, oracleReplayRequested } from './oracle-config.js'
+import {
+  isGeneratedOracleCampaign,
+  oracleProperty,
+  oracleReplayRequested,
+} from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -892,7 +896,7 @@ describe(`GC boundary campaign reach`, () => {
   })
   afterEach(({ task }) => {
     if (
-      task.name !== `determinism` &&
+      isGeneratedOracleCampaign(task.name) &&
       task.result?.state !== `fail` &&
       !oracleReplayRequested()
     ) {
