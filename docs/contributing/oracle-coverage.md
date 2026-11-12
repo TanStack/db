@@ -4381,6 +4381,36 @@ the list grows against the merge-base. An entry is removed when its retiring
 work lands: F33 for the censuses, and extracting the multi-tab driver for
 the two witnesses.
 
+The conversion also moved model-only reach censuses out of their oracle
+files: tests that sample a grammar at a fixed seed, with no production, and
+require a count of entered states. They kept their seed, run count, and
+minimum unchanged, but they now run in ordinary files, so the owning
+oracle's declared reach no longer holds them and the run-budget tracker
+reports them as removed. They stay there by the maintainer decision "merge
+sooner and then remove once F33 is in" (2026-11-11). The route back is F33:
+when @tanstack/oracles supports an enforced per-state minimum in `measured`
+of a generated source with fixed seeds (law `reach minimum`), each census
+becomes a declared state of its owner and leaves the ordinary file.
+
+| Census (seed, runs) | Ordinary file now | Owning oracle |
+| --- | --- | --- |
+| full-join windows: rootless at least 10, mixed null group at least 5 (seed 2073, 40 runs × multiplier) | `packages/db/tests/query/ordered-work-examples.test.ts` | `query/ordered-work-oracle.property.test.ts` |
+| two-transition placements and route-history matrix cuts (seeds 1725, 1726, 1727, 1733) | `packages/db/tests/query/includes-history-grammar.test.ts` | `query/includes-oracle.property.test.ts` |
+| window dimensions, at least 3 per premise (seed 2137, 60 runs) | `packages/db/tests/query/includes-work-counter.test.ts` | `query/includes-work-counter-oracle.test.ts` |
+| repeated, cursor, empty, and unbounded exact demands (seed 1656, 200 runs) | `packages/db/tests/query/load-subset-model.test.ts` | `query/load-subset-oracle.property.test.ts` |
+| nullable value and lifecycle dimensions (seed 93472, 100 runs) | `packages/db/tests/query/ordered-lifecycle-model.test.ts` | `query/ordered-lifecycle-oracle.property.test.ts` |
+| grammar-ablation census (seed 2220100, 200 runs) | `packages/db/tests/sync-metadata-session.test.ts` | `sync-metadata-session-oracle.property.test.ts` |
+| three fixed-seed revert censuses (seed 2026101) | `packages/db/tests/proxy-revert-census.test.ts` | `proxy-revert-oracle.property.test.ts` |
+| every kind, mutation, and verdict (seed 2026930) | `packages/db-ivm/tests/hash-identity-grammar.test.ts` | `hash-identity-oracle.property.test.ts` |
+| ordered histories that promote retained rows, at least 10 (seed 1741) | `packages/db-ivm/tests/incrementalization-law-calibration.test.ts` | `incrementalization-law-oracle.property.test.ts` |
+| cancelled NaN-prefixed values, more than 10 (seed 20260930) | `packages/db-ivm/tests/index-refinement-grammar.test.ts` | `index-refinement-oracle.property.test.ts` |
+| tail-order ablation (seed 165905, 12 runs) | `packages/browser-db-sqlite-persistence/tests/shared-driver-fairness-grammar.test.ts` | `shared-driver-fairness-oracle.test.ts` |
+| bounded action-history axes and independent-key work shapes (seeds 1992, 31992) | `packages/db-sqlite-persistence-core/tests/ordinary-transaction-work-calibration.test.ts` | `ordinary-transaction-work-oracle.ts` (registered by `sqlite-resume-snapshot-oracle.test.ts`) |
+| the #2139 known-defect census (seed 2128, 12 runs) | `packages/db-sqlite-persistence-core/tests/persisted-known-defects.test.ts` | `persisted-oracle.test.ts` |
+| retained generated grammar and axis ablations | `packages/node-db-sqlite-persistence/tests/expression-index-grammar.test.ts` | `expression-index-oracle.test.ts` |
+| the fixed recovery corpus's deletion and reload combinations (seed 1659) | `packages/electric-db-collection/tests/electric-recovery-publication-grammar.test.ts` | `electric-recovery-oracle.test.ts` |
+| the Electric adapter grammar (seed 18530601) | `packages/electric-db-collection/tests/electric-adapter-grammar.test.ts` | `electric-oracle.property.test.ts` |
+
 `scripts/lint-scope-oracle.property.test.js` owns lint selection after an
 edit (`scripts.lint-scope`): the changed scope, the named (pre-commit) scope,
 and the Claude edit and stop hooks. A generated construction in each campaign fixes
