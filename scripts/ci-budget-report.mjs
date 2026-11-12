@@ -36,7 +36,11 @@ export function measure(jobs) {
       job.conclusion !== `skipped`,
   )
   const jobRows = measured
-    .map((job) => ({ name: job.name, minutes: minutes(job), url: job.html_url }))
+    .map((job) => ({
+      name: job.name,
+      minutes: minutes(job),
+      url: job.html_url,
+    }))
     .sort((a, b) => b.minutes - a.minutes)
   const workflowMinutes =
     measured.length === 0
@@ -92,7 +96,10 @@ export function commentMarker(prNumber) {
 
 export function commentBody(result, { runUrl, prNumber }) {
   const rows = result.over
-    .map((job) => `- ${job.name}: ${fmt(job.minutes)} (budget ${JOB_BUDGET_MINUTES}m)`)
+    .map(
+      (job) =>
+        `- ${job.name}: ${fmt(job.minutes)} (budget ${JOB_BUDGET_MINUTES}m)`,
+    )
     .join(`\n`)
   const workflow = result.workflowOver
     ? `\n- Whole workflow: ${fmt(result.workflowMinutes)} (budget ${WORKFLOW_BUDGET_MINUTES}m)`
@@ -120,11 +127,35 @@ function gh(args, input) {
 
 function findOrCreateIssue(repo) {
   const issues = JSON.parse(
-    gh([`issue`, `list`, `--repo`, repo, `--label`, ISSUE_LABEL, `--state`, `all`, `--limit`, `100`, `--json`, `number,title`]),
+    gh([
+      `issue`,
+      `list`,
+      `--repo`,
+      repo,
+      `--label`,
+      ISSUE_LABEL,
+      `--state`,
+      `all`,
+      `--limit`,
+      `100`,
+      `--json`,
+      `number,title`,
+    ]),
   )
   const existing = issues.find((issue) => issue.title === ISSUE_TITLE)
   if (existing) return existing.number
-  gh([`label`, `create`, ISSUE_LABEL, `--repo`, repo, `--color`, `B60205`, `--description`, `CI jobs over the budget`, `--force`])
+  gh([
+    `label`,
+    `create`,
+    ISSUE_LABEL,
+    `--repo`,
+    repo,
+    `--color`,
+    `B60205`,
+    `--description`,
+    `CI jobs over the budget`,
+    `--force`,
+  ])
   const url = gh([
     `issue`,
     `create`,
@@ -153,10 +184,24 @@ function upsertComment(repo, issueNumber, prNumber, body) {
   ]).trim()
   const id = found.split(`\n`)[0]
   if (id) {
-    gh([`api`, `-X`, `PATCH`, `repos/${repo}/issues/comments/${id}`, `-F`, `body=@${file}`])
+    gh([
+      `api`,
+      `-X`,
+      `PATCH`,
+      `repos/${repo}/issues/comments/${id}`,
+      `-F`,
+      `body=@${file}`,
+    ])
     return `updated`
   }
-  gh([`api`, `-X`, `POST`, `repos/${repo}/issues/${issueNumber}/comments`, `-F`, `body=@${file}`])
+  gh([
+    `api`,
+    `-X`,
+    `POST`,
+    `repos/${repo}/issues/${issueNumber}/comments`,
+    `-F`,
+    `body=@${file}`,
+  ])
   return `created`
 }
 
@@ -170,7 +215,13 @@ function loadJobs(args) {
   }
   const repo = process.env.GITHUB_REPOSITORY
   const runId = process.env.GITHUB_RUN_ID
-  return gh([`api`, `--paginate`, `repos/${repo}/actions/runs/${runId}/jobs?per_page=100`, `--jq`, `.jobs[]`])
+  return gh([
+    `api`,
+    `--paginate`,
+    `repos/${repo}/actions/runs/${runId}/jobs?per_page=100`,
+    `--jq`,
+    `.jobs[]`,
+  ])
     .split(`\n`)
     .filter(Boolean)
     .map((line) => JSON.parse(line))
@@ -179,19 +230,33 @@ function loadJobs(args) {
 function main(args) {
   const result = measure(loadJobs(args))
   for (const line of annotations(result)) console.log(line)
-  const runUrl = process.env.RUN_URL ?? `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
+  const runUrl =
+    process.env.RUN_URL ??
+    `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
   const prNumber = process.env.PR_NUMBER
   if (process.env.GITHUB_STEP_SUMMARY)
-    appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMarkdown(result, { runUrl, prNumber }))
+    appendFileSync(
+      process.env.GITHUB_STEP_SUMMARY,
+      summaryMarkdown(result, { runUrl, prNumber }),
+    )
   const offending = result.over.length > 0 || result.workflowOver
   if (!offending || !prNumber || process.env.ISSUE_WRITABLE !== `true`) return
   try {
     const repo = process.env.GITHUB_REPOSITORY
     const issue = findOrCreateIssue(repo)
-    const action = upsertComment(repo, issue, prNumber, commentBody(result, { runUrl, prNumber }))
-    console.log(`Slow CI triage issue #${issue}: ${action} the comment for PR #${prNumber}`)
+    const action = upsertComment(
+      repo,
+      issue,
+      prNumber,
+      commentBody(result, { runUrl, prNumber }),
+    )
+    console.log(
+      `Slow CI triage issue #${issue}: ${action} the comment for PR #${prNumber}`,
+    )
   } catch (error) {
-    console.log(`::warning title=Slow CI triage::could not update the issue: ${String(error.message).split(`\n`)[0]}`)
+    console.log(
+      `::warning title=Slow CI triage::could not update the issue: ${String(error.message).split(`\n`)[0]}`,
+    )
   }
 }
 
