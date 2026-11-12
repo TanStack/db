@@ -12,7 +12,12 @@ import {
 } from 'vitest'
 import { makePgClient } from '../../db-collection-e2e/support/global-setup'
 import { compileSQL } from '../src/sql-compiler'
-import { oracleReplayRequested, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  isFixedOracleCampaign,
+  isGeneratedOracleCampaign,
+  oracleReplayRequested,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   recordAssertionJudgment,
@@ -375,7 +380,7 @@ describe(`Electric predicate compiler semantics`, () => {
     reached.clear()
     executedCells = 0
     if (oracleReplayRequested()) return
-    if (!task.name.startsWith(`fixed seed `)) return
+    if (!isFixedOracleCampaign(task.name)) return
     // The authored SQL fixtures exceed the random grammar's numeric bounds.
     // Keep them on the same PostgreSQL/model path before the fixed campaign,
     // without broadening or reweighting the existing arbitrary.
@@ -389,12 +394,11 @@ describe(`Electric predicate compiler semantics`, () => {
       oracleReplayRequested()
     )
       return
-    if (task.name !== `random seed` && !task.name.startsWith(`fixed seed `))
-      return
+    if (!isGeneratedOracleCampaign(task.name)) return
     expect(executedCells).toBe(oracleRuns(50))
     // The original fixed seed owned this category census. The native API adds
     // a fresh campaign, whose inputs still receive the full SQL comparison.
-    if (task.name.startsWith(`fixed seed `))
+    if (isFixedOracleCampaign(task.name))
       expect([...reached].sort()).toEqual(
         expect.arrayContaining([...requiredReach]),
       )

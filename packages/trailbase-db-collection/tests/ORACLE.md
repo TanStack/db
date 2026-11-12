@@ -193,16 +193,21 @@ pnpm test:oracles --coverage.enabled=false
 TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 pnpm test:oracles --coverage.enabled=false --testTimeout=60000
 ```
 
-For a failing random campaign, use its reported seed and shrink path:
+For a failing random campaign, copy its reported unit, seed and shrink path.
+This example selects the generated unit:
 
 ```sh
-TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0:1 TANSTACK_DB_ORACLE_PROPERTY=trailbase.lifecycle node --import tsx ../db/tests/oracle-replay.ts tests/lifecycle-oracle.property.test.ts --coverage.enabled=false
+TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0 TANSTACK_DB_ORACLE_PROPERTY=trailbase.lifecycle TANSTACK_DB_ORACLE_UNIT='random seed: generated' node --import tsx ../db/tests/oracle-replay.ts tests/lifecycle-oracle.property.test.ts --coverage.enabled=false
 ```
 
 Use `TANSTACK_DB_ORACLE_PROPERTY=trailbase.page-event` for the page-event grammar.
-The manifest selects the native random campaign for the requested property.
+The manifest selects the native random campaign for the requested property;
+the unit selects its generated histories or one named construction.
 
-Replace the example seed/path with the failure's values. The guarded runner
+Replace the example unit/seed/path with the failure's values. Older recorded
+paths include a prefix of constructed histories and need the translation in the
+[coverage map](../../../docs/contributing/oracle-coverage.md#oracle-campaign-unit-migration-2026-11-12).
+The guarded runner
 requires a witness that the named property executed with this seed and path;
 wrong-property and zero-reach commands fail. Direct Vitest commands do not supply
 that guard. Shared configuration lives in `packages/db/tests/oracle-config.ts`;

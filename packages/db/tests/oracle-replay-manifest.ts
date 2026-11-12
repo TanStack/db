@@ -1512,6 +1512,7 @@ export type OracleReplayManifestEntry = {
   cwd?: string
   command?: string
   testNamePattern?: string
+  /** UNIT applies to generated oracleProperty sources; use its printed value. */
   environment: ReadonlyArray<string>
 }
 
@@ -2272,7 +2273,7 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
           : status === `reseeded-campaign`
             ? `pnpm exec vitest run ${file.split(`/`).slice(2).join(`/`)}`
             : status === `enumerated-campaign`
-              ? `env -u TANSTACK_DB_ORACLE_SEED -u TANSTACK_DB_ORACLE_PATH -u TANSTACK_DB_ORACLE_PROPERTY pnpm exec vitest run ${config === undefined ? `` : `--config ${config} `}-t '${testNamePattern!.replaceAll(`'`, `'\\''`)}' ${outsidePackages ? file.split(`/`).pop() : file.split(`/`).slice(2).join(`/`)}`
+              ? `env -u TANSTACK_DB_ORACLE_SEED -u TANSTACK_DB_ORACLE_PATH -u TANSTACK_DB_ORACLE_PROPERTY -u TANSTACK_DB_ORACLE_UNIT pnpm exec vitest run ${config === undefined ? `` : `--config ${config} `}-t '${testNamePattern!.replaceAll(`'`, `'\\''`)}' ${outsidePackages ? file.split(`/`).pop() : file.split(`/`).slice(2).join(`/`)}`
               : outsidePackages
                 ? `node --import tsx ${`../`.repeat(cwd!.split(`/`).length)}packages/db/tests/oracle-replay.ts ${outsideConfig === undefined ? `` : `--config ${outsideConfig} `}${file.split(`/`).pop()}`
                 : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${ownerReplayConfigs.has(file) ? `--config ${ownerReplayConfigs.get(file)} ` : ``}${file.split(`/`).slice(2).join(`/`)}`,
@@ -2289,6 +2290,7 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
                 `TANSTACK_DB_ORACLE_SEED`,
                 `TANSTACK_DB_ORACLE_PATH`,
                 `TANSTACK_DB_ORACLE_PROPERTY`,
+                `TANSTACK_DB_ORACLE_UNIT`,
               ],
   }
 })

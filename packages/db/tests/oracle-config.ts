@@ -12,6 +12,21 @@ import { convertedProperties } from './property-registry/index.js'
 
 export * from '@tanstack/oracles'
 
+// Aggregate reach belongs to complete generated campaigns. Constructed and
+// determinism units execute individual histories and cannot meet those minima.
+export function isFixedOracleCampaign(name: string): boolean {
+  return /^fixed seed -?\d+: generated$/.test(name)
+}
+
+export function isGeneratedOracleCampaign(name: string): boolean {
+  return name === `random seed: generated` || isFixedOracleCampaign(name)
+}
+
+// Vitest's currentTestName includes the enclosing suites.
+export function isOracleDeterminismUnit(name: string | undefined): boolean {
+  return /\bdeterminism(?:: .*)?$/.test(name ?? ``)
+}
+
 const staticOracleProperties = [
   `persistence.crossed-leadership-index`,
   `persisted-options.types.core-fixed`,
@@ -1058,8 +1073,13 @@ const retiredReplayVariables = [
   `TANSTACK_DB_LIKE_ORACLE_RUNS`,
 ] as const
 
-configureOracles({
-  envPrefix: `TANSTACK_DB_ORACLE`,
-  registry: registeredOracleProperties,
-  retiredVariables: retiredReplayVariables,
-})
+/** A legacy replay adapter calls this before any oracle reads its selection. */
+export function configureDbOracles(): void {
+  configureOracles({
+    envPrefix: `TANSTACK_DB_ORACLE`,
+    registry: registeredOracleProperties,
+    retiredVariables: retiredReplayVariables,
+  })
+}
+
+configureDbOracles()

@@ -1,6 +1,7 @@
 import fc from 'fast-check'
 import { afterEach, beforeEach, describe, expect, vi } from 'vitest'
 import {
+  isGeneratedOracleCampaign,
   oracleProperty,
   oracleReplayRequested,
 } from '../../db/tests/oracle-config.js'
@@ -1392,7 +1393,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     })
     afterEach(({ task }) => {
       if (
-        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        !isGeneratedOracleCampaign(task.name) ||
         task.result?.state === `fail` ||
         oracleReplayRequested()
       )
@@ -1499,7 +1500,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     })
     afterEach(({ task }) => {
       if (
-        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        !isGeneratedOracleCampaign(task.name) ||
         task.result?.state === `fail` ||
         oracleReplayRequested()
       )
@@ -1549,7 +1550,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     })
     afterEach(({ task }) => {
       if (
-        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        !isGeneratedOracleCampaign(task.name) ||
         task.result?.state === `fail` ||
         oracleReplayRequested()
       )

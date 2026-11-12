@@ -10,7 +10,11 @@ import {
   observeHistoryPromise,
   withHistoryCleanup,
 } from './optimistic-history-oracle.js'
-import { oracleProperty, oracleReplayRequested } from './oracle-config.js'
+import {
+  isGeneratedOracleCampaign,
+  oracleProperty,
+  oracleReplayRequested,
+} from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -369,7 +373,7 @@ describe(`Same-key transaction laws`, () => {
     })
     afterEach(({ task }) => {
       if (
-        task.name !== `determinism` &&
+        isGeneratedOracleCampaign(task.name) &&
         task.result?.state !== `fail` &&
         !oracleReplayRequested()
       )

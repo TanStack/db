@@ -9,7 +9,11 @@ import {
 import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
-import { oracleReplayRequested, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  isGeneratedOracleCampaign,
+  oracleReplayRequested,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 import {
   oracleProperty,
   violation as oracleViolation,
@@ -122,8 +126,11 @@ vi.mock(`@electric-sql/client`, async (importOriginal) => {
  * Dropped rows and reactivation controls prove the named comparisons are live.
  */
 
-// Replay only the selected generated law with TANSTACK_DB_ORACLE_SEED,
-// TANSTACK_DB_ORACLE_PATH, and TANSTACK_DB_ORACLE_PROPERTY. For example:
+// Replay a generated law with the complete printed Replay: coordinates:
+// TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, TANSTACK_DB_ORACLE_PROPERTY,
+// and TANSTACK_DB_ORACLE_UNIT. The original pre-unit example below retains
+// historical coordinates; its first path index selected a construction. Use
+// the migration note in docs/contributing/oracle-coverage.md before translating:
 // TANSTACK_DB_ORACLE_SEED=20260917 TANSTACK_DB_ORACLE_PATH=0 \
 // TANSTACK_DB_ORACLE_PROPERTY=electric.sdk-snapshot-delivery \
 // pnpm --dir packages/electric-db-collection exec vitest run tests/electric-sdk-delivery-oracle.property.test.ts
@@ -160,8 +167,7 @@ afterEach(({ task }) => {
   // The old census ran only after a successful campaign. Preserve an earlier
   // law/driver failure as primary, and stand aside during path replay.
   if (task.result?.errors?.length || oracleReplayRequested()) return
-  if (task.name !== `random seed` && !task.name.startsWith(`fixed seed `))
-    return
+  if (!isGeneratedOracleCampaign(task.name)) return
   const property = task.suite?.name
   const census:
     | { expected: ReadonlyArray<string>; observed: ReadonlySet<string> }

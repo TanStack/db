@@ -581,3 +581,27 @@ synced collisions beside rejected local collisions. ORC-014 uses both real
 receiving exports without transferring a SQLite/provider premise. ORC-015
 measures the new type and admission states. ORC-016 keeps all observations in
 shared judgments over generated inputs, without standalone regression answers.
+
+## Helper compatibility follow-up, 2026-11-12
+
+The commands above preserve the evidence at their recorded code revisions.
+The helper's optional `ownerRef` selects an older oracle against the working
+tree's production source; it does not restore that older production API.
+Reproducing an archived survival result requires its recorded subject revision
+as well as the named oracle revision. Accepted public-type changes can make an
+old owner's clean comparison fail before its mutation distinguishes anything.
+
+The current helper now loads an old owner's configuration, reach and replay
+witness companions from the same `ownerRef`, closing a removed-companion module
+error. The documented `4ea6b7663` and `39065e399` owners load and register again.
+A bounded clean run of each old owner against the current working tree fails
+its old exact `PublicShape<Result>` versus `PublicShape<Published | undefined>`
+comparison, as do the local-utils and query-status controls. Those current-tree
+results do not reproduce the archived survival claim and are not mutant kills.
+
+Current generated path replays also require the unit printed in `Replay:`.
+Historical paths retain their original meaning above; use the
+[campaign-unit migration](../oracle-coverage.md#oracle-campaign-unit-migration-2026-11-12)
+before translating them to the new runner. Current native helper controls and
+the bounded compatibility checks are recorded in the
+[dependency follow-up](2026-11-12-constructed-startup-calibrations.md#dependency-compatibility-follow-up).

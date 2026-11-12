@@ -235,7 +235,10 @@ import {
 } from '../src/errors.js'
 import { RequestErrors } from '../src/collection/lifecycle.js'
 import { createDeferred } from '../src/deferred.js'
-import { oracleReplayRequested } from './oracle-config.js'
+import {
+  isGeneratedOracleCampaign,
+  oracleReplayRequested,
+} from './oracle-config.js'
 import { oracleProperty } from './oracle-property.js'
 import {
   forwardAssertionJudgment,
@@ -3469,8 +3472,7 @@ describe(`source failure and health oracle`, () => {
   let historiesRan = false
   let structuralCampaign = false
   beforeEach(({ task }) => {
-    structuralCampaign =
-      task.name === `random seed` || task.name.startsWith(`fixed seed `)
+    structuralCampaign = isGeneratedOracleCampaign(task.name)
   })
   const historyArbitrary = fc.tuple(
     fc
@@ -5550,7 +5552,7 @@ describe(`on-demand demand grammar`, () => {
   let fixed = new Set<(typeof demandReachStates)[number]>()
   let campaign = false
   beforeEach(async ({ task }) => {
-    campaign = task.name === `random seed`
+    campaign = task.name === `random seed: generated`
     counts = new Map(demandReachStates.map((state) => [state, 0]))
     fixed = new Set()
     if (!campaign || oracleReplayRequested()) return
@@ -7681,7 +7683,7 @@ describe(`lazy join demand grammar`, () => {
     )
   }
   beforeEach(async ({ task }) => {
-    campaign = task.name === `random seed`
+    campaign = task.name === `random seed: generated`
     counts = new Map(lazyReachStates.map((state) => [state, 0]))
     fixed = new Set()
     if (!campaign || oracleReplayRequested()) return

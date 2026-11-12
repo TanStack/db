@@ -14,6 +14,7 @@ import {
   reduceLifecycle,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
 import {
+  isGeneratedOracleCampaign,
   oracleFixedSeed,
   oracleReplayRequested,
   oracleRoute,
@@ -2924,7 +2925,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   beforeEach(({ task }) => {
     countingRestartCampaign =
       task.suite?.name === restartProperty &&
-      (task.name === `random seed` || task.name.startsWith(`fixed seed `))
+      isGeneratedOracleCampaign(task.name)
     if (countingRestartCampaign)
       for (const state of restartStates) restartCounts.set(state, 0)
   })

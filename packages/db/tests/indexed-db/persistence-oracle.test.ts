@@ -24,7 +24,6 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
 import { createTransaction } from '../../src'
 import { oracleProperty } from '../oracle-config'
-import type { Verdict } from '../oracle-config'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -39,6 +38,7 @@ import {
   userRow,
   withHarness,
 } from './harness'
+import type { Verdict } from '../oracle-config'
 import type { Row } from './harness'
 
 const keys = [0, '0', 1, '1'] as const

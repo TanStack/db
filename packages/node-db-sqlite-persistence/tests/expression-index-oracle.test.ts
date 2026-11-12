@@ -49,7 +49,8 @@
  *
  * Reach, challenge, replay, and cleanup: the expression-index matrix and both
  * generated BigInt range checks run in fixed-seed and seedless-random campaigns.
- * A path replay sets TANSTACK_DB_ORACLE_PATH, TANSTACK_DB_ORACLE_SEED, and
+ * Copy the complete printed Replay: coordinates for a generated path, including
+ * TANSTACK_DB_ORACLE_UNIT. A path replay sets TANSTACK_DB_ORACLE_PATH, TANSTACK_DB_ORACLE_SEED, and
  * TANSTACK_DB_ORACLE_PROPERTY to one of sqlite-persistence.expression-index,
  * sqlite-persistence.bigint-roundtrip, or sqlite-persistence.bigint-rejection.
  * That property's random campaign replays only its recorded history; the fixed

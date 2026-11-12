@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DuplicateKeySyncError } from '../src/errors.js'
 import {
+  isGeneratedOracleCampaign,
   oracleProperty,
   oracleReplayRequested,
   oracleRoute,
@@ -571,7 +572,7 @@ describe(`retained state campaign reach`, () => {
   })
   afterEach(({ task }) => {
     if (
-      task.name !== `determinism` &&
+      isGeneratedOracleCampaign(task.name) &&
       task.result?.state !== `fail` &&
       !oracleReplayRequested()
     )

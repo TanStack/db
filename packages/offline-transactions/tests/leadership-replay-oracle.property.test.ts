@@ -93,8 +93,11 @@ afterEach(() => {
 
 // Each campaign below is its own replay property, and a path belongs to one of
 // them. To replay a shrink path, set TANSTACK_DB_ORACLE_SEED,
-// TANSTACK_DB_ORACLE_PATH, and TANSTACK_DB_ORACLE_PROPERTY to that campaign's
-// `offline.leadership.*` property. For example, from the repository root:
+// TANSTACK_DB_ORACLE_PATH, TANSTACK_DB_ORACLE_PROPERTY, and TANSTACK_DB_ORACLE_UNIT
+// from its complete printed Replay: coordinates (`offline.leadership.*`). The
+// following preserves original pre-unit coordinates. Translate its path for
+// the selected construction/generated unit before using the current runner
+// (docs/contributing/oracle-coverage.md). Original repository-root example:
 // TANSTACK_DB_ORACLE_SEED=20260923 TANSTACK_DB_ORACLE_PATH=0:0 \
 // TANSTACK_DB_ORACLE_PROPERTY=offline.leadership.stale-read \
 // pnpm --dir packages/offline-transactions exec vitest run \

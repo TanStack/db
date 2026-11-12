@@ -5,12 +5,12 @@ import { Func, PropRef, Value } from '../src/query/ir.js'
 import { where } from './collection-subscription-reentrancy-fixture.js'
 import { reentrantSnapshotHistories } from './collection-subscription-lifecycle-grammar-oracle.js'
 import { oracleProperty } from './oracle-config.js'
-import type { Verdict } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from './oracle-assertion-adapter.js'
+import type { Verdict } from './oracle-config.js'
 import type { LoadSubsetOptions } from '../src/types.js'
 
 /**

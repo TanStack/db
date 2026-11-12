@@ -1835,7 +1835,10 @@ describe(`resumption notification error and surviving demand`, () => {
     enteredThisHistory = new Set()
   })
   afterEach(({ task }) => {
-    if (task.name === `fixed seed 2229` || task.name === `random seed`) {
+    if (
+      task.name === `fixed seed 2229: generated` ||
+      task.name === `random seed: generated`
+    ) {
       if (!oracleReplayRequested()) {
         const missing = states.filter(
           (state) => notificationCounts.get(state)! < 1,

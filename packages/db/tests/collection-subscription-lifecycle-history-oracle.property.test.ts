@@ -36,6 +36,7 @@ import {
   rejectAt,
 } from './oracle-assertion-adapter.js'
 import {
+  isFixedOracleCampaign,
   oraclePropertyOptions,
   oracleReplayRequested,
   readOracleRunConfig,
@@ -2086,9 +2087,9 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   let countingCampaign = true
   beforeEach(({ task }) => {
     countingCampaign =
-      (task.name === `random seed` &&
+      (task.name === `random seed: generated` &&
         task.suite?.name !== `subscription-lifecycle.constructed-history`) ||
-      task.name.startsWith(`fixed seed `) ||
+      isFixedOracleCampaign(task.name) ||
       task.suite?.name === `subscription-lifecycle.replay-failed` ||
       !task.suite?.name.startsWith(`subscription-lifecycle.`)
   })

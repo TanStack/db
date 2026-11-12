@@ -16,7 +16,8 @@ import type { FiniteArrayValue } from './pg-serializer-finite-decoder'
 
 type ArrayControl = { name: string; input: Array<FiniteArrayValue | undefined> }
 
-// Replay one named law with TANSTACK_DB_ORACLE_SEED=<reported seed>,
+// This property has enumerated histories, so leave TANSTACK_DB_ORACLE_UNIT
+// unset. Replay one named law with TANSTACK_DB_ORACLE_SEED=<reported seed>,
 // TANSTACK_DB_ORACLE_PATH=<reported shrink path>, and
 // TANSTACK_DB_ORACLE_PROPERTY=<property name>. Example:
 // TANSTACK_DB_ORACLE_SEED=1 TANSTACK_DB_ORACLE_PATH=0 \

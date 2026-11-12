@@ -544,7 +544,8 @@ async function openWarmTabs(host: Host, count: number, syncMode: SyncMode) {
 }
 
 // Generated-history campaigns (ORC-007): a fixed seed and a random seed
-// with the same property and budget. TANSTACK_DB_ORACLE_SEED with
+// with the same property and budget. Copy the complete printed Replay:
+// coordinates, including TANSTACK_DB_ORACLE_UNIT. TANSTACK_DB_ORACLE_SEED with
 // TANSTACK_DB_ORACLE_PATH and TANSTACK_DB_ORACLE_PROPERTY=
 // browser.multi-tab-reserved-history replays one recorded counterexample;
 // TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the budget.

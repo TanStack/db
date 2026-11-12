@@ -3,12 +3,12 @@ import { createCollection, createEffect } from '../src/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { captureMicrotaskErrors, flushPromises } from './utils.js'
 import { oracleProperty } from './oracle-config.js'
-import type { Verdict } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from './oracle-assertion-adapter.js'
+import type { Verdict } from './oracle-config.js'
 
 /**
  * # What does concurrent effect disposal mean?

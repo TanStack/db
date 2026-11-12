@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, expect } from 'vitest'
 import fc from 'fast-check'
 import { SortedMap } from '../src/SortedMap'
-import { oracleProperty, oracleReplayRequested } from './oracle-config'
+import {
+  isGeneratedOracleCampaign,
+  oracleProperty,
+  oracleReplayRequested,
+} from './oracle-config'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -424,11 +428,7 @@ beforeEach(({ task }) => {
   const order = orders.find(
     (candidate) => properties[candidate] === task.suite?.name,
   )
-  if (
-    order === undefined ||
-    !(task.name.startsWith(`fixed seed `) || task.name === `random seed`)
-  )
-    return
+  if (order === undefined || !isGeneratedOracleCampaign(task.name)) return
   const counts = new Map<ReachState, number>(
     statesFor(order).map((state) => [state, 0]),
   )

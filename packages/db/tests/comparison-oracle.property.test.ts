@@ -86,7 +86,10 @@ const nullsLastOpts: CompareOptions = {
 // These properties judge immediate comparator and normalization results; there
 // is no mutable history or cleanup. Each function return is its observation cut.
 // The fixed campaign preserves one sample set, while the random campaign explores
-// new values. A path replay runs one property directly, for example
+// new values. Copy complete printed Replay: coordinates, including
+// TANSTACK_DB_ORACLE_UNIT, for a current generated replay. The original pre-unit
+// example below has no construction prefix; its path needs no shift when adding
+// UNIT='random seed: generated' to replay that source revision:
 // TANSTACK_DB_ORACLE_PROPERTY=comparison.1 TANSTACK_DB_ORACLE_SEED=123
 // TANSTACK_DB_ORACLE_PATH='0:0' pnpm --filter @tanstack/db exec vitest run
 // --configLoader runner tests/comparison-oracle.property.test.ts.

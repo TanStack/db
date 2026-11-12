@@ -2,7 +2,6 @@ import { describe, expect, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { BTree } from '../src/utils/btree.js'
 import { oracleProperty } from './oracle-config.js'
-import type { Verdict } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
@@ -19,6 +18,7 @@ import {
   expectValue,
   runMapHistory,
 } from './btree-map-oracle.js'
+import type { Verdict } from './oracle-config.js'
 import type { Action, Payload, ReferenceModel } from './btree-map-oracle.js'
 
 /**

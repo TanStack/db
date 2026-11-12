@@ -638,7 +638,8 @@ const advanceStep = (elapsedMs: 1 | 20 | 60 | 120): Step => ({
 })
 const cleanupStep = (side: Side): Step => ({ kind: `cleanup`, side })
 
-// Replay one history with TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH,
+// Replay one history with the complete printed Replay: coordinates, including
+// TANSTACK_DB_ORACLE_UNIT, TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH,
 // and TANSTACK_DB_ORACLE_PROPERTY=collection-lifecycle.gc-persisting-transaction.
 // Each constructed history names the states it enters, with the steps that
 // enter it, and every declared state has at least one. The constructed
