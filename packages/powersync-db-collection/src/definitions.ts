@@ -27,6 +27,30 @@ export type InferPowerSyncOutputType<
   : InferSchemaOutput<TSchema>
 
 /**
+ * The collection key: the type of the output row's `id`. It is a string
+ * unless a schema converts `id`, for example to a number.
+ */
+export type InferPowerSyncKey<TOutput> = TOutput extends { id: infer TId }
+  ? TId extends number
+    ? number
+    : string
+  : string
+
+/**
+ * SQLite stores every PowerSync `id` as text. Set `numericIds: true` when the
+ * schema converts `id` to a number, as for a backend with integer primary
+ * keys. Predicates on `id` then compare numbers, and the collection key is
+ * the number. The option is required exactly when the output `id` is a number.
+ * An `id` that may be a string or a number fits neither mode and is rejected.
+ */
+export type NumericIdsConfig<TOutput> =
+  InferPowerSyncKey<TOutput> extends number
+    ? { numericIds: true }
+    : InferPowerSyncKey<TOutput> extends string
+      ? { numericIds?: false }
+      : { numericIds: never }
+
+/**
  * A mapping type for custom serialization of object properties to SQLite-compatible values.
  *
  * This type allows you to override, for keys in the input object (`TOutput`), a function that transforms
@@ -208,7 +232,7 @@ export type BasePowerSyncCollectionConfig<
 > = Omit<
   BaseCollectionConfig<
     InferPowerSyncOutputType<TTable, TSchema>,
-    string,
+    InferPowerSyncKey<InferPowerSyncOutputType<TTable, TSchema>>,
     TSchema
   >,
   `onInsert` | `onUpdate` | `onDelete` | `getKey` | `syncMode`
@@ -230,7 +254,8 @@ export type BasePowerSyncCollectionConfig<
    *   streaming of initial results, at the cost of more query calls.
    */
   syncBatchSize?: number
-} & (EagerSyncHooks | OnDemandSyncHooks)
+} & NumericIdsConfig<InferPowerSyncOutputType<TTable, TSchema>> &
+  (EagerSyncHooks | OnDemandSyncHooks)
 
 /**
  * Configuration interface for PowerSync collection options.
@@ -306,7 +331,7 @@ export type EnhancedPowerSyncCollectionConfig<
   TSchema extends StandardSchemaV1 = never,
 > = CollectionConfig<
   OutputType,
-  string,
+  InferPowerSyncKey<OutputType>,
   TSchema,
   PowerSyncCollectionUtils<TTable>
 > & {

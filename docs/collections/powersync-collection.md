@@ -399,6 +399,47 @@ const task = tasksCollection.get("task-1")
 task.due_date.getTime() // OK - TypeScript knows this is a Date
 ```
 
+### Integer Primary Keys
+
+SQLite stores every PowerSync `id` as text. If your backend uses integer primary keys, convert `id` to a number in `deserializationSchema` and set `numericIds: true`. The collection key is then a number, so integer foreign keys match it, for example in `eq(part.id, line.partId)`. Predicates on `id`, such as `gt(product.id, 2)`, compare numbers in on-demand loads, change tracking, and eviction.
+
+```typescript
+import { Schema, Table, column } from "@powersync/web"
+import { createCollection } from "@tanstack/react-db"
+import { powerSyncCollectionOptions } from "@tanstack/powersync-db-collection"
+import { z } from "zod"
+
+const APP_SCHEMA = new Schema({
+  products: new Table({
+    name: column.text,
+  }),
+})
+
+const productSchema = z.object({
+  id: z.number(),
+  name: z.string().nullable(),
+})
+
+const products = createCollection(
+  powerSyncCollectionOptions({
+    database: db,
+    table: APP_SCHEMA.props.products,
+    schema: productSchema,
+    deserializationSchema: productSchema.extend({
+      id: z.coerce.number<string>(), // SQLite TEXT '5' to the key 5
+    }),
+    numericIds: true,
+    onDeserializationError: (error) => {
+      // Present fatal error
+    },
+  })
+)
+
+products.get(5)
+```
+
+TypeScript requires `numericIds: true` when the schema outputs a number `id`, and rejects it otherwise. An `id` that may be either a string or a number is not supported. Equality and `in` predicates on a numeric `id` use SQLite's `id` index; range predicates such as `gt` scan the table. Numeric IDs must be safe JavaScript integers, and converting the number back to text must reproduce the stored ID exactly. Keep IDs as strings if they can exceed the safe integer range or contain leading zeros. Updates and deletes use the text form of the key to find the SQLite row.
+
 ### Optimistic Updates
 
 Updates to the collection are applied optimistically to the local state first, then synchronized with PowerSync and the backend. If an error occurs during sync, the changes are automatically rolled back.
@@ -511,6 +552,8 @@ class Connector implements PowerSyncBackendConnector {
 The `powerSyncCollectionOptions` function accepts the following options:
 
 ```ts
+import type { StandardSchemaV1 } from "@standard-schema/spec"
+
 interface PowerSyncCollectionConfig<TTable extends Table, TSchema> {
   // Required options
   database: PowerSyncDatabase
@@ -525,6 +568,9 @@ interface PowerSyncCollectionConfig<TTable extends Table, TSchema> {
   serializer?: {
     [Key in keyof TOutput]?: (value: TOutput[Key]) => SQLiteCompatibleType
   }
+
+  // Integer primary keys: required when the schema outputs a number id
+  numericIds?: boolean
 
   // Performance tuning
   syncBatchSize?: number // Control batch size for initial sync, defaults to 1000
