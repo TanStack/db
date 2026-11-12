@@ -19,12 +19,12 @@ import { expect } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { oracleProperty } from './oracle-config.js'
-import type { Verdict } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from './oracle-assertion-adapter.js'
+import type { Verdict } from './oracle-config.js'
 import type { SyncConfig } from '../src/types.js'
 
 type Row = { id: number; value: string }
