@@ -4306,6 +4306,17 @@ keys and the fixed seed 271828 as removed, although both campaigns still run in
 the oracle file. Owner: `scripts.run-budget`. Needed witness: a campaign whose
 budget a helper computes and passes in as parameters.
 
+A budget that a loop variable carries is not tracked for the same reason.
+`sync-metadata-session-persisted-oracle.test.ts` registers eleven persisted
+production paths (`persisted-flat` through `persisted-peers-on-demand`) in one
+`oracleProperty` loop over an array of `{ property, seed, runs }` entries.
+The call reads `id`, `fixedSeeds`, and `runs` from the loop's variables, so a
+lowered `runs` in an entry is not reported (checked on 2026-11-11 by lowering
+the `persisted-flat` entry from 50 to 49). The file's literal campaigns, such
+as `persisted-queued-metadata-repair`, are tracked. Owner:
+`scripts.run-budget`. Needed witness: a campaign whose id, seed, and count come
+from an array entry that a loop destructures.
+
 `scripts/strip-oracle-probes-oracle.property.test.js` owns the build-time removal of the
 oracle state probes from published builds (`scripts.strip-oracle-probes`, maintainer decision of
 2026-11-09). Its grammar draws one-function programs with the guard in the placements that the
@@ -4369,27 +4380,72 @@ documentation. Constructions in each campaign draw a missing install (no
 delegate through the launch checkout's script. They also draw a session
 checkout whose installed plugin lacks its entry file, lacks its subpath rule
 module, imports a package that is not installed, or has a cut-off entry file.
-It does not draw a broken ESLint or parser, a missing dependency deeper in the
-tree, or a stop hook input with `stop_hook_active`.
+It does not draw a broken ESLint or parser, or a missing dependency deeper in
+the tree. A stop hook input with `stop_hook_active` is drawn only in the stops
+of an unknown option and a missing `main` (`unknown-option-continued-stop` and
+`no-main-continued-stop`, constructed in each campaign). Such a stop already
+continued the turn once, so it must be silent, with `{}` for Codex. The script
+reads a hook's input before it judges the options, so a bad option keeps that
+guard. The missing-install
+histories also run `pnpm lint:run-budgets`
+(`scripts/check-oracle-run-counts.mjs`), which loads the parser with a dynamic
+import and writes the same skip line with exit status 1. A broken plugin
+leaves that report clean.
 
-Open limit of `scripts.lint-scope` (reachable, older than the missing-install
-rule; owner: `scripts/lint-scope-oracle.property.test.js`; needs a maintainer
-decision). A worktree under `.worktrees/` with no `node_modules` of its own,
-inside an installed launch checkout, resolves ESLint, the parser, and the
-plugin by walking up to the launch checkout's `node_modules`. So it lints with
-the launch checkout's plugin, not the one its own lockfile pins, which breaks
-this oracle's law that each report uses the session checkout's installed rule.
-Trace (reproduced 2026-11-11): commit a launch checkout with the script and an
-undeclared oracle file, install it with a plugin whose `no-unit-test` message
-carries a mark, add `.worktrees/wt` with `git worktree add` and no install, edit
-the oracle file there, and run `node scripts/agent-lint-feedback.mjs` in the
-worktree. It exits 1 with a report that carries the launch checkout's mark. The
-grammar does not draw this state: every installed worktree history copies the
-plugin into the worktree, and the missing-install histories leave the launch
-checkout uninstalled too. Needed witness: a worktree-install dimension (own or
-none) under an installed launch checkout, with the decided law. The two
-candidate laws are to skip as not installed, or to lint with the launch
-checkout's rule and say so.
+The same owner covers the remaining failure paths of review finding F26, under
+the same 2026-11-10 decision. An unknown `--format`, `--event`, or other
+option, a hook input that is not a JSON object, a checkout with no `main` branch for the
+merge-base, and an error that the rule throws while it lints each end with one
+`oracle lint failed: <message>` line. A hook format exits 0 and hands the line
+to the agent on its harness's channel; with an unknown event, that is the edit
+channel. The script reads the format and event leniently before it judges the
+other options, so an unknown option beside a hook format also answers on the
+agent channel. Every other run writes the line to stderr and exits nonzero, and so
+does `pnpm lint:run-budgets` without `main`. A fault dimension draws each
+failure, and a construction in each campaign enters it (`unknown-format-fault`,
+`unknown-event-fault`, `unknown-option-fault`, `invalid-input-fault`,
+`no-main-fault`, and `lint-error-fault`). The model predicts the line in each
+form that the failure reaches, and a clean run for a form that lints no file
+when the rule throws. A failure is drawn only with a full install. A worktree
+that lints with an outer plugin also draws a missing `main` and a lint error,
+which happen after the plugin loads. There the line that names the plugin
+comes before the failure line, so a lint-time throw says which plugin threw
+(`outer-plugin-lint-error`, constructed in each campaign). Without
+`main`, only the forms that always need the merge-base run: the changed scope,
+the four stop hooks, and the run-budget report. An edit hook or a named scope
+that names the lockfile also reads the merge-base; that is not drawn. The
+values are three unknown formats, three unknown events, three unknown options
+(`--bogus`, `--all=yes`, and `-x`), two texts that are not JSON, and three JSON values that are not objects. The lint error is one that
+the rule throws on every file. A git failure other than a missing `main`, and
+an error in the delegated copy of the script, are not drawn.
+
+The outer-plugin rule closes a former open limit of `scripts.lint-scope`
+(maintainer decision, 2026-11-11: "using outer checkout's plugin seems fine").
+A worktree under `.worktrees/` with no `node_modules` of its own, inside an
+installed launch checkout, resolves ESLint, the parser, and the plugin by
+walking up to the launch checkout's `node_modules`. It lints with the launch
+checkout's plugin, not the one its own lockfile pins, and every form says so
+in one line: `oracle lint used the plugin installed at <location>, outside
+<checkout>`. A command-line run writes the line to stderr and keeps its exit
+status. A hook puts the line before its report. With no report, an edit hook
+hands it to the agent and exits 0, as a skip does. The line never blocks a
+stop (coordinator decision, 2026-11-11): the lint ran, so only lint reports
+and a line that says the lint did not run may block one. With no report, the
+Claude Code, Codex, and Gemini CLI stop hooks show the line as
+`systemMessage`, which their hook documentation describes as a message to
+the user that does not block. Copilot's `agentStop` documents only
+`decision` and `reason`, so its stop is silent. A worktree-install dimension
+(own or none) draws this state under an installed launch checkout, and a
+construction in each campaign enters it (`worktree-outer-plugin`). Another
+construction gives such a worktree a stop and an edit with no report
+(`outer-plugin-quiet-stop` and `outer-plugin-quiet-edit`). The model predicts
+the launch checkout's unmarked rule for such a worktree, even when its branch
+changed the plugin, and the line in every form. In each harness, it predicts
+whether the stop blocks and what it shows, and the whole edit hook output
+when the edit has no report: the agent channel, never `systemMessage`, which
+reaches only the user. A checkout whose own plugin loads must print no such line. It
+does not draw a launch checkout whose plugin is linked from outside every
+checkout.
 
 It does not draw `.js` support modules or drivers,
 although the rule now resolves a `.js` test module when no TypeScript source
@@ -4432,10 +4488,12 @@ helpers and their self-tests are deleted (maintainer decision, 2026-11-10).
 The framework's own self-oracle owns the declared-reach, replay and
 shrink-fidelity laws for every `oracleProperty`.
 
-The `legacyCampaigns` list in `scripts/oracle-lint-settings.mjs` is empty: no
-file keeps a raw or legacy campaign. `scripts/check-legacy-oracle-campaigns.mjs`
-still rejects any addition relative to the merge-base, so the empty list cannot
-regrow; the setting itself leaves with the framework's later removal of it.
+No file keeps a raw or legacy campaign. The framework removed the
+`legacyCampaigns` setting (TanStack/oracles #23), so `oracle/oracle-property-only`
+exempts no file and reports a raw campaign or legacy import wherever it
+appears. `scripts/oracle-lint-settings.mjs` no longer sets it, and the
+merge-base gate that kept the empty list from regrowing is deleted (see
+"Legacy oracle campaign migration" below).
 
 The last callers converted as follows. A per-history reach on an enumerated
 source (the documented-mutations receivers, the Query reload-housekeeping
@@ -4443,10 +4501,13 @@ kinds in `packages/query-db-collection/tests/reload-housekeeping-oracle.test.ts`
 (`query-db.reload-housekeeping`), and the real Electric GC receiver
 `collection-lifecycle.gc-retention-boundaries.electric-postgres`) is a check law, `declared reach`,
 because an enumerated source runs every history. The one aggregate reach over
-an enumeration, the four model-derived states of the failing-Query histories,
-is a grammar calibration in `failing-queries-oracle.test.ts` that runs the
-model's reach classifier over the oracle's own enumeration without production,
-until `oracleProperty` declares states on enumerated sources. The SQLite
+an enumeration, the four model-derived states of the failing-Query histories
+in `failing-queries-oracle.test.ts`, is declared on the enumerated source,
+`histories: { enumerated, states }` (TanStack/oracles #19). The property's
+`reached` reads each history's states from the model's reach classifier, and
+its `reach` test fails when no enumerated history enters a declared state.
+It replaced a grammar calibration that ran the same classifier over the same
+enumeration without production. The SQLite
 sync-metadata session campaigns declare their states with constructed
 histories; the persisted nesting-and-seeds campaigns' "at least five random
 histories per state" became "at least one constructed history per state, plus
@@ -5215,8 +5276,8 @@ reload after a named notice keeps a seed's metadata (decision 18).
 | Owner | Production paths | Observations and checkpoint |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [sync metadata session oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-session-oracle.ts) (`flat`, `nested`, `seeds`, `nested-seeds`, `seeds-full`, `nested-conflicts` grammars) | `DbClient` Collection, core hold, `DbClient.hydrate` seeds | `metadata.row.get`, `metadata.collection.get`, `list()`, `list(prefix)`, `collection.base`, each commit receipt's state, thrown errors; after every action and after settlement |
-| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted-driver.ts) and its [campaigns](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`, `persisted-reads`, `persisted-reads-seeds`, `persisted-peers`, `persisted-peers-full`, `persisted-peers-on-demand`) | `persistedCollectionOptions` over an in-memory adapter, store hold, core hold, and a storage read held in flight; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup; a peer's notices, eager, under full row updates, and on demand | the same source reads after every action; `collection.base` and receipts after settlement; in the peer production paths, stored rows after settlement and stored row metadata at every completed durable action cut and after settlement |
-| [native SQLite/coordinator receiver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite-driver.ts) and its [campaigns](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite.test.ts) | two real Collections and coordinators, node:sqlite, BroadcastChannel and Web Locks; partial/full/on-demand grammar | shared model and source reads after correlated commit/notice/recovery cuts; rows, metadata and applied receipts after settlement; direct durable metadata after each correlated action and durable rows after settlement |
+| [persisted driver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted-driver.ts) and its [campaigns](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-persisted-oracle.test.ts) (`persisted-flat`, `persisted-nested`, `persisted-seeds`, `persisted-cached`, `persisted-conflicts`, `persisted-nested-seeds`, `persisted-reads`, `persisted-reads-seeds`, `persisted-peers`, `persisted-peers-full`, `persisted-peers-on-demand`) | `persistedCollectionOptions` over an in-memory adapter, store hold, core hold, and a storage read held in flight; seeds through a `DbClient`, alone and crossed with nesting and a row cached in storage at startup; a peer's notices, eager, under full row updates, and on demand | the same source reads after every action; `collection.base` and receipts after settlement; in the peer production paths, stored rows after settlement and stored row metadata at every completed durable action cut and after settlement |
+| [native SQLite/coordinator receiver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite-driver.ts) and its [campaigns](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sync-metadata-session-sqlite-oracle.test.ts) | two real Collections and coordinators, node:sqlite, BroadcastChannel and Web Locks; partial/full/on-demand grammar | shared model and source reads after correlated commit/notice/recovery cuts; rows, metadata and applied receipts after settlement; direct durable metadata after each correlated action and durable rows after settlement |
 | [recovery schedules](https://github.com/TanStack/db/blob/main/packages/db/tests/sync-metadata-recovery-oracle.ts) using the same session model and native receiver | response delivery, storage reading and captured-row application held separately; bare/non-bare seeds, a second tab's source write, or cleanup during one recovery on demand | source metadata before application, after the interruption and after completion; stale source reads at cleanup start and after late work; direct durable metadata after completion |
 | paired properties and boundary witnesses in the core driver file | production against itself: holds removed, row 2's actions removed, or seeds performed first; stale run; write without a transaction; cleanup with a held seed | source reads (and row 1's view) at each shared checkpoint, or every observation after settlement for seed order; thrown errors; unhandled rejections |
 | [row metadata composition oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-row-metadata-composition-oracle.test.ts) held-window and nested grammar | Collection, core hold, a transaction begun inside an open one, `DbClient.hydrate` | implicit row-metadata rules during a hold, and for an outer transaction whose inserts are reclassified after an inner write applies first, with and without a hold |
@@ -5276,8 +5337,23 @@ original seed/re-insert/reload grammar, fixed/random 40 budgets and its
 completed fixed-branch guards remain; the new constructive batch supplies
 guaranteed bare-key-1 implicit histories independently of seed. Both hosts share
 the 40-run sibling and 8-run durability campaign mechanics in
-`sync-metadata-session-campaign.ts`; production setup, recovery observations and
+`sync-metadata-session-campaign-oracle.ts`; production setup, recovery observations and
 direct replay selection remain in their receiving files.
+
+The campaign module and the files that host these campaigns carry `oracle` in
+their names, so `pnpm lint:run-budgets` tracks their budgets, except the
+loop-carried entries recorded under `scripts.run-budget`: the persisted
+driver's `sync-metadata-session-persisted-oracle.test.ts`, the native
+receiver's `sync-metadata-session-sqlite-oracle.test.ts`,
+`sync-metadata-recovery-oracle.test.ts`, and
+`sync-metadata-missing-row-oracle.test.ts` (review finding F28). The
+persisted flat property was two raw fast-check campaigns of 50 histories and
+a sample test of its fixed-seed reach. It is now an `oracleProperty` with the
+same seed (2220011), budget, model, driver, and comparison. Its four regimes
+(`read with two held transactions`, `open transaction over a held
+transaction`, `store hold`, and `core hold`) are required by constructed
+histories, whose prefixes are in the session oracle's `regimeConstructions`
+(maintainer decision, 2026-11-11, to remove every legacy campaign form).
 
 The native on-demand path can receive a successful recovery response that
 crosses an earlier cache version without transaction replay details. The shared
@@ -8489,6 +8565,30 @@ one no-stale-step flag while the production probe saw no obsolete step. That
 run's random seed was not recorded, and 16 seeds did not reproduce it; it may
 be a false flag of the law's over-approximating premise.
 
+Review follow-up: two false flags on unchanged production, found by the
+review at the default random budget (2 of 40 seeds failed with no mutant),
+are repaired in the oracle only.
+
+- The no-stale-step law counted any full-source read that a settlement
+  started as proof of an obsolete step. A genuine replacement start whose
+  settlement falls back to a full-source read (a head insert, or an
+  unexpressible boundary rank) was flagged. Witness: request-authority,
+  seed 4, path `17698:0:0:0:10:16:17:17:17`. The law now counts a full-source
+  read only when every installed rank is finite.
+- The fake's drain settled a pending replay while a request issued inside
+  that replay attempt was still in flight, and the held law then flagged the
+  retirement that followed. ARCHITECTURE.md (Replay participants) publishes a
+  replay only after every acquisition of its attempt settles. Witness: seed
+  119, path `1430:0:1:1:5:4:10:12:14:15:15`. The drain now settles those
+  requests first.
+
+After both repairs, 40 random seeds (300 to 339) pass the whole file with no
+mutant. With the review's production mutants at seed 7, `nofix` fails 8
+tests, `restart` 6, `droprefill` 6, `retireown` 29, and `smaller` 1. One
+premise risk remains undrawn: a fresh start whose prefix returns empty would
+issue a refill prefix from its own settlement and be flagged. The fake never
+returns an empty start prefix there.
+
 Awaiting maintainer decision. Owner: this oracle.
 
 - `m3`: a blocked pass drops a staged continuation. The refill is later
@@ -8563,53 +8663,26 @@ value/key contracts and their stated limits.
 
 The commit-pinned `@tanstack/oracles` framework supplies `oracleProperty` as
 its only campaign API. DB retained the two removed helpers and their self-tests
-locally while the explicit `legacyCampaigns` baseline shrank. The baseline
+locally while an explicit `legacyCampaigns` baseline shrank. The baseline
 contained 199 files at adoption, including three restored compatibility test
-files. It is now empty, and the vendored helpers and their self-tests are
-deleted (2026-11-10). `node scripts/oracle-campaign-inventory.mjs` surveys the current files
-with the lint plugin's own legacy-use classifier; its shape and fixed-history
-flags are planning hints, not evidence of a completed conversion.
-
+files. Every file converted, and the vendored helpers and their self-tests are
+deleted (2026-11-10). The framework then removed the setting (TanStack/oracles
+#23, maintainer decision 2026-11-10): `oracle/oracle-property-only` reports any
+value of `settings.oracles.legacyCampaigns`, `[]` included, in every oracle
+file, and exempts no file. TanStack DB no longer sets it. The merge-base gate
+`scripts/check-legacy-oracle-campaigns.mjs` and its oracle,
 `scripts/legacy-campaign-baseline-oracle.property.test.js`
-(`scripts.legacy-campaign-baseline`) owns the migration gate in
-`scripts/check-legacy-oracle-campaigns.mjs`. AGENTS.md's migration ratchet is its
-authority: an adopted baseline may only lose exact file identities. The model
-uses membership in a four-file universe. The driver commits base settings in a
-temporary Git repository, writes head settings, runs the actual CLI, and
-compares the full additions report and exit status after process completion.
-The grammar also varies the setting's presence and the gate's presence at base.
-Fixture histories cross inherited pre-commit/prepare-commit-msg hooks with
-plain or strict CRLF global configuration. A constructed no-hook history with
-strict CRLF settings requires fixture setup and the completed gate report to
-remain independent of developer global configuration.
-Only absence of both permits initial adoption; after the setting is removed,
-the gate's presence preserves an empty allowed set. Constructed histories cover
-an addition, an addition after an empty adopted baseline, an addition after the
-setting was removed, a removal, and initial adoption. Both 20-history campaigns
-run these same laws and constructions. A local association records each
-builder's declared states on every invocation. The shared check compares those
-declarations with actual state observations for seeded, generated, and shrunk
-constructed outputs; it does not depend on the pinned framework's seeded-only
-association. The checker rejects both an always-accept report and a trace that
-omits a required constructed state at the virtual `constructed states`
-checkpoint. This checkpoint is unrecorded, so an incomplete driver trace keeps
-its actual driver failure primary rather than inventing an earlier state
-omission. Actual gate-report mismatches still use `completed`. Production
-mutants that always accept or allow a removed baseline
-to restart fail the named `only shrinks` law at `completed`, including direct
-seed/path replay.
+(`scripts.legacy-campaign-baseline`, two 20-history campaigns), are deleted
+with it: they guarded a list that no longer exists. Without an exemption list,
+`oracle/oracle-property-only` reports every raw campaign and legacy campaign
+import in every oracle file that `pnpm lint:oracles` lints, so no file can
+regrow one. `node scripts/oracle-campaign-inventory.mjs` surveys the current
+files with the rule's own classifier; its shape and fixed-history flags are
+planning hints, not evidence of a completed conversion.
 
-Limits: valid settings with unique file names; the settings module exists at
-base and exports literal settings without imports. The external lint plugin
-owns malformed entries, stale entries in files that still exist, and the
-classification of legacy API uses. Deleted files have no lint invocation;
-remove their baseline entries when deleting them. The gate compares file
-identities and permits reason edits. No existing
-product law or campaign is converted by the repin. Each later conversion needs
-its own same-seed before/after gap comparison; this adoption does not supply
-that evidence. Gaps in changed functions close by a kill or an explicit
-maintainer allowance for their anchored gaps; a coverage-map entry alone does
-not close them.
+Each conversion needs its own same-seed before/after gap comparison. Gaps in
+changed functions close by a kill or an explicit maintainer allowance for
+their anchored gaps; a coverage-map entry alone does not close them.
 
 The reversed-index owner now registers generated reads through
 `reverse-index.reads` and its four existing large histories through the finite

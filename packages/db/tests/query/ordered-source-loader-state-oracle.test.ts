@@ -1265,7 +1265,11 @@ async function checkAuthorityCase(
       resumed.issuedTruncates === truncates &&
       resumed.issuedEpochMoves === epochMoves &&
       authoritative &&
-      (fullSource ||
+      // A full-source read proves an obsolete step only when every installed
+      // rank is finite: a head insert or an unexpressible boundary sends a
+      // genuine replacement start's settlement to a full-source read too.
+      ((fullSource &&
+        snapshot().every(({ value }) => Number.isFinite(value.rank))) ||
         (options.orderBy !== undefined &&
           options.where === undefined &&
           options.minValues === undefined))
@@ -1919,6 +1923,17 @@ async function checkAuthorityCase(
     joinedPending = false
     for (let round = 0; round < 40; round++) {
       // A release during the drain can start a truncate of its own.
+      // A replay publishes only after every acquisition started inside its
+      // attempt settles (ARCHITECTURE.md, Replay participants), so the drain
+      // settles those first, as the real subscription waits for them.
+      const attempt = inflight().find(
+        (request) => request.index >= replayOwnedBefore,
+      )
+      if (truncatePending && attempt) {
+        await settle(attempt, true)
+        checkHeld(`after the drain settles request ${attempt.index}`)
+        continue
+      }
       if (truncatePending) {
         settleReplay()
         // Replay retirement can release leases that a later read in this

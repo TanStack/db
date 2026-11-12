@@ -55,6 +55,11 @@
   "peerDependencies": {
     "typescript": ">=4.7"
   },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^5.1.0",
     "temporal-polyfill": "^0.3.2"

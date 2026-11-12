@@ -1,4 +1,5 @@
-// Survey the shrinking migration baseline using the package's own classifier.
+// Survey the oracle files that still run a raw campaign or import a legacy
+// campaign API, using the package's own classifier.
 // Shape and fixed-history flags are planning hints; conversion still reads
 // each law, grammar, driver, comparison, and its gap reports.
 import { execFileSync } from 'node:child_process'
@@ -10,9 +11,6 @@ import rule from '@tanstack/eslint-plugin-oracles/rules/oracle-property-only'
 import { oracleLintSettings } from './oracle-lint-settings.mjs'
 
 const linter = new Linter()
-const settings = {
-  oracles: { ...oracleLintSettings.oracles, legacyCampaigns: [] },
-}
 const paths = execFileSync(
   `git`,
   [`ls-files`, `--cached`, `--others`, `--exclude-standard`, `-z`],
@@ -36,7 +34,7 @@ for (const file of new Set(paths)) {
         languageOptions: { parser },
         plugins: { oracle: { rules: { 'oracle-property-only': rule } } },
         rules: { 'oracle/oracle-property-only': `error` },
-        settings,
+        settings: oracleLintSettings,
       },
     ],
     { filename: file },

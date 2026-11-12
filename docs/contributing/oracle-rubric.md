@@ -322,8 +322,13 @@ presence of a preferred heading, class, comment template, or helper.
   random hits alone do not enforce either obligation.
   Literal fixed histories do not count toward required reach. A passing run
   count does not satisfy this requirement.
-  The `legacyCampaigns` list is empty: every campaign uses `oracleProperty`,
-  and the vendored legacy reach helpers are deleted.
+  An enumerated source runs every history, so it declares its states with
+  `histories: { enumerated, states }` and needs no constructed history. Its
+  `reach` test fails when no enumerated history enters a declared state
+  (maintainer decision, 2026-11-10, in the `oracleProperty` contract).
+  Every campaign uses `oracleProperty`. The framework removed the
+  `legacyCampaigns` exemption list, and the vendored legacy reach helpers are
+  deleted.
 - **Acceptance evidence:** The pull request reports each declared state and how
   many histories reached it in the normal test run. A state that only a larger
   run budget reaches is reported as such.

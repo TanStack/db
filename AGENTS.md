@@ -57,17 +57,11 @@ paths and observation checkpoints. The pinned `oracleProperty` registers Vitest
 tests; importing it into a Playwright spec does not convert that spec. Supply a
 compatible registration path or a Vitest production driver that still runs the
 real browser and provider before changing the functions that witness owns.
-Keep the existing Playwright witness and its legacy entry until that replacement
+Keep the existing Playwright witness until that replacement
 passes. An unavailable runner path blocks the affected production change; it
 does not waive conversion or permit a Node-only substitute for real-host evidence.
 
-`oracleProperty` is the only campaign API for new or converted oracles. The
-`legacyCampaigns` entries in `scripts/oracle-lint-settings.mjs` temporarily
-permit the listed files to keep their old campaigns. The list may only shrink.
-CI runs `scripts/check-legacy-oracle-campaigns.mjs` through `pnpm lint:oracles`
-to reject additions relative to the merge-base. Remove a file's entry when it
-converts. Remove the vendored compatibility helpers when their last caller
-converts.
+`oracleProperty` is the only campaign API.
 
 A conversion preserves laws, law statements, declared states, and run budgets.
 Replace literal-example reach with constructed histories that keep randomness.
