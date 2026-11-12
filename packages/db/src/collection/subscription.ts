@@ -1577,18 +1577,52 @@ export class CollectionSubscription
 
   /**
    * Count the applied source rows that pass this subscription's filter and
-   * that `included` accepts. Rows an optimistic write hides still count: they
-   * are in the source, which a provider's offset counts. An optimistic insert
-   * is not in the source and does not count.
+   * sort at or before an ordered boundary (`through`). Rows that an optimistic
+   * write hides or overlays still count, at their applied positions: they are
+   * in the source, which a provider's offset counts. An optimistic insert is
+   * not in the source and does not count.
+   *
+   * The visible rows come from an indexed ordered read that starts at
+   * `limit` rows and doubles until it passes the boundary, so the work grows
+   * with the prefix, not with the source. Only the overlaid keys are then
+   * read at their applied values.
    */
-  countAppliedRows(included: (row: Record<string, unknown>) => boolean): number {
-    const filter = this.options.whereExpression
-      ? createFilterFunctionFromExpression(this.options.whereExpression)
-      : undefined
-    let count = 0
-    for (const row of this.collection._state.syncedData.values()) {
-      const value = row as Record<string, unknown>
-      if ((filter?.(value) ?? true) && included(value)) count++
+  countAppliedRows(
+    through: (row: Record<string, unknown>) => boolean,
+    { orderBy, limit }: { orderBy: OrderBy; limit: number },
+  ): number {
+    const where = this.options.whereExpression
+    let rows: Array<ChangeMessage<Record<string, unknown>, string | number>>
+    for (let size = Math.max(limit, 1); ; size *= 2) {
+      rows =
+        this.collection.currentStateAsChanges({
+          orderBy,
+          limit: size,
+          where,
+        }) ?? []
+      const last = rows.at(-1)
+      if (rows.length < size || last === undefined || !through(last.value))
+        break
+    }
+    let count = rows.filter(
+      ({ key, value }) =>
+        !this.collection._hasOptimisticOverlay(key) && through(value),
+    ).length
+    const { optimisticDeletes, optimisticUpserts, syncedData } =
+      this.collection._state
+    if (optimisticDeletes.size + optimisticUpserts.size === 0) return count
+    const filter = where ? createFilterFunctionFromExpression(where) : undefined
+    for (const key of new Set([
+      ...optimisticDeletes,
+      ...optimisticUpserts.keys(),
+    ])) {
+      const applied = syncedData.get(key) as Record<string, unknown> | undefined
+      if (
+        applied !== undefined &&
+        (filter?.(applied) ?? true) &&
+        through(applied)
+      )
+        count++
     }
     return count
   }

@@ -880,6 +880,10 @@ export class OrderedSourceLoader {
             : this.subscription.countAppliedRows(
                 (value) =>
                   this.info.comparator(value, this.settledSourceBoundary) <= 0,
+                {
+                  orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+                  limit: this.info.offset + this.info.limit,
+                },
               ),
         }),
       `ordered`,

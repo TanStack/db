@@ -10,6 +10,7 @@ import {
 } from 'vitest'
 import { toArray } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
+import { CollectionSubscription } from '../../src/collection/subscription.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import { createDeferred } from '../../src/deferred.js'
 import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
@@ -3562,6 +3563,14 @@ describe(`ordered source work oracle`, () => {
  *   read, which is one pass; a bounded read that then sorts the whole source in
  *   memory makes a second pass and fails. A joined plan reads its full source
  *   twice per change on `main` too, so the scan law does not cover it.
+ * - **Move scan:** an indexed window move over one order term scans no more
+ *   source rows than the work bound for its new window, including the reads
+ *   that count its continuation's offset. Scans here also count the rows that
+ *   iterating the source's applied (synced) state yields outside a snapshot
+ *   read. The `ordered-work.eager-window-move` campaign fixes that premise
+ *   and must reach moves that continue past a settled boundary. A tie
+ *   request's filtered snapshot still visits every source row on `main`; the
+ *   coverage map records that scan as open.
  * - **Full join:** the result holds every root row, and one rootless row for
  *   each marker whose id names no root row. A rootless row sorts with the null
  *   ranks. Its window is the first result rows in that order. The plan reads
@@ -4297,6 +4306,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   ignoredProvenReports: number
   unindexedRefetchChecks: number
   shortUnindexedRefills: number
+  boundedContinuations: number
 }> {
   const joined = isJoinedFilter(testCase)
   const fullJoin = testCase.filter === `full-joined`
@@ -4510,6 +4520,19 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // applied, and where the documented short-prefix fallback excused it.
   let unindexedRefetchChecks = 0
   let shortUnindexedRefills = 0
+  // Window moves whose loads include a continuation, a bounded read past a
+  // settled boundary (`minValues`), where the loader counts its offset.
+  let continuationRequests = 0
+  let boundedContinuations = 0
+  const requestLimitedSnapshot =
+    CollectionSubscription.prototype.requestLimitedSnapshot
+  CollectionSubscription.prototype.requestLimitedSnapshot = function (
+    this: CollectionSubscription,
+    options: Parameters<typeof requestLimitedSnapshot>[0],
+  ) {
+    if (options.minValues !== undefined) continuationRequests++
+    return requestLimitedSnapshot.call(this, options)
+  }
   let provenReportRequestsBefore: number | undefined
   // Set by such a report until a step that can change source ordering, and
   // the first repair request the first query issued meanwhile.
@@ -4878,11 +4901,18 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // Work has two counts: rows a local snapshot reads for the query, and rows
   // the source delivers to it, which include index refills. Both are bounded.
   let read = 0
+  // A snapshot's own pass over the source is counted by the rows it returns.
+  let readingSnapshot = false
   const readSnapshot = source.currentStateAsChanges.bind(source)
   source.currentStateAsChanges = ((...args) => {
-    const result = readSnapshot(...args)
-    read += result?.length ?? 0
-    return result
+    readingSnapshot = true
+    try {
+      const result = readSnapshot(...args)
+      read += result?.length ?? 0
+      return result
+    } finally {
+      readingSnapshot = false
+    }
   }) as typeof source.currentStateAsChanges
   let delivered = 0
   const subscribe = source.subscribeChanges.bind(source)
@@ -4900,6 +4930,26 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       yield entry
     }
   } as typeof source.entries
+  // A bounded read counts its continuation offset too. Reading the applied
+  // rows to count it is a scan of the source, so a bounded step also counts
+  // the rows that iterating the source's synced state yields, outside a
+  // snapshot read. A tie request's filtered snapshot still visits every
+  // source row on main; the coverage map records that open scan.
+  let appliedScanned = 0
+  const synced = source._state.syncedData
+  for (const method of [`values`, `entries`, Symbol.iterator] as const) {
+    const iterate = synced[method].bind(synced) as () => Iterator<unknown>
+    Object.defineProperty(synced, method, {
+      configurable: true,
+      value: function* () {
+        const iterator = iterate()
+        for (let next = iterator.next(); !next.done; next = iterator.next()) {
+          if (!readingSnapshot) appliedScanned++
+          yield next.value
+        }
+      },
+    })
+  }
   const buildQuery = (
     q: InitialQueryBuilder,
     { offset, limit }: { offset: number; limit: number } = testCase,
@@ -5308,6 +5358,8 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       read = 0
       delivered = 0
       scanned = 0
+      appliedScanned = 0
+      const continuationsBefore = continuationRequests
       served = 0
       published.length = 0
       commits = 1
@@ -5648,13 +5700,34 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
             `rows delivered by step ${step}`,
           ).toBeLessThanOrEqual(bound),
         )
-        // A bounded read walks the index; it never scans the source.
+        // A bounded read walks the index; it never scans the source, not
+        // even to count a continuation's offset.
         compareAt(`ordered-work-oracle.property.test.ts:5578`, () =>
           expect(
-            scanned,
+            scanned + appliedScanned,
             `rows scanned by bounded step ${step}`,
           ).toBeLessThanOrEqual(bound),
         )
+      }
+      // A window move acquires only the missing part of its new window, past
+      // the rows it already counts (ARCHITECTURE.md, explicit window moves).
+      // With an index on a single order term that continuation, and the
+      // offset it carries, walk the index: the move scans no more source rows
+      // than the work bound for the new window, independent of the source
+      // size. Rows a snapshot returns are bounded by the read law's own
+      // budget, which a two-term or unindexed move does not have.
+      const moveBound =
+        command.type === `move` && !refetching && !held && !peer
+          ? workBound([...boundaryBefore, ...boundaryRanks(rows, shown)])
+          : undefined
+      if (moveBound !== undefined) {
+        compareAt(`ordered-work-oracle.property.test.ts:move-scan`, () =>
+          expect(
+            scanned + appliedScanned,
+            `rows scanned by window move at step ${step}`,
+          ).toBeLessThanOrEqual(moveBound),
+        )
+        if (continuationRequests > continuationsBefore) boundedContinuations++
       }
     }
     compareAt(`ordered-work-oracle.property.test.ts:5584`, () =>
@@ -5668,8 +5741,11 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       ignoredProvenReports,
       unindexedRefetchChecks,
       shortUnindexedRefills,
+      boundedContinuations,
     }
   } finally {
+    CollectionSubscription.prototype.requestLimitedSnapshot =
+      requestLimitedSnapshot
     unsubscribe?.()
     await effect?.dispose()
     await query.cleanup()
@@ -7764,6 +7840,67 @@ describe(`eager indexed ordered windows`, () => {
         await checkEagerWindow(scenario)
       }),
     check: (_history, _observations, verdict) => verdict,
+  })
+
+  // The window-move scan law's premise, fixed: a source filter over an index
+  // on one order term, a forwarding provider that answers at once, no peer,
+  // and a last move to a window that ends past every earlier one, so the
+  // loader continues past its counted prefix.
+  const eagerMoveCase = eagerCaseBase.map((testCase): EagerCase => ({
+    ...testCase,
+    filter: `source`,
+    indexed: true,
+    terms: 1,
+    latency: `immediate`,
+    provider: `forward`,
+    peer: false,
+    history: [...testCase.history, { type: `move`, offset: 0, limit: 6 }],
+  }))
+  describe(`eager window-move campaign reach`, () => {
+    let continued = 0
+    beforeEach(() => {
+      continued = 0
+    })
+    afterEach(({ task }) => {
+      if (
+        (!task.name.startsWith(`fixed seed `) && task.name !== `random seed`) ||
+        task.result?.state === `fail` ||
+        oracleReplayRequested()
+      )
+        return
+      process.stdout.write(
+        `ordered-work.eager-window-move ${task.name} window-move continuations ${continued}\n`,
+      )
+      expect(
+        continued,
+        `histories with an indexed window move that continues`,
+      ).toBeGreaterThanOrEqual(30)
+    })
+    oracleProperty({
+      id: `ordered-work.eager-window-move`,
+      law: {
+        statement: `An indexed window move over one order term scans no more source rows than the work bound for its new window, including the reads that count its continuation's offset.`,
+        authority: `query/live/ARCHITECTURE.md: explicit window moves acquire only the missing portion; law 12 (Work: irrelevant rows do not cause unrelated scans).`,
+        limits: `Source filters over an index on one order term, a forwarding provider that answers at once, no peer; scans are rows that the Collection's entries() and its applied-row iteration yield outside a snapshot read. A tie request's filtered snapshot still visits every source row on main and is not counted.`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/collection/subscription.ts',
+        'src/indexes/btree-index.ts',
+        'src/local-only.ts#localOnlyCollectionOptions',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
+      histories: { arbitrary: eagerMoveCase, runs: 40, fixedSeeds: [2182] },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          const observed = await runEagerWindow(history)
+          if (observed.boundedContinuations > 0) continued++
+        }),
+      check: (_history, _observations, verdict) => verdict,
+    })
   })
 
   // Reconstruction: the fixed-seed campaign reaches the premise. Sampling

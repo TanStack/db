@@ -878,7 +878,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/ordered-work-oracle.property.test.ts`,
     `ordered-work`,
-    `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load eager-proven-report eager-unindexed-refetch`,
+    `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load eager-proven-report eager-unindexed-refetch eager-window-move`,
   ],
   [
     `db/tests/query/load-subset-replay-refinement-oracle.test.ts`,
@@ -888,7 +888,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/pagination-oracle.property.test.ts`,
     `pagination`,
-    `multi-order nullable-cursor pending-mutation pending-history ordered-window window-transition async-cursor`,
+    `multi-order nullable-cursor pending-mutation pending-history ordered-window window-transition async-cursor offset-continuation`,
   ],
   [
     `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
