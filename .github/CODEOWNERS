@@ -1,0 +1,10 @@
+.github/ @TanStack/tanstack-core
+.nx/ @TanStack/tanstack-core
+nx.json @TanStack/tanstack-core
+.changeset/config.json @TanStack/tanstack-core
+scripts/ @TanStack/tanstack-core
+.npmrc @TanStack/tanstack-core
+docs/contributing/oracle-coverage.md @TanStack/tanstack-core
+scripts/oracle-lint-settings.mjs @TanStack/tanstack-core
+scripts/ci-tests.mjs @TanStack/tanstack-core
+.github/workflows/ @TanStack/tanstack-core
