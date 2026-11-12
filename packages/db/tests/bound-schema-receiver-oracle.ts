@@ -18,7 +18,7 @@ import {
   modelBoundSchemaMutation,
   modelBoundSchemaRows,
 } from './live-query-bound-options-oracle'
-import { declareOracle, differs, pass, violation } from './oracle-config'
+import { differs, pass, violation } from './oracle-config'
 import type {
   BoundSchemaHistory,
   BoundSchemaObservation,
@@ -209,8 +209,3 @@ export function checkBoundSchemaReceiver(
     )
   return pass
 }
-
-declareOracle({
-  model: [modelBoundSchemaReceiver],
-  check: [checkBoundSchemaReceiver],
-})

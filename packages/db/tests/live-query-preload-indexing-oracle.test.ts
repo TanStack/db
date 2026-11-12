@@ -23,7 +23,6 @@ import {
   indexConfigurationLabel,
   indexConfigurations,
 } from './conformance/indexing-config-oracle'
-import { declareOracle } from './oracle-declaration'
 import { oracleProperty } from './oracle-property'
 import {
   forwardAssertionJudgment,
@@ -55,11 +54,6 @@ function preloadIndexHistories() {
     ),
   )
 }
-declareOracle({
-  grammar: [preloadIndexHistories],
-  model: [expectedIndexing],
-  check: [expectIndexingAdmission],
-})
 
 // Constructor functions remain in the original fixture table. Data histories
 // name each fixture by its position and stable constructor role; resolve retrieves

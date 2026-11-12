@@ -1,6 +1,7 @@
 // Ordinary tests moved out of collection-cleanup-restart-oracle.test.ts. They
 // keep literal expectations for cleanup, restart, and observer behavior; the
-// three-cut laws and the grammar calibration stay in the oracle file.
+// three-cut laws stay in the oracle file. The grammar checks at the end check
+// the oracle's bounded grammars.
 import { describe, expect, it, vi } from 'vitest'
 import {
   BasicIndex,
@@ -17,6 +18,7 @@ import {
   reentryScenarios,
   withOracleCleanup,
 } from './collection-cleanup-restart-support.js'
+import { dependentCleanupCells } from './collection-cleanup-restart-grammar-oracle.js'
 import type { SyncConfig } from '../src/types'
 import type { Row } from './collection-cleanup-restart-support.js'
 
@@ -1318,5 +1320,45 @@ describe(`Collection cleanup admission oracle`, () => {
       },
     ])
     expect(collection.isLoadingSubset).toBe(false)
+  })
+})
+
+function expectExactCaseIds(
+  actual: ReadonlyArray<{ id: string }>,
+  expected: ReadonlyArray<string>,
+): void {
+  const ids = actual.map(({ id }) => id)
+  expect(ids).toEqual(expected)
+  expect(new Set(ids).size).toBe(ids.length)
+}
+
+// The bounded grammars of the cleanup oracle in
+// collection-cleanup-restart-oracle.test.ts: each declared cell exactly once.
+describe(`Collection cleanup oracle grammar`, () => {
+  it(`declares each cell of the dependents product once`, () => {
+    const ids = dependentCleanupCells.map(({ id }) => id)
+    expect(new Set(ids).size).toBe(ids.length)
+    // 6 x 6 pairs x 3 adapters, plus a second release order for the 20 pairs
+    // with a held dependent under each of the 2 held adapters.
+    expect(ids.length).toBe(6 * 6 * 3 + 20 * 2)
+  })
+
+  it(`calibrates every declared bounded-product cell exactly once`, () => {
+    expectExactCaseIds(reentryScenarios, [
+      `abort:plain:1`,
+      `abort:plain:2`,
+      `abort:nested:1`,
+      `abort:nested:2`,
+      `release:plain:1`,
+      `release:plain:2`,
+      `release:nested:1`,
+      `release:nested:2`,
+    ])
+    expectExactCaseIds(completedBoundaryScenarios, [
+      `event:source`,
+      `event:live-query`,
+      `await:source`,
+      `await:live-query`,
+    ])
   })
 })

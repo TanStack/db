@@ -3,7 +3,6 @@
  * changed overlap values and both restore orders on each storage host.
  */
 import { describe } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   persistedStartupBatchHistories,
   persistedStartupHistoryArb,
@@ -12,16 +11,13 @@ import { registerPersistedStartupConformance } from '../../db-adapter-conformanc
 import { powerSyncStartupAdapter } from './persisted-startup-driver'
 
 const historyArb = persistedStartupHistoryArb(`collection`, true, false, true)
-// The receiving path judges persisted startup through this adapter entry.
-// The shared model owns replacement; this list lets the gap CLI credit it.
-declareOracle({
-  owns: [`src/powersync.ts#powerSyncCollectionOptions`],
-  grammar: [historyArb],
-})
 describe(`persisted startup conformance: PowerSync`, () => {
   registerPersistedStartupConformance({
     property: `adapter.powersync.persisted-startup`,
     adapter: powerSyncStartupAdapter,
+    // The receiving path judges persisted startup through this adapter entry.
+    // The shared model owns replacement; this list lets the gap CLI credit it.
+    owns: [`src/powersync.ts#powerSyncCollectionOptions`],
     histories: persistedStartupBatchHistories,
     arbitrary: historyArb,
     scopedStartupCommit: true,

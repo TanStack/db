@@ -5,7 +5,6 @@
  */
 import { describe } from 'vitest'
 import fc from 'fast-check'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { registerPersistedStartupConformance } from '../../db-adapter-conformance/tests/persisted-startup-oracle-suite'
 import {
   queryStartupAdapter,
@@ -50,18 +49,15 @@ const queryStartupHistoryArb: fc.Arbitrary<QueryStartupHistory> = fc
         (h.initialRender === `network-first` && h.previous !== 0)),
   )
 
-// The receiving path judges persisted startup through this adapter entry.
-// The shared model owns replacement; this list lets the gap CLI credit it.
-declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
-  grammar: [queryStartupHistoryArb],
-})
 // Keep registration visible to Vitest's static typecheck collector as well
 // as its runtime collector; the shared suite registers the actual law checks.
 describe(`persisted startup conformance: Query`, () => {
   registerPersistedStartupConformance({
     property: `query.startup-ownership`,
     adapter: queryStartupAdapter,
+    // The receiving path judges persisted startup through this adapter entry.
+    // The shared model owns replacement; this list lets the gap CLI credit it.
+    owns: [`src/query.ts#queryCollectionOptions`],
     histories: queryStartupHistories,
     arbitrary: queryStartupHistoryArb,
     origins: [

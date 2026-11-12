@@ -48,221 +48,46 @@
  * histories change selected source facts and retain their array-difference
  * judgment; they do not specify every unordered graph notification.
  */
-import { isDeepStrictEqual } from 'node:util'
-import { afterAll, expect, test } from 'vitest'
+import { afterAll, expect } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { Query, coalesce, eq } from '../../src/query/index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { createTransaction } from '../../src/transactions.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
-import { oracleRoute } from '../oracle-config.js'
-import { expectedSourceMetadata } from './virtual-row-fields-source-oracle.js'
+import { oracleProperty } from '../oracle-config.js'
 import {
-  checkWithCleanup,
-  virtualFieldNames,
-} from './virtual-row-fields-support.js'
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
+import { checkWithCleanup } from './virtual-row-fields-support.js'
 import {
   callbackHistories,
   callbackReach,
   runCallbackHistory,
 } from './effect-callback-oracle.js'
+import {
+  captureEvent,
+  captureSelected,
+  checkEffectDelta,
+  expectedEffectDelta,
+  expectedEffectRows,
+} from './virtual-row-fields-effect-model-oracle.js'
+import type {
+  History,
+  KeyIntervals,
+  Ledger,
+  ProjectedRow,
+  RecordedEvent,
+  Side,
+  SourceRow,
+  SourceState,
+  SourceValue,
+} from './virtual-row-fields-effect-model-oracle.js'
 import type { DeltaEvent, EffectConfig } from '../../src/query/effect.js'
 import type { Transaction } from '../../src/transactions.js'
 import type { CallbackOutput, CallbackRow } from './effect-callback-oracle.js'
 
-type Key = string | number
-type Side = `left` | `right`
-type Origin = `local` | `remote`
-type SourceRow = {
-  id: Key
-  parentId: string
-  side: Side
-  label: string
-}
-type SourceState = {
-  id: string
-  base: Array<SourceRow>
-  origins: Map<Key, Origin>
-  overlay?: SourceRow
-  confirmation?: SourceRow
-}
-type Projection = `structured` | `functional`
-type Kind = `single` | `join` | `union`
-type History = {
-  kind: Kind
-  projection: Projection
-  reverse: boolean
-  confirm: ReadonlyArray<Side>
-  reject: ReadonlyArray<Side>
-  rightFirst: boolean
-}
-type ProjectedRow = Record<string, unknown> & { id: Key; side: Side }
-type ModelEvent = {
-  type: `enter` | `update` | `exit`
-  value: ProjectedRow
-  previousValue?: ProjectedRow
-}
-type RecordedEvent = {
-  type: string
-  key: Key
-  value: unknown
-  previousValue?: unknown
-}
-type NamedEvent = RecordedEvent & { route: ModelEvent[`type`] }
-type Ledger = {
-  batches: Array<Array<RecordedEvent>>
-  named: Array<NamedEvent>
-}
-type KeyIntervals = Map<string, Key>
-
-function visibleSource(source: SourceState) {
-  return source.base.map((base) => {
-    const pending = source.overlay?.id === base.id
-    const row = pending ? source.overlay! : base
-    return {
-      ...row,
-      ...expectedSourceMetadata(
-        row.id,
-        source.id,
-        pending,
-        source.origins.get(row.id) ?? `remote`,
-      ),
-    }
-  })
-}
-type SourceValue = ReturnType<typeof visibleSource>[number]
-
-// SELECT copies these source facts into ordinary fields. New output objects
-// need no root metadata judgment to determine their explicitly selected values.
-function projectedSource(row: SourceValue): ProjectedRow {
-  return {
-    id: row.id,
-    side: row.side,
-    label: row.label,
-    observedKey: row.$key,
-    observedCollectionId: row.$collectionId,
-    observedOrigin: row.$origin,
-    observedPending: row.$hasPendingWrites,
-  }
-}
-function expectedEffectRows(
-  kind: Kind,
-  left: SourceState,
-  right: SourceState,
-): Array<ProjectedRow> {
-  const a = visibleSource(left)
-  const b = visibleSource(right)
-  if (kind === `single`) return a.map(projectedSource)
-  if (kind === `union`) return [...a, ...b].map(projectedSource)
-  return a.map((row) => {
-    const joined = b.find((candidate) => candidate.parentId === row.id)
-    return {
-      ...projectedSource(row),
-      rightLabel: joined?.label,
-      rightKey: joined?.$key,
-      rightCollectionId: joined?.$collectionId,
-      rightOrigin: joined?.$origin,
-      rightPending: joined?.$hasPendingWrites,
-    }
-  })
-}
-function occurrence(value: unknown): string {
-  if (!value || typeof value !== `object`) return `invalid:${String(value)}`
-  const row = value as Record<string, unknown>
-  return `${String(row.side)}:${typeof row.id}:${String(row.id)}`
-}
-// Independent before/after differencing retains every occurrence. Equality
-// distinguishes a missing own field from a field whose value is undefined.
-function expectedEffectDelta(
-  before: ReadonlyArray<ProjectedRow>,
-  after: ReadonlyArray<ProjectedRow>,
-): Array<ModelEvent> {
-  const delta: Array<ModelEvent> = []
-  for (const old of before) {
-    if (!after.some((row) => occurrence(row) === occurrence(old)))
-      delta.push({ type: `exit`, value: old })
-  }
-  for (const row of after) {
-    const old = before.find((prior) => occurrence(prior) === occurrence(row))
-    if (!old) delta.push({ type: `enter`, value: row })
-    else if (!isDeepStrictEqual(old, row))
-      delta.push({ type: `update`, value: row, previousValue: old })
-  }
-  return delta
-}
-function eventOrder(a: { value: unknown }, b: { value: unknown }): number {
-  return occurrence(a.value).localeCompare(occurrence(b.value))
-}
-function eventValue(event: RecordedEvent) {
-  const { key: _key, ...selected } = event
-  return selected
-}
-// Named delivery and batch delivery each refine the independent full delta.
-// Cross-channel agreement alone would allow both channels to share a defect.
-function checkEffectDelta(
-  ledger: Ledger,
-  expected: ReadonlyArray<ModelEvent>,
-  active: KeyIntervals,
-): void {
-  const batches = ledger.batches.flat()
-  const failures: Array<Error> = []
-  const judge = (law: string, compare: () => void) => {
-    try {
-      compare()
-    } catch (error) {
-      failures.push(new Error(law, { cause: error }))
-    }
-  }
-  judge(`batch delta and previous values`, () => {
-    expect(batches.map(eventValue).sort(eventOrder)).toStrictEqual(
-      [...expected].sort(eventOrder),
-    )
-  })
-  judge(`named delta, route and previous values`, () => {
-    expect(ledger.named.map(eventValue).sort(eventOrder)).toStrictEqual(
-      expected
-        .map((event) => ({ ...event, route: event.type }))
-        .sort(eventOrder),
-    )
-  })
-  judge(`named and batch event keys agree`, () => {
-    expect(
-      ledger.named.map(({ route: _route, ...event }) => event).sort(eventOrder),
-    ).toStrictEqual([...batches].sort(eventOrder))
-  })
-
-  // Report an invalid event without adopting it as a live occurrence. Later
-  // lawful enters in the same batch can still establish their own intervals.
-  for (const event of batches) {
-    const id = occurrence(event.value)
-    judge(`opaque key interval for ${event.type} ${id}`, () => {
-      expect([`string`, `number`]).toContain(typeof event.key)
-      if (event.type === `enter`) {
-        expect(active.has(id), `enter starts an absent occurrence`).toBe(false)
-        expect(
-          [...active.values()],
-          `live occurrence keys are distinct`,
-        ).not.toContain(event.key)
-        active.set(id, event.key)
-      } else {
-        expect(active.has(id), `update/exit names a live occurrence`).toBe(true)
-        expect(event.key, `key remains stable within its active interval`).toBe(
-          active.get(id),
-        )
-        if (event.type === `exit`) active.delete(id)
-      }
-    })
-  }
-  if (failures.length)
-    throw new AggregateError(failures, `Effect delta law failed`, {
-      cause: failures[0],
-    })
-}
-
-// One source has two outcomes and two confirmation states. Two sources have
-// four independent outcomes, four confirmation masks and two settlement orders.
-// Only unions vary branch order: it has observable source-selection machinery.
 const effectMetadataHistories: Array<History> = (
   [`structured`, `functional`] as const
 ).flatMap((projection) =>
@@ -302,62 +127,87 @@ afterAll(() => {
       Object.fromEntries(deliveryReach.counts()),
     )
 })
-test.each(callbackHistories)(
-  `delivers current values across callback profiles: %j`,
-  async (history) => {
-    oracleRoute(`case`)
-    ranDelivery = true
-    await runCallbackHistory(
-      history,
-      {
-        mount: async ({ skipInitial, ordered, project, handlers }) => {
-          const source = createCollection(
-            mockSyncCollectionOptions<CallbackRow>({
-              id: `callback-core`,
-              getKey: (row) => row.id,
-              initialData: [{ id: 1, version: 0 }],
-            }),
-          )
-          await source.preload()
-          const config: EffectConfig<CallbackOutput> = {
-            query: () => {
-              const rows = new Query().from({ row: source })
-              return (
-                ordered ? rows.orderBy(({ row }) => row.id).limit(10) : rows
-              ).fn.select(({ row }) => project(row))
-            },
-            skipInitial,
-            ...handlers,
-          }
-          const effect = createEffect(config)
-          await flushPromises()
-          return {
-            write: async (type, version) => {
-              source.utils.begin()
-              source.utils.write({ type, value: { id: 1, version } })
-              source.utils.commit()
-              await flushPromises()
-            },
-            replaceHandlers: async (replacement) => {
-              Object.assign(config, replacement)
-              await flushPromises()
-            },
-            dispose: () => effect.dispose(),
-            cleanup: () =>
-              checkWithCleanup(async () => {
-                await effect.dispose()
-              }, [
-                async () => {
-                  await source.cleanup()
-                },
-              ]),
-          }
-        },
+// The former case body, unchanged.
+async function judgeCallbackDelivery(
+  history: (typeof callbackHistories)[number],
+): Promise<void> {
+  ranDelivery = true
+  await runCallbackHistory(
+    history,
+    {
+      mount: async ({ skipInitial, ordered, project, handlers }) => {
+        const source = createCollection(
+          mockSyncCollectionOptions<CallbackRow>({
+            id: `callback-core`,
+            getKey: (row) => row.id,
+            initialData: [{ id: 1, version: 0 }],
+          }),
+        )
+        await source.preload()
+        const config: EffectConfig<CallbackOutput> = {
+          query: () => {
+            const rows = new Query().from({ row: source })
+            return (
+              ordered ? rows.orderBy(({ row }) => row.id).limit(10) : rows
+            ).fn.select(({ row }) => project(row))
+          },
+          skipInitial,
+          ...handlers,
+        }
+        const effect = createEffect(config)
+        await flushPromises()
+        return {
+          write: async (type, version) => {
+            source.utils.begin()
+            source.utils.write({ type, value: { id: 1, version } })
+            source.utils.commit()
+            await flushPromises()
+          },
+          replaceHandlers: async (replacement) => {
+            Object.assign(config, replacement)
+            await flushPromises()
+          },
+          dispose: () => effect.dispose(),
+          cleanup: () =>
+            checkWithCleanup(async () => {
+              await effect.dispose()
+            }, [
+              async () => {
+                await source.cleanup()
+              },
+            ]),
+        }
       },
-      deliveryReach,
-    )
+    },
+    deliveryReach,
+  )
+}
+
+const callbackDeliveryLaw = `Effect callbacks deliver current values across handler profiles at the core boundary.`
+
+oracleProperty({
+  id: `virtual-row-fields-effect.callback-delivery`,
+  law: {
+    statement: callbackDeliveryLaw,
+    authority: `The Collection virtual-field boundary and boundary-only metadata decision (2026-11-05) in packages/db/src/query/live/ARCHITECTURE.md, and the Effect publication rules, stated at the start of this owner.`,
+    limits: `The enumerated callback representation and handler-profile histories at the core Effect boundary.`,
   },
-)
+  owns: [
+    `src/collection/index.ts#createCollection`,
+    `src/query/effect.ts#createEffect`,
+    `src/transactions.ts#createTransaction`,
+  ],
+  histories: callbackHistories,
+  label: (history) =>
+    `delivers current values across callback profiles: ${JSON.stringify(history)}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(callbackDeliveryLaw, plan, observe, () =>
+      judgeCallbackDelivery(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
 function pathOf(history: Pick<History, `kind` | `projection` | `reverse`>) {
   return `${history.kind}${history.kind === `union` ? (history.reverse ? `-right-first` : `-left-first`) : ``}/${history.projection}`
 }
@@ -430,16 +280,6 @@ afterAll(() => {
       Object.fromEntries(effectPassedCuts),
     )
 })
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/query/effect.ts#createEffect',
-    'src/transactions.ts#createTransaction',
-  ],
-  model: [visibleSource, expectedEffectRows, expectedEffectDelta],
-  check: [checkEffectDelta],
-  grammar: [effectMetadataHistories],
-})
 
 function gate() {
   let resolve!: () => void
@@ -465,25 +305,6 @@ function createSource(state: SourceState, hold: ReturnType<typeof gate>) {
   })
 }
 type Source = ReturnType<typeof createSource>
-function captureSelected(value: unknown): unknown {
-  if (!value || typeof value !== `object`) return value
-  return Object.fromEntries(
-    Object.entries(value).filter(
-      ([name]) => !virtualFieldNames.some((field) => field === name),
-    ),
-  )
-}
-function captureEvent(event: DeltaEvent): RecordedEvent {
-  return {
-    type: event.type,
-    key: event.key,
-    value: captureSelected(event.value),
-    ...(`previousValue` in event
-      ? { previousValue: captureSelected(event.previousValue) }
-      : {}),
-  }
-}
-// Driver projection: runtime source objects, not model source snapshots.
 function selectSource(row: SourceValue) {
   return {
     id: row.id,
@@ -585,456 +406,269 @@ function startEffect(
   })
 }
 
-test.each(effectMetadataHistories)(
-  `delivers explicitly selected source metadata through Effects: %j`,
-  async (history) => {
-    oracleRoute(`case`)
-    enteredEffectHistories++
-    effectMetadataHistory++
-    const path = pathOf(history)
-    const id = historyId(history)
-    const reach = (cut: string) => {
-      effectMetadataHistoriesByState
-        .get(`${id}/batch/${cut}`)!
-        .add(effectMetadataHistory)
-      effectMetadataHistoriesByState
-        .get(`${id}/named/${cut}`)!
-        .add(effectMetadataHistory)
-    }
-    const leftMain: SourceRow = {
-      id: history.kind === `union` ? 1 : `a`,
-      parentId: `unused`,
-      side: `left`,
-      label: `left-base`,
-    }
-    const peer: SourceRow = {
-      id: `anchor`,
-      parentId: `unused`,
-      side: `left`,
-      label: `peer`,
-    }
-    const rightMain: SourceRow = {
-      id: history.kind === `union` ? `1` : `r`,
-      parentId: `a`,
-      side: `right`,
-      label: `right-base`,
-    }
-    const states: Record<Side, SourceState> = {
-      left: {
-        id: `effect-left`,
-        base: [{ ...leftMain }, { ...peer }],
-        origins: new Map(),
-      },
-      right: {
-        id: `effect-right`,
-        base: [{ ...rightMain }],
-        origins: new Map(),
-      },
-    }
-    const holds = { left: gate(), right: gate() }
-    let left: Source | undefined
-    let right: Source | undefined
-    let effect: ReturnType<typeof createEffect> | undefined
-    const settlements: Partial<Record<Side, Promise<unknown>>> = {}
-    const transactions = new Map<Side, Transaction>()
-    const failures = {
-      left: new Error(`left rejection`),
-      right: new Error(`right rejection`),
-    }
-    const ledger: Ledger = { batches: [], named: [] }
-    const errors: Array<unknown> = []
-    const mismatches: Array<Error> = []
-    const active: KeyIntervals = new Map()
-    let checkedBatches = 0
-    let checkedNamed = 0
-    let previous: Array<ProjectedRow> = []
-    const modelRows = () =>
-      expectedEffectRows(history.kind, states.left, states.right)
-    const cut = async (name: string, premise?: () => void) => {
-      await flushPromises()
-      const next = modelRows()
-      let premiseReached = true
-      try {
-        premise?.()
-      } catch (error) {
-        premiseReached = false
-        mismatches.push(
-          new Error(`Effect metadata premise ${name}`, { cause: error }),
-        )
-      }
-      try {
-        checkEffectDelta(
-          {
-            batches: ledger.batches.slice(checkedBatches),
-            named: ledger.named.slice(checkedNamed),
-          },
-          expectedEffectDelta(previous, next),
-          active,
-        )
-        expect(errors).toStrictEqual([])
-        const key = `${path}/${name}`
-        effectPassedCuts.set(key, (effectPassedCuts.get(key) ?? 0) + 1)
-      } catch (error) {
-        mismatches.push(
-          new Error(`Effect metadata cut ${name}`, { cause: error }),
-        )
-      }
-      checkedBatches = ledger.batches.length
-      checkedNamed = ledger.named.length
-      previous = next
-      if (premiseReached) reach(name)
-    }
-    const write = (
-      side: Side,
-      type: `insert` | `update` | `delete`,
-      row: SourceRow,
-    ) => {
-      const source = side === `left` ? left! : right!
-      source.utils.begin()
-      source.utils.write({ type, value: { ...row } })
-      return source.utils.commit()
-    }
-    const requirePersisting = (side: Side) => {
-      expect(holds[side].calls, `${side} handler entered once`).toBe(1)
-      expect(
-        transactions.get(side)?.state,
-        `${side} transaction persists`,
-      ).toBe(`persisting`)
-    }
-    const drive = async () => {
-      left = createSource(states.left, holds.left)
-      right = createSource(states.right, holds.right)
-      await Promise.all([left.preload(), right.preload()])
-      effect = startEffect(history, left, right, ledger, errors)
-      await cut(`initial`)
-      const sides = sidesOf(history)
-      for (const side of sides) {
-        const source = side === `left` ? left : right
-        const row = states[side].base[0]!
-        states[side].overlay = { ...row, label: `${side}-pending` }
-        const transaction = source.update(row.id, (draft) => {
-          draft.label = `${side}-pending`
-        })
-        transactions.set(side, transaction)
-        settlements[side] = transaction.when(`settled`).then(
-          () => undefined,
-          (error: unknown) => error,
-        )
-        await cut(`${side}-pending`, () => requirePersisting(side))
-      }
-      if (sides.length === 2)
-        await cut(`two-pending`, () => {
-          requirePersisting(`left`)
-          requirePersisting(`right`)
-        })
-      for (const side of history.confirm) {
-        const row = { ...states[side].base[0]!, label: `${side}-server` }
-        states[side].confirmation = row
-        // Commit accepts this row; the persisting overlay still owns visibility.
-        write(side, `update`, row)
-        await cut(`${side}-accepted-held`, () => requirePersisting(side))
-      }
-      const order: Array<Side> =
-        history.kind === `single`
-          ? [`left`]
-          : history.rightFirst
-            ? [`right`, `left`]
-            : [`left`, `right`]
-      for (const [index, side] of order.entries()) {
-        const state = states[side]
-        const reject = history.reject.includes(side)
-        state.overlay = undefined
-        if (state.confirmation) {
-          const confirmation = state.confirmation
-          state.base = state.base.map((row) =>
-            row.id === confirmation.id ? { ...confirmation } : row,
-          )
-          state.origins.set(confirmation.id, reject ? `remote` : `local`)
-          state.confirmation = undefined
-        }
-        if (reject) holds[side].reject(failures[side])
-        else holds[side].resolve()
-        expect(await settlements[side]).toBe(
-          reject ? failures[side] : undefined,
-        )
-        await cut(`${side}-${reject ? `rejected` : `fulfilled`}`, () => {
-          expect(holds[side].calls, `${side} handler entered once`).toBe(1)
-          expect(
-            transactions.get(side)?.state,
-            `${side} transaction settled`,
-          ).toBe(reject ? `failed` : `completed`)
-        })
-        if (sides.length === 2 && index === 0) {
-          const stillPending = order[1]!
-          await cut(`one-pending-${stillPending}`, () => {
-            requirePersisting(stillPending)
-            expect(transactions.get(side)?.state).toBe(
-              reject ? `failed` : `completed`,
-            )
-          })
-        }
-      }
-      for (const side of sides) {
-        const state = states[side]
-        const row = { ...state.base[0]!, label: `${side}-later` }
-        state.base[0] = row
-        state.origins.set(row.id, `remote`)
-        write(side, `update`, row)
-        await cut(`${side}-remote-followup`)
-      }
-      states.left.base = states.left.base.filter((row) => row.id !== peer.id)
-      write(`left`, `delete`, peer)
-      await cut(`peer-exit`)
-      states.left.base.push({ ...peer })
-      write(`left`, `insert`, peer)
-      await cut(`peer-reentry`)
-      const survivor = { ...states.left.base[0]!, label: `survivor-next-use` }
-      states.left.base[0] = survivor
-      write(`left`, `update`, survivor)
-      await cut(`survivor-next-use`)
-      await effect.dispose()
-      await cut(`final-drain`)
-    }
-    await checkWithCleanup(async () => {
-      try {
-        await drive()
-      } catch (error) {
-        mismatches.push(
-          new Error(`Effect metadata driver ${id}`, { cause: error }),
-        )
-      }
-      if (mismatches.length)
-        throw new AggregateError(mismatches, `Effect metadata history failed`, {
-          cause: mismatches[0],
-        })
-    }, [
-      async () => {
-        holds.left.resolve()
-        holds.right.resolve()
-        await Promise.all(Object.values(settlements))
-      },
-      async () => {
-        await effect?.dispose()
-      },
-      async () => {
-        await right?.cleanup()
-      },
-      async () => {
-        await left?.cleanup()
-      },
-    ])
-  },
-)
-
-// The same delta judgment must reject wrong callback histories even when their
-// final row is right. Controls seed active key intervals through initial enter
-// delivery, so failures reach the update comparison rather than setup.
-const effectFaults = [
-  `omitted-peer`,
-  `duplicate-message`,
-  `duplicate-batch`,
-  `stale-pending`,
-  `wrong-source`,
-  `new-previous-value`,
-  `extra-undefined`,
-  `wrong-route`,
-  `missing-named`,
-  `delayed-extra`,
-  `key-collision`,
-  `key-change`,
-] as const
-declareOracle({ grammar: [effectFaults] })
-test.each(effectFaults)(
-  `rejects a hostile Effect metadata ledger: %s`,
-  (fault) => {
-    oracleRoute(`calibration`)
-    const row = (id: Key, pending: boolean): ProjectedRow => ({
-      id,
-      side: `left`,
-      label: pending ? `pending` : `base`,
-      observedKey: id,
-      observedCollectionId: `source`,
-      observedOrigin: pending ? `local` : `remote`,
-      observedPending: pending,
-    })
-    const before = [row(1, false), row(`1`, false)]
-    const after = [row(1, true), row(`1`, true)]
-    const events = (expected: Array<ModelEvent>, prefix: string): Ledger => {
-      const batch = expected.map((event) => ({
-        ...structuredClone(event),
-        key: `${prefix}/${occurrence(event.value)}`,
-      }))
-      return {
-        batches: [batch],
-        named: batch.map((event) => ({
-          ...structuredClone(event),
-          route: event.type,
-        })),
-      }
-    }
-    const active: KeyIntervals = new Map()
-    checkEffectDelta(
-      events(expectedEffectDelta([], before), `opaque`),
-      expectedEffectDelta([], before),
-      active,
-    )
-    const expected = expectedEffectDelta(before, after)
-    const allowed = events(expected, `opaque`)
-    checkEffectDelta(structuredClone(allowed), expected, new Map(active))
-    const hostile = structuredClone(allowed)
-    const first = hostile.batches[0]![0]!
-    const second = hostile.batches[0]![1]!
-    if (fault === `omitted-peer`) hostile.batches[0]!.pop()
-    if (fault === `duplicate-message`)
-      hostile.batches[0]!.push(structuredClone(first))
-    if (fault === `duplicate-batch`)
-      hostile.batches.push(structuredClone(hostile.batches[0]!))
-    if (fault === `stale-pending`)
-      (first.value as Record<string, unknown>).observedPending = false
-    if (fault === `wrong-source`)
-      (first.value as Record<string, unknown>).observedCollectionId =
-        `other-source`
-    if (fault === `new-previous-value`)
-      first.previousValue = structuredClone(first.value)
-    if (fault === `extra-undefined`)
-      (first.value as Record<string, unknown>).extra = undefined
-    if (fault === `wrong-route`) hostile.named[0]!.route = `enter`
-    if (fault === `missing-named`) hostile.named.pop()
-    if (fault === `delayed-extra`)
-      hostile.batches.push([structuredClone(first)])
-    // Both channels agree on each bad key, so only interval continuity can
-    // reject these faults; cross-channel agreement cannot mask its removal.
-    if (fault === `key-collision`) {
-      second.key = first.key
-      hostile.named[1]!.key = second.key
-    }
-    if (fault === `key-change`) {
-      first.key = `different-opaque-key`
-      hostile.named[0]!.key = first.key
-    }
-    expect(() => checkEffectDelta(hostile, expected, new Map(active))).toThrow()
-  },
-)
-
-// Allowed controls preserve implementation freedom: row order and opaque key
-// representation do not define metadata, and an exited interval owns no key.
-function calibrationRows(pending: boolean): Array<ProjectedRow> {
-  const base: Array<SourceRow> = [
-    { id: 1, side: `left`, parentId: `unused`, label: `base` },
-    { id: `1`, side: `left`, parentId: `unused`, label: `peer` },
-  ]
-  return expectedEffectRows(
-    `single`,
-    {
-      id: `source`,
-      base,
+// The former case body, unchanged.
+async function judgeEffectMetadataHistory(history: History): Promise<void> {
+  enteredEffectHistories++
+  effectMetadataHistory++
+  const path = pathOf(history)
+  const id = historyId(history)
+  const reach = (cut: string) => {
+    effectMetadataHistoriesByState
+      .get(`${id}/batch/${cut}`)!
+      .add(effectMetadataHistory)
+    effectMetadataHistoriesByState
+      .get(`${id}/named/${cut}`)!
+      .add(effectMetadataHistory)
+  }
+  const leftMain: SourceRow = {
+    id: history.kind === `union` ? 1 : `a`,
+    parentId: `unused`,
+    side: `left`,
+    label: `left-base`,
+  }
+  const peer: SourceRow = {
+    id: `anchor`,
+    parentId: `unused`,
+    side: `left`,
+    label: `peer`,
+  }
+  const rightMain: SourceRow = {
+    id: history.kind === `union` ? `1` : `r`,
+    parentId: `a`,
+    side: `right`,
+    label: `right-base`,
+  }
+  const states: Record<Side, SourceState> = {
+    left: {
+      id: `effect-left`,
+      base: [{ ...leftMain }, { ...peer }],
       origins: new Map(),
-      ...(pending ? { overlay: { ...base[0]!, label: `pending` } } : {}),
     },
-    { id: `unused`, base: [], origins: new Map() },
-  )
+    right: {
+      id: `effect-right`,
+      base: [{ ...rightMain }],
+      origins: new Map(),
+    },
+  }
+  const holds = { left: gate(), right: gate() }
+  let left: Source | undefined
+  let right: Source | undefined
+  let effect: ReturnType<typeof createEffect> | undefined
+  const settlements: Partial<Record<Side, Promise<unknown>>> = {}
+  const transactions = new Map<Side, Transaction>()
+  const failures = {
+    left: new Error(`left rejection`),
+    right: new Error(`right rejection`),
+  }
+  const ledger: Ledger = { batches: [], named: [] }
+  const errors: Array<unknown> = []
+  const mismatches: Array<Error> = []
+  const active: KeyIntervals = new Map()
+  let checkedBatches = 0
+  let checkedNamed = 0
+  let previous: Array<ProjectedRow> = []
+  const modelRows = () =>
+    expectedEffectRows(history.kind, states.left, states.right)
+  const cut = async (name: string, premise?: () => void) => {
+    await flushPromises()
+    const next = modelRows()
+    let premiseReached = true
+    try {
+      premise?.()
+    } catch (error) {
+      premiseReached = false
+      mismatches.push(
+        new Error(`Effect metadata premise ${name}`, { cause: error }),
+      )
+    }
+    try {
+      checkEffectDelta(
+        {
+          batches: ledger.batches.slice(checkedBatches),
+          named: ledger.named.slice(checkedNamed),
+        },
+        expectedEffectDelta(previous, next),
+        active,
+      )
+      expect(errors).toStrictEqual([])
+      const key = `${path}/${name}`
+      effectPassedCuts.set(key, (effectPassedCuts.get(key) ?? 0) + 1)
+    } catch (error) {
+      mismatches.push(
+        new Error(`Effect metadata cut ${name}`, { cause: error }),
+      )
+    }
+    checkedBatches = ledger.batches.length
+    checkedNamed = ledger.named.length
+    previous = next
+    if (premiseReached) reach(name)
+  }
+  const write = (
+    side: Side,
+    type: `insert` | `update` | `delete`,
+    row: SourceRow,
+  ) => {
+    const source = side === `left` ? left! : right!
+    source.utils.begin()
+    source.utils.write({ type, value: { ...row } })
+    return source.utils.commit()
+  }
+  const requirePersisting = (side: Side) => {
+    expect(holds[side].calls, `${side} handler entered once`).toBe(1)
+    expect(transactions.get(side)?.state, `${side} transaction persists`).toBe(
+      `persisting`,
+    )
+  }
+  const drive = async () => {
+    left = createSource(states.left, holds.left)
+    right = createSource(states.right, holds.right)
+    await Promise.all([left.preload(), right.preload()])
+    effect = startEffect(history, left, right, ledger, errors)
+    await cut(`initial`)
+    const sides = sidesOf(history)
+    for (const side of sides) {
+      const source = side === `left` ? left : right
+      const row = states[side].base[0]!
+      states[side].overlay = { ...row, label: `${side}-pending` }
+      const transaction = source.update(row.id, (draft) => {
+        draft.label = `${side}-pending`
+      })
+      transactions.set(side, transaction)
+      settlements[side] = transaction.when(`settled`).then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+      await cut(`${side}-pending`, () => requirePersisting(side))
+    }
+    if (sides.length === 2)
+      await cut(`two-pending`, () => {
+        requirePersisting(`left`)
+        requirePersisting(`right`)
+      })
+    for (const side of history.confirm) {
+      const row = { ...states[side].base[0]!, label: `${side}-server` }
+      states[side].confirmation = row
+      // Commit accepts this row; the persisting overlay still owns visibility.
+      write(side, `update`, row)
+      await cut(`${side}-accepted-held`, () => requirePersisting(side))
+    }
+    const order: Array<Side> =
+      history.kind === `single`
+        ? [`left`]
+        : history.rightFirst
+          ? [`right`, `left`]
+          : [`left`, `right`]
+    for (const [index, side] of order.entries()) {
+      const state = states[side]
+      const reject = history.reject.includes(side)
+      state.overlay = undefined
+      if (state.confirmation) {
+        const confirmation = state.confirmation
+        state.base = state.base.map((row) =>
+          row.id === confirmation.id ? { ...confirmation } : row,
+        )
+        state.origins.set(confirmation.id, reject ? `remote` : `local`)
+        state.confirmation = undefined
+      }
+      if (reject) holds[side].reject(failures[side])
+      else holds[side].resolve()
+      expect(await settlements[side]).toBe(reject ? failures[side] : undefined)
+      await cut(`${side}-${reject ? `rejected` : `fulfilled`}`, () => {
+        expect(holds[side].calls, `${side} handler entered once`).toBe(1)
+        expect(
+          transactions.get(side)?.state,
+          `${side} transaction settled`,
+        ).toBe(reject ? `failed` : `completed`)
+      })
+      if (sides.length === 2 && index === 0) {
+        const stillPending = order[1]!
+        await cut(`one-pending-${stillPending}`, () => {
+          requirePersisting(stillPending)
+          expect(transactions.get(side)?.state).toBe(
+            reject ? `failed` : `completed`,
+          )
+        })
+      }
+    }
+    for (const side of sides) {
+      const state = states[side]
+      const row = { ...state.base[0]!, label: `${side}-later` }
+      state.base[0] = row
+      state.origins.set(row.id, `remote`)
+      write(side, `update`, row)
+      await cut(`${side}-remote-followup`)
+    }
+    states.left.base = states.left.base.filter((row) => row.id !== peer.id)
+    write(`left`, `delete`, peer)
+    await cut(`peer-exit`)
+    states.left.base.push({ ...peer })
+    write(`left`, `insert`, peer)
+    await cut(`peer-reentry`)
+    const survivor = { ...states.left.base[0]!, label: `survivor-next-use` }
+    states.left.base[0] = survivor
+    write(`left`, `update`, survivor)
+    await cut(`survivor-next-use`)
+    await effect.dispose()
+    await cut(`final-drain`)
+  }
+  await checkWithCleanup(async () => {
+    try {
+      await drive()
+    } catch (error) {
+      mismatches.push(
+        new Error(`Effect metadata driver ${id}`, { cause: error }),
+      )
+    }
+    if (mismatches.length)
+      throw new AggregateError(mismatches, `Effect metadata history failed`, {
+        cause: mismatches[0],
+      })
+  }, [
+    async () => {
+      holds.left.resolve()
+      holds.right.resolve()
+      await Promise.all(Object.values(settlements))
+    },
+    async () => {
+      await effect?.dispose()
+    },
+    async () => {
+      await right?.cleanup()
+    },
+    async () => {
+      await left?.cleanup()
+    },
+  ])
 }
-function calibrationLedger(
-  delta: ReadonlyArray<ModelEvent>,
-  keyFor: (value: ProjectedRow) => Key,
-): Ledger {
-  const batch = delta.map((event) => ({
-    ...structuredClone(event),
-    key: keyFor(event.value),
-  }))
-  return {
-    batches: batch.length ? [batch.reverse()] : [],
-    named: batch.map((event) => ({
-      ...structuredClone(event),
-      route: event.type,
-    })),
-  }
-}
-test(`permits reordered delivery and fresh opaque keys after an exit`, () => {
-  oracleRoute(`fixed history`)
-  const before = calibrationRows(false)
-  const after = calibrationRows(true)
-  const active: KeyIntervals = new Map()
-  const oldKey = (row: ProjectedRow) => `arbitrary/${occurrence(row)}`
-  const initial = expectedEffectDelta([], before)
-  checkEffectDelta(calibrationLedger(initial, oldKey), initial, active)
-  const update = expectedEffectDelta(before, after)
-  checkEffectDelta(calibrationLedger(update, oldKey), update, active)
-  const remaining = [after[0]!]
-  const exit = expectedEffectDelta(after, remaining)
-  checkEffectDelta(calibrationLedger(exit, oldKey), exit, active)
-  const reentry = expectedEffectDelta(remaining, after)
-  checkEffectDelta(
-    calibrationLedger(reentry, (row) => `fresh/${occurrence(row)}`),
-    reentry,
-    active,
-  )
-  const next = [before[0]!, after[1]!]
-  const survivor = expectedEffectDelta(after, next)
-  checkEffectDelta(calibrationLedger(survivor, oldKey), survivor, active)
+
+const explicitMetadataLaw = `Effects deliver explicitly selected source metadata, matching the visible source rows, at every batch and named callback cut.`
+
+oracleProperty({
+  id: `virtual-row-fields-effect.explicit-metadata`,
+  law: {
+    statement: explicitMetadataLaw,
+    authority: `The Collection virtual-field boundary and boundary-only metadata decision (2026-11-05) in packages/db/src/query/live/ARCHITECTURE.md, and the Effect publication rules, stated at the start of this owner.`,
+    limits: `The enumerated single, join, and union metadata histories over controlled sources and optimistic transactions.`,
+  },
+  owns: [
+    `src/collection/index.ts#createCollection`,
+    `src/query/effect.ts#createEffect`,
+    `src/transactions.ts#createTransaction`,
+  ],
+  histories: effectMetadataHistories,
+  label: (history) =>
+    `delivers explicitly selected source metadata through Effects: ${JSON.stringify(history)}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(explicitMetadataLaw, plan, observe, () =>
+      judgeEffectMetadataHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })
-test(`permits empty callback partitions while preserving exact delta events`, () => {
-  oracleRoute(`fixed history`)
-  const before = calibrationRows(false)
-  const after = calibrationRows(true)
-  const active: KeyIntervals = new Map()
-  const keyFor = (row: ProjectedRow) => occurrence(row)
-  for (const delta of [
-    expectedEffectDelta([], before),
-    expectedEffectDelta(before, after),
-    expectedEffectDelta(after, after),
-  ]) {
-    const ledger = calibrationLedger(delta, keyFor)
-    ledger.batches.unshift([])
-    ledger.batches.push([])
-    checkEffectDelta(ledger, delta, active)
-  }
-})
-test(`records scalar callback values before later object mutation`, () => {
-  oracleRoute(`fixed history`)
-  const before = calibrationRows(false)
-  const after = calibrationRows(true)
-  const keyFor = (row: ProjectedRow) => occurrence(row)
-  const active: KeyIntervals = new Map()
-  const initial = expectedEffectDelta([], before)
-  checkEffectDelta(calibrationLedger(initial, keyFor), initial, active)
-  const expected = expectedEffectDelta(before, after)
-  const row = structuredClone(expected[0]!.value)
-  const previousValue = structuredClone(expected[0]!.previousValue!)
-  const event: DeltaEvent = {
-    type: `update`,
-    key: keyFor(row),
-    value: row,
-    previousValue,
-  }
-  const ledger: Ledger = {
-    batches: [[captureEvent(event)]],
-    named: [{ route: `update`, ...captureEvent(event) }],
-  }
-  row.observedPending = false
-  previousValue.label = `mutated after delivery`
-  checkEffectDelta(ledger, expected, active)
-})
-test(`preserves later interval judgments after an invalid unknown update`, () => {
-  oracleRoute(`fixed history`)
-  const before = calibrationRows(false)
-  const after = calibrationRows(true)
-  const keyFor = (row: ProjectedRow) => occurrence(row)
-  const active: KeyIntervals = new Map()
-  const initial = expectedEffectDelta([], before)
-  const ledger = calibrationLedger(initial, keyFor)
-  const invalid = {
-    type: `update`,
-    key: `never-entered`,
-    value: structuredClone(before[0]!),
-    previousValue: structuredClone(before[0]!),
-  }
-  ledger.batches[0]!.unshift(invalid)
-  ledger.named.unshift({ ...structuredClone(invalid), route: `update` })
-  expect(() => checkEffectDelta(ledger, initial, active)).toThrow()
-  const update = expectedEffectDelta(before, after)
-  checkEffectDelta(calibrationLedger(update, keyFor), update, active)
-})
+
+// The hostile-ledger and allowed-ledger checker calibrations of
+// checkEffectDelta are ordinary tests in virtual-row-fields-effect.test.ts.
 
 /**
  * Membership is independent of the selected value's comparison domain. A fresh
@@ -1144,190 +778,214 @@ function captureBoundaryEvent(event: DeltaEvent): RecordedEvent {
       : {}),
   }
 }
-declareOracle({ model: [boundaryModelRows], grammar: [boundaryHistories] })
-test.each(boundaryHistories)(
-  `classifies callback-visible membership across coalesced source histories: %j`,
-  async (history) => {
-    oracleRoute(`case`)
-    enteredBoundary = true
-    boundaryHistory++
-    const main: SourceRow = {
-      id: `a`,
-      parentId: `unused`,
-      side: `left`,
-      label: `v0`,
-    }
-    const anchor: SourceRow = {
-      id: `anchor`,
-      parentId: `unused`,
-      side: `left`,
-      label: `anchor`,
-    }
-    const joined: SourceRow = {
-      id: `r`,
-      parentId: `a`,
-      side: `right`,
-      label: `right`,
-    }
-    const state: SourceState = {
-      id: `boundary-left`,
-      base: history.present ? [main, anchor] : [anchor],
-      origins: new Map(),
-    }
-    const rightState: SourceState = {
-      id: `boundary-right`,
-      base: [joined],
-      origins: new Map(),
-    }
-    const left = createSource(state, gate())
-    const right = createSource(rightState, gate())
-    const ledger: Ledger = { batches: [], named: [] }
-    const active: KeyIntervals = new Map()
-    const failures: Array<unknown> = []
-    const callbackErrors: Array<unknown> = []
-    let effect: ReturnType<typeof createEffect> | undefined
-    let before: Array<ProjectedRow> = []
-    let checkedBatch = 0
-    let checkedNamed = 0
-    const cut = async (name?: string) => {
-      await flushPromises()
-      const after = boundaryModelRows(
-        history.kind,
-        history.representation,
-        state,
-        rightState,
+// The former case body, unchanged.
+async function judgeBoundaryMembership(
+  history: (typeof boundaryHistories)[number],
+): Promise<void> {
+  enteredBoundary = true
+  boundaryHistory++
+  const main: SourceRow = {
+    id: `a`,
+    parentId: `unused`,
+    side: `left`,
+    label: `v0`,
+  }
+  const anchor: SourceRow = {
+    id: `anchor`,
+    parentId: `unused`,
+    side: `left`,
+    label: `anchor`,
+  }
+  const joined: SourceRow = {
+    id: `r`,
+    parentId: `a`,
+    side: `right`,
+    label: `right`,
+  }
+  const state: SourceState = {
+    id: `boundary-left`,
+    base: history.present ? [main, anchor] : [anchor],
+    origins: new Map(),
+  }
+  const rightState: SourceState = {
+    id: `boundary-right`,
+    base: [joined],
+    origins: new Map(),
+  }
+  const left = createSource(state, gate())
+  const right = createSource(rightState, gate())
+  const ledger: Ledger = { batches: [], named: [] }
+  const active: KeyIntervals = new Map()
+  const failures: Array<unknown> = []
+  const callbackErrors: Array<unknown> = []
+  let effect: ReturnType<typeof createEffect> | undefined
+  let before: Array<ProjectedRow> = []
+  let checkedBatch = 0
+  let checkedNamed = 0
+  const cut = async (name?: string) => {
+    await flushPromises()
+    const after = boundaryModelRows(
+      history.kind,
+      history.representation,
+      state,
+      rightState,
+    )
+    try {
+      checkEffectDelta(
+        {
+          batches: ledger.batches.slice(checkedBatch),
+          named: ledger.named.slice(checkedNamed),
+        },
+        expectedEffectDelta(before, after),
+        active,
       )
-      try {
-        checkEffectDelta(
-          {
-            batches: ledger.batches.slice(checkedBatch),
-            named: ledger.named.slice(checkedNamed),
-          },
-          expectedEffectDelta(before, after),
-          active,
-        )
-        expect(callbackErrors).toStrictEqual([])
-      } catch (error) {
-        failures.push(
-          new Error(`membership cut ${name ?? `individual action`}`, {
-            cause: error,
-          }),
-        )
-      }
-      before = after
-      checkedBatch = ledger.batches.length
-      checkedNamed = ledger.named.length
-      if (name)
-        boundaryHistoriesByState
-          .get(`${boundaryId(history)}/${name}`)!
-          .add(boundaryHistory)
+      expect(callbackErrors).toStrictEqual([])
+    } catch (error) {
+      failures.push(
+        new Error(`membership cut ${name ?? `individual action`}`, {
+          cause: error,
+        }),
+      )
     }
-    // The model applies the authored source operation directly. Production
-    // receives the same operation through public sync writes and scheduling.
-    const apply = (type: `insert` | `delete` | `update`, label: string) => {
-      const row = { ...main, label }
-      state.base =
-        type === `delete`
-          ? state.base.filter((value) => value.id !== main.id)
-          : type === `insert`
-            ? [...state.base, row]
-            : state.base.map((value) => (value.id === main.id ? row : value))
-      left.utils.begin()
-      left.utils.write({ type, value: row })
-      left.utils.commit()
-    }
-    await checkWithCleanup(async () => {
-      await Promise.all([left.preload(), right.preload()])
-      effect = createEffect({
-        query: () => {
-          const base = new Query().from({ a: left })
-          const project = (a: SourceValue, b?: SourceValue) => {
-            const label = a.label
-            const payload =
-              history.representation === `function`
-                ? () => label
-                : history.representation === `private`
-                  ? new BoundaryValue(label)
-                  : label
-            return {
-              ...selectSource(a),
-              ...(history.kind === `join`
-                ? {
-                    rightLabel: b?.label,
-                    rightKey: b?.$key,
-                    rightCollectionId: b?.$collectionId,
-                    rightOrigin: b?.$origin,
-                    rightPending: b?.$hasPendingWrites,
-                  }
-                : {}),
-              payload,
-            }
+    before = after
+    checkedBatch = ledger.batches.length
+    checkedNamed = ledger.named.length
+    if (name)
+      boundaryHistoriesByState
+        .get(`${boundaryId(history)}/${name}`)!
+        .add(boundaryHistory)
+  }
+  // The model applies the authored source operation directly. Production
+  // receives the same operation through public sync writes and scheduling.
+  const apply = (type: `insert` | `delete` | `update`, label: string) => {
+    const row = { ...main, label }
+    state.base =
+      type === `delete`
+        ? state.base.filter((value) => value.id !== main.id)
+        : type === `insert`
+          ? [...state.base, row]
+          : state.base.map((value) => (value.id === main.id ? row : value))
+    left.utils.begin()
+    left.utils.write({ type, value: row })
+    left.utils.commit()
+  }
+  await checkWithCleanup(async () => {
+    await Promise.all([left.preload(), right.preload()])
+    effect = createEffect({
+      query: () => {
+        const base = new Query().from({ a: left })
+        const project = (a: SourceValue, b?: SourceValue) => {
+          const label = a.label
+          const payload =
+            history.representation === `function`
+              ? () => label
+              : history.representation === `private`
+                ? new BoundaryValue(label)
+                : label
+          return {
+            ...selectSource(a),
+            ...(history.kind === `join`
+              ? {
+                  rightLabel: b?.label,
+                  rightKey: b?.$key,
+                  rightCollectionId: b?.$collectionId,
+                  rightOrigin: b?.$origin,
+                  rightPending: b?.$hasPendingWrites,
+                }
+              : {}),
+            payload,
           }
-          return history.kind === `join`
-            ? base
-                .leftJoin({ b: right }, ({ a, b }) => eq(a.id, b.parentId))
-                .fn.select(({ a, b }) => project(a, b))
-            : base.fn.select(({ a }) => project(a))
-        },
-        onBatch: (events) => {
-          ledger.batches.push(events.map(captureBoundaryEvent))
-        },
-        onEnter: (event) => {
-          ledger.named.push({ route: `enter`, ...captureBoundaryEvent(event) })
-        },
-        onUpdate: (event) => {
-          ledger.named.push({ route: `update`, ...captureBoundaryEvent(event) })
-        },
-        onExit: (event) => {
-          ledger.named.push({ route: `exit`, ...captureBoundaryEvent(event) })
-        },
-        onError: (error) => callbackErrors.push(error),
-        onSourceError: (error) => callbackErrors.push(error),
-      })
-      await cut(`initial`)
-      const commands: Array<readonly [`insert` | `delete`, string]> =
-        history.present
-          ? [
-              [`delete`, `v0`],
-              [`insert`, `v1`],
-              [`delete`, `v1`],
-            ]
-          : [
-              [`insert`, `v0`],
-              [`delete`, `v0`],
-              [`insert`, `v1`],
-            ]
-      if (history.grouped) {
-        createTransaction({ mutationFn: async () => {} }).mutate(() => {
-          for (const [type, label] of commands) apply(type, label)
-        })
-      } else {
-        for (const [type, label] of commands) {
-          apply(type, label)
-          await cut()
         }
+        return history.kind === `join`
+          ? base
+              .leftJoin({ b: right }, ({ a, b }) => eq(a.id, b.parentId))
+              .fn.select(({ a, b }) => project(a, b))
+          : base.fn.select(({ a }) => project(a))
+      },
+      onBatch: (events) => {
+        ledger.batches.push(events.map(captureBoundaryEvent))
+      },
+      onEnter: (event) => {
+        ledger.named.push({ route: `enter`, ...captureBoundaryEvent(event) })
+      },
+      onUpdate: (event) => {
+        ledger.named.push({ route: `update`, ...captureBoundaryEvent(event) })
+      },
+      onExit: (event) => {
+        ledger.named.push({ route: `exit`, ...captureBoundaryEvent(event) })
+      },
+      onError: (error) => callbackErrors.push(error),
+      onSourceError: (error) => callbackErrors.push(error),
+    })
+    await cut(`initial`)
+    const commands: Array<readonly [`insert` | `delete`, string]> =
+      history.present
+        ? [
+            [`delete`, `v0`],
+            [`insert`, `v1`],
+            [`delete`, `v1`],
+          ]
+        : [
+            [`insert`, `v0`],
+            [`delete`, `v0`],
+            [`insert`, `v1`],
+          ]
+    if (history.grouped) {
+      createTransaction({ mutationFn: async () => {} }).mutate(() => {
+        for (const [type, label] of commands) apply(type, label)
+      })
+    } else {
+      for (const [type, label] of commands) {
+        apply(type, label)
+        await cut()
       }
-      await cut(`sequence`)
-      if (!history.present) apply(`delete`, `v1`)
-      await cut(`absent`)
-      apply(`insert`, `v2`)
-      await cut(`reentry`)
-      apply(`update`, `v3`)
-      await cut(`next-use`)
-      if (failures.length)
-        throw new AggregateError(failures, `Effect membership history failed`, {
-          cause: failures[0],
-        })
-    }, [
-      async () => {
-        await effect?.dispose()
-      },
-      async () => {
-        await right.cleanup()
-      },
-      async () => {
-        await left.cleanup()
-      },
-    ])
+    }
+    await cut(`sequence`)
+    if (!history.present) apply(`delete`, `v1`)
+    await cut(`absent`)
+    apply(`insert`, `v2`)
+    await cut(`reentry`)
+    apply(`update`, `v3`)
+    await cut(`next-use`)
+    if (failures.length)
+      throw new AggregateError(failures, `Effect membership history failed`, {
+        cause: failures[0],
+      })
+  }, [
+    async () => {
+      await effect?.dispose()
+    },
+    async () => {
+      await right.cleanup()
+    },
+    async () => {
+      await left.cleanup()
+    },
+  ])
+}
+
+const boundaryMembershipLaw = `Effect callback membership follows the source snapshots, independent of the selected value's comparison domain: an absent occurrence cannot update.`
+
+oracleProperty({
+  id: `virtual-row-fields-effect.boundary-membership`,
+  law: {
+    statement: boundaryMembershipLaw,
+    authority: `The Collection virtual-field boundary and boundary-only metadata decision (2026-11-05) in packages/db/src/query/live/ARCHITECTURE.md, and the Effect publication rules, stated at the start of this owner.`,
+    limits: `The enumerated scalar, callable, and private-value histories; no exact instance identity for a re-evaluated projection.`,
   },
-)
+  owns: [
+    `src/collection/index.ts#createCollection`,
+    `src/query/effect.ts#createEffect`,
+    `src/transactions.ts#createTransaction`,
+  ],
+  histories: boundaryHistories,
+  label: (history) =>
+    `classifies callback-visible membership across coalesced source histories: ${JSON.stringify(history)}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(boundaryMembershipLaw, plan, observe, () =>
+      judgeBoundaryMembership(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})

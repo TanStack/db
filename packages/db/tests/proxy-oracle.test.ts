@@ -1,16 +1,19 @@
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createCollection } from '../src/collection/index'
 import { createChangeProxy, withChangeTracking } from '../src/proxy'
 import { makeFrozenRow, makeStoredRow } from './proxy-native-rows'
-import { oracleRoute } from './oracle-config'
 import {
   asProductionError,
   errorViolation,
   isErrorObservation,
 } from './oracle-error-observation'
-import { declareOracle } from './oracle-declaration'
 import { differs, oracleProperty, pass, violation } from './oracle-property'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter'
 import type { Observation, Verdict } from './oracle-property'
 import type { FrozenRow, StoredRow } from './proxy-native-rows'
 /**
@@ -263,11 +266,6 @@ function writeThroughAccessPath(
   return row
 }
 
-declareOracle({
-  check: [judgeCallbacks],
-  model: [runArrayCallback, writeThroughAccessPath, modelArrayCallbacks],
-})
-
 // -0 joins the values and deltas, so `-0 += 0` writes 0: a change of a
 // zero's sign alone, which a draft must record like any other write. The
 // campaign and its random histories are oracleProperty below.
@@ -424,55 +422,70 @@ oracleProperty<CallbackHistory, Array<CallbackView>>({
   ],
 })
 
+async function runAccessPathWrites(path: (typeof accessPaths)[number]) {
+  for (const delta of [0, 3, -2]) {
+    const make = () => ({ id: 1, items: [{ value: 1 }, { value: 2 }] })
+    const run = (row: ReturnType<typeof make>) =>
+      writeThroughAccessPath(row, path, delta)
+    const expected = writeThroughAccessPath(make(), path, delta)
+    const original = make()
+    const changes = withChangeTracking(original, run)
+    expect({ ...original, ...changes }).toStrictEqual(expected)
+    expect(original).toStrictEqual(make())
+    let confirm: (value: ReturnType<typeof make>) => void = () => {}
+    const collection = createCollection({
+      getKey: (row: ReturnType<typeof make>) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: make() })
+          commit()
+          markReady()
+          confirm = (value) => {
+            begin()
+            write({ type: `update`, value })
+            commit()
+          }
+        },
+      },
+      // The handler confirms the update, so the stored row is its result.
+      onUpdate: ({ transaction }) => {
+        confirm(transaction.mutations[0].modified)
+        return Promise.resolve()
+      },
+    })
+    try {
+      const tx = collection.update(1, run)
+      await tx.when(`settled`)
+      const saved = collection.get(1)!
+      // This oracle covers row data, not collection-owned virtual fields.
+      expect({ id: saved.id, items: saved.items }).toStrictEqual(expected)
+    } finally {
+      await collection.cleanup()
+    }
+  }
+}
+
 describe(`native array callback oracle`, () => {
-  it.each(accessPaths)(
-    `preserves native writes through the %s access path`,
-    async (path) => {
-      oracleRoute(`case`)
-      for (const delta of [0, 3, -2]) {
-        const make = () => ({ id: 1, items: [{ value: 1 }, { value: 2 }] })
-        const run = (row: ReturnType<typeof make>) =>
-          writeThroughAccessPath(row, path, delta)
-        const expected = writeThroughAccessPath(make(), path, delta)
-        const original = make()
-        const changes = withChangeTracking(original, run)
-        expect({ ...original, ...changes }).toStrictEqual(expected)
-        expect(original).toStrictEqual(make())
-        let confirm: (value: ReturnType<typeof make>) => void = () => {}
-        const collection = createCollection({
-          getKey: (row: ReturnType<typeof make>) => row.id,
-          startSync: true,
-          sync: {
-            sync: ({ begin, write, commit, markReady }) => {
-              begin()
-              write({ type: `insert`, value: make() })
-              commit()
-              markReady()
-              confirm = (value) => {
-                begin()
-                write({ type: `update`, value })
-                commit()
-              }
-            },
-          },
-          // The handler confirms the update, so the stored row is its result.
-          onUpdate: ({ transaction }) => {
-            confirm(transaction.mutations[0].modified)
-            return Promise.resolve()
-          },
-        })
-        try {
-          const tx = collection.update(1, run)
-          await tx.when(`settled`)
-          const saved = collection.get(1)!
-          // This oracle covers row data, not collection-owned virtual fields.
-          expect({ id: saved.id, items: saved.items }).toStrictEqual(expected)
-        } finally {
-          await collection.cleanup()
-        }
-      }
+  oracleProperty({
+    id: `proxy.access-path-writes`,
+    law: {
+      statement: `A write through each callback access path of a draft array gives the native row in the change set, leaves the original unchanged, and is the stored row after the handler confirms it.`,
+      authority: `src/proxy.ts draft contract stated above; the same write on a plain native row is the model`,
+      limits: `Five access paths over a two-item array with deltas 0, 3 and -2; row data only, not collection-owned virtual fields.`,
     },
-  )
+    owns: [`src/proxy.ts`],
+    histories: accessPaths,
+    label: (path) => `preserves native writes through the ${path} access path`,
+    resolve: (path) => ({ path }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`proxy.access-path-writes`, plan, observe, () =>
+        runAccessPathWrites(plan.path),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 // Commented-out draft checks kept from the Proxy Library suite.
@@ -625,11 +638,29 @@ describe(`stored functions behave like native values`, () => {
     const { proxy } = createChangeProxy(make(f, f2))
     expect(probe(proxy, f)).toEqual(native)
   }
-  declareOracle({ check: [expectNativeProbeResult] })
 
-  it.each(probes)(`%s gives the native result`, (_name, probe) => {
-    oracleRoute(`case`)
-    expectNativeProbeResult(probe)
+  oracleProperty({
+    id: `proxy.stored-function-probes`,
+    law: {
+      statement: `Reading or calling a function stored as row data on a draft gives the observation that the same probe gives on a native row.`,
+      authority: `src/proxy.ts draft contract stated above; the probe on a plain native row is the model`,
+      limits: `The fifteen named read, call, assignment and inherited-constructor probes over one stored-function row.`,
+    },
+    owns: [`src/proxy.ts`],
+    histories: probes.map(([name]) => name),
+    label: (name) => `${name} gives the native result`,
+    resolve: (name) => ({
+      probe: probes.find(([candidate]) => candidate === name)![1],
+    }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `proxy.stored-function-probes`,
+        plan,
+        observe,
+        () => expectNativeProbeResult(plan.probe),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -706,11 +737,26 @@ describe(`defineProperty behaves like on a native row`, () => {
     const enumerable = expected.rest.enumerable === true
     expect(getChanges()).toEqual(enumerable ? { [key]: native[key] } : {})
   }
-  declareOracle({ check: [expectDefinitionMatchesNative] })
 
-  it.each(definitions)(`%s`, (_name, define) => {
-    oracleRoute(`case`)
-    expectDefinitionMatchesNative(define)
+  oracleProperty({
+    id: `proxy.define-property`,
+    law: {
+      statement: `Object.defineProperty on a draft gives the native result, value and descriptor, and a defined enumerable value is a change.`,
+      authority: `src/proxy.ts draft contract stated above; the same definition on a plain native row is the model`,
+      limits: `The nine named value, read-only, nested and getter definitions over one two-key row.`,
+    },
+    owns: [`src/proxy.ts`],
+    histories: definitions.map(([name]) => name),
+    label: (name) => name,
+    resolve: (name) => ({
+      define: definitions.find(([candidate]) => candidate === name)![1],
+    }),
+    model: recordedAssertionJudgment,
+    driver: (plan, record) =>
+      recordAssertionJudgment(`proxy.define-property`, plan, record, () =>
+        expectDefinitionMatchesNative(plan.define),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -760,11 +806,26 @@ describe(`frozen and sealed drafts keep nested writes`, () => {
     run(proxy)
     expect({ ...make(), ...getChanges() }).toEqual({ ...native })
   }
-  declareOracle({ check: [expectNativeRowAfter] })
 
-  it.each(histories)(`%s gives the native row`, (_name, run) => {
-    oracleRoute(`case`)
-    expectNativeRowAfter(run)
+  oracleProperty({
+    id: `proxy.frozen-nested-writes`,
+    law: {
+      statement: `Freezing, sealing or fixing a key of a draft does not lose a later nested write: applying the changes to the original gives the native row.`,
+      authority: `src/proxy.ts draft contract stated above; the same history on a plain native row is the model`,
+      limits: `The four named freeze, seal and fixed-key histories over one nested row.`,
+    },
+    owns: [`src/proxy.ts`],
+    histories: histories.map(([name]) => name),
+    label: (name) => `${name} gives the native row`,
+    resolve: (name) => ({
+      run: histories.find(([candidate]) => candidate === name)![1],
+    }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`proxy.frozen-nested-writes`, plan, observe, () =>
+        expectNativeRowAfter(plan.run),
+      ),
+    check: forwardAssertionJudgment,
   })
 
   // The boundary is a read-only and non-configurable key. A sealed key is

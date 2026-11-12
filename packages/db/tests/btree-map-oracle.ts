@@ -8,7 +8,6 @@ import { expect } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { BTree } from '../src/utils/btree.js'
 import { oracleAssertion } from './oracle-assertion-adapter.js'
-import { declareOracle } from './oracle-declaration.js'
 
 export type Payload = { v: number }
 export type Stored = Readonly<{ reference: Payload; v: number }>
@@ -32,7 +31,8 @@ export const arbitraryAction: fc.Arbitrary<Action> = fc.oneof(
 
 // A fixed campaign and a random campaign run the same history grammar. A path
 // replay of this property runs only its random campaign from the recorded seed
-// and shrink path: TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
+// and shrink path. Copy complete printed Replay: coordinates, including
+// TANSTACK_DB_ORACLE_UNIT, TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
 // TANSTACK_DB_ORACLE_PROPERTY=btree-map.history with
 // `pnpm exec vitest run packages/db/tests/btree-map-oracle.test.ts`.
 
@@ -211,6 +211,3 @@ export function expectRefinement(
   expectPair(tree.nextHigherPair(undefined), sorted[0], model)
   expectPair(tree.nextLowerPair(undefined), sorted[sorted.length - 1], model)
 }
-
-// The shared definition is used by both the product driver and calibration.
-declareOracle({ check: [expectRefinement], model: [stepModel] })

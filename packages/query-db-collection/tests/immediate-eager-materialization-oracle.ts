@@ -19,7 +19,6 @@
  * No persistence, mutations, stale data, fetching, or promise timing is claimed.
  */
 import fc from 'fast-check'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import type {
   ConstructedHistory,
   Observation,
@@ -319,11 +318,3 @@ export function immediateEagerMaterializationOptions(
     ],
   }
 }
-declareOracle({
-  model: [expectedImmediateMaterialization],
-  grammar: [
-    immediateMaterializationHistoryArb,
-    immediateMaterializationHistories,
-  ],
-  check: [checkImmediateMaterialization],
-})

@@ -1,5 +1,5 @@
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DbClient } from '../src/client.js'
 import { getLiveQueryHash } from '../src/live-query-options.js'
@@ -7,14 +7,13 @@ import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { Query, createLiveQueryCollection } from '../src/query/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
-import { oracleRoute } from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
 import { oracleProperty } from './oracle-property.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
+  rejectAt,
 } from './oracle-assertion-adapter.js'
 import { finishHistory } from './observer-history-cleanup.js'
 import {
@@ -375,16 +374,75 @@ async function checkHistory(
   }
 }
 
-declareOracle({
-  check: [checkRead, checkHistory, checkHealthHistory],
-  model: [modelRows],
-})
-
 const history = fc.array(command, { minLength: 1, maxLength: 24 })
 const reads = fc.array(
   fc.record({ snapshot: fc.nat({ max: 30 }), dataFirst: fc.boolean() }),
   { maxLength: 30 },
 )
+
+async function readOlderSnapshot() {
+  const commands: Array<Command> = [
+    { type: `upsert`, id: `a`, version: 1 },
+    { type: `upsert`, id: `b`, version: 1 },
+    { type: `capture` },
+    { type: `upsert`, id: `a`, version: 2 },
+    { type: `capture` },
+    { type: `delete`, id: `b` },
+    { type: `capture` },
+    { type: `upsert`, id: `c`, version: 3 },
+    { type: `capture` },
+  ]
+  for (const shape of [`ordered`, `single`] as const) {
+    for (const dataFirst of [true, false]) {
+      await checkHistory(shape, true, commands, [
+        { snapshot: 1, dataFirst },
+        { snapshot: 0, dataFirst: !dataFirst },
+      ])
+    }
+  }
+}
+
+// Calibration: the #1542 design. Its getters read the live query when first
+// accessed instead of the rows captured at snapshot time.
+async function checkLiveFirstAccess() {
+  const { observer, query, source } = setup(`ordered`)
+  try {
+    source.insert({ id: `a`, version: 1 })
+    const captured = observer.getSnapshot()
+    const hostile = Object.create(captured, {
+      data: { get: () => [...query.values()] },
+      state: { get: () => new Map(query.entries()) },
+    }) as Snapshot
+    source.update(`a`, (draft) => {
+      draft.version = 2
+    })
+    let rejection: unknown
+    try {
+      checkRead(
+        `ordered`,
+        { snapshot: hostile, rows: [{ id: `a`, version: 1 }] },
+        true,
+        `hostile`,
+      )
+    } catch (error) {
+      rejection = error
+    }
+    // Exactly the old matcher: only a data-rows or state-rows rejection counts.
+    if (
+      rejection instanceof Error &&
+      /data rows|state rows/.test(rejection.message)
+    )
+      rejectAt(`calibration: live first-access getters`, rejection)
+    if (rejection !== undefined)
+      throw new Error(
+        `the check rejected the live first-access getters with an error the old matcher did not accept: ${String(rejection)}`,
+      )
+  } finally {
+    observer.dispose()
+    await query.cleanup()
+    await source.cleanup()
+  }
+}
 
 describe(`retained live-query snapshots are point-in-time`, () => {
   // The tuple preserves the old two-arbitrary input. Every generated input
@@ -459,57 +517,39 @@ describe(`retained live-query snapshots are point-in-time`, () => {
     check: forwardAssertionJudgment,
   })
 
-  it(`reads a snapshot after several newer snapshots were built`, async () => {
-    oracleRoute(`fixed history`)
-    const commands: Array<Command> = [
-      { type: `upsert`, id: `a`, version: 1 },
-      { type: `upsert`, id: `b`, version: 1 },
-      { type: `capture` },
-      { type: `upsert`, id: `a`, version: 2 },
-      { type: `capture` },
-      { type: `delete`, id: `b` },
-      { type: `capture` },
-      { type: `upsert`, id: `c`, version: 3 },
-      { type: `capture` },
-    ]
-    for (const shape of [`ordered`, `single`] as const) {
-      for (const dataFirst of [true, false]) {
-        await checkHistory(shape, true, commands, [
-          { snapshot: 1, dataFirst },
-          { snapshot: 0, dataFirst: !dataFirst },
-        ])
-      }
-    }
-  })
-
-  it(`rejects a snapshot that reads the live Collection on first access`, async () => {
-    oracleRoute(`calibration`)
-    // Calibration: the #1542 design. Its getters read the live query when
-    // first accessed instead of the rows captured at snapshot time.
-    const { observer, query, source } = setup(`ordered`)
-    try {
-      source.insert({ id: `a`, version: 1 })
-      const captured = observer.getSnapshot()
-      const hostile = Object.create(captured, {
-        data: { get: () => [...query.values()] },
-        state: { get: () => new Map(query.entries()) },
-      }) as Snapshot
-      source.update(`a`, (draft) => {
-        draft.version = 2
-      })
-      expect(() =>
-        checkRead(
-          `ordered`,
-          { snapshot: hostile, rows: [{ id: `a`, version: 1 }] },
-          true,
-          `hostile`,
-        ),
-      ).toThrow(/data rows|state rows/)
-    } finally {
-      observer.dispose()
-      await query.cleanup()
-      await source.cleanup()
-    }
+  oracleProperty({
+    id: `live-query-observer.retained-snapshot-fixed`,
+    law: {
+      statement: `First and later reads of a retained snapshot preserve capture-time rows and container identity across both shapes and attachment cuts.`,
+      authority: `The point-in-time snapshot contract and ownership table above.`,
+      limits: `One fixed history that reads an older snapshot after several newer snapshots were built, in both shapes and both read orders; the calibration feeds the checker live first-access getters.`,
+    },
+    owns: [`src/live-query-observer.ts`],
+    histories: [`reads a snapshot after several newer snapshots were built`],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `retained snapshot rows and identity`,
+        plan,
+        observe,
+        () => readOlderSnapshot(),
+      ),
+    check: forwardAssertionJudgment,
+    calibrations: [
+      {
+        name: `rejects a snapshot that reads the live Collection on first access`,
+        law: `retained snapshot rows and identity`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `retained snapshot rows and identity`,
+            plan,
+            observe,
+            () => checkLiveFirstAccess(),
+          ),
+      },
+    ],
   })
 })
 
@@ -769,6 +809,20 @@ describe(`a snapshot shows the current health tree`, () => {
       runs: 80,
       fixedSeeds: [695],
       states: healthStates,
+      fixed: [
+        {
+          // Replay of the reported trace: a framework renders (detached
+          // read), a source reports a problem before commit, the framework
+          // commits (attach), then reads again.
+          name: `shows a health-only change made between a detached read and attach`,
+          history: [
+            { type: `read` },
+            { type: `report` },
+            { type: `subscribe` },
+            { type: `read` },
+          ],
+        },
+      ],
       // Five separately checked constructions preserve the old minimum of
       // five reached histories per state, now in each campaign independently.
       constructed: Array.from({ length: 5 }, (_, index) => ({
@@ -796,19 +850,6 @@ describe(`a snapshot shows the current health tree`, () => {
         (reach) => checkHealthHistory(commands, reach),
       ),
     check: forwardAssertionJudgment,
-  })
-
-  it(`shows a health-only change made between a detached read and attach`, async () => {
-    oracleRoute(`fixed history`)
-    // Replay of the reported trace: a framework renders (detached read), a
-    // source reports a problem before commit, the framework commits
-    // (attach), then reads again.
-    await checkHealthHistory([
-      { type: `read` },
-      { type: `report` },
-      { type: `subscribe` },
-      { type: `read` },
-    ])
   })
 })
 
@@ -1077,8 +1118,6 @@ async function checkContainerHistory(
     failure,
   )
 }
-
-declareOracle({ check: [checkContainerHistory], grammar: [containerHistory] })
 
 describe(`metadata snapshots share immutable row containers`, () => {
   const examples: Array<[ContainerHistory]> = (
@@ -1548,38 +1587,51 @@ async function checkCapturePathHistory(
   )
 }
 
-declareOracle({
-  check: [checkCapturePathHistory],
-  grammar: [capturePathHistory],
-})
-
 describe(`snapshot capture paths preserve row and layout laws`, () => {
   // These replay the same driver/check before the broad campaign so a value
   // failure cannot hide the distinct layout premise during RED verification.
-  for (const action of [`discard-write`, `discard-move`] as const)
-    it(`reads committed rows after ${action}`, async () => {
-      oracleRoute(`fixed history`)
-      const reach = snapshotReach<CapturePathReach>([
-        `ordered-granular`,
-        `initial-detached-granular`,
-        `discarded-write-granular-detached`,
-        `discarded-move-granular-detached`,
-        `layout-only-granular-detached`,
-      ])
-      await checkCapturePathHistory(
-        {
-          shape: `ordered`,
-          mode: `granular`,
-          attached: false,
-          hydrated: false,
-          count: 2,
-          deferralDepth: 1,
-          dataFirst: false,
-          commands: [action],
-        },
-        reach,
-      )
-    })
+  const readCommittedRows = async (
+    action: `discard-write` | `discard-move`,
+  ) => {
+    const reach = snapshotReach<CapturePathReach>([
+      `ordered-granular`,
+      `initial-detached-granular`,
+      `discarded-write-granular-detached`,
+      `discarded-move-granular-detached`,
+      `layout-only-granular-detached`,
+    ])
+    await checkCapturePathHistory(
+      {
+        shape: `ordered`,
+        mode: `granular`,
+        attached: false,
+        hydrated: false,
+        count: 2,
+        deferralDepth: 1,
+        dataFirst: false,
+        commands: [action],
+      },
+      reach,
+    )
+  }
+  oracleProperty({
+    id: `live-query-observer.capture-paths-discard`,
+    law: {
+      statement: `Retained snapshots preserve committed row values and layout through projection, findOne, hydration, and discarded publication deferrals.`,
+      authority: `The retained-snapshot contract and Collection deferred-publication contract described above.`,
+      limits: `One ordered granular detached history per discarded deferral kind, with only its five premise states declared.`,
+    },
+    owns: [`src/live-query-observer.ts`],
+    histories: [`discard-write`, `discard-move`] as const,
+    label: (action) => `reads committed rows after ${action}`,
+    resolve: (action) => ({ action }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`snapshot capture paths`, plan, observe, () =>
+        readCommittedRows(plan.action),
+      ),
+    check: forwardAssertionJudgment,
+  })
   const examples: Array<[CapturePathHistory]> = (
     [`ordered`, `single`] as const
   ).flatMap((shape) =>
@@ -1648,13 +1700,24 @@ describe(`snapshot capture paths preserve row and layout laws`, () => {
   ]
   // These original 13-command regressions deliberately remain direct replays:
   // the generated language still has its original maximum of 12 commands.
-  it.each(examples)(
-    `replays the retained capture-path history %#`,
-    async (scenario) => {
-      oracleRoute(`fixed history`)
-      await checkCapturePathHistory(scenario, snapshotReach(captureStates))
+  oracleProperty({
+    id: `live-query-observer.capture-paths-retained`,
+    law: {
+      statement: `Retained snapshots preserve committed row values and layout through projection, findOne, hydration, and discarded publication deferrals.`,
+      authority: `The retained-snapshot contract and Collection deferred-publication contract described above.`,
+      limits: `The sixteen original 13-command regressions over both shapes, modes, attachments and hydration; the generated language has at most 12 commands.`,
     },
-  )
+    owns: [`src/live-query-observer.ts`],
+    histories: examples.map((_, index) => index),
+    label: (index) => `replays the retained capture-path history ${index}`,
+    resolve: (index) => ({ scenario: examples[index]![0] }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`snapshot capture paths`, plan, observe, () =>
+        checkCapturePathHistory(plan.scenario, snapshotReach(captureStates)),
+      ),
+    check: forwardAssertionJudgment,
+  })
   oracleProperty<CapturePathHistory, Verdict>({
     id: `live-query-observer.capture-paths`,
     law: {
@@ -1999,7 +2062,6 @@ async function checkPayloadHistory(
     failure,
   )
 }
-declareOracle({ check: [checkPayloadHistory], grammar: [payloadHistory] })
 describe(`publications preserve nested record shape`, () => {
   const examples: Array<[PayloadHistory]> = (
     [`granular`, `wholesale`] as const
@@ -2314,7 +2376,6 @@ async function checkSparsePublication(
     failure,
   )
 }
-declareOracle({ check: [checkSparsePublication] })
 describe(`array value publication`, () => {
   oracleProperty<SparseArrayCase, Verdict>({
     id: `live-query-observer.sparse-array`,

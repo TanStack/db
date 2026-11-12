@@ -19,7 +19,6 @@
  * cache rotation, or intermediate-publication claim beyond the held response.
  */
 import fc from 'fast-check'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 
 export type RetainedScope = `a` | `b`
 export type ScopedHydrationRow = {
@@ -210,11 +209,6 @@ export function scopedHydrationReached(
       : []),
   ]
 }
-declareOracle({
-  model: [expectedScopedHydration],
-  grammar: [scopedHydrationHistoryArb, scopedHydrationHistories],
-  check: [scopedHydrationViolations],
-})
 
 /**
  * A newly acquired cached Query does not override a continuously owned row
@@ -288,8 +282,3 @@ export function cachedPeerClaimViolations(
     violations.push(`cached claim started an unexpected physical fetch`)
   return violations
 }
-declareOracle({
-  model: [expectedCachedPeerClaim],
-  grammar: [cachedPeerClaimHistoryArb, cachedPeerClaimHistories],
-  check: [cachedPeerClaimViolations],
-})

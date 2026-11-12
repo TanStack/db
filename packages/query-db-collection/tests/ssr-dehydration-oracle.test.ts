@@ -7,10 +7,14 @@ import {
   eq,
 } from '@tanstack/db'
 import { crossSerializeStream, getCrossReferenceHeader } from 'seroval'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { queryCollectionOptions } from '../src/query.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import type { DehydratedState } from '@tanstack/query-core'
 import type { LoadSubsetOptions } from '@tanstack/db'
 
@@ -119,13 +123,6 @@ function expectHydratedRow(
   browserClient.clear()
 }
 
-// What this oracle owns: the Query cache entries that queryCollectionOptions
-// creates and loads, which the SSR dehydration and stream checks observe.
-declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
-  check: [expectHydratedRow],
-})
-
 async function checkWithCleanup(
   check: () => Promise<void>,
   cleanups: ReadonlyArray<() => void | Promise<void>>,
@@ -161,143 +158,184 @@ async function checkWithCleanup(
   }
 }
 
-describe(`Query collection SSR dehydration oracle`, () => {
-  it(`serializes an ordinary successful Query cache entry`, async () => {
-    oracleRoute(`case`)
-    const queryClient = createQueryClient()
-    await checkWithCleanup(async () => {
-      queryClient.setQueryData([`plain-ssr-control`], [row])
-      const initial = dehydrate(queryClient)
-      expectDehydratedRow(initial)
-      const streamed = await serializeRouterPayload(initial)
-      expectHydratedRow(initial, streamed)
-    }, [() => queryClient.clear()])
-  })
+// Serializes an ordinary successful Query cache entry.
+async function serializeOrdinaryEntry(): Promise<void> {
+  const queryClient = createQueryClient()
+  await checkWithCleanup(async () => {
+    queryClient.setQueryData([`plain-ssr-control`], [row])
+    const initial = dehydrate(queryClient)
+    expectDehydratedRow(initial)
+    const streamed = await serializeRouterPayload(initial)
+    expectHydratedRow(initial, streamed)
+  }, [() => queryClient.clear()])
+}
 
-  it(`serializes a successful on-demand entry with a compound predicate`, async () => {
-    oracleRoute(`case`)
-    const queryClient = createQueryClient()
-    let receivedWhere: LoadSubsetOptions[`where`]
-    const collection = createCollection(
-      queryCollectionOptions<Row>({
-        id: `on-demand-ssr-oracle`,
-        queryClient,
-        queryKey: [`on-demand-ssr-oracle`],
-        meta: { origin: `user` },
-        queryFn: (context) => {
-          receivedWhere = context.meta?.loadSubsetOptions?.where
-          return Promise.resolve([row])
-        },
-        getKey: (item) => item.id,
-        syncMode: `on-demand`,
-        startSync: true,
-      }),
-    )
-    const live = createLiveQueryCollection((query) =>
-      query
-        .from({ item: collection })
-        .where(({ item }) => eq(item.category, `A`))
-        .where(({ item }) => eq(item.id, `1`))
-        .select(({ item }) => ({ id: item.id, category: item.category })),
-    )
-
-    await checkWithCleanup(async () => {
-      await live.preload()
-      expect(receivedWhere).toMatchObject({ type: `func`, name: `and` })
-      expect(receivedWhere).toBeInstanceOf(IR.Func)
-      expect(live.toArray.map((item) => item.id)).toEqual([row.id])
-
-      const initial = dehydrate(queryClient)
-      expectDehydratedRow(initial)
-      const streamed = await serializeRouterPayload(initial)
-      expectHydratedRow(initial, streamed, { origin: `user` })
-    }, [
-      () => live.cleanup(),
-      () => collection.cleanup(),
-      () => queryClient.clear(),
-    ])
-  })
-
-  it(`serializes a successful on-demand entry with a cancellation signal`, async () => {
-    oracleRoute(`case`)
-    const queryClient = createQueryClient()
-    const requestSignal = new AbortController().signal
-    let receivedSignal: AbortSignal | undefined
-    const collection = createCollection(
-      queryCollectionOptions<Row>({
-        id: `on-demand-ssr-signal-oracle`,
-        queryClient,
-        queryKey: [`on-demand-ssr-signal-oracle`],
-        queryFn: (context) => {
-          receivedSignal = context.meta?.loadSubsetOptions?.signal
-          return Promise.resolve([row])
-        },
-        getKey: (item) => item.id,
-        syncMode: `on-demand`,
-        startSync: true,
-      }),
-    )
-
-    await checkWithCleanup(async () => {
-      await collection._sync.loadSubset({
-        signal: requestSignal,
-      })
-      expect(receivedSignal).toBe(requestSignal)
-      const initial = dehydrate(queryClient)
-      expectDehydratedRow(initial)
-      const streamed = await serializeRouterPayload(initial)
-      expectHydratedRow(initial, streamed)
-    }, [() => collection.cleanup(), () => queryClient.clear()])
-  })
-
-  it(`serializes an ordered cursor request with a custom comparator`, async () => {
-    oracleRoute(`case`)
-    const queryClient = createQueryClient()
-    const compare = (a: string, b: string): number => a.localeCompare(b)
-    const orderBy: NonNullable<LoadSubsetOptions[`orderBy`]> = [
-      {
-        expression: new IR.PropRef([`id`]),
-        compareOptions: {
-          direction: `asc`,
-          nulls: `last`,
-          stringSort: `custom`,
-          compare,
-        },
+// Serializes a successful on-demand entry with a compound predicate.
+async function serializeCompoundPredicateEntry(): Promise<void> {
+  const queryClient = createQueryClient()
+  let receivedWhere: LoadSubsetOptions[`where`]
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id: `on-demand-ssr-oracle`,
+      queryClient,
+      queryKey: [`on-demand-ssr-oracle`],
+      meta: { origin: `user` },
+      queryFn: (context) => {
+        receivedWhere = context.meta?.loadSubsetOptions?.where
+        return Promise.resolve([row])
       },
-    ]
-    const cursor: NonNullable<LoadSubsetOptions[`cursor`]> = {
-      whereFrom: new IR.Func(`gt`, [new IR.PropRef([`id`]), new IR.Value(`0`)]),
-      whereCurrent: new IR.Func(`eq`, [
-        new IR.PropRef([`id`]),
-        new IR.Value(`1`),
-      ]),
-    }
-    let receivedOptions: LoadSubsetOptions | undefined
-    const collection = createCollection(
-      queryCollectionOptions<Row>({
-        id: `on-demand-ssr-cursor-oracle`,
-        queryClient,
-        queryKey: [`on-demand-ssr-cursor-oracle`],
-        queryFn: (context) => {
-          receivedOptions = context.meta?.loadSubsetOptions
-          return Promise.resolve([row])
-        },
-        getKey: (item) => item.id,
-        syncMode: `on-demand`,
-        startSync: true,
-      }),
-    )
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+    }),
+  )
+  const live = createLiveQueryCollection((query) =>
+    query
+      .from({ item: collection })
+      .where(({ item }) => eq(item.category, `A`))
+      .where(({ item }) => eq(item.id, `1`))
+      .select(({ item }) => ({ id: item.id, category: item.category })),
+  )
 
-    await checkWithCleanup(async () => {
-      await collection._sync.loadSubset({ orderBy, cursor })
-      expect(receivedOptions?.orderBy?.[0]?.compareOptions).toMatchObject({
+  await checkWithCleanup(async () => {
+    await live.preload()
+    expect(receivedWhere).toMatchObject({ type: `func`, name: `and` })
+    expect(receivedWhere).toBeInstanceOf(IR.Func)
+    expect(live.toArray.map((item) => item.id)).toEqual([row.id])
+
+    const initial = dehydrate(queryClient)
+    expectDehydratedRow(initial)
+    const streamed = await serializeRouterPayload(initial)
+    expectHydratedRow(initial, streamed, { origin: `user` })
+  }, [
+    () => live.cleanup(),
+    () => collection.cleanup(),
+    () => queryClient.clear(),
+  ])
+}
+
+// Serializes a successful on-demand entry with a cancellation signal.
+async function serializeCancellationSignalEntry(): Promise<void> {
+  const queryClient = createQueryClient()
+  const requestSignal = new AbortController().signal
+  let receivedSignal: AbortSignal | undefined
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id: `on-demand-ssr-signal-oracle`,
+      queryClient,
+      queryKey: [`on-demand-ssr-signal-oracle`],
+      queryFn: (context) => {
+        receivedSignal = context.meta?.loadSubsetOptions?.signal
+        return Promise.resolve([row])
+      },
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+    }),
+  )
+
+  await checkWithCleanup(async () => {
+    await collection._sync.loadSubset({
+      signal: requestSignal,
+    })
+    expect(receivedSignal).toBe(requestSignal)
+    const initial = dehydrate(queryClient)
+    expectDehydratedRow(initial)
+    const streamed = await serializeRouterPayload(initial)
+    expectHydratedRow(initial, streamed)
+  }, [() => collection.cleanup(), () => queryClient.clear()])
+}
+
+// Serializes an ordered cursor request with a custom comparator.
+async function serializeOrderedCursorEntry(): Promise<void> {
+  const queryClient = createQueryClient()
+  const compare = (a: string, b: string): number => a.localeCompare(b)
+  const orderBy: NonNullable<LoadSubsetOptions[`orderBy`]> = [
+    {
+      expression: new IR.PropRef([`id`]),
+      compareOptions: {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `custom`,
         compare,
-      })
-      expect(receivedOptions?.cursor?.whereFrom).toBe(cursor.whereFrom)
-      const initial = dehydrate(queryClient)
-      expectDehydratedRow(initial)
-      const streamed = await serializeRouterPayload(initial)
-      expectHydratedRow(initial, streamed)
-    }, [() => collection.cleanup(), () => queryClient.clear()])
+      },
+    },
+  ]
+  const cursor: NonNullable<LoadSubsetOptions[`cursor`]> = {
+    whereFrom: new IR.Func(`gt`, [new IR.PropRef([`id`]), new IR.Value(`0`)]),
+    whereCurrent: new IR.Func(`eq`, [
+      new IR.PropRef([`id`]),
+      new IR.Value(`1`),
+    ]),
+  }
+  let receivedOptions: LoadSubsetOptions | undefined
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id: `on-demand-ssr-cursor-oracle`,
+      queryClient,
+      queryKey: [`on-demand-ssr-cursor-oracle`],
+      queryFn: (context) => {
+        receivedOptions = context.meta?.loadSubsetOptions
+        return Promise.resolve([row])
+      },
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+    }),
+  )
+
+  await checkWithCleanup(async () => {
+    await collection._sync.loadSubset({ orderBy, cursor })
+    expect(receivedOptions?.orderBy?.[0]?.compareOptions).toMatchObject({
+      compare,
+    })
+    expect(receivedOptions?.cursor?.whereFrom).toBe(cursor.whereFrom)
+    const initial = dehydrate(queryClient)
+    expectDehydratedRow(initial)
+    const streamed = await serializeRouterPayload(initial)
+    expectHydratedRow(initial, streamed)
+  }, [() => collection.cleanup(), () => queryClient.clear()])
+}
+
+// Each fixed request form, by its test name, and the case that runs it.
+const ssrForms = new Map<string, () => Promise<void>>([
+  [
+    `serializes an ordinary successful Query cache entry`,
+    serializeOrdinaryEntry,
+  ],
+  [
+    `serializes a successful on-demand entry with a compound predicate`,
+    serializeCompoundPredicateEntry,
+  ],
+  [
+    `serializes a successful on-demand entry with a cancellation signal`,
+    serializeCancellationSignalEntry,
+  ],
+  [
+    `serializes an ordered cursor request with a custom comparator`,
+    serializeOrderedCursorEntry,
+  ],
+])
+
+describe(`Query collection SSR dehydration oracle`, () => {
+  oracleProperty({
+    id: `query-db.ssr-dehydration`,
+    law: {
+      statement: `A successful QueryClient cache entry, ordinary or on-demand with any request metadata, survives dehydrate and the router stream serialization and hydrates with its row and without its loadSubsetOptions.`,
+      authority: `The SSR boundary reported in #1950, as stated at the top of this file; Query Core dehydrate/hydrate and Seroval crossSerializeStream.`,
+      limits: `The four fixed request forms above through dehydrate and crossSerializeStream; it does not run TanStack Start or prove that a browser Collection resumes the query.`,
+    },
+    // What this oracle owns: the Query cache entries that queryCollectionOptions
+    // creates and loads, which the SSR dehydration and stream checks observe.
+    owns: [`src/query.ts#queryCollectionOptions`],
+    histories: [...ssrForms.keys()],
+    label: (form) => form,
+    resolve: (form) => ({ form }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`ssr dehydration`, plan, observe, () =>
+        ssrForms.get(plan.form)!(),
+      ),
+    check: forwardAssertionJudgment,
   })
 })

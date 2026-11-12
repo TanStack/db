@@ -26,7 +26,6 @@ import {
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from './oracle-assertion-adapter.js'
-import { declareOracle } from './oracle-declaration.js'
 import { withOracleCleanup } from './utils.js'
 import type { Verdict } from './oracle-property.js'
 import type { DehydratedLiveQueryResult } from '../src/client.js'
@@ -361,9 +360,4 @@ describe(`SSR stream record lifetime`, () => {
       ),
     check: forwardAssertionJudgment,
   })
-})
-
-declareOracle({
-  check: [checkRecordHistory],
-  grammar: [grammar],
 })

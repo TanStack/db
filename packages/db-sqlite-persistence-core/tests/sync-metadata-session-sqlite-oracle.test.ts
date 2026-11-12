@@ -1,19 +1,21 @@
 // @vitest-environment node
-import { it } from 'vitest'
 import {
-  describeMismatch,
   persistedPeerFullGrammar,
   persistedPeerGrammar,
   persistedPeerOnDemandGrammar,
   runSessionHistory,
   seedReinsertReloadReplay,
 } from '../../db/tests/sync-metadata-session-oracle'
-import { oracleReplayTest } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   registerKeptMetadataDurabilityProperty,
   registerSeedReinsertReloadProperty,
 } from './sync-metadata-session-campaign-oracle'
 import { createSQLiteDriver } from './sync-metadata-session-sqlite-driver'
+import {
+  checkSessionRuns,
+  observeSessionRun,
+} from './sync-metadata-session-runs'
 import type {
   SessionAction,
   SessionGrammar,
@@ -32,16 +34,44 @@ async function check(
     createSQLiteDriver(productionPath),
   )
 }
-oracleReplayTest(it).each(productionPaths)(
-  `receives the seed/re-insert/reload replay through SQLite ($name)`,
-  async (productionPath) => {
-    const result = await check(seedReinsertReloadReplay, productionPath)
-    if (result.mismatch)
-      throw new Error(
-        describeMismatch(seedReinsertReloadReplay, result.mismatch),
-      )
+// The seed/re-insert/reload replay through SQLite on each peer production
+// path, with the model, driver, and comparison of the generated campaigns.
+oracleProperty({
+  id: `sync-metadata-session.sqlite-seed-reinsert-reload-replay`,
+  law: {
+    statement: `A source read through SQLite persistence gives what the same read gives on a bare Collection for the seed/re-insert/reload replay on every peer production path.`,
+    authority: `The sync metadata session oracle's laws and decisions (packages/db/tests/sync-metadata-session-oracle.ts header).`,
+    limits: `The one named replay on the three peer production paths.`,
   },
-)
+  owns: [`src/persisted.ts`, `src/sqlite-core-adapter.ts`],
+  histories: productionPaths.map(({ name }) => name),
+  label: (name) =>
+    `receives the seed/re-insert/reload replay through SQLite (${name})`,
+  resolve: (name) => ({
+    productionPath: productionPaths.find((path) => path.name === name)!,
+  }),
+  model: ({ productionPath }) => [
+    {
+      path: productionPath.name,
+      name: `history`,
+      actions: seedReinsertReloadReplay.length,
+    },
+  ],
+  driver: ({ productionPath }, observe) =>
+    observeSessionRun(
+      observe,
+      {
+        path: productionPath.name,
+        name: `history`,
+        actions: seedReinsertReloadReplay.length,
+      },
+      seedReinsertReloadReplay,
+      () => check(seedReinsertReloadReplay, productionPath),
+    ),
+  check: (_plan, observations, owed) =>
+    checkSessionRuns(observations, owed, { constructive: false }),
+  timeout: 240_000,
+})
 
 // The peer action asserts actual requiresFullReload delivery before the
 // shared comparison passes; the property changes no host premise.

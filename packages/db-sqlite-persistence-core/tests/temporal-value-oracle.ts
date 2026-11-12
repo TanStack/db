@@ -8,7 +8,6 @@
  */
 import { Temporal } from 'temporal-polyfill'
 import { IR } from '@tanstack/db'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 export { Temporal }
 
@@ -184,4 +183,3 @@ export function temporalQueryCases(family: TemporalFamily) {
 
 // Owns nothing: this module holds the typed-value fixtures and query cases. The
 // production path is driven by sqlite-temporal-value-oracle.test.ts, which declares it.
-declareOracle({ model: [temporalQueryCases] })

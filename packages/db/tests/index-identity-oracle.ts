@@ -1,7 +1,6 @@
 // Exact index identity membership is determined by live source descriptors.
 import { expect } from 'vitest'
 import { oracleAssertion } from './oracle-assertion-adapter'
-import { declareOracle } from './oracle-declaration'
 import type { BaseIndex } from '../src/indexes/base-index.js'
 
 type GroupRow<T> = Readonly<{ key: string; value: T; groupId: number }>
@@ -25,5 +24,3 @@ export function expectExactIdentities<T>(
     )
   }
 }
-
-declareOracle({ check: [expectExactIdentities] })

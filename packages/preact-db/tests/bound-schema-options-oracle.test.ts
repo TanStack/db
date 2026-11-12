@@ -7,7 +7,7 @@
  */
 import { act } from 'preact/test-utils'
 import { useLiveQuery } from '../src/useLiveQuery'
-import { declareOracle, oracleProperty } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-config'
 import {
   boundSchemaGrammar,
   boundSchemaHistories,
@@ -138,10 +138,4 @@ oracleProperty({
       ],
     },
   ],
-})
-
-declareOracle({
-  grammar: [histories],
-  model: [modelBoundSchemaReceiver],
-  check: [checkBoundSchemaReceiver],
 })

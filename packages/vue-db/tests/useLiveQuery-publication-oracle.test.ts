@@ -29,9 +29,13 @@
  */
 import { createCollection } from '@tanstack/db'
 import { effectScope, watch } from 'vue'
-import { expect, it, vi } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import { expect, vi } from 'vitest'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 
@@ -98,108 +102,129 @@ function expectCoherentPublication(
   expect(observed.at(-1)?.publicData).toEqual(expected.after)
 }
 
-it.each(cases)(
-  `publishes one coherent Vue data snapshot for a source $name through $input`,
-  async ({ name, initial, change, input }) => {
-    oracleRoute(`case`)
-    const source = createCollection(
-      mockSyncCollectionOptions<Row>({
-        id: `vue-publication-${name}-${input}`,
-        getKey: (row) => row.id,
-        initialData: initial,
-      }),
+// The former test body, unchanged: mount the real hook, apply one sync
+// transaction, and judge the watcher's observations with
+// expectCoherentPublication. Cleanup failures keep their original precedence.
+async function runPublicationCase({
+  name,
+  initial,
+  change,
+  input,
+}: (typeof cases)[number]): Promise<void> {
+  const source = createCollection(
+    mockSyncCollectionOptions<Row>({
+      id: `vue-publication-${name}-${input}`,
+      getKey: (row) => row.id,
+      initialData: initial,
+    }),
+  )
+  const scope = effectScope()
+  const expectedBefore = snapshot(initial)
+  let resultCollection: { value: unknown } | undefined
+  let primaryFailure: unknown
+  try {
+    const result = scope.run(() =>
+      input === `collection`
+        ? useLiveQuery(source)
+        : useLiveQuery((q) =>
+            q.from({ items: source }).select(({ items }) => ({
+              id: items.id,
+              value: items.value,
+            })),
+          ),
+    )!
+    resultCollection = result.collection
+    await vi.waitFor(() =>
+      expect(snapshot(result.data.value)).toEqual(expectedBefore),
     )
-    const scope = effectScope()
-    const expectedBefore = snapshot(initial)
-    let resultCollection: { value: unknown } | undefined
-    let primaryFailure: unknown
+
+    const observed: Array<{
+      publicData: Snapshot
+      sourceAtCallback: Snapshot
+    }> = []
+    scope.run(() =>
+      watch(
+        () => snapshot(result.data.value),
+        (publicData) => {
+          observed.push({
+            publicData,
+            sourceAtCallback: snapshot(source.values()),
+          })
+        },
+        { flush: `sync` },
+      ),
+    )
+
+    source.utils.begin()
+    source.utils.write(change)
+    source.utils.commit()
+
+    const expectedAfter = snapshot(source.values())
+    expect(expectedAfter).not.toEqual(expectedBefore)
+    expectCoherentPublication(
+      { before: expectedBefore, after: expectedAfter },
+      observed,
+      snapshot(result.data.value),
+    )
+  } catch (error) {
+    primaryFailure = error
+  }
+  const cleanupErrors: Array<unknown> = []
+  let liveQueryCollection: typeof source | null = null
+  if (resultCollection) {
     try {
-      const result = scope.run(() =>
-        input === `collection`
-          ? useLiveQuery(source)
-          : useLiveQuery((q) =>
-              q.from({ items: source }).select(({ items }) => ({
-                id: items.id,
-                value: items.value,
-              })),
-            ),
-      )!
-      resultCollection = result.collection
-      await vi.waitFor(() =>
-        expect(snapshot(result.data.value)).toEqual(expectedBefore),
-      )
-
-      const observed: Array<{
-        publicData: Snapshot
-        sourceAtCallback: Snapshot
-      }> = []
-      scope.run(() =>
-        watch(
-          () => snapshot(result.data.value),
-          (publicData) => {
-            observed.push({
-              publicData,
-              sourceAtCallback: snapshot(source.values()),
-            })
-          },
-          { flush: `sync` },
-        ),
-      )
-
-      source.utils.begin()
-      source.utils.write(change)
-      source.utils.commit()
-
-      const expectedAfter = snapshot(source.values())
-      expect(expectedAfter).not.toEqual(expectedBefore)
-      expectCoherentPublication(
-        { before: expectedBefore, after: expectedAfter },
-        observed,
-        snapshot(result.data.value),
-      )
-    } catch (error) {
-      primaryFailure = error
-    }
-    const cleanupErrors: Array<unknown> = []
-    let liveQueryCollection: typeof source | null = null
-    if (resultCollection) {
-      try {
-        liveQueryCollection = resultCollection.value as typeof source | null
-      } catch (error) {
-        cleanupErrors.push(error)
-      }
-    }
-    try {
-      scope.stop()
+      liveQueryCollection = resultCollection.value as typeof source | null
     } catch (error) {
       cleanupErrors.push(error)
     }
-    if (liveQueryCollection && liveQueryCollection !== source) {
-      try {
-        await liveQueryCollection.cleanup()
-      } catch (error) {
-        cleanupErrors.push(error)
-      }
-    }
+  }
+  try {
+    scope.stop()
+  } catch (error) {
+    cleanupErrors.push(error)
+  }
+  if (liveQueryCollection && liveQueryCollection !== source) {
     try {
-      await source.cleanup()
+      await liveQueryCollection.cleanup()
     } catch (error) {
       cleanupErrors.push(error)
     }
-    if (cleanupErrors.length > 0) {
-      throw new AggregateError(
-        primaryFailure === undefined
-          ? cleanupErrors
-          : [primaryFailure, ...cleanupErrors],
-        `Vue publication oracle cleanup failed`,
-        { cause: primaryFailure },
-      )
-    }
-    if (primaryFailure !== undefined) throw primaryFailure
+  }
+  try {
+    await source.cleanup()
+  } catch (error) {
+    cleanupErrors.push(error)
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(
+      primaryFailure === undefined
+        ? cleanupErrors
+        : [primaryFailure, ...cleanupErrors],
+      `Vue publication oracle cleanup failed`,
+      { cause: primaryFailure },
+    )
+  }
+  if (primaryFailure !== undefined) throw primaryFailure
+}
+
+const PUBLICATION_LAW = `One applied source change exposes only the preceding or the final data snapshot to a synchronous Vue watcher, which fires once with the final result.`
+
+oracleProperty({
+  id: `vue.use-live-query-publication`,
+  law: {
+    statement: PUBLICATION_LAW,
+    authority: `packages/db/tests/conformance/contract.ts data; the project glossary's publication; this file's contract above.`,
+    limits: `Two or three initial rows, a supplied Collection or an identity live query, and one insert, update, or nonterminal delete; empty results, multi-change transactions, and recompilation are not covered.`,
   },
-)
-
-declareOracle({
   owns: [`src/useLiveQuery.ts#useLiveQuery`],
-  check: [expectCoherentPublication],
+  histories: cases,
+  label: ({ name, input }) =>
+    `publishes one coherent Vue data snapshot for a source ${name} through ${input}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(PUBLICATION_LAW, plan, observe, () =>
+      runPublicationCase(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })

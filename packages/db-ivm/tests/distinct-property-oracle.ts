@@ -4,7 +4,6 @@
  * cause survives. Missing construction reach is checked last at an unrecorded
  * checkpoint, which cannot turn a graph or setup error into a semantic kill.
  */
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { pass, violation } from '../../db/tests/oracle-property.js'
 import { OracleComparisonMismatch } from './incrementalization-law-oracle.js'
 import type { Observation, Verdict } from '../../db/tests/oracle-property.js'
@@ -76,5 +75,3 @@ export function checkDistinctCampaign(
       )
   return pass
 }
-
-declareOracle({ check: [checkDistinctCampaign] })

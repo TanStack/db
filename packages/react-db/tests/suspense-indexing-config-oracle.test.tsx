@@ -49,7 +49,6 @@ import {
   indexOptionAbsencePairs,
 } from '../../db/tests/conformance/indexing-config-oracle'
 import { expectUnorderedRows } from '../../db/tests/conformance/result-laws'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-config'
 import {
   forwardAssertionJudgment,
@@ -63,15 +62,6 @@ import type { ReactNode } from 'react'
 import type { IndexSettings } from '../../db/tests/conformance/indexing-config-oracle'
 import type { Row } from '../../db/tests/conformance/contract'
 
-declareOracle({
-  grammar: [indexConfigurationPairs, indexOptionAbsencePairs],
-  model: [expectedIndexing],
-  check: [
-    expectIndexingAdmission,
-    expectIndexingConfiguration,
-    expectIndependentIndexingOutputs,
-  ],
-})
 function createSameNameIndex() {
   return class SameNameIndex extends BasicIndex {}
 }

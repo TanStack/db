@@ -2,11 +2,51 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const [mutation = `none`, ownerRef] = process.argv.slice(2)
 const root = process.cwd()
 const packageRoot = resolve(root, `packages/db-sqlite-persistence-core`)
 const ownerPath = `packages/db-sqlite-persistence-core/tests/persisted-options-type-oracle.ts`
+// These compiler/admission drivers use no Vitest timers or assertions. Keep
+// native registration and its unit selection, supplying only a callback host.
+const callbackHost = `
+export const callbacks = [];
+let suite;
+export const describe = (name, body) => {
+  const parent = suite;
+  suite = { name, suite: parent };
+  try { body(); } finally { suite = parent; }
+};
+export const it = Object.assign((name, body, timeout) => {
+  const task = { name, suite };
+  callbacks.push({ name: name, timeout, fn: () => body({ task, signal: new AbortController().signal }) });
+}, { skip() {} });
+export const expect = { getState: () => ({}) };
+export const vi = new Proxy({}, { get() { throw new Error('Compiler calibration does not support virtual timers'); } });
+`
+const callbackPlugin = {
+  name: `native-oracle-calibration-host`,
+  setup(builder) {
+    builder.onResolve({ filter: /oracle-config(?:\.[jt]s)?$/ }, (args) => {
+      const candidate = resolve(args.resolveDir, args.path)
+      const config = resolve(root, `packages/db/tests/oracle-config`)
+      if ([config, `${config}.js`, `${config}.ts`].includes(candidate))
+        return { path: `${config}.ts`, sideEffects: true }
+    })
+    // Bundle the framework too, so its Vitest import uses the same host.
+    builder.onResolve({ filter: /^@tanstack\/oracles$/ }, () => ({
+      path: fileURLToPath(import.meta.resolve(`@tanstack/oracles`)),
+    }))
+    builder.onResolve({ filter: /^vitest$/ }, () => ({
+      path: `vitest`,
+      namespace: `calibration`,
+    }))
+    builder.onLoad({ filter: /.*/, namespace: `calibration` }, () => ({
+      contents: callbackHost,
+    }))
+  },
+}
 let source = ownerRef
   ? execFileSync(`git`, [`show`, `${ownerRef}:${ownerPath}`], {
       encoding: `utf8`,
@@ -22,6 +62,7 @@ if (mutation.startsWith(`utility-`)) {
   )
   const guard = `options.utils && name in options.utils`
   const controls = {
+    'utility-none': () => original,
     'utility-parent': () =>
       execFileSync(
         `git`,
@@ -45,7 +86,7 @@ if (mutation.startsWith(`utility-`)) {
   if (!(mutation in controls))
     throw new Error(`Unknown runtime control: ${mutation}`)
   const altered = controls[mutation]()
-  if (altered === original)
+  if (altered === original && mutation !== `utility-none`)
     throw new Error(`Missing mutation target: ${mutation}`)
   mkdirSync(`.context`, { recursive: true })
   const filename = resolve(
@@ -74,16 +115,10 @@ if (mutation.startsWith(`utility-`)) {
       ]),
     ),
     plugins: [
+      callbackPlugin,
       {
         name: `utility-admission-calibration`,
         setup(builder) {
-          builder.onResolve({ filter: /^vitest$/ }, () => ({
-            path: `vitest`,
-            namespace: `calibration`,
-          }))
-          builder.onLoad({ filter: /.*/, namespace: `calibration` }, () => ({
-            contents: `export const callbacks = []; export const it = Object.assign((name, fn) => callbacks.push({ name, fn }), { skip() {} });`,
-          }))
           builder.onLoad({ filter: /\/persisted\.ts$/ }, ({ path }) =>
             path === resolve(packageRoot, `src/persisted.ts`)
               ? { contents: altered, loader: `ts` }
@@ -104,6 +139,9 @@ if (mutation.startsWith(`utility-`)) {
       TANSTACK_DB_ORACLE_SEED: `2259`,
       TANSTACK_DB_ORACLE_PATH: process.env.TANSTACK_DB_ORACLE_PATH ?? `0:0:0`,
       TANSTACK_DB_ORACLE_PROPERTY: `persisted-options.utilities.core`,
+      TANSTACK_DB_ORACLE_UNIT:
+        process.env.TANSTACK_DB_ORACLE_UNIT ??
+        `random seed: all utility admission forms`,
     },
   })
   if (result.error) throw result.error
@@ -269,15 +307,43 @@ const receiver =
   (mutation.startsWith(`query-`) ? `browser` : `core`)
 if (![`core`, `browser`].includes(receiver))
   throw new Error(`Unknown receiver: ${receiver}`)
+const nativeRegistration = source.includes(`import { oracleProperty }`)
+const historicalCompanions =
+  ownerRef && !nativeRegistration
+    ? resolve(root, `.context/calibration-owner-${process.pid}`)
+    : undefined
+const companionNames = [
+  `oracle-config`,
+  `oracle-reach`,
+  `oracle-replay-witness`,
+]
+if (historicalCompanions) {
+  mkdirSync(historicalCompanions, { recursive: true })
+  for (const name of companionNames)
+    writeFileSync(
+      resolve(historicalCompanions, `${name}.ts`),
+      execFileSync(
+        `git`,
+        [`show`, `${ownerRef}:packages/db/tests/${name}.ts`],
+        {
+          encoding: `utf8`,
+        },
+      ),
+    )
+}
 source = source.replace(
   "import { it } from 'vitest'",
   `const callbacks: Array<{name: string; fn: () => Promise<void>; timeout: number}> = [];
 const it = Object.assign((name: string, fn: () => Promise<void>, timeout: number) => callbacks.push({name, fn, timeout}), {skip: () => {}});`,
 )
-for (const name of [`oracle-config`]) {
+for (const name of companionNames) {
   source = source.replace(
     `'../../db/tests/${name}.js'`,
-    JSON.stringify(resolve(root, `packages/db/tests/${name}.ts`)),
+    JSON.stringify(
+      historicalCompanions
+        ? resolve(historicalCompanions, `${name}.ts`)
+        : resolve(root, `packages/db/tests/${name}.ts`),
+    ),
   )
 }
 source = source.replace(
@@ -322,9 +388,10 @@ if (process.env.ORACLE_COMPILER_WORK === `1`) {
     // Each expected error`,
   )
 }
-source += `\nregisterPersistedOptionsTypeOracle(${JSON.stringify(receiver)});
-const selected = callbacks.find(({name}) => name.endsWith('(replay)') || name.endsWith('(fixed)'));
-if (!selected) throw new Error('Missing calibration campaign');
+source += `${nativeRegistration ? `\nimport { callbacks } from 'vitest';\nimport { oracleRuns } from ${JSON.stringify(resolve(root, `packages/db/tests/oracle-config.ts`))};` : ``}
+registerPersistedOptionsTypeOracle(${JSON.stringify(receiver)});
+const selected = ${nativeRegistration ? `callbacks.filter(({name}) => process.env.TANSTACK_DB_ORACLE_PATH === undefined ? name.startsWith('fixed seed 2259:') : name === process.env.TANSTACK_DB_ORACLE_UNIT)` : `callbacks.filter(({name}) => name.endsWith('(replay)') || name.endsWith('(fixed)'))`};
+if (selected.length === 0) throw new Error('Missing calibration campaign');
 if (process.env.ORACLE_REGISTRATION_ONLY === '1') {
   const multiplier = readOracleRunConfig().multiplier;
   console.info(JSON.stringify({multiplier, runs: oracleRuns(12), timeouts: callbacks.map(({timeout}) => timeout)}));
@@ -333,7 +400,7 @@ if (process.env.ORACLE_REGISTRATION_ONLY === '1') {
   let beats = 0;
   const heartbeat = setInterval(() => beats++, 1);
   try {
-    for (const campaign of process.env.ORACLE_ALL_CAMPAIGNS === '1' ? callbacks : [selected]) await campaign.fn();
+    for (const campaign of process.env.ORACLE_ALL_CAMPAIGNS === '1' ? callbacks : selected) await campaign.fn();
   } finally { clearInterval(heartbeat); }
   if (process.env.ORACLE_COMPILER_WORK === '1') console.info('WORKER_HEARTBEATS', beats);
 }
@@ -341,18 +408,42 @@ console.info('CALIBRATION ACCEPTED: ${mutation}');\n`
 mkdirSync(`.context`, { recursive: true })
 const filename = resolve(
   root,
-  `.context/calibrate-persisted-${mutation}-${receiver}-${process.pid}.ts`,
+  `.context/calibrate-persisted-${mutation}-${receiver}-${process.pid}.${nativeRegistration ? `mjs` : `ts`}`,
 )
-writeFileSync(filename, source)
-const result = spawnSync(resolve(root, `node_modules/.bin/tsx`), [filename], {
-  stdio: `inherit`,
-  env: {
-    ...process.env,
-    TANSTACK_DB_ORACLE_SEED: `2259`,
-    ...(process.env.TANSTACK_DB_ORACLE_PATH
-      ? { TANSTACK_DB_ORACLE_PROPERTY: `persisted-options.types.${receiver}` }
-      : {}),
+if (nativeRegistration) {
+  const { build } = await import(`esbuild`)
+  await build({
+    stdin: {
+      contents: source,
+      resolveDir: resolve(packageRoot, `tests`),
+      loader: `ts`,
+    },
+    outfile: filename,
+    bundle: true,
+    platform: `node`,
+    format: `esm`,
+    packages: `external`,
+    plugins: [callbackPlugin],
+  })
+} else {
+  writeFileSync(filename, source)
+}
+const result = spawnSync(
+  process.execPath,
+  nativeRegistration ? [filename] : [`--import`, `tsx`, filename],
+  {
+    stdio: `inherit`,
+    env: {
+      ...process.env,
+      TANSTACK_DB_ORACLE_SEED: `2259`,
+      TANSTACK_DB_ORACLE_UNIT: process.env.TANSTACK_DB_ORACLE_PATH
+        ? process.env.TANSTACK_DB_ORACLE_UNIT
+        : undefined,
+      ...(process.env.TANSTACK_DB_ORACLE_PATH
+        ? { TANSTACK_DB_ORACLE_PROPERTY: `persisted-options.types.${receiver}` }
+        : {}),
+    },
   },
-})
+)
 if (result.error) throw result.error
 process.exitCode = result.status ?? 1

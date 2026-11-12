@@ -1,10 +1,8 @@
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { DbClient } from '../src/client.js'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
-import { oracleRoute } from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
 import { finishHistory } from './observer-history-cleanup.js'
 import { withOracleCleanup } from './utils.js'
 import { differs, oracleProperty, pass } from './oracle-property.js'
@@ -13,6 +11,7 @@ import {
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
+  rejectAt,
 } from './oracle-assertion-adapter.js'
 import type { Verdict } from './oracle-property.js'
 import type { ChangeMessage } from '../src/types.js'
@@ -1253,12 +1252,6 @@ function reactionHistory(reaction: Reaction): Array<Command> {
   ]
 }
 
-declareOracle({
-  check: [runHistory, assertHistory],
-  model: [subscribeModel, unsubscribeModel, publishModel, disposeModel],
-  grammar: [command, listener],
-})
-
 // Registration delegates to runHistory's existing independent eligibility
 // model and comparisons. The adapter preserves its assertion object and never
 // converts setup, production, or cleanup failures into comparison verdicts.
@@ -1269,6 +1262,178 @@ const listenerReachStates = [
   `command:dispose`,
   ...reactions.map((reaction) => `reaction:${reaction}`),
 ]
+// A calibration runs a production mutant of runHistory and accepts exactly the
+// old rejection: an AssertionError from the eligibility ledger's comparison.
+// It returns that rejection, so the caller can check its premises first.
+async function mutantRejection(
+  name: string,
+  mutantRun: () => Promise<unknown>,
+): Promise<Error | undefined> {
+  try {
+    await mutantRun()
+  } catch (error) {
+    if (error instanceof Error && error.name === `AssertionError`) return error
+    throw new Error(
+      `${name}: the check rejected with an error the old matcher did not accept: ${String(error)}`,
+    )
+  }
+  return undefined
+}
+
+const joiningHistory: Array<Command> = [
+  { type: `subscribe`, listener: 0 },
+  {
+    type: `publish`,
+    version: 1,
+    nestedVersion: 0,
+    reactor: 0,
+    peer: 1,
+    reaction: `addPeer`,
+  },
+  {
+    type: `publish`,
+    version: 2,
+    nestedVersion: 0,
+    reactor: 0,
+    peer: 0,
+    reaction: `none`,
+  },
+]
+
+const duplicateBootstrapHistory: Array<Command> = [
+  {
+    type: `publish`,
+    version: 1,
+    nestedVersion: 0,
+    reactor: 0,
+    peer: 0,
+    reaction: `none`,
+  },
+  { type: `subscribe`, listener: 0 },
+]
+
+const versionMarginHistory: Array<Command> = [
+  {
+    type: `publish`,
+    version: -20,
+    nestedVersion: -20,
+    reactor: 0,
+    peer: 0,
+    reaction: `none`,
+  },
+  { type: `subscribe`, listener: 0 },
+  {
+    type: `publish`,
+    version: 20,
+    nestedVersion: 20,
+    reactor: 0,
+    peer: 0,
+    reaction: `nested`,
+  },
+  {
+    type: `publish`,
+    version: 20,
+    nestedVersion: 20,
+    reactor: 0,
+    peer: 0,
+    reaction: `none`,
+  },
+]
+
+type CalibrationPlan = Array<Command>
+type CalibrationObserve = (checkpoint: string, value: unknown) => void
+
+// Each old calibration test runs whole as a mutant driver: its clean premise
+// run, its exact reach premise, and the mutant that the ledger must reject.
+function historyCalibrations(mode: `granular` | `wholesale`) {
+  const calibration = (
+    name: string,
+    body: () => Promise<void>,
+  ): {
+    name: string
+    law: string
+    driver: (
+      plan: CalibrationPlan,
+      observe: CalibrationObserve,
+    ) => Promise<void>
+  } => ({
+    name,
+    law: `listener eligibility ledger`,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `listener eligibility ledger`,
+        plan,
+        observe,
+        body,
+      ),
+  })
+  return [
+    calibration(
+      `${mode} listeners joining during dispatch start with the next eligible publication`,
+      async () => {
+        const history = joiningHistory
+        const reach = emptyReach()
+        await runHistory(mode, history, { reach })
+        expect(reach.reactions.addPeer).toBe(1)
+        const rejection = await mutantRejection(`early peer delivery`, () =>
+          runHistory(mode, history, { mutant: `earlyPeerDelivery` }),
+        )
+        if (rejection) rejectAt(`calibration: early peer delivery`, rejection)
+      },
+    ),
+    calibration(
+      `rejects dropped peer delivery after a throwing listener through the ${mode} production path`,
+      async () => {
+        const history = reactionHistory(`throw`)
+        await runHistory(mode, history)
+        const reach = emptyReach()
+        const rejection = await mutantRejection(
+          `dropped peer after throw`,
+          () =>
+            runHistory(mode, history, { mutant: `dropPeerAfterThrow`, reach }),
+        )
+        expect(reach.reactions.throw).toBe(1)
+        if (rejection)
+          rejectAt(`calibration: dropped peer after throw`, rejection)
+      },
+    ),
+    ...(mode === `granular`
+      ? [
+          calibration(
+            `rejects a duplicate granular bootstrap through the production seed path`,
+            async () => {
+              const history = duplicateBootstrapHistory
+              await runHistory(`granular`, history)
+              const rejection = await mutantRejection(
+                `duplicate bootstrap`,
+                () =>
+                  runHistory(`granular`, history, {
+                    mutant: `duplicateBootstrap`,
+                  }),
+              )
+              if (rejection)
+                rejectAt(`calibration: duplicate bootstrap`, rejection)
+            },
+          ),
+        ]
+      : []),
+    calibration(
+      `rejects a reentrant publication delivered out of FIFO order through the ${mode} production path`,
+      async () => {
+        const history = reactionHistory(`nested`)
+        await runHistory(mode, history)
+        const reach = emptyReach()
+        const rejection = await mutantRejection(`reentrant out of order`, () =>
+          runHistory(mode, history, { mutant: `reentrantOutOfOrder`, reach }),
+        )
+        expect(reach.reactions.nested).toBe(1)
+        if (rejection)
+          rejectAt(`calibration: reentrant out of order`, rejection)
+      },
+    ),
+  ]
+}
+
 for (const [mode, id] of [
   [`granular`, `live-query-observer.granular-history`],
   [`wholesale`, `live-query-observer.wholesale-history`],
@@ -1286,6 +1451,12 @@ for (const [mode, id] of [
       runs: 75,
       fixedSeeds: [1813, -1359260562],
       states: listenerReachStates,
+      fixed: [
+        {
+          name: `${mode} one-row version margins retain the no-change boundary`,
+          history: versionMarginHistory,
+        },
+      ],
       constructed: [
         {
           name: `subscription ownership commands`,
@@ -1328,144 +1499,53 @@ for (const [mode, id] of [
         if (count > 0) observe(`reach`, `reaction:${reaction}`)
     },
     check: forwardAssertionJudgment,
+    calibrations: historyCalibrations(mode),
   })
 }
 
-describe(`LiveQueryObserver generated histories`, () => {
-  it.each([`granular`, `wholesale`] as const)(
-    `%s listeners joining during dispatch start with the next eligible publication`,
-    async (mode) => {
-      oracleRoute(`fixed history`)
-      const history: Array<Command> = [
+async function executeEveryKind() {
+  const reach = emptyReach()
+  for (const mode of [`granular`, `wholesale`] as const) {
+    await runHistory(
+      mode,
+      [
         { type: `subscribe`, listener: 0 },
-        {
-          type: `publish`,
-          version: 1,
-          nestedVersion: 0,
-          reactor: 0,
-          peer: 1,
-          reaction: `addPeer`,
-        },
-        {
-          type: `publish`,
-          version: 2,
-          nestedVersion: 0,
-          reactor: 0,
-          peer: 0,
-          reaction: `none`,
-        },
-      ]
-      const reach = emptyReach()
-      await runHistory(mode, history, { reach })
-      expect(reach.reactions.addPeer).toBe(1)
-      await expect(
-        runHistory(mode, history, { mutant: `earlyPeerDelivery` }),
-      ).rejects.toMatchObject({ name: `AssertionError` })
-    },
-  )
-
-  it(`executes every command and reaction kind in fixed production histories`, async () => {
-    oracleRoute(`fixed history`)
-    const reach = emptyReach()
-    for (const mode of [`granular`, `wholesale`] as const) {
-      await runHistory(
-        mode,
-        [
-          { type: `subscribe`, listener: 0 },
-          { type: `unsubscribe`, listener: 0 },
-          { type: `dispose` },
-        ],
-        { reach },
-      )
-      for (const reaction of reactions) {
-        await runHistory(mode, reactionHistory(reaction), { reach })
-      }
-    }
-
-    expect(Object.values(reach.commands).every((count) => count > 0)).toBe(true)
-    expect(Object.values(reach.reactions).every((count) => count > 0)).toBe(
-      true,
+        { type: `unsubscribe`, listener: 0 },
+        { type: `dispose` },
+      ],
+      { reach },
     )
+    for (const reaction of reactions) {
+      await runHistory(mode, reactionHistory(reaction), { reach })
+    }
+  }
+
+  expect(Object.values(reach.commands).every((count) => count > 0)).toBe(true)
+  expect(Object.values(reach.reactions).every((count) => count > 0)).toBe(true)
+}
+
+describe(`LiveQueryObserver generated histories`, () => {
+  oracleProperty({
+    id: `live-query-observer.history-every-kind`,
+    law: {
+      statement: `Listeners receive each one-row publication in eligibility order, with the established bootstrap, reentry, disposal, and first-error rules.`,
+      authority: `The existing independent eligibility ledger and contract table in this file.`,
+      limits: `Fixed production histories in both modes that execute every command and reaction kind; each must be reached.`,
+    },
+    owns: [`src/live-query-observer.ts`],
+    histories: [
+      `executes every command and reaction kind in fixed production histories`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `listener eligibility ledger`,
+        plan,
+        observe,
+        () => executeEveryKind(),
+      ),
+    check: forwardAssertionJudgment,
   })
-
-  it.each([`granular`, `wholesale`] as const)(
-    `%s one-row version margins retain the no-change boundary`,
-    async (mode) => {
-      oracleRoute(`fixed history`)
-      await runHistory(mode, [
-        {
-          type: `publish`,
-          version: -20,
-          nestedVersion: -20,
-          reactor: 0,
-          peer: 0,
-          reaction: `none`,
-        },
-        { type: `subscribe`, listener: 0 },
-        {
-          type: `publish`,
-          version: 20,
-          nestedVersion: 20,
-          reactor: 0,
-          peer: 0,
-          reaction: `nested`,
-        },
-        {
-          type: `publish`,
-          version: 20,
-          nestedVersion: 20,
-          reactor: 0,
-          peer: 0,
-          reaction: `none`,
-        },
-      ])
-    },
-  )
-
-  it.each([`granular`, `wholesale`] as const)(
-    `rejects dropped peer delivery after a throwing listener through the %s production path`,
-    async (mode) => {
-      oracleRoute(`calibration`)
-      const history = reactionHistory(`throw`)
-      await runHistory(mode, history)
-      const reach = emptyReach()
-      await expect(
-        runHistory(mode, history, { mutant: `dropPeerAfterThrow`, reach }),
-      ).rejects.toMatchObject({ name: `AssertionError` })
-      expect(reach.reactions.throw).toBe(1)
-    },
-  )
-
-  it(`rejects a duplicate granular bootstrap through the production seed path`, async () => {
-    oracleRoute(`calibration`)
-    const history: Array<Command> = [
-      {
-        type: `publish`,
-        version: 1,
-        nestedVersion: 0,
-        reactor: 0,
-        peer: 0,
-        reaction: `none`,
-      },
-      { type: `subscribe`, listener: 0 },
-    ]
-    await runHistory(`granular`, history)
-    await expect(
-      runHistory(`granular`, history, { mutant: `duplicateBootstrap` }),
-    ).rejects.toMatchObject({ name: `AssertionError` })
-  })
-
-  it.each([`granular`, `wholesale`] as const)(
-    `rejects a reentrant publication delivered out of FIFO order through the %s production path`,
-    async (mode) => {
-      oracleRoute(`calibration`)
-      const history = reactionHistory(`nested`)
-      await runHistory(mode, history)
-      const reach = emptyReach()
-      await expect(
-        runHistory(mode, history, { mutant: `reentrantOutOfOrder`, reach }),
-      ).rejects.toMatchObject({ name: `AssertionError` })
-      expect(reach.reactions.nested).toBe(1)
-    },
-  )
 })

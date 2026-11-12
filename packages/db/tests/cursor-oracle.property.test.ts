@@ -1,19 +1,15 @@
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it as vitestIt } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { PropRef, Value } from '../src/query/ir.js'
 import { buildCursor } from '../src/utils/cursor.js'
-import {
-  oracleProperty,
-  oracleReplayTest,
-  oracleRoute,
-} from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty } from './oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
+  rejectAt,
 } from './oracle-assertion-adapter.js'
 import { withHistoryCleanup } from './optimistic-history-oracle.js'
 import { orderBy } from './cursor-order-terms.js'
@@ -38,8 +34,6 @@ import type { Term } from './cursor-order-terms.js'
  * It does not establish provider ordering, other value types, or a whole
  * paginated query's acquisition and publication behavior.
  */
-
-const it = oracleReplayTest(vitestIt)
 
 const fixedSeed = 20260930
 
@@ -235,10 +229,31 @@ const assertRepeatedCursor = (
   )
 }
 
-declareOracle({
-  check: [expectCursorDenotation, expectLocalTupleOrder, assertRepeatedCursor],
-  model: [compareValue, compareTuple],
-})
+// A calibration's wrong builder or observation must make the shared check
+// throw. Each old calibration accepted any thrown Error, so exactly those
+// rejections count as the check rejecting the wrong answer.
+function acceptRejection(name: string, error: unknown): never {
+  if (error instanceof Error) rejectAt(`calibration ${name}`, error)
+  throw new Error(
+    `${name}: the check threw a non-Error value, which the old calibration did not accept: ${String(error)}`,
+  )
+}
+
+const cursorAuthority = `CursorExpressions.whereFrom API contract and ordered continuation in query/live/ARCHITECTURE.md`
+
+// The two width-two boundary values that a composite-width builder must reject.
+const compositeTerm: Term = { direction: `asc`, nulls: `last` }
+
+// The fixed public-snapshot history: a leading tie ordered by a nullable
+// trailing term.
+const localOrderFixed: CursorCase = [
+  [
+    { direction: `asc`, nulls: `last` },
+    { direction: `desc`, nulls: `first` },
+  ],
+  [0, 1],
+  [0, null],
+]
 
 // Boundary width distinguishes one-value continuation from rejected composite
 // values; one value remains legal with several order terms. Direction reverses
@@ -251,19 +266,89 @@ declareOracle({
 // A boundary with no order is the nearby invalid state.
 
 describe(`buildCursor properties`, () => {
-  it.each(scalarTerms)(
-    `checks every small scalar/null boundary for $direction / nulls $nulls`,
-    (term) => {
-      oracleRoute(`case`)
-      // All 49 pairs run under every option cell. Null and undefined remain
-      // distinct driver inputs even though their ordering positions coincide.
-      for (const boundary of scalarValues) {
-        for (const candidate of scalarValues) {
-          expectCursorDenotation([term], [boundary], [candidate])
-        }
-      }
+  oracleProperty({
+    id: `cursor.scalar-matrix`,
+    law: {
+      statement: `A leading-column cursor denotes exactly the strict ordered suffix, including direction and null placement.`,
+      authority: cursorAuthority,
+      limits: `Every small scalar/null boundary and candidate pair under each of the four direction and null-placement cells.`,
     },
-  )
+    owns: [`src/utils/cursor.ts#buildCursor`],
+    histories: scalarTerms,
+    label: ({ direction, nulls }) =>
+      `checks every small scalar/null boundary for ${direction} / nulls ${nulls}`,
+    resolve: (term) => ({ term }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`cursor.scalar-matrix`, plan, observe, () => {
+        // All 49 pairs run under every option cell. Null and undefined remain
+        // distinct driver inputs even though their ordering positions coincide.
+        for (const boundary of scalarValues) {
+          for (const candidate of scalarValues) {
+            expectCursorDenotation([plan.term], [boundary], [candidate])
+          }
+        }
+      }),
+    check: forwardAssertionJudgment,
+    // A constant predicate is a wrong builder: true admits the equal boundary
+    // value, false drops the following one. The check must reject each.
+    calibrations: scalarTerms.flatMap((term) => {
+      const following = term.direction === `asc` ? 1 : -1
+      const name = `rejects constant cursor predicates for ${term.direction} / nulls ${term.nulls}`
+      return [
+        {
+          name: `${name}: constant true`,
+          law: `cursor.scalar-matrix`,
+          driver: (
+            plan: { term: Term },
+            observe: (checkpoint: string, value: unknown) => void,
+          ) =>
+            recordAssertionJudgment(
+              `cursor.scalar-matrix`,
+              plan,
+              observe,
+              () => {
+                try {
+                  expectCursorDenotation(
+                    [term],
+                    [0],
+                    [0],
+                    () => new Value(true),
+                  )
+                } catch (error) {
+                  acceptRejection(name, error)
+                }
+              },
+            ),
+        },
+        {
+          name: `${name}: constant false`,
+          law: `cursor.scalar-matrix`,
+          driver: (
+            plan: { term: Term },
+            observe: (checkpoint: string, value: unknown) => void,
+          ) =>
+            recordAssertionJudgment(
+              `cursor.scalar-matrix`,
+              plan,
+              observe,
+              () => {
+                try {
+                  expectCursorDenotation(
+                    [term],
+                    [0],
+                    [following],
+                    () => new Value(false),
+                  )
+                } catch (error) {
+                  acceptRejection(name, error)
+                }
+              },
+            ),
+        },
+      ]
+    }),
+  })
 
   oracleProperty({
     id: `cursor.scalar-continuation`,
@@ -289,97 +374,137 @@ describe(`buildCursor properties`, () => {
     check: forwardAssertionJudgment,
   })
 
-  it.each([2, 3, 4])(
-    `rejects composite width %i in every option cell`,
-    (width) => {
-      oracleRoute(`case`)
-      for (const term of scalarTerms) {
-        expectCursorDenotation(
-          Array.from({ length: width }, () => term),
-          Array(width).fill(0),
-          Array(width).fill(1),
-        )
-      }
+  oracleProperty({
+    id: `cursor.composite-width-matrix`,
+    law: {
+      statement: `One boundary value is supported; composite cursor values reject.`,
+      authority: cursorAuthority,
+      limits: `Composite widths 2, 3 and 4 with every term equal, under each of the four option cells.`,
     },
-  )
-
-  it.each([2, 3, 4])(
-    `accepts one leading boundary value for %i ordered terms`,
-    (width) => {
-      oracleRoute(`case`)
-      const terms = Array.from({ length: width }, () => ({
-        direction: `asc` as const,
-        nulls: `last` as const,
-      }))
-      expectCursorDenotation(terms, [0], Array(width).fill(1))
-      expectCursorDenotation(terms, [0], Array(width).fill(-1))
-    },
-  )
-
-  it(`rejects a builder that accepts two boundary values`, () => {
-    oracleRoute(`calibration`)
-    const term: Term = { direction: `asc`, nulls: `last` }
-    expect(() =>
-      expectCursorDenotation(
-        [term, term],
-        [0, 0],
-        [1, 1],
-        () => new Value(true),
+    owns: [`src/utils/cursor.ts#buildCursor`],
+    histories: [2, 3, 4],
+    label: (width) => `rejects composite width ${width} in every option cell`,
+    resolve: (width) => ({ width }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `cursor.composite-width-matrix`,
+        plan,
+        observe,
+        () => {
+          for (const term of scalarTerms) {
+            expectCursorDenotation(
+              Array.from({ length: plan.width }, () => term),
+              Array(plan.width).fill(0),
+              Array(plan.width).fill(1),
+            )
+          }
+        },
       ),
-    ).toThrow()
-    expectCursorDenotation([term, term], [0, 0], [1, 1])
+    check: forwardAssertionJudgment,
+    calibrations: [
+      {
+        name: `rejects a builder that accepts two boundary values`,
+        law: `cursor.composite-width-matrix`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `cursor.composite-width-matrix`,
+            plan,
+            observe,
+            () => {
+              try {
+                expectCursorDenotation(
+                  [compositeTerm, compositeTerm],
+                  [0, 0],
+                  [1, 1],
+                  () => new Value(true),
+                )
+              } catch (error) {
+                acceptRejection(
+                  `rejects a builder that accepts two boundary values`,
+                  error,
+                )
+              }
+            },
+          ),
+      },
+    ],
   })
 
-  it(`orders a leading tie by a nullable trailing term in the public snapshot after preload fulfills`, async () => {
-    oracleRoute(`fixed history`)
-    const terms: Array<Term> = [
-      { direction: `asc`, nulls: `last` },
-      { direction: `desc`, nulls: `first` },
-    ]
-    const boundary = [0, 1]
-    const candidate = [0, null]
-    await expectLocalTupleOrder(terms, boundary, candidate)
+  oracleProperty({
+    id: `cursor.leading-boundary-matrix`,
+    law: {
+      statement: `One leading boundary value remains legal with several order terms.`,
+      authority: cursorAuthority,
+      limits: `Two, three and four ascending nulls-last terms with one boundary value and candidates above and below it.`,
+    },
+    owns: [`src/utils/cursor.ts#buildCursor`],
+    histories: [2, 3, 4],
+    label: (width) =>
+      `accepts one leading boundary value for ${width} ordered terms`,
+    resolve: (width) => ({ width }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `cursor.leading-boundary-matrix`,
+        plan,
+        observe,
+        () => {
+          const terms = Array.from({ length: plan.width }, () => ({
+            direction: `asc` as const,
+            nulls: `last` as const,
+          }))
+          expectCursorDenotation(terms, [0], Array(plan.width).fill(1))
+          expectCursorDenotation(terms, [0], Array(plan.width).fill(-1))
+        },
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `cursor.local-order-fixed`,
+    law: {
+      statement: `The public snapshot orders nullable tuples by all authored terms after preload fulfills.`,
+      authority: cursorAuthority,
+      limits: `One fixed leading-tie history with a nullable descending trailing term, which the generated width grammars cannot take back.`,
+    },
+    owns: [`src/utils/cursor.ts#buildCursor`],
+    histories: [localOrderFixed],
+    label: () =>
+      `orders a leading tie by a nullable trailing term in the public snapshot after preload fulfills`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`cursor.local-order-fixed`, plan, observe, () =>
+        assertLocalTupleOrder(plan.history),
+      ),
+    check: forwardAssertionJudgment,
     // A leading-only order would place boundary first by the id tie-breaker.
-    await expect(
-      expectLocalTupleOrder(
-        terms,
-        boundary,
-        candidate,
-        `reverse-observed-order`,
-      ),
-    ).rejects.toThrow()
-  })
-
-  it.each(scalarTerms)(
-    `rejects constant cursor predicates for $direction / nulls $nulls`,
-    (term) => {
-      oracleRoute(`calibration`)
-      expect(() =>
-        expectCursorDenotation([term], [0], [0], () => new Value(true)),
-      ).toThrow()
-      const following = term.direction === `asc` ? 1 : -1
-      expect(() =>
-        expectCursorDenotation(
-          [term],
-          [0],
-          [following],
-          () => new Value(false),
-        ),
-      ).toThrow()
-      expectCursorDenotation([term], [0], [0])
-      expectCursorDenotation([term], [0], [following])
-    },
-  )
-
-  it(`rejects an unstable cursor expression on repeated construction`, () => {
-    oracleRoute(`calibration`)
-    let calls = 0
-    expect(() =>
-      assertRepeatedCursor(
-        [[{ direction: `asc`, nulls: `first` }], [0], [0]],
-        () => new Value(++calls === 1),
-      ),
-    ).toThrow()
+    calibrations: [
+      {
+        name: `rejects a reversed observed order`,
+        law: `cursor.local-order-fixed`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `cursor.local-order-fixed`,
+            plan,
+            observe,
+            async () => {
+              const [terms, boundary, candidate] = localOrderFixed
+              try {
+                await expectLocalTupleOrder(
+                  terms,
+                  boundary,
+                  candidate,
+                  `reverse-observed-order`,
+                )
+              } catch (error) {
+                acceptRejection(`rejects a reversed observed order`, error)
+              }
+            },
+          ),
+      },
+    ],
   })
 
   oracleProperty({
@@ -490,5 +615,31 @@ describe(`buildCursor properties`, () => {
         assertRepeatedCursor(plan.history),
       ),
     check: forwardAssertionJudgment,
+    calibrations: [
+      {
+        name: `rejects an unstable cursor expression on repeated construction`,
+        law: `cursor.repeat-construction`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `cursor.repeat-construction`,
+            plan,
+            observe,
+            () => {
+              let calls = 0
+              try {
+                assertRepeatedCursor(
+                  [[{ direction: `asc`, nulls: `first` }], [0], [0]],
+                  () => new Value(++calls === 1),
+                )
+              } catch (error) {
+                acceptRejection(
+                  `rejects an unstable cursor expression on repeated construction`,
+                  error,
+                )
+              }
+            },
+          ),
+      },
+    ],
   })
 })

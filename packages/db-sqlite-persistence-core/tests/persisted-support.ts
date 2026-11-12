@@ -1696,8 +1696,6 @@ export const describeUnlessOracleReplay = oracleReplayTest(
   `persistence.follower-remote-demand`,
 )
 
-export const describeUnlessAnyOracleReplay = oracleReplayTest(describe)
-
 export const generationNoticeHistory = fc.record({
   retiredNotice: fc.constantFrom<GenerationNoticeHistory[`retiredNotice`]>(
     `none`,

@@ -3,7 +3,6 @@ import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect } from 'vitest'
 import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleAssertion } from '../../db/tests/oracle-assertion-adapter'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
 import { readOfflineOracleConfig } from './oracle-config'
@@ -510,22 +509,6 @@ async function checkRoundtrip(
   }
   if (cleanupFailure !== undefined) throw cleanupFailure
 }
-
-// The check runs one history through production and compares every checkpoint
-// with the semantic model above. Generated properties, fixed histories, and the
-// fault calibrations all reach it.
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
-  owns: [
-    `src/outbox/TransactionSerializer.ts#TransactionSerializer.serialize`,
-    `src/outbox/TransactionSerializer.ts#TransactionSerializer.deserialize`,
-    `src/outbox/OutboxManager.ts#OutboxManager.add`,
-    `src/outbox/OutboxManager.ts#OutboxManager.getAll`,
-    `src/outbox/OutboxManager.ts#OutboxManager.get`,
-  ],
-  check: [checkRoundtrip],
-})
 
 const twin: Pair = {
   runtime: `2024-01-01T00:00:00.000Z`,

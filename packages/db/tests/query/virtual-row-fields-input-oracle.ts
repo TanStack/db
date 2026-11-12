@@ -18,7 +18,6 @@
  * objects/descriptors and same-key overlapping transactions are outside it.
  */
 import { isDeepStrictEqual } from 'node:util'
-import { declareOracle } from '../oracle-declaration.js'
 import { virtualFieldNames } from './virtual-row-fields-support.js'
 import { expectedSourceMetadata } from './virtual-row-fields-source-oracle.js'
 import {
@@ -285,19 +284,3 @@ export function metadataOutputViolations(
     ? []
     : [`derived ordinary output differs from the callback-input law`]
 }
-
-declareOracle({
-  model: [
-    expectedSourceVirtualFields,
-    expectedMetadataInput,
-    expectedMetadataRecord,
-  ],
-  check: [metadataInputViolations, metadataOutputViolations],
-  grammar: [
-    metadataInputDescriptions,
-    metadataCallbackHistories,
-    metadataCallbackReceiverHistories,
-    metadataInlineHistories,
-    metadataCompilerCacheHistories,
-  ],
-})

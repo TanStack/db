@@ -62,6 +62,7 @@ import ts from 'typescript'
 import { afterAll, expect } from 'vitest'
 import {
   differs,
+  isOracleDeterminismUnit,
   oracleProperty,
   oracleReplayRequested,
   pass,
@@ -656,7 +657,7 @@ oracleProperty({
     const text = programText(spec)
     const admitted = ruleAccepts(text)
     observe(`rule admission`, admitted)
-    const counted = !expect.getState().currentTestName.endsWith(`determinism`)
+    const counted = !isOracleDeterminismUnit(expect.getState().currentTestName)
     if (!admitted) {
       if (counted) tally.rejected++
       return

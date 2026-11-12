@@ -40,6 +40,7 @@ function runReplay(
   property = `oracle-replay.calibration`,
   cleanupFailure = false,
   workingDirectory = packageDirectory,
+  unit?: string,
 ): { status: number | null; output: string } {
   const result = spawnSync(
     process.execPath,
@@ -59,6 +60,7 @@ function runReplay(
         TANSTACK_DB_ORACLE_SEED: `42`,
         TANSTACK_DB_ORACLE_PATH: `0`,
         TANSTACK_DB_ORACLE_PROPERTY: property,
+        TANSTACK_DB_ORACLE_UNIT: unit,
         TANSTACK_DB_ORACLE_REPLAY_CALIBRATION: fault,
         TANSTACK_DB_ORACLE_REPLAY_TEST_CLEANUP_FAILURE: cleanupFailure
           ? `1`
@@ -89,6 +91,97 @@ describe(`guarded oracle replay`, () => {
     expect(result.output).toContain(`oracle replay target never executed`)
     expect(result.output).toContain(`"executions":0`)
   }, 40_000)
+
+  it.each([
+    { name: `legacy-only target`, executions: 1, status: 0 },
+    {
+      name: `filtered target`,
+      executions: 0,
+      status: 0,
+      filter: `absent test`,
+    },
+    {
+      name: `unknown canonical property`,
+      executions: 0,
+      status: 1,
+      canonicalProperty: `absent.property`,
+      message: `unknown oracle property`,
+    },
+    {
+      name: `conflicting canonical unit`,
+      executions: 0,
+      status: 1,
+      canonicalProperty: `browser.shared-driver-fairness`,
+      message: `Conflicting legacy and canonical oracle replay coordinate: TANSTACK_DB_ORACLE_UNIT`,
+    },
+  ])(
+    `witnesses the browser alias with $name`,
+    ({ executions, status, filter, canonicalProperty, message }) => {
+      const property = `browser.shared-driver-fairness`
+      const directory = mkdtempSync(join(tmpdir(), `oracle-alias-replay-`))
+      const channel = join(directory, `witness.jsonl`)
+      try {
+        const result = spawnSync(
+          process.execPath,
+          [
+            join(repositoryDirectory, `node_modules/vitest/vitest.mjs`),
+            `run`,
+            `tests/shared-driver-fairness-oracle.test.ts`,
+            `-t`,
+            filter ?? property,
+            `--maxWorkers=1`,
+            `--coverage.enabled=false`,
+            `--typecheck.enabled=false`,
+          ],
+          {
+            cwd: join(
+              repositoryDirectory,
+              `packages/browser-db-sqlite-persistence`,
+            ),
+            env: {
+              ...process.env,
+              TANSTACK_DB_DRIVER_FAIRNESS_SEED: `165905`,
+              TANSTACK_DB_DRIVER_FAIRNESS_PATH: `0`,
+              TANSTACK_DB_ORACLE_SEED: canonicalProperty ? `165905` : undefined,
+              TANSTACK_DB_ORACLE_PATH: canonicalProperty ? `0` : undefined,
+              TANSTACK_DB_ORACLE_PROPERTY: canonicalProperty,
+              TANSTACK_DB_ORACLE_UNIT: canonicalProperty
+                ? `random seed: absent`
+                : undefined,
+              TANSTACK_DB_ORACLE_REPLAY_WITNESS: channel,
+              TANSTACK_DB_ORACLE_REPLAY_WITNESS_MODE: `async`,
+            },
+            encoding: `utf8`,
+            timeout: 30_000,
+          },
+        )
+        if (result.error) throw result.error
+        const output = result.stdout + result.stderr
+        const witnesses = existsSync(channel)
+          ? readFileSync(channel, `utf8`)
+              .trim()
+              .split(`\n`)
+              .map((line) => JSON.parse(line))
+          : []
+        expect(result.status, output).toBe(status)
+        expect(
+          witnesses.filter(
+            (witness) =>
+              witness.property === property &&
+              witness.seed === 165905 &&
+              witness.path === `0` &&
+              witness.numRuns === 1,
+          ),
+          output,
+        ).toHaveLength(executions)
+        expect(output).not.toContain(`fixed seed 165905: generated reach`)
+        if (message) expect(output).toContain(message)
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
+    },
+    40_000,
+  )
 
   it(`runs a named replay directly without the owner's fixed campaign`, () => {
     const result = runReplay([fixture])
@@ -124,31 +217,37 @@ describe(`guarded oracle replay`, () => {
       `index-update.reference-model`,
       `tests/index-update-oracle.property.test.ts`,
       2,
+      `random seed: generated`,
     ],
     [
       `index-update.nullish-membership`,
       `tests/index-update-oracle.property.test.ts`,
       2,
+      `random seed: generated`,
     ],
     [
       `index-update.exact-identity`,
       `tests/index-update-oracle.property.test.ts`,
       2,
+      `random seed: generated`,
     ],
     [
       `index-update.custom-comparator`,
       `tests/index-update-oracle.property.test.ts`,
       2,
+      `random seed: generated`,
     ],
     [
       `pagination.matrix.window-0`,
       `tests/query/pagination-oracle.property.test.ts`,
       1,
+      `random seed: generated`,
     ],
     [
       `pagination.matrix.state-7`,
       `tests/query/pagination-oracle.property.test.ts`,
       1,
+      `random seed: generated`,
     ],
     ...[
       `builder`,
@@ -164,18 +263,47 @@ describe(`guarded oracle replay`, () => {
             `pagination.limit-admission-${path}-${admission}`,
             `tests/query/pagination-oracle.property.test.ts`,
             1,
+            `random seed: admission and settlement cuts`,
           ] as const,
       ),
     ),
   ] as const)(
     `selects only the requested %s replay campaign`,
-    (property, file, expectedTests) => {
-      const result = runReplay([file], undefined, property)
+    (property, file, expectedTests, unit) => {
+      const result = runReplay(
+        [file],
+        undefined,
+        property,
+        false,
+        packageDirectory,
+        unit,
+      )
       expect(result.status, result.output).toBe(0)
       expect(result.output).toContain(`"executions":${expectedTests}`)
       expect(stripVTControlCharacters(result.output)).toMatch(
         new RegExp(`Tests\\s+${expectedTests} passed \\| \\d+ skipped`),
       )
+    },
+    40_000,
+  )
+
+  it.each([
+    [undefined, `requires TANSTACK_DB_ORACLE_UNIT`],
+    [`random seed: absent`, `is no random unit of this property`],
+  ])(
+    `rejects a generated path replay with unit %s`,
+    (unit, message) => {
+      const result = runReplay(
+        [`tests/index-update-oracle.property.test.ts`],
+        undefined,
+        `index-update.reference-model`,
+        false,
+        packageDirectory,
+        unit,
+      )
+      expect(result.status, result.output).toBe(1)
+      expect(result.output).toContain(message)
+      expect(result.output).toContain(`"executions":0`)
     },
     40_000,
   )
@@ -214,13 +342,23 @@ describe(`guarded oracle replay`, () => {
   ])(
     `executes the actual named owner %s and rejects a filtered target`,
     (property, file, randomName) => {
-      const executed = runReplay([file, `-t`, randomName], undefined, property)
+      const executed = runReplay(
+        [file, `-t`, randomName],
+        undefined,
+        property,
+        false,
+        packageDirectory,
+        `random seed: generated`,
+      )
       expect(executed.status, executed.output).toBe(0)
       expect(executed.output).toContain(`"executions":1`)
       const excluded = runReplay(
         [file, `tests/utils.test.ts`, `-t`, `oracle run configuration`],
         undefined,
         property,
+        false,
+        packageDirectory,
+        `random seed: generated`,
       )
       expect(excluded.status, excluded.output).toBe(1)
       expect(excluded.output).toContain(`oracle replay target never executed`)
@@ -418,7 +556,7 @@ describe(`named oracle replay manifest`, () => {
       cwd: `packages/db`,
       environment: [],
       testNamePattern: `oracle-replay\\.enumerated-calibration > `,
-      command: `env -u TANSTACK_DB_ORACLE_SEED -u TANSTACK_DB_ORACLE_PATH -u TANSTACK_DB_ORACLE_PROPERTY pnpm exec vitest run -t 'oracle-replay\\.enumerated-calibration > ' tests/replay-enumerated-oracle.fixture.test.ts`,
+      command: `env -u TANSTACK_DB_ORACLE_SEED -u TANSTACK_DB_ORACLE_PATH -u TANSTACK_DB_ORACLE_PROPERTY -u TANSTACK_DB_ORACLE_UNIT pnpm exec vitest run -t 'oracle-replay\\.enumerated-calibration > ' tests/replay-enumerated-oracle.fixture.test.ts`,
     })
     // Execute the advertised command itself. The neighbor fault proves that
     // selecting this property's cases does not run a similarly named property.
@@ -435,6 +573,7 @@ describe(`named oracle replay manifest`, () => {
             TANSTACK_DB_ORACLE_SEED: `42`,
             TANSTACK_DB_ORACLE_PATH: `0`,
             TANSTACK_DB_ORACLE_PROPERTY: entry.property,
+            TANSTACK_DB_ORACLE_UNIT: `random seed: generated`,
             TANSTACK_DB_ORACLE_ENUMERATED_CALIBRATION: fault,
           },
           encoding: `utf8`,
@@ -721,7 +860,11 @@ describe(`named oracle replay manifest`, () => {
         // These oracles number their properties in file order.
         const [family] = entry.property.split(`.`)
         expect(source).toContain(`\`${family}.\${id}\``)
-      } else if (entry.property.startsWith(`pagination.limit-admission-`)) {
+      } else if (
+        entry.property.startsWith(`pagination.limit-admission-`) &&
+        // The fixed admission histories name their property literally.
+        entry.property !== `pagination.limit-admission-fixed`
+      ) {
         const suffix = entry.property.slice(
           `pagination.limit-admission-`.length,
         )
@@ -838,6 +981,7 @@ describe(`named oracle replay manifest`, () => {
         `TANSTACK_DB_ORACLE_SEED`,
         `TANSTACK_DB_ORACLE_PATH`,
         `TANSTACK_DB_ORACLE_PROPERTY`,
+        `TANSTACK_DB_ORACLE_UNIT`,
       ],
     })
   })
@@ -846,9 +990,16 @@ describe(`named oracle replay manifest`, () => {
     const direct = oracleReplayManifest.filter(({ property }) =>
       /^(index-update|pagination\.matrix)\./.test(property),
     )
-    expect(direct).toHaveLength(20)
+    // The 20 generated matrix properties replay a seed and path; the fixed
+    // index-update histories are enumerated sources that replay their cases.
+    expect(direct.filter(({ status }) => status === `assertion`)).toHaveLength(
+      20,
+    )
     for (const entry of direct) {
-      expect(entry.status).toBe(`assertion`)
+      if (entry.status !== `assertion`) {
+        expect(entry.property).toMatch(/^index-update\./)
+        expect(entry.status).toBe(`enumerated-campaign`)
+      }
       expect(entry.testNamePattern).toBeDefined()
     }
   })

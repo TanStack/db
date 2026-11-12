@@ -1,5 +1,4 @@
 import { afterEach, beforeEach } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   differs,
   oracleProperty,
@@ -122,8 +121,9 @@ function directRowDriver() {
  * adapter. Named empty, reordered, duplicated, missing-key, and swapped-value
  * wrong answers challenge the same named-law check. Normal execution runs the same alias
  * properties and budgets in retained fixed-seed and seedless-random campaigns.
- * TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and TANSTACK_DB_ORACLE_PROPERTY
- * select one exact replay.
+ * Copy the complete printed Replay: coordinates: TANSTACK_DB_ORACLE_SEED,
+ * TANSTACK_DB_ORACLE_PATH, TANSTACK_DB_ORACLE_PROPERTY, and
+ * TANSTACK_DB_ORACLE_UNIT select one exact generated-unit replay.
  * Real-provider refinement: frozen receipts from the published 15.2.7 Native
  * and Node sources, plus forward receipts from 18.2.1 Native, Node, and browser
  * sources, prove the shim's accepted envelopes match provider output.
@@ -569,9 +569,4 @@ oracleProperty<Aliases, Expected>({
   check: (aliases, trace, expected) =>
     judge(aliases, trace, expected, `statement`),
   calibrations: [...calibrations, constructionReachCalibration],
-})
-
-declareOracle({
-  model: [aliasQueryCase],
-  grammar: [writeResultAliasesArbitrary, statementResultAliasesArbitrary],
 })

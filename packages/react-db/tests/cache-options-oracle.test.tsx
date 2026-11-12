@@ -29,7 +29,6 @@ import {
   checkCacheOptionRows,
   conflictingCacheOptions,
 } from '../../db/tests/live-query-cache-options-oracle'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   differs,
   oracleProperty,
@@ -398,9 +397,3 @@ for (const path of paths) {
     ],
   })
 }
-
-declareOracle({
-  grammar: [histories],
-  model: [modelCacheOptions, conflictingCacheOptions],
-  check: [checkCacheOptions, checkCacheOptionAdmission, checkCacheOptionRows],
-})

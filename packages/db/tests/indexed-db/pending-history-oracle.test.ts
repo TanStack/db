@@ -19,16 +19,16 @@
  * every boundary. Fixed/fresh histories use the same generator and checker.
  */
 import { fc } from '@fast-check/vitest'
-import { expect, it as vitestIt } from 'vitest'
+import { beforeEach, expect } from 'vitest'
 import { createLiveQueryCollection } from '../../src'
+import { oracleProperty, oracleReplayRequested } from '../oracle-config'
+import { nativeCampaignReceipt } from '../native-campaign-receipt'
 import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../oracle-config'
-import { declareOracle } from '../oracle-declaration'
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from '../oracle-assertion-adapter'
 import {
   Channel,
   deferred,
@@ -45,18 +45,9 @@ import {
   snapshot,
 } from './cross-tab-oracle'
 import { recordCollection } from './recorder'
-import { runCampaign } from './campaign'
+import { campaignFailure, createCampaignRecorder } from './campaign'
 import type { Change, OracleRow } from './cross-tab-oracle'
 import type { Operation } from './harness'
-
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexed-db.ts#createIndexedDB',
-    'src/indexed-db.ts#indexedDBCollectionOptions',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
-})
 
 // Campaigns. The fixed campaign and the fresh campaign run the same generator
 // and checker. A path replay of `indexeddb.pending-history` runs its recorded
@@ -64,7 +55,6 @@ declareOracle({
 // reseeds the fresh campaign.
 const FIXED_SEED = 11792027
 const PENDING_HISTORY = `indexeddb.pending-history`
-const it = oracleReplayTest(vitestIt)
 
 type PeerStep = {
   kind: 'write' | 'delete' | 'clear' | 'import'
@@ -403,8 +393,7 @@ async function run(
   })
 }
 
-it('reconstructs held multi-row CRUD crossed with every peer action and decision', async () => {
-  oracleRoute(`case`)
+async function reconstructEveryBoundary() {
   const reach = new Set<string>()
   for (const local of ['insert', 'update', 'delete'] as const)
     for (const kind of ['write', 'delete', 'clear', 'import'] as const)
@@ -420,64 +409,175 @@ it('reconstructs held multi-row CRUD crossed with every peer action and decision
         )
   for (const operation of ['insert', 'update', 'delete', 'clear', 'import'])
     expect(reach.has(`peer ${operation}`), operation).toBe(true)
-}, 60_000)
-it('attributes the queued confirmation after an earlier replacement', async () => {
-  oracleRoute(`fixed history`)
-  const history: History = {
-    local: 'insert',
-    accept: true,
-    count: 1,
-    peer: [{ kind: 'import', overlap: true, value: 0 }],
-  }
-  await run(history)
-  // Same production path, deliberately wrong observation at settlement. The
-  // old lifetime-acknowledgement model accepted this remote origin instead.
-  await expect(run(history, new Set(), 'origin')).rejects.toThrow(
-    'settlement metadata 0',
-  )
-  // Final production rows remain correct while the captured promise cut is
-  // wrong. Sampling after peer delivery must not erase this failure.
-  await expect(run(history, new Set(), 'rows')).rejects.toThrow(
-    'public rows at settlement',
-  )
+}
+
+oracleProperty({
+  id: `indexeddb.pending-history-reconstruction`,
+  law: {
+    statement: `One held whole-row intent crossed with independently accepted peer work refines the pending-history reference at handler entry, every peer read and publication, settlement, the ordinary suffix and restore.`,
+    authority: `optimistic-history-oracle.ts and the pending-history reference stated above`,
+    limits: `Fixed held multi-row CRUD crossed with every peer action and both decisions; every peer operation must be reached.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: [
+    'reconstructs held multi-row CRUD crossed with every peer action and decision',
+  ],
+  label: (name) => name,
+  resolve: (name) => ({ name }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `indexeddb.pending-history-reconstruction`,
+      plan,
+      observe,
+      () => reconstructEveryBoundary(),
+    ),
+  check: forwardAssertionJudgment,
+  timeout: 60_000,
 })
 
-it('a peer no-op cannot spend another source acknowledgement', async () => {
-  oracleRoute(`fixed history`)
-  await run({
-    local: 'insert',
-    accept: false,
-    count: 1,
-    peer: [
-      { kind: 'import', overlap: true, value: 1 },
-      { kind: 'write', overlap: true, value: 1 },
-    ],
-  })
+// A replacement before the queued confirmation must not take its origin.
+const replacedConfirmation: History = {
+  local: 'insert',
+  accept: true,
+  count: 1,
+  peer: [{ kind: 'import', overlap: true, value: 0 }],
+}
+const pendingFixedHistories: Array<{ name: string; history: History }> = [
+  {
+    name: 'attributes the queued confirmation after an earlier replacement',
+    history: replacedConfirmation,
+  },
+  {
+    name: 'a peer no-op cannot spend another source acknowledgement',
+    history: {
+      local: 'insert',
+      accept: false,
+      count: 1,
+      peer: [
+        { kind: 'import', overlap: true, value: 1 },
+        { kind: 'write', overlap: true, value: 1 },
+      ],
+    },
+  },
+]
+// Same production path, deliberately wrong observation at settlement. The old
+// lifetime-acknowledgement model accepted the remote origin; the rows fault
+// keeps final production rows correct while the captured promise cut is wrong,
+// so sampling after peer delivery must not erase it.
+const settlementFaults = [
+  { fault: 'origin', message: 'settlement metadata 0' },
+  { fault: 'rows', message: 'public rows at settlement' },
+] as const
+
+oracleProperty({
+  id: `indexeddb.pending-history-fixed`,
+  law: {
+    statement: `One held whole-row intent crossed with independently accepted peer work refines the pending-history reference at handler entry, every peer read and publication, settlement, the ordinary suffix and restore.`,
+    authority: `optimistic-history-oracle.ts and the pending-history reference stated above`,
+    limits: `Named fixed histories replayed through the same driver and checks; the settlement calibrations corrupt the observation at the settlement cut.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: pendingFixedHistories,
+  label: ({ name }) => name,
+  resolve: ({ history }) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `indexeddb.pending-history-fixed`,
+      plan,
+      observe,
+      () => run(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+  calibrations: settlementFaults.map(({ fault, message }) => ({
+    name: `attributes the queued confirmation after an earlier replacement: rejects a wrong ${fault} observation at settlement`,
+    law: `indexeddb.pending-history-fixed`,
+    driver: (
+      plan: { history: History },
+      observe: (checkpoint: string, value: unknown) => void,
+    ) =>
+      recordAssertionJudgment(
+        `indexeddb.pending-history-fixed`,
+        plan,
+        observe,
+        async () => {
+          try {
+            await run(replacedConfirmation, new Set(), fault)
+          } catch (error) {
+            // Exactly the old matcher: an error whose message names this cut.
+            if (error instanceof Error && error.message.includes(message))
+              rejectAt(`calibration ${fault}`, error)
+            throw new Error(
+              `settlement ${fault} calibration: the check rejected with an error the old matcher did not accept: ${String(error)}`,
+            )
+          }
+        },
+      ),
+  })),
 })
 
 const runs =
   process.env.TANSTACK_INDEXEDDB_ORACLE_PROFILE === 'stress' ? 300 : 30
-it(`refines held mutations through fixed peer histories`, async () => {
-  oracleRoute(`fixed seed`)
-  await runCampaign(
-    'pending',
-    histories,
-    (history, receipt) => run(history, receipt.reach),
-    { runs: oracleRuns(runs), seed: FIXED_SEED },
+// A recorder belongs to one native test. Its unchanged shrink predicate keeps
+// the original law, checkpoint and every premise the first failure reached;
+// its completion receipt writes the campaign report and checks the budget.
+let recorder: ReturnType<typeof createCampaignRecorder<History>>
+let replayCalls = 0
+beforeEach(() => {
+  replayCalls = 0
+  recorder = createCampaignRecorder('pending', histories, (history, receipt) =>
+    run(history, receipt.reach),
   )
-}, 120_000)
-oracleReplayTest(vitestIt, PENDING_HISTORY)(
-  `refines held mutations through fresh peer histories`,
-  async () => {
-    const parameters = oraclePropertyOptions(runs, PENDING_HISTORY)
-    oracleRoute(oracleRouteOf(parameters))
-    const { numRuns, seed, path } = parameters
-    await runCampaign(
-      'pending',
-      histories,
-      (history, receipt) => run(history, receipt.reach),
-      { runs: numRuns, seed, path },
-    )
-  },
-  120_000,
+})
+nativeCampaignReceipt<History>((result) =>
+  recorder.complete(result, {
+    runs: result.runConfiguration.numRuns ?? runs,
+    ...(oracleReplayRequested() ? { path: result.runConfiguration.path } : {}),
+  }),
 )
+oracleProperty({
+  id: PENDING_HISTORY,
+  timeout: 120_000,
+  law: {
+    statement: `One held whole-row intent crossed with independently accepted peer work refines the pending-history reference at handler entry, every peer read and publication, settlement, the ordinary suffix and restore.`,
+    authority: `optimistic-history-oracle.ts and the pending-history reference stated above`,
+    limits: `The bounded peer-history grammar of one held local intent over fake IndexedDB and a controlled Channel; no simultaneous same-key writers, multiple local intents or cleanup's pending-caller policy.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: { arbitrary: histories, runs, fixedSeeds: [FIXED_SEED] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(PENDING_HISTORY, plan, observe, async () => {
+      if (oracleReplayRequested() && replayCalls++ > 0) return
+      try {
+        await recorder.run(plan.history)
+      } catch (error) {
+        // The recorder rethrows only the same failed law/checkpoint with the
+        // first history's full premise set; preserve every other attempt in its report.
+        rejectAt(
+          campaignFailure(error).checkpoint,
+          error instanceof Error
+            ? error
+            : new Error(String(error), { cause: error }),
+        )
+      }
+    }),
+  check: forwardAssertionJudgment,
+})

@@ -7,7 +7,6 @@ import {
   pass,
   violation,
 } from '../../oracle-config.js'
-import { declareOracle } from '../../oracle-declaration.js'
 import type {
   ConstructedHistory,
   Observation,
@@ -218,12 +217,6 @@ function checkLike(
         `constructed reach`,
       )
 }
-
-declareOracle({
-  model: [referenceLike, modelLike],
-  grammar: [likeCase],
-  check: [checkLike],
-})
 
 oracleProperty({
   id: `evaluators.like`,

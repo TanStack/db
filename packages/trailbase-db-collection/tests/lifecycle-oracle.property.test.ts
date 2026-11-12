@@ -23,7 +23,6 @@ import { vi } from 'vitest'
 import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
 import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
 import { createStartupHost } from '../../db-adapter-conformance/tests/persisted-startup-host'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import { observeHydrationLifecycle } from './lifecycle-hydration-driver'
@@ -2073,14 +2072,6 @@ oracleProperty({
           : undefined,
     },
   ],
-})
-
-// The reusable judgments own this production boundary. The framework handles
-// campaign registration; this declaration retains gap-report discovery.
-declareOracle({
-  check: [checkLawFacts],
-  model: [referenceFacts, expectedEarlyDemand],
-  grammar: [scenarioArb, pageHistoryArb],
 })
 
 /** The same cleanup law receives controlled and real Node SQLite hydration.

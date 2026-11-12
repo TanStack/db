@@ -49,7 +49,8 @@
  *
  * Reach, challenge, replay, and cleanup: the expression-index matrix and both
  * generated BigInt range checks run in fixed-seed and seedless-random campaigns.
- * A path replay sets TANSTACK_DB_ORACLE_PATH, TANSTACK_DB_ORACLE_SEED, and
+ * Copy the complete printed Replay: coordinates for a generated path, including
+ * TANSTACK_DB_ORACLE_UNIT. A path replay sets TANSTACK_DB_ORACLE_PATH, TANSTACK_DB_ORACLE_SEED, and
  * TANSTACK_DB_ORACLE_PROPERTY to one of sqlite-persistence.expression-index,
  * sqlite-persistence.bigint-roundtrip, or sqlite-persistence.bigint-rejection.
  * That property's random campaign replays only its recorded history; the fixed
@@ -57,7 +58,9 @@
  * random campaigns. A matrix that lacks an axis fails every history's grammar
  * check (assertGeneratedScenarioGrammar, run by the driver); a per-axis
  * grammar calibration ablates each axis from the fixed matrix and requires
- * that check to name it. Each axis's plausible wrong SQL answer is a native
+ * that check to name it. The grammar and its check live in
+ * expression-index-grammar-oracle.ts, and their calibrations, which run no
+ * production, in expression-index-grammar.test.ts. Each axis's plausible wrong SQL answer is a native
  * calibration that the unchanged comparison must reject at that axis: the
  * check names the compared axis in the law (`sqlite-persistence.expression-index:
  * <kind> axis`). Seed, run and path configuration, and the shrinking
@@ -79,26 +82,20 @@
  * ablation stays as a grammar calibration without fast-check campaigns.
  */
 import fc from 'fast-check'
-import { describe, expect, vi, it as vitestIt } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { IR } from '@tanstack/db'
 import {
   createPersistedTableName,
   createSQLiteCorePersistenceAdapter,
   decodePersistedStorageKey,
 } from '@tanstack/db-sqlite-persistence-core'
-import {
-  oracleFixedSeed,
-  oracleProperty,
-  oracleReplayTest,
-  oracleRoute,
-} from '../../db/tests/oracle-config.js'
+import { oracleProperty } from '../../db/tests/oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   Temporal,
   temporalFamilies,
@@ -121,19 +118,29 @@ import {
   sqliteScalarParameter,
   withFailurePreservingCleanup,
 } from './expression-index-support'
+import {
+  DEFAULT_ORACLE_SEED,
+  GENERATED_SCENARIO_FAULTS,
+  GENERATED_SCENARIO_KINDS,
+  assertGeneratedScenarioGrammar,
+  generatedScenarioMatrixArbitrary,
+  resolveGeneratedScenarioMatrix,
+} from './expression-index-grammar-oracle'
+import type {
+  GeneratedExpressionIndexScenario,
+  GeneratedScenarioKind,
+} from './expression-index-grammar-oracle'
 import type { Observation, Verdict } from '../../db/tests/oracle-config.js'
 import type { TemporalFamily } from '../../db-sqlite-persistence-core/tests/temporal-value-oracle'
 import type {
   CapturedQuery,
   ExpressionIndexObservation,
-  ExpressionIndexScenario,
   OracleScalar,
   QueryPlanRow,
   QueryTransform,
   ScanRow,
 } from './expression-index-support'
 
-const DEFAULT_ORACLE_SEED = 1_659_005
 const DEFAULT_ORACLE_RUNS = 8
 
 type OracleCase = {
@@ -141,26 +148,6 @@ type OracleCase = {
   target: OracleScalar
   distractors: [OracleScalar, OracleScalar]
 }
-
-const identifierStart = [`a`, `m`, `p`, `t`, `x`] as const
-const identifierRest = [`a`, `b`, `e`, `i`, `n`, `r`, `s`, `0`, `1`] as const
-
-const identifierArbitrary = fc
-  .tuple(
-    fc.constantFrom(...identifierStart),
-    fc.array(fc.constantFrom(...identifierRest), { maxLength: 5 }),
-  )
-  .map(([start, rest]) => `${start}${rest.join(``)}`)
-
-const legalPathArbitrary = fc
-  .tuple(
-    identifierArbitrary,
-    fc.array(
-      fc.oneof(identifierArbitrary, fc.integer({ min: 0, max: 3 }).map(String)),
-      { maxLength: 3 },
-    ),
-  )
-  .map(([root, tail]) => [root, ...tail])
 
 function expectedKeysFromScan(
   rows: ReadonlyArray<ScanRow>,
@@ -171,306 +158,6 @@ function expectedKeysFromScan(
     .filter((row) => readPath(row.value, path) === target)
     .map((row) => String(row.key))
     .sort()
-}
-
-const GENERATED_SCENARIO_KINDS = [
-  `eq`,
-  `in`,
-  `batched-in`,
-  `range`,
-  `and`,
-  `order-by`,
-  `wrapped-lower`,
-] as const
-
-type GeneratedScenarioKind = (typeof GENERATED_SCENARIO_KINDS)[number]
-
-const GENERATED_SCENARIO_FAULTS = [
-  { kind: `eq`, wrongAnswer: `inverted equality operator` },
-  { kind: `in`, wrongAnswer: `shifted first IN binding` },
-  { kind: `batched-in`, wrongAnswer: `replaced final batch member` },
-  { kind: `range`, wrongAnswer: `exclusive lower boundary` },
-  { kind: `and`, wrongAnswer: `wrong conjunct binding` },
-  { kind: `order-by`, wrongAnswer: `reversed ordering direction` },
-  { kind: `wrapped-lower`, wrongAnswer: `wrong expression wrapper` },
-] as const satisfies ReadonlyArray<{
-  kind: GeneratedScenarioKind
-  wrongAnswer: string
-}>
-
-type GeneratedExpressionIndexScenario = ExpressionIndexScenario & {
-  kind: GeneratedScenarioKind
-  expectedKeys: Array<string>
-  expectedPlan: `search` | `ordered-scan`
-}
-
-const numericIndexCaseArbitrary = fc
-  .tuple(legalPathArbitrary, fc.integer({ min: -10_000, max: 10_000 }))
-  .map(([path, target]) => ({ path, target }))
-
-const stringIndexCaseArbitrary = fc
-  .tuple(legalPathArbitrary, fc.integer({ min: 0, max: 10_000 }))
-  .map(([path, suffix]) => ({ path, target: `target-'${suffix}` }))
-
-const generatedScenarioMatrixArbitrary = fc.tuple(
-  stringIndexCaseArbitrary,
-  numericIndexCaseArbitrary,
-  numericIndexCaseArbitrary,
-  numericIndexCaseArbitrary,
-  stringIndexCaseArbitrary,
-  numericIndexCaseArbitrary,
-  stringIndexCaseArbitrary,
-)
-
-type GeneratedMatrixHistory =
-  typeof generatedScenarioMatrixArbitrary extends fc.Arbitrary<infer H>
-    ? H
-    : never
-
-function resolveGeneratedScenarioMatrix([
-  eqCase,
-  inCase,
-  batchedCase,
-  rangeCase,
-  andCase,
-  orderCase,
-  lowerCase,
-]: GeneratedMatrixHistory) {
-  const eqRows = [
-    {
-      key: `eq-match-a`,
-      value: createNestedRow(eqCase.path, eqCase.target),
-    },
-    {
-      key: `eq-different`,
-      value: createNestedRow(eqCase.path, `${eqCase.target}-other`),
-    },
-    {
-      key: `eq-match-b`,
-      value: createNestedRow(eqCase.path, eqCase.target),
-    },
-  ]
-  const batchedValues = Array.from({ length: 901 }, (_unused, index) =>
-    BigInt(batchedCase.target + index),
-  )
-  const lowerTarget = lowerCase.target.toLowerCase()
-
-  return [
-    {
-      kind: `eq`,
-      label: `generated-eq`,
-      indexExpression: new IR.PropRef(eqCase.path),
-      where: new IR.Func<boolean>(`eq`, [
-        new IR.PropRef(eqCase.path),
-        new IR.Value(eqCase.target),
-      ]),
-      rows: eqRows,
-      expectedKeys: [`eq-match-a`, `eq-match-b`],
-      expectedPlan: `search`,
-    },
-    {
-      kind: `in`,
-      label: `generated-in`,
-      indexExpression: new IR.PropRef(inCase.path),
-      where: new IR.Func<boolean>(`in`, [
-        new IR.PropRef(inCase.path),
-        new IR.Value([BigInt(inCase.target - 1), BigInt(inCase.target)]),
-      ]),
-      rows: [
-        {
-          key: `in-lower`,
-          value: createNestedRow(inCase.path, BigInt(inCase.target - 1)),
-        },
-        {
-          key: `in-match`,
-          value: createNestedRow(inCase.path, BigInt(inCase.target)),
-        },
-        {
-          key: `in-higher`,
-          value: createNestedRow(inCase.path, BigInt(inCase.target + 1)),
-        },
-      ],
-      expectedKeys: [`in-lower`, `in-match`],
-      expectedPlan: `search`,
-    },
-    {
-      kind: `batched-in`,
-      label: `generated-batched-in`,
-      indexExpression: new IR.PropRef(batchedCase.path),
-      where: new IR.Func<boolean>(`in`, [
-        new IR.PropRef(batchedCase.path),
-        new IR.Value(batchedValues),
-      ]),
-      rows: [
-        {
-          key: `batch-first`,
-          value: createNestedRow(batchedCase.path, BigInt(batchedCase.target)),
-        },
-        {
-          key: `batch-last`,
-          value: createNestedRow(
-            batchedCase.path,
-            BigInt(batchedCase.target + 900),
-          ),
-        },
-        {
-          key: `batch-outside`,
-          value: createNestedRow(
-            batchedCase.path,
-            BigInt(batchedCase.target - 1),
-          ),
-        },
-      ],
-      expectedKeys: [`batch-first`, `batch-last`],
-      expectedPlan: `search`,
-    },
-    {
-      kind: `range`,
-      label: `generated-range`,
-      indexExpression: new IR.PropRef(rangeCase.path),
-      where: new IR.Func<boolean>(`gte`, [
-        new IR.PropRef(rangeCase.path),
-        new IR.Value(rangeCase.target),
-      ]),
-      rows: [
-        {
-          key: `range-lower`,
-          value: createNestedRow(rangeCase.path, rangeCase.target - 1),
-        },
-        {
-          key: `range-match`,
-          value: createNestedRow(rangeCase.path, rangeCase.target),
-        },
-        {
-          key: `range-higher`,
-          value: createNestedRow(rangeCase.path, rangeCase.target + 1),
-        },
-      ],
-      expectedKeys: [`range-higher`, `range-match`],
-      expectedPlan: `search`,
-    },
-    {
-      kind: `and`,
-      label: `generated-and`,
-      indexExpression: new IR.PropRef(andCase.path),
-      where: new IR.Func<boolean>(`and`, [
-        new IR.Func(`eq`, [
-          new IR.PropRef(andCase.path),
-          new IR.Value(andCase.target),
-        ]),
-        new IR.Func(`eq`, [new IR.PropRef([`status`]), new IR.Value(`active`)]),
-      ]),
-      rows: [
-        {
-          key: `and-match`,
-          value: {
-            ...createNestedRow(andCase.path, andCase.target),
-            status: `active`,
-          },
-        },
-        {
-          key: `and-inactive`,
-          value: {
-            ...createNestedRow(andCase.path, andCase.target),
-            status: `inactive`,
-          },
-        },
-        {
-          key: `and-different`,
-          value: {
-            ...createNestedRow(andCase.path, `${andCase.target}-other`),
-            status: `active`,
-          },
-        },
-      ],
-      expectedKeys: [`and-match`],
-      expectedPlan: `search`,
-    },
-    {
-      kind: `order-by`,
-      label: `generated-order-by`,
-      indexExpression: new IR.PropRef(orderCase.path),
-      orderBy: [
-        {
-          expression: new IR.PropRef(orderCase.path),
-          compareOptions: {
-            direction: `asc`,
-            nulls: `last`,
-          },
-        },
-      ],
-      preserveResultOrder: true,
-      rows: [
-        {
-          key: `order-high`,
-          value: createNestedRow(orderCase.path, orderCase.target + 1),
-        },
-        {
-          key: `order-low`,
-          value: createNestedRow(orderCase.path, orderCase.target - 1),
-        },
-        {
-          key: `order-middle`,
-          value: createNestedRow(orderCase.path, orderCase.target),
-        },
-      ],
-      expectedKeys: [`order-low`, `order-middle`, `order-high`],
-      expectedPlan: `ordered-scan`,
-    },
-    {
-      kind: `wrapped-lower`,
-      label: `generated-wrapped-lower`,
-      indexExpression: new IR.Func(`lower`, [new IR.PropRef(lowerCase.path)]),
-      where: new IR.Func<boolean>(`eq`, [
-        new IR.Func(`lower`, [new IR.PropRef(lowerCase.path)]),
-        new IR.Value(lowerTarget),
-      ]),
-      rows: [
-        {
-          key: `lower-upper`,
-          value: createNestedRow(
-            lowerCase.path,
-            lowerCase.target.toUpperCase(),
-          ),
-        },
-        {
-          key: `lower-lower`,
-          value: createNestedRow(lowerCase.path, lowerTarget),
-        },
-        {
-          key: `lower-other`,
-          value: createNestedRow(lowerCase.path, `${lowerTarget}-other`),
-        },
-      ],
-      expectedKeys: [`lower-lower`, `lower-upper`],
-      expectedPlan: `search`,
-    },
-  ] satisfies Array<GeneratedExpressionIndexScenario>
-}
-
-function assertGeneratedScenarioGrammar(
-  scenarios: ReadonlyArray<GeneratedExpressionIndexScenario>,
-): void {
-  const actualKinds = scenarios.map(({ kind }) => kind)
-  const missingKinds = GENERATED_SCENARIO_KINDS.filter(
-    (kind) => !actualKinds.includes(kind),
-  )
-  const unexpectedKinds = actualKinds.filter(
-    (kind) => !GENERATED_SCENARIO_KINDS.includes(kind),
-  )
-  const duplicateKinds = actualKinds.filter(
-    (kind, index) => actualKinds.indexOf(kind) !== index,
-  )
-
-  if (
-    missingKinds.length > 0 ||
-    unexpectedKinds.length > 0 ||
-    duplicateKinds.length > 0
-  ) {
-    throw new Error(
-      `generated scenario grammar mismatch: missing=${missingKinds.join(`,`) || `none`}; unexpected=${unexpectedKinds.join(`,`) || `none`}; duplicate=${duplicateKinds.join(`,`) || `none`}`,
-    )
-  }
 }
 
 function mutateGeneratedScenarioQuery(
@@ -901,12 +588,6 @@ function expectedNativePolarityKeys(
     .sort()
 }
 
-declareOracle({
-  check: [assertExpressionIndexHistory],
-  model: [expectedKeysFromScan, expectedRangeKeys, expectedNativePolarityKeys],
-  grammar: [generatedScenarioMatrixArbitrary],
-})
-
 // A generated-matrix comparison names its scenario's axis in its checkpoint
 // (the diagnostic JSON's `kind`). The check carries that axis into the law,
 // so a violation, and each wrong-answer calibration, names the faulted axis.
@@ -1250,62 +931,6 @@ describe(`SQLite expression-index oracle`, () => {
         ),
     })),
   })
-
-  const generatedControlTest = oracleReplayTest(vitestIt)
-
-  generatedControlTest(
-    `reconstructs the retained generated grammar and rejects a nearby duplicate axis`,
-    () => {
-      oracleRoute(`calibration`)
-      const [matrix] = fc.sample(
-        generatedScenarioMatrixArbitrary.map(resolveGeneratedScenarioMatrix),
-        oracleFixedSeed(DEFAULT_ORACLE_SEED, { numRuns: 1 }),
-      )
-      if (!matrix) throw new Error(`fixed grammar witness was not generated`)
-      assertGeneratedScenarioGrammar(matrix)
-      oracleAssertion(
-        `expect(GENERATED_SCENARIO_FAULTS.map(({ kind }) => kind)).toEqual( GENERATED_SCENARIO_KINDS, )`,
-        () =>
-          expect(GENERATED_SCENARIO_FAULTS.map(({ kind }) => kind)).toEqual(
-            GENERATED_SCENARIO_KINDS,
-          ),
-      )
-      const equalityScenario = matrix[0]
-      if (!equalityScenario) {
-        throw new Error(`fixed grammar witness omitted equality`)
-      }
-      oracleAssertion(
-        `expect(() => assertGeneratedScenarioGrammar([...matrix, equalityScenario]), ).toThrow('duplicate=eq'`,
-        () =>
-          expect(() =>
-            assertGeneratedScenarioGrammar([...matrix, equalityScenario]),
-          ).toThrow(`duplicate=eq`),
-      )
-    },
-  )
-
-  // Grammar calibration: ablating any one axis from the fixed matrix fails
-  // the grammar check that every native history runs, naming that axis.
-  generatedControlTest.each(GENERATED_SCENARIO_KINDS)(
-    `rejects the generated grammar when the %s axis is ablated`,
-    (kind) => {
-      oracleRoute(`calibration`)
-      const [matrix] = fc.sample(
-        generatedScenarioMatrixArbitrary.map(resolveGeneratedScenarioMatrix),
-        oracleFixedSeed(DEFAULT_ORACLE_SEED, { numRuns: 1 }),
-      )
-      if (!matrix) throw new Error(`fixed grammar witness was not generated`)
-      oracleAssertion(
-        `expect(() => assertGeneratedScenarioGrammar(ablated)).toThrow('missing=${kind}')`,
-        () =>
-          expect(() =>
-            assertGeneratedScenarioGrammar(
-              matrix.filter((scenario) => scenario.kind !== kind),
-            ),
-          ).toThrow(`missing=${kind}`),
-      )
-    },
-  )
 })
 
 // Native values add a bounded rank/text dimension to this SQL/plan owner.

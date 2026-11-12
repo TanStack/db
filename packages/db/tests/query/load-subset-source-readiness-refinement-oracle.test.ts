@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest'
+import { expect } from 'vitest'
 import { BTreeIndex } from '../../src/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
@@ -8,9 +8,13 @@ import {
   eq,
   toArray,
 } from '../../src/query/index.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { flushPromises } from '../utils.js'
-import { oracleRoute } from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import { finishCleanup } from './load-subset-source-readiness-support.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -48,289 +52,311 @@ function expectedRows(
   ]
 }
 
-declareOracle({
+// The four-cell history grammar: old resolve/reject crossed with
+// old-first/fresh-first settlement.
+const retiredDemandCells = [
+  { oldOutcome: `resolve`, settlementOrder: `old-first` },
+  { oldOutcome: `reject`, settlementOrder: `old-first` },
+  { oldOutcome: `resolve`, settlementOrder: `fresh-first` },
+  { oldOutcome: `reject`, settlementOrder: `fresh-first` },
+] as const
+type RetiredDemandCell = (typeof retiredDemandCells)[number]
+
+// The production driver: real parent and on-demand child Collections with
+// controlled adapter delivery, compared with `expectedRows` at each cut.
+async function runRetiredDemandCell({
+  oldOutcome,
+  settlementOrder,
+}: RetiredDemandCell): Promise<void> {
+  type Parent = { id: string; group: string }
+  type Child = { id: string; group: string }
+  type PendingRequest = {
+    options: LoadSubsetOptions
+    rows: ReturnType<typeof createDeferred<ReadonlyArray<Child>>>
+  }
+  const caseId = `${oldOutcome}-${settlementOrder}`
+  const parentId = `readiness-generation-parent-${caseId}`
+  const childId = `readiness-generation-child-${caseId}`
+  let parentBegin!: () => void
+  let parentWrite!: (message: {
+    type: `update`
+    value: Parent
+    previousValue: Parent
+  }) => void
+  let parentCommit!: () => true | Promise<void>
+  const oldParent: Parent = { id: `parent`, group: `old` }
+  const freshParent: Parent = { ...oldParent, group: `fresh` }
+  const parent = createCollection<Parent>({
+    id: parentId,
+    getKey: (row) => row.id,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        parentBegin = begin
+        parentWrite = write
+        parentCommit = commit
+        begin()
+        write({ type: `insert`, value: oldParent })
+        commit()
+        markReady()
+      },
+    },
+  })
+  let childBegin!: () => void
+  let childWrite!: (message: { type: `insert`; value: Child }) => void
+  let childCommit!: () => true | Promise<void>
+  const pending: Array<PendingRequest> = []
+  const unloads: Array<{
+    options: LoadSubsetOptions
+    abortedAtUnload: boolean | undefined
+  }> = []
+  const child = createCollection<Child>({
+    id: childId,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        childBegin = begin
+        childWrite = write
+        childCommit = commit
+        markReady()
+        return {
+          loadSubset: (options) => {
+            const rows = createDeferred<ReadonlyArray<Child>>()
+            pending.push({ options, rows })
+            return rows.promise.then(async (acquiredRows) => {
+              if (acquiredRows.length > 0) {
+                childBegin()
+                for (const row of acquiredRows) {
+                  childWrite({ type: `insert`, value: row })
+                }
+                const applied = childCommit()
+                if (applied !== true) await applied
+              }
+              return
+            })
+          },
+          unloadSubset: (options) => {
+            unloads.push({
+              options,
+              abortedAtUnload: options.signal?.aborted,
+            })
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `readiness-generation-live-${caseId}`,
+    query: (q) =>
+      q.from({ parent }).select(({ parent: parentRow }) => ({
+        id: parentRow.id,
+        children: toArray(
+          q
+            .from({ child })
+            .where(({ child: childRow }) =>
+              eq(childRow.group, parentRow.group),
+            ),
+        ),
+      })),
+    startSync: true,
+  })
+  const visibleRows = (): Array<{ id: string; children: Array<Row> }> =>
+    live.toArray.map((row) => ({
+      id: row.id,
+      children: row.children.map((childRow) => ({
+        id: childRow.id,
+        group: childRow.group,
+      })),
+    }))
+  let preloadState: `pending` | `resolved` | `rejected` = `pending`
+  const preload = live.preload()
+  void preload.then(
+    () => {
+      preloadState = `resolved`
+    },
+    () => {
+      preloadState = `rejected`
+    },
+  )
+  const requestedGroups = (options: LoadSubsetOptions): Array<string> =>
+    extractSimpleComparisons(options.where).flatMap((comparison) => {
+      if (comparison.field.join(`.`) !== `group`) return []
+      if (comparison.operator === `eq`) {
+        return typeof comparison.value === `string` ? [comparison.value] : []
+      }
+      if (comparison.operator !== `in` || !Array.isArray(comparison.value)) {
+        return []
+      }
+      return comparison.value.filter(
+        (value): value is string => typeof value === `string`,
+      )
+    })
+  const expectUnloads = (
+    ...expectedOptions: ReadonlyArray<LoadSubsetOptions>
+  ): void => {
+    expect(unloads).toHaveLength(expectedOptions.length)
+    for (const [index, options] of expectedOptions.entries()) {
+      expect(unloads[index]!.options).toBe(options)
+      expect(unloads[index]!.abortedAtUnload).toBe(true)
+    }
+  }
+  let liveCleaned = false
+  let primaryFailure: { error: unknown } | undefined
+
+  try {
+    await flushPromises()
+    expect(pending).toHaveLength(1)
+    expect(requestedGroups(pending[0]!.options)).toEqual([`old`])
+    expect(live.status).toBe(`loading`)
+    expect(preloadState).toBe(`pending`)
+    expect(visibleRows()).toEqual(expectedRows(`old`, []))
+
+    // Progressive rows applied before retirement remain in the source.
+    // Their route must still disappear when the parent changes group.
+    const oldChild: Child = { id: `old-child`, group: `old` }
+    childBegin()
+    childWrite({ type: `insert`, value: oldChild })
+    const oldApplied = childCommit()
+    if (oldApplied !== true) await oldApplied
+    await flushPromises()
+    expect(visibleRows()).toEqual(expectedRows(`old`, [oldChild]))
+    expect(preloadState).toBe(`pending`)
+
+    parentBegin()
+    parentWrite({
+      type: `update`,
+      value: freshParent,
+      previousValue: oldParent,
+    })
+    const parentApplied = parentCommit()
+    if (parentApplied !== true) await parentApplied
+    await flushPromises()
+
+    expect(pending).toHaveLength(2)
+    expect(requestedGroups(pending[0]!.options)).toEqual([`old`])
+    expect(requestedGroups(pending[1]!.options)).toEqual([`fresh`])
+    expect(pending[0]!.options.signal?.aborted).toBe(true)
+    expect(pending[1]!.options.signal?.aborted).toBe(false)
+    expectUnloads(pending[0]!.options)
+    expect(live.status).toBe(`loading`)
+    expect(preloadState).toBe(`pending`)
+    expect(child.get(oldChild.id)).toEqual(expect.objectContaining(oldChild))
+    expect(visibleRows()).toEqual(expectedRows(`fresh`, [oldChild]))
+    // A route that retained the retired bucket would fail this comparison.
+    expect([{ id: `parent`, children: [oldChild] }]).not.toEqual(
+      expectedRows(`fresh`, [oldChild]),
+    )
+
+    const freshChild: Child = { id: `fresh-child`, group: `fresh` }
+    const freshSettlement = { settled: false }
+    const settleOld = async () => {
+      if (oldOutcome === `resolve`) {
+        pending[0]!.rows.resolve([])
+      } else {
+        pending[0]!.rows.reject(new Error(`retired source demand failed`))
+      }
+      await flushPromises()
+    }
+    const settleFresh = async () => {
+      expect(child.get(freshChild.id)).toBeUndefined()
+      pending[1]!.rows.resolve([freshChild])
+      await flushPromises()
+      freshSettlement.settled = true
+    }
+    const settlements =
+      settlementOrder === `old-first`
+        ? [settleOld, settleFresh]
+        : [settleFresh, settleOld]
+    for (const settle of settlements) {
+      await settle()
+      expect(live.status).toBe(freshSettlement.settled ? `ready` : `loading`)
+      expect(preloadState).toBe(
+        freshSettlement.settled ? `resolved` : `pending`,
+      )
+      expect(visibleRows()).toEqual(
+        expectedRows(
+          `fresh`,
+          freshSettlement.settled ? [oldChild, freshChild] : [oldChild],
+        ),
+      )
+      expect(live.utils.lastSubsetError).toBeUndefined()
+    }
+
+    await preload
+    await flushPromises()
+
+    expect(live.status).toBe(`ready`)
+    expect(preloadState).toBe(`resolved`)
+    expect(live.utils.lastSubsetError).toBeUndefined()
+    expect(child.get(freshChild.id)).toEqual(
+      expect.objectContaining(freshChild),
+    )
+    expect(visibleRows()).toEqual(expectedRows(`fresh`, [oldChild, freshChild]))
+    expect(live.toArray).toEqual([
+      expect.objectContaining({
+        id: `parent`,
+        children: [expect.objectContaining({ id: `fresh-child` })],
+      }),
+    ])
+    expect(pending[1]!.options.signal?.aborted).toBe(false)
+    expectUnloads(pending[0]!.options)
+
+    await live.cleanup()
+    liveCleaned = true
+    expect(pending[1]!.options.signal?.aborted).toBe(true)
+    expectUnloads(pending[0]!.options, pending[1]!.options)
+  } catch (error) {
+    primaryFailure = { error }
+    throw error
+  } finally {
+    for (const request of pending) {
+      request.rows.resolve([])
+    }
+    await finishCleanup(primaryFailure, [
+      [
+        { name: `preload waiter`, run: () => preload.catch(() => undefined) },
+        {
+          name: `live query`,
+          run: () => (liveCleaned ? Promise.resolve() : live.cleanup()),
+        },
+      ],
+      [
+        { name: `parent source`, run: () => parent.cleanup() },
+        { name: `child source`, run: () => child.cleanup() },
+      ],
+    ])
+  }
+}
+
+oracleProperty({
+  id: `load-subset.source-readiness-refinement`,
+  law: {
+    statement: `A retired correlated child demand may resolve or reject before or after the fresh one, but it never marks the query ready or releases the fresh acquisition lease, and visible children are the applied source rows that match the current parent group.`,
+    authority: `The stale-demand and initial-demand laws of packages/db/src/query/live/ARCHITECTURE.md.`,
+    limits: `The four bounded fixtures; no arbitrary provider cancellation or framework render timing.`,
+  },
   owns: [
     'src/collection/index.ts#createCollection',
     'src/indexes/btree-index.ts',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
-  model: [expectedRows],
+  histories: retiredDemandCells,
+  label: ({ oldOutcome, settlementOrder }) =>
+    `fences a retired source-demand attempt across ${settlementOrder} ${oldOutcome} settlement`,
+  resolve: (cell) => ({ cell }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `load-subset source readiness refinement`,
+      plan,
+      observe,
+      () => runRetiredDemandCell(plan.cell),
+    ),
+  check: forwardAssertionJudgment,
 })
-
-it.each([
-  { oldOutcome: `resolve`, settlementOrder: `old-first` },
-  { oldOutcome: `reject`, settlementOrder: `old-first` },
-  { oldOutcome: `resolve`, settlementOrder: `fresh-first` },
-  { oldOutcome: `reject`, settlementOrder: `fresh-first` },
-] as const)(
-  `fences a retired source-demand attempt across $settlementOrder $oldOutcome settlement`,
-  async ({ oldOutcome, settlementOrder }) => {
-    oracleRoute(`case`)
-    type Parent = { id: string; group: string }
-    type Child = { id: string; group: string }
-    type PendingRequest = {
-      options: LoadSubsetOptions
-      rows: ReturnType<typeof createDeferred<ReadonlyArray<Child>>>
-    }
-    const caseId = `${oldOutcome}-${settlementOrder}`
-    const parentId = `readiness-generation-parent-${caseId}`
-    const childId = `readiness-generation-child-${caseId}`
-    let parentBegin!: () => void
-    let parentWrite!: (message: {
-      type: `update`
-      value: Parent
-      previousValue: Parent
-    }) => void
-    let parentCommit!: () => true | Promise<void>
-    const oldParent: Parent = { id: `parent`, group: `old` }
-    const freshParent: Parent = { ...oldParent, group: `fresh` }
-    const parent = createCollection<Parent>({
-      id: parentId,
-      getKey: (row) => row.id,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          parentBegin = begin
-          parentWrite = write
-          parentCommit = commit
-          begin()
-          write({ type: `insert`, value: oldParent })
-          commit()
-          markReady()
-        },
-      },
-    })
-    let childBegin!: () => void
-    let childWrite!: (message: { type: `insert`; value: Child }) => void
-    let childCommit!: () => true | Promise<void>
-    const pending: Array<PendingRequest> = []
-    const unloads: Array<{
-      options: LoadSubsetOptions
-      abortedAtUnload: boolean | undefined
-    }> = []
-    const child = createCollection<Child>({
-      id: childId,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          childBegin = begin
-          childWrite = write
-          childCommit = commit
-          markReady()
-          return {
-            loadSubset: (options) => {
-              const rows = createDeferred<ReadonlyArray<Child>>()
-              pending.push({ options, rows })
-              return rows.promise.then(async (acquiredRows) => {
-                if (acquiredRows.length > 0) {
-                  childBegin()
-                  for (const row of acquiredRows) {
-                    childWrite({ type: `insert`, value: row })
-                  }
-                  const applied = childCommit()
-                  if (applied !== true) await applied
-                }
-                return
-              })
-            },
-            unloadSubset: (options) => {
-              unloads.push({
-                options,
-                abortedAtUnload: options.signal?.aborted,
-              })
-            },
-          }
-        },
-      },
-    })
-    const live = createLiveQueryCollection({
-      id: `readiness-generation-live-${caseId}`,
-      query: (q) =>
-        q.from({ parent }).select(({ parent: parentRow }) => ({
-          id: parentRow.id,
-          children: toArray(
-            q
-              .from({ child })
-              .where(({ child: childRow }) =>
-                eq(childRow.group, parentRow.group),
-              ),
-          ),
-        })),
-      startSync: true,
-    })
-    const visibleRows = (): Array<{ id: string; children: Array<Row> }> =>
-      live.toArray.map((row) => ({
-        id: row.id,
-        children: row.children.map((childRow) => ({
-          id: childRow.id,
-          group: childRow.group,
-        })),
-      }))
-    let preloadState: `pending` | `resolved` | `rejected` = `pending`
-    const preload = live.preload()
-    void preload.then(
-      () => {
-        preloadState = `resolved`
-      },
-      () => {
-        preloadState = `rejected`
-      },
-    )
-    const requestedGroups = (options: LoadSubsetOptions): Array<string> =>
-      extractSimpleComparisons(options.where).flatMap((comparison) => {
-        if (comparison.field.join(`.`) !== `group`) return []
-        if (comparison.operator === `eq`) {
-          return typeof comparison.value === `string` ? [comparison.value] : []
-        }
-        if (comparison.operator !== `in` || !Array.isArray(comparison.value)) {
-          return []
-        }
-        return comparison.value.filter(
-          (value): value is string => typeof value === `string`,
-        )
-      })
-    const expectUnloads = (
-      ...expectedOptions: ReadonlyArray<LoadSubsetOptions>
-    ): void => {
-      expect(unloads).toHaveLength(expectedOptions.length)
-      for (const [index, options] of expectedOptions.entries()) {
-        expect(unloads[index]!.options).toBe(options)
-        expect(unloads[index]!.abortedAtUnload).toBe(true)
-      }
-    }
-    let liveCleaned = false
-    let primaryFailure: { error: unknown } | undefined
-
-    try {
-      await flushPromises()
-      expect(pending).toHaveLength(1)
-      expect(requestedGroups(pending[0]!.options)).toEqual([`old`])
-      expect(live.status).toBe(`loading`)
-      expect(preloadState).toBe(`pending`)
-      expect(visibleRows()).toEqual(expectedRows(`old`, []))
-
-      // Progressive rows applied before retirement remain in the source.
-      // Their route must still disappear when the parent changes group.
-      const oldChild: Child = { id: `old-child`, group: `old` }
-      childBegin()
-      childWrite({ type: `insert`, value: oldChild })
-      const oldApplied = childCommit()
-      if (oldApplied !== true) await oldApplied
-      await flushPromises()
-      expect(visibleRows()).toEqual(expectedRows(`old`, [oldChild]))
-      expect(preloadState).toBe(`pending`)
-
-      parentBegin()
-      parentWrite({
-        type: `update`,
-        value: freshParent,
-        previousValue: oldParent,
-      })
-      const parentApplied = parentCommit()
-      if (parentApplied !== true) await parentApplied
-      await flushPromises()
-
-      expect(pending).toHaveLength(2)
-      expect(requestedGroups(pending[0]!.options)).toEqual([`old`])
-      expect(requestedGroups(pending[1]!.options)).toEqual([`fresh`])
-      expect(pending[0]!.options.signal?.aborted).toBe(true)
-      expect(pending[1]!.options.signal?.aborted).toBe(false)
-      expectUnloads(pending[0]!.options)
-      expect(live.status).toBe(`loading`)
-      expect(preloadState).toBe(`pending`)
-      expect(child.get(oldChild.id)).toEqual(expect.objectContaining(oldChild))
-      expect(visibleRows()).toEqual(expectedRows(`fresh`, [oldChild]))
-      // A route that retained the retired bucket would fail this comparison.
-      expect([{ id: `parent`, children: [oldChild] }]).not.toEqual(
-        expectedRows(`fresh`, [oldChild]),
-      )
-
-      const freshChild: Child = { id: `fresh-child`, group: `fresh` }
-      const freshSettlement = { settled: false }
-      const settleOld = async () => {
-        if (oldOutcome === `resolve`) {
-          pending[0]!.rows.resolve([])
-        } else {
-          pending[0]!.rows.reject(new Error(`retired source demand failed`))
-        }
-        await flushPromises()
-      }
-      const settleFresh = async () => {
-        expect(child.get(freshChild.id)).toBeUndefined()
-        pending[1]!.rows.resolve([freshChild])
-        await flushPromises()
-        freshSettlement.settled = true
-      }
-      const settlements =
-        settlementOrder === `old-first`
-          ? [settleOld, settleFresh]
-          : [settleFresh, settleOld]
-      for (const settle of settlements) {
-        await settle()
-        expect(live.status).toBe(freshSettlement.settled ? `ready` : `loading`)
-        expect(preloadState).toBe(
-          freshSettlement.settled ? `resolved` : `pending`,
-        )
-        expect(visibleRows()).toEqual(
-          expectedRows(
-            `fresh`,
-            freshSettlement.settled ? [oldChild, freshChild] : [oldChild],
-          ),
-        )
-        expect(live.utils.lastSubsetError).toBeUndefined()
-      }
-
-      await preload
-      await flushPromises()
-
-      expect(live.status).toBe(`ready`)
-      expect(preloadState).toBe(`resolved`)
-      expect(live.utils.lastSubsetError).toBeUndefined()
-      expect(child.get(freshChild.id)).toEqual(
-        expect.objectContaining(freshChild),
-      )
-      expect(visibleRows()).toEqual(
-        expectedRows(`fresh`, [oldChild, freshChild]),
-      )
-      expect(live.toArray).toEqual([
-        expect.objectContaining({
-          id: `parent`,
-          children: [expect.objectContaining({ id: `fresh-child` })],
-        }),
-      ])
-      expect(pending[1]!.options.signal?.aborted).toBe(false)
-      expectUnloads(pending[0]!.options)
-
-      await live.cleanup()
-      liveCleaned = true
-      expect(pending[1]!.options.signal?.aborted).toBe(true)
-      expectUnloads(pending[0]!.options, pending[1]!.options)
-    } catch (error) {
-      primaryFailure = { error }
-      throw error
-    } finally {
-      for (const request of pending) {
-        request.rows.resolve([])
-      }
-      await finishCleanup(primaryFailure, [
-        [
-          { name: `preload waiter`, run: () => preload.catch(() => undefined) },
-          {
-            name: `live query`,
-            run: () => (liveCleaned ? Promise.resolve() : live.cleanup()),
-          },
-        ],
-        [
-          { name: `parent source`, run: () => parent.cleanup() },
-          { name: `child source`, run: () => child.cleanup() },
-        ],
-      ])
-    }
-  },
-)
 
 /**
  * Initial-query readiness for this two-source join needs both root demands.

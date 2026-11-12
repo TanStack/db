@@ -13,7 +13,6 @@
  * The production driver adds real persisted hosts to that same boundary.
  */
 import * as fc from 'fast-check'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 
 export type HydrationLifecycleRow = { id: string; value: number }
 export type HydrationLifecycleHistory = {
@@ -159,9 +158,3 @@ export const hydrationLifecycleHistories: Array<HydrationLifecycleHistory> = (
     ),
   ),
 )
-
-declareOracle({
-  model: [expectedHydrationLifecycle],
-  grammar: [hydrationLifecycleHistoryArb, hydrationLifecycleHistories],
-  check: [hydrationLifecycleViolations],
-})

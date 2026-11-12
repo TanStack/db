@@ -747,15 +747,20 @@ entry, contract comment, or table of fixtures does not turn examples into an
 oracle.
 
 Keep a fixed regression as input to the same model, production driver, and
-comparison that the generated campaign uses. It must not carry a separate
-expected answer or its own assertions. Checker calibration may supply a wrong
-observation to that same comparison. Put supplemental unit tests in ordinary
-test files; they do not discharge an oracle-owned coverage obligation.
+comparison that the generated campaign uses: a fixed history
+(`histories.fixed`) of that `oracleProperty`, or an enumerated property with
+the same driver, model, and check when the grammar cannot produce it. It must
+not carry a separate expected answer or its own assertions. A checker
+calibration is a `calibrations` entry that supplies a wrong observation or a
+mutant driver to that same comparison. Put supplemental unit tests, and
+expectations that step only the model, in ordinary test files; they do not
+discharge an oracle-owned coverage obligation.
 
 For compile-time contracts, generate legal TypeScript inputs and check their
-public types against a reusable independent type law. A list of
-`expectTypeOf` calls or `@ts-expect-error` examples is not an oracle. Negative
-checks derived by the shared law from generated inputs are permitted.
+public types against a reusable independent type law, with an `oracleProperty`
+whose driver runs the type checker. A list of `expectTypeOf` calls or
+`@ts-expect-error` examples is not an oracle. Negative checks derived by the
+shared law from generated inputs are permitted.
 
 ### Name Oracle Files for Discovery
 
@@ -765,17 +770,28 @@ Modules that define the model, checker, or its history grammar also qualify.
 Identify the actual mechanism before renaming a file. A coverage-map entry,
 contract comment, or collection of fixed assertions is not sufficient evidence.
 
-An oracle file holds only oracle tests. It declares its check, model, and
-history grammar with `declareOracle` from
-`packages/db/tests/oracle-declaration.ts`. A type-level oracle names its model
-types in `typeModel`. Each part is optional. Every test in the file must use a
-declared part, directly or through a production driver, or run a generated
-property that states its law inline. A test that compares production with a
-hand-written value is a unit test: put it in an ordinary test file. The
-`oracle/no-unit-test` lint rule reports a test that does neither.
+An oracle file holds only oracle tests, and it registers them only through
+`oracleProperty`, which takes the check, model, history grammar, and driver.
+Its fixed regressions and cases are its histories, its calibrations are its
+`calibrations`, and its reach checks are its declared states. Every other
+test belongs in an ordinary test file, including a test that compares
+production with a hand-written value and a test that steps only the model.
+The `oracle/no-unit-test` lint rule reports every other registration in a file
+whose name contains `oracle` (maintainer decision, 2026-11-11).
+
+Two kinds of test files support an oracle without being oracle files. An
+`it.fails` witness of a known defect goes in an ordinary
+`<subject>-known-defects.test.ts` that reuses the oracle's driver and check;
+the coverage map records the defect as open and names the file. A spec for a
+runtime where `oracleProperty` cannot load, such as a Playwright spec or a
+suite that a WebView app bundles, is a receiving witness named `*-witness.*`:
+it compares production with its oracle owner's shared check, and every oracle
+lint rule except `oracle/no-unit-test` applies to it.
 
 Name the production code that an oracle file judges in the `owns` list of each
-`oracleProperty` call, written inline as a literal array. A law has no owner
+`oracleProperty` call, written inline as a literal array. A file that registers
+through a wrapper passes the list in the wrapper call's options literal, and
+the wrapper forwards it to `oracleProperty`. A law has no owner
 field; code ownership belongs to CODEOWNERS. The oracle rubric's
 [naming section](docs/contributing/oracle-rubric.md#name-oracle-files-consistently)
 states the form that the gap report reads.

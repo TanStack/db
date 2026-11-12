@@ -17,7 +17,13 @@ const config = defineConfig({
     typecheck: {
       enabled: true,
       include: [`tests/**/*.test.ts`, `tests/**/*.test-d.ts`],
-      exclude: [`**/node_modules/**`, `tests/reload-class-oracle.test.ts`],
+      // These oracles register their tests at run time through
+      // oracleProperty, so the typecheck collector finds no suite in them.
+      exclude: [
+        `**/node_modules/**`,
+        `tests/reload-class-oracle.test.ts`,
+        `tests/reload-class-oracle.electron.e2e.test.ts`,
+      ],
     },
   },
 })

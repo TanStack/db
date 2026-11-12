@@ -6,7 +6,6 @@
  * references, work limits, and failed-traversal atomicity stay with other owners.
  */
 import { hash } from '../src/hashing/hash'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { oracleReplayRequested } from '../../db/tests/oracle-config.js'
 import {
   oracleProperty,
@@ -20,7 +19,6 @@ import {
   expectedMixedGraph,
   graphArbitrary,
   isAcyclic,
-  unfoldGraph,
 } from './hash-mixed-graph-shared-oracle'
 import type {
   ConstructedHistory,
@@ -320,12 +318,6 @@ function checkCampaign(
       )
   return pass
 }
-
-declareOracle({
-  model: [isAcyclic, unfoldGraph, expectedCampaign],
-  check: [checkMixedGraph, checkCampaign],
-  grammar: [graphArbitrary],
-})
 
 oracleProperty({
   id: `ivm.hash-mixed-graph`,

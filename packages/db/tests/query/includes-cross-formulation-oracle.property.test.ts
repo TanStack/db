@@ -1,7 +1,13 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, test } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { describe, expect } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { oracleAssertion } from '../oracle-assertion-adapter.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from '../oracle-assertion-adapter.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
 import {
@@ -15,19 +21,16 @@ import {
   queryOnce,
   toArray,
 } from '../../src/query/index.js'
-import {
-  oracleCalibrationTest,
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleRoute,
-  oracleRuns,
-  readOracleRunConfig,
-} from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+import { oracleProperty } from '../oracle-config.js'
 import { flushPromises } from '../utils.js'
-import { runIncludesCalibration } from './includes-calibration.js'
 import { registerIncludesProperty } from './includes-registration-oracle.js'
+import {
+  assertTlpPartitions,
+  partitionAndRouteScenario,
+  recomputeNestedModel,
+  recomputeWindowedModel,
+  sharedRouteDeletionScenario,
+} from './includes-cross-formulation-model-oracle.js'
 import {
   assertArrayKeys,
   assertGroupedRouteCounts,
@@ -35,7 +38,6 @@ import {
   captureGroupedRows,
   captureOrderedNested,
   captureReferenceRows,
-  compareChildren,
   compareParents,
   createControlledCollection,
   normalizeChild,
@@ -43,6 +45,10 @@ import {
   normalizeNested,
   withCleanup,
 } from './includes-cross-formulation-support.js'
+import type {
+  CrossFormulationAction,
+  CrossFormulationScenario,
+} from './includes-cross-formulation-model-oracle.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 import type { ControlledCollection } from './includes-oracle-helpers.js'
@@ -85,22 +91,6 @@ import type {
  * demand, publication, or facade lifecycle contracts.
  */
 
-type CrossFormulationAction =
-  // `put` is model shorthand for a Collection insert when the id is absent
-  // and a Collection update when it is present. Deletes of absent ids are
-  // model no-ops; the driver does not send a source change for them.
-  | { type: `putParent`; row: ParentRow }
-  | { type: `deleteParent`; id: number }
-  | { type: `putChild`; row: ChildRow }
-  | { type: `deleteChild`; id: number }
-
-type CrossFormulationScenario = {
-  parents: Array<ParentRow>
-  children: Array<ChildRow>
-  pivot: number
-  actions: Array<CrossFormulationAction>
-}
-
 type ReferenceContextParent = {
   id: number
   group: number
@@ -112,39 +102,6 @@ type ReferenceContextChild = {
   id: number
   group: number
   token: ReferenceKey
-}
-
-// This is the independent relationship model. It uses only current source
-// Maps, strict group equality, and the declared total orders.
-function recomputeNestedModel(
-  parents: Map<number, ParentRow>,
-  children: Map<number, ChildRow>,
-): Array<NormalizedParent> {
-  return normalizeNested(
-    [...parents.values()].map((parent) => ({
-      ...parent,
-      children: [...children.values()].filter(
-        (child) => child.parentGroup === parent.group,
-      ),
-    })),
-  )
-}
-
-function recomputeWindowedModel(
-  parents: ReadonlyMap<number, ParentRow>,
-  children: ReadonlyMap<number, ChildRow>,
-  offset: number,
-  limit: number,
-): Array<NormalizedParent> {
-  return normalizeNested(
-    [...parents.values()].map((parent) => ({
-      ...parent,
-      children: [...children.values()]
-        .filter((child) => child.parentGroup === parent.group)
-        .sort(compareChildren)
-        .slice(offset, offset + limit),
-    })),
-  )
 }
 
 function assertFormulationResults(
@@ -319,39 +276,6 @@ async function queryChildren(
   return rows.map((row) =>
     normalizeChild(row, `${context} ${partition} child ${row.id}`),
   )
-}
-
-function assertTlpPartitions(
-  results: ReadonlyArray<ReadonlyArray<ChildRow>>,
-  sourceRows: ReadonlyArray<ChildRow>,
-  pivot: number,
-  context: string,
-): void {
-  const partitions = [`predicate`, `complement`, `unknown`] as const
-  oracleAssertion(
-    'includes cross-formulation-oracle.property comparison 318',
-    () =>
-      expect(results, `${context} partition count`).toHaveLength(
-        partitions.length,
-      ),
-  )
-  for (const [index, partition] of partitions.entries()) {
-    // This is a direct finite relation over source values, independent of the
-    // query evaluator. A union could be complete with rows in wrong branches.
-    const expected = sourceRows
-      .filter((child) => {
-        if (child.score === null) return partition === `unknown`
-        return partition === (child.score < pivot ? `predicate` : `complement`)
-      })
-      .sort(compareChildren)
-    oracleAssertion(
-      'includes cross-formulation-oracle.property comparison 328',
-      () =>
-        expect(results[index], `${context} ${partition} partition`).toEqual(
-          expected,
-        ),
-    )
-  }
 }
 
 async function queryPerParent(
@@ -654,41 +578,6 @@ const actionArbitrary: fc.Arbitrary<CrossFormulationAction> = fc.oneof(
 // maximum sampled offset are marginal cases. Longer histories, deeper include
 // trees, arbitrary row shapes, asynchronous failures, and provider races are
 // outside this grammar and belong to the named adjacent owners.
-const sharedRouteDeletionScenario: CrossFormulationScenario = {
-  parents: [
-    { id: 0, group: 0, position: 0 },
-    { id: 1, group: 0, position: 0 },
-  ],
-  children: [
-    { id: 10, parentGroup: 0, score: null, position: 0 },
-    { id: 11, parentGroup: 0, score: null, position: 0 },
-    { id: 12, parentGroup: 0, score: null, position: 0 },
-  ],
-  pivot: 0,
-  actions: [{ type: `deleteChild`, id: 10 }],
-}
-
-const partitionAndRouteScenario: CrossFormulationScenario = {
-  parents: [
-    { id: 0, group: 0, position: 1 },
-    { id: 1, group: 0, position: 0 },
-  ],
-  children: [
-    { id: 10, parentGroup: 0, score: null, position: 2 },
-    { id: 11, parentGroup: 0, score: -1, position: 1 },
-    { id: 12, parentGroup: 1, score: 1, position: 0 },
-  ],
-  pivot: 0,
-  actions: [
-    { type: `putParent`, row: { id: 0, group: 1, position: 1 } },
-    {
-      type: `putChild`,
-      row: { id: 12, parentGroup: 0, score: 1, position: 0 },
-    },
-    { type: `putParent`, row: { id: 0, group: 0, position: -1 } },
-  ],
-}
-
 const overwriteAndNoopScenario: CrossFormulationScenario = {
   parents: [
     { id: 0, group: -1, position: 0 },
@@ -742,151 +631,206 @@ const windowedExamples: Array<
   [{ scenario: partitionAndRouteScenario, offset: 2, limit: 3 }],
 ]
 
-// The parts this file declares. The equivalence check compares the nested,
-// flat, per-parent, and TLP formulations with the recomputed model, and the
-// window check does the same for ordered child windows. The TLP check compares
-// each partition with a direct relation over source rows. The grouped check
-// compares a nested route's counts with the standalone grouped query.
-declareOracle({
-  owns: [
-    'src/collection/change-events.ts#createFilterFunctionFromExpression',
-    'src/collection/index.ts#createCollection',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/query-once.ts#queryOnce',
+// The query-equality route values. Each row builds fresh values, so the
+// enumerated history is the row's name and resolution finds its builder.
+const groupedEqualityRoutes = [
+  [`Date and number`, () => [new Date(0), 0, new Date(1)] as const],
+  [
+    `Buffer and Uint8Array`,
+    () =>
+      [
+        Buffer.from([1, 2, 3]),
+        new Uint8Array([1, 2, 3]),
+        new Uint8Array([1, 2, 4]),
+      ] as const,
   ],
-  check: [
-    expectFormulationsEquivalent,
-    expectWindowedIncludeMatches,
-    assertTlpPartitions,
-    expectNestedCountsMatchStandalone,
+  [
+    `equivalent Temporal values`,
+    () =>
+      [
+        Temporal.PlainDate.from(`2024-04-05`),
+        Temporal.PlainDate.from(`2024-04-05`),
+        Temporal.PlainDate.from(`2024-04-06`),
+      ] as const,
   ],
-  model: [recomputeNestedModel, recomputeWindowedModel],
-})
+] as const
+const groupedEqualityRouteValues = new Map(
+  groupedEqualityRoutes.map(([name, createValues]) => [name, createValues]),
+)
+
+// The former case body, unchanged: a nested grouped include and the
+// standalone grouped query must agree through deletes and reinserts.
+async function judgeGroupedEqualityRoute(
+  createValues: (typeof groupedEqualityRoutes)[number][1],
+): Promise<void> {
+  const [parentGroup, equivalentChildGroup, unequalChildGroup] = createValues()
+  const parents = createControlledCollection(`equality-route-parents`, [
+    { id: 1, group: parentGroup as unknown },
+  ])
+  const childRows = [
+    { id: 10, parentGroup: parentGroup as unknown },
+    { id: 11, parentGroup: equivalentChildGroup as unknown },
+    { id: 12, parentGroup: unequalChildGroup as unknown },
+  ]
+  const children = createControlledCollection(
+    `equality-route-children`,
+    childRows,
+  )
+  const nested = createLiveQueryCollection({
+    query: (q) =>
+      q.from({ parent: parents.collection }).select(({ parent }) => ({
+        id: parent.id,
+        summaries: toArray(
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, parent.group))
+            .groupBy(({ child }) => child.parentGroup)
+            .select(({ child }) => ({ count: count(child.id) })),
+        ),
+      })),
+  })
+  const standalone = createLiveQueryCollection({
+    query: (q) =>
+      q
+        .from({ child: children.collection })
+        .where(({ child }) => eq(child.parentGroup, parentGroup))
+        .groupBy(({ child }) => child.parentGroup)
+        .select(({ child }) => ({ count: count(child.id) })),
+  })
+
+  const assertCounts = (expectedCount: number) => {
+    assertGroupedRouteCounts(nested.toArray, [expectedCount])
+    const nestedCounts = expectNestedCountsMatchStandalone(
+      nested.toArray,
+      standalone.toArray,
+    )
+    expect(nestedCounts).toEqual(
+      expectedCount === 0 ? [] : [{ count: expectedCount }],
+    )
+  }
+
+  await withCleanup(async () => {
+    await Promise.all([nested.preload(), standalone.preload()])
+    assertCounts(2)
+    for (const [type, rowIndex, expectedCount] of [
+      [`delete`, 0, 1],
+      [`delete`, 1, 0],
+      [`insert`, 0, 1],
+      [`insert`, 1, 2],
+    ] as const) {
+      children.write(type, childRows[rowIndex]!)
+      await flushPromises()
+      assertCounts(expectedCount)
+    }
+  }, [
+    () => nested.cleanup(),
+    () => standalone.cleanup(),
+    () => parents.collection.cleanup(),
+    () => children.collection.cleanup(),
+  ])
+}
+
+const groupedEqualityLaw = `A grouped include routes children by query equality, so its counts match the standalone grouped query for equal and unequal Date, binary, and Temporal route values.`
+
+// Named regressions that the bounded scenario grammar cannot produce, or that
+// the file keeps by name. Each replays the equivalence check unchanged.
+const equivalenceFixedHistories: Array<{
+  name: string
+  scenario: CrossFormulationScenario
+}> = [
+  {
+    name: `shared-route child deletion agrees across formulations`,
+    scenario: sharedRouteDeletionScenario,
+  },
+  {
+    name: `split, merge and reactivated routes preserve all predicate partitions`,
+    scenario: {
+      parents: [
+        { id: 0, group: 0, position: 1 },
+        { id: 1, group: 0, position: 0 },
+      ],
+      children: [
+        { id: 10, parentGroup: 0, score: null, position: 2 },
+        { id: 11, parentGroup: 0, score: -1, position: 1 },
+        { id: 12, parentGroup: 0, score: 1, position: 0 },
+        { id: 13, parentGroup: 1, score: 0, position: 0 },
+      ],
+      pivot: 0,
+      actions: [
+        { type: `putParent`, row: { id: 0, group: 1, position: 1 } },
+        { type: `putParent`, row: { id: 1, group: 1, position: 0 } },
+        {
+          type: `putChild`,
+          row: { id: 11, parentGroup: 0, score: -1, position: -1 },
+        },
+        { type: `putParent`, row: { id: 0, group: 0, position: -1 } },
+        { type: `deleteParent`, id: 1 },
+        { type: `putParent`, row: { id: 1, group: 0, position: 0 } },
+        {
+          type: `putChild`,
+          row: { id: 12, parentGroup: 1, score: 1, position: 0 },
+        },
+      ],
+    },
+  },
+]
+
+const equivalenceLaw = `The nested, flat, per-parent, and TLP formulations publish the recomputed relationship model after every source change.`
+
+// The bounded ordered-window cases, including the offset-3 empty tail that the
+// sampled 0..2-offset grammar cannot produce.
+const orderedWindowCases = [
+  { name: `zero limit`, offset: 0, limit: 0 },
+  { name: `first tied page`, offset: 0, limit: 2 },
+  { name: `offset through tie`, offset: 1, limit: 2 },
+  // One child remains at this boundary. Treating the final occupied offset
+  // as an empty tail would violate the ordered-window contract.
+  { name: `last occupied offset`, offset: 2, limit: 2 },
+  { name: `empty tail`, offset: 3, limit: 2 },
+]
+
+// The former case body, unchanged.
+function judgeOrderedWindowCase({
+  offset,
+  limit,
+}: (typeof orderedWindowCases)[number]): Promise<void> {
+  return expectWindowedIncludeMatches(
+    {
+      parents: [
+        { id: 0, group: 0, position: 1 },
+        { id: 1, group: 1, position: 0 },
+      ],
+      children: [
+        { id: 10, parentGroup: 0, score: null, position: 1 },
+        { id: 11, parentGroup: 0, score: -1, position: 0 },
+        { id: 12, parentGroup: 0, score: 1, position: 0 },
+        { id: 13, parentGroup: 1, score: 0, position: 0 },
+      ],
+      pivot: 0,
+      actions: [
+        {
+          type: `putChild`,
+          row: { id: 10, parentGroup: 0, score: null, position: -1 },
+        },
+        { type: `putParent`, row: { id: 0, group: 0, position: -1 } },
+        {
+          type: `putChild`,
+          row: { id: 11, parentGroup: 0, score: -1, position: 2 },
+        },
+        {
+          type: `putChild`,
+          row: { id: 12, parentGroup: 1, score: 1, position: 0 },
+        },
+      ],
+    },
+    offset,
+    limit,
+  )
+}
+
+const orderedWindowLaw = `A nested include's ordered child window matches the recomputed windowed model through root and child moves.`
 
 describe(`includes cross-formulation oracle`, () => {
-  const replay = readOracleRunConfig()
-
-  // The reference-sensitive and symbol-route checks compare a lazy or nested
-  // formulation with a fully loaded or standalone one. Each generated seed runs
-  // its own parent and child history.
-  declareOracle({
-    check: [
-      checkReferenceContextRouting,
-      checkReferenceKeyRouting,
-      checkSymbolGroupRouting,
-    ],
-  })
-
-  test(`bounded grammar axes distinguish routes, order, partitions, and windows`, () => {
-    oracleRoute(`fixed history`)
-    const parents = new Map(
-      partitionAndRouteScenario.parents.map((row) => [row.id, row]),
-    )
-    const children = new Map(
-      partitionAndRouteScenario.children.map((row) => [row.id, row]),
-    )
-    const ids = (rows: ReadonlyArray<NormalizedParent>) =>
-      rows.map((row) => ({
-        id: row.id,
-        children: row.children.map((c) => c.id),
-      }))
-
-    expect(ids(recomputeNestedModel(parents, children))).toEqual([
-      { id: 1, children: [11, 10] },
-      { id: 0, children: [11, 10] },
-    ])
-    parents.set(0, { id: 0, group: 1, position: 1 })
-    expect(ids(recomputeNestedModel(parents, children))).toEqual([
-      { id: 1, children: [11, 10] },
-      { id: 0, children: [12] },
-    ])
-    children.set(12, { ...children.get(12)!, parentGroup: 0 })
-    expect(ids(recomputeNestedModel(parents, children))).toEqual([
-      { id: 1, children: [12, 11, 10] },
-      { id: 0, children: [] },
-    ])
-    parents.set(0, { id: 0, group: 0, position: -1 })
-    expect(ids(recomputeNestedModel(parents, children))).toEqual([
-      { id: 0, children: [12, 11, 10] },
-      { id: 1, children: [12, 11, 10] },
-    ])
-    expect(
-      recomputeWindowedModel(parents, children, 0, 0).map(
-        (row) => row.children.length,
-      ),
-    ).toEqual([0, 0])
-    expect(ids(recomputeWindowedModel(parents, children, 1, 2))).toEqual([
-      { id: 0, children: [11, 10] },
-      { id: 1, children: [11, 10] },
-    ])
-    expect(ids(recomputeWindowedModel(parents, children, 2, 3))).toEqual([
-      { id: 0, children: [10] },
-      { id: 1, children: [10] },
-    ])
-
-    // The three child scores cover true, false, and unknown at pivot 0.
-    // Moving the pivot to -2 moves -1 into the complement; replacing null
-    // with a number removes the unknown partition. These are independent of
-    // the query evaluator used by the TLP production formulation.
-    const partition = (pivot: number) =>
-      [...children.values()].map((child) => ({
-        id: child.id,
-        branch:
-          child.score === null
-            ? `unknown`
-            : child.score < pivot
-              ? `predicate`
-              : `complement`,
-      }))
-    expect(partition(0)).toEqual([
-      { id: 10, branch: `unknown` },
-      { id: 11, branch: `predicate` },
-      { id: 12, branch: `complement` },
-    ])
-    expect(partition(-2)).toEqual([
-      { id: 10, branch: `unknown` },
-      { id: 11, branch: `complement` },
-      { id: 12, branch: `complement` },
-    ])
-    children.set(10, { ...children.get(10)!, score: 0 })
-    expect(partition(0).find((row) => row.id === 10)?.branch).toBe(`complement`)
-
-    const sharedChildren = new Map(
-      sharedRouteDeletionScenario.children.map((row) => [row.id, row]),
-    )
-    const sharedParents = new Map(
-      sharedRouteDeletionScenario.parents.map((row) => [row.id, row]),
-    )
-    expect(ids(recomputeNestedModel(sharedParents, sharedChildren))).toEqual([
-      { id: 0, children: [10, 11, 12] },
-      { id: 1, children: [10, 11, 12] },
-    ])
-    sharedChildren.delete(10)
-    expect(ids(recomputeNestedModel(sharedParents, sharedChildren))).toEqual([
-      { id: 0, children: [11, 12] },
-      { id: 1, children: [11, 12] },
-    ])
-  })
-
-  test(`TLP checker rejects a wrong branch even when the union is complete`, () => {
-    oracleRoute(`calibration`)
-    const rows: Array<ChildRow> = [
-      { id: 10, parentGroup: 0, score: null, position: 0 },
-      { id: 11, parentGroup: 0, score: -1, position: 1 },
-      { id: 12, parentGroup: 0, score: 1, position: 2 },
-    ]
-    const correct = [[rows[1]!], [rows[2]!], [rows[0]!]]
-    assertTlpPartitions(correct, rows, 0, `TLP calibration`)
-    const wrong = [[rows[0]!], [rows[2]!], [rows[1]!]]
-    expect(wrong.flat()).toHaveLength(rows.length)
-    expect(new Set(wrong.flat().map((row) => row.id))).toEqual(
-      new Set(rows.map((row) => row.id)),
-    )
-    expect(() =>
-      assertTlpPartitions(wrong, rows, 0, `TLP calibration`),
-    ).toThrow(`TLP calibration predicate partition`)
-  })
-
   // The next three properties have fixed route-transition histories. Their
   // generated integer is only a user token label: values span FastCheck's
   // default integer domain, while zero is reconstructed by the cold fixed
@@ -903,6 +847,12 @@ describe(`includes cross-formulation oracle`, () => {
       property: `includes-cross-formulation.reference-context`,
       runs: 4,
       fixedSeed: 1658001,
+      owns: [
+        `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+        `src/collection/index.ts#createCollection`,
+        `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        `src/query/query-once.ts#queryOnce`,
+      ],
     },
     `parent-context routing preserves reference-sensitive predicate values across transitions for a fixed seed`,
     async (code) => {
@@ -1091,98 +1041,31 @@ describe(`includes cross-formulation oracle`, () => {
     ])
   }
 
-  test.each([
-    [`Date and number`, () => [new Date(0), 0, new Date(1)] as const],
-    [
-      `Buffer and Uint8Array`,
-      () =>
-        [
-          Buffer.from([1, 2, 3]),
-          new Uint8Array([1, 2, 3]),
-          new Uint8Array([1, 2, 4]),
-        ] as const,
-    ],
-    [
-      `equivalent Temporal values`,
-      () =>
-        [
-          Temporal.PlainDate.from(`2024-04-05`),
-          Temporal.PlainDate.from(`2024-04-05`),
-          Temporal.PlainDate.from(`2024-04-06`),
-        ] as const,
-    ],
-  ])(
-    `grouped includes use query equality for %s routes`,
-    async (_name, createValues) => {
-      oracleRoute(`case`)
-      const [parentGroup, equivalentChildGroup, unequalChildGroup] =
-        createValues()
-      const parents = createControlledCollection(`equality-route-parents`, [
-        { id: 1, group: parentGroup as unknown },
-      ])
-      const childRows = [
-        { id: 10, parentGroup: parentGroup as unknown },
-        { id: 11, parentGroup: equivalentChildGroup as unknown },
-        { id: 12, parentGroup: unequalChildGroup as unknown },
-      ]
-      const children = createControlledCollection(
-        `equality-route-children`,
-        childRows,
-      )
-      const nested = createLiveQueryCollection({
-        query: (q) =>
-          q.from({ parent: parents.collection }).select(({ parent }) => ({
-            id: parent.id,
-            summaries: toArray(
-              q
-                .from({ child: children.collection })
-                .where(({ child }) => eq(child.parentGroup, parent.group))
-                .groupBy(({ child }) => child.parentGroup)
-                .select(({ child }) => ({ count: count(child.id) })),
-            ),
-          })),
-      })
-      const standalone = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ child: children.collection })
-            .where(({ child }) => eq(child.parentGroup, parentGroup))
-            .groupBy(({ child }) => child.parentGroup)
-            .select(({ child }) => ({ count: count(child.id) })),
-      })
-
-      const assertCounts = (expectedCount: number) => {
-        assertGroupedRouteCounts(nested.toArray, [expectedCount])
-        const nestedCounts = expectNestedCountsMatchStandalone(
-          nested.toArray,
-          standalone.toArray,
-        )
-        expect(nestedCounts).toEqual(
-          expectedCount === 0 ? [] : [{ count: expectedCount }],
-        )
-      }
-
-      await withCleanup(async () => {
-        await Promise.all([nested.preload(), standalone.preload()])
-        assertCounts(2)
-        for (const [type, rowIndex, expectedCount] of [
-          [`delete`, 0, 1],
-          [`delete`, 1, 0],
-          [`insert`, 0, 1],
-          [`insert`, 1, 2],
-        ] as const) {
-          children.write(type, childRows[rowIndex]!)
-          await flushPromises()
-          assertCounts(expectedCount)
-        }
-      }, [
-        () => nested.cleanup(),
-        () => standalone.cleanup(),
-        () => parents.collection.cleanup(),
-        () => children.collection.cleanup(),
-      ])
+  oracleProperty({
+    id: `includes-cross-formulation.grouped-equality`,
+    law: {
+      statement: groupedEqualityLaw,
+      authority: `The cross-formulation equivalence contract stated at the start of this owner and packages/db/src/query/live/ARCHITECTURE.md.`,
+      limits: `The three enumerated route-value families over controlled source Collections.`,
     },
-  )
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: groupedEqualityRoutes.map(([name]) => name),
+    label: (name) => `grouped includes use query equality for ${name} routes`,
+    resolve: (name) => ({
+      createValues: groupedEqualityRouteValues.get(name)!,
+    }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(groupedEqualityLaw, plan, observe, () =>
+        judgeGroupedEqualityRoute(plan.createValues),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   registerIncludesProperty(
     [fc.integer()],
@@ -1190,6 +1073,12 @@ describe(`includes cross-formulation oracle`, () => {
       property: `includes-cross-formulation.reference-key`,
       runs: 4,
       fixedSeed: 1658002,
+      owns: [
+        `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+        `src/collection/index.ts#createCollection`,
+        `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        `src/query/query-once.ts#queryOnce`,
+      ],
     },
     `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys for a fixed seed`,
     (...args: Parameters<typeof checkReferenceKeyRouting>) => {
@@ -1400,6 +1289,12 @@ describe(`includes cross-formulation oracle`, () => {
       property: `includes-cross-formulation.symbol-group-route`,
       runs: 4,
       fixedSeed: 1658003,
+      owns: [
+        `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+        `src/collection/index.ts#createCollection`,
+        `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        `src/query/query-once.ts#queryOnce`,
+      ],
     },
     `grouped includes agree with standalone groups for symbol routes for a fixed seed`,
     (...args: Parameters<typeof checkSymbolGroupRouting>) => {
@@ -1495,235 +1390,60 @@ describe(`includes cross-formulation oracle`, () => {
     }
   }
 
-  fcTest(`shared-route child deletion agrees across formulations`, () => {
-    oracleRoute(`fixed history`)
-    return expectFormulationsEquivalent(sharedRouteDeletionScenario)
+  oracleProperty({
+    id: `includes-cross-formulation.equivalence-fixed`,
+    law: {
+      statement: equivalenceLaw,
+      authority: `The cross-formulation equivalence contract stated at the start of this owner and packages/db/src/query/live/ARCHITECTURE.md.`,
+      limits: `Two named fixed scenarios, replayed through the same equivalence check as the generated campaign.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: equivalenceFixedHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(equivalenceLaw, plan, observe, () =>
+        expectFormulationsEquivalent(plan.history.scenario),
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  test(`split, merge and reactivated routes preserve all predicate partitions`, () => {
-    oracleRoute(`fixed history`)
-    return expectFormulationsEquivalent({
-      parents: [
-        { id: 0, group: 0, position: 1 },
-        { id: 1, group: 0, position: 0 },
-      ],
-      children: [
-        { id: 10, parentGroup: 0, score: null, position: 2 },
-        { id: 11, parentGroup: 0, score: -1, position: 1 },
-        { id: 12, parentGroup: 0, score: 1, position: 0 },
-        { id: 13, parentGroup: 1, score: 0, position: 0 },
-      ],
-      pivot: 0,
-      actions: [
-        { type: `putParent`, row: { id: 0, group: 1, position: 1 } },
-        { type: `putParent`, row: { id: 1, group: 1, position: 0 } },
-        {
-          type: `putChild`,
-          row: { id: 11, parentGroup: 0, score: -1, position: -1 },
-        },
-        { type: `putParent`, row: { id: 0, group: 0, position: -1 } },
-        { type: `deleteParent`, id: 1 },
-        { type: `putParent`, row: { id: 1, group: 0, position: 0 } },
-        {
-          type: `putChild`,
-          row: { id: 12, parentGroup: 1, score: 1, position: 0 },
-        },
-      ],
-    })
+  oracleProperty({
+    id: `includes-cross-formulation.ordered-window-cases`,
+    law: {
+      statement: orderedWindowLaw,
+      authority: `The cross-formulation equivalence contract stated at the start of this owner and packages/db/src/query/live/ARCHITECTURE.md.`,
+      limits: `The five enumerated offset and limit cases over one fixed scenario.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: orderedWindowCases,
+    label: ({ name }) =>
+      `preserves ordered window ${name} through root and child moves`,
+    resolve: (windowCase) => ({ ...windowCase }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(orderedWindowLaw, plan, observe, () =>
+        judgeOrderedWindowCase(plan),
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  test.each([
-    { name: `zero limit`, offset: 0, limit: 0 },
-    { name: `first tied page`, offset: 0, limit: 2 },
-    { name: `offset through tie`, offset: 1, limit: 2 },
-    // One child remains at this boundary. Treating the final occupied offset
-    // as an empty tail would violate the ordered-window contract.
-    { name: `last occupied offset`, offset: 2, limit: 2 },
-    { name: `empty tail`, offset: 3, limit: 2 },
-  ])(
-    `preserves ordered window $name through root and child moves`,
-    ({ offset, limit }) => {
-      oracleRoute(`case`)
-      return expectWindowedIncludeMatches(
-        {
-          parents: [
-            { id: 0, group: 0, position: 1 },
-            { id: 1, group: 1, position: 0 },
-          ],
-          children: [
-            { id: 10, parentGroup: 0, score: null, position: 1 },
-            { id: 11, parentGroup: 0, score: -1, position: 0 },
-            { id: 12, parentGroup: 0, score: 1, position: 0 },
-            { id: 13, parentGroup: 1, score: 0, position: 0 },
-          ],
-          pivot: 0,
-          actions: [
-            {
-              type: `putChild`,
-              row: { id: 10, parentGroup: 0, score: null, position: -1 },
-            },
-            { type: `putParent`, row: { id: 0, group: 0, position: -1 } },
-            {
-              type: `putChild`,
-              row: { id: 11, parentGroup: 0, score: -1, position: 2 },
-            },
-            {
-              type: `putChild`,
-              row: { id: 12, parentGroup: 1, score: 1, position: 0 },
-            },
-          ],
-        },
-        offset,
-        limit,
-      )
-    },
-  )
-
-  // Checked direct replay witness:
-  // TANSTACK_DB_ORACLE_SEED=1658004
-  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
-  // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.equivalence
-  // TANSTACK_DB_ORACLE_CALIBRATION=missing-parent
-  // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
-  // tests/query/includes-cross-formulation-oracle.property.test.ts
-  // -t 'includes-cross-formulation\\.equivalence > random seed'
-  // Expected: one main-property failure at cross-formulation checkpoint 0.
-  oracleCalibrationTest(
-    test,
-    `includes-cross-formulation.equivalence`,
-    `missing-parent`,
-  )(
-    `generated equivalence rejects a missing production parent and replays its checkpoint`,
-    async () => {
-      oracleRoute(`calibration`)
-      // The hostile observation is injected after the real nested query is
-      // captured. The same generated driver and refinement comparison execute
-      // during shrinking and direct seed/path replay.
-      const property = fc.asyncProperty(scenarioArbitrary, async (scenario) => {
-        await expectFormulationsEquivalent(scenario, (rows) => rows.slice(1))
-      })
-      const propertyId = `includes-cross-formulation.equivalence`
-      const directReplay = oracleReplayRequested()
-      const failure = await runIncludesCalibration(
-        property,
-        directReplay
-          ? { ...oraclePropertyOptions(8, propertyId), endOnFailure: true }
-          : oracleFixedSeed(1_658_004, { numRuns: oracleRuns(8) }),
-      )
-      expect(failure.failed).toBe(true)
-      expect(String(failure.errorInstance)).toContain(
-        `cross-formulation checkpoint`,
-      )
-      expect(String(failure.errorInstance)).toContain(`checkpoint":0`)
-      if (directReplay) {
-        expect(failure.seed).toBe(replay.campaignSeed)
-        expect(replay.replayPath).toBe(
-          `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
-        )
-        return
-      }
-      expect(failure.numShrinks).toBeGreaterThan(0)
-      if (failure.counterexamplePath === null)
-        throw new Error(`missing-parent mutant did not produce a replay path`)
-      expect(failure.counterexamplePath).toBe(
-        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
-      )
-      const replayResult = await runIncludesCalibration(property, {
-        seed: failure.seed,
-        path: failure.counterexamplePath,
-        numRuns: 1,
-        endOnFailure: true,
-      })
-      expect(replayResult.failed).toBe(true)
-      expect(String(replayResult.errorInstance)).toContain(
-        `cross-formulation checkpoint`,
-      )
-      expect(String(replayResult.errorInstance)).toContain(`checkpoint":0`)
-      expect(replayResult.counterexample).toEqual(failure.counterexample)
-    },
-  )
-
-  // Checked direct replay witness:
-  // TANSTACK_DB_ORACLE_SEED=1658005
-  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
-  // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.ordered-window
-  // TANSTACK_DB_ORACLE_CALIBRATION=extra-child
-  // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
-  // tests/query/includes-cross-formulation-oracle.property.test.ts
-  // -t 'includes-cross-formulation\\.ordered-window > random seed'
-  // Expected: one main-property failure at ordered-window checkpoint 0.
-  oracleCalibrationTest(
-    test,
-    `includes-cross-formulation.ordered-window`,
-    `extra-child`,
-  )(
-    `generated window rejects an extra production child and replays its checkpoint`,
-    async () => {
-      oracleRoute(`calibration`)
-      const property = fc.asyncProperty(
-        windowedScenarioArbitrary,
-        async (sample) => {
-          const { scenario, offset, limit } = sample
-          await expectWindowedIncludeMatches(scenario, offset, limit, (rows) =>
-            rows.map((parent, index) =>
-              index === 0
-                ? {
-                    ...parent,
-                    children: [...parent.children, scenario.children[0]!],
-                  }
-                : parent,
-            ),
-          )
-        },
-      )
-      const propertyId = `includes-cross-formulation.ordered-window`
-      const directReplay = oracleReplayRequested()
-      const failure = await runIncludesCalibration(
-        property,
-        directReplay
-          ? { ...oraclePropertyOptions(12, propertyId), endOnFailure: true }
-          : oracleFixedSeed(1_658_005, { numRuns: oracleRuns(12) }),
-      )
-      expect(failure.failed).toBe(true)
-      expect(String(failure.errorInstance)).toContain(
-        `ordered-window checkpoint`,
-      )
-      expect(String(failure.errorInstance)).toContain(`checkpoint":0`)
-      if (directReplay) {
-        expect(failure.seed).toBe(replay.campaignSeed)
-        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
-        return
-      }
-      expect(failure.numShrinks).toBeGreaterThan(0)
-      if (failure.counterexamplePath === null)
-        throw new Error(`extra-child mutant did not produce a replay path`)
-      expect(failure.counterexamplePath).toBe(
-        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
-      )
-      const replayResult = await runIncludesCalibration(property, {
-        seed: failure.seed,
-        path: failure.counterexamplePath,
-        numRuns: 1,
-        endOnFailure: true,
-      })
-      expect(replayResult.failed).toBe(true)
-      expect(String(replayResult.errorInstance)).toContain(
-        `ordered-window checkpoint`,
-      )
-      expect(String(replayResult.errorInstance)).toContain(`checkpoint":0`)
-      expect(replayResult.counterexample).toEqual(failure.counterexample)
-    },
-  )
+  const equivalenceStatement = `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a fixed seed`
+  const orderedWindowStatement = `matches recomputation for ordered offset and limit child windows for a fixed seed`
 
   const checkEquivalenceScenario = (scenario: CrossFormulationScenario) =>
-    expectFormulationsEquivalent(
-      scenario,
-      replay.replayPath !== undefined &&
-        replay.replayProperty === `includes-cross-formulation.equivalence` &&
-        process.env.TANSTACK_DB_ORACLE_CALIBRATION === `missing-parent`
-        ? (rows) => rows.slice(1)
-        : undefined,
-    )
+    expectFormulationsEquivalent(scenario)
 
   registerIncludesProperty(
     [scenarioArbitrary],
@@ -1732,8 +1452,47 @@ describe(`includes cross-formulation oracle`, () => {
       runs: 8,
       fixedSeed: 1658004,
       examples: scenarioExamples,
+      calibrations: [
+        {
+          name: `generated equivalence rejects a missing production parent`,
+          law: equivalenceStatement,
+          // The former calibration's hostile observation: drop the first
+          // nested parent after the real nested query is captured. Exactly
+          // its old matcher: only a cross-formulation comparison failure at
+          // checkpoint 0 counts as the check rejecting it.
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              equivalenceStatement,
+              plan,
+              observe,
+              async () => {
+                try {
+                  await expectFormulationsEquivalent(plan.history[0], (rows) =>
+                    rows.slice(1),
+                  )
+                } catch (error) {
+                  if (
+                    error instanceof Error &&
+                    String(error).includes(`cross-formulation checkpoint`) &&
+                    String(error).includes(`checkpoint":0`)
+                  )
+                    rejectAt(`missing-parent calibration`, error)
+                  throw new Error(
+                    `the missing-parent mutant failed outside the expected rejection: ${String(error)}`,
+                  )
+                }
+              },
+            ),
+        },
+      ],
+      owns: [
+        `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+        `src/collection/index.ts#createCollection`,
+        `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        `src/query/query-once.ts#queryOnce`,
+      ],
     },
-    `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a fixed seed`,
+    equivalenceStatement,
     (...args: Parameters<typeof checkEquivalenceScenario>) => {
       return checkEquivalenceScenario(...args)
     },
@@ -1747,25 +1506,7 @@ describe(`includes cross-formulation oracle`, () => {
     scenario: CrossFormulationScenario
     offset: number
     limit: number
-  }) =>
-    expectWindowedIncludeMatches(
-      scenario,
-      offset,
-      limit,
-      replay.replayPath !== undefined &&
-        replay.replayProperty === `includes-cross-formulation.ordered-window` &&
-        process.env.TANSTACK_DB_ORACLE_CALIBRATION === `extra-child`
-        ? (rows) =>
-            rows.map((parent, index) =>
-              index === 0
-                ? {
-                    ...parent,
-                    children: [...parent.children, scenario.children[0]!],
-                  }
-                : parent,
-            )
-        : undefined,
-    )
+  }) => expectWindowedIncludeMatches(scenario, offset, limit)
 
   registerIncludesProperty(
     [windowedScenarioArbitrary],
@@ -1774,8 +1515,62 @@ describe(`includes cross-formulation oracle`, () => {
       runs: 12,
       fixedSeed: 1658005,
       examples: windowedExamples,
+      calibrations: [
+        {
+          name: `generated window rejects an extra production child`,
+          law: orderedWindowStatement,
+          // The former calibration's hostile observation: append a source
+          // child to the first published parent. Exactly its old matcher: only
+          // an ordered-window comparison failure at checkpoint 0 counts as the
+          // check rejecting it.
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              orderedWindowStatement,
+              plan,
+              observe,
+              async () => {
+                const [{ scenario, offset, limit }] = plan.history
+                try {
+                  await expectWindowedIncludeMatches(
+                    scenario,
+                    offset,
+                    limit,
+                    (rows) =>
+                      rows.map((parent, index) =>
+                        index === 0
+                          ? {
+                              ...parent,
+                              children: [
+                                ...parent.children,
+                                scenario.children[0]!,
+                              ],
+                            }
+                          : parent,
+                      ),
+                  )
+                } catch (error) {
+                  if (
+                    error instanceof Error &&
+                    String(error).includes(`ordered-window checkpoint`) &&
+                    String(error).includes(`checkpoint":0`)
+                  )
+                    rejectAt(`extra-child calibration`, error)
+                  throw new Error(
+                    `the extra-child mutant failed outside the expected rejection: ${String(error)}`,
+                  )
+                }
+              },
+            ),
+        },
+      ],
+      owns: [
+        `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+        `src/collection/index.ts#createCollection`,
+        `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        `src/query/query-once.ts#queryOnce`,
+      ],
     },
-    `matches recomputation for ordered offset and limit child windows for a fixed seed`,
+    orderedWindowStatement,
     (...args: Parameters<typeof checkWindowedScenario>) => {
       return checkWindowedScenario(...args)
     },

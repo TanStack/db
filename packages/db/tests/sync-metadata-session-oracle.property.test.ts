@@ -1,8 +1,7 @@
-import { fc } from '@fast-check/vitest'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect } from 'vitest'
 import { DbClient, collectionOptions } from '../src/client.js'
 import { DuplicateKeySyncError } from '../src/errors.js'
-import { oracleReplayRequested, oracleRoute } from './oracle-config.js'
+import { oracleReplayRequested } from './oracle-config.js'
 import { oracleProperty } from './oracle-property.js'
 import {
   forwardAssertionJudgment,
@@ -15,7 +14,6 @@ import {
   describeMismatch,
   flatGrammar,
   historyRegimes,
-  modelCheckpoints,
   nestedConflictGrammar,
   nestedGrammar,
   nestedSeedGrammar,
@@ -28,13 +26,13 @@ import {
   sessionCollectionKeys,
   sessionHistoryArbitrary,
 } from './sync-metadata-session-oracle.js'
+import { witnesses } from './sync-metadata-session-witness-grammar-oracle.js'
 import type { Verdict } from './oracle-property.js'
 import type {
   ReceiptState,
   SessionAction,
   SessionDriver,
   SessionGrammar,
-  SessionModel,
 } from './sync-metadata-session-oracle.js'
 import type { SyncConfig } from '../src/types.js'
 
@@ -254,313 +252,6 @@ async function assertSessionHistory(
     )
 }
 
-// ---------------------------------------------------------------------------
-// Named witnesses
-// ---------------------------------------------------------------------------
-
-const a = (
-  type: SessionAction[`type`],
-  key?: number | string,
-  metadata?: boolean,
-) =>
-  ({
-    type,
-    ...(key === undefined ? {} : { key }),
-    ...(metadata === undefined ? {} : { metadata }),
-  }) as SessionAction
-
-/**
- * Each witness reaches one law's premise. The model expectations below are
- * derived by hand from the laws, so they also check the model against the
- * wrong answers that production gives on `30175be48`.
- */
-const witnesses = {
-  // A later seed beneath an open re-insert does not change its kind, but a
-  // source update that merges over that seed and commits ahead does: the
-  // re-insert then lands on a different row (decision 10).
-  lateSeedUnderMergedUpdate: {
-    grammar: nestedSeedGrammar,
-    history: [
-      a(`seed`, 1),
-      a(`begin`),
-      a(`upsert`, 1, true),
-      a(`reinsert`, 1, false),
-      a(`begin`),
-      { type: `seed`, key: 1, bare: true },
-      a(`upsert`, 1, false),
-      a(`commit`),
-    ] as Array<SessionAction>,
-  },
-  // The same under a hold: the inner commit stays accepted but unapplied, so
-  // the seed still marks the row.
-  heldLateSeedUnderMergedUpdate: {
-    grammar: nestedSeedGrammar,
-    history: [
-      a(`hold`),
-      a(`seed`, 1),
-      a(`begin`),
-      a(`upsert`, 1, true),
-      a(`reinsert`, 1, false),
-      a(`begin`),
-      { type: `seed`, key: 1, bare: true },
-      a(`upsert`, 1, false),
-      a(`commit`),
-    ] as Array<SessionAction>,
-  },
-  // Issue #2220: a held earlier write must stay visible after a later commit.
-  heldCursor: {
-    grammar: flatGrammar,
-    history: [
-      a(`hold`),
-      a(`begin`),
-      { type: `collectionSet`, key: `cursor` },
-      a(`commit`),
-      a(`begin`),
-      a(`upsert`, 1, false),
-      a(`commit`),
-    ] as Array<SessionAction>,
-  },
-  // The open transaction overlays every held one, not only the newest.
-  openOverHeld: {
-    grammar: flatGrammar,
-    history: [
-      a(`hold`),
-      a(`begin`),
-      a(`rowSet`, 1),
-      { type: `collectionSet`, key: `gc:a` },
-      a(`commit`),
-      a(`begin`),
-    ] as Array<SessionAction>,
-  },
-  // Independent transactions: an outer abort keeps an inner commit.
-  outerAbortKeepsInnerCommit: {
-    grammar: nestedGrammar,
-    history: [
-      a(`begin`),
-      a(`begin`),
-      a(`upsert`, 1, true),
-      a(`commit`),
-      a(`cancel`),
-    ] as Array<SessionAction>,
-  },
-  // Commit order: the outer transaction commits after the inner one, so its
-  // earlier write wins, and a hold does not change that order.
-  commitOrderDuringHold: {
-    grammar: nestedGrammar,
-    history: [
-      a(`hold`),
-      a(`begin`),
-      a(`rowSet`, 1),
-      a(`begin`),
-      a(`rowSet`, 1),
-      a(`commit`),
-      a(`commit`),
-      a(`release`),
-    ] as Array<SessionAction>,
-  },
-  // During a hold, the outer transaction can still write and commit after an
-  // inner one commits.
-  outerContinuesAfterInnerDuringHold: {
-    grammar: nestedGrammar,
-    history: [
-      a(`hold`),
-      a(`begin`),
-      a(`begin`),
-      a(`rowSet`, 1),
-      a(`commit`),
-      a(`rowSet`, 2),
-      a(`commit`),
-    ] as Array<SessionAction>,
-  },
-  // An inner truncate applies at its own commit, at once despite a hold.
-  innerTruncateAppliesAtItsCommit: {
-    grammar: nestedGrammar,
-    history: [
-      a(`begin`),
-      a(`upsert`, 1, true),
-      a(`commit`),
-      a(`hold`),
-      a(`begin`),
-      a(`begin`),
-      a(`truncate`),
-      a(`commit`),
-      a(`commit`),
-    ] as Array<SessionAction>,
-  },
-  // A seed that arrives under an open update changes the update's merge base,
-  // but never makes the source's equal re-insert a duplicate, and the
-  // re-insert still replaces the row: the late seed's extra field goes.
-  seedUnderOpenReinsert: {
-    grammar: seedGrammar,
-    history: [
-      a(`begin`),
-      { type: `seed`, key: 1, narrow: true, bare: true },
-      a(`upsert`, 1, false),
-      a(`reinsert`, 1, false),
-      { type: `seed`, key: 1, bare: true },
-      a(`commit`),
-    ] as Array<SessionAction>,
-  },
-  // A seed never supersedes a source metadata write on a row the source did not write.
-  seedUnderMetadataOnlyWrite: {
-    grammar: seedGrammar,
-    history: [
-      a(`begin`),
-      a(`rowSet`, 1),
-      a(`commit`),
-      a(`seed`, 1),
-    ] as Array<SessionAction>,
-  },
-  // A seed arriving under the source's open insert sits beneath it: the
-  // insert replaces the seeded row and clears its metadata. Consumers see the
-  // seed until the insert's transaction applies.
-  seedUnderOpenInsert: {
-    grammar: seedGrammar,
-    history: [
-      a(`begin`),
-      a(`upsert`, 1, false),
-      a(`seed`, 1),
-      a(`commit`),
-    ] as Array<SessionAction>,
-  },
-  // The same history with the insert committed before the seed arrives: the
-  // outcome does not depend on arrival order.
-  seedAfterCommittedInsert: {
-    grammar: seedGrammar,
-    history: [
-      a(`begin`),
-      a(`upsert`, 1, false),
-      a(`commit`),
-      a(`seed`, 1),
-    ] as Array<SessionAction>,
-  },
-  // A source insert equal to a seeded row is still an insert: the source never
-  // wrote the row, so the insert names its metadata and clears the seed's.
-  equalInsertOverSeed: {
-    grammar: seedGrammar,
-    history: [
-      a(`seed`, 1),
-      a(`begin`),
-      a(`reinsert`, 1, false),
-    ] as Array<SessionAction>,
-  },
-  // The latest seed of a row no source write has written wins whole, so a
-  // narrow seed drops the earlier seed's other field.
-  laterSeedReplacesSeed: {
-    grammar: seedGrammar,
-    history: [
-      a(`seed`, 1),
-      { type: `seed`, key: 1, narrow: true },
-    ] as Array<SessionAction>,
-  },
-  // Once the source has updated a seeded row, a later seed is ignored for the
-  // row's data; the update wrote no metadata, so the late seed supplies it.
-  partialUpdateThenLateSeed: {
-    grammar: seedGrammar,
-    history: [
-      a(`seed`, 1),
-      a(`begin`),
-      a(`upsert`, 1, false),
-      a(`commit`),
-      { type: `seed`, key: 1, narrow: true },
-    ] as Array<SessionAction>,
-  },
-  // The latest seed wins whole: a later seed without metadata leaves none.
-  bareLaterSeedClearsMetadata: {
-    grammar: seedGrammar,
-    history: [
-      a(`seed`, 1),
-      { type: `seed`, key: 1, bare: true },
-    ] as Array<SessionAction>,
-  },
-  // A fresh source insert over a row only a seed supplied replaces the row
-  // and, naming no metadata, clears the seed's.
-  insertOverSeedReplaces: {
-    grammar: seedGrammar,
-    history: [
-      a(`seed`, 1),
-      a(`begin`),
-      a(`insertOverSeed`, 1, false),
-      a(`commit`),
-    ] as Array<SessionAction>,
-  },
-  // A source update merges over a seeded row under partial row updates, so the
-  // seed's other field and its metadata stay.
-  updateOverSeed: {
-    grammar: seedGrammar,
-    history: [
-      a(`seed`, 1),
-      a(`begin`),
-      a(`upsert`, 1, false),
-      a(`commit`),
-    ] as Array<SessionAction>,
-  },
-  // Under full row updates the update replaces the seeded row; its metadata
-  // stays, because the update names none.
-  updateOverSeedFullRows: {
-    grammar: seedFullGrammar,
-    history: [
-      a(`seed`, 1),
-      a(`begin`),
-      a(`upsert`, 1, false),
-      a(`commit`),
-    ] as Array<SessionAction>,
-  },
-  // An open truncate hides a held row write: a row read stops at the truncate.
-  openTruncateHidesHeldRow: {
-    grammar: flatGrammar,
-    history: [
-      a(`hold`),
-      a(`begin`),
-      a(`rowSet`, 1),
-      a(`commit`),
-      a(`begin`),
-      a(`truncate`),
-    ] as Array<SessionAction>,
-  },
-  // An open delete hides a held collection entry from `list()`.
-  openDeleteHidesHeldListEntry: {
-    grammar: flatGrammar,
-    history: [
-      a(`hold`),
-      a(`begin`),
-      a(`collectionSet`, `gc:a`),
-      a(`commit`),
-      a(`begin`),
-      a(`collectionDelete`, `gc:a`),
-    ] as Array<SessionAction>,
-  },
-  // `list('gc:')` includes the key equal to the prefix and excludes `gc`.
-  prefixBoundary: {
-    grammar: flatGrammar,
-    history: [
-      a(`begin`),
-      a(`collectionSet`, `gc`),
-      a(`collectionSet`, `gc:`),
-    ] as Array<SessionAction>,
-  },
-  // Under full row updates a held update replaces the row, so a later insert
-  // of the updated row is an equal re-insert, not a duplicate. A classifier
-  // that merged the held update would keep the inserted row's field `m`.
-  fullUpdateThenEqualInsertDuringHold: {
-    grammar: seedFullGrammar,
-    history: [
-      a(`begin`),
-      a(`upsert`, 1, true),
-      a(`commit`),
-      a(`hold`),
-      a(`begin`),
-      a(`upsert`, 1, false),
-      a(`commit`),
-      a(`begin`),
-      a(`reinsert`, 1, false),
-    ] as Array<SessionAction>,
-  },
-} satisfies Record<
-  string,
-  { grammar: SessionGrammar; history: Array<SessionAction> }
->
-
 /**
  * Each grammar's replay names: its campaign, and the paired formulations that
  * apply to it (key independence without full row updates, seed order with
@@ -683,212 +374,35 @@ const declaredReach: Record<string, Array<[string, number]>> = {
 }
 
 describe(`sync metadata session oracle`, () => {
-  it(`derives the named witnesses from the laws`, async () => {
-    oracleRoute(`fixed history`)
-    type Observation = ReturnType<SessionModel[`observe`]>
-    const at = async (name: keyof typeof witnesses, step: number) => {
-      const { grammar, history } = witnesses[name]
-      return (await modelCheckpoints(grammar, history)).get(step) as Observation
-    }
-    // Wrong answer on 30175be48: the held cursor reads as absent.
-    const held = await at(`heldCursor`, 6)
-    expect(held.collection.cursor).toEqual({ s: 2 })
-    expect(held.base[1]).toBe(absentMarker)
-    // Wrong answer: the open transaction hides every held write.
-    const open = await at(`openOverHeld`, 5)
-    expect(open.rowMetadata[1]).toEqual({ s: 2 })
-    expect(open.prefixList).toEqual([[`gc:a`, { s: 3 }]])
-    // Wrong answer under closed nesting: the outer abort undoes the inner
-    // commit, and its receipt waits for the outer commit.
-    const innerCommitted = await at(`outerAbortKeepsInnerCommit`, 3)
-    const insertedRow = { id: 1, v: { s: 2 }, m: { s: 2 } }
-    expect(innerCommitted.rowMetadata[1]).toEqual({ s: 2 })
-    expect(innerCommitted.base[1]).toEqual(insertedRow)
-    expect(innerCommitted.receipts).toEqual([`applied`])
-    const outerAborted = await at(`outerAbortKeepsInnerCommit`, 4)
-    expect(outerAborted.rowMetadata[1]).toEqual({ s: 2 })
-    expect(outerAborted.base[1]).toEqual(insertedRow)
-    // Wrong answers: issue order (the inner write wins), and on 30175be48 a
-    // held inner commit read over the open outer write and applied after it.
-    expect((await at(`commitOrderDuringHold`, 4)).rowMetadata[1]).toEqual({
-      s: 4,
-    })
-    expect((await at(`commitOrderDuringHold`, 5)).rowMetadata[1]).toEqual({
-      s: 2,
-    })
-    const released = await at(`commitOrderDuringHold`, 7)
-    expect(released.rowMetadata[1]).toEqual({ s: 2 })
-    expect(released.receipts).toEqual([`applied`, `applied`])
-    // Wrong answer on 30175be48: the outer transaction cannot write after an
-    // inner one commits during a hold.
-    const continued = await at(`outerContinuesAfterInnerDuringHold`, 6)
-    expect(continued.rowMetadata).toEqual({ 1: { s: 3 }, 2: { s: 5 } })
-    expect(continued.receipts).toEqual([`pending`, `pending`])
-    // Wrong answer under closed nesting: the inner truncate waits for the
-    // outer commit.
-    const innerTruncated = await at(`innerTruncateAppliesAtItsCommit`, 7)
-    expect(innerTruncated.base[1]).toBe(absentMarker)
-    expect(innerTruncated.rowMetadata[1]).toBe(absentMarker)
-    expect(innerTruncated.receipts).toEqual([`applied`, `applied`])
-    expect((await at(`innerTruncateAppliesAtItsCommit`, 8)).receipts).toEqual([
-      `applied`,
-      `applied`,
-      `pending`,
-    ])
-    // Wrong answers: replay makes the re-insert a duplicate and invalidates
-    // the source's transaction, so only the late seed remains; or the
-    // re-insert merges and keeps the late seed's field.
-    const reinserted = await at(`seedUnderOpenReinsert`, 5)
-    expect(reinserted.base[1]).toEqual({ id: 1, v: { s: 2 } })
-    expect(reinserted.receipts).toEqual([`applied`])
-    // Wrong answer: the seed's metadata replaces the source's metadata write.
-    const seeded = await at(`seedUnderMetadataOnlyWrite`, 3)
-    expect(seeded.rowMetadata[1]).toEqual({ s: 1 })
-    expect(seeded.base[1]).toEqual({ id: 1, v: { s: 3 }, seeded: { s: 3 } })
-    // Wrong answer on 30175be48: the open insert becomes an update over the
-    // late seed, so the seed's metadata and other field survive it.
-    const underOpen = await at(`seedUnderOpenInsert`, 2)
-    expect(underOpen.rowMetadata[1]).toBe(absentMarker)
-    expect(underOpen.base[1]).toEqual({ id: 1, v: { s: 2 }, seeded: { s: 2 } })
-    const openCommitted = await at(`seedUnderOpenInsert`, 3)
-    expect(openCommitted.rowMetadata[1]).toBe(absentMarker)
-    expect(openCommitted.base[1]).toEqual({ id: 1, v: { s: 1 } })
-    const afterCommit = await at(`seedAfterCommittedInsert`, 3)
-    expect(afterCommit.rowMetadata[1]).toBe(absentMarker)
-    expect(afterCommit.base[1]).toEqual({ id: 1, v: { s: 1 } })
-    // Wrong answer on 30175be48: core counts it as an equal re-insert.
-    const equalInsert = await at(`equalInsertOverSeed`, 2)
-    expect(equalInsert.rowMetadata[1]).toBe(absentMarker)
-    const truncated = await at(`openTruncateHidesHeldRow`, 5)
-    expect(truncated.rowMetadata[1]).toBe(absentMarker)
-    const deleted = await at(`openDeleteHidesHeldListEntry`, 5)
-    expect(deleted.list).toEqual([])
-    expect(deleted.prefixList).toEqual([])
-    const boundary = await at(`prefixBoundary`, 2)
-    expect(boundary.prefixList).toEqual([[`gc:`, { s: 2 }]])
-    expect(boundary.list).toEqual([
-      [`gc`, { s: 1 }],
-      [`gc:`, { s: 2 }],
-    ])
-    const equalAfterFullUpdate = await at(
-      `fullUpdateThenEqualInsertDuringHold`,
-      8,
-    )
-    expect(equalAfterFullUpdate.rowMetadata[1]).toEqual({ s: 1 })
-    expect(equalAfterFullUpdate.base[1]).toEqual({
-      id: 1,
-      v: { s: 1 },
-      m: { s: 1 },
-    })
-    const laterSeed = await at(`laterSeedReplacesSeed`, 1)
-    expect(laterSeed.rowMetadata[1]).toEqual({ s: 1 })
-    expect(laterSeed.base[1]).toEqual({ id: 1, v: { s: 1 } })
-    // Wrong answer on 30175be48: the late seed is dropped with its metadata.
-    const lateSeed = await at(`partialUpdateThenLateSeed`, 4)
-    expect(lateSeed.rowMetadata[1]).toEqual({ s: 4 })
-    expect(lateSeed.base[1]).toEqual({ id: 1, v: { s: 2 }, seeded: { s: 0 } })
-    // Wrong answer on 30175be48: the earlier seed's metadata survives.
-    const bare = await at(`bareLaterSeedClearsMetadata`, 1)
-    expect(bare.rowMetadata[1]).toBe(absentMarker)
-    expect(bare.base[1]).toEqual({ id: 1, v: { s: 1 }, seeded: { s: 1 } })
-    // Wrong answer on 30175be48: the insert merges over the seed as an update.
-    const replacedSeed = await at(`insertOverSeedReplaces`, 3)
-    expect(replacedSeed.rowMetadata[1]).toBe(absentMarker)
-    expect(replacedSeed.base[1]).toEqual({ id: 1, v: { s: 2 } })
-    const merged = await at(`updateOverSeed`, 3)
-    expect(merged.rowMetadata[1]).toEqual({ s: 0 })
-    expect(merged.base[1]).toEqual({ id: 1, v: { s: 2 }, seeded: { s: 0 } })
-    const replaced = await at(`updateOverSeedFullRows`, 3)
-    expect(replaced.rowMetadata[1]).toEqual({ s: 0 })
-    expect(replaced.base[1]).toEqual({ id: 1, v: { s: 2 } })
-  })
-
-  it.each(Object.entries(witnesses))(
-    `keeps the session law on witness %s`,
-    async (_name, { grammar, history }) => {
-      oracleRoute(`fixed history`)
-      await assertSessionHistory(grammar, history)
+  // Each named witness, through the same driver and comparison as the
+  // generated campaigns. The witnesses span several grammars, so they run as
+  // one enumerated property, named by witness.
+  oracleProperty({
+    id: `sync-metadata-session.witnesses`,
+    law: {
+      statement: `Source reads include accepted and open writes in the independent session order, while rows and receipts follow atomic application.`,
+      authority: `The borrowed consistency laws, maintainer decisions and independent model in sync-metadata-session-oracle.ts.`,
+      limits: `The named witnesses in sync-metadata-session-witness-grammar-oracle.ts, each in its own grammar, with the core hold and DbClient hydration boundary.`,
     },
-  )
+    owns: [`src/client.ts`, `src/collection/sync.ts`],
+    histories: Object.keys(witnesses) as Array<keyof typeof witnesses>,
+    label: (name) => `keeps the session law on witness ${name}`,
+    resolve: (name) => ({ name, ...witnesses[name] }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `sync-metadata-session.witnesses`,
+        plan,
+        observe,
+        () => assertSessionHistory(plan.grammar, plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 // ---------------------------------------------------------------------------
 // Campaigns
 // ---------------------------------------------------------------------------
-
-/**
- * Grammar ablation: each generated axis exists for a regime. Removing the
- * axis must remove its regime from the fixed campaign, or the axis adds
- * nothing the laws need.
- */
-describe(`sync metadata session grammar ablation`, () => {
-  const ablations: Array<{
-    grammar: SessionGrammar
-    drop: (action: SessionAction) => boolean
-    regime: string
-  }> = [
-    {
-      grammar: flatGrammar,
-      drop: (x) => x.type === `hold`,
-      regime: `read with two held transactions`,
-    },
-    {
-      grammar: flatGrammar,
-      drop: (x) => x.type === `truncate`,
-      regime: `truncate during a hold`,
-    },
-    {
-      grammar: flatGrammar,
-      drop: (x) => x.type === `reinsert`,
-      regime: `equal re-insert`,
-    },
-    {
-      grammar: flatGrammar,
-      drop: (x) => x.type === `collectionSet` && x.undefinedValue === true,
-      regime: `undefined collection value`,
-    },
-    {
-      grammar: nestedGrammar,
-      drop: (x) => x.type === `cancel`,
-      regime: `abort keeps an inner commit`,
-    },
-    {
-      grammar: { ...nestedGrammar, maxDepth: 1 },
-      drop: () => false,
-      regime: `nested commit`,
-    },
-    { grammar: seedGrammar, drop: (x) => x.type === `seed`, regime: `seed` },
-  ]
-  it.each(ablations.map((ablation) => [ablation.regime, ablation] as const))(
-    `removing the axis for %s removes that regime`,
-    (_regime, { grammar, drop, regime }) => {
-      oracleRoute(`fixed seed`)
-      const count = (filter: (action: SessionAction) => boolean) =>
-        fc
-          .sample(sessionHistoryArbitrary(grammar), {
-            seed: 2_220_100,
-            numRuns: 200,
-          })
-          .filter((history) =>
-            historyRegimes(grammar, history.filter(filter)).has(regime),
-          ).length
-      const fullGrammar =
-        grammar.maxDepth === 1 && regime === `nested commit`
-          ? nestedGrammar
-          : grammar
-      const full = fc
-        .sample(sessionHistoryArbitrary(fullGrammar), {
-          seed: 2_220_100,
-          numRuns: 200,
-        })
-        .filter((history) =>
-          historyRegimes(fullGrammar, history).has(regime),
-        ).length
-      expect(full).toBeGreaterThan(10)
-      expect(count((action) => !drop(action))).toBe(0)
-    },
-  )
-})
 
 /**
  * Second formulation: production against itself, with and without holds.

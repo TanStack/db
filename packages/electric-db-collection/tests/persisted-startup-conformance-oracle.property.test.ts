@@ -3,7 +3,6 @@
  * changed overlap values and both restore orders on each storage host.
  */
 import { describe } from 'vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   persistedStartupHistories,
   persistedStartupHistoryArb,
@@ -12,16 +11,13 @@ import { registerPersistedStartupConformance } from '../../db-adapter-conformanc
 import { electricStartupAdapter } from './persisted-startup-driver'
 
 const historyArb = persistedStartupHistoryArb(`collection`)
-// The receiving path judges persisted startup through this adapter entry.
-// The shared model owns replacement; this list lets the gap CLI credit it.
-declareOracle({
-  owns: [`src/electric.ts#electricCollectionOptions`],
-  grammar: [historyArb],
-})
 describe(`persisted startup conformance: Electric`, () => {
   registerPersistedStartupConformance({
     property: `adapter.electric.persisted-startup`,
     adapter: electricStartupAdapter,
+    // The receiving path judges persisted startup through this adapter entry.
+    // The shared model owns replacement; this list lets the gap CLI credit it.
+    owns: [`src/electric.ts#electricCollectionOptions`],
     histories: persistedStartupHistories,
     arbitrary: historyArb,
   })

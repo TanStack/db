@@ -1,6 +1,6 @@
 import { fc } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import {
   BTreeIndex,
   BasicIndex,
@@ -9,9 +9,7 @@ import {
   eq,
 } from '../src/index'
 import { localOnlyCollectionOptions } from '../src/local-only'
-import { PropRef } from '../src/query/ir'
-import { oracleProperty, oracleRoute } from './oracle-config'
-import { declareOracle } from './oracle-declaration'
+import { oracleProperty } from './oracle-config'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -26,6 +24,12 @@ import {
   mirrorRows,
   replacement,
 } from './change-event-history-fixture.js'
+import {
+  assertIndexAgreement,
+  expectedEventTrace,
+  expectedRowsAfter,
+  perKeyEventTrace,
+} from './change-event-history-model-oracle.js'
 import type {
   Key,
   Op,
@@ -96,12 +100,6 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
 type IndexType = typeof BasicIndex | typeof BTreeIndex
 type SyncActions = Parameters<SyncConfig<TestItem, number>[`sync`]>[0]
 
-type EventProjection = {
-  type: OpKind
-  value: TestItem
-  previousValue?: TestItem
-}
-
 type GeneratedHistory = {
   initialKeys: ReadonlyArray<Key>
   sequence: ReadonlyArray<Op>
@@ -130,86 +128,6 @@ function opsFromPresence(
     else present.add(key)
     return { kind, key, step: firstStep + index }
   })
-}
-
-function applyModelOp(rows: Map<number, TestItem>, op: Op): void {
-  if (op.kind === `delete`) rows.delete(op.key)
-  else
-    rows.set(op.key, {
-      id: op.key,
-      name: `v${op.step}`,
-      fileId: fileIdForKey(op.key),
-    })
-}
-
-function expectedRowsAfter(
-  initialKeys: ReadonlyArray<Key>,
-  sequence: ReadonlyArray<Op>,
-): Map<number, TestItem> {
-  const rows = new Map<number, TestItem>(
-    initialKeys.map((key) => [
-      key,
-      { id: key, name: `initial-${key}`, fileId: fileIdForKey(key) },
-    ]),
-  )
-  for (const op of sequence) applyModelOp(rows, op)
-  return rows
-}
-
-// A batch permits any interleaving of distinct keys. Each key's trace keeps
-// message order and multiplicity, which the Collection mirror depends on.
-function eventRow(row: TestItem): TestItem {
-  return { id: row.id, name: row.name, fileId: row.fileId }
-}
-
-function perKeyEventTrace(
-  changes: ReadonlyArray<ChangeMessage<TestItem, number>>,
-): Array<readonly [number, Array<EventProjection>]> {
-  const byKey = new Map<number, Array<EventProjection>>()
-  for (const change of changes) {
-    const trace = byKey.get(change.key) ?? []
-    trace.push({
-      type: change.type,
-      value: eventRow(change.value),
-      ...(change.previousValue === undefined
-        ? {}
-        : { previousValue: eventRow(change.previousValue) }),
-    })
-    byKey.set(change.key, trace)
-  }
-  return [...byKey].sort(([left], [right]) => left - right)
-}
-
-function expectedEventTrace(
-  sequence: ReadonlyArray<Op>,
-): Array<readonly [number, Array<EventProjection>]> {
-  const rows = new Map<number, TestItem>()
-  const byKey = new Map<number, Array<EventProjection>>()
-  for (const op of sequence) {
-    const before = rows.get(op.key)
-    applyModelOp(rows, op)
-    const after = rows.get(op.key)
-    let event: EventProjection
-    if (op.kind === `delete`) {
-      if (!before || after) throw new Error(`model delete requires a row`)
-      event = { type: `delete`, value: before }
-    } else if (op.kind === `insert`) {
-      if (before || !after)
-        throw new Error(`model insert requires an absent key`)
-      event = { type: `insert`, value: after }
-    } else {
-      if (!before || !after) throw new Error(`model update requires a row`)
-      event = {
-        type: `update`,
-        value: after,
-        previousValue: before,
-      }
-    }
-    const trace = byKey.get(op.key) ?? []
-    trace.push(event)
-    byKey.set(op.key, trace)
-  }
-  return [...byKey].sort(([left], [right]) => left - right)
 }
 
 function applyOp(
@@ -258,25 +176,6 @@ function assertFinalAgreement(
   oracleAssertion('assertFinalAgreement', () =>
     expect(mirrorRows(mirror)).toEqual(expectedRows),
   )
-}
-
-function assertIndexAgreement(
-  index: BaseIndex<number>,
-  expected: ReadonlyMap<number, TestItem>,
-): void {
-  oracleAssertion('assertIndexAgreement', () =>
-    expect(index.keyCount).toBe(expected.size),
-  )
-  for (const fileId of [`f1`, `f2`] as const) {
-    const expectedKeys = new Set(
-      [...expected]
-        .filter(([, row]) => row.fileId === fileId)
-        .map(([key]) => key),
-    )
-    oracleAssertion('assertIndexAgreement', () =>
-      expect(index.lookup(`eq`, fileId)).toEqual(expectedKeys),
-    )
-  }
 }
 
 async function runWithCleanup(
@@ -627,15 +526,149 @@ function expectDurationFieldPublication(
   expect(fields(mirror.get(1))).toEqual(expectedFields)
 }
 
-declareOracle({
-  check: [
-    assertFinalAgreement,
-    assertIndexAgreement,
-    runHistory,
-    expectDurationFieldPublication,
-  ],
-  model: [applyModelOp, expectedRowsAfter, expectedEventTrace],
-})
+async function runDurationFieldChangeHistory(): Promise<void> {
+  let sync!: Parameters<SyncConfig<DurationRow, number>[`sync`]>[0]
+  const collection = createCollection<DurationRow, number>({
+    id: `duration-field-change-history`,
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: (actions) => {
+        sync = actions
+        actions.markReady()
+      },
+    },
+  })
+
+  await runWithCleanup(
+    async () => {
+      await collection.stateWhenReady()
+      const first = {
+        id: 1,
+        duration: Temporal.Duration.from({ seconds: 1 }),
+      }
+      const second = {
+        id: 1,
+        duration: Temporal.Duration.from({ milliseconds: 1000 }),
+      }
+      expect(first.duration.toString()).toBe(second.duration.toString())
+      sync.begin()
+      sync.write({ type: `insert`, value: first })
+      expect(sync.commit()).toBe(true)
+
+      // The model applies each valid source write to a plain keyed Map.
+      // A subscriber maintains an independent mirror from public messages.
+      const expected = new Map<number, DurationRow>([[1, first]])
+      const mirror = new Map(expected)
+      const received: Array<ChangeMessage<DurationRow, number>> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          received.push(...changes)
+          for (const change of changes) {
+            if (change.type === `delete`) mirror.delete(change.key)
+            else mirror.set(change.key, change.value)
+          }
+        },
+        { includeInitialState: false },
+      )
+      try {
+        expected.set(1, second)
+        sync.begin()
+        sync.write({ type: `update`, value: second })
+        expect(sync.commit()).toBe(true)
+
+        expectDurationFieldPublication(
+          expected,
+          collection.state,
+          received,
+          mirror,
+        )
+      } finally {
+        subscription.unsubscribe()
+      }
+    },
+    () => collection.cleanup(),
+  )
+}
+
+async function runDeferredCausalHistory(
+  rounds: ReadonlyArray<ReadonlyArray<Op>>,
+): Promise<void> {
+  const sequence = rounds.flat()
+  let sync!: SyncActions
+  const collection = createCollection<TestItem, number>({
+    id: `deferred-causal-change-history`,
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: (actions) => {
+        sync = actions
+        actions.markReady()
+      },
+    },
+  })
+  const callbacks: Array<Array<ChangeMessage<TestItem, number>>> = []
+  const subscription = collection.subscribeChanges(
+    (changes) => callbacks.push(changes),
+    { includeInitialState: false },
+  )
+  const publication = collection._deferPublication()
+  await runWithCleanup(
+    async () => {
+      await collection.stateWhenReady()
+      for (const round of rounds) {
+        sync.begin()
+        for (const op of round) {
+          if (op.kind === `delete`) {
+            sync.write({ type: `delete`, key: op.key })
+          } else {
+            sync.write({
+              type: op.kind,
+              value: {
+                id: op.key,
+                name: `v${op.step}`,
+                fileId: fileIdForKey(op.key),
+              },
+            })
+          }
+        }
+        expect(sync.commit()).toBe(true)
+      }
+      expect(callbacks).toEqual([])
+      publication.publish()
+      expect(callbacks).toHaveLength(1)
+      expect(perKeyEventTrace(callbacks[0]!)).toEqual(
+        expectedEventTrace(sequence),
+      )
+      expect(
+        [...collection.state].map(([key, row]) => [key, row.name]),
+      ).toEqual([[2, `v6`]])
+    },
+    async () => {
+      const cleanupFailures: Array<unknown> = []
+      for (const release of [
+        () => publication.discard(),
+        () => subscription.unsubscribe(),
+        () => collection.cleanup(),
+      ]) {
+        try {
+          await release()
+        } catch (error) {
+          cleanupFailures.push(error)
+        }
+      }
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError(
+          cleanupFailures,
+          `Causal oracle cleanup failed`,
+          {
+            cause: cleanupFailures[0],
+          },
+        )
+      }
+    },
+  )
+}
 
 describe(`change-event history oracle`, () => {
   // Published #1519 keeps equivalent Duration forms distinct for query `eq`.
@@ -647,162 +680,69 @@ describe(`change-event history oracle`, () => {
   // public observations must reflect the second value.
   // This witness covers ordinary same-realm Durations, not altered objects or
   // a requirement to suppress events for a separately allocated equal copy.
-  it(`publishes a Duration field change to the Collection and change-message consumer`, async () => {
-    oracleRoute(`fixed history`)
-    let sync!: Parameters<SyncConfig<DurationRow, number>[`sync`]>[0]
-    const collection = createCollection<DurationRow, number>({
-      id: `duration-field-change-history`,
-      getKey: (row) => row.id,
-      startSync: true,
-      sync: {
-        sync: (actions) => {
-          sync = actions
-          actions.markReady()
-        },
-      },
-    })
-
-    await runWithCleanup(
-      async () => {
-        await collection.stateWhenReady()
-        const first = {
-          id: 1,
-          duration: Temporal.Duration.from({ seconds: 1 }),
-        }
-        const second = {
-          id: 1,
-          duration: Temporal.Duration.from({ milliseconds: 1000 }),
-        }
-        expect(first.duration.toString()).toBe(second.duration.toString())
-        sync.begin()
-        sync.write({ type: `insert`, value: first })
-        expect(sync.commit()).toBe(true)
-
-        // The model applies each valid source write to a plain keyed Map.
-        // A subscriber maintains an independent mirror from public messages.
-        const expected = new Map<number, DurationRow>([[1, first]])
-        const mirror = new Map(expected)
-        const received: Array<ChangeMessage<DurationRow, number>> = []
-        const subscription = collection.subscribeChanges(
-          (changes) => {
-            received.push(...changes)
-            for (const change of changes) {
-              if (change.type === `delete`) mirror.delete(change.key)
-              else mirror.set(change.key, change.value)
-            }
-          },
-          { includeInitialState: false },
-        )
-        try {
-          expected.set(1, second)
-          sync.begin()
-          sync.write({ type: `update`, value: second })
-          expect(sync.commit()).toBe(true)
-
-          expectDurationFieldPublication(
-            expected,
-            collection.state,
-            received,
-            mirror,
-          )
-        } finally {
-          subscription.unsubscribe()
-        }
-      },
-      () => collection.cleanup(),
-    )
+  const durationHistories = [
+    {
+      name: `publishes a Duration field change to the Collection and change-message consumer`,
+    },
+  ]
+  oracleProperty({
+    id: `collection-state.duration-field-change`,
+    law: {
+      statement: `A source replacement that changes a Duration's intrinsic fields reaches the public row and the change-message mirror, as the reference Map predicts.`,
+      authority: `Collection change-message contract (#1901) and the published Duration equality of #1519, stated above`,
+      limits: `One two-step same-realm Duration history; no altered objects and no suppression of events for an equal copy.`,
+    },
+    owns: [`src/collection/changes.ts`, `src/local-only.ts`],
+    histories: durationHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`duration field change`, plan, observe, () =>
+        runDurationFieldChangeHistory(),
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  it(`preserves each key's causal messages within a deferred callback`, async () => {
-    oracleRoute(`fixed history`)
-    const rounds: ReadonlyArray<ReadonlyArray<Op>> = [
-      [
-        { kind: `insert`, key: 1, step: 1 },
-        { kind: `insert`, key: 2, step: 2 },
+  const deferredCausalHistories: Array<{
+    name: string
+    rounds: ReadonlyArray<ReadonlyArray<Op>>
+  }> = [
+    {
+      name: `preserves each key's causal messages within a deferred callback`,
+      rounds: [
+        [
+          { kind: `insert`, key: 1, step: 1 },
+          { kind: `insert`, key: 2, step: 2 },
+        ],
+        [
+          { kind: `update`, key: 1, step: 3 },
+          { kind: `update`, key: 2, step: 4 },
+        ],
+        [
+          { kind: `delete`, key: 1, step: 5 },
+          { kind: `update`, key: 2, step: 6 },
+        ],
       ],
-      [
-        { kind: `update`, key: 1, step: 3 },
-        { kind: `update`, key: 2, step: 4 },
-      ],
-      [
-        { kind: `delete`, key: 1, step: 5 },
-        { kind: `update`, key: 2, step: 6 },
-      ],
-    ]
-    const sequence = rounds.flat()
-    let sync!: SyncActions
-    const collection = createCollection<TestItem, number>({
-      id: `deferred-causal-change-history`,
-      getKey: (row) => row.id,
-      startSync: true,
-      sync: {
-        sync: (actions) => {
-          sync = actions
-          actions.markReady()
-        },
-      },
-    })
-    const callbacks: Array<Array<ChangeMessage<TestItem, number>>> = []
-    const subscription = collection.subscribeChanges(
-      (changes) => callbacks.push(changes),
-      { includeInitialState: false },
-    )
-    const publication = collection._deferPublication()
-    await runWithCleanup(
-      async () => {
-        await collection.stateWhenReady()
-        for (const round of rounds) {
-          sync.begin()
-          for (const op of round) {
-            if (op.kind === `delete`) {
-              sync.write({ type: `delete`, key: op.key })
-            } else {
-              sync.write({
-                type: op.kind,
-                value: {
-                  id: op.key,
-                  name: `v${op.step}`,
-                  fileId: fileIdForKey(op.key),
-                },
-              })
-            }
-          }
-          expect(sync.commit()).toBe(true)
-        }
-        expect(callbacks).toEqual([])
-        publication.publish()
-        expect(callbacks).toHaveLength(1)
-        expect(perKeyEventTrace(callbacks[0]!)).toEqual(
-          expectedEventTrace(sequence),
-        )
-        expect(
-          [...collection.state].map(([key, row]) => [key, row.name]),
-        ).toEqual([[2, `v6`]])
-      },
-      async () => {
-        const cleanupFailures: Array<unknown> = []
-        for (const release of [
-          () => publication.discard(),
-          () => subscription.unsubscribe(),
-          () => collection.cleanup(),
-        ]) {
-          try {
-            await release()
-          } catch (error) {
-            cleanupFailures.push(error)
-          }
-        }
-        if (cleanupFailures.length > 0) {
-          throw new AggregateError(
-            cleanupFailures,
-            `Causal oracle cleanup failed`,
-            {
-              cause: cleanupFailures[0],
-            },
-          )
-        }
-      },
-    )
+    },
+  ]
+  oracleProperty({
+    id: `collection-state.deferred-causal-messages`,
+    law: {
+      statement: `A deferred publication delivers each key's messages in causal order with complete row values, matching the model's per-key event trace; cross-key interleaving is unconstrained.`,
+      authority: `Collection change-message contract and the maintainer cross-key ordering decision stated above`,
+      limits: `One deferred sync history of three rounds over two keys.`,
+    },
+    owns: [`src/collection/changes.ts`, `src/local-only.ts`],
+    histories: deferredCausalHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`deferred causal messages`, plan, observe, () =>
+        runDeferredCausalHistory(plan.history.rounds),
+      ),
+    check: forwardAssertionJudgment,
   })
 
   const indexTypes: Array<readonly [string, IndexType]> = [
@@ -849,61 +789,38 @@ describe(`change-event history oracle`, () => {
       return { initialKeys: [1, 2], sequence: [...replacement, ...tail], mode }
     })
 
-  it(`rejects a deferred message with the right name but wrong row fields`, () => {
-    oracleRoute(`calibration`)
-    const sequence: Array<Op> = [
-      { kind: `insert`, key: 1, step: 1 },
-      { kind: `update`, key: 1, step: 2 },
-    ]
-    const expected = expectedEventTrace(sequence)
-    expect(
-      perKeyEventTrace([
-        {
-          type: `insert`,
-          key: 1,
-          value: { id: 1, name: `v1`, fileId: `f2` },
-        },
-        {
-          type: `update`,
-          key: 1,
-          value: { id: 1, name: `v2`, fileId: `f1` },
-          previousValue: { id: 1, name: `v1`, fileId: `f2` },
-        },
-      ]),
-    ).not.toEqual(expected)
-  })
-
-  it(`rejects a missing live key in the index checker`, () => {
-    oracleRoute(`calibration`)
-    expect(replacement.map(({ kind, key }) => [kind, key])).toEqual([
-      [`delete`, 1],
-      [`delete`, 2],
-      [`insert`, 1],
-      [`insert`, 2],
-    ])
-    const expected = expectedRowsAfter([1, 2], replacement)
-    const index = new BasicIndex<number>(1, new PropRef([`fileId`]))
-    index.build([...expected])
-    assertIndexAgreement(index, expected)
-    index.remove(1, expected.get(1))
-    expect(() => assertIndexAgreement(index, expected)).toThrowError(/expected/)
-  })
-
-  for (const [name, IndexType] of indexTypes) {
-    it.each([`batched`, `sequential`] as const)(
-      `keeps ${name} and indexed queries aligned after %s replacement`,
-      async (mode) => {
-        oracleRoute(`fixed history`)
-        await runHistory(
+  const indexReplacementHistories = indexTypes.flatMap(([index]) =>
+    ([`batched`, `sequential`] as const).map((mode) => ({ index, mode })),
+  )
+  const indexTypesByName = new Map(indexTypes)
+  oracleProperty({
+    id: `collection-state.eager-index-replacement`,
+    law: {
+      statement: `Eager index buckets and indexed query rows agree with the independent authored Map at every settled prefix and final query checkpoint.`,
+      authority: `Collection change-message and eager-index contracts stated above`,
+      limits: `The fixed replacement history (delete then reinsert keys 1 and 2) for BasicIndex and BTreeIndex in batched and sequential modes; the generated indexed grammar cannot take it back.`,
+    },
+    owns: [`src/collection/changes.ts`, `src/local-only.ts`],
+    histories: indexReplacementHistories,
+    label: ({ index, mode }) =>
+      `keeps ${index} and indexed queries aligned after ${mode} replacement`,
+    resolve: (history) => ({
+      history,
+      IndexType: indexTypesByName.get(history.index)!,
+    }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`eager index replacement`, plan, observe, () =>
+        runHistory(
           replacement,
           [1, 2],
-          mode,
-          `indexed-${name}-${mode}`,
-          IndexType,
-        )
-      },
-    )
-  }
+          plan.history.mode,
+          `indexed-${plan.history.index}-${plan.history.mode}`,
+          plan.IndexType,
+        ),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   const verifyIndexedHistory = async ({
     initialKeys,
@@ -942,31 +859,59 @@ describe(`change-event history oracle`, () => {
     check: forwardAssertionJudgment,
   })
 
-  it.each(cases)(
-    `$id: $label reconstructs every public row`,
-    async ({ mode, sequence, initialKeys, id }) => {
-      oracleRoute(`case`)
-      await runHistory(sequence, initialKeys, mode, `history-oracle-${id}`)
+  oracleProperty({
+    id: `collection-state.change-event-cases`,
+    law: {
+      statement: `Each settled change-message history reconstructs the Collection's public rows through valid per-key messages.`,
+      authority: `Collection change-message contract stated above`,
+      limits: `The bounded enumeration: one-key histories through length four from an absent row and two-key histories through length three from every initial presence state, batched and sequential.`,
     },
-  )
+    owns: [`src/collection/changes.ts`, `src/local-only.ts`],
+    histories: cases,
+    label: ({ id, label }) => `${id}: ${label} reconstructs every public row`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`change-event case`, plan, observe, () =>
+        runHistory(
+          plan.history.sequence,
+          plan.history.initialKeys,
+          plan.history.mode,
+          `history-oracle-${plan.history.id}`,
+        ),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   // Every bounded history again, ending with a reload. It includes the
   // reported trace: initialData [1], update 1, reload.
-  it.each(cases)(
-    `$id: $label then reload reconstructs every public row`,
-    async ({ mode, sequence, initialKeys, id }) => {
-      oracleRoute(`case`)
-      await runHistory(
-        sequence,
-        initialKeys,
-        mode,
-        `history-oracle-reload-${id}`,
-        undefined,
-        undefined,
-        true,
-      )
+  oracleProperty({
+    id: `collection-state.change-event-reload-cases`,
+    law: {
+      statement: `Each settled change-message history that ends with a reload keeps the local-only rows, and a later write reaches the rows and the mirror.`,
+      authority: `Collection change-message contract and the maintainer reload decision stated above`,
+      limits: `The same bounded enumeration as collection-state.change-event-cases, each history ending with a reload.`,
     },
-  )
+    owns: [`src/collection/changes.ts`, `src/local-only.ts`],
+    histories: cases,
+    label: ({ id, label }) =>
+      `${id}: ${label} then reload reconstructs every public row`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`change-event reload case`, plan, observe, () =>
+        runHistory(
+          plan.history.sequence,
+          plan.history.initialKeys,
+          plan.history.mode,
+          `history-oracle-reload-${plan.history.id}`,
+          undefined,
+          undefined,
+          true,
+        ),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   oracleProperty({
     id: `collection-state.change-event-history`,

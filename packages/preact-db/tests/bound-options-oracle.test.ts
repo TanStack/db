@@ -19,7 +19,6 @@ import {
   checkBoundOptions,
 } from '../../db/tests/live-query-bound-options-oracle'
 import {
-  declareOracle,
   differs,
   oracleProperty,
   pass,
@@ -285,10 +284,4 @@ oracleProperty({
                 },
           ),
   })),
-})
-
-declareOracle({
-  check: [checkBoundOptionHistory],
-  grammar: [histories],
-  model: [modelBoundOptions],
 })

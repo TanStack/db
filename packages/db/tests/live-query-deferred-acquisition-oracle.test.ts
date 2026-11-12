@@ -51,7 +51,7 @@
  * `DbClient` stream preloads, a subscriber that outlives cleanup, and reads
  * that wait for readiness.
  */
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import {
   BTreeIndex,
@@ -64,7 +64,6 @@ import { resumeDeferredLiveQueryCollections } from '../src/live-query-options.js
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
 import { expectedStartHandoff } from './collection-subscription-lifecycle-grammar-oracle.js'
-import { oracleRoute } from './oracle-config.js'
 import { oracleProperty } from './oracle-property.js'
 import {
   forwardAssertionJudgment,
@@ -72,7 +71,6 @@ import {
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from './oracle-assertion-adapter.js'
-import { declareOracle } from './oracle-declaration.js'
 import {
   EXPECTED_IDS,
   QUERY_SHAPES,
@@ -420,19 +418,55 @@ async function runAcquisitionHistory(
   }
 }
 
+type AcquisitionCase = {
+  state: SourceState
+  shape: QueryShape
+  depth: 1 | 2
+  name: string
+}
+
 describe(`live-query deferred acquisition`, () => {
-  for (const state of SOURCE_STATES) {
-    for (const shape of QUERY_SHAPES) {
-      for (const depth of [1, 2] as const) {
-        for (const [name, commands] of Object.entries(HISTORIES)) {
-          it(`${state}, ${shape}, depth ${depth}: ${name}`, async () => {
-            oracleRoute(`case`)
-            return runAcquisitionHistory(state, shape, depth, commands)
-          })
-        }
-      }
-    }
-  }
+  oracleProperty({
+    id: `live-query.deferred-acquisition`,
+    law: {
+      statement: `A live-query Collection starts no provider work of its own: its source subscriptions defer acquisition until it has a subscriber that asks for data or a preload, and readiness and rows follow the model after every command.`,
+      authority: `The deferred-acquisition contract and independent command model stated above`,
+      limits: `Every source state, query shape, nesting depth 1 or 2, and named command history.`,
+    },
+    owns: [
+      `src/live-query-options.ts#resumeDeferredLiveQueryCollections`,
+      `src/query/pooled-live-query.ts#createPooledLiveQuery`,
+      `src/collection/index.ts#CollectionImpl._deferSyncStart`,
+      `src/collection/index.ts#CollectionImpl._resumeSyncStart`,
+    ],
+    histories: SOURCE_STATES.flatMap((state) =>
+      QUERY_SHAPES.flatMap((shape) =>
+        ([1, 2] as const).flatMap((depth) =>
+          Object.keys(HISTORIES).map((name): AcquisitionCase => ({
+            state,
+            shape,
+            depth,
+            name,
+          })),
+        ),
+      ),
+    ),
+    label: ({ state, shape, depth, name }) =>
+      `${state}, ${shape}, depth ${depth}: ${name}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `live-query.deferred-acquisition`,
+        plan,
+        observe,
+        () => {
+          const { state, shape, depth, name } = plan.history
+          return runAcquisitionHistory(state, shape, depth, HISTORIES[name]!)
+        },
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -450,18 +484,6 @@ describe(`live-query deferred acquisition`, () => {
  * client, which must not mistake the absent config for a live-query builder.
  */
 // The pooled entry point takes the internal builder, as its own oracle does.
-// What this oracle owns: the gap report judges the deferred sync-start and resumption
-// entry points and pooled live-query creation by this file's histories.
-declareOracle({
-  check: [runAcquisitionHistory, runPooledHistory, runDeferredSiblingHistory],
-  model: [
-    initialModel,
-    applyModel,
-    expectedReplacementRun,
-    deferredSiblingRows,
-  ],
-})
-
 async function runPooledHistory(
   state: SourceState,
   commands: ReadonlyArray<Command>,
@@ -526,14 +548,34 @@ describe(`pooled live-query deferred acquisition`, () => {
     'subscribe after build': [`start`, `read`, `subscribe`],
     'preload after build': [`start`, `preload`],
   }
-  for (const state of [`eager-idle`, `eager-running`] as const) {
-    for (const [name, commands] of Object.entries(pooledHistories)) {
-      it(`${state}: ${name}`, async () => {
-        oracleRoute(`case`)
-        return runPooledHistory(state, commands)
-      })
-    }
-  }
+  oracleProperty({
+    id: `live-query.deferred-pooled`,
+    law: {
+      statement: `A pooled view's partition subscription defers acquisition until the view has a subscriber or a preload, and readiness and rows follow the model after every command.`,
+      authority: `The deferred-acquisition contract and independent command model stated above`,
+      limits: `Eager idle and running sources with the three pooled histories without cleanup.`,
+    },
+    owns: [
+      `src/live-query-options.ts#resumeDeferredLiveQueryCollections`,
+      `src/query/pooled-live-query.ts#createPooledLiveQuery`,
+      `src/collection/index.ts#CollectionImpl._deferSyncStart`,
+      `src/collection/index.ts#CollectionImpl._resumeSyncStart`,
+    ],
+    histories: ([`eager-idle`, `eager-running`] as const).flatMap((state) =>
+      Object.keys(pooledHistories).map((name) => ({ state, name })),
+    ),
+    label: ({ state, name }) => `${state}: ${name}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`live-query.deferred-pooled`, plan, observe, () =>
+        runPooledHistory(
+          plan.history.state,
+          pooledHistories[plan.history.name]!,
+        ),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -555,6 +597,92 @@ function expectedReplacementRun(
   }
 }
 
+type SurvivorCase = {
+  state: `eager-idle` | `on-demand-idle`
+  shape: QueryShape
+  depth: 1 | 2
+  reader: `ordinary` | `resumed` | `deferred`
+  renderGate: boolean
+  cleanupAt: `loading` | `ready`
+  restartFromCleanup: boolean
+}
+
+async function survivorAfterCleanup({
+  state,
+  shape,
+  depth,
+  reader,
+  renderGate,
+  cleanupAt,
+  restartFromCleanup,
+}: SurvivorCase) {
+  const expected = expectedReplacementRun(state, reader)
+  const { collection: source, counts } = makeSource(state)
+  const { outer, collections } = makeLiveQuery(source, shape, depth)
+  if (renderGate) expect(outer._deferSyncStart()).toBe(true)
+  let subscription: ReturnType<typeof outer.subscribeChanges> | undefined
+  if (reader !== `ordinary`) {
+    subscription = outer.subscribeChanges(() => {}, {
+      deferAcquisition: true,
+    })
+  }
+  let pending: Promise<void> | undefined
+  let reached = false
+  const retiredStatuses: Array<string> = []
+  const stopTarget = outer.on(`status:change`, ({ status }) => {
+    if (reached) {
+      retiredStatuses.push(status)
+      if (restartFromCleanup && status === `cleaned-up`)
+        outer.startSyncImmediate()
+    }
+  })
+  const stopSource = source.on(`status:change`, ({ status }) => {
+    if (status === cleanupAt && !reached) {
+      reached = true
+      pending = outer.cleanup()
+    }
+  })
+  try {
+    if (reader === `ordinary`) subscription = outer.subscribeChanges(() => {})
+    else if (reader === `resumed`) subscription!.resumeDeferredAcquisition()
+    else source.startSyncImmediate()
+    expect(reached, `source startup reached cleanup`).toBe(true)
+    await pending
+    if (!restartFromCleanup) {
+      expect(outer.status, `cleanup must not retry admission`).toBe(
+        `cleaned-up`,
+      )
+      expect(retiredStatuses).toEqual([`cleaned-up`])
+    } else {
+      expect(retiredStatuses[0]).toBe(`cleaned-up`)
+      expect(
+        retiredStatuses.filter((status) => status === `loading`),
+      ).toHaveLength(1)
+    }
+    expect(outer.subscriberCount).toBe(expected.acquiring)
+    stopSource()
+    stopTarget()
+    outer.startSyncImmediate()
+    await settle()
+    expect(counts.acquisitions > 0, `replacement has acquisition`).toBe(
+      expected.acquires,
+    )
+    expect(outer.status === `ready`, `replacement readiness`).toBe(
+      expected.ready,
+    )
+    expect(outer.toArray.map((row) => row.id)).toEqual(
+      expected.ready ? EXPECTED_IDS[shape] : [],
+    )
+    expect(outer.subscriberCount).toBe(expected.acquiring)
+  } finally {
+    stopSource()
+    stopTarget()
+    subscription?.unsubscribe()
+    for (const collection of collections) await collection.cleanup()
+    await source.cleanup()
+  }
+}
+
 describe(`a subscriber that outlives cleanup`, () => {
   // Admission may still be transferring ownership when a source status callback
   // cleans up the live-query Collection. Cleanup retires that start, not the
@@ -562,8 +690,20 @@ describe(`a subscriber that outlives cleanup`, () => {
   // The model counts a returned acquiring handle as demand for the next run;
   // a still-deferred handle contributes none. This extends the settled-cleanup
   // histories below with the construction boundary, both shapes and depths.
-  it.each(
-    ([`eager-idle`, `on-demand-idle`] as const).flatMap((state) =>
+  oracleProperty({
+    id: `live-query.deferred-cleanup-survivor`,
+    law: {
+      statement: `Cleanup during admission retires that start, not the surviving logical subscription: the replacement run's subscribers, readiness and acquisition follow from how the surviving subscriber read.`,
+      authority: `The deferred-acquisition contract and independent command model stated above`,
+      limits: `Eager and on-demand idle sources, every query shape, depth 1 or 2, three reader kinds, with and without a render gate, cleanup at loading or ready, with and without a restart from cleanup.`,
+    },
+    owns: [
+      `src/live-query-options.ts#resumeDeferredLiveQueryCollections`,
+      `src/query/pooled-live-query.ts#createPooledLiveQuery`,
+      `src/collection/index.ts#CollectionImpl._deferSyncStart`,
+      `src/collection/index.ts#CollectionImpl._resumeSyncStart`,
+    ],
+    histories: ([`eager-idle`, `on-demand-idle`] as const).flatMap((state) =>
       QUERY_SHAPES.flatMap((shape) =>
         ([1, 2] as const).flatMap((depth) =>
           ([`ordinary`, `resumed`, `deferred`] as const).flatMap((reader) =>
@@ -584,9 +724,7 @@ describe(`a subscriber that outlives cleanup`, () => {
         ),
       ),
     ),
-  )(
-    `$state $shape depth=$depth $reader gate=$renderGate survives $cleanupAt cleanup during admission (restart=$restartFromCleanup)`,
-    async ({
+    label: ({
       state,
       shape,
       depth,
@@ -594,76 +732,19 @@ describe(`a subscriber that outlives cleanup`, () => {
       renderGate,
       cleanupAt,
       restartFromCleanup,
-    }) => {
-      oracleRoute(`case`)
-      const expected = expectedReplacementRun(state, reader)
-      const { collection: source, counts } = makeSource(state)
-      const { outer, collections } = makeLiveQuery(source, shape, depth)
-      if (renderGate) expect(outer._deferSyncStart()).toBe(true)
-      let subscription: ReturnType<typeof outer.subscribeChanges> | undefined
-      if (reader !== `ordinary`) {
-        subscription = outer.subscribeChanges(() => {}, {
-          deferAcquisition: true,
-        })
-      }
-      let pending: Promise<void> | undefined
-      let reached = false
-      const retiredStatuses: Array<string> = []
-      const stopTarget = outer.on(`status:change`, ({ status }) => {
-        if (reached) {
-          retiredStatuses.push(status)
-          if (restartFromCleanup && status === `cleaned-up`)
-            outer.startSyncImmediate()
-        }
-      })
-      const stopSource = source.on(`status:change`, ({ status }) => {
-        if (status === cleanupAt && !reached) {
-          reached = true
-          pending = outer.cleanup()
-        }
-      })
-      try {
-        if (reader === `ordinary`)
-          subscription = outer.subscribeChanges(() => {})
-        else if (reader === `resumed`) subscription!.resumeDeferredAcquisition()
-        else source.startSyncImmediate()
-        expect(reached, `source startup reached cleanup`).toBe(true)
-        await pending
-        if (!restartFromCleanup) {
-          expect(outer.status, `cleanup must not retry admission`).toBe(
-            `cleaned-up`,
-          )
-          expect(retiredStatuses).toEqual([`cleaned-up`])
-        } else {
-          expect(retiredStatuses[0]).toBe(`cleaned-up`)
-          expect(
-            retiredStatuses.filter((status) => status === `loading`),
-          ).toHaveLength(1)
-        }
-        expect(outer.subscriberCount).toBe(expected.acquiring)
-        stopSource()
-        stopTarget()
-        outer.startSyncImmediate()
-        await settle()
-        expect(counts.acquisitions > 0, `replacement has acquisition`).toBe(
-          expected.acquires,
-        )
-        expect(outer.status === `ready`, `replacement readiness`).toBe(
-          expected.ready,
-        )
-        expect(outer.toArray.map((row) => row.id)).toEqual(
-          expected.ready ? EXPECTED_IDS[shape] : [],
-        )
-        expect(outer.subscriberCount).toBe(expected.acquiring)
-      } finally {
-        stopSource()
-        stopTarget()
-        subscription?.unsubscribe()
-        for (const collection of collections) await collection.cleanup()
-        await source.cleanup()
-      }
-    },
-  )
+    }) =>
+      `${state} ${shape} depth=${depth} ${reader} gate=${renderGate} survives ${cleanupAt} cleanup during admission (restart=${restartFromCleanup})`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `live-query.deferred-cleanup-survivor`,
+        plan,
+        observe,
+        () => survivorAfterCleanup(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**

@@ -1,0 +1,1664 @@
+/**
+ * Shared behavioral suite for every `useLiveInfiniteQuery` adapter.
+ *
+ * Histories vary source rows, visible page count, query parameters, collection
+ * identity, input form, request timing, failure, and unmount. The independent
+ * expectation is a finite ordered prefix sliced into fixed-size pages; the
+ * on-demand fixture recomputes requests from immutable source data rather than
+ * borrowing the hook's page cache. Every checkpoint checks the whole public
+ * page ledger, not only its newest page. Scenarios with a fixed source and
+ * query also check every ready value the binding published along the way, so a
+ * truncated intermediate value fails even when the settled ledger recovers.
+ *
+ * A driver may differ in how its framework reaches the checkpoint. It may not
+ * differ in the value and lifecycle facts visible there. The suite tracks all
+ * handles, sources, and pending fetches so cleanup is itself part of the tested
+ * history instead of test-runner housekeeping.
+ *
+ * This module keeps the scenarios that compare production with the source rows
+ * or with a model; the model and the publication law are in
+ * infinite-suite-laws-oracle.ts. Each framework's ordinary conformance test file
+ * runs this suite, so its scenarios are ordinary tests, not oracle properties. Scenarios whose only comparison is a value written down by
+ * hand are in infinite-suite-cases.ts. The shared machinery is in
+ * infinite-suite-harness.ts.
+ */
+import { describe, expect, it, vi } from 'vitest'
+import {
+  captureError,
+  createScenarioState,
+  rows,
+  runScenario,
+  scenarioLifetime,
+  trackScenarioPromise,
+  waitFor,
+  waitForAsync,
+  wrapDriver,
+} from './infinite-suite-harness'
+import {
+  captureRejection,
+  expectFirstOnDemandValue,
+  expectNoPagesAfterRejection,
+  expectReadyObservationsMatchSource,
+  expectedOverlappingWindow,
+} from './infinite-suite-laws-oracle'
+import { expectPageRows } from './page-laws-oracle'
+import { scenarioRegistry } from './registration'
+import type {
+  InfiniteQueryContext,
+  InfiniteRow,
+} from './infinite-suite-harness'
+import type { InfiniteQueryDriver } from './infinite-contract'
+
+/**
+ * The two laws that this suite's scenarios compare with. The publication law
+ * checks every ready value against the source prefix for its page count. The
+ * overlapping-window model predicts the committed prefix, its continuation, and
+ * the retained error after overlapping window outcomes.
+ */
+export function runInfiniteQuerySuite(
+  rawDriver: InfiniteQueryDriver,
+  registerUnitScenarios: (context: InfiniteQueryContext) => void,
+): void {
+  const registry = scenarioRegistry(rawDriver.limits)
+  const state = createScenarioState()
+  const driver = wrapDriver(rawDriver, state)
+  const lifetime = scenarioLifetime(state)
+  const trackPromise = (promise: Promise<void>): Promise<void> =>
+    trackScenarioPromise(state, promise)
+  const scenario = (
+    key: string,
+    name: string,
+    fn: () => Promise<void> | void,
+    // A generated grammar runs many histories, each through the driver's cut.
+    timeoutMs?: number,
+  ) => {
+    registry.register(key)
+    const label = `[${key}] ${name}`
+    it(label, () => runScenario(state, fn), timeoutMs)
+  }
+
+  describe(`infinite-query conformance :: ${driver.name}`, () => {
+    registerUnitScenarios({ driver, registry, state })
+
+    scenario(
+      `first-paint-ready`,
+      `publishes the ready first page on the first paint for a synchronous source`,
+      async () => {
+        // Independent model: a synchronously loaded source is already complete,
+        // so the first page is ready at the first paint. An empty idle paint
+        // before data is the "flash of no content" this law forbids; the
+        // framework must not commit one. Reading only the final settled state
+        // would hide such a flash, so this asserts the first recorded paint.
+        const source = driver.makeSource(rows(8))
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+
+        expect(handle.observations()[0]).toEqual({
+          status: `ready`,
+          ids: [`1`, `2`, `3`],
+          pages: [[`1`, `2`, `3`]],
+          hasNextPage: true,
+        })
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+      },
+    )
+
+    scenario(
+      `first-paint-ready-collection`,
+      `publishes the ready first page on the first paint for a supplied collection that has not started`,
+      async () => {
+        // Same law as `first-paint-ready`, for the collection input form. The
+        // supplied collection has not started and its window already holds the
+        // first page and its peek-ahead row, so nothing has to change before
+        // its rows are correct.
+        const source = driver.makeSource(rows(8))
+        const collection = driver.makePrecreated((q) =>
+          q
+            .from({ items: source.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`)
+            .limit(4),
+        ).collection
+        expect(collection.status).toBe(`idle`)
+        const handle = driver.mountCollection(collection, { pageSize: 3 })
+        await handle.flush()
+
+        expect(handle.observations()[0]).toEqual({
+          status: `ready`,
+          ids: [`1`, `2`, `3`],
+          pages: [[`1`, `2`, `3`]],
+          hasNextPage: true,
+        })
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+      },
+    )
+
+    scenario(
+      `page-expansion`,
+      `loads the initial page and expands through the final partial page`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3, initialPageParam: 4 },
+        )
+        await handle.flush()
+
+        expect(handle.current().data.map((row) => row.id)).toEqual([
+          `1`,
+          `2`,
+          `3`,
+        ])
+        expect(handle.current().pages.map((page) => page.length)).toEqual([3])
+        expect(handle.current().pageParams).toEqual([4])
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+        expect(handle.current().hasNextPage).toBe(true)
+
+        await handle.fetchNextPage()
+        await handle.flush()
+        expect(handle.current().data.map((row) => row.id)).toEqual([
+          `1`,
+          `2`,
+          `3`,
+          `4`,
+          `5`,
+          `6`,
+        ])
+        expect(handle.current().pageParams).toEqual([4, 5])
+        expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
+
+        await handle.fetchNextPage()
+        await handle.flush()
+        expect(handle.current().pages.map((page) => page.length)).toEqual([
+          3, 3, 2,
+        ])
+        expect(handle.current().pageParams).toEqual([4, 5, 6])
+        expectPageRows(handle.current(), rows(8), 3)
+        expect(handle.current().hasNextPage).toBe(false)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+      },
+    )
+
+    scenario(
+      `boundary-noop`,
+      `does not add a page after the end of the result`,
+      async () => {
+        const source = driver.makeSource(rows(2))
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+
+        await handle.fetchNextPage()
+        await handle.flush()
+        expect(handle.current().pages.map((page) => page.length)).toEqual([2])
+        expectPageRows(handle.current(), rows(2), 3)
+        expect(handle.current().hasNextPage).toBe(false)
+        expectReadyObservationsMatchSource(handle, rows(2), 3)
+      },
+    )
+
+    scenario(
+      `empty-result`,
+      `represents an empty result as one empty page`,
+      async () => {
+        const source = driver.makeSource(rows(0))
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+
+        expect(handle.current().data).toEqual([])
+        expect(handle.current().pages).toEqual([[]])
+        expectPageRows(handle.current(), [], 3)
+        expect(handle.current().hasNextPage).toBe(false)
+        expectReadyObservationsMatchSource(handle, [], 3)
+      },
+    )
+
+    scenario(
+      `exact-boundary`,
+      `detects the end when the result fills the final page exactly`,
+      async () => {
+        const source = driver.makeSource(rows(6))
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        await handle.fetchNextPage()
+        await handle.flush()
+
+        expect(handle.current().pages.map((page) => page.length)).toEqual([
+          3, 3,
+        ])
+        expect(handle.current().hasNextPage).toBe(false)
+        expectPageRows(handle.current(), rows(6), 3)
+        expectReadyObservationsMatchSource(handle, rows(6), 3)
+      },
+    )
+
+    scenario(
+      `live-window`,
+      `keeps all committed pages live when a row enters the window`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        await handle.fetchNextPage()
+        await handle.flush()
+
+        await handle.apply(() => {
+          source.insert({ id: `new`, label: `new`, rank: 100 })
+        })
+        expect(handle.current().data.map((row) => row.id)).toEqual([
+          `new`,
+          `1`,
+          `2`,
+          `3`,
+          `4`,
+          `5`,
+        ])
+        expect(handle.current().pages.map((page) => page.length)).toEqual([
+          3, 3,
+        ])
+        expectPageRows(
+          handle.current(),
+          [{ id: `new`, label: `new`, rank: 100 }, ...rows(8).slice(0, 5)],
+          3,
+        )
+      },
+    )
+
+    scenario(
+      `live-deletion`,
+      `backfills committed pages when rows are deleted`,
+      async () => {
+        const data = rows(8)
+        const source = driver.makeSource(data)
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        await handle.fetchNextPage()
+        await handle.flush()
+
+        await handle.apply(() => source.remove(data[1]!))
+        expect(handle.current().data.map((row) => row.id)).toEqual([
+          `1`,
+          `3`,
+          `4`,
+          `5`,
+          `6`,
+          `7`,
+        ])
+        expect(handle.current().pages.map((page) => page.length)).toEqual([
+          3, 3,
+        ])
+        expectPageRows(
+          handle.current(),
+          rows(8)
+            .filter((row) => row.id !== `2`)
+            .slice(0, 6),
+          3,
+        )
+      },
+    )
+
+    scenario(
+      `partial-page-deletion`,
+      `removes rows from a partial page in either order direction`,
+      async () => {
+        for (const direction of [`desc`, `asc`] as const) {
+          const data = rows(5, direction)
+          const source = driver.makeSource(data)
+          const handle = driver.mount(
+            (q) =>
+              q
+                .from({ items: source.collection })
+                .orderBy(({ items }: any) => items.rank, direction),
+            { pageSize: 20 },
+          )
+          await handle.flush()
+
+          const removed = direction === `desc` ? data[0]! : data[4]!
+          await handle.apply(() => source.remove(removed))
+          expect(handle.current().data.map((row) => row.id)).not.toContain(
+            removed.id,
+          )
+          expect(handle.current().pages.map((page) => page.length)).toEqual([4])
+          const remaining = rows(5, direction).filter(
+            (row) => row.id !== removed.id,
+          )
+          expectPageRows(
+            handle.current(),
+            direction === `desc` ? remaining : remaining.reverse(),
+            20,
+          )
+          expect(handle.current().hasNextPage).toBe(false)
+          handle.unmount()
+        }
+      },
+    )
+
+    scenario(
+      `live-has-next-page`,
+      `updates hasNextPage when a row is inserted beyond the visible page`,
+      async () => {
+        const source = driver.makeSource(rows(3))
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        expect(handle.current().hasNextPage).toBe(false)
+
+        await handle.apply(() => {
+          source.insert({ id: `last`, label: `last`, rank: 0 })
+        })
+        expect(handle.current().data.map((row) => row.id)).toEqual([
+          `1`,
+          `2`,
+          `3`,
+        ])
+        expect(handle.current().hasNextPage).toBe(true)
+        expectPageRows(handle.current(), rows(3), 3)
+      },
+    )
+
+    scenario(
+      `concurrent-fetch`,
+      `coalesces concurrent next-page requests`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+
+        const utils = handle.current().collection.utils as {
+          setWindow: (window: {
+            offset: number
+            limit: number
+          }) => true | Promise<void>
+        }
+        const originalSetWindow = utils.setWindow.bind(utils)
+        let calls = 0
+        const windows: Array<() => void> = []
+        // A faulty driver can create more than one request. Release all of
+        // them even when the coalescing assertion fails, before joining fetches.
+        let windowsReleased = false
+        const releaseWindows = () => {
+          windowsReleased = true
+          windows.splice(0).forEach((resolve) => resolve())
+        }
+        lifetime!.defer(releaseWindows)
+        utils.setWindow = (window) => {
+          calls++
+          originalSetWindow(window)
+          return new Promise<void>((resolve) => {
+            if (windowsReleased) resolve()
+            else windows.push(resolve)
+          })
+        }
+
+        try {
+          const first = trackPromise(handle.fetchNextPage())
+          const second = trackPromise(handle.fetchNextPage())
+          let secondSettled = false
+          void second.then(
+            () => {
+              secondSettled = true
+            },
+            () => {
+              secondSettled = true
+            },
+          )
+          await waitFor(() => windows.length > 0)
+
+          expect(calls).toBe(1)
+          expect(handle.current().isFetchingNextPage).toBe(true)
+          expect(secondSettled).toBe(false)
+          releaseWindows()
+          await Promise.all([first, second])
+          expect(calls).toBe(1)
+          await handle.flush()
+          expect(handle.current().pages.map((page) => page.length)).toEqual([
+            3, 3,
+          ])
+          expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
+        } finally {
+          utils.setWindow = originalSetWindow
+        }
+      },
+    )
+
+    scenario(
+      `on-demand-paging`,
+      `uses peek-ahead windows while paging an on-demand source`,
+      async () => {
+        const source = driver.makeOnDemandSource(rows(8))
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+
+        // One mount requests its first peek-ahead window exactly once, after
+        // the hook subscribes.
+        expect(source.calls.filter((call) => call.limit === 4)).toHaveLength(1)
+        expectFirstOnDemandValue(handle, [`1`, `2`, `3`], `on-demand-paging`)
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+        expect(handle.current().data.map((row) => row.id)).toEqual([
+          `1`,
+          `2`,
+          `3`,
+        ])
+        expect(handle.current().hasNextPage).toBe(true)
+
+        await handle.fetchNextPage()
+        await handle.fetchNextPage()
+        await handle.flush()
+        expect(handle.current().pages.map((page) => page.length)).toEqual([
+          3, 3, 2,
+        ])
+        expect(handle.current().hasNextPage).toBe(false)
+        expectPageRows(handle.current(), rows(8), 3)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+      },
+    )
+
+    scenario(
+      `on-demand-collection-window`,
+      `requests only the window the hook needs from a supplied on-demand collection`,
+      async () => {
+        // Same law as `on-demand-paging`, for the collection input form. A
+        // supplied collection may declare a wider limit than the hook needs,
+        // or exactly the first page and its peek-ahead row. Either way, a
+        // mount requests no on-demand rows beyond the window the hook needs,
+        // and requests that first window once. A wider window is adjusted
+        // before the collection starts, never after. An unbounded supplied
+        // window is outside this law: the controller cannot narrow it before
+        // its first source request, on main or here.
+        for (const declared of [10, 4] as const) {
+          const source = driver.makeOnDemandSource(rows(8))
+          const collection = driver.makePrecreated((q) => {
+            const ordered = q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`)
+            return ordered.limit(declared)
+          }).collection
+          const handle = driver.mountCollection(collection, { pageSize: 3 })
+          await handle.flush()
+
+          const where = `declared limit ${declared}`
+          // An on-demand source holds only the rows it was asked for, so its
+          // keys are the rows the mount requested.
+          expect(
+            [...source.collection.keys()].sort(),
+            `${where}: the source loaded only the first page and peek-ahead row`,
+          ).toEqual([`1`, `2`, `3`, `4`])
+          expect(
+            source.calls.filter((call) => call.limit === 4),
+            `${where}: first window once`,
+          ).toHaveLength(1)
+          expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+          expectReadyObservationsMatchSource(handle, rows(8), 3)
+          expectFirstOnDemandValue(
+            handle,
+            [`1`, `2`, `3`],
+            where,
+            declared === 4 ? `loading` : `idle`,
+          )
+          handle.unmount()
+        }
+      },
+    )
+
+    scenario(
+      `preloaded-collection-first-paint`,
+      `publishes a preloaded on-demand collection's first page on the first paint without another request`,
+      async () => {
+        // The documented route-loader pattern: define one limited live query,
+        // await its preload, then render the same collection. The preload is
+        // the demand, so its rows are stored when it returns, and the hook's
+        // first value is the ready first page in every framework. Mounting
+        // asks the source for nothing more.
+        const source = driver.makeOnDemandSource(rows(8))
+        const collection = driver.makePrecreated((q) =>
+          q
+            .from({ items: source.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`)
+            .limit(4),
+        ).collection
+        // A preload that does not count as demand never settles; bound the
+        // wait so that failure reaches an assertion instead of the timeout.
+        const preloaded = await Promise.race([
+          collection.preload().then(() => true),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(false), 200),
+          ),
+        ])
+        expect(preloaded, `the preload settles`).toBe(true)
+        const requestsBeforeMount = source.calls.length
+        expect(
+          source.calls.filter((call) => call.limit === 4),
+          `the preload requested the first window once`,
+        ).toHaveLength(1)
+
+        const handle = driver.mountCollection(collection, { pageSize: 3 })
+        await handle.flush()
+
+        expect(handle.observations()[0]).toEqual({
+          status: `ready`,
+          ids: [`1`, `2`, `3`],
+          pages: [[`1`, `2`, `3`]],
+          hasNextPage: true,
+        })
+        expect(source.calls.length, `mounting requested nothing more`).toBe(
+          requestsBeforeMount,
+        )
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+      },
+    )
+
+    scenario(
+      `on-demand-async`,
+      `tracks an asynchronous on-demand page load`,
+      async () => {
+        const source = driver.makeOnDemandSource(rows(8), 5)
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await waitForAsync(() => handle.current().data.length === 3)
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+
+        const fetch = handle.fetchNextPage()
+        await waitForAsync(() => handle.current().isFetchingNextPage)
+        await fetch
+        await handle.flush()
+        expect(handle.current().pages.map((page) => page.length)).toEqual([
+          3, 3,
+        ])
+        expect(handle.current().isFetchingNextPage).toBe(false)
+        expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+      },
+    )
+
+    scenario(
+      `lagging-on-demand-ready-at-settle`,
+      `is ready when its window requests settle, before an on-demand source is ready`,
+      async () => {
+        // Law (ARCHITECTURE.md law 10): the settled window requests, not the
+        // source's markReady, make the query initially ready. The source stays
+        // loading at the checkpoint, so a binding that waits for the source
+        // fails there. Rows written before settlement may already be visible.
+        const source = driver.makeLaggingOnDemandSource(rows(8))
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        expect(source.pending()).toBeGreaterThan(0)
+        expect(handle.current().status).not.toBe(`ready`)
+
+        // A window can chain follow-up requests; settle each one it issues.
+        for (let round = 0; round < 5 && source.pending() > 0; round++) {
+          source.settle()
+          await handle.flush()
+        }
+        expect(source.pending()).toBe(0)
+        expect(source.collection.status).toBe(`loading`)
+        expect(handle.current().status).toBe(`ready`)
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+        expect(handle.current().hasNextPage).toBe(true)
+
+        source.markReady()
+        await handle.flush()
+        expect(handle.current().status).toBe(`ready`)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+      },
+    )
+
+    scenario(
+      `window-failure`,
+      `keeps pages and status after a failed window request`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+
+        const failure = new Error(`window failed`)
+        const utils = handle.current().collection.utils as {
+          setWindow: (window: {
+            offset: number
+            limit: number
+          }) => true | Promise<void>
+        }
+        const originalSetWindow = utils.setWindow.bind(utils)
+        utils.setWindow = (window) => {
+          originalSetWindow(window)
+          return Promise.reject(failure)
+        }
+
+        try {
+          await expect(handle.fetchNextPage()).resolves.toBeUndefined()
+          await handle.flush()
+          expect(handle.current().pages.map((page) => page.length)).toEqual([3])
+          expect(handle.current().status).toBe(`ready`)
+          expect(handle.current().isLoadingError).toBe(false)
+
+          utils.setWindow = originalSetWindow
+          await handle.fetchNextPage()
+          await handle.flush()
+          expect(handle.current().pages.map((page) => page.length)).toEqual([
+            3, 3,
+          ])
+          expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
+        } finally {
+          utils.setWindow = originalSetWindow
+        }
+      },
+    )
+
+    scenario(
+      `overlapping-window-outcomes`,
+      `keeps continuation on committed pages and live source changes after a window failure`,
+      async () => {
+        // Contract: after overlapping window requests settle, the latest
+        // committed page count determines continuation, and a failed request
+        // changes neither the pages nor the status. The bounded grammar
+        // crosses an exhausted versus remaining source with both settlement
+        // orders, then changes source extent after the failure.
+        // This drives the exported DB controller in each package realm. Hooks
+        // expose no preload operation, so their scheduling is outside this cell.
+        const pageSize = 2
+        let checked = 0
+        for (const rowCount of [4, 5]) {
+          for (const settleFailureFirst of [true, false]) {
+            const sourceRows = rows(rowCount)
+            let currentRows = sourceRows
+            const source = driver.makeSource(sourceRows)
+            const collection = rawDriver.makePrecreated((q) =>
+              q
+                .from({ items: source.collection })
+                .orderBy(({ items }: any) => items.rank, `desc`)
+                // Keep the peek-ahead row in the collection after the
+                // controller releases its lease for the detached read.
+                .limit(pageSize * 2 + 1)
+                .offset(0),
+            ).collection
+            lifetime!.defer(() => collection.cleanup())
+            await collection.preload()
+
+            const controller = driver.makeWindowController(collection, {
+              pageSize,
+            })
+            const utils = collection.utils as {
+              setWindow: (window: {
+                offset: number
+                limit: number
+              }) => true | Promise<void>
+            }
+            const originalSetWindow = utils.setWindow.bind(utils)
+            let rejectFirst!: (error: unknown) => void
+            let resolveSecond!: () => void
+            const firstWindow = new Promise<void>((_resolve, reject) => {
+              rejectFirst = reject
+            })
+            const secondWindow = new Promise<void>((resolve) => {
+              resolveSecond = resolve
+            })
+            const windowSpy = vi.spyOn(utils, `setWindow`)
+            windowSpy.mockImplementationOnce(() => firstWindow)
+            windowSpy.mockImplementationOnce((window) =>
+              Promise.resolve(originalSetWindow(window)).then(
+                () => secondWindow,
+              ),
+            )
+            const failure = new Error(`initial window failed`)
+            let firstReleased = false
+            let secondReleased = false
+            let preload: Promise<unknown> | undefined
+            let fetch: Promise<unknown> | undefined
+            const check = (pageSucceeded: boolean) => {
+              const expected = expectedOverlappingWindow(
+                currentRows,
+                pageSize,
+                pageSucceeded,
+              )
+              const actual = controller.getSnapshot()
+              expect(actual.data.map((row) => row.id)).toEqual(expected.ids)
+              expect(
+                actual.pages.map((page) => page.map((row) => row.id)),
+              ).toEqual(expected.pages)
+              expect(actual.pageParams).toEqual(expected.pageParams)
+              expect(actual.hasNextPage).toBe(expected.hasNextPage)
+              expect(actual.isFetchingNextPage).toBe(
+                expected.isFetchingNextPage,
+              )
+              expect(actual.status).toBe(`ready`)
+              checked++
+            }
+
+            try {
+              preload = controller.preload().then(
+                () => undefined,
+                (error: unknown) => error,
+              )
+              fetch = controller.fetchNextPage().then(
+                () => undefined,
+                (error: unknown) => error,
+              )
+              expect(
+                windowSpy.mock.calls.map(([window]) => window.limit),
+              ).toEqual([3, 5])
+              if (settleFailureFirst) {
+                firstReleased = true
+                rejectFirst(failure)
+                expect(await preload).toBe(failure)
+                check(false)
+                secondReleased = true
+                resolveSecond()
+                expect(await fetch).toBeUndefined()
+                check(true)
+              } else {
+                secondReleased = true
+                resolveSecond()
+                expect(await fetch).toBeUndefined()
+                check(true)
+                firstReleased = true
+                rejectFirst(failure)
+                expect(await preload).toBe(failure)
+                check(true)
+              }
+              const fifthRow =
+                rowCount === 4
+                  ? { id: `5`, label: `row-5`, rank: -1 }
+                  : sourceRows[4]!
+              const unsubscribe = controller.subscribe(() => {})
+              try {
+                if (rowCount === 4) {
+                  source.insert(fifthRow)
+                  currentRows = [...currentRows, fifthRow]
+                } else {
+                  source.remove(fifthRow)
+                  currentRows = currentRows.slice(0, 4)
+                }
+                await waitForAsync(
+                  () => collection.toArray.length === currentRows.length,
+                )
+                check(true)
+              } finally {
+                unsubscribe()
+              }
+              // Detached observers refresh their rows when getSnapshot reads
+              // them; continuation must use that same current source extent.
+              if (rowCount === 4) {
+                source.remove(fifthRow)
+              } else {
+                source.insert(fifthRow)
+              }
+              currentRows = sourceRows
+              await waitForAsync(
+                () => collection.toArray.length === currentRows.length,
+              )
+              check(true)
+              await controller.preload()
+              check(true)
+            } finally {
+              if (!firstReleased) rejectFirst(failure)
+              if (!secondReleased) resolveSecond()
+              await Promise.allSettled([preload, fetch])
+              controller.dispose()
+              windowSpy.mockRestore()
+            }
+          }
+        }
+        expect(checked).toBe(20)
+      },
+    )
+
+    scenario(
+      `dependency-immediate-fetch`,
+      `fetches from the replacement query immediately after changing dependencies`,
+      async () => {
+        const source = driver.makeSource(rows(10))
+        const handle = driver.mountControllable(
+          (q, minimum: number) =>
+            q
+              .from({ items: source.collection })
+              .where(({ items }: any) => driver.gt(items.rank, minimum))
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          0,
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        await handle.fetchNextPage()
+        await handle.flush()
+
+        handle.setParamSync(5)
+        await handle.fetchNextPage()
+        await handle.flush()
+
+        expect(handle.current().data.map((row) => row.rank)).toEqual([
+          10, 9, 8, 7, 6,
+        ])
+        expect(handle.current().pages.map((page) => page.length)).toEqual([
+          3, 2,
+        ])
+        expectPageRows(handle.current(), rows(10).slice(0, 5), 3)
+      },
+    )
+
+    scenario(
+      `equal-dependency-depth`,
+      `preserves loaded pages for a structurally equal dependency`,
+      async () => {
+        const source = driver.makeSource(rows(10))
+        const handle = driver.mountControllable(
+          (q, filter: { minimum: number }) =>
+            q
+              .from({ items: source.collection })
+              .where(({ items }: any) => driver.gt(items.rank, filter.minimum))
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { minimum: 0 },
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        await handle.fetchNextPage()
+        await handle.flush()
+
+        handle.setParamSync({ minimum: 0 })
+        await handle.flush()
+        expect(handle.current().pages.map((page) => page.length)).toEqual([
+          3, 3,
+        ])
+        expectPageRows(handle.current(), rows(10).slice(0, 6), 3)
+        // The replacement must not publish a truncated ready value on its way to
+        // the retained depth. `minimum: 0` admits every row.
+        expectReadyObservationsMatchSource(handle, rows(10), 3)
+      },
+    )
+
+    scenario(
+      `circular-dependency`,
+      `preserves page depth for a structurally equal circular dependency`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        const dependency: { self?: unknown } = {}
+        dependency.self = dependency
+        const handle = driver.mountControllable(
+          (q, _dependency: unknown) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          dependency,
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        await handle.fetchNextPage()
+        await handle.flush()
+
+        const replacement: { self?: unknown } = {}
+        replacement.self = replacement
+        handle.setParamSync(replacement)
+        await handle.flush()
+
+        expect(handle.current().pages.map((page) => page.length)).toEqual([
+          3, 3,
+        ])
+        expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+      },
+    )
+
+    scenario(
+      `page-shape-change`,
+      `preserves committed page depth when reactive page options change`,
+      async () => {
+        const source = driver.makeSource(rows(20))
+        const handle = driver.mountConfigControllable(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3, initialPageParam: 4 },
+        )
+        await handle.flush()
+        await handle.fetchNextPage()
+        await handle.fetchNextPage()
+        await handle.flush()
+
+        handle.setConfigSync({ pageSize: 4, initialPageParam: 8 })
+        await handle.flush()
+        expect(handle.current().pages.map((page) => page.length)).toEqual([
+          4, 4, 4,
+        ])
+        expect(handle.current().pageParams).toEqual([8, 9, 10])
+        expectPageRows(handle.current(), rows(20).slice(0, 12), 4)
+      },
+    )
+
+    scenario(
+      `page-option-omission`,
+      `replaces omitted page options with defaults on the same handle`,
+      async () => {
+        const source = driver.makeSource(rows(21))
+        const handle = driver.mountConfigControllable(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3, initialPageParam: 4 },
+        )
+        await handle.flush()
+        expectPageRows(handle.current(), rows(21).slice(0, 3), 3)
+        expect(handle.current().pageParams).toEqual([4])
+        for (const next of [
+          {},
+          { pageSize: undefined, initialPageParam: undefined },
+        ]) {
+          handle.setConfigSync(next)
+          await handle.flush()
+          expectPageRows(handle.current(), rows(21).slice(0, 20), 20)
+          expect(handle.current().pageParams).toEqual([0])
+          expect(handle.current().hasNextPage).toBe(true)
+        }
+        handle.setConfigSync({ pageSize: 5, initialPageParam: 7 })
+        await handle.flush()
+        expectPageRows(handle.current(), rows(21).slice(0, 5), 5)
+        expect(handle.current().pageParams).toEqual([7])
+
+        const freshSource = driver.makeSource(rows(21, `fresh`))
+        const fresh = driver.mount((q) =>
+          q
+            .from({ items: freshSource.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`),
+        )
+        await fresh.flush()
+        expectPageRows(fresh.current(), rows(21, `fresh`).slice(0, 20), 20)
+        expect(fresh.current().pageParams).toEqual([0])
+        expect(fresh.current().hasNextPage).toBe(true)
+      },
+    )
+
+    scenario(
+      `invalid-page-size`,
+      `normalizes invalid and unsafe page sizes to the default`,
+      async () => {
+        const source = driver.makeSource(rows(21))
+        for (const pageSize of [
+          0,
+          -1,
+          2.5,
+          Number.NaN,
+          Number.POSITIVE_INFINITY,
+          Number.MAX_SAFE_INTEGER,
+        ]) {
+          const handle = driver.mount(
+            (q) =>
+              q
+                .from({ items: source.collection })
+                .orderBy(({ items }: any) => items.rank, `desc`),
+            { pageSize },
+          )
+          await handle.flush()
+          expect(handle.current().pages[0]).toHaveLength(20)
+          expectPageRows(handle.current(), rows(21).slice(0, 20), 20)
+          expect(handle.current().hasNextPage).toBe(true)
+          expectReadyObservationsMatchSource(handle, rows(21), 20)
+          handle.unmount()
+        }
+      },
+    )
+
+    scenario(
+      `collection-immediate-fetch`,
+      `fetches from a replacement collection immediately after replacing input`,
+      async () => {
+        const first = driver.makeSource(rows(8, `a`))
+        const second = driver.makeSource(rows(8, `b`))
+        const firstQuery = driver.makePrecreated((q) =>
+          q
+            .from({ items: first.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`)
+            .limit(4),
+        ).collection
+        const secondQuery = driver.makePrecreated((q) =>
+          q
+            .from({ items: second.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`)
+            .limit(4),
+        ).collection
+        const handle = driver.mountCollectionControllable(firstQuery, {
+          pageSize: 3,
+        })
+        await handle.flush()
+        await handle.fetchNextPage()
+        await handle.flush()
+
+        handle.replaceCollectionSync(secondQuery)
+        await handle.fetchNextPage()
+        await handle.flush()
+
+        expect(handle.current().collection).toBe(secondQuery)
+        expect(handle.current().data.map((row) => row.id)).toEqual([
+          `b1`,
+          `b2`,
+          `b3`,
+          `b4`,
+          `b5`,
+          `b6`,
+        ])
+        expect(handle.current().pages.map((page) => page.length)).toEqual([
+          3, 3,
+        ])
+        expectPageRows(handle.current(), rows(8, `b`).slice(0, 6), 3)
+      },
+    )
+
+    scenario(
+      `input-kind-switch`,
+      `switches between a supplied collection and a query callback`,
+      async () => {
+        const collectionSource = driver.makeSource(rows(6, `a`))
+        const querySource = driver.makeSource(rows(6, `b`))
+        const collection = driver.makePrecreated((q) =>
+          q
+            .from({ items: collectionSource.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`)
+            .limit(4),
+        ).collection
+        const handle = driver.mountInputControllable(
+          collection,
+          (q) =>
+            q
+              .from({ items: querySource.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        expectPageRows(handle.current(), rows(6, `a`).slice(0, 3), 3)
+        expect(handle.current().data.map((row) => row.id)).toEqual([
+          `a1`,
+          `a2`,
+          `a3`,
+        ])
+
+        handle.setInputKindSync(`query`)
+        await handle.flush()
+        expectPageRows(handle.current(), rows(6, `b`).slice(0, 3), 3)
+        expect(handle.current().data.map((row) => row.id)).toEqual([
+          `b1`,
+          `b2`,
+          `b3`,
+        ])
+
+        handle.setInputKindSync(`collection`)
+        await handle.flush()
+        expectPageRows(handle.current(), rows(6, `a`).slice(0, 3), 3)
+        expect(handle.current().data.map((row) => row.id)).toEqual([
+          `a1`,
+          `a2`,
+          `a3`,
+        ])
+      },
+    )
+
+    scenario(
+      `stale-window`,
+      `ignores a window promise from a replaced query`,
+      async () => {
+        const source = driver.makeSource(rows(10))
+        const handle = driver.mountControllable(
+          (q, minimum: number) =>
+            q
+              .from({ items: source.collection })
+              .where(({ items }: any) => driver.gt(items.rank, minimum))
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          0,
+          { pageSize: 3 },
+        )
+        await handle.flush()
+
+        const oldUtils = handle.current().collection.utils as {
+          setWindow: (window: {
+            offset: number
+            limit: number
+          }) => true | Promise<void>
+        }
+        const originalSetWindow = oldUtils.setWindow.bind(oldUtils)
+        let resolveWindow: (() => void) | undefined
+        lifetime!.defer(() => resolveWindow?.())
+        oldUtils.setWindow = (window) => {
+          const result = originalSetWindow(window)
+          if (resolveWindow !== undefined) return result
+          return new Promise<void>((resolve) => {
+            resolveWindow = resolve
+          })
+        }
+
+        try {
+          // This existing stale-operation law allows either terminal outcome.
+          const staleFetch = trackPromise(
+            handle.fetchNextPage().catch(() => undefined),
+          )
+          await waitFor(() => resolveWindow !== undefined)
+          handle.setParamSync(8)
+          await handle.flush()
+          resolveWindow?.()
+          await staleFetch.catch(() => {})
+          await handle.flush()
+
+          expect(handle.current().data.map((row) => row.rank)).toEqual([10, 9])
+          expectPageRows(handle.current(), rows(10).slice(0, 2), 3)
+          expect(handle.current().pages.map((page) => page.length)).toEqual([2])
+        } finally {
+          oldUtils.setWindow = originalSetWindow
+        }
+      },
+    )
+
+    scenario(
+      `callback-once`,
+      `invokes a zero-arity-compatible query callback once`,
+      async () => {
+        const source = driver.makeSource(rows(4))
+        let calls = 0
+        const callback = (...args: Array<any>) => {
+          calls++
+          return args[0]
+            .from({ items: source.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`)
+        }
+        const handle = driver.mount(callback, { pageSize: 3 })
+        await handle.flush()
+
+        expect(calls).toBe(1)
+        expect(handle.current().data).toHaveLength(3)
+        expectPageRows(handle.current(), rows(4).slice(0, 3), 3)
+        expectReadyObservationsMatchSource(handle, rows(4), 3)
+      },
+    )
+
+    scenario(
+      `collection-window-normalization`,
+      `normalizes a pre-created collection to the first peek-ahead window`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        const collection = driver.makePrecreated((q) =>
+          q
+            .from({ items: source.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`)
+            .offset(1)
+            .limit(2),
+        ).collection
+        const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+        lifetime!.defer(() => warn.mockRestore())
+        const handle = driver.mountCollection(collection, { pageSize: 3 })
+        await handle.flush()
+
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining(`Pre-created collection has window`),
+        )
+        expect(
+          (collection.utils as { getWindow: () => unknown }).getWindow(),
+        ).toEqual({ offset: 0, limit: 4 })
+        expect(handle.current().data.map((row) => row.id)).toEqual([
+          `1`,
+          `2`,
+          `3`,
+        ])
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+        // The supplied window starts at offset 1. A binding that published its
+        // rows before normalizing the window would show a wrong ready prefix.
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+        warn.mockRestore()
+      },
+    )
+
+    scenario(
+      `collection-live-update`,
+      `keeps a supplied pre-created collection live`,
+      async () => {
+        const source = driver.makeSource(rows(6))
+        const collection = driver.makePrecreated((q) =>
+          q
+            .from({ items: source.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`)
+            .limit(4),
+        ).collection
+        const handle = driver.mountCollection(collection, { pageSize: 3 })
+        await handle.flush()
+
+        await handle.apply(() => {
+          source.insert({ id: `new`, label: `new`, rank: 100 })
+        })
+        expect(handle.current().data.map((row) => row.id)).toEqual([
+          `new`,
+          `1`,
+          `2`,
+        ])
+        expectPageRows(
+          handle.current(),
+          [{ id: `new`, label: `new`, rank: 100 }, ...rows(6).slice(0, 2)],
+          3,
+        )
+      },
+    )
+
+    scenario(
+      `shared-window-release`,
+      `releases shared window leases and restores the initial window`,
+      async () => {
+        const source = driver.makeSource(rows(12))
+        const collection = driver.makePrecreated((q) =>
+          q
+            .from({ items: source.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`)
+            .limit(4),
+        ).collection
+        const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+        try {
+          const larger = driver.mountCollection(collection, { pageSize: 3 })
+          const smaller = driver.mountCollection(collection, { pageSize: 1 })
+          await larger.flush()
+          await smaller.flush()
+          await larger.fetchNextPage()
+          await smaller.fetchNextPage()
+          await larger.flush()
+
+          const getWindow = () =>
+            (collection.utils as { getWindow: () => unknown }).getWindow()
+          expect(getWindow()).toEqual({ offset: 0, limit: 7 })
+          expectPageRows(larger.current(), rows(12).slice(0, 6), 3)
+          expectPageRows(smaller.current(), rows(12).slice(0, 2), 1)
+          larger.unmount()
+          await smaller.flush()
+          expect(getWindow()).toEqual({ offset: 0, limit: 3 })
+          expectPageRows(smaller.current(), rows(12).slice(0, 2), 1)
+          smaller.unmount()
+          expect(getWindow()).toEqual({ offset: 0, limit: 4 })
+          expect(warn).not.toHaveBeenCalled()
+        } finally {
+          warn.mockRestore()
+        }
+      },
+    )
+
+    // ---- query identity (1.0 law; see contract.ts) ----------------------
+    //
+    // Each history branches only on the driver's public identity policy, and
+    // both branches check pages: a comparing binding rejects, and a reactive
+    // binding pages the current input.
+
+    // `fn.where` runs a JavaScript predicate, so its IR has no stable hash.
+    const functionalRanks = (source: { collection: any }) => (q: any) =>
+      q
+        .from({ items: source.collection })
+        .fn.where(({ items }: any) => items.rank > 4)
+        .orderBy(({ items }: any) => items.rank, `desc`)
+
+    scenario(
+      `unhashable-query`,
+      `pages a query without a stable IR identity, needing queryKey only where the binding compares identity`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        if (driver.comparesQueryIdentity) {
+          // An empty key is absent, as it is for a DbClient preload.
+          for (const config of [
+            { pageSize: 3 },
+            { pageSize: 3, queryKey: [] },
+          ]) {
+            const error = await captureError(() =>
+              driver.mount(functionalRanks(source), config),
+            )
+            expect(error).toMatchObject({ name: `UnhashableQueryIRError` })
+          }
+        }
+        const handle = driver.mount(
+          functionalRanks(source),
+          driver.comparesQueryIdentity
+            ? { pageSize: 3, queryKey: [`ranks-above`, 4] }
+            : { pageSize: 3 },
+        )
+        await handle.flush()
+        await handle.fetchNextPage()
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(0, 4), 3)
+        expect(handle.current().hasNextPage).toBe(false)
+      },
+    )
+
+    scenario(
+      `source-id-reuse`,
+      `rejects or pages a different source under a Collection ID the binding read`,
+      async () => {
+        // Claim memory grammar, as in the live suite without a disabled step:
+        // a history mounts on A(x) or C(y), then takes two steps over A(x),
+        // B(x) (another object under A's ID), and C(y). The pairwise model
+        // judges each step from the history alone. A comparing binding rejects
+        // a step when an earlier step read another object under its ID, which
+        // ends the history; a reactive binding pages the selected source.
+        type Pick = `A` | `B` | `C`
+        const first = driver.makeSource(rows(4))
+        const sourceOf: Record<Pick, { collection: any }> = {
+          A: first,
+          B: driver.makeSource(rows(3, `r`), first.collection.id),
+          C: driver.makeSource(rows(2, `o`)),
+        }
+        const pagesOf: Record<Pick, Array<InfiniteRow>> = {
+          A: rows(4).slice(0, 3),
+          B: rows(3, `r`),
+          C: rows(2, `o`),
+        }
+        const collides = (history: ReadonlyArray<Pick>, next: Pick) =>
+          history.some(
+            (prior) =>
+              prior !== next &&
+              sourceOf[prior].collection.id === sourceOf[next].collection.id,
+          )
+        type ReachState =
+          | `swap after an intervening query`
+          | `revisit after an intervening query`
+        // A state names what lies between the step that made a claim and the
+        // step that tests it.
+        const reachedState = (
+          history: ReadonlyArray<Pick>,
+          next: Pick,
+        ): ReachState | undefined => {
+          const lastIndex = (match: (pick: Pick) => boolean) => {
+            for (let index = history.length - 1; index >= 0; index--) {
+              if (match(history[index]!)) return index
+            }
+            return -1
+          }
+          const conflict = lastIndex(
+            (prior) =>
+              prior !== next &&
+              sourceOf[prior].collection.id === sourceOf[next].collection.id,
+          )
+          if (conflict >= 0) {
+            return history.length - conflict > 1
+              ? `swap after an intervening query`
+              : undefined
+          }
+          const revisit = lastIndex((prior) => prior === next)
+          return revisit >= 0 && history.length - revisit > 1
+            ? `revisit after an intervening query`
+            : undefined
+        }
+        // Declared reach: the states where a claim must outlive the query
+        // that made it.
+        const requiredStates: ReadonlyArray<ReachState> = [
+          `swap after an intervening query`,
+          `revisit after an intervening query`,
+        ]
+        const observedStates = new Set<ReachState>()
+        const picks: ReadonlyArray<Pick> = [`A`, `B`, `C`]
+        for (const start of [`A`, `C`] as const) {
+          for (const second of picks) {
+            for (const third of picks) {
+              const history: Array<Pick> = [start]
+              const handle = driver.mountControllable(
+                (q, pick: Pick) =>
+                  q
+                    .from({ items: sourceOf[pick].collection })
+                    .orderBy(({ items }: any) => items.rank, `desc`),
+                start as Pick,
+                { pageSize: 3 },
+              )
+              await handle.flush()
+              expectPageRows(handle.current(), pagesOf[start], 3)
+              for (const next of [second, third]) {
+                const reached = reachedState(history, next)
+                if (reached) observedStates.add(reached)
+                if (driver.comparesQueryIdentity && collides(history, next)) {
+                  const error = await captureRejection(async () => {
+                    handle.setParamSync(next)
+                    await handle.flush()
+                    return handle.current()
+                  })
+                  expect(error).toMatchObject({
+                    name: `SourceCollectionIdReuseError`,
+                  })
+                  expectNoPagesAfterRejection(handle)
+                  break
+                }
+                const observed = handle.observations().length
+                handle.setParamSync(next)
+                if (collides(history, next)) {
+                  // A reactive binding read the swap as a new source. At the
+                  // first paint, after the framework's microtask flush and
+                  // before any later task, it shows only the new source's
+                  // rows or none; so does every value it publishes after.
+                  await Promise.resolve()
+                  await Promise.resolve()
+                  const allowed = new Set(pagesOf[next].map((row) => row.id))
+                  const firstPaint = handle
+                    .current()
+                    .data.map((row: { id: string }) => row.id)
+                  expect(
+                    firstPaint.filter((id: string) => !allowed.has(id)),
+                    `first paint ${JSON.stringify(firstPaint)}`,
+                  ).toEqual([])
+                  await handle.flush()
+                  for (const observation of handle
+                    .observations()
+                    .slice(observed)) {
+                    expect(
+                      observation.ids.filter((id) => !allowed.has(id)),
+                      `published ${JSON.stringify(observation.ids)}`,
+                    ).toEqual([])
+                  }
+                } else {
+                  await handle.flush()
+                }
+                history.push(next)
+                expectPageRows(handle.current(), pagesOf[next], 3)
+              }
+              handle.unmount()
+            }
+          }
+        }
+        expect(
+          requiredStates.filter(
+            (checkpoint) => !observedStates.has(checkpoint),
+          ),
+        ).toEqual([])
+
+        if (!driver.comparesQueryIdentity) return
+        // Keyed dimension (comparing bindings only), as in the live suite:
+        // AK reads A(x) and BK reads B(x) under their own keys. A keyed step
+        // records no claim and checks none, so a claim made before it still
+        // binds a later derived step.
+        type KeyedPick = Pick | `AK` | `BK`
+        const base = (pick: KeyedPick): Pick =>
+          pick === `AK` ? `A` : pick === `BK` ? `B` : pick
+        const isKeyed = (pick: KeyedPick) => pick !== base(pick)
+        const conflicts = (prior: KeyedPick, next: KeyedPick) =>
+          !isKeyed(prior) &&
+          !isKeyed(next) &&
+          base(prior) !== base(next) &&
+          sourceOf[base(prior)].collection.id ===
+            sourceOf[base(next)].collection.id
+        type KeyedReachState =
+          `claim crosses a keyed step` | `keyed step after a claim`
+        const requiredKeyedStates: ReadonlyArray<KeyedReachState> = [
+          `claim crosses a keyed step`,
+          `keyed step after a claim`,
+        ]
+        const observedKeyedStates = new Set<KeyedReachState>()
+        const mountKeyed = driver.mountKeyedControllable
+        // Every comparing driver supplies the keyed form.
+        expect(mountKeyed).toBeDefined()
+        const keyedPicks: ReadonlyArray<KeyedPick> = [`A`, `B`, `C`, `AK`, `BK`]
+        for (const start of [`A`, `C`, `AK`] as const) {
+          for (const second of keyedPicks) {
+            for (const third of keyedPicks) {
+              const history: Array<KeyedPick> = [start]
+              const handle = mountKeyed!(
+                (q, pick: KeyedPick) =>
+                  q
+                    .from({ items: sourceOf[base(pick)].collection })
+                    .orderBy(({ items }: any) => items.rank, `desc`),
+                (pick) => (isKeyed(pick) ? [`keyed`, pick] : undefined),
+                start as KeyedPick,
+                { pageSize: 3 },
+              )
+              await handle.flush()
+              expectPageRows(handle.current(), pagesOf[base(start)], 3)
+              for (const next of [second, third]) {
+                let claimIndex = -1
+                for (let index = history.length - 1; index >= 0; index--) {
+                  if (conflicts(history[index]!, next)) {
+                    claimIndex = index
+                    break
+                  }
+                }
+                if (
+                  claimIndex >= 0 &&
+                  history.slice(claimIndex + 1).some(isKeyed)
+                ) {
+                  observedKeyedStates.add(`claim crosses a keyed step`)
+                }
+                if (
+                  isKeyed(next) &&
+                  history.some(
+                    (prior) =>
+                      !isKeyed(prior) &&
+                      base(prior) !== base(next) &&
+                      sourceOf[base(prior)].collection.id ===
+                        sourceOf[base(next)].collection.id,
+                  )
+                ) {
+                  observedKeyedStates.add(`keyed step after a claim`)
+                }
+                if (claimIndex >= 0) {
+                  const error = await captureRejection(async () => {
+                    handle.setParamSync(next)
+                    await handle.flush()
+                    return handle.current()
+                  })
+                  expect(error).toMatchObject({
+                    name: `SourceCollectionIdReuseError`,
+                  })
+                  expectNoPagesAfterRejection(handle)
+                  break
+                }
+                handle.setParamSync(next)
+                await handle.flush()
+                history.push(next)
+                expectPageRows(handle.current(), pagesOf[base(next)], 3)
+              }
+              handle.unmount()
+            }
+          }
+        }
+        expect(
+          requiredKeyedStates.filter(
+            (checkpoint) => !observedKeyedStates.has(checkpoint),
+          ),
+        ).toEqual([])
+      },
+      // 18 histories of three steps each, and 75 keyed histories for a
+      // comparing binding.
+      60_000,
+    )
+
+    scenario(
+      `unhashable-recompile`,
+      `recompiling to a query without a stable IR identity follows the binding's identity policy`,
+      async () => {
+        const source = driver.makeSource(rows(8))
+        // `null` selects the structured query; a number, the functional one
+        // that keeps ranks at or below it.
+        const handle = driver.mountControllable(
+          (q, atMost: number | null) => {
+            const query = q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`)
+            return atMost === null
+              ? query
+              : query.fn.where(({ items }: any) => items.rank <= atMost)
+          },
+          null as number | null,
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+        if (driver.comparesQueryIdentity) {
+          const error = await captureRejection(async () => {
+            handle.setParamSync(4)
+            await handle.flush()
+            return handle.current()
+          })
+          expect(error).toMatchObject({ name: `UnhashableQueryIRError` })
+          expectNoPagesAfterRejection(handle)
+          return
+        }
+        // A changed captured value recompiles, though no identity names it.
+        handle.setParamSync(4)
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(4, 7), 3)
+        handle.setParamSync(2)
+        await handle.flush()
+        expectPageRows(handle.current(), rows(8).slice(6, 8), 3)
+      },
+    )
+  })
+}

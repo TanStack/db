@@ -22,28 +22,26 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
-import { afterAll, beforeAll, expect, it } from 'vitest'
+import { afterAll, beforeAll } from 'vitest'
 import {
   expectedSsrSnapshot,
   ssrSnapshotExamples,
   ssrSnapshotHistoryArbitrary,
 } from '../../db/tests/ssr-snapshot-admission-oracle'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   OracleCheckpointFailure,
   differs,
   oracleProperty,
-  oracleReplayTest,
-  oracleRoute,
   pass,
   violation,
 } from '../../db/tests/oracle-config'
-import { atOracleCheckpoint } from '../../db/tests/oracle-failure-fidelity'
+import { checkRender } from './ssr-effects-check-oracle'
 import type {
   Observation as OracleObservation,
   Verdict,
 } from '../../db/tests/oracle-config'
 import type { SsrSnapshotHistory } from '../../db/tests/ssr-snapshot-admission-oracle'
+import type { Observation } from './ssr-effects-check-oracle'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
@@ -96,15 +94,6 @@ const histories = ssrSnapshotHistoryArbitrary.map(serverHistory, (value) => ({
   browserPreload: false,
 }))
 const examples = ssrSnapshotExamples.map(serverHistory)
-type Observation = {
-  reactVersion: string
-  rendererVersion: string
-  calls: number
-  view?: { rows: unknown; status?: string }
-  failure?: string
-  diagnostics: Array<string>
-  cleanupFailures: Array<string>
-}
 const paths = [
   `ordinary-provider`,
   `ordinary-explicit`,
@@ -113,71 +102,6 @@ const paths = [
   `standalone`,
   `supplied`,
 ] as const
-const isLayoutDiagnostic = (message: string) =>
-  /useLayoutEffect does nothing on the server/i.test(message)
-
-// Preparation independently decides ordinary admission and rows/status.
-// Completed-query Suspense shares the ready judgment. Standalone builders and
-// supplied Collections check only return/diagnostics, without a transport claim.
-// Keeping raw messages permits unrelated diagnostics and exposes exact warnings.
-function checkRender(
-  history: SsrSnapshotHistory,
-  actual: Observation,
-  path: string,
-  expected = expectedSsrSnapshot(history),
-) {
-  try {
-    atOracleCheckpoint(`SSR path reached`, path, () => {
-      expect(
-        actual.calls,
-        `real server renderer invoked the hook`,
-      ).toBeGreaterThan(0)
-    })
-    const descriptor = path.includes(`provider`) || path.includes(`explicit`)
-    atOracleCheckpoint(`SSR preparation admission`, path, () => {
-      if (descriptor && expected.rejects) {
-        expect(actual.failure, `untransported server view rejects`).toMatch(
-          /SSR.*(?:preload|hydrat)/i,
-        )
-      } else {
-        expect(actual.failure, `legal SSR render`).toBeUndefined()
-        expect(actual.view, `hook returned its public view`).toBeDefined()
-        if (path.startsWith(`suspense`))
-          expect(actual.view?.rows, `prepared Suspense rows`).toEqual(
-            expected.rows,
-          )
-        else if (descriptor)
-          expect(actual.view, `server public view`).toEqual({
-            rows: expected.rows,
-            status: expected.status,
-          })
-      }
-    })
-    if (!descriptor || !expected.rejects)
-      atOracleCheckpoint(`SSR client-layout diagnostic`, path, () => {
-        expect(
-          actual.diagnostics.filter(isLayoutDiagnostic),
-          `legal SSR emits no client-layout diagnostic: ${JSON.stringify(actual.diagnostics)}`,
-        ).toEqual([])
-      })
-  } catch (error) {
-    if (actual.cleanupFailures.length)
-      throw new AggregateError(
-        [error, ...actual.cleanupFailures.map((failure) => new Error(failure))],
-        `SSR comparison and cleanup failed`,
-        { cause: error },
-      )
-    throw error
-  }
-  atOracleCheckpoint(`SSR cleanup`, path, () => {
-    expect(actual.cleanupFailures, `server cleanup diagnostics`).toEqual([])
-  })
-}
-
-declareOracle({
-  check: [checkRender],
-  grammar: [histories],
-})
 // The child process records native server facts. The same admission/diagnostic
 // judgment runs afterward, with runtime identity checked first as before.
 function checkEffects(
@@ -382,39 +306,3 @@ for (const runtime of runtimes) {
       checkEffects(history, trace, expected, `disabled`, runtime.version),
   })
 }
-
-oracleReplayTest(it)(
-  `distinguishes a client-layout diagnostic from unrelated messages`,
-  () => {
-    oracleRoute(`calibration`)
-    const history: SsrSnapshotHistory = {
-      preparation: `none`,
-      sourceState: `idle`,
-      rows: [],
-    }
-    const expected = expectedSsrSnapshot(history)
-    const actual: Observation = {
-      reactVersion: `calibration`,
-      rendererVersion: `calibration`,
-      calls: 1,
-      view: { rows: expected.rows, status: expected.status },
-      diagnostics: [`unrelated diagnostic`],
-      cleanupFailures: [],
-    }
-    expect(() =>
-      checkRender(history, actual, `ordinary-provider`),
-    ).not.toThrow()
-    expect(() =>
-      checkRender(
-        history,
-        {
-          ...actual,
-          diagnostics: [
-            `Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded.`,
-          ],
-        },
-        `ordinary-provider`,
-      ),
-    ).toThrow(/SSR client-layout diagnostic/)
-  },
-)

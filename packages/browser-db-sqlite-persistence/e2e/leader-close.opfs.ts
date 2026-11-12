@@ -1,6 +1,6 @@
 /**
  * Host driver for the #2085 source-Collection law in
- * `leader-close-oracle.opfs.spec.ts`. A real Chromium page closes after its
+ * `leader-close-witness.opfs.spec.ts`. A real Chromium page closes after its
  * OPFS adapter commits a follower RPC but before the leader answers. This
  * controls the response boundary; it does not stand in for Electric delivery.
  */

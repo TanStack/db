@@ -5,7 +5,6 @@ import { IndexedDBAdapter } from '../src/storage/IndexedDBAdapter'
 import { LocalStorageAdapter } from '../src/storage/LocalStorageAdapter'
 import { WebLocksLeader } from '../src/coordination/WebLocksLeader'
 import { BroadcastChannelLeader } from '../src/coordination/BroadcastChannelLeader'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   differs,
   oracleProperty,
@@ -736,11 +735,6 @@ function checkEnvironment(
   return pass
 }
 
-declareOracle({
-  grammar: [environmentHistory],
-  model: [environmentModel],
-  check: [checkEnvironment],
-})
 const environmentStates = [
   `storage custom`,
   `storage indexeddb`,
@@ -842,80 +836,89 @@ function constructEnvironment(
   }
   return base
 }
-oracleProperty<EnvironmentHistory, ReturnType<typeof environmentModel>>({
-  id: `offline.executor-environment`,
-  law: {
-    statement: `Initialization selects configured or preferred available storage and coordination, reports public diagnostics and callbacks, gates offline admission on leadership, and settles across disposal or dependency failure.`,
-    authority: `Offline transactions guide Storage and leadership/React Native and Expo; README storage configuration; public StorageDiagnostic and waitForInit contracts; established storage-failure and unread-init tests.`,
-    limits: `Controlled adapter probes and election collaborators; no native browser durability/election claim, no exact diagnostic wording, no mixed security/quota diagnostic precedence, no startup non-Error normalization promise or failed-replay availability law.`,
-  },
-  histories: {
-    arbitrary: environmentHistory,
-    runs: 100,
-    fixedSeeds: [20261110],
-    states: environmentStates,
-    constructed: environmentStates.map((state) => ({
-      name: state,
-      enters: [state],
-      build: (generated) => constructEnvironment(state, generated),
-    })),
-  },
-  model: environmentModel,
-  driver: driveEnvironment,
-  check: checkEnvironment,
-  calibrations: [
-    {
-      name: `initialization silently leaves its caller pending`,
-      law: `initialization completion`,
-      corrupt: (trace) =>
-        trace.map((entry) =>
-          entry.checkpoint === `initialized`
-            ? {
-                ...entry,
-                value: {
-                  ...(entry.value as EnvironmentCut),
-                  initialized: `pending`,
-                },
-              }
-            : entry,
-        ),
+/** Registers the environment campaign. The receiving test file names the
+ * production code that it owns. */
+export function registerExecutorEnvironment({
+  owns,
+}: {
+  owns: ReadonlyArray<string>
+}): void {
+  oracleProperty<EnvironmentHistory, ReturnType<typeof environmentModel>>({
+    owns,
+    id: `offline.executor-environment`,
+    law: {
+      statement: `Initialization selects configured or preferred available storage and coordination, reports public diagnostics and callbacks, gates offline admission on leadership, and settles across disposal or dependency failure.`,
+      authority: `Offline transactions guide Storage and leadership/React Native and Expo; README storage configuration; public StorageDiagnostic and waitForInit contracts; established storage-failure and unread-init tests.`,
+      limits: `Controlled adapter probes and election collaborators; no native browser durability/election claim, no exact diagnostic wording, no mixed security/quota diagnostic precedence, no startup non-Error normalization promise or failed-replay availability law.`,
     },
-    {
-      name: `provisional diagnostics omit their public message`,
-      law: `diagnostic shape`,
-      corrupt: (trace) =>
-        trace.map((entry) =>
-          entry.checkpoint === `constructed`
-            ? {
-                ...entry,
-                value: {
-                  ...(entry.value as EnvironmentCut),
-                  diagnostic: {
-                    ...(entry.value as EnvironmentCut).diagnostic,
-                    message: undefined,
+    histories: {
+      arbitrary: environmentHistory,
+      runs: 100,
+      fixedSeeds: [20261110],
+      states: environmentStates,
+      constructed: environmentStates.map((state) => ({
+        name: state,
+        enters: [state],
+        build: (generated) => constructEnvironment(state, generated),
+      })),
+    },
+    model: environmentModel,
+    driver: driveEnvironment,
+    check: checkEnvironment,
+    calibrations: [
+      {
+        name: `initialization silently leaves its caller pending`,
+        law: `initialization completion`,
+        corrupt: (trace) =>
+          trace.map((entry) =>
+            entry.checkpoint === `initialized`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as EnvironmentCut),
+                    initialized: `pending`,
                   },
-                },
-              }
-            : entry,
-        ),
-    },
-    {
-      name: `leadership becomes enabled after disposal`,
-      law: `leadership admission`,
-      corrupt: (trace, plan) =>
-        plan.fault !== `none`
-          ? undefined
-          : trace.map((entry) =>
-              entry.checkpoint === `disposed`
-                ? {
-                    ...entry,
-                    value: {
-                      ...(entry.value as EnvironmentCut),
-                      enabled: true,
+                }
+              : entry,
+          ),
+      },
+      {
+        name: `provisional diagnostics omit their public message`,
+        law: `diagnostic shape`,
+        corrupt: (trace) =>
+          trace.map((entry) =>
+            entry.checkpoint === `constructed`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as EnvironmentCut),
+                    diagnostic: {
+                      ...(entry.value as EnvironmentCut).diagnostic,
+                      message: undefined,
                     },
-                  }
-                : entry,
-            ),
-    },
-  ],
-})
+                  },
+                }
+              : entry,
+          ),
+      },
+      {
+        name: `leadership becomes enabled after disposal`,
+        law: `leadership admission`,
+        corrupt: (trace, plan) =>
+          plan.fault !== `none`
+            ? undefined
+            : trace.map((entry) =>
+                entry.checkpoint === `disposed`
+                  ? {
+                      ...entry,
+                      value: {
+                        ...(entry.value as EnvironmentCut),
+                        enabled: true,
+                      },
+                    }
+                  : entry,
+              ),
+      },
+    ],
+  })
+}

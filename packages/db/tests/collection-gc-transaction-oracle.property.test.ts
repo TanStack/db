@@ -3,7 +3,6 @@ import { vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
-import { declareOracle } from './oracle-declaration.js'
 import { differs, oracleProperty, pass, violation } from './oracle-property.js'
 import { resetCleanupQueue, withOracleCleanup } from './utils.js'
 import type { Verdict } from './oracle-property.js'
@@ -639,11 +638,8 @@ const advanceStep = (elapsedMs: 1 | 20 | 60 | 120): Step => ({
 })
 const cleanupStep = (side: Side): Step => ({ kind: `cleanup`, side })
 
-declareOracle({
-  grammar: [stepArbitrary],
-})
-
-// Replay one history with TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH,
+// Replay one history with the complete printed Replay: coordinates, including
+// TANSTACK_DB_ORACLE_UNIT, TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH,
 // and TANSTACK_DB_ORACLE_PROPERTY=collection-lifecycle.gc-persisting-transaction.
 // Each constructed history names the states it enters, with the steps that
 // enter it, and every declared state has at least one. The constructed

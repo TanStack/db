@@ -1,15 +1,5 @@
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import {
-  checkEagerLiveSourceHistory,
-  eagerLiveSourceHistoryArb,
-  eagerLiveSourceModel,
-} from '../../db-adapter-conformance/src'
 import { trailBaseConformanceDriver } from './conformance-driver'
-import {
-  constructTrailBaseEagerHistory,
-  observeTrailBaseEagerHistory,
-  trailBaseEagerVerdict,
-} from './eager-live-source-framework-oracle'
+import { observeTrailBaseEagerHistory } from './eager-live-source-framework-oracle'
 import { registerTrailBaseEager } from './eager-live-source-oracle-suite'
 
 /**
@@ -33,18 +23,14 @@ import { registerTrailBaseEager } from './eager-live-source-oracle-suite'
 
 const property = `adapter-conformance.eager-live-source.trailbase`
 const driver = trailBaseConformanceDriver()
-const historyArb = eagerLiveSourceHistoryArb(driver)
 
 registerTrailBaseEager(
-  { property, defaultRuns: 600 },
+  {
+    property,
+    defaultRuns: 600,
+    owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
+  },
   driver,
   (history, corruptValues) =>
     observeTrailBaseEagerHistory(driver, history, corruptValues),
 )
-
-declareOracle({
-  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
-  check: [checkEagerLiveSourceHistory, trailBaseEagerVerdict],
-  model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-  grammar: [historyArb, constructTrailBaseEagerHistory],
-})

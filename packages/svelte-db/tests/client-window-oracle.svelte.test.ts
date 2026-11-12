@@ -28,12 +28,7 @@ import {
 import { ScenarioLifetime } from '../../db/tests/conformance/scenario-lifetime'
 import { OracleCheckpointFailure } from '../../db/tests/oracle-failure-fidelity'
 import { selectedRow } from '../../db/tests/conformance/result-laws'
-import {
-  declareOracle,
-  oracleProperty,
-  pass,
-  violation,
-} from '../../db/tests/oracle-config'
+import { oracleProperty, pass, violation } from '../../db/tests/oracle-config'
 import type { Observation, Verdict } from '../../db/tests/oracle-config'
 import type {
   InitialQueryBuilder,
@@ -498,10 +493,6 @@ describe(`Svelte client page identity`, () => {
       }),
     )
 })
-declareOracle({
-  model: [modelClientWindow],
-  check: [checkClientWindowHistory],
-})
 
 /** An unchanged explicit client key retains the authored input, including after
  * a rejected key read. Recovery must not replay a prior declarative move over
@@ -782,9 +773,4 @@ oracleProperty({
       )
   },
   check: checkRecovery,
-})
-declareOracle({
-  grammar: [recoveryArbitrary, recoveryHistories],
-  model: [modelRecovery],
-  check: [checkRecovery],
 })

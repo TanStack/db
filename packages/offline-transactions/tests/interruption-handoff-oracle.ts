@@ -5,7 +5,6 @@ import { vi } from 'vitest'
 import { startOfflineExecutor } from '../src/OfflineExecutor'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import { NonRetriableError } from '../src/types'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   differs,
   oracleProperty,
@@ -802,11 +801,6 @@ function checkHandoff(
   return pass
 }
 
-declareOracle({
-  grammar: [handoffHistory],
-  model: [handoffModel],
-  check: [checkHandoff],
-})
 const states = [
   ...paths.map((path) => `path ${path}`),
   `origin live`,
@@ -1119,7 +1113,6 @@ const issuedHandoffHistory: fc.Arbitrary<HandoffHistory> = fc.record({
   replacements: fc.integer({ min: 1, max: 3 }),
   replaceCollection: fc.constant(false),
 })
-declareOracle({ grammar: [issuedHandoffHistory] })
 const issuedHandoffStates = [
   ...paths.map((path) => `path ${path}`),
   `origin live`,
@@ -1232,7 +1225,6 @@ const reviewHandoffStates = [
   `peer after subscriber exception`,
   `live offline predecessor`,
 ]
-declareOracle({ grammar: [reviewHandoffHistory] })
 oracleProperty<HandoffHistory, ReturnType<typeof handoffModel>>({
   id: `offline.disposal-review-boundaries`,
   law: {
@@ -1376,7 +1368,6 @@ async function driveHandoffResources(
   }
 }
 
-declareOracle({ grammar: [resourceHistory] })
 const resourceStates = [
   ...paths.map((path) => `path ${path}`),
   `origin live`,

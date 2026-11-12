@@ -71,7 +71,10 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { failureLine, loadFailureLine } from './lint-load-failure.mjs'
-import { oracleLintSettings } from './oracle-lint-settings.mjs'
+import {
+  oracleLintSettings,
+  registrationExceptionConfig,
+} from './oracle-lint-settings.mjs'
 
 const formats = new Set([`claude`, `codex`, `gemini`, `copilot`, `text`])
 
@@ -419,6 +422,9 @@ function createLinter() {
         ...oraclePlugin.configs.recommended,
         files: [`**/*.ts`, `**/*.tsx`, `**/*.js`, `**/*.mjs`, `**/*.jsx`],
       },
+      // The reviewed exception list; check-registration-exceptions.mjs keeps
+      // each file's count exact.
+      registrationExceptionConfig,
     ],
   })
 }

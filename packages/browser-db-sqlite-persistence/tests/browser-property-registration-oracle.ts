@@ -1,6 +1,10 @@
 import fc from 'fast-check'
 import { afterEach, beforeEach, describe } from 'vitest'
-import { oracleProperty } from '../../db/tests/oracle-config'
+import {
+  configureDbOracles,
+  isGeneratedOracleCampaign,
+  oracleProperty,
+} from '../../db/tests/oracle-config'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
@@ -10,6 +14,8 @@ import type { GeneratedHistories } from '../../db/tests/oracle-config'
 
 type BrowserCampaign<THistory> = {
   id: string
+  // The caller's owns list, forwarded unchanged to oracleProperty.
+  owns?: ReadonlyArray<string>
   runs: number
   fixedSeed: number
   examples?: ReadonlyArray<THistory>
@@ -46,14 +52,14 @@ export function registerBrowserProperty<THistory>(
       campaign.beforeCampaign?.()
     })
     afterEach(({ task }) => {
-      if (task.name !== `random seed` && !task.name.startsWith(`fixed seed `))
-        return
+      if (!isGeneratedOracleCampaign(task.name)) return
       if (failed) campaign.failedCampaign?.()
       else campaign.afterCampaign?.()
     })
     for (const histories of sources)
       oracleProperty({
         id: campaign.id,
+        owns: campaign.owns,
         law: {
           statement,
           authority: `The calling owner's existing RFC #1659 and persistence contract citations.`,
@@ -97,6 +103,9 @@ export function browserReplayAlias(
     [`TANSTACK_DB_ORACLE_PROPERTY`, replay.property],
     [`TANSTACK_DB_ORACLE_SEED`, String(replay.seed)],
     [`TANSTACK_DB_ORACLE_PATH`, replay.path],
+    // This wrapper registers no constructed histories, so old generated paths
+    // keep their indices in the generated unit.
+    [`TANSTACK_DB_ORACLE_UNIT`, `random seed: generated`],
   ]) {
     const existing = process.env[key!]
     if (existing !== undefined && existing !== value)
@@ -105,4 +114,5 @@ export function browserReplayAlias(
       )
     process.env[key!] = value
   }
+  configureDbOracles()
 }

@@ -1,10 +1,8 @@
 import { fc } from '@fast-check/vitest'
-import { beforeEach, expect, it, vi } from 'vitest'
+import { beforeEach, expect, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
-import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   checkExistingElectricComparison,
@@ -56,8 +54,6 @@ import type { ElectricCollectionUtils } from '../src/electric'
 vi.mock(`@electric-sql/client`, async () =>
   (await import(`./electric-descriptor-harness`)).createMockedElectricClient(),
 )
-
-const fixedCase = oracleReplayTest(it)
 
 // The durable fixture is a driver, not the independent tag model. It must
 // preserve the SQLite adapter's mutation algebra: an insert replaces the old
@@ -407,30 +403,53 @@ async function runTagHistory(
 
 // Bounded neighbors isolate membership loss from reset debt. The ordinary
 // untagged resume is the distinguishing control for changes_only capability.
-fixedCase.each([
+// The generated property runs every restart combination of a history; each
+// neighbor here selects one combination, so they are enumerated cases of the
+// same driver and comparison.
+const restartDemandCases = [
   { tagged: true, legacyResume: false, cold: true, fresh: false },
   { tagged: false, legacyResume: false, cold: true, fresh: false },
   { tagged: false, legacyResume: true, cold: true, fresh: false },
   { tagged: false, legacyResume: false, cold: false, fresh: true },
-])(
-  `settles restart demand with tagged=$tagged legacy=$legacyResume cold=$cold reset=$fresh`,
-  async ({ cold, fresh, ...history }) => {
-    oracleRoute(`case`)
-    await runTagHistory(
-      {
-        ...history,
-        syncMode: `on-demand`,
-        interruptRecovery: false,
-        edits: [],
-        removals: [`left`, `right`, `other`],
-      },
-      { cold, fresh },
-    )
+]
+async function runRestartDemandCase({
+  cold,
+  fresh,
+  ...history
+}: (typeof restartDemandCases)[number]) {
+  await runTagHistory(
+    {
+      ...history,
+      syncMode: `on-demand`,
+      interruptRecovery: false,
+      edits: [],
+      removals: [`left`, `right`, `other`],
+    },
+    { cold, fresh },
+  )
+}
+oracleProperty({
+  id: `electric.persisted-tag-history-restart`,
+  law: {
+    statement: `Compatible warm resumes retain tag membership; fresh source snapshots rebuild it across warm and cold restart.`,
+    authority: `The independent tag-set law and persisted recovery contract stated above runTagHistory.`,
+    limits: `Four on-demand restart neighbors, each with one selected restart combination, through the same driver and comparison as electric.persisted-tag-history.`,
   },
-)
+  owns: [`src/electric.ts#electricCollectionOptions`],
+  histories: restartDemandCases,
+  label: ({ tagged, legacyResume, cold, fresh }) =>
+    `settles restart demand with tagged=${tagged} legacy=${legacyResume} cold=${cold} reset=${fresh}`,
+  ...existingElectricComparison(
+    `electric.persisted-tag-history-restart`,
+    runRestartDemandCase,
+  ),
+  check: checkExistingElectricComparison,
+})
 
 // The two campaigns use the same grammar, checker, and budget. A path replay
-// of the property runs only the random campaign. Reproduce a saved failure with:
+// selects only its reported random unit. Copy the complete printed Replay:
+// coordinates, including TANSTACK_DB_ORACLE_UNIT, for this generated property:
+// TANSTACK_DB_ORACLE_UNIT='<reported random unit>'
 // TANSTACK_DB_ORACLE_PROPERTY=electric.persisted-tag-history
 // TANSTACK_DB_ORACLE_SEED=<seed> TANSTACK_DB_ORACLE_PATH=<path>
 // pnpm exec vitest run tests/electric-descriptor-isolation-oracle.test.ts
@@ -514,23 +533,40 @@ beforeEach(() => {
 // acquisition readiness. Retiring the session must abandon its commit turn;
 // otherwise a demand in the replacement session waits on impossible work.
 
-fixedCase.each([`eager`, `on-demand`, `progressive`] as const)(
-  `delivers abandoned tag-recovery callbacks after replacement starts in %s mode`,
-  async (syncMode) => {
-    oracleRoute(`case`)
-    await runTagHistory({
-      syncMode,
-      tagged: true,
-      legacyResume: false,
-      interruptRecovery: true,
-      edits: [],
-      removals: [`left`, `right`, `other`],
-    })
-    // Three interrupted rebuilds plus one compatible warm resume. Each
-    // interrupted branch checks its abandoned callback was actually invoked.
-    expect(streams).toHaveLength(11)
+async function runAbandonedRecoveryCase(
+  syncMode: `eager` | `on-demand` | `progressive`,
+) {
+  // Each case counts its streams from a reset harness, as a fresh test does.
+  resetElectricDescriptorHarness()
+  await runTagHistory({
+    syncMode,
+    tagged: true,
+    legacyResume: false,
+    interruptRecovery: true,
+    edits: [],
+    removals: [`left`, `right`, `other`],
+  })
+  // Three interrupted rebuilds plus one compatible warm resume. Each
+  // interrupted branch checks its abandoned callback was actually invoked.
+  expect(streams).toHaveLength(11)
+}
+oracleProperty({
+  id: `electric.persisted-tag-history-recovery`,
+  law: {
+    statement: `Abandoned tag-recovery callbacks delivered after a replacement provider session starts change no membership.`,
+    authority: `The independent tag-set law and persisted recovery contract stated above runTagHistory.`,
+    limits: `One tagged interrupted-recovery history in each sync mode, through the same driver and comparison as electric.persisted-tag-history, with its stream count.`,
   },
-)
+  owns: [`src/electric.ts#electricCollectionOptions`],
+  histories: [`eager`, `on-demand`, `progressive`] as const,
+  label: (syncMode) =>
+    `delivers abandoned tag-recovery callbacks after replacement starts in ${syncMode} mode`,
+  ...existingElectricComparison(
+    `electric.persisted-tag-history-recovery`,
+    runAbandonedRecoveryCase,
+  ),
+  check: checkExistingElectricComparison,
+})
 
 const ownerHistory = fc.record({
   startSync: fc.boolean(),
@@ -635,7 +671,3 @@ oracleProperty({
 // Reusing one wrapper itself is rejected before a second owner starts. The
 // public checkpoints are admission, the first receipt, and each Collection's
 // rows after only the first provider session acknowledges its transaction.
-
-declareOracle({
-  check: [runTagHistory, runOwnerHistory],
-})

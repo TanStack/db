@@ -20,15 +20,9 @@
  * React's abandoned-render cut is checked by its receiving driver separately.
  */
 import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
-import { declareOracle } from '../oracle-declaration'
+import { describe, expect } from 'vitest'
 import { atOracleCheckpoint } from '../oracle-failure-fidelity'
-import {
-  oracleProperty,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRuns,
-} from '../oracle-config'
+import { oracleProperty, oracleRuns } from '../oracle-config'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -635,77 +629,6 @@ function windowHistoryProperty(
 // another's missing witness. Replay goes directly to the requested campaign.
 export function registerWindowHistoryOracle(driver: LiveQueryDriver) {
   describe(`window history :: ${driver.name}`, () => {
-    oracleReplayTest(it)(
-      `rejects a pending keyed map that differs from the settled rows`,
-      () => {
-        const history = windowHistoryExamples[0]![0]
-        const input = history.inputs[0]!
-        const rows = windowRows(history.rows, input, false)
-        const collection = {}
-        // data and Collection are valid. The empty map alone is the wrong answer.
-        oracleAssertion('checkWindowObservation', () =>
-          checkWindowObservation(
-            { rows, collection },
-            { rows, previousCollection: collection, retain: true },
-            `held acquisition`,
-          ),
-        )
-        oracleAssertion('expect(() =>', () =>
-          expect(() =>
-            oracleAssertion('checkWindowState', () =>
-              checkWindowState(new Map(), rows, `held acquisition`),
-            ),
-          ).toThrow(`keyed window rows at held acquisition`),
-        )
-        oracleAssertion('checkWindowState', () =>
-          checkWindowState(
-            new Map(rows.map((row) => [row.id, row])),
-            rows,
-            `held acquisition`,
-          ),
-        )
-      },
-    )
-    // These controls use the campaign's shared comparison. Owner-only recording
-    // accepts 1 -> 2 -> 1 when a replacement subscribes before its predecessor
-    // retires. A retired Collection's 2 -> 1 decrement must still be accepted.
-    oracleReplayTest(it)(
-      `retained subscriptions distinguish overlapping replacement from GC`,
-      () => {
-        const collection = {}
-        const overlappingReplacement = [
-          {
-            owners: [collection],
-            previousSubscriberCount: 1,
-            subscriberCount: 2,
-          },
-          {
-            owners: [collection],
-            previousSubscriberCount: 2,
-            subscriberCount: 1,
-          },
-        ]
-        oracleAssertion('expect(() =>', () =>
-          expect(() =>
-            oracleAssertion('checkWindowSubscriptions', () =>
-              checkWindowSubscriptions(overlappingReplacement, collection),
-            ),
-          ).toThrow(`retained upstream subscription count`),
-        )
-        oracleAssertion('checkWindowSubscriptions', () =>
-          checkWindowSubscriptions(
-            [
-              {
-                owners: [collection],
-                previousSubscriberCount: 2,
-                subscriberCount: 1,
-              },
-            ],
-            collection,
-          ),
-        )
-      },
-    )
     registerPeerWindowOracle(driver)
     if (driver.mountKeyedControllable) registerImmutableKeyOracle(driver)
     // Disabled input is legal only for ordinary bindings that accept keys.
@@ -743,17 +666,33 @@ export function registerWindowHistoryOracle(driver: LiveQueryDriver) {
           )
           describe(`${form} window histories`, () => {
             // Preserve both original example executions without pretending the
-            // authored input list is the generator's compulsory-move template.
-            for (const campaign of [`fixed`, `fresh`] as const)
-              for (const [index, [history]] of windowHistoryExamples.entries())
-                oracleReplayTest(it)(
-                  `fixed input ${index}/${campaign}`,
+            // authored input list is the generator's compulsory-move template:
+            // the arbitrary cannot take these authored inputs back, so one
+            // enumerated property replays each example per campaign name.
+            oracleProperty({
+              id: windowHistoryProperty(driver, `window-history-fixed`),
+              law: {
+                statement: `An adapter-owned outer page move retains its Collection; a changed plan replaces it, and source writes keep the current page live.`,
+                authority: `conformance/contract.ts query identity and committed-window laws; maintainer window decision 2026-10-30 and independent-output decision 2026-11-03.`,
+                limits: `The authored fixed window examples, each run twice (fixed and fresh), through the same driver-specific receiving path and comparison; each must enter every required state of its form.`,
+              },
+              histories: ([`fixed`, `fresh`] as const).flatMap((campaign) =>
+                windowHistoryExamples.map((_, index) => ({ campaign, index })),
+              ),
+              label: ({ campaign, index }) =>
+                `fixed input ${index}/${campaign}`,
+              resolve: ({ index }) => ({ index }),
+              model: recordedAssertionJudgment,
+              driver: (plan, observe) =>
+                recordAssertionJudgment(
+                  `adapter-owned page window`,
+                  plan,
+                  observe,
                   async () => {
-                    oracleRoute(`fixed history`)
                     const observed = new Set<(typeof states)[number]>()
                     await runWindowHistory(
                       driver,
-                      { ...history, nested },
+                      { ...windowHistoryExamples[plan.index]![0], nested },
                       keyed,
                       { reach: (state) => observed.add(state) },
                       keyPolicy,
@@ -768,8 +707,10 @@ export function registerWindowHistoryOracle(driver: LiveQueryDriver) {
                         ).toEqual([]),
                     )
                   },
-                  oracleRuns(30000),
-                )
+                ),
+              check: forwardAssertionJudgment,
+              timeout: oracleRuns(30000),
+            })
             oracleProperty({
               id: windowHistoryProperty(driver, `window-history`),
               law: {
@@ -818,19 +759,6 @@ export function registerWindowHistoryOracle(driver: LiveQueryDriver) {
         }
   })
 }
-// Owns no production entry in packages/db: this module checks the public
-// observations that each framework driver passes it, so the framework packages
-// that run it own the entries it judges.
-declareOracle({
-  model: [sameWindowPlan, windowRows],
-  grammar: [windowHistoryArbitrary],
-  check: [
-    checkWindowObservation,
-    checkWindowState,
-    checkWindowSubscriptions,
-    runWindowHistory,
-  ],
-})
 /**
  * Pending window moves keep the last settled page. A later commit supersedes
  * the requested window; an older acquisition cannot publish its own page. This
@@ -1052,13 +980,6 @@ async function checkPendingWindowHistory(
       )
   })
 }
-// Owns no production entry in packages/db: this module checks the public
-// observations that each framework driver passes it, so the framework packages
-// that run it own the entries it judges.
-declareOracle({
-  grammar: [pendingWindowArbitrary],
-  check: [checkPendingWindowHistory],
-})
 function registerPendingWindowOracle(driver: LiveQueryDriver) {
   oracleProperty({
     id: windowHistoryProperty(driver, `pending-window-history`),
@@ -1329,13 +1250,6 @@ function registerPublicationWindowOracle(driver: LiveQueryDriver) {
     timeout: oracleRuns(30000),
   })
 }
-// Owns no production entry in packages/db: this module checks the public
-// observations that each framework driver passes it, so the framework packages
-// that run it own the entries it judges.
-declareOracle({
-  grammar: [publicationWindowArbitrary],
-  check: [checkPublicationWindowHistory],
-})
 /** Independent bindings may read the same source, but their mutable pages are
  * local. The shared sort/slice model judges both outputs after declarative and
  * imperative moves, source writes, and retirement of the other binding. A
@@ -1505,10 +1419,6 @@ function registerPeerWindowOracle(driver: LiveQueryDriver) {
     check: forwardAssertionJudgment,
   })
 }
-declareOracle({
-  grammar: [pendingWindowArbitrary],
-  check: [checkPeerWindowHistory],
-})
 // A disabled input admits no authored plan. The enablement contract therefore
 // precedes stable-key retention: first admit the enabled plan, then keep it
 // until its key changes. These histories cross the two formerly separate lanes.
@@ -1657,10 +1567,6 @@ function registerKeyedAdmissionOracle(driver: LiveQueryDriver) {
     check: forwardAssertionJudgment,
   })
 }
-declareOracle({
-  grammar: [keyedAdmissionArbitrary],
-  check: [checkKeyedAdmission],
-})
 // Immutable explicit keys obey contract.ts (maintainer decision, 2026-11-03).
 // Equal values keep the authored query even when a new callback proposes a
 // different predicate. Changed nested values admit that predicate. Mutation is
@@ -1929,7 +1835,3 @@ function registerImmutableKeyOracle(driver: LiveQueryDriver) {
     check: forwardAssertionJudgment,
   })
 }
-declareOracle({
-  grammar: [immutableKeyArbitrary],
-  check: [checkImmutableKeyHistory],
-})

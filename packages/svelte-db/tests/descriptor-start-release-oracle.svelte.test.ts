@@ -13,7 +13,6 @@ import {
   expectedDescriptorStart,
 } from '../../db/tests/descriptor-start-release-oracle'
 import { descriptorStartFixture } from '../../db/tests/descriptor-start-release-support'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   differs,
   oracleProperty,
@@ -115,10 +114,4 @@ oracleProperty({
   model: modelHistory,
   driver: recordHistory,
   check: checkHistory,
-})
-
-declareOracle({
-  check: [checkHistory],
-  model: [expectedDescriptorStart],
-  grammar: [descriptorStartHistories],
 })

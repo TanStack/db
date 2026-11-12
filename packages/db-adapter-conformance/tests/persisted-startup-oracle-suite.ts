@@ -11,6 +11,8 @@
  * observations occur only after the composition driver proves its source /
  * restore order. The first-result, durable, refresh and reopen comparisons keep
  * their original cuts; a later result cannot repair an earlier verdict.
+ * Calibrations bind directly to randomized constructions that guarantee their
+ * fault's premise, so they do not search through real database startups.
  *
  * Limits: the shared owner's three-key eager grammar, one source scope and an
  * optional peer, a disjoint persisting mutation, and local-only reopen. The
@@ -51,6 +53,7 @@ export function registerPersistedStartupConformance<
   origin = () => undefined,
   scopedStartupCommit = false,
   timeout = 60_000,
+  owns,
 }: {
   property: string
   adapter: PersistedStartupAdapter<H>
@@ -60,6 +63,8 @@ export function registerPersistedStartupConformance<
   timeout?: number
   origins?: Array<string>
   origin?: (history: H) => string | undefined
+  /** The receiving adapter's production entry, forwarded to oracleProperty. */
+  owns?: ReadonlyArray<string>
 }) {
   const states = [
     ...startupRequiredStates(
@@ -70,9 +75,9 @@ export function registerPersistedStartupConformance<
     ),
     ...origins,
   ]
-  // The pinned framework remembers required states only for seed examples.
-  // Keep the same obligations on every fresh generated or shrunk construction.
-  // They describe its inputs, never production's expected rows.
+  // Keep construction obligations in the shared comparison too, so the
+  // missing-state controls judge fresh generated and shrunk constructions.
+  // These describe inputs, never production's expected rows.
   const constructionStates = new WeakMap<H, ReadonlyArray<string>>()
   const constructed = states.map((state) => {
     const witness = histories.find(
@@ -172,6 +177,26 @@ export function registerPersistedStartupConformance<
       },
     }
   })
+
+  // Persistence loss needs a source write, including when a peer alone owns
+  // the saved rows. An overlapping key changes its value from 1 to 2. Preserve
+  // the generated membership and actions around that guaranteed write.
+  for (const state of [`response-before-restore`, `network-first-fallback`]) {
+    const premise = constructed.find(({ enters }) => enters.includes(state))!
+    const enters = [state, `overlapping-update`]
+    constructed.push({
+      name: `source persistence ${state}`,
+      enters,
+      build: (generated: H): H => {
+        const history = premise.build(generated)
+        const key = 1 << ((generated.previous + generated.next) % 3)
+        history.previous |= key
+        history.next |= key
+        constructionStates.set(history, enters)
+        return history
+      },
+    })
+  }
 
   for (const host of [`controlled`, `node-sqlite`] as const) {
     describe(`${property} through ${host}`, () => {
@@ -364,6 +389,7 @@ export function registerPersistedStartupConformance<
 
       oracleProperty({
         id: property,
+        owns,
         law: {
           statement: `A complete eager source result replaces its persisted baseline and is durable before later refresh; network-first fallback preserves the saved snapshot. Opted-in receivers preserve ordinary startup commits without a full replacement.`,
           authority: `READY-3/PUB-7; docs/collections/query-collection.md, Direct Writes and Query Sync and Initial Data; glossary, network-first initial render; maintainer shared-owner decision 2026-11-09 and batching decision 2026-11-10.`,
@@ -393,6 +419,13 @@ export function registerPersistedStartupConformance<
                 {
                   name: `replaces the ordinary initial commit with an explicit truncate`,
                   law: `startup batching`,
+                  history: {
+                    constructed: histories.some(
+                      (h) => h.batchSize !== undefined,
+                    )
+                      ? `generated source-at-batch`
+                      : `generated paged-single-source`,
+                  },
                   corrupt: (trace: ReadonlyArray<Observation>, history: H) =>
                     history.batchSize === undefined &&
                     !history.singleSourceCommit
@@ -425,6 +458,7 @@ export function registerPersistedStartupConformance<
           ...states.map((state) => ({
             name: `omits constructed ${state}`,
             law: `constructed reach`,
+            history: { constructed: `generated ${state}` },
             corrupt: (trace: ReadonlyArray<Observation>, history: H) =>
               constructionStates.get(history)?.includes(state)
                 ? trace.filter(
@@ -436,6 +470,8 @@ export function registerPersistedStartupConformance<
           {
             name: `keeps stale durability until later refresh`,
             law: `startup durability`,
+            difference: `startupDurable:`,
+            history: { constructed: `generated omitted-row` },
             corrupt: (trace, history) => {
               if (history.next === history.previous) return undefined
               return trace.map((entry) =>
@@ -457,6 +493,8 @@ export function registerPersistedStartupConformance<
           {
             name: `loses the saved fallback`,
             law: `persisted startup`,
+            difference: `fallback:`,
+            history: { constructed: `generated network-first-fallback` },
             corrupt: (trace, history) =>
               history.response === `after-deadline` && history.previous !== 0
                 ? trace.map((entry) =>
@@ -481,6 +519,10 @@ export function registerPersistedStartupConformance<
           {
             name: `keeps the saved snapshot at first durability`,
             law: `startup durability`,
+            difference: `startupDurable:`,
+            history: {
+              constructed: `source persistence network-first-fallback`,
+            },
             corrupt: (trace, history) =>
               history.response === `after-deadline` && history.previous !== 0
                 ? trace.map((entry) =>
@@ -503,6 +545,10 @@ export function registerPersistedStartupConformance<
             (response) => ({
               name: `loses source persistence with ${response}`,
               law: `startup durability`,
+              difference: `startupDurable:`,
+              history: {
+                constructed: `source persistence ${response === `before-restore` ? `response-before-restore` : `network-first-fallback`}`,
+              },
               driver: losePersistence(response),
             }),
           ),

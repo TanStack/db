@@ -1,11 +1,6 @@
 import { describe } from 'vitest'
 import { oracleProperty } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import {
-  checkEagerLiveSourceHistory,
-  eagerLiveSourceHistoryArb,
-  eagerLiveSourceModel,
-} from '../src'
+import {} from '../src'
 import {
   checkEagerLiveSourceObservations,
   eagerLiveSourceHistories,
@@ -33,7 +28,6 @@ import { neonRealtimeDriver } from './neon/neon-realtime-driver'
 describe(`eager live-source conformance: Neon Realtime adapter`, () => {
   const property = `adapter-conformance.eager-live-source.neon-realtime`
   const driver = neonRealtimeDriver()
-  const historyArb = eagerLiveSourceHistoryArb(driver)
   // Preserve the old 400-history fixed/fresh budgets and minimum five
   // declared-state entries through the shared constructed-history recipes.
   const runs = 400
@@ -48,13 +42,5 @@ describe(`eager live-source conformance: Neon Realtime adapter`, () => {
       fixedSeeds: [2118],
     },
     timeout: campaignTimeoutMs,
-  })
-
-  // The adapter under test is vendored in tests/neon; this package's src is
-  // the shared oracle. This receiving path owns no shipped entry point.
-  declareOracle({
-    check: [checkEagerLiveSourceHistory],
-    model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-    grammar: [historyArb],
   })
 })

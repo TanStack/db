@@ -16,7 +16,6 @@ import {
   pass,
   violation,
 } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { peopleQuery } from './ssr-test-utils'
 import SsrDbApp from './SsrDbApp.svelte'
 import type { Observation, Verdict } from '../../db/tests/oracle-config'
@@ -764,9 +763,4 @@ oracleProperty({
   driver: recordReceivingHistory,
   check: checkReceivingHistory,
   timeout: 30_000,
-})
-declareOracle({
-  model: [expectedSsrSnapshot, expectedSsrReceivingViews],
-  check: [checkHandoff, checkReceivingHistory],
-  grammar: [ssrSnapshotHistoryArbitrary, ssrReceivingHistoryArbitrary],
 })

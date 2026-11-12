@@ -14,12 +14,8 @@
  * scheduling, arbitrary optimistic overlap, or a same-key conflict policy.
  */
 import { fc } from '@fast-check/vitest'
-import { beforeEach, expect, it } from 'vitest'
-import {
-  oracleProperty,
-  oracleReplayRequested,
-  oracleRoute,
-} from '../oracle-config.js'
+import { beforeEach, expect } from 'vitest'
+import { oracleProperty, oracleReplayRequested } from '../oracle-config.js'
 import { nativeCampaignReceipt } from '../native-campaign-receipt'
 import {
   forwardAssertionJudgment,
@@ -29,13 +25,7 @@ import {
 } from '../oracle-assertion-adapter'
 import { campaignFailure, createCampaignRecorder } from './campaign'
 import { runTransportHistory } from './cross-tab-driver'
-import {
-  CrossTabModel,
-  assertPublicationHistory,
-  assertReplay,
-  assertSnapshot,
-  assertStatuses,
-} from './cross-tab-oracle'
+import { assertSnapshot } from './cross-tab-oracle'
 import type { TransportStep } from './cross-tab-driver'
 
 const kinds = [
@@ -133,8 +123,9 @@ oracleProperty({
   check: forwardAssertionJudgment,
 })
 
-it('reconstructs every action and overlapping receiver reads', async () => {
-  oracleRoute(`fixed history`)
+// The fixed reconstruction and the finite two-write template replay through
+// the transport driver outside the generated grammar's recorder.
+async function reconstructEveryAction() {
   const reached = await runTransportHistory([
     action('write', 0),
     action('delete', 0),
@@ -147,10 +138,9 @@ it('reconstructs every action and overlapping receiver reads', async () => {
   ])
   for (const kind of [...kinds, 'overlapping receivers'])
     expect(reached.has(kind), kind).toBe(true)
-})
+}
 
-it('enumerates two ordered writes with every intermediate delivery choice', async () => {
-  oracleRoute(`case`)
+async function enumerateOrderedWrites() {
   let explored = 0
   // 2 first writers × 2 second writers × 4 delivery subsets = 16 schedules.
   for (const first of [0, 1])
@@ -164,126 +154,64 @@ it('enumerates two ordered writes with every intermediate delivery choice', asyn
         explored++
       }
   expect(explored).toBe(16)
-}, 60_000)
+}
 
-it('requires local admission to distinguish identical durable deletions', () => {
-  oracleRoute(`fixed history`)
-  const row = { id: 0, name: 'old' }
-  const delayed = new CrossTabModel([0, 0], [[row]])
-  delayed.accept(0, { rows: [], deletes: [0], replace: false })
-  expect(delayed.durable[0]).toEqual([])
-  expect(delayed.publicSnapshots[1]).toEqual([row])
-  // A durable-only projection rejects the locally legal update: explicit
-  // grammar calibration, not a claimed production mutant.
-  expect(() =>
-    assertSnapshot(
-      delayed.durable[0]!,
-      delayed.publicSnapshots[1]!,
-      'local admission',
+oracleProperty({
+  id: `indexeddb.cross-tab-history-reconstruction`,
+  law: {
+    statement:
+      'Each cross-tab publication refines one coherent history of whole effects at its existing public row, event and status checkpoints.',
+    authority:
+      'The independent per-Collection model and public IndexedDB contract in cross-tab-oracle.ts.',
+    limits:
+      'One fixed history that reconstructs every action and overlapping receiver reads through the transport driver.',
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+  ],
+  histories: ['reconstructs every action and overlapping receiver reads'],
+  label: (name) => name,
+  resolve: (name) => ({ name }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `indexeddb.cross-tab-history-reconstruction`,
+      plan,
+      observe,
+      () => reconstructEveryAction(),
     ),
-  ).toThrow('public rows at local admission')
-  delayed.receive(1, [{ rows: [], deletes: [0], replace: false }])
-  expect(delayed.publicSnapshots[1]).toEqual([])
+  check: forwardAssertionJudgment,
 })
 
-it('rejects repaired partial publications and malformed raw deltas', () => {
-  oracleRoute(`calibration`)
-  const before = [
-    { id: 0, name: 'a' },
-    { id: 1, name: 'b' },
-  ]
-  const after = [
-    { id: 0, name: 'new a' },
-    { id: 1, name: 'new b' },
-  ]
-  const effect = { rows: after, deletes: [], replace: false }
-  const first = {
-    key: 0,
-    type: 'update' as const,
-    value: after[0]!,
-    previousValue: before[0]!,
-  }
-  const second = {
-    key: 1,
-    type: 'update' as const,
-    value: after[1]!,
-    previousValue: before[1]!,
-  }
-  expect(() =>
-    assertPublicationHistory(
-      before,
-      [
-        { changes: [first], rows: [after[0]!, before[1]!] },
-        { changes: [second], rows: after },
-      ],
-      [effect],
-      'control',
+oracleProperty({
+  id: `indexeddb.cross-tab-history-ordered-writes`,
+  law: {
+    statement:
+      'Each cross-tab publication refines one coherent history of whole effects at its existing public row, event and status checkpoints.',
+    authority:
+      'The independent per-Collection model and public IndexedDB contract in cross-tab-oracle.ts.',
+    limits:
+      'The finite template of two ordered writes with every sender and intermediate delivery choice (16 schedules).',
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+  ],
+  histories: [
+    'enumerates two ordered writes with every intermediate delivery choice',
+  ],
+  label: (name) => name,
+  resolve: (name) => ({ name }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `indexeddb.cross-tab-history-ordered-writes`,
+      plan,
+      observe,
+      () => enumerateOrderedWrites(),
     ),
-  ).toThrow('atomic publication')
-  for (const corrupt of [
-    { ...first, type: 'insert' as const },
-    { ...first, previousValue: { id: 0, name: 'wrong' } },
-  ])
-    expect(() =>
-      assertPublicationHistory(
-        before,
-        [{ changes: [corrupt, second], rows: after }],
-        [effect],
-        'control',
-      ),
-    ).toThrow('event semantics')
-  assertPublicationHistory(
-    before,
-    [{ changes: [first, second], rows: after }],
-    [effect],
-    'healthy control',
-  )
-  expect(() =>
-    assertStatuses(['ready', 'error', 'ready'], ['ready'], 'repaired error'),
-  ).toThrow('Collection status')
-  expect(() =>
-    assertReplay({
-      inputReconstructed: true,
-      premiseReached: false,
-      sameFailure: false,
-    }),
-  ).toThrow('failure replay')
-})
-
-it('rejects wrong raw event keys before folding including duplicate malformed inserts', () => {
-  oracleRoute(`calibration`)
-  const row = { id: 1, name: 'accepted value' }
-  const effect = { rows: [row], deletes: [], replace: false }
-  for (const key of ['wrong', '1']) {
-    const change = { key, type: 'insert' as const, value: row }
-    for (const changes of [[change], [change, change]])
-      expect(() =>
-        assertPublicationHistory(
-          [],
-          [{ changes, rows: [row] }],
-          [effect],
-          'raw key identity',
-        ),
-      ).toThrow('event semantics')
-  }
-  expect(() =>
-    assertPublicationHistory(
-      [row],
-      [
-        {
-          changes: [
-            {
-              key: 1,
-              type: 'update',
-              previousValue: row,
-              value: { ...row, id: '1' },
-            },
-          ],
-          rows: [{ ...row, id: '1' }],
-        },
-      ],
-      [{ ...effect, rows: [{ ...row, id: '1' }] }],
-      'update key identity',
-    ),
-  ).toThrow('event semantics')
+  check: forwardAssertionJudgment,
 })

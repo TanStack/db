@@ -47,7 +47,6 @@
  */
 import fc from 'fast-check'
 import { createSQLiteCorePersistenceAdapter } from '../src'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   differs,
   oracleProperty,
@@ -134,12 +133,6 @@ function check(
     pass
   )
 }
-
-declareOracle({
-  model: [expected],
-  grammar: [historyArbitrary],
-  check: [check],
-})
 
 oracleProperty({
   id: `sqlite-persistence.logical-scheduling`,

@@ -8,10 +8,49 @@ import {
   configureOracles,
   validateOraclePropertyRegistry,
 } from '@tanstack/oracles'
+import { convertedProperties } from './property-registry/index.js'
 
 export * from '@tanstack/oracles'
 
+// Aggregate reach belongs to complete generated campaigns. Constructed and
+// determinism units execute individual histories and cannot meet those minima.
+export function isFixedOracleCampaign(name: string): boolean {
+  return /^fixed seed -?\d+: generated$/.test(name)
+}
+
+export function isGeneratedOracleCampaign(name: string): boolean {
+  return name === `random seed: generated` || isFixedOracleCampaign(name)
+}
+
+/**
+ * The reach hooks in the oracle files run only for the units that
+ * `isGeneratedOracleCampaign` names, so a rename of the framework's campaign
+ * units would skip every aggregate reach check without a failure. Given the
+ * test names that a generated property registered, this throws unless its
+ * random campaign and at least one fixed-seed campaign are among them.
+ * oracle-campaign-units.test.ts runs it against a real generated property
+ * of the pinned framework, so the check fails closed for every hook.
+ */
+export function assertGeneratedCampaignUnits(
+  names: ReadonlyArray<string>,
+): void {
+  const random = names.some(
+    (name) => isGeneratedOracleCampaign(name) && !isFixedOracleCampaign(name),
+  )
+  const fixed = names.some(isFixedOracleCampaign)
+  if (!random || !fixed)
+    throw new Error(
+      `a generated oracleProperty registered ${JSON.stringify(names)}, but isGeneratedOracleCampaign names ${random ? `no fixed-seed campaign` : `no random campaign`}; the reach hooks that it gates would run for none of them`,
+    )
+}
+
+// Vitest's currentTestName includes the enclosing suites.
+export function isOracleDeterminismUnit(name: string | undefined): boolean {
+  return /\bdeterminism(?:: .*)?$/.test(name ?? ``)
+}
+
 const staticOracleProperties = [
+  `oracle-campaign-units.contract`,
   `persistence.crossed-leadership-index`,
   `persisted-options.types.core-fixed`,
   `persisted-options.types.browser-fixed`,
@@ -893,6 +932,7 @@ export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...comparisonProperties,
   ...paginationMatrixProperties,
   ...includesMatrixProperties,
+  ...convertedProperties,
 ])
 
 /**
@@ -1056,8 +1096,13 @@ const retiredReplayVariables = [
   `TANSTACK_DB_LIKE_ORACLE_RUNS`,
 ] as const
 
-configureOracles({
-  envPrefix: `TANSTACK_DB_ORACLE`,
-  registry: registeredOracleProperties,
-  retiredVariables: retiredReplayVariables,
-})
+/** A legacy replay adapter calls this before any oracle reads its selection. */
+export function configureDbOracles(): void {
+  configureOracles({
+    envPrefix: `TANSTACK_DB_ORACLE`,
+    registry: registeredOracleProperties,
+    retiredVariables: retiredReplayVariables,
+  })
+}
+
+configureDbOracles()

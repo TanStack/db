@@ -1,5 +1,5 @@
 import { writeSync } from 'node:fs'
-import { beforeEach, describe, expect, it as vitestIt } from 'vitest'
+import { beforeEach, describe, expect } from 'vitest'
 import fc from 'fast-check'
 import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
@@ -7,11 +7,6 @@ import { output } from '../../src/operators/index.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
 import { groupedTopKWithFractionalIndex } from '../../src/operators/groupedTopKWithFractionalIndex.js'
 import { orderByWithFractionalIndex } from '../../src/operators/orderBy.js'
-import {
-  oracleReplayTest,
-  oracleRoute,
-} from '../../../db/tests/oracle-config.js'
-import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 import { oracleProperty } from '../../../db/tests/oracle-property.js'
 import { atOracleCheckpoint } from '../../../db/tests/oracle-failure-fidelity.js'
 import {
@@ -20,13 +15,14 @@ import {
   topKReferences,
 } from './topk-property-oracle.js'
 import { TopKRelation } from './topk-relation-oracle.js'
+import {
+  keys,
+  orderedKeys,
+  selectedWindowKeys,
+} from './topk-window-model-oracle.js'
 import type { TopKComparisonRecorder } from './topk-relation-oracle.js'
+import type { Key, Window } from './topk-window-model-oracle.js'
 import type { TopKWithFractionalIndexOptions } from '../../src/operators/topKWithFractionalIndex.js'
-
-declareOracle({
-  check: [TopKRelation, checkNumericWindow],
-  model: [selectedWindowKeys, requestedWindowChanged],
-})
 
 /**
  * A top-K window selects support from a signed, typed-key relation.
@@ -50,22 +46,10 @@ declareOracle({
  * that lets a downstream graph respond to changed requested demand.
  */
 
-const keys = [1, `1`, 2, `2`, `a`] as const
-const orderedKeys = [`1`, `2`, `a`, 1, 2] as const
-type Key = (typeof keys)[number]
+// The key domain and the window selection model are in
+// topk-window-model-oracle.ts.
 type Row = { id: number; value: string }
 type Step = { slot: number; support: number; offset: number; limit: number }
-type Window = { offset: number; limit: number }
-
-// Selection is a predicate on each installed row's rank. It never enumerates
-// absent ranks or adds offset and width, so large bounds cannot corrupt the
-// reference through floating-point addition. Authored offset and width remain
-// independent: a later partial move must retain the other exact bound.
-function selectedWindowKeys(present: ReadonlyArray<Key>, window: Window) {
-  return present.filter(
-    (_, rank) => rank >= window.offset && rank - window.offset < window.limit,
-  )
-}
 
 // A requested window is a set of ranks, independently of installed rows.
 // Distinct nonempty windows differ even when both currently select no row.
@@ -80,7 +64,6 @@ function requestedWindowChanged(before: Window, after: Window): boolean {
 // The fixed and random campaigns share the same property, recorder, checks,
 // and run budget. A path replay of this property selects only its random
 // campaign; a seed without a path reseeds it.
-const it = oracleReplayTest(vitestIt)
 // Slot chooses typed identity and rank; support chooses the presence crossing;
 // offset chooses the first selected rank; limit chooses window width. Removing
 // any of these axes loses its corresponding distinction. The grammar rejects
@@ -383,8 +366,6 @@ class NumericWindowMismatch extends Error {
     )
   }
 }
-
-declareOracle({ grammar: [numericWindowInput] })
 
 describe.each([
   { name: `array`, operator: topKWithFractionalIndex },
@@ -732,39 +713,6 @@ function checkNegativeWindowHistory(
     })
 }
 
-declareOracle({
-  grammar: [negativeWindowHistory],
-  check: [checkNegativeWindowHistory],
-})
-
-// Rival interpretations must disagree with the rank predicate. Feed their
-// wrong rows to the same signed-output checker; no production helper supplies
-// the expected answer, and no output normalization removes the distinction.
-it(`rejects end-relative slicing and offset-first clamping`, () => {
-  oracleRoute(`calibration`)
-  const present = orderedKeys.slice(0, 3)
-  for (const window of [
-    { offset: -2, limit: 1 },
-    { offset: -1, limit: 2 },
-  ]) {
-    const expected = selectedWindowKeys(present, window).map(
-      (key): [Key, number, string] => [key, 10 - keys.indexOf(key), `tie`],
-    )
-    const wrong =
-      window.limit === 1
-        ? present.slice(window.offset, window.offset + window.limit)
-        : present.slice(0, window.limit)
-    const relation = new TopKRelation<Key>()
-    relation.add(
-      wrong.map((key, index) => [
-        [key, [{ id: 10 - keys.indexOf(key), value: `tie` }, `a${index}`]],
-        1,
-      ]),
-    )
-    expect(() => relation.expectRows(expected)).toThrow()
-  }
-})
-
 describe.each([
   {
     name: `array`,
@@ -825,32 +773,5 @@ describe.each([
         ),
       check: checkTopKComparisons,
     })
-  },
-)
-
-it.each([-2, 2])(
-  `rejects excess signed weight %s across a moved window`,
-  (weight) => {
-    oracleRoute(`calibration`)
-    const check = (corrupt: boolean) => {
-      const relation = new TopKRelation<Key>()
-      relation.add([[[1, [{ id: 9, value: `tie` }, `a0`]], 1]])
-      relation.expectRows([[1, 9, `tie`]])
-      relation.add([
-        [
-          [1, [{ id: 9, value: `tie` }, `a0`]],
-          corrupt && weight < 0 ? weight : -1,
-        ],
-        [
-          [`1`, [{ id: 8, value: `tie` }, `a1`]],
-          corrupt && weight > 0 ? weight : 1,
-        ],
-      ])
-      relation.expectRows([[`1`, 8, `tie`]])
-    }
-    check(false)
-    expect(() => check(true)).toThrowError(
-      expect.objectContaining({ name: `AssertionError` }),
-    )
   },
 )

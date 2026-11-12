@@ -8,7 +8,6 @@
  */
 import { fc } from '@fast-check/vitest'
 import { expect } from 'vitest'
-import { declareOracle } from './oracle-declaration.js'
 
 export const sparseArrayCase = fc.record({
   cells: fc.array(
@@ -84,8 +83,3 @@ export function checkSparseArray(
     expected,
   )
 }
-declareOracle({
-  grammar: [sparseArrayCase],
-  model: [sparseArrayValues],
-  check: [checkSparseArray],
-})

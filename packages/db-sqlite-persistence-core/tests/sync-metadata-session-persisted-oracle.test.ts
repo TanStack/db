@@ -1,7 +1,5 @@
-import { describe, it } from 'vitest'
 import {
   constructRegime,
-  describeMismatch,
   historyRegimes,
   persistedCachedGrammar,
   persistedConflictGrammar,
@@ -85,233 +83,6 @@ import type { OwedSessionRun } from './sync-metadata-session-runs'
  * so every accepted transaction of this tab is durable and the notice is the
  * next one in the stream.
  */
-
-async function assertPersistedHistory(
-  history: ReadonlyArray<SessionAction>,
-  productionPath: SessionGrammar = persistedFlatGrammar,
-): Promise<void> {
-  const { mismatch } = await runSessionHistory(productionPath, history, () =>
-    createPersistedDriver(
-      productionPath.seeds,
-      productionPath.cached === true,
-      productionPath.readHold === true,
-      productionPath.peers === true,
-      productionPath.fullRows === true,
-      productionPath.onDemand === true,
-    ),
-  )
-  if (mismatch) throw new Error(describeMismatch(history, mismatch))
-}
-
-describe(`sync metadata session oracle through the persisted wrapper`, () => {
-  it.each([false, true])(
-    `keeps a held cursor visible after a later commit (store hold: %s)`,
-    async (holdStore) => {
-      await assertPersistedHistory([
-        { type: `hold`, store: holdStore },
-        { type: `begin` },
-        { type: `collectionSet`, key: `cursor` },
-        { type: `commit` },
-        { type: `begin` },
-        { type: `upsert`, key: 1, metadata: false },
-        { type: `commit` },
-      ])
-    },
-  )
-
-  // The reported path: once the wrapper has handed transactions to core and
-  // core holds them, a read after a third transaction loses the earliest
-  // write. A store hold keeps them in the wrapper's staging instead; that
-  // neighbour passes on 30175be48.
-  it.each([false, true])(
-    `keeps a held write visible after a third transaction (store hold: %s)`,
-    async (holdStore) => {
-      await assertPersistedHistory([
-        { type: `hold`, store: holdStore },
-        { type: `begin` },
-        { type: `upsert`, key: 1, metadata: true },
-        { type: `commit` },
-        { type: `begin` },
-        { type: `commit` },
-        { type: `begin` },
-        { type: `collectionSet`, key: `cursor` },
-        { type: `commit` },
-      ])
-    },
-  )
-
-  // A source insert equal to a seeded row is still an insert: the source never
-  // wrote the row, so it names the row's metadata and clears the seed's.
-  it(`clears a seed's metadata when the source inserts an equal row`, async () => {
-    await assertPersistedHistory(
-      [
-        { type: `seed`, key: 1 },
-        { type: `begin` },
-        { type: `reinsert`, key: 1, metadata: false },
-      ],
-      persistedSeedGrammar,
-    )
-  })
-
-  // An equal re-insert keeps metadata as an update does, without writing it,
-  // so the latest seed still governs the row's metadata after it commits.
-  it(`lets a later seed replace metadata that an accepted re-insert kept`, async () => {
-    await assertPersistedHistory(
-      [
-        { type: `begin` },
-        { type: `seed`, key: 1, bare: true },
-        { type: `upsert`, key: 1, metadata: false },
-        { type: `reinsert`, key: 1, metadata: false },
-        { type: `seed`, key: 1 },
-        { type: `commit` },
-        { type: `seed`, key: 1, bare: true },
-      ],
-      persistedSeedGrammar,
-    )
-  })
-
-  // The same holds when the re-insert commits ahead of the enclosing
-  // transaction whose row it re-inserted and lands on a seeded row.
-  it(`lets a later seed replace metadata that an inner re-insert kept`, async () => {
-    await assertPersistedHistory(
-      [
-        { type: `begin` },
-        { type: `seed`, key: 2 },
-        { type: `upsert`, key: 2, metadata: false },
-        { type: `begin` },
-        { type: `reinsert`, key: 2, metadata: false },
-        { type: `commit` },
-        { type: `seed`, key: 2, bare: true },
-      ],
-      persistedNestedSeedGrammar,
-    )
-  })
-
-  // A persisted cache row is a seed (decision C), so a later DbClient seed
-  // replaces its metadata until the source writes the metadata.
-  it(`lets a later seed replace a cached row's metadata`, async () => {
-    await assertPersistedHistory(
-      [
-        { type: `begin` },
-        { type: `upsert`, key: 1, metadata: false },
-        { type: `seed`, key: 1, bare: true },
-      ],
-      persistedNestedSeedGrammar,
-    )
-  })
-
-  // An update without metadata keeps metadata, so the insert before it still
-  // decides the row's metadata. When an inner transaction commits ahead and
-  // changes the row that insert lands on, the insert clears the metadata.
-  it(`rejudges an enclosing re-insert that a later update kept`, async () => {
-    await assertPersistedHistory(
-      [
-        { type: `begin` },
-        { type: `upsert`, key: 1, metadata: false },
-        { type: `reinsert`, key: 1, metadata: false },
-        { type: `upsert`, key: 1, metadata: false },
-        { type: `begin` },
-        { type: `upsert`, key: 1, metadata: true },
-        { type: `commit` },
-      ],
-      persistedNestedSeedGrammar,
-    )
-  })
-
-  // Every insert without metadata in an enclosing transaction is re-judged
-  // when an inner one commits ahead: an earlier re-insert that now lands on a
-  // different row clears metadata, and a later equal re-insert keeps that.
-  it(`rejudges every enclosing re-insert of a key, not only the last`, async () => {
-    await assertPersistedHistory(
-      [
-        { type: `begin` },
-        { type: `insertOverSeed`, key: 1, metadata: false },
-        { type: `commit` },
-        { type: `begin` },
-        { type: `reinsert`, key: 1, metadata: false },
-        { type: `reinsert`, key: 1, metadata: false },
-        { type: `begin` },
-        { type: `upsert`, key: 1, metadata: true },
-        { type: `commit` },
-      ],
-      persistedNestedSeedGrammar,
-    )
-  })
-
-  // An enclosing insert that cleared metadata can become an equal re-insert
-  // of the row an inner transaction committed ahead; it then keeps the
-  // metadata a seed supplied beneath.
-  it(`lets an enclosing clear become an equal re-insert after an inner commit`, async () => {
-    await assertPersistedHistory(
-      [
-        { type: `begin` },
-        { type: `insertOverSeed`, key: 1, metadata: false },
-        { type: `reinsert`, key: 1, metadata: false },
-        { type: `begin` },
-        { type: `reinsert`, key: 1, metadata: false },
-        { type: `seed`, key: 1 },
-        { type: `commit` },
-      ],
-      persistedNestedSeedGrammar,
-    )
-  })
-
-  // A later seed beneath an open re-insert does not change its kind, but an
-  // inner update that merges over that seed and commits ahead does: the
-  // re-insert then lands on a different row and clears metadata (decision 10).
-  it(`lets an inner update merged over a later seed change an enclosing re-insert`, async () => {
-    await assertPersistedHistory(
-      [
-        { type: `begin` },
-        { type: `upsert`, key: 1, metadata: true },
-        { type: `reinsert`, key: 1, metadata: false },
-        { type: `begin` },
-        { type: `seed`, key: 1, bare: true },
-        { type: `upsert`, key: 1, metadata: false },
-        { type: `commit` },
-      ],
-      persistedNestedSeedGrammar,
-    )
-  })
-
-  // An inner transaction reads the open writes of the transactions it began
-  // inside: one session reads all its open writes.
-  it(`reads an enclosing transaction's write inside a nested transaction`, async () => {
-    await assertPersistedHistory(
-      [{ type: `begin` }, { type: `rowSet`, key: 1 }, { type: `begin` }],
-      persistedNestedGrammar,
-    )
-  })
-
-  // An inner transaction's equal re-insert keeps the row's metadata. When it
-  // commits ahead of the outer transaction whose row it re-inserted, it lands
-  // where that row is absent; it is still the re-insert it was written as.
-  it(`keeps an inner re-insert's metadata when it commits ahead of the row it re-inserted`, async () => {
-    await assertPersistedHistory(
-      [
-        { type: `begin` },
-        { type: `rowSet`, key: 1 },
-        { type: `commit` },
-        { type: `begin` },
-        { type: `upsert`, key: 1, metadata: false },
-        { type: `begin` },
-        { type: `reinsert`, key: 1, metadata: false },
-        { type: `commit` },
-      ],
-      persistedConflictGrammar,
-    )
-  })
-
-  // An insert without metadata clears the row's metadata, even inside the
-  // transaction that set it (2026-10-05 rules).
-  it(`reads an insert's implicit metadata clear in the open transaction`, async () => {
-    await assertPersistedHistory([
-      { type: `begin` },
-      { type: `rowSet`, key: 2 },
-      { type: `upsert`, key: 2, metadata: false },
-    ])
-  })
-})
 
 /**
  * Each production path's fixed campaign and the states it must reach (ORC-015). The
@@ -766,32 +537,6 @@ const readSeedReplays: Array<[string, Array<SessionAction>]> = [
   ],
 ]
 
-describe(`sync metadata session oracle through the persisted wrapper: peer replays`, () => {
-  it.each(peerReplays)(`replays: %s`, (_name, history) =>
-    assertPersistedHistory(history, persistedPeerGrammar),
-  )
-  it.each(peerFullReplays)(`replays under full rows: %s`, (_name, history) =>
-    assertPersistedHistory(history, persistedPeerFullGrammar),
-  )
-  // Fixed history found by the earlier raw persisted-peers-full random campaign
-  // (seed 654774679; the native campaign draws other histories for that seed):
-  // an outer transaction inserts over a bare seed and an inner equal re-insert
-  // commits first. Its implicit metadata keep writes no metadata to storage;
-  // the shared model judges source reads and the later unknown-author reload
-  // separately under D9, D15 and D18. This uses the campaigns' model, driver,
-  // and comparison.
-  it(`replays under full rows: keeps source metadata reads consistent across an inner re-insert and reload`, () =>
-    assertPersistedHistory(seedReinsertReloadReplay, persistedPeerFullGrammar))
-  it.each(peerOnDemandReplays)(`replays on demand: %s`, (_name, history) =>
-    assertPersistedHistory(history, persistedPeerOnDemandGrammar),
-  )
-  it.each(readSeedReplays)(
-    `replays with reads and seeds: %s`,
-    (_name, history) =>
-      assertPersistedHistory(history, persistedReadSeedGrammar),
-  )
-})
-
 // The broad peer campaigns can already generate this interaction. This constructive
 // grammar measures its scarce overlap and adjacent legal histories directly;
 // it uses the existing independent model, driver, and per-action comparison.
@@ -984,4 +729,316 @@ oracleProperty<
     completedSessionRuns(trace).map((run) => run.name),
   calibrations: sessionRunCalibrations(),
   timeout: 120_000,
+})
+
+// Fixed regressions and peer replays, each replayed through the same
+// production path, model, driver, and comparison as its generated campaign.
+const fixedSessionHistories: Array<{
+  name: string
+  path: string
+  history: ReadonlyArray<SessionAction>
+}> = [
+  {
+    name: `keeps a held cursor visible after a later commit (store hold: false)`,
+    path: persistedFlatGrammar.name,
+    history: [
+      { type: `hold`, store: false },
+      { type: `begin` },
+      { type: `collectionSet`, key: `cursor` },
+      { type: `commit` },
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: false },
+      { type: `commit` },
+    ],
+  },
+  {
+    name: `keeps a held cursor visible after a later commit (store hold: true)`,
+    path: persistedFlatGrammar.name,
+    history: [
+      { type: `hold`, store: true },
+      { type: `begin` },
+      { type: `collectionSet`, key: `cursor` },
+      { type: `commit` },
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: false },
+      { type: `commit` },
+    ],
+  },
+  // The reported path: once the wrapper has handed transactions to core and
+  // core holds them, a read after a third transaction loses the earliest
+  // write. A store hold keeps them in the wrapper's staging instead; that
+  // neighbour passes on 30175be48.
+  {
+    name: `keeps a held write visible after a third transaction (store hold: false)`,
+    path: persistedFlatGrammar.name,
+    history: [
+      { type: `hold`, store: false },
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: true },
+      { type: `commit` },
+      { type: `begin` },
+      { type: `commit` },
+      { type: `begin` },
+      { type: `collectionSet`, key: `cursor` },
+      { type: `commit` },
+    ],
+  },
+  // The reported path: once the wrapper has handed transactions to core and
+  // core holds them, a read after a third transaction loses the earliest
+  // write. A store hold keeps them in the wrapper's staging instead; that
+  // neighbour passes on 30175be48.
+  {
+    name: `keeps a held write visible after a third transaction (store hold: true)`,
+    path: persistedFlatGrammar.name,
+    history: [
+      { type: `hold`, store: true },
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: true },
+      { type: `commit` },
+      { type: `begin` },
+      { type: `commit` },
+      { type: `begin` },
+      { type: `collectionSet`, key: `cursor` },
+      { type: `commit` },
+    ],
+  },
+  // A source insert equal to a seeded row is still an insert: the source never
+  // wrote the row, so it names the row's metadata and clears the seed's.
+  {
+    name: `clears a seed's metadata when the source inserts an equal row`,
+    path: persistedSeedGrammar.name,
+    history: [
+      { type: `seed`, key: 1 },
+      { type: `begin` },
+      { type: `reinsert`, key: 1, metadata: false },
+    ],
+  },
+  // An equal re-insert keeps metadata as an update does, without writing it,
+  // so the latest seed still governs the row's metadata after it commits.
+  {
+    name: `lets a later seed replace metadata that an accepted re-insert kept`,
+    path: persistedSeedGrammar.name,
+    history: [
+      { type: `begin` },
+      { type: `seed`, key: 1, bare: true },
+      { type: `upsert`, key: 1, metadata: false },
+      { type: `reinsert`, key: 1, metadata: false },
+      { type: `seed`, key: 1 },
+      { type: `commit` },
+      { type: `seed`, key: 1, bare: true },
+    ],
+  },
+  // The same holds when the re-insert commits ahead of the enclosing
+  // transaction whose row it re-inserted and lands on a seeded row.
+  {
+    name: `lets a later seed replace metadata that an inner re-insert kept`,
+    path: persistedNestedSeedGrammar.name,
+    history: [
+      { type: `begin` },
+      { type: `seed`, key: 2 },
+      { type: `upsert`, key: 2, metadata: false },
+      { type: `begin` },
+      { type: `reinsert`, key: 2, metadata: false },
+      { type: `commit` },
+      { type: `seed`, key: 2, bare: true },
+    ],
+  },
+  // A persisted cache row is a seed (decision C), so a later DbClient seed
+  // replaces its metadata until the source writes the metadata.
+  {
+    name: `lets a later seed replace a cached row's metadata`,
+    path: persistedNestedSeedGrammar.name,
+    history: [
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: false },
+      { type: `seed`, key: 1, bare: true },
+    ],
+  },
+  // An update without metadata keeps metadata, so the insert before it still
+  // decides the row's metadata. When an inner transaction commits ahead and
+  // changes the row that insert lands on, the insert clears the metadata.
+  {
+    name: `rejudges an enclosing re-insert that a later update kept`,
+    path: persistedNestedSeedGrammar.name,
+    history: [
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: false },
+      { type: `reinsert`, key: 1, metadata: false },
+      { type: `upsert`, key: 1, metadata: false },
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: true },
+      { type: `commit` },
+    ],
+  },
+  // Every insert without metadata in an enclosing transaction is re-judged
+  // when an inner one commits ahead: an earlier re-insert that now lands on a
+  // different row clears metadata, and a later equal re-insert keeps that.
+  {
+    name: `rejudges every enclosing re-insert of a key, not only the last`,
+    path: persistedNestedSeedGrammar.name,
+    history: [
+      { type: `begin` },
+      { type: `insertOverSeed`, key: 1, metadata: false },
+      { type: `commit` },
+      { type: `begin` },
+      { type: `reinsert`, key: 1, metadata: false },
+      { type: `reinsert`, key: 1, metadata: false },
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: true },
+      { type: `commit` },
+    ],
+  },
+  // An enclosing insert that cleared metadata can become an equal re-insert
+  // of the row an inner transaction committed ahead; it then keeps the
+  // metadata a seed supplied beneath.
+  {
+    name: `lets an enclosing clear become an equal re-insert after an inner commit`,
+    path: persistedNestedSeedGrammar.name,
+    history: [
+      { type: `begin` },
+      { type: `insertOverSeed`, key: 1, metadata: false },
+      { type: `reinsert`, key: 1, metadata: false },
+      { type: `begin` },
+      { type: `reinsert`, key: 1, metadata: false },
+      { type: `seed`, key: 1 },
+      { type: `commit` },
+    ],
+  },
+  // A later seed beneath an open re-insert does not change its kind, but an
+  // inner update that merges over that seed and commits ahead does: the
+  // re-insert then lands on a different row and clears metadata (decision 10).
+  {
+    name: `lets an inner update merged over a later seed change an enclosing re-insert`,
+    path: persistedNestedSeedGrammar.name,
+    history: [
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: true },
+      { type: `reinsert`, key: 1, metadata: false },
+      { type: `begin` },
+      { type: `seed`, key: 1, bare: true },
+      { type: `upsert`, key: 1, metadata: false },
+      { type: `commit` },
+    ],
+  },
+  // An inner transaction reads the open writes of the transactions it began
+  // inside: one session reads all its open writes.
+  {
+    name: `reads an enclosing transaction's write inside a nested transaction`,
+    path: persistedNestedGrammar.name,
+    history: [{ type: `begin` }, { type: `rowSet`, key: 1 }, { type: `begin` }],
+  },
+  // An inner transaction's equal re-insert keeps the row's metadata. When it
+  // commits ahead of the outer transaction whose row it re-inserted, it lands
+  // where that row is absent; it is still the re-insert it was written as.
+  {
+    name: `keeps an inner re-insert's metadata when it commits ahead of the row it re-inserted`,
+    path: persistedConflictGrammar.name,
+    history: [
+      { type: `begin` },
+      { type: `rowSet`, key: 1 },
+      { type: `commit` },
+      { type: `begin` },
+      { type: `upsert`, key: 1, metadata: false },
+      { type: `begin` },
+      { type: `reinsert`, key: 1, metadata: false },
+      { type: `commit` },
+    ],
+  },
+  // An insert without metadata clears the row's metadata, even inside the
+  // transaction that set it (2026-10-05 rules).
+  {
+    name: `reads an insert's implicit metadata clear in the open transaction`,
+    path: persistedFlatGrammar.name,
+    history: [
+      { type: `begin` },
+      { type: `rowSet`, key: 2 },
+      { type: `upsert`, key: 2, metadata: false },
+    ],
+  },
+  ...peerReplays.map(([name, history]) => ({
+    name: `replays: ${name}`,
+    path: persistedPeerGrammar.name,
+    history,
+  })),
+  ...peerFullReplays.map(([name, history]) => ({
+    name: `replays under full rows: ${name}`,
+    path: persistedPeerFullGrammar.name,
+    history,
+  })),
+  // Fixed history found by the earlier raw persisted-peers-full random campaign
+  // (seed 654774679; the native campaign draws other histories for that seed):
+  // an outer transaction inserts over a bare seed and an inner equal re-insert
+  // commits first. Its implicit metadata keep writes no metadata to storage;
+  // the shared model judges source reads and the later unknown-author reload
+  // separately under D9, D15 and D18. This uses the campaigns' model, driver,
+  // and comparison.
+  {
+    name: `replays under full rows: keeps source metadata reads consistent across an inner re-insert and reload`,
+    path: persistedPeerFullGrammar.name,
+    history: seedReinsertReloadReplay,
+  },
+  ...peerOnDemandReplays.map(([name, history]) => ({
+    name: `replays on demand: ${name}`,
+    path: persistedPeerOnDemandGrammar.name,
+    history,
+  })),
+  ...readSeedReplays.map(([name, history]) => ({
+    name: `replays with reads and seeds: ${name}`,
+    path: persistedReadSeedGrammar.name,
+    history,
+  })),
+]
+
+// The production paths that the fixed histories name.
+const fixedSessionPaths = new Map(
+  [
+    persistedConflictGrammar,
+    persistedFlatGrammar,
+    persistedNestedGrammar,
+    persistedNestedSeedGrammar,
+    persistedPeerFullGrammar,
+    persistedPeerGrammar,
+    persistedPeerOnDemandGrammar,
+    persistedReadSeedGrammar,
+    persistedSeedGrammar,
+  ].map((productionPath) => [productionPath.name, productionPath]),
+)
+
+oracleProperty({
+  id: `sync-metadata-session.persisted-fixed`,
+  law: {
+    statement: `A source read through the persisted wrapper gives what the same read gives on a bare Collection, for each named fixed regression and peer replay on its production path: source reads after every action, consumer rows at the final checkpoint, and in the peer production paths the stored rows, agree with the session model.`,
+    authority: `The sync metadata session oracle's laws and decisions (packages/db/tests/sync-metadata-session-oracle.ts header).`,
+    limits: `The named histories below, each on one production path; restart and resume reads are outside them.`,
+  },
+  owns: [`src/persisted.ts`],
+  histories: fixedSessionHistories,
+  label: ({ name }) => name,
+  resolve: ({ path, history }) => ({
+    productionPath: fixedSessionPaths.get(path)!,
+    history,
+  }),
+  model: ({ productionPath, history }) => [
+    { path: productionPath.name, name: `history`, actions: history.length },
+  ],
+  driver: ({ productionPath, history }, observe) =>
+    observeSessionRun(
+      observe,
+      { path: productionPath.name, name: `history`, actions: history.length },
+      history,
+      () =>
+        runSessionHistory(productionPath, history, () =>
+          createPersistedDriver(
+            productionPath.seeds,
+            productionPath.cached === true,
+            productionPath.readHold === true,
+            productionPath.peers === true,
+            productionPath.fullRows === true,
+            productionPath.onDemand === true,
+          ),
+        ),
+    ),
+  check: (_plan, observations, owed) =>
+    checkSessionRuns(observations, owed, { constructive: false }),
+  timeout: 240_000,
 })

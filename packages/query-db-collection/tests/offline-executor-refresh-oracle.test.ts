@@ -1,5 +1,4 @@
 import fc from 'fast-check'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   barrierModel,
@@ -23,7 +22,6 @@ const queryBarrierHistory: fc.Arbitrary<BarrierHistory> = fc.record({
   retire: fc.constant(false),
   notifications: fc.integer({ min: 1, max: 3 }),
 })
-declareOracle({ grammar: [queryBarrierHistory] })
 const queryBarrierStates = [
   `pending refresh barrier`,
   `stale refetch delivered`,

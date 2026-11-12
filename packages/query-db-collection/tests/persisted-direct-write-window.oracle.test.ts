@@ -1,9 +1,14 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { DuplicateKeySyncError, createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { rejectsAs } from '../../db/tests/calibration-rejection'
 import {
   checked,
   createAdapter,
@@ -449,39 +454,118 @@ async function compareWriteWithReference(
   )
 }
 
-declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
-  check: [
-    compareWriteWithReference,
-    compareLaterRefetchOrder,
-    compareDuplicateInsert,
-  ],
-})
-
-// A mutant that reports readiness but discards the first source transaction
-// commits its empty metadata transaction and must fail the same comparison.
-// Selecting its causal schedule
-// cannot excuse missing source rows at the final observation cut.
-for (const kind of [`fake`, `sqlite`] as const)
-  for (const op of ops)
-    it(`rejects a discarded first result for ${op} through ${kind}`, async () => {
-      oracleRoute(`calibration`)
-      await expect(
-        compareWriteWithReference(op, `startup`, `refetch-only`, kind, true),
-      ).rejects.toThrow(/reference/)
-    })
+type WriteCase = {
+  name: string
+  op: Op
+  holder: Holder
+  keyCase: KeyCase
+  kind: StorageKind
+}
+// The fake-adapter matrix, then the real SQLite subset: each write type with
+// the key that only the waiting refetch holds, at all three held boundaries.
+const writeCases: Array<WriteCase> = [
+  ...holders.flatMap((holder) =>
+    keyCases.flatMap((keyCase) =>
+      ops.map((op): WriteCase => ({
+        name: `${op} with ${holder} holding the lock, key ${keyCase}`,
+        op,
+        holder,
+        keyCase,
+        kind: `fake`,
+      })),
+    ),
+  ),
+  ...holders.flatMap((holder) =>
+    ops.map((op): WriteCase => ({
+      name: `real SQLite: ${op} with ${holder} holding the lock, key refetch-only`,
+      op,
+      holder,
+      keyCase: `refetch-only`,
+      kind: `sqlite`,
+    })),
+  ),
+]
 
 describe(`persisted direct writes behind a waiting refetch`, () => {
-  for (const holder of holders) {
-    for (const keyCase of keyCases) {
-      for (const op of ops) {
-        it(`${op} with ${holder} holding the lock, key ${keyCase}`, async () => {
-          oracleRoute(`case`)
-          await compareWriteWithReference(op, holder, keyCase)
-        })
-      }
-    }
-  }
+  oracleProperty({
+    id: `query-db.persisted-direct-write-window`,
+    law: {
+      statement: `A persisted direct write behind a waiting refetch returns the outcome and rows of the no-persistence reference with the same source-commit order, and storage then holds the visible rows.`,
+      authority: `The direct-write window contract stated at the top of this file; docs/collections/query-collection.md, Direct Writes.`,
+      limits: `Four write types, three held boundaries and two key cases over the fake adapter, and the refetch-only subset over node SQLite; no concurrent writers or failed I/O.`,
+    },
+    owns: [`src/query.ts#queryCollectionOptions`],
+    histories: writeCases,
+    label: ({ name }) => name,
+    resolve: (writeCase) => ({ writeCase }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `persisted direct write window`,
+        plan,
+        observe,
+        () =>
+          compareWriteWithReference(
+            plan.writeCase.op,
+            plan.writeCase.holder,
+            plan.writeCase.keyCase,
+            plan.writeCase.kind,
+          ),
+      ),
+    check: forwardAssertionJudgment,
+    // A mutant that reports readiness but discards the first source transaction
+    // commits its empty metadata transaction and must fail the same comparison.
+    // Selecting its causal schedule cannot excuse missing source rows at the
+    // final observation cut. Each calibration configures that mutant only for
+    // its own write type and storage at the startup boundary with the
+    // refetch-only key, the history the old calibration ran; every other
+    // history runs unchanged and passes, so the calibration reaches that one.
+    calibrations: ([`fake`, `sqlite`] as const).flatMap((kind) =>
+      ops.map((op) => ({
+        name: `rejects a discarded first result for ${op} through ${kind}`,
+        law: `persisted direct write window`,
+        driver: (
+          plan: { writeCase: WriteCase },
+          observe: (checkpoint: string, value: unknown) => void,
+        ) =>
+          recordAssertionJudgment(
+            `persisted direct write window`,
+            plan,
+            observe,
+            () => {
+              const { writeCase } = plan
+              const mutated =
+                writeCase.op === op &&
+                writeCase.kind === kind &&
+                writeCase.holder === `startup` &&
+                writeCase.keyCase === `refetch-only`
+              if (!mutated)
+                return compareWriteWithReference(
+                  writeCase.op,
+                  writeCase.holder,
+                  writeCase.keyCase,
+                  writeCase.kind,
+                )
+              return rejectsAs(
+                `discarded first result`,
+                () =>
+                  compareWriteWithReference(
+                    op,
+                    `startup`,
+                    `refetch-only`,
+                    kind,
+                    true,
+                  ),
+                (failure) =>
+                  expect(() => {
+                    throw failure
+                  }).toThrow(/reference/),
+              )
+            },
+          ),
+      })),
+    ),
+  })
 })
 
 /**
@@ -682,17 +766,6 @@ async function compareLaterRefetchOrder(
   )
 }
 
-describe(`a later refetch while a persisted direct write waits`, () => {
-  for (const start of [`before`, `after`] as const) {
-    for (const touch of [`same`, `different`] as const) {
-      it(`R3 started ${start} the write, ${touch} key`, async () => {
-        oracleRoute(`case`)
-        await compareLaterRefetchOrder(start, touch)
-      })
-    }
-  }
-})
-
 /**
  * ## Real SQLite receives the same law
  *
@@ -702,23 +775,42 @@ describe(`a later refetch while a persisted direct write waits`, () => {
  * waiting refetch holds, at all three held boundaries, plus the four ordering
  * cases. The same commit recorder determines the reference's causal order.
  */
-describe(`real SQLite: persisted direct writes behind a waiting refetch`, () => {
-  for (const holder of holders) {
-    for (const op of ops) {
-      it(`${op} with ${holder} holding the lock, key refetch-only`, async () => {
-        oracleRoute(`case`)
-        await compareWriteWithReference(op, holder, `refetch-only`, `sqlite`)
-      })
-    }
-  }
-  for (const start of [`before`, `after`] as const) {
-    for (const touch of [`same`, `different`] as const) {
-      it(`R3 started ${start} the write, ${touch} key`, async () => {
-        oracleRoute(`case`)
-        await compareLaterRefetchOrder(start, touch, `sqlite`)
-      })
-    }
-  }
+type OrderCase = { name: string; start: Start; touch: Touch; kind: StorageKind }
+const orderCases: Array<OrderCase> = ([`fake`, `sqlite`] as const).flatMap(
+  (kind) =>
+    ([`before`, `after`] as const).flatMap((start) =>
+      ([`same`, `different`] as const).map((touch): OrderCase => ({
+        name: `${kind === `sqlite` ? `real SQLite: ` : ``}R3 started ${start} the write, ${touch} key`,
+        start,
+        touch,
+        kind,
+      })),
+    ),
+)
+
+describe(`a later refetch while a persisted direct write waits`, () => {
+  oracleProperty({
+    id: `query-db.persisted-direct-write-refetch-order`,
+    law: {
+      statement: `A refetch that started before a waiting persisted direct write loses to it on its keys and wins on the others; one that started after it wins. The visible rows equal the no-persistence reference, and storage holds them.`,
+      authority: `The merge rule for direct writes and in-flight fetches stated above; docs/collections/query-collection.md, Direct Writes.`,
+      limits: `Both start orders and both key choices, over the fake adapter and node SQLite.`,
+    },
+    owns: [`src/query.ts#queryCollectionOptions`],
+    histories: orderCases,
+    label: ({ name }) => name,
+    resolve: (orderCase) => ({ orderCase }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`later refetch order`, plan, observe, () =>
+        compareLaterRefetchOrder(
+          plan.orderCase.start,
+          plan.orderCase.touch,
+          plan.orderCase.kind,
+        ),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -784,8 +876,22 @@ async function compareDuplicateInsert(): Promise<void> {
 }
 
 describe(`a persisted direct insert of an existing key`, () => {
-  it(`rejects like the reference and keeps the row`, async () => {
-    oracleRoute(`fixed history`)
-    await compareDuplicateInsert()
+  oracleProperty({
+    id: `query-db.persisted-direct-duplicate-insert`,
+    law: {
+      statement: `Without persistence, core rejects a sync insert of an existing key; the persisted Collection must reject it too and keep the stored row.`,
+      authority: `Core sync insert semantics (DuplicateKeySyncError); the duplicate-insert law stated above.`,
+      limits: `One existing key, applied before the write runs, over the fake adapter.`,
+    },
+    owns: [`src/query.ts#queryCollectionOptions`],
+    histories: [`rejects like the reference and keeps the row`],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`duplicate insert`, plan, observe, () =>
+        compareDuplicateInsert(),
+      ),
+    check: forwardAssertionJudgment,
   })
 })

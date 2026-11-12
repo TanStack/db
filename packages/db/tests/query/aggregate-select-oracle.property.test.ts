@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import {
   add,
@@ -36,18 +36,13 @@ import {
   NonAggregateExpressionNotInGroupByError,
 } from '../../src/errors.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
-import {
-  oracleProperty,
-  oracleReplayTest,
-  oracleRoute,
-} from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../oracle-assertion-adapter.js'
-import { declareOracle } from '../oracle-declaration.js'
 
 /**
  * # What does an aggregate query publish beside its aggregates?
@@ -1760,7 +1755,6 @@ const resolveRequiredHistories = (
   inputs.map((input, index) =>
     requiredHistory(structuralHistories[index]!, input),
   )
-const requiredHistories = requiredInputs.map(resolveRequiredHistories)
 
 /** The states the operator laws need; each campaign must reach all of them. */
 const reachStates = [
@@ -1838,13 +1832,8 @@ const aggregateLaw = {
 
 // The check is `runHistory`: it runs each generated history, and after every
 // step it compares the published rows and the compile outcome with
-// `modelGroup` and `modelError`. Generated histories, structural examples, and
-// existing model replays use this same check.
-declareOracle({
-  check: [runHistory],
-  model: [modelGroup, modelError],
-  grammar: [history, requiredHistories],
-})
+// `modelGroup` and `modelError`. Generated histories, structural examples,
+// fixed regressions, and existing model replays use this same check.
 
 describe(`aggregate select shapes`, () => {
   // One finite history is the original complete twelve-family structural
@@ -1917,42 +1906,44 @@ describe(`aggregate select shapes`, () => {
     check: forwardAssertionJudgment,
   })
 
-  // Fixed regression of a review counterexample: a grouped select value that
-  // holds the group key inside a function must read the group's key.
-  oracleReplayTest(it)(`reads the group key inside a function`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory({
-      top: {
-        fields: { f0: { k: `add`, a: { k: `lit`, n: 0 }, b: { k: `key` } } },
-      },
-      nested: { fields: { f0: { k: `agg`, fn: `count` } } },
-      grouping: `key`,
-    })
-  })
-
-  // Fixed regression: a published row keeps the select's field order, also
-  // when a group key comes before a plain aggregate.
-  oracleReplayTest(it)(`keeps the select's field order`, async () => {
-    oracleRoute(`fixed history`)
-    await runHistory({
-      top: {
-        fields: {
-          f0: { k: `key` },
-          f1: { k: `agg`, fn: `count` },
+  // Fixed regressions of review and generated counterexamples. The broad
+  // grammar cannot take them back, so each replays through `runHistory`, the
+  // shared check, under its old test name.
+  const aggregateRegressions: Array<{ name: string; history: History }> = [
+    // A review counterexample: a grouped select value that holds the
+    // group key inside a function must read the group's key.
+    {
+      name: `reads the group key inside a function`,
+      history: {
+        top: {
+          fields: {
+            f0: { k: `add`, a: { k: `lit`, n: 0 }, b: { k: `key` } },
+          },
         },
+        nested: { fields: { f0: { k: `agg`, fn: `count` } } },
+        grouping: `key`,
       },
-      nested: { fields: { f0: { k: `agg`, fn: `count` } } },
-      grouping: `key`,
-    })
-  })
-
-  // Fixed regression of a generated counterexample: an aggregate query without
-  // groupBy whose select wraps its only aggregate still accepts HAVING.
-  oracleReplayTest(it)(
-    `accepts HAVING beside a wrapped aggregate without groupBy`,
-    async () => {
-      oracleRoute(`fixed history`)
-      await runHistory({
+    },
+    // A published row keeps the select's field order, also when a group
+    // key comes before a plain aggregate.
+    {
+      name: `keeps the select's field order`,
+      history: {
+        top: {
+          fields: {
+            f0: { k: `key` },
+            f1: { k: `agg`, fn: `count` },
+          },
+        },
+        nested: { fields: { f0: { k: `agg`, fn: `count` } } },
+        grouping: `key`,
+      },
+    },
+    // A generated counterexample: an aggregate query without groupBy
+    // whose select wraps its only aggregate still accepts HAVING.
+    {
+      name: `accepts HAVING beside a wrapped aggregate without groupBy`,
+      history: {
         top: {
           fields: {
             f0: {
@@ -1965,22 +1956,22 @@ describe(`aggregate select shapes`, () => {
         },
         nested: {
           fields: {
-            f0: { k: `add`, a: { k: `agg`, fn: `count` }, b: { k: `parent` } },
+            f0: {
+              k: `add`,
+              a: { k: `agg`, fn: `count` },
+              b: { k: `parent` },
+            },
           },
           having: { part: { k: `parent` }, lit: 1 },
         },
         grouping: `none`,
-      })
+      },
     },
-  )
-
-  // Fixed regression: a parent field stays legal when the include's source
-  // shadows the parent alias.
-  oracleReplayTest(it)(
-    `reads a parent field under a shadowing child alias`,
-    async () => {
-      oracleRoute(`fixed history`)
-      await runHistory({
+    // A parent field stays legal when the include's source shadows the
+    // parent alias.
+    {
+      name: `reads a parent field under a shadowing child alias`,
+      history: {
         top: { fields: { f0: { k: `agg`, fn: `count` } } },
         nested: {
           fields: {
@@ -1990,7 +1981,27 @@ describe(`aggregate select shapes`, () => {
         },
         grouping: `none`,
         shadow: true,
-      })
+      },
     },
-  )
+  ]
+  oracleProperty({
+    id: `aggregate.select-fixed`,
+    law: {
+      ...aggregateLaw,
+      limits: `Four named regressions that the broad generated grammar cannot take back.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: aggregateRegressions,
+    label: ({ name }) => name,
+    resolve: (regression) => ({ regression }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(PROPERTY, plan, observe, () =>
+        runHistory(plan.regression.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

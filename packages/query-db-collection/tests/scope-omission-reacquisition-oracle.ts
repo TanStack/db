@@ -18,7 +18,6 @@ import { untilStartup } from '../../db-adapter-conformance/tests/persisted-start
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
 import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { mergeDirectWritesOverFetch } from './direct-write-precedence-oracle'
 import type { SyncPersistenceCapabilityV1 } from '@tanstack/db'
 import type { PersistedCollectionPersistence } from '../../db-sqlite-persistence-core/src'
@@ -465,38 +464,3 @@ export function options(
     ],
   }
 }
-/** The framework's generated construction objects differ from its seeded
- * construction objects. Exercise the same builder, receiving path and check
- * with generated inputs, then remove only its required actual reach fact. */
-export async function calibrateGeneratedConstructions(
-  receive: (
-    h: History,
-    observe: (cut: string, value: unknown) => void,
-  ) => Promise<void>,
-) {
-  for (const input of fc.sample(arbitrary, { numRuns: 1, seed: 1313 })) {
-    for (const builder of constructed) {
-      const h = builder.build(input)
-      const trace: Array<Observation> = []
-      await receive(h, (checkpoint, value) => trace.push({ checkpoint, value }))
-      const clean = check(h, trace)
-      if (clean.kind !== 'pass')
-        throw new Error('Clean construction failed: ' + JSON.stringify(clean))
-      const corrupt = trace.filter(
-        (o) =>
-          o.checkpoint !== 'reach' ||
-          !builder.enters.includes(o.value as string),
-      )
-      const result = check(h, corrupt)
-      if (result.kind !== 'violation' || result.law !== 'constructed reach')
-        throw new Error(
-          'Generated missing-state control passed for ' + builder.name,
-        )
-    }
-  }
-}
-declareOracle({
-  model: [expected],
-  grammar: [arbitrary],
-  check: [check, calibrateGeneratedConstructions],
-})

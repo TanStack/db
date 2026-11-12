@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
 import {
@@ -10,13 +10,9 @@ import {
   normalizeValue,
 } from '../src/utils/comparison'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils'
-import {
-  oracleProperty,
-  oracleReplayRequested,
-  oracleRoute,
-} from './oracle-config.js'
+import { oracleProperty, oracleReplayRequested } from './oracle-config.js'
 import { defaultOpts, lexicalOpts } from './comparison-options.js'
-import { declareOracle } from './oracle-declaration.js'
+import { rejection } from './calibration-rejection.js'
 import { nativeCampaignReceipt } from './native-campaign-receipt'
 import {
   checkWithOriginalFailure,
@@ -90,7 +86,10 @@ const nullsLastOpts: CompareOptions = {
 // These properties judge immediate comparator and normalization results; there
 // is no mutable history or cleanup. Each function return is its observation cut.
 // The fixed campaign preserves one sample set, while the random campaign explores
-// new values. A path replay runs one property directly, for example
+// new values. Copy complete printed Replay: coordinates, including
+// TANSTACK_DB_ORACLE_UNIT, for a current generated replay. The original pre-unit
+// example below has no construction prefix; its path needs no shift when adding
+// UNIT='random seed: generated' to replay that source revision:
 // TANSTACK_DB_ORACLE_PROPERTY=comparison.1 TANSTACK_DB_ORACLE_SEED=123
 // TANSTACK_DB_ORACLE_PATH='0:0' pnpm --filter @tanstack/db exec vitest run
 // --configLoader runner tests/comparison-oracle.property.test.ts.
@@ -162,6 +161,10 @@ function comparisonProperty<
           limits:
             'The unchanged bounded same-type and normalization grammars; unrelated object identity order, mixed-type order and query/index receiving paths remain outside this owner.',
         },
+        // What this oracle owns: the comparison and normalization functions in
+        // utils/comparison.ts, which the comparison-laws-oracle companion's
+        // checks and models judge through this file's properties.
+        owns: [`src/utils/comparison.ts`],
         histories: { arbitrary, runs: campaignRuns, fixedSeeds: [fixedSeed] },
         resolve: (history) => ({ history }),
         model: recordedAssertionJudgment,
@@ -393,101 +396,164 @@ describe(`ascComparator property-based tests`, () => {
   })
 })
 
+const comparisonAuthority =
+  'OrderByOptions, CompareOptions and the comparison, binary normalization and non-finite ordering contracts stated by the named comparison-laws-oracle companion'
+
 describe(`NaN and invalid Date default-order refinement`, () => {
-  it(`reconstructs the finite, duplicate NaN, null, and invalid Date witnesses`, () => {
-    oracleRoute(`case`)
-    assertNonFiniteOrder({
-      family: `number`,
-      finiteDays: [3, 1, 5],
-      unorderedCount: 2,
-      includeNull: false,
-    })
-    assertNonFiniteOrder({
-      family: `number`,
-      finiteDays: [5, 1],
-      unorderedCount: 1,
-      includeNull: true,
-    })
-    assertNonFiniteOrder({
-      family: `date`,
-      finiteDays: [19_358], // 2023-01-01, the legacy valid-Date operand.
-      unorderedCount: 1,
-      includeNull: false,
-    })
+  oracleProperty({
+    id: `comparison.non-finite-witnesses`,
+    law: {
+      statement: `The default comparator refines the tagged finite and non-finite order: NaN and invalid Dates share one position after finite values, and null stays first.`,
+      authority: comparisonAuthority,
+      limits: `The three fixed legacy witnesses: duplicate NaN among finite numbers, NaN with null, and one invalid Date beside a valid one.`,
+    },
+    owns: [`src/utils/comparison.ts`],
+    histories: [
+      `reconstructs the finite, duplicate NaN, null, and invalid Date witnesses`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `comparison.non-finite-witnesses`,
+        plan,
+        observe,
+        () => {
+          assertNonFiniteOrder({
+            family: `number`,
+            finiteDays: [3, 1, 5],
+            unorderedCount: 2,
+            includeNull: false,
+          })
+          assertNonFiniteOrder({
+            family: `number`,
+            finiteDays: [5, 1],
+            unorderedCount: 1,
+            includeNull: true,
+          })
+          assertNonFiniteOrder({
+            family: `date`,
+            finiteDays: [19_358], // 2023-01-01, the legacy valid-Date operand.
+            unorderedCount: 1,
+            includeNull: false,
+          })
+        },
+      ),
+    check: forwardAssertionJudgment,
+    // Each calibration replays its old body: a wrong comparison or default
+    // sort must make the shared non-finite order check throw, and the wrong
+    // answer must have been reached.
+    calibrations: [
+      {
+        name: `rejects a wrong comparison that ties non-finite and finite values`,
+        law: `comparison.non-finite-witnesses`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `comparison.non-finite-witnesses`,
+            plan,
+            observe,
+            () => {
+              const rejections: Array<Error> = []
+              for (const family of [`number`, `date`] as const) {
+                let reachedFault = false
+                const faultyComparator = (
+                  a: number | Date | null,
+                  b: number | Date | null,
+                ) => {
+                  const faultApplies =
+                    family === `number`
+                      ? typeof a === `number` &&
+                        Number.isNaN(a) &&
+                        typeof b === `number` &&
+                        Number.isFinite(b)
+                      : a instanceof Date &&
+                        Number.isNaN(a.getTime()) &&
+                        b instanceof Date &&
+                        Number.isFinite(b.getTime())
+                  if (faultApplies) {
+                    reachedFault = true
+                    return 0
+                  }
+                  return ascComparator(a, b, DEFAULT_COMPARE_OPTIONS)
+                }
+                rejections.push(
+                  rejection(
+                    () => true,
+                    () =>
+                      assertNonFiniteOrder(
+                        {
+                          family,
+                          finiteDays: [1],
+                          unorderedCount: 1,
+                          includeNull: false,
+                        },
+                        faultyComparator,
+                      ),
+                  ),
+                )
+                expect(reachedFault).toBe(true)
+              }
+              rejectAt(
+                `calibration: a comparison that ties non-finite and finite values`,
+                rejections[0]!,
+              )
+            },
+          ),
+      },
+      {
+        name: `rejects a default sort that ties NaN to finite values`,
+        law: `comparison.non-finite-witnesses`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `comparison.non-finite-witnesses`,
+            plan,
+            observe,
+            () => {
+              let reachedFault = false
+              const faultySort = (
+                a: number | Date | null,
+                b: number | Date | null,
+              ) => {
+                if (typeof a === `number` && Number.isNaN(a)) {
+                  reachedFault = true
+                  return 0
+                }
+                if (typeof b === `number` && Number.isNaN(b)) {
+                  reachedFault = true
+                  return 0
+                }
+                return defaultComparator(a, b)
+              }
+              const rejected = rejection(
+                () => true,
+                () =>
+                  assertNonFiniteOrder(
+                    {
+                      family: `number`,
+                      finiteDays: [3, 1, 5],
+                      unorderedCount: 2,
+                      includeNull: false,
+                    },
+                    (a, b) => ascComparator(a, b, DEFAULT_COMPARE_OPTIONS),
+                    faultySort,
+                  ),
+              )
+              expect(reachedFault).toBe(true)
+              rejectAt(
+                `calibration: a default sort that ties NaN to finite values`,
+                rejected,
+              )
+            },
+          ),
+      },
+    ],
   })
 
   comparisonProperty([arbitraryNonFiniteInput])(
     `default comparator refines tagged finite and non-finite order`,
     (input) => assertNonFiniteOrder(input),
   )
-
-  it(`rejects a wrong comparison that ties non-finite and finite values`, () => {
-    oracleRoute(`calibration`)
-    for (const family of [`number`, `date`] as const) {
-      let reachedFault = false
-      const faultyComparator = (
-        a: number | Date | null,
-        b: number | Date | null,
-      ) => {
-        const faultApplies =
-          family === `number`
-            ? typeof a === `number` &&
-              Number.isNaN(a) &&
-              typeof b === `number` &&
-              Number.isFinite(b)
-            : a instanceof Date &&
-              Number.isNaN(a.getTime()) &&
-              b instanceof Date &&
-              Number.isFinite(b.getTime())
-        if (faultApplies) {
-          reachedFault = true
-          return 0
-        }
-        return ascComparator(a, b, DEFAULT_COMPARE_OPTIONS)
-      }
-      expect(() =>
-        assertNonFiniteOrder(
-          {
-            family,
-            finiteDays: [1],
-            unorderedCount: 1,
-            includeNull: false,
-          },
-          faultyComparator,
-        ),
-      ).toThrowError()
-      expect(reachedFault).toBe(true)
-    }
-  })
-
-  it(`rejects a default sort that ties NaN to finite values`, () => {
-    oracleRoute(`calibration`)
-    let reachedFault = false
-    const faultySort = (a: number | Date | null, b: number | Date | null) => {
-      if (typeof a === `number` && Number.isNaN(a)) {
-        reachedFault = true
-        return 0
-      }
-      if (typeof b === `number` && Number.isNaN(b)) {
-        reachedFault = true
-        return 0
-      }
-      return defaultComparator(a, b)
-    }
-    expect(() =>
-      assertNonFiniteOrder(
-        {
-          family: `number`,
-          finiteDays: [3, 1, 5],
-          unorderedCount: 2,
-          includeNull: false,
-        },
-        (a, b) => ascComparator(a, b, DEFAULT_COMPARE_OPTIONS),
-        faultySort,
-      ),
-    ).toThrowError()
-    expect(reachedFault).toBe(true)
-  })
 })
 
 describe(`descComparator property-based tests`, () => {
@@ -543,19 +609,40 @@ describe(`makeComparator property-based tests`, () => {
     },
   )
 
-  it(`preserves signed infinity from a valid custom string comparator`, () => {
-    oracleRoute(`case`)
-    const comparator = makeComparator({
-      ...defaultOpts,
-      stringSort: `custom`,
-      compare: (a, b) => (a === b ? 0 : a < b ? -Infinity : Infinity),
-    })
-    expect(comparator(`a`, `b`)).toBe(-Infinity)
-    expect(comparator(`b`, `a`)).toBe(Infinity)
-    expect(comparator(`a`, `a`)).toBe(0)
-    expect(checkAntisymmetry(comparator(`a`, `b`), comparator(`b`, `a`))).toBe(
-      true,
-    )
+  oracleProperty({
+    id: `comparison.signed-infinity-custom`,
+    law: {
+      statement: `A comparator made with a valid custom string comparison preserves that comparison's signed infinity and stays antisymmetric.`,
+      authority: comparisonAuthority,
+      limits: `One custom comparison over the strings a and b that returns -Infinity, 0 or Infinity.`,
+    },
+    owns: [`src/utils/comparison.ts`],
+    histories: [
+      `preserves signed infinity from a valid custom string comparator`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `comparison.signed-infinity-custom`,
+        plan,
+        observe,
+        () => {
+          const comparator = makeComparator({
+            ...defaultOpts,
+            stringSort: `custom`,
+            compare: (a, b) => (a === b ? 0 : a < b ? -Infinity : Infinity),
+          })
+          expect(comparator(`a`, `b`)).toBe(-Infinity)
+          expect(comparator(`b`, `a`)).toBe(Infinity)
+          expect(comparator(`a`, `a`)).toBe(0)
+          expect(
+            checkAntisymmetry(comparator(`a`, `b`), comparator(`b`, `a`)),
+          ).toBe(true)
+        },
+      ),
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -797,32 +884,115 @@ const arbitraryZonedDateTimeOrderInput: fc.Arbitrary<ZonedDateTimeOrderInput> =
   )
 
 describe(`Temporal default-order refinement`, () => {
-  it(`reconstructs the three PlainDate and one ZonedDateTime assertions`, () => {
-    oracleRoute(`case`)
-    const jan = { year: 2024, month: 1, day: 1 }
-    const june = { year: 2024, month: 6, day: 1 }
-    assertPlainDateOrder({
-      left: { year: 2023, month: 12, day: 28 },
-      right: jan,
-    })
-    assertPlainDateOrder({ left: jan, right: june })
-    assertPlainDateOrder({
-      left: jan,
-      right: { year: 2024, month: 1, day: 2 },
-    })
-    assertPlainDateOrder({ left: jan, right: jan })
-    assertZonedDateTimeOrder({
-      leftNanoOffset: 0,
-      rightNanoOffset: 0,
-      leftZone: `+00:00`,
-      rightZone: `+05:30`,
-    })
-    assertZonedDateTimeOrder({
-      leftNanoOffset: 0,
-      rightNanoOffset: 1,
-      leftZone: `+05:30`,
-      rightZone: `+00:00`,
-    })
+  oracleProperty({
+    id: `comparison.temporal-witnesses`,
+    law: {
+      statement: `The default comparator orders ISO PlainDate values by their calendar fields and ZonedDateTime values by their instants across offset zones.`,
+      authority: comparisonAuthority,
+      limits: `The fixed legacy PlainDate pairs and two ZonedDateTime pairs: one instant in two zones, and adjacent nanosecond instants.`,
+    },
+    owns: [`src/utils/comparison.ts`],
+    histories: [
+      `reconstructs the three PlainDate and one ZonedDateTime assertions`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `comparison.temporal-witnesses`,
+        plan,
+        observe,
+        () => {
+          const jan = { year: 2024, month: 1, day: 1 }
+          const june = { year: 2024, month: 6, day: 1 }
+          assertPlainDateOrder({
+            left: { year: 2023, month: 12, day: 28 },
+            right: jan,
+          })
+          assertPlainDateOrder({ left: jan, right: june })
+          assertPlainDateOrder({
+            left: jan,
+            right: { year: 2024, month: 1, day: 2 },
+          })
+          assertPlainDateOrder({ left: jan, right: jan })
+          assertZonedDateTimeOrder({
+            leftNanoOffset: 0,
+            rightNanoOffset: 0,
+            leftZone: `+00:00`,
+            rightZone: `+05:30`,
+          })
+          assertZonedDateTimeOrder({
+            leftNanoOffset: 0,
+            rightNanoOffset: 1,
+            leftZone: `+05:30`,
+            rightZone: `+00:00`,
+          })
+        },
+      ),
+    check: forwardAssertionJudgment,
+    // A wrong comparator must make the shared ZonedDateTime check throw.
+    calibrations: [
+      {
+        name: `rejects text order for one instant shown in two zones`,
+        law: `comparison.temporal-witnesses`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `comparison.temporal-witnesses`,
+            plan,
+            observe,
+            () => {
+              const sample: ZonedDateTimeOrderInput = {
+                leftNanoOffset: 0,
+                rightNanoOffset: 0,
+                leftZone: `+00:00`,
+                rightZone: `+05:30`,
+              }
+              const lexical = (left: unknown, right: unknown) =>
+                String(left).localeCompare(String(right))
+              rejectAt(
+                `calibration: text order for one instant shown in two zones`,
+                rejection(
+                  () => true,
+                  () => assertZonedDateTimeOrder(sample, lexical),
+                ),
+              )
+            },
+          ),
+      },
+      {
+        name: `rejects millisecond truncation across adjacent instants`,
+        law: `comparison.temporal-witnesses`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `comparison.temporal-witnesses`,
+            plan,
+            observe,
+            () => {
+              const sample: ZonedDateTimeOrderInput = {
+                leftNanoOffset: 0,
+                rightNanoOffset: 1,
+                leftZone: `+05:30`,
+                rightZone: `+00:00`,
+              }
+              const truncated = (left: unknown, right: unknown) => {
+                const leftEpoch = (left as { epochNanoseconds: bigint })
+                  .epochNanoseconds
+                const rightEpoch = (right as { epochNanoseconds: bigint })
+                  .epochNanoseconds
+                return Number(leftEpoch / 1_000_000n - rightEpoch / 1_000_000n)
+              }
+              rejectAt(
+                `calibration: millisecond truncation across adjacent instants`,
+                rejection(
+                  () => true,
+                  () => assertZonedDateTimeOrder(sample, truncated),
+                ),
+              )
+            },
+          ),
+      },
+    ],
   })
 
   comparisonProperty([arbitraryPlainDateOrderInput])(
@@ -834,40 +1004,4 @@ describe(`Temporal default-order refinement`, () => {
     `ZonedDateTime order refines supplied instants across offset zones`,
     assertZonedDateTimeOrder,
   )
-
-  it(`rejects text order for one instant shown in two zones`, () => {
-    oracleRoute(`calibration`)
-    const sample: ZonedDateTimeOrderInput = {
-      leftNanoOffset: 0,
-      rightNanoOffset: 0,
-      leftZone: `+00:00`,
-      rightZone: `+05:30`,
-    }
-    const lexical = (left: unknown, right: unknown) =>
-      String(left).localeCompare(String(right))
-    expect(() => assertZonedDateTimeOrder(sample, lexical)).toThrow()
-  })
-
-  it(`rejects millisecond truncation across adjacent instants`, () => {
-    oracleRoute(`calibration`)
-    const sample: ZonedDateTimeOrderInput = {
-      leftNanoOffset: 0,
-      rightNanoOffset: 1,
-      leftZone: `+05:30`,
-      rightZone: `+00:00`,
-    }
-    const truncated = (left: unknown, right: unknown) => {
-      const leftEpoch = (left as { epochNanoseconds: bigint }).epochNanoseconds
-      const rightEpoch = (right as { epochNanoseconds: bigint })
-        .epochNanoseconds
-      return Number(leftEpoch / 1_000_000n - rightEpoch / 1_000_000n)
-    }
-    expect(() => assertZonedDateTimeOrder(sample, truncated)).toThrow()
-  })
-})
-
-// Temporal models remain beside their public comparator observation cuts.
-declareOracle({
-  check: [assertPlainDateOrder, assertZonedDateTimeOrder],
-  model: [modelPlainDateSign, modelNanosecondSign],
 })

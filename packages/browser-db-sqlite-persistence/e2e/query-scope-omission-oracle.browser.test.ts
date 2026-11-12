@@ -1,14 +1,10 @@
-import { afterAll, beforeAll, it } from 'vitest'
-import { oracleReplayRequested } from '../../db/tests/oracle-config'
+import { afterAll, beforeAll } from 'vitest'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   captureBrowserHistory,
   startAdapterChromium,
 } from '../tests/adapter-chromium-host'
-import {
-  calibrateGeneratedConstructions,
-  options,
-} from '../../query-db-collection/tests/scope-omission-reacquisition-oracle'
+import { options } from '../../query-db-collection/tests/scope-omission-reacquisition-oracle'
 import { deliverQueryHistory } from './query-ownership-browser-support'
 import type { History } from '../../query-db-collection/tests/scope-omission-reacquisition-oracle'
 import type { QueryReceivingResult } from './query-ownership-browser-support'
@@ -49,12 +45,3 @@ oracleProperty({
   ...property,
   check: (h, trace, expected) => property.check(h, trace, expected),
 })
-let controlSequence = 0
-it.skipIf(oracleReplayRequested())(
-  'rejects missing states from generated constructions',
-  () =>
-    calibrateGeneratedConstructions((h, observe) =>
-      receive(h, 'generated-control-browser-' + controlSequence++, observe),
-    ),
-  120000,
-)

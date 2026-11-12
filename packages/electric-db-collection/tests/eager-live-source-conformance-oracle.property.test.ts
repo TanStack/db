@@ -1,11 +1,6 @@
 import { describe } from 'vitest'
 import { oracleProperty } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import {
-  checkEagerLiveSourceHistory,
-  eagerLiveSourceHistoryArb,
-  eagerLiveSourceModel,
-} from '../../db-adapter-conformance/src'
+import {} from '../../db-adapter-conformance/src'
 import {
   checkEagerLiveSourceObservations,
   eagerLiveSourceHistories,
@@ -35,7 +30,6 @@ import { electricConformanceDriver } from './conformance-driver'
 describe(`eager live-source conformance: electric`, () => {
   const property = `adapter-conformance.eager-live-source.electric`
   const driver = electricConformanceDriver()
-  const historyArb = eagerLiveSourceHistoryArb(driver)
   const runs = 400
   const campaignTimeoutMs = 120_000
 
@@ -65,11 +59,5 @@ describe(`eager live-source conformance: electric`, () => {
       fixedSeeds: [2118],
     },
     timeout: campaignTimeoutMs,
-  })
-
-  declareOracle({
-    check: [checkEagerLiveSourceHistory],
-    model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-    grammar: [historyArb],
   })
 })

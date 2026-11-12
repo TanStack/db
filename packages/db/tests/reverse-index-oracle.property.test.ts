@@ -3,7 +3,6 @@ import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { ReverseIndex } from '../src/indexes/reverse-index.js'
 import { PropRef } from '../src/query/ir.js'
 import { differs, oracleProperty, pass, violation } from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
 import type {
   ConstructedHistory,
   Observation,
@@ -280,12 +279,6 @@ const readCase: fc.Arbitrary<ReadCase> = fc.record({
   n: fc.integer({ min: 0, max: 6 }),
   cursor: fc.option(fc.record({ from: value }), { nil: undefined }),
   rejected: fc.uniqueArray(fc.integer({ min: 0, max: 15 }), { maxLength: 6 }),
-})
-
-declareOracle({
-  check: [checkRead],
-  model: [modelOrder, after, expectedRead, modelRead],
-  grammar: [readCase],
 })
 
 // The four large regressions have a separate finite grammar. They retain the

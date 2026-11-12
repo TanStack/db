@@ -1,17 +1,13 @@
 import fc from 'fast-check'
 import { Temporal } from 'temporal-polyfill'
-import { expect, it } from 'vitest'
 import { compileExpression } from '../../../src/query/compiler/evaluators.js'
 import { Func, PropRef, Value } from '../../../src/query/ir.js'
 import {
   differs,
   oracleProperty,
-  oracleReplayTest,
-  oracleRoute,
   pass,
   violation,
 } from '../../oracle-config.js'
-import { declareOracle } from '../../oracle-declaration.js'
 import type {
   ConstructedHistory,
   Observation,
@@ -390,12 +386,6 @@ function checkIn(
       )
 }
 
-declareOracle({
-  model: [referenceIn, modelIn],
-  grammar: [inCase],
-  check: [checkIn],
-})
-
 oracleProperty({
   id: `evaluators.in`,
   law: {
@@ -519,58 +509,56 @@ oracleProperty({
 // searches the original 28-value pool with its original arbitrary, rather than
 // the enlarged product grammar. The search stops at its first rejection, as
 // the old fc.check did. Both clean and raw observations use the shared law.
-oracleReplayTest(it)(
-  `rejects raw equality within the original calibration search`,
-  () => {
-    oracleRoute(`calibration`)
-    const calibrationItem = fc.constantFrom(...originalPool)
-    const calibrationCase: fc.Arbitrary<InCase> = fc.record({
-      value: calibrationItem,
-      list: fc.array(calibrationItem, { maxLength: 6 }),
-      listFromRow: fc.boolean(),
-    })
-    const candidates = fc.sample(calibrationCase, {
-      seed: 0x2029,
-      numRuns: 500,
-    })
-    for (const [index, candidate] of candidates.entries()) {
-      // Resolution restores the same exact pool references, including opaque
-      // values and distinct objects. It does not serialize or copy those leaves.
-      const plan = resolveIn({
-        value: indexOf(candidate.value),
-        list: candidate.list.map(indexOf),
-        listFromRow: candidate.listFromRow,
-      })
-      const trace: Array<Observation> = []
-      driveIn(plan, (checkpoint, value) => trace.push({ checkpoint, value }))
-      const expected = modelIn(plan)
-      expect(checkIn(plan, trace, expected)).toEqual(pass)
-      const raw =
-        plan.value == null
-          ? null
-          : plan.list.some((entry) => entry === plan.value)
-      const wrong = checkIn(
-        plan,
-        trace.map((entry) =>
+// The candidates are enumerated in sample order through the same model,
+// driver, and check, and the calibration skips a candidate whose raw answer
+// equals the reference, as the old search continued past it.
+const calibrationItem = fc.constantFrom(...originalPool)
+const calibrationCase: fc.Arbitrary<InCase> = fc.record({
+  value: calibrationItem,
+  list: fc.array(calibrationItem, { maxLength: 6 }),
+  listFromRow: fc.boolean(),
+})
+// Resolution restores the same exact pool references, including opaque
+// values and distinct objects. It does not serialize or copy those leaves.
+const originalCalibrationCandidates: ReadonlyArray<InHistory> = fc
+  .sample(calibrationCase, { seed: 0x2029, numRuns: 500 })
+  .map((candidate) => ({
+    value: indexOf(candidate.value),
+    list: candidate.list.map(indexOf),
+    listFromRow: candidate.listFromRow,
+  }))
+
+oracleProperty({
+  id: `evaluators.in-original-calibration`,
+  law: {
+    statement: `IN returns the independent three-valued membership result for each constant or changing row list, with normalized value equality and exact reference leaves.`,
+    authority: `The IN and equality contracts in evaluators.ts, stated at the start of this owner.`,
+    limits: `The original calibration search: 500 candidates sampled at seed 0x2029 from the original 28-value pool, replayed through the shared model, driver, and check. No non-array-list, WHERE publication, index, or subset-loading claim.`,
+  },
+  owns: [`src/query/compiler/evaluators.ts#compileExpression`],
+  histories: originalCalibrationCandidates,
+  label: (history) =>
+    `original calibration candidate ${originalCalibrationCandidates.indexOf(history) + 1} of 500`,
+  resolve: resolveIn,
+  model: modelIn,
+  driver: driveIn,
+  check: checkIn,
+  calibrations: [
+    {
+      name: `rejects raw equality within the original calibration search`,
+      law: `IN result`,
+      corrupt: (trace, plan) => {
+        const raw =
+          plan.value == null
+            ? null
+            : plan.list.some((entry) => entry === plan.value)
+        if (raw === referenceIn(plan.value, plan.list)) return undefined
+        return trace.map((entry) =>
           entry.checkpoint === `evaluation returned`
             ? { ...entry, value: raw }
             : entry,
-        ),
-        expected,
-      )
-      if (
-        wrong.kind === `violation` &&
-        wrong.law === `IN result` &&
-        wrong.checkpoint === `evaluation returned`
-      ) {
-        process.stdout.write(
-          `IN raw-equality calibration rejected candidate ${index + 1} of 500 at seed 8233\n`,
         )
-        return
-      }
-    }
-    throw new Error(
-      `the shared IN check accepted every raw-equality candidate within the original 500-candidate search`,
-    )
-  },
-)
+      },
+    },
+  ],
+})

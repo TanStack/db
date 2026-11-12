@@ -29,7 +29,6 @@ import {
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
 import { oracleProperty } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { lazyOracleBaseRuns } from './lazy-paging-campaign'
 import { expectedLazyRows } from './lazy-paging-model-oracle'
@@ -42,9 +41,6 @@ type AssertionReach = {
   beginHistory: () => void
   reach: (state: string) => void
 }
-
-// Owns no convex source: this grammar drives @tanstack/db Collection and live queries with its own SyncConfig, not the convex pager.
-declareOracle({})
 
 const grammar = fc.record({
   count: fc.integer({ min: 1, max: 4 }),

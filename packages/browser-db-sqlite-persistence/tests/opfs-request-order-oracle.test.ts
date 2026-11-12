@@ -20,7 +20,6 @@ import {
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { openBrowserWASQLiteOPFSDatabase } from '../src/opfs-database'
 import {
   findRequestOrderViolation,
@@ -251,10 +250,6 @@ const requestOrderHistory = fc
     }),
   )
 const requestOrderProperty = `opfs.request-order`
-declareOracle({
-  check: [runRequestOrderHistory],
-  grammar: [requestOrderHistory],
-})
 const requestOrderLaw = {
   statement: `The existing request-order model judges ordered request completion, close, and late execute behavior through the real worker module.`,
   authority: `The shared opfs-request-order-oracle.ts contract and worker protocol.`,

@@ -1,4 +1,4 @@
-// Ordinary native value scenarios. value-oracle.spec.ts owns the structured-clone
+// Ordinary native value scenarios. value-witness.spec.ts owns the structured-clone
 // value laws and their models; this foreign-realm witness compares with literal
 // bytes and offsets, so it is supplemental coverage.
 import { expect } from '@playwright/test'

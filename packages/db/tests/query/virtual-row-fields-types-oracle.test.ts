@@ -30,10 +30,15 @@
  */
 import { resolve } from 'node:path'
 import ts from 'typescript'
-import { afterAll, expect, test } from 'vitest'
+import { afterAll, expect } from 'vitest'
 import * as publicDb from '../../src/index.js'
-import { declareOracle } from '../oracle-declaration.js'
-import { oracleRoute } from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from '../oracle-assertion-adapter.js'
 import { checkWithCleanup } from './virtual-row-fields-support.js'
 import {
   metadataCompositions as compositions,
@@ -846,11 +851,20 @@ host.getSourceFile = (
   return source
 }
 let previous: ts.Program | undefined
+// A consumer's diagnostics are a function of its source alone: the public
+// declarations and compiler options do not change during a run. The
+// framework's determinism test replays histories in the same process, so a
+// replayed source reuses its diagnostics instead of type-checking it again
+// (each check takes seconds). Its runtime construction still runs again.
+const diagnosticsBySource = new Map<string, ReadonlyArray<ts.Diagnostic>>()
 function compileConsumer(source: string): ReadonlyArray<ts.Diagnostic> {
+  const known = diagnosticsBySource.get(source)
+  if (known !== undefined) return known
   generated = source
   const program = ts.createProgram([filename], options, host, previous)
   previous = program
   const diagnostics = [...parsed.errors, ...ts.getPreEmitDiagnostics(program)]
+  diagnosticsBySource.set(source, diagnostics)
   return diagnostics
 }
 /**
@@ -922,44 +936,50 @@ function checkConsumer(diagnostics: ReadonlyArray<ts.Diagnostic>): void {
     }),
   ).toBe(``)
 }
-declareOracle({
-  owns: ['src/index.ts'],
-  grammar: [
-    typeShapes,
-    authoredCollisions,
-    authoredPaths,
-    authoredKinds,
-    groupedForms,
-    groupingBoundaries,
-    aggregateDepths,
-    inlineChoices,
-    wrappedAggregateForms,
-    wrappedAggregateKinds,
-  ],
-  model: [consumerSource, groupingKeyFor],
-  check: [checkConsumer, checkConsumerConstruction],
-})
-test.each(typeShapes)(
-  `preserves generated public row/value types: %j`,
-  async (shape) => {
-    oracleRoute(`case`)
-    publicTypesEntered = true
-    publicTypeHistory++
-    const consumer = consumerSource(shape)
-    await checkConsumerConstruction(consumer.source)
-    historiesByState.get(`construction-admitted`)!.add(publicTypeHistory)
-    const diagnostics = compileConsumer(consumer.source)
-    for (const state of consumer.states)
-      historiesByState.get(state)!.add(publicTypeHistory)
-    checkConsumer(diagnostics)
+// The former case body, unchanged: compile one generated consumer against the
+// public types, admit its construction, and record the states it entered.
+async function judgePublicTypeShape(shape: TypeShape): Promise<void> {
+  publicTypesEntered = true
+  publicTypeHistory++
+  const consumer = consumerSource(shape)
+  await checkConsumerConstruction(consumer.source)
+  historiesByState.get(`construction-admitted`)!.add(publicTypeHistory)
+  const diagnostics = compileConsumer(consumer.source)
+  for (const state of consumer.states)
+    historiesByState.get(state)!.add(publicTypeHistory)
+  checkConsumer(diagnostics)
+}
+
+const publicTypesLaw = `Generated consumers of the public API observe the row and value types that the virtual-field boundary promises, and their constructions are admitted at runtime.`
+
+oracleProperty({
+  id: `virtual-row-fields-types.public-types`,
+  law: {
+    statement: publicTypesLaw,
+    authority: `The Collection virtual-field boundary and reserved public row fields in packages/db/src/query/live/ARCHITECTURE.md (boundary-only metadata, maintainer decision of 2026-11-05), stated at the start of this owner.`,
+    limits: `The enumerated key, value, optional, and union type shapes of this file's closed consumer grammar.`,
   },
-  30_000,
-)
+  owns: [`src/index.ts`],
+  histories: typeShapes,
+  label: (shape) =>
+    `preserves generated public row/value types: ${JSON.stringify(shape)}`,
+  resolve: (shape) => ({ shape }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(publicTypesLaw, plan, observe, () =>
+      judgePublicTypeShape(plan.shape),
+    ),
+  check: forwardAssertionJudgment,
+  // The old tests allowed 30 seconds each. The framework's determinism test
+  // runs every third shape twice in one test, about 16 compilations, so the
+  // property's per-test limit covers that test too.
+  timeout: 300_000,
+})
 
 // Feed a hostile type observation through the actual compiler/checker. Altering
 // only the expected law emulates leaked value metadata or lost nullability;
 // the legal production query remains identical to its accepted neighbor.
-test.each([
+const hostileTypeObservations = [
   `value-metadata`,
   `lost-nullability`,
   `one-branch-readonly`,
@@ -967,98 +987,162 @@ test.each([
   `date-metadata-any`,
   `nested-optional-metadata`,
   `nested-readonly`,
-] as const)(
-  `rejects a hostile public type observation: %s`,
-  (fault) => {
-    oracleRoute(`case`)
-    const consumer = consumerSource(
-      fault === `one-branch-readonly` ? typeShapes[1]! : typeShapes[0]!,
-      new Set([
-        fault === `value-metadata`
-          ? `inline/object/toArray`
-          : fault === `lost-nullability`
-            ? `inline/nullable-whole/toArray`
-            : fault === `date-metadata-any`
-              ? `inline/date/toArray`
-              : `root/functional-direct/direct`,
-      ]),
-    )
-    checkConsumer(compileConsumer(consumer.source))
-    const wrong =
+] as const
+
+// The former case body, unchanged: a hostile expected law over the identical
+// legal query must fail only its generated Assert constraints.
+function judgeHostileTypeObservation(
+  fault: (typeof hostileTypeObservations)[number],
+): void {
+  const consumer = consumerSource(
+    fault === `one-branch-readonly` ? typeShapes[1]! : typeShapes[0]!,
+    new Set([
       fault === `value-metadata`
-        ? consumer.source.replace(
-            `Normalize<{ value: string }>>>`,
-            `Normalize<Published<{ value: string }>>>>`,
-          )
+        ? `inline/object/toArray`
         : fault === `lost-nullability`
-          ? consumer.source.replaceAll(
-              `Published<Row> | Missing<Published<Row>>`,
-              `Published<Row>`,
+          ? `inline/nullable-whole/toArray`
+          : fault === `date-metadata-any`
+            ? `inline/date/toArray`
+            : `root/functional-direct/direct`,
+    ]),
+  )
+  checkConsumer(compileConsumer(consumer.source))
+  const wrong =
+    fault === `value-metadata`
+      ? consumer.source.replace(
+          `Normalize<{ value: string }>>>`,
+          `Normalize<Published<{ value: string }>>>>`,
+        )
+      : fault === `lost-nullability`
+        ? consumer.source.replaceAll(
+            `Published<Row> | Missing<Published<Row>>`,
+            `Published<Row>`,
+          )
+        : fault === `one-branch-readonly`
+          ? consumer.source.replace(
+              `Normalize<Published<Row>>>>`,
+              `Normalize<MutableOne<Published<Row>>>>>`,
             )
-          : fault === `one-branch-readonly`
+          : fault === `date-metadata-any`
             ? consumer.source.replace(
-                `Normalize<Published<Row>>>>`,
-                `Normalize<MutableOne<Published<Row>>>>>`,
+                `Normalize<Date>>>`,
+                `Normalize<Date & { readonly $key: any }>>>`,
               )
-            : fault === `date-metadata-any`
+            : fault === `nested-optional-metadata`
               ? consumer.source.replace(
-                  `Normalize<Date>>>`,
-                  `Normalize<Date & { readonly $key: any }>>>`,
+                  `Normalize<Published<Row>>>>`,
+                  `Normalize<Published<Omit<Row, 'profile'> & { profile: Profile & { readonly $key?: string } }>>>>`,
                 )
-              : fault === `nested-optional-metadata`
+              : fault === `nested-readonly`
                 ? consumer.source.replace(
                     `Normalize<Published<Row>>>>`,
-                    `Normalize<Published<Omit<Row, 'profile'> & { profile: Profile & { readonly $key?: string } }>>>>`,
+                    `Normalize<Published<Omit<Row, 'profile'> & { profile: { readonly label: string } }>>>>`,
                   )
-                : fault === `nested-readonly`
-                  ? consumer.source.replace(
-                      `Normalize<Published<Row>>>>`,
-                      `Normalize<Published<Omit<Row, 'profile'> & { profile: { readonly label: string } }>>>>`,
-                    )
-                  : consumer.source.replace(
-                      `type Profile = { label: string };`,
-                      `type Profile = { label: any };`,
-                    )
-    expect(wrong).not.toBe(consumer.source)
-    const diagnostics = compileConsumer(wrong)
-    // A syntax/setup error cannot stand in for a rejected wrong type. Require
-    // only failed Assert constraints in this generated consumer's law aliases.
-    expect(diagnostics.length).toBeGreaterThan(0)
-    for (const diagnostic of diagnostics) {
-      expect(diagnostic.file?.fileName).toBe(filename)
-      expect(diagnostic.code).toBe(2344)
-      const text = diagnostic.file!.text
-      const lineStart = text.lastIndexOf(`\n`, diagnostic.start) + 1
-      const lineEnd = text.indexOf(`\n`, diagnostic.start)
-      expect(text.slice(lineStart, lineEnd)).toMatch(
-        /type (Observation_|Removal|CallbackValues)/,
-      )
-    }
-    expect(() => checkConsumer(diagnostics)).toThrow()
+                : consumer.source.replace(
+                    `type Profile = { label: string };`,
+                    `type Profile = { label: any };`,
+                  )
+  expect(wrong).not.toBe(consumer.source)
+  const diagnostics = compileConsumer(wrong)
+  // A syntax/setup error cannot stand in for a rejected wrong type. Require
+  // only failed Assert constraints in this generated consumer's law aliases.
+  expect(diagnostics.length).toBeGreaterThan(0)
+  for (const diagnostic of diagnostics) {
+    expect(diagnostic.file?.fileName).toBe(filename)
+    expect(diagnostic.code).toBe(2344)
+    const text = diagnostic.file!.text
+    const lineStart = text.lastIndexOf(`\n`, diagnostic.start) + 1
+    const lineEnd = text.indexOf(`\n`, diagnostic.start)
+    expect(text.slice(lineStart, lineEnd)).toMatch(
+      /type (Observation_|Removal|CallbackValues)/,
+    )
+  }
+  expect(() => checkConsumer(diagnostics)).toThrow()
+}
+
+const hostileTypesLaw = `The public-type check rejects each hostile type observation through the actual compiler, with only the generated consumer's law aliases failing.`
+
+oracleProperty({
+  id: `virtual-row-fields-types.hostile-observations`,
+  law: {
+    statement: hostileTypesLaw,
+    authority: `The Collection virtual-field boundary and reserved public row fields in packages/db/src/query/live/ARCHITECTURE.md (boundary-only metadata, maintainer decision of 2026-11-05), stated at the start of this owner.`,
+    limits: `The seven enumerated hostile observations over two legal type shapes.`,
   },
-  30_000,
-)
+  owns: [`src/index.ts`],
+  histories: hostileTypeObservations,
+  label: (fault) => `rejects a hostile public type observation: ${fault}`,
+  resolve: (fault) => ({ fault }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(hostileTypesLaw, plan, observe, () =>
+      judgeHostileTypeObservation(plan.fault),
+    ),
+  check: forwardAssertionJudgment,
+  // The old tests allowed 30 seconds each; the determinism test runs one
+  // observation in eight twice in one test.
+  timeout: 120_000,
+})
 
 // Grammar controls preserve the admission checkpoint that exposed two invalid
 // early fixtures. Their legal neighbors run the identical generated body.
-test.each([`non-record-facade`, `missing-index-type`] as const)(
-  `rejects an illegal generated construction at admission: %s`,
-  async (fault) => {
-    oracleRoute(`calibration`)
-    const consumer = consumerSource(
-      typeShapes[0]!,
-      new Set([`inline/array/toArray`]),
-    )
-    await checkConsumerConstruction(consumer.source)
-    const wrong =
-      fault === `non-record-facade`
-        ? consumer.source.replace(`children: toArray(`, `children: include(`)
-        : consumer.source.replace(`, { indexType: BTreeIndex }`, ``)
-    expect(wrong).not.toBe(consumer.source)
-    await expect(checkConsumerConstruction(wrong)).rejects.toThrow(
-      fault === `non-record-facade`
-        ? /must select an object when materializing as a Collection/
-        : /No index type specified and no defaultIndexType set/,
-    )
+const admissionLaw = `A generated consumer's construction is admitted at runtime only when it is a legal query: an illegal neighbor of an admitted construction is rejected at admission.`
+const admissionFaults = [`non-record-facade`, `missing-index-type`] as const
+
+oracleProperty({
+  id: `virtual-row-fields-types.construction-admission`,
+  law: {
+    statement: admissionLaw,
+    authority: `The Collection virtual-field boundary and reserved public row fields in packages/db/src/query/live/ARCHITECTURE.md (boundary-only metadata, maintainer decision of 2026-11-05), stated at the start of this owner.`,
+    limits: `One legal inline array consumer and its two illegal neighbors.`,
   },
-)
+  owns: [`src/index.ts`],
+  histories: [{ shape: 0, paths: [`inline/array/toArray`] }],
+  label: () =>
+    `admits the legal generated construction beside its illegal neighbors`,
+  resolve: ({ shape, paths }) => ({
+    consumer: consumerSource(typeShapes[shape]!, new Set(paths)),
+  }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(admissionLaw, plan, observe, () =>
+      checkConsumerConstruction(plan.consumer.source),
+    ),
+  check: forwardAssertionJudgment,
+  calibrations: admissionFaults.map((fault) => ({
+    name: `rejects an illegal generated construction at admission: ${fault}`,
+    law: admissionLaw,
+    // The former calibration body. Exactly the old matcher: only a rejection
+    // whose message names this fault's admission error counts as the check
+    // rejecting the illegal construction; any other outcome fails this
+    // calibration, as it failed the old test.
+    driver: (
+      plan: { consumer: ReturnType<typeof consumerSource> },
+      observe: (checkpoint: string, value: unknown) => void,
+    ) =>
+      recordAssertionJudgment(admissionLaw, plan, observe, async () => {
+        const { consumer } = plan
+        const wrong =
+          fault === `non-record-facade`
+            ? consumer.source.replace(
+                `children: toArray(`,
+                `children: include(`,
+              )
+            : consumer.source.replace(`, { indexType: BTreeIndex }`, ``)
+        expect(wrong).not.toBe(consumer.source)
+        const expected =
+          fault === `non-record-facade`
+            ? /must select an object when materializing as a Collection/
+            : /No index type specified and no defaultIndexType set/
+        try {
+          await checkConsumerConstruction(wrong)
+        } catch (error) {
+          if (error instanceof Error && expected.test(error.message))
+            rejectAt(`admission ${fault}`, error)
+          throw new Error(
+            `the illegal construction failed outside the expected rejection: ${String(error)}`,
+          )
+        }
+      }),
+  })),
+})

@@ -9,7 +9,6 @@ import {
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,
@@ -1221,16 +1220,6 @@ describe(`SQLite resume snapshots`, () => {
   // models of retained generations and claim intervals. The fixed and generated
   // cases share those checks. The startup grammar is the generator whose coverage
   // the fixed startup corpus calibrates.
-  declareOracle({
-    check: [
-      assertRetiredStorageHistory,
-      assertManagedClaimReadHistory,
-      runProgressHistory,
-    ],
-    model: [expectedRetainedGenerations],
-    grammar: [startupHistoryArbitrary, progressHistory],
-  })
-
   oracleProperty({
     id: `sqlite-resume.startup-generation`,
     law: {

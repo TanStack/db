@@ -6,7 +6,6 @@
  * carriers, collision freedom, and work bounds remain separate owners.
  */
 import fc from 'fast-check'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   oracleProperty,
   pass,
@@ -149,12 +148,6 @@ function checkCampaign(
   }
   return pass
 }
-
-declareOracle({
-  model: [isAcyclic, expectedGraph, expectedCampaign],
-  check: [checkGraph, checkCampaign],
-  grammar: [graphArbitrary, historyArbitrary],
-})
 
 oracleProperty({
   id: `ivm.hash-graph`,

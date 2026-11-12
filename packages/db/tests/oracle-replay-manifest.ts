@@ -1,4 +1,8 @@
 import { registeredOracleProperties } from './oracle-config.js'
+import {
+  convertedOwners,
+  convertedProperties,
+} from './property-registry/index.js'
 
 /**
  * This manifest maps a replay name to the source file that can prove it ran.
@@ -14,6 +18,11 @@ import { registeredOracleProperties } from './oracle-config.js'
 const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
+  [
+    `db/tests/oracle-campaign-units.test.ts`,
+    `oracle-campaign-units`,
+    `contract`,
+  ],
   [
     `query-db-collection/tests/documented-mutations-oracle.test.ts`,
     `documented-mutations`,
@@ -1147,7 +1156,7 @@ const ownerGroups: ReadonlyArray<
   ],
   [`db/tests/proxy-oracle.test.ts`, `proxy`, `callback-history`],
   [
-    `db/e2e/indexed-db/cross-tab-oracle.spec.ts`,
+    `db/e2e/indexed-db/cross-tab-witness.spec.ts`,
     `indexeddb`,
     `browser-native-history`,
   ],
@@ -1418,6 +1427,7 @@ const ownerGroups: ReadonlyArray<
     `adapter-conformance.eager-live-source`,
     `convex convex.react convex.wrapped`,
   ],
+  ...convertedOwners,
 ]
 
 const owners = new Map<string, string>()
@@ -1507,6 +1517,7 @@ export type OracleReplayManifestEntry = {
   cwd?: string
   command?: string
   testNamePattern?: string
+  /** UNIT applies to generated oracleProperty sources; use its printed value. */
   environment: ReadonlyArray<string>
 }
 
@@ -1884,6 +1895,9 @@ const reseededProperties = new Set<string>()
 // Keep their literal registry names here; the owner groups still supply their
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
+  // Every property that the declareOracle removal added is an enumerated
+  // source: one test per history, and no random campaign.
+  ...convertedProperties,
   ...[`rxdb`, `powersync`].flatMap((adapter) =>
     [`controlled`, `node-sqlite`].map(
       (host) => `adapter.${adapter}.capability.${host}`,
@@ -2028,6 +2042,11 @@ const nativeSyncMetadataProperties = new Set(
 )
 
 function directReplayTestName(property: string): string | undefined {
+  // An enumerated source registers one test per history and no random
+  // campaign, so its direct replay selects every test of the property, before
+  // any prefix rule below can name a campaign it does not have.
+  if (enumeratedProperties.has(property))
+    return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
   if (nativeSyncMetadataProperties.has(property))
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
   if (property.startsWith(`adapter-conformance.persisted-baseline-lifecycle.`))
@@ -2061,8 +2080,6 @@ function directReplayTestName(property: string): string | undefined {
     ].includes(property)
   )
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
-  if (enumeratedProperties.has(property))
-    return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
   if (
     [
       `query.persisted-direct-ownership`,
@@ -2136,6 +2153,26 @@ const outsideReplayConfigs = new Map([
  * runs only under its own config.
  */
 const ownerReplayConfigs = new Map([
+  [
+    `packages/convex-db-collection/e2e/auth-app-oracle.test.ts`,
+    `vitest.e2e.config.ts`,
+  ],
+  [
+    `packages/convex-db-collection/e2e/public-pagination-oracle.test.ts`,
+    `vitest.e2e.config.ts`,
+  ],
+  [
+    `packages/convex-db-collection/e2e/lazy-paging-oracle.test.ts`,
+    `vitest.lazy.e2e.config.ts`,
+  ],
+  [
+    `packages/electric-db-collection/e2e/electric.e2e.test.ts`,
+    `vitest.e2e.config.ts`,
+  ],
+  [
+    `packages/electron-db-sqlite-persistence/tests/reload-class-oracle.electron.e2e.test.ts`,
+    `vitest.e2e.config.ts`,
+  ],
   [
     `packages/browser-db-sqlite-persistence/e2e/query-scope-omission-oracle.browser.test.ts`,
     `vitest.adapter-oracles.config.ts`,
@@ -2241,7 +2278,7 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
           : status === `reseeded-campaign`
             ? `pnpm exec vitest run ${file.split(`/`).slice(2).join(`/`)}`
             : status === `enumerated-campaign`
-              ? `env -u TANSTACK_DB_ORACLE_SEED -u TANSTACK_DB_ORACLE_PATH -u TANSTACK_DB_ORACLE_PROPERTY pnpm exec vitest run ${config === undefined ? `` : `--config ${config} `}-t '${testNamePattern!.replaceAll(`'`, `'\\''`)}' ${outsidePackages ? file.split(`/`).pop() : file.split(`/`).slice(2).join(`/`)}`
+              ? `env -u TANSTACK_DB_ORACLE_SEED -u TANSTACK_DB_ORACLE_PATH -u TANSTACK_DB_ORACLE_PROPERTY -u TANSTACK_DB_ORACLE_UNIT pnpm exec vitest run ${config === undefined ? `` : `--config ${config} `}-t '${testNamePattern!.replaceAll(`'`, `'\\''`)}' ${outsidePackages ? file.split(`/`).pop() : file.split(`/`).slice(2).join(`/`)}`
               : outsidePackages
                 ? `node --import tsx ${`../`.repeat(cwd!.split(`/`).length)}packages/db/tests/oracle-replay.ts ${outsideConfig === undefined ? `` : `--config ${outsideConfig} `}${file.split(`/`).pop()}`
                 : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${ownerReplayConfigs.has(file) ? `--config ${ownerReplayConfigs.get(file)} ` : ``}${file.split(`/`).slice(2).join(`/`)}`,
@@ -2258,6 +2295,7 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
                 `TANSTACK_DB_ORACLE_SEED`,
                 `TANSTACK_DB_ORACLE_PATH`,
                 `TANSTACK_DB_ORACLE_PROPERTY`,
+                `TANSTACK_DB_ORACLE_UNIT`,
               ],
   }
 })

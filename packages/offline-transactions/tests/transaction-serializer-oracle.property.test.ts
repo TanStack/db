@@ -1,17 +1,16 @@
 import { types as nativeTypes } from 'node:util'
 import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
-import { oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
+  rejectAt,
 } from '../../db/tests/oracle-assertion-adapter'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
 import { FakeStorageAdapter } from './harness'
@@ -87,27 +86,13 @@ import type {
  * Retained-storage checks use FakeStorageAdapter, not browser storage.
  */
 
-declareOracle({ check: [checkRoundtrip, checkCodec] })
-
-it(`preserves marker-shaped user data through current wire encoding`, async () => {
-  oracleRoute(`case`)
-  const runtime = {
-    __type: `Temporal`,
-    type: `Temporal.PlainDate`,
-    value: `2026-09-16`,
-  }
-  await checkRoundtrip(
-    [
-      {
-        kind: `insert`,
-        slot: 0,
-        before: twin,
-        after: { runtime, wire: objectWire(runtime) },
-      },
-    ],
-    0,
-  )
-})
+// A marker-shaped user object is data, not a Temporal marker: the current
+// wire escapes it once, and the restored operand is the same object.
+const markerShapedRuntime = {
+  __type: `Temporal`,
+  type: `Temporal.PlainDate`,
+  value: `2026-09-16`,
+}
 
 // Roundtrips generate valid envelopes. Corrupted wire must be rejected before
 // it can replace any mutation field with an invented empty object.
@@ -117,6 +102,13 @@ describe.each([`modified`, `original`, `changes`] as const)(
   (field) => {
     oracleProperty({
       id: `offline.serializer.malformed-object`,
+      owns: [
+        `src/outbox/TransactionSerializer.ts#TransactionSerializer.serialize`,
+        `src/outbox/TransactionSerializer.ts#TransactionSerializer.deserialize`,
+        `src/outbox/OutboxManager.ts#OutboxManager.add`,
+        `src/outbox/OutboxManager.ts#OutboxManager.getAll`,
+        `src/outbox/OutboxManager.ts#OutboxManager.get`,
+      ],
       law: {
         ...serializerLaw,
         statement: `Malformed escaped Object markers reject before replacing any mutation field.`,
@@ -196,8 +188,52 @@ describe.each([`modified`, `original`, `changes`] as const)(
     })
   },
 )
+// Each encoder and decoder fault, crossed with the boundary it is injected at.
+const mutationWireFaults = (
+  [
+    `date-as-string`,
+    `string-as-date`,
+    `wrong-registry`,
+    `omit-changes`,
+    `unknown-encoding`,
+  ] as const
+).flatMap((fault) =>
+  ([`encoder`, `decoder`] as const).map((boundary) => ({ fault, boundary })),
+)
+/** A mutation wire history's edits and the clock time it runs at. */
+type MutationWirePlan = { edits: Array<Edit>; time: number }
+/** Whether a calibration's old Vitest matchers accept a rejection. */
+function matches(assertions: () => void): boolean {
+  try {
+    assertions()
+    return true
+  } catch {
+    return false
+  }
+}
+const asError = (failure: unknown): Error =>
+  failure instanceof Error ? failure : new Error(String(failure))
+/** A rejection that the old matchers did not accept stays a driver error: a
+ * new, unmarked error, so no comparison checkpoint inside it counts. */
+const unaccepted = (mutant: string, failure: unknown): Error =>
+  new Error(
+    `${mutant} failed in a way that its calibration does not accept: ${String(failure)}`,
+  )
+
+// The check runs one history through production and compares every checkpoint
+// with the semantic model in transaction-serializer-oracle.ts. Generated
+// properties, fixed histories, and the fault calibrations all reach it. What
+// this oracle owns: the gap report judges these entries, and their reference
+// trees within the package, by this file's tests.
 oracleProperty({
   id: MUTATION_WIRE_PROPERTY,
+  owns: [
+    `src/outbox/TransactionSerializer.ts#TransactionSerializer.serialize`,
+    `src/outbox/TransactionSerializer.ts#TransactionSerializer.deserialize`,
+    `src/outbox/OutboxManager.ts#OutboxManager.add`,
+    `src/outbox/OutboxManager.ts#OutboxManager.getAll`,
+    `src/outbox/OutboxManager.ts#OutboxManager.get`,
+  ],
   law: {
     ...serializerLaw,
     statement: `Mutation wire and restored operands preserve their authored meaning across application recreation.`,
@@ -211,9 +247,33 @@ oracleProperty({
     runs: 100,
     fixedSeeds: [20260914],
     fixed: [
+      // The fault calibrations below run on the first named history whose
+      // clean trace passes, so this one comes first: it is the authored
+      // history at time zero that each fault calibration corrupts.
+      {
+        name: `all edit kinds at time zero`,
+        history: encodeHistory([fixedHistory, 0]),
+      },
       {
         name: `all edit kinds and hostile marker values`,
         history: encodeHistory([fixedHistory, 1704067200000]),
+      },
+      {
+        name: `preserves marker-shaped user data through current wire encoding`,
+        history: encodeHistory([
+          [
+            {
+              kind: `insert`,
+              slot: 0,
+              before: twin,
+              after: {
+                runtime: markerShapedRuntime,
+                wire: objectWire(markerShapedRuntime),
+              },
+            },
+          ],
+          0,
+        ]),
       },
     ],
   },
@@ -227,31 +287,141 @@ oracleProperty({
       checkRoundtrip(plan.edits, plan.time),
     ),
   check: forwardAssertionJudgment,
+  calibrations: mutationWireFaults.map(({ fault, boundary }) => ({
+    name: `rejects the ${fault} ${boundary} mutant at its own boundary`,
+    law: `mutation wire meaning`,
+    driver: (plan: MutationWirePlan, observe) =>
+      recordAssertionJudgment(
+        `mutation wire meaning`,
+        plan,
+        observe,
+        async () => {
+          const decode = vi.spyOn(
+            TransactionSerializer.prototype,
+            `deserialize`,
+          )
+          try {
+            const expectedFailure =
+              boundary === `encoder` ||
+              (fault !== `wrong-registry` && fault !== `unknown-encoding`)
+                ? { name: `AssertionError` }
+                : {
+                    message:
+                      fault === `wrong-registry`
+                        ? `Collection with id writer:0 not found`
+                        : `Unsupported transaction value encoding: 5`,
+                  }
+            const failure = await checkRoundtrip(
+              plan.edits,
+              plan.time,
+              fault,
+              boundary,
+            ).then(
+              () => undefined,
+              (error: unknown) => error ?? new Error(String(error)),
+            )
+            if (failure === undefined) return
+            // Exactly the old matchers: only this rejection, at this boundary,
+            // counts as the check rejecting the mutant.
+            if (
+              matches(() => {
+                expect(failure).toMatchObject(expectedFailure)
+                expect(decode).toHaveBeenCalledTimes(
+                  boundary === `encoder` ? 0 : 1,
+                )
+              })
+            )
+              rejectAt(`${fault} ${boundary} mutant`, asError(failure))
+            throw unaccepted(`the ${fault} ${boundary} mutant`, failure)
+          } finally {
+            decode.mockRestore()
+          }
+        },
+      ),
+  })),
 })
 
-it(`retains the wire mismatch when cleanup also fails`, async () => {
-  oracleRoute(`calibration`)
-  let failure: unknown
-  try {
-    await checkRoundtrip(
-      [fixedHistory[0]!],
-      0,
-      `omit-changes`,
-      `encoder`,
-      false,
-      false,
-      true,
-    )
-  } catch (error) {
-    failure = error
-  }
-  expect(failure).toBeInstanceOf(AggregateError)
-  const aggregate = failure as AggregateError
-  expect(aggregate.cause).toMatchObject({ name: `AssertionError` })
-  expect(String(aggregate.cause)).toContain(`mutation wire checkpoint`)
-  expect(aggregate.errors).toEqual([
-    new Error(`injected serializer cleanup failure`),
-  ])
+// The cleanup-failure calibration corrupts exactly the first authored edit at
+// time zero, so that history runs as its own enumerated case through the same
+// driver and comparison as the generated campaign above.
+const cleanupCalibrationHistories = [
+  {
+    name: `the first authored edit at time zero`,
+    history: encodeHistory([[fixedHistory[0]!], 0]),
+  },
+]
+oracleProperty({
+  id: `offline.serializer.mutation-wire-cleanup`,
+  law: {
+    ...serializerLaw,
+    statement: `Mutation wire and restored operands preserve their authored meaning across application recreation, and a comparison failure survives a cleanup failure.`,
+    limits: `The first authored edit at time zero, which the cleanup-failure calibration corrupts; it runs through the same driver and comparison as offline.serializer.mutation-wire.`,
+  },
+  owns: [
+    `src/outbox/TransactionSerializer.ts#TransactionSerializer.serialize`,
+    `src/outbox/TransactionSerializer.ts#TransactionSerializer.deserialize`,
+    `src/outbox/OutboxManager.ts#OutboxManager.add`,
+    `src/outbox/OutboxManager.ts#OutboxManager.getAll`,
+    `src/outbox/OutboxManager.ts#OutboxManager.get`,
+  ],
+  histories: cleanupCalibrationHistories,
+  label: ({ name }) => name,
+  resolve: ({ history }) => {
+    const [edits, time] = decodeHistory<[Array<Edit>, number]>(history)
+    return { edits, time }
+  },
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`mutation wire meaning`, plan, observe, () =>
+      checkRoundtrip(plan.edits, plan.time),
+    ),
+  check: forwardAssertionJudgment,
+  calibrations: [
+    {
+      name: `retains the wire mismatch when cleanup also fails`,
+      law: `mutation wire meaning`,
+      driver: (plan: MutationWirePlan, observe) =>
+        recordAssertionJudgment(
+          `mutation wire meaning`,
+          plan,
+          observe,
+          async () => {
+            const failure = await checkRoundtrip(
+              plan.edits,
+              plan.time,
+              `omit-changes`,
+              `encoder`,
+              false,
+              false,
+              true,
+            ).then(
+              () => undefined,
+              (error: unknown) => error ?? new Error(String(error)),
+            )
+            if (failure === undefined) return
+            // Exactly the old matchers: the aggregate keeps the wire mismatch
+            // as its cause and the cleanup failure as its only error.
+            if (
+              matches(() => {
+                expect(failure).toBeInstanceOf(AggregateError)
+                const aggregate = failure as AggregateError
+                expect(aggregate.cause).toMatchObject({
+                  name: `AssertionError`,
+                })
+                expect(String(aggregate.cause)).toContain(
+                  `mutation wire checkpoint`,
+                )
+                expect(aggregate.errors).toEqual([
+                  new Error(`injected serializer cleanup failure`),
+                ])
+              })
+            )
+              rejectAt(`mutation wire cleanup failure`, asError(failure))
+            throw unaccepted(`the cleanup-failure mutant`, failure)
+          },
+        ),
+    },
+  ],
 })
 
 const legacyEdits = fc.array(
@@ -293,6 +463,13 @@ describe.each([
 ])(`compatible wire $id`, ({ id, seed, legacy, arbitrary, fixed }) => {
   oracleProperty({
     id,
+    owns: [
+      `src/outbox/TransactionSerializer.ts#TransactionSerializer.serialize`,
+      `src/outbox/TransactionSerializer.ts#TransactionSerializer.deserialize`,
+      `src/outbox/OutboxManager.ts#OutboxManager.add`,
+      `src/outbox/OutboxManager.ts#OutboxManager.getAll`,
+      `src/outbox/OutboxManager.ts#OutboxManager.get`,
+    ],
     law: {
       ...serializerLaw,
       statement: `Compatible unversioned and version-two wire preserves authored mutation meaning.`,
@@ -333,47 +510,6 @@ describe.each([
     check: forwardAssertionJudgment,
   })
 })
-
-it.each(
-  (
-    [
-      `date-as-string`,
-      `string-as-date`,
-      `wrong-registry`,
-      `omit-changes`,
-      `unknown-encoding`,
-    ] as const
-  ).flatMap((fault) =>
-    ([`encoder`, `decoder`] as const).map((boundary) => ({
-      fault,
-      boundary,
-    })),
-  ),
-)(
-  `rejects the $fault $boundary mutant at its own boundary`,
-  async ({ fault, boundary }) => {
-    oracleRoute(`calibration`)
-    const decode = vi.spyOn(TransactionSerializer.prototype, `deserialize`)
-    try {
-      const expectedFailure =
-        boundary === `encoder` ||
-        (fault !== `wrong-registry` && fault !== `unknown-encoding`)
-          ? { name: `AssertionError` }
-          : {
-              message:
-                fault === `wrong-registry`
-                  ? `Collection with id writer:0 not found`
-                  : `Unsupported transaction value encoding: 5`,
-            }
-      await expect(
-        checkRoundtrip(fixedHistory, 0, fault, boundary),
-      ).rejects.toMatchObject(expectedFailure)
-      expect(decode).toHaveBeenCalledTimes(boundary === `encoder` ? 0 : 1)
-    } finally {
-      decode.mockRestore()
-    }
-  },
-)
 
 /**
  * Opt-in mutation codecs own their mutation-value domain independently of the
@@ -757,6 +893,13 @@ const codecConstructions = [
 ]
 oracleProperty({
   id: `offline.serializer.mutation-codec`,
+  owns: [
+    `src/outbox/TransactionSerializer.ts#TransactionSerializer.serialize`,
+    `src/outbox/TransactionSerializer.ts#TransactionSerializer.deserialize`,
+    `src/outbox/OutboxManager.ts#OutboxManager.add`,
+    `src/outbox/OutboxManager.ts#OutboxManager.getAll`,
+    `src/outbox/OutboxManager.ts#OutboxManager.get`,
+  ],
   law: {
     ...serializerLaw,
     statement: `Opt-in codecs preserve complete supplied operands and unreadable records leave durable work unchanged.`,

@@ -1,4 +1,3 @@
-import { declareOracle } from '../../tests/oracle-declaration.js'
 import { OracleMismatch } from '../../tests/indexed-db/cross-tab-oracle'
 import type { BrowserEvidence } from './browser'
 
@@ -22,5 +21,3 @@ export function retainedDocument(
     )
   return retained
 }
-
-declareOracle({ check: [retainedDocument] })

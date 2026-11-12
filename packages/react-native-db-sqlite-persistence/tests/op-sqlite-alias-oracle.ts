@@ -5,7 +5,6 @@
  * separate observation because exact row data alone does not retain it.
  */
 import { fc } from '@fast-check/vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { differs, pass, violation } from '../../db/tests/oracle-property.js'
 import {
   isRecord,
@@ -144,9 +143,3 @@ export function aliasQueryCase(aliases: ReadonlyArray<string>): {
     ),
   }
 }
-
-declareOracle({
-  check: [checkAliasRows, checkAliasGrammar],
-  model: [aliasQueryCase],
-  grammar: [writeResultAliasesArbitrary, statementResultAliasesArbitrary],
-})

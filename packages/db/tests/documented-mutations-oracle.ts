@@ -1,5 +1,4 @@
 import { expect } from 'vitest'
-import { declareOracle } from './oracle-declaration'
 import { pass, violation } from './oracle-config'
 import {
   checkMutationConfirmation,
@@ -922,17 +921,3 @@ export const documentedMutationCalibrations: Array<{
     },
   },
 ]
-
-declareOracle({
-  check: [
-    checkDocumentedMutation,
-    checkDocumentedRequest,
-    checkDocumentedMutationTrace,
-  ],
-  grammar: [documentedMutationHistories, documentedHandlers],
-  model: [
-    documentedMutationInputs,
-    modelDocumentedMutation,
-    owedDocumentedCuts,
-  ],
-})

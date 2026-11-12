@@ -1,0 +1,210 @@
+// The enumerated oracleProperty ids, and their replay owners, of the
+// "db-collection" area: the properties that the declareOracle removal
+// (2026-11-11) added. See index.ts.
+import type { ConvertedOwnerGroup } from './index.js'
+
+export const properties: ReadonlyArray<string> = [
+  // section: publication
+  `subscription-lifecycle.publication-selection`,
+  `subscription-lifecycle.publication-deferral-cleanup`,
+  `subscription-lifecycle.publication-retired-transports`,
+  `subscription-lifecycle.publication-raw-reset`,
+  `subscription-lifecycle.publication-product`,
+  `subscription-lifecycle.publication-empty-reset`,
+  `subscription-lifecycle.publication-retained-replacement`,
+  `subscription-lifecycle.publication-eager-restart`,
+  `subscription-lifecycle.publication-fixed`,
+  // section: source-health
+  `source-health.history-fixed`,
+  `source-health.overlap`,
+  `source-health.on-demand-reload`,
+  `source-health.on-demand-fixed`,
+  `source-health.lazy-demand-fixed`,
+  // section: lifecycle
+  `subscription-lifecycle.cleaned-restart-demand`,
+  `subscription-lifecycle.parked-reload-demand`,
+  `subscription-lifecycle.history-fixed`,
+  `subscription-lifecycle.history-cases`,
+  `subscription-lifecycle.caller-outcome`,
+  `subscription-lifecycle.detached-callers`,
+  `subscription-lifecycle.retired-delivery`,
+  `subscription-lifecycle.returned-results`,
+  `subscription-lifecycle.required-coverage`,
+  `subscription-lifecycle.change-retirement`,
+  `subscription-lifecycle.replay-failed`,
+  `subscription-lifecycle.async-restart-regimes`,
+  `subscription-lifecycle.startup-retirement`,
+  `subscription-lifecycle.unavailable-demand`,
+  `subscription-lifecycle.queued-cancel`,
+  `subscription-lifecycle.aborted-replay-release`,
+  `subscription-lifecycle.release-reentry`,
+  `subscription-lifecycle.three-generations`,
+  `subscription-lifecycle.start-cleanup`,
+  `subscription-lifecycle.resume-retirement`,
+  `subscription-replay.filtered-reentry`,
+  `subscription-replay.completion-fixed`,
+  // section: state
+  `collection-state.duration-field-change`,
+  `collection-state.deferred-causal-messages`,
+  `collection-state.eager-index-replacement`,
+  `collection-state.change-event-cases`,
+  `collection-state.change-event-reload-cases`,
+  `row-metadata-composition.nested`,
+  `row-metadata-composition.held-window`,
+  `row-metadata-composition.production-path`,
+  `collection-cleanup.dependents`,
+  `collection-cleanup.subscriber-admission`,
+  `collection-cleanup.restart-boundary`,
+  `collection-cleanup.loading-restart`,
+  `collection-cleanup.dependent-preload`,
+  `collection-cleanup.dependent-effect`,
+  `collection-cleanup.late-effect`,
+  `db-client-hydration.authority`,
+  `db-client-hydration.absent-seed-metadata`,
+  `db-client-hydration.interleaving`,
+  `collection-state.retention-fixed`,
+  `collection-state.retention-reentrant-restart`,
+  `collection-state.direct-deletion-drop`,
+  `collection-state.open-sync-attribution`,
+  `collection-state.optimistic-fixed`,
+  `collection-state.source-reinsert-attribution`,
+  `collection-state.absent-key-delete-drop`,
+  `collection-state.absent-key-delete-after-drop`,
+  `collection-state.absent-key-delete-persisting`,
+  `collection-state.handler-confirmation`,
+  `collection-state.validated-defaults`,
+  `collection-state.partial-over-default`,
+  `collection-state.insert-update-replay`,
+  `collection-state.sync-row-overlay`,
+  `collection-state.buffered-update-delete`,
+  `collection-state.settlement-orders`,
+  `collection-state.aborted-delete-partial`,
+  // section: misc
+  `collection-publication.metadata-only-fixed`,
+  `collection-publication.metadata-cancellation-fixed`,
+  `collection-lifecycle.gc-retention-boundaries-fixed`,
+  `collection-sync.ready-truncate`,
+  `collection-sync.reentrant-drain-bounded`,
+  `local-storage.order-fixed`,
+  `local-storage.value-fidelity-fixed`,
+  `sync-metadata-session.witnesses`,
+  `truncate-readiness.replacement-intent`,
+  `truncate-readiness.reentrant-batches`,
+  `collection-index.signature-classes`,
+  `subscription-reentrancy.direct-snapshot`,
+  `effect-disposal.joined-callers`,
+  `local-only.direct-write-fixed`,
+]
+
+export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
+  // section: publication
+  [
+    `db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts`,
+    `subscription-lifecycle`,
+    `publication-selection publication-deferral-cleanup publication-retired-transports publication-raw-reset publication-product publication-empty-reset publication-retained-replacement publication-eager-restart publication-fixed`,
+  ],
+  // section: source-health
+  [
+    `db/tests/source-health-oracle.test.ts`,
+    `source-health`,
+    `history-fixed overlap on-demand-reload on-demand-fixed lazy-demand-fixed`,
+  ],
+  // section: lifecycle
+  [
+    `db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
+    `subscription-lifecycle`,
+    `cleaned-restart-demand parked-reload-demand history-fixed history-cases caller-outcome detached-callers retired-delivery returned-results required-coverage change-retirement replay-failed`,
+  ],
+  [
+    `db/tests/collection-subscription-lifecycle-oracle.test.ts`,
+    `subscription-lifecycle`,
+    `async-restart-regimes startup-retirement unavailable-demand queued-cancel aborted-replay-release release-reentry three-generations start-cleanup resume-retirement`,
+  ],
+  [
+    `db/tests/collection-subscription-replay-oracle.property.test.ts`,
+    `subscription-replay`,
+    `filtered-reentry completion-fixed`,
+  ],
+  // section: state
+  [
+    `db/tests/change-event-history-oracle.test.ts`,
+    `collection-state`,
+    `duration-field-change deferred-causal-messages eager-index-replacement change-event-cases change-event-reload-cases`,
+  ],
+  [
+    `db/tests/collection-row-metadata-composition-oracle.test.ts`,
+    `row-metadata-composition`,
+    `nested held-window production-path`,
+  ],
+  [
+    `db/tests/collection-cleanup-restart-oracle.test.ts`,
+    `collection-cleanup`,
+    `dependents subscriber-admission restart-boundary loading-restart dependent-preload dependent-effect late-effect`,
+  ],
+  [
+    `db/tests/db-client-hydration-authority-oracle.test.ts`,
+    `db-client-hydration`,
+    `authority absent-seed-metadata interleaving`,
+  ],
+  [
+    `db/tests/collection-state-retention-oracle.property.test.ts`,
+    `collection-state`,
+    `retention-fixed retention-reentrant-restart direct-deletion-drop open-sync-attribution optimistic-fixed source-reinsert-attribution absent-key-delete-drop absent-key-delete-after-drop absent-key-delete-persisting handler-confirmation validated-defaults partial-over-default insert-update-replay sync-row-overlay buffered-update-delete settlement-orders aborted-delete-partial`,
+  ],
+  // section: misc
+  [
+    `db/tests/collection-metadata-publication-oracle.property.test.ts`,
+    `collection-publication`,
+    `metadata-only-fixed metadata-cancellation-fixed`,
+  ],
+  [
+    `db/tests/collection-gc-retention-oracle.property.test.ts`,
+    `collection-lifecycle`,
+    `gc-retention-boundaries-fixed`,
+  ],
+  [
+    `db/tests/collection-sync-reentrancy-oracle.test.ts`,
+    `collection-sync`,
+    `ready-truncate reentrant-drain-bounded`,
+  ],
+  [
+    `db/tests/local-storage-order-oracle.test.ts`,
+    `local-storage`,
+    `order-fixed`,
+  ],
+  [
+    `db/tests/local-storage-value-fidelity-oracle.property.test.ts`,
+    `local-storage`,
+    `value-fidelity-fixed`,
+  ],
+  [
+    `db/tests/sync-metadata-session-oracle.property.test.ts`,
+    `sync-metadata-session`,
+    `witnesses`,
+  ],
+  [
+    `db/tests/truncate-readiness-oracle.test.ts`,
+    `truncate-readiness`,
+    `replacement-intent reentrant-batches`,
+  ],
+  [
+    `db/tests/collection-index-value-oracle.test.ts`,
+    `collection-index`,
+    `signature-classes`,
+  ],
+  [
+    `db/tests/collection-subscription-reentrancy-oracle.test.ts`,
+    `subscription-reentrancy`,
+    `direct-snapshot`,
+  ],
+  [
+    `db/tests/effect-disposal-oracle.test.ts`,
+    `effect-disposal`,
+    `joined-callers`,
+  ],
+  [
+    `db/tests/local-only-direct-write-oracle.test.ts`,
+    `local-only`,
+    `direct-write-fixed`,
+  ],
+]

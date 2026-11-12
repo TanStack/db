@@ -12,7 +12,7 @@
  * oracle does not judge slow-query timing, repeated query warnings, index
  * benefit, or production-build suppression.
  */
-import { afterEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, describe, expect, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
 import {
@@ -22,8 +22,12 @@ import {
 import { eq } from '../src/query/builder/functions.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from './utils.js'
-import { oracleRoute } from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty } from './oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import type { IndexSuggestion } from '../src/indexes/index-registry.js'
 
 type Row = { id: number; url: string }
@@ -68,23 +72,17 @@ function expectedIndexCount(
   return mode === `eager` || index !== `none` ? 1 : 0
 }
 
-// What this oracle owns: the collection-size suggestion and the ordered-index
-// fallback warning, by this file's scenarios.
-declareOracle({
-  owns: [
-    `src/indexes/index-registry.ts#checkCollectionSizeForIndex`,
-    `src/query/compiler/order-by.ts#warnOrderIndexFallback`,
-  ],
-  check: [expectSizeSuggestionOutcome, expectOrderedIndexMessages],
-  model: [
-    expectedSuggestions,
-    expectedIndexCount,
-    expectedOrderedIndexDiagnostic,
-  ],
-})
+const indexSuggestionAuthority = `The index dev-mode suggestion and bounded orderBy fallback-warning contracts in src/indexes/index-registry.ts and src/query/compiler/order-by.ts, as modelled above`
+
+type SizeScenario = {
+  mode: `off` | `eager` | undefined
+  size: number
+  index: `none` | `url` | `id`
+  enabled: boolean
+}
 
 describe(`collection-size index suggestions`, () => {
-  for (const scenario of [
+  const sizeScenarios: ReadonlyArray<SizeScenario> = [
     { mode: `off`, size: 1101, index: `none`, enabled: true },
     { mode: undefined, size: 1101, index: `none`, enabled: true },
     { mode: `off`, size: 1000, index: `none`, enabled: true },
@@ -94,93 +92,118 @@ describe(`collection-size index suggestions`, () => {
     { mode: `off`, size: 1101, index: `id`, enabled: true },
     { mode: `eager`, size: 1101, index: `none`, enabled: true },
     { mode: `off`, size: 1101, index: `none`, enabled: false },
-  ] as const) {
-    test(`${scenario.mode}, ${scenario.size} rows, index=${scenario.index}, advice=${scenario.enabled}`, async () => {
-      oracleRoute(`case`)
-      const suggestions: Array<IndexSuggestion> = []
-      configureIndexDevMode({
-        enabled: scenario.enabled,
-        collectionSizeThreshold: 1000,
-        slowQueryThresholdMs: Number.MAX_VALUE,
-        onSuggestion: (suggestion) => suggestions.push(suggestion),
-      })
-
-      const rows = Array.from({ length: scenario.size }, (_, id): Row => ({
-        id,
-        url: `url-${id}`,
-      }))
-      const source = createCollection(
-        mockSyncCollectionOptions<Row>({
-          id: `suggestion-${scenario.mode}-${scenario.size}-${scenario.index}`,
-          getKey: (row) => row.id,
-          initialData: rows,
-          autoIndex: scenario.mode,
-          defaultIndexType: BasicIndex,
-        }),
-      )
-      await source.stateWhenReady()
-      if (scenario.index === `url`) source.createIndex((row) => row.url)
-      if (scenario.index === `id`) source.createIndex((row) => row.id)
-
-      const query = createLiveQueryCollection({
-        startSync: true,
-        query: (q) =>
-          q.from({ row: source }).where(({ row }) => eq(row.url, `url-7`)),
-      })
-
-      let primaryFailure: { error: unknown } | undefined
-      try {
-        await query.stateWhenReady()
-        expect(query.toArray.map((row) => row.id)).toEqual([7])
-        const sizeSuggestions = suggestions.filter(
-          (suggestion) => suggestion.type === `collection-size`,
-        )
-        const expected = expectedSuggestions(
-          scenario.mode,
-          scenario.size,
-          scenario.index,
-          scenario.enabled,
-        )
-        expectSizeSuggestionOutcome(
-          sizeSuggestions,
-          expected,
-          source.id,
-          scenario.size,
-        )
-        expect(source.indexes.size).toBe(
-          expectedIndexCount(scenario.mode, scenario.index),
-        )
-      } catch (error) {
-        primaryFailure = { error }
-      }
-
-      const cleanupFailures: Array<unknown> = []
-      try {
-        await query.cleanup()
-      } catch (error) {
-        cleanupFailures.push(error)
-      }
-      try {
-        await source.cleanup()
-      } catch (error) {
-        cleanupFailures.push(error)
-      }
-      if (primaryFailure && cleanupFailures.length > 0) {
-        throw new AggregateError(
-          [primaryFailure.error, ...cleanupFailures],
-          `Index suggestion check and cleanup failed`,
-          { cause: primaryFailure.error },
-        )
-      }
-      if (primaryFailure) throw primaryFailure.error
-      if (cleanupFailures.length > 0) {
-        throw new AggregateError(
-          cleanupFailures,
-          `Index suggestion cleanup failed`,
-        )
-      }
+  ]
+  const runSizeScenario = async (scenario: SizeScenario) => {
+    const suggestions: Array<IndexSuggestion> = []
+    configureIndexDevMode({
+      enabled: scenario.enabled,
+      collectionSizeThreshold: 1000,
+      slowQueryThresholdMs: Number.MAX_VALUE,
+      onSuggestion: (suggestion) => suggestions.push(suggestion),
     })
+
+    const rows = Array.from({ length: scenario.size }, (_, id): Row => ({
+      id,
+      url: `url-${id}`,
+    }))
+    const source = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `suggestion-${scenario.mode}-${scenario.size}-${scenario.index}`,
+        getKey: (row) => row.id,
+        initialData: rows,
+        autoIndex: scenario.mode,
+        defaultIndexType: BasicIndex,
+      }),
+    )
+    await source.stateWhenReady()
+    if (scenario.index === `url`) source.createIndex((row) => row.url)
+    if (scenario.index === `id`) source.createIndex((row) => row.id)
+
+    const query = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q.from({ row: source }).where(({ row }) => eq(row.url, `url-7`)),
+    })
+
+    let primaryFailure: { error: unknown } | undefined
+    try {
+      await query.stateWhenReady()
+      expect(query.toArray.map((row) => row.id)).toEqual([7])
+      const sizeSuggestions = suggestions.filter(
+        (suggestion) => suggestion.type === `collection-size`,
+      )
+      const expected = expectedSuggestions(
+        scenario.mode,
+        scenario.size,
+        scenario.index,
+        scenario.enabled,
+      )
+      expectSizeSuggestionOutcome(
+        sizeSuggestions,
+        expected,
+        source.id,
+        scenario.size,
+      )
+      expect(source.indexes.size).toBe(
+        expectedIndexCount(scenario.mode, scenario.index),
+      )
+    } catch (error) {
+      primaryFailure = { error }
+    }
+
+    const cleanupFailures: Array<unknown> = []
+    try {
+      await query.cleanup()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+    try {
+      await source.cleanup()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+    if (primaryFailure && cleanupFailures.length > 0) {
+      throw new AggregateError(
+        [primaryFailure.error, ...cleanupFailures],
+        `Index suggestion check and cleanup failed`,
+        { cause: primaryFailure.error },
+      )
+    }
+    if (primaryFailure) throw primaryFailure.error
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(
+        cleanupFailures,
+        `Index suggestion cleanup failed`,
+      )
+    }
   }
+  // What this oracle owns: the collection-size suggestion and the
+  // ordered-index fallback warning, by this file's scenarios.
+  oracleProperty({
+    id: `index-suggestion.collection-size`,
+    law: {
+      statement: `A collection-size suggestion is emitted exactly when advice is enabled, the source exceeds the threshold, the queried field lacks an index, and the Collection will not create one automatically.`,
+      authority: indexSuggestionAuthority,
+      limits: `The eight fixed mode, size, index and advice scenarios at a 1,000-row threshold.`,
+    },
+    owns: [
+      `src/indexes/index-registry.ts#checkCollectionSizeForIndex`,
+      `src/query/compiler/order-by.ts#warnOrderIndexFallback`,
+    ],
+    histories: sizeScenarios,
+    label: (scenario) =>
+      `${scenario.mode}, ${scenario.size} rows, index=${scenario.index}, advice=${scenario.enabled}`,
+    resolve: (scenario) => ({ scenario }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `index-suggestion.collection-size`,
+        plan,
+        observe,
+        () => runSizeScenario(plan.scenario),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -320,69 +343,90 @@ describe(`bounded orderBy index diagnostics`, () => {
       ],
     },
   ]
-  for (const scenario of scenarios) {
-    test(scenario.name, async () => {
-      oracleRoute(`case`)
-      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      const source = createCollection(
-        mockSyncCollectionOptions<{ id: number; name: string }>({
-          id: `ordered-index-diagnostic-${scenario.name}`,
-          getKey: (row) => row.id,
-          initialData: [
-            { id: 1, name: `Charlie` },
-            { id: 2, name: `Alice` },
-            { id: 3, name: `Bob` },
-          ],
-          autoIndex: `off`,
-        }),
-      )
-      let query: ReturnType<typeof createLiveQueryCollection> | undefined
-      await withOracleCleanup(async () => {
-        await source.stateWhenReady()
-        for (const candidate of scenario.candidates) {
-          source.createIndex((row) => row[candidate.field], {
-            indexType: BasicIndex,
-            options: {
-              compareOptions: {
-                direction: candidate.direction ?? `asc`,
-                nulls: candidate.nulls,
-                stringSort: `locale`,
-              },
-              ...(candidate.ordered
-                ? {}
-                : { compareFn: (a: string, b: string) => b.localeCompare(a) }),
+  const runOrderedScenario = async (scenario: (typeof scenarios)[number]) => {
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const source = createCollection(
+      mockSyncCollectionOptions<{ id: number; name: string }>({
+        id: `ordered-index-diagnostic-${scenario.name}`,
+        getKey: (row) => row.id,
+        initialData: [
+          { id: 1, name: `Charlie` },
+          { id: 2, name: `Alice` },
+          { id: 3, name: `Bob` },
+        ],
+        autoIndex: `off`,
+      }),
+    )
+    let query: ReturnType<typeof createLiveQueryCollection> | undefined
+    await withOracleCleanup(async () => {
+      await source.stateWhenReady()
+      for (const candidate of scenario.candidates) {
+        source.createIndex((row) => row[candidate.field], {
+          indexType: BasicIndex,
+          options: {
+            compareOptions: {
+              direction: candidate.direction ?? `asc`,
+              nulls: candidate.nulls,
+              stringSort: `locale`,
             },
+            ...(candidate.ordered
+              ? {}
+              : { compareFn: (a: string, b: string) => b.localeCompare(a) }),
+          },
+        })
+      }
+
+      query = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.name, {
+            direction: `asc`,
+            nulls: `last`,
           })
-        }
+          .limit(2),
+      )
 
-        query = createLiveQueryCollection((q) =>
-          q
-            .from({ row: source })
-            .orderBy(({ row }) => row.name, {
-              direction: `asc`,
-              nulls: `last`,
-            })
-            .limit(2),
+      await query.preload()
+      expect(query.toArray.map((row) => row.name)).toEqual([`Alice`, `Bob`])
+      const messages = warning.mock.calls
+        .flat()
+        .filter(
+          (message): message is string =>
+            typeof message === `string` &&
+            message.includes(`orderBy with limit`),
         )
-
-        await query.preload()
-        expect(query.toArray.map((row) => row.name)).toEqual([`Alice`, `Bob`])
-        const messages = warning.mock.calls
-          .flat()
-          .filter(
-            (message): message is string =>
-              typeof message === `string` &&
-              message.includes(`orderBy with limit`),
-          )
-        const expected = expectedOrderedIndexDiagnostic(scenario.candidates)
-        expectOrderedIndexMessages(messages, expected)
-      }, [
-        () => warning.mockRestore(),
-        () => query?.cleanup(),
-        () => source.cleanup(),
-      ])
-    })
+      const expected = expectedOrderedIndexDiagnostic(scenario.candidates)
+      expectOrderedIndexMessages(messages, expected)
+    }, [
+      () => warning.mockRestore(),
+      () => query?.cleanup(),
+      () => source.cleanup(),
+    ])
   }
+  oracleProperty({
+    id: `index-suggestion.ordered-diagnostic`,
+    law: {
+      statement: `A bounded ordered query warns with the cause that remains after considering every index candidate: no field index, mismatched compareOptions, or no ordered-read capability; any usable candidate suppresses the warning.`,
+      authority: indexSuggestionAuthority,
+      limits: `The fixed finite candidate grammar over field identity, null placement and ordered-read capability, with up to two candidates.`,
+    },
+    owns: [
+      `src/indexes/index-registry.ts#checkCollectionSizeForIndex`,
+      `src/query/compiler/order-by.ts#warnOrderIndexFallback`,
+    ],
+    histories: scenarios,
+    label: ({ name }) => name,
+    resolve: (scenario) => ({ scenario }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `index-suggestion.ordered-diagnostic`,
+        plan,
+        observe,
+        () => runOrderedScenario(plan.scenario),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   // A local index cannot confer a provider collation identity. Even a
   // comparator-compatible index must leave the full-source cost visible.

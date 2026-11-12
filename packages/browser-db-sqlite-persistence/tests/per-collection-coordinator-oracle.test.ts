@@ -9,17 +9,19 @@ import {
   createLiveQueryCollection,
   eq,
 } from '@tanstack/db'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, vi } from 'vitest'
 import {
+  forwardAssertionJudgment,
   oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
   rejectAt,
 } from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   createBrowserWASQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
-import { oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   browserReplayAlias,
   registerBrowserProperty,
@@ -56,12 +58,35 @@ import {
   withFailurePreservingCleanup,
   withNativeBrowserTransport,
 } from './per-collection-coordinator-support'
+import {
+  RemoteLeaseOwnerLedger,
+  collectionScopedLeaseViolations,
+  coordinatorRouteViolations,
+  findUnownedWrites,
+  freshInitViolations,
+  rawSnapshotViolations,
+  remoteLeaseTakeoverViolations,
+  routeViolationDiscriminant,
+  routeViolations,
+  subsetAckViolations,
+  subsetWireViolations,
+} from './per-collection-coordinator-checks-oracle'
+import type {
+  CollectionScopedLeaseSnapshot,
+  CoordinatorRouteObservation,
+  FreshInitOutcome,
+  RawCollectionSnapshot,
+  RemoteLeaseTakeoverTrace,
+  RemoteLeaseTakeoverViolation,
+  RouteViolation,
+  RoutedApply,
+  SubsetAckTrace,
+} from './per-collection-coordinator-checks-oracle'
 import type { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import type {
   PersistedCollectionCoordinator,
   PersistedMutationEnvelope,
   PersistenceAdapter,
-  TransportedLoadSubsetOptions,
 } from '@tanstack/db-sqlite-persistence-core'
 import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
 import type { BrowserWASQLiteDatabase } from '../src'
@@ -83,6 +108,17 @@ import type {
 const FIXED_SEED = 165902
 
 const { runs: RUNS, replay: REPLAY } = readCoordinatorOracleConfig()
+
+// Each fixed history below runs its unchanged driver, which applies this
+// file's checks and models; the adapter transports that judgment. The checks
+// and the lease model live in per-collection-coordinator-checks-oracle.ts, and
+// their calibrations, which run no production, in
+// per-collection-coordinator-calibration.test.ts.
+const coordinatorLaw = {
+  statement: `The browser coordinator keeps subset transport, acknowledgement, acquisition leases, SQLite state, adapter routing, and write ownership per collection, before and after leadership changes, as this file's checks and models require.`,
+  authority: `RFC #1659 Workstream 2, for BrowserCollectionCoordinator, browser persistence resolution, and the persisted sync wrapper.`,
+}
+const coordinatorJudgment = `per-collection coordinator`
 browserReplayAlias(
   REPLAY && {
     property: 'browser-coordinator.' + REPLAY.property,
@@ -181,12 +217,16 @@ Reach, challenge, replay, cleanup, and limits:
   failure, plus cancellation on release and disposal.
 */
 
-beforeEach(() => {
+// Each test starts with a fresh controlled fixture and ends by proving that
+// nothing it started is still live. A driver whose history runs more than once
+// in one test, as the framework's determinism test runs it, resets the fixture
+// itself after each run.
+function prepareCoordinatorFixture(): void {
   durableTerms.clear()
   installControlledBrowserSeams()
-})
+}
 
-afterEach(async () => {
+async function resetCoordinatorFixture(): Promise<void> {
   const cleanupDiagnostics: Array<CleanupDiagnostic> = []
   for (const coordinator of liveCoordinators) {
     await captureCleanup(cleanupDiagnostics, `afterEach live coordinator`, () =>
@@ -224,62 +264,10 @@ afterEach(async () => {
   heldLocks.clear()
   queuedLocks.clear()
   expect.soft(cleanupDiagnostics).toEqual([])
-})
-
-type SubsetAckTrace = {
-  ownerInvocation: `coordinator` | `fixture-fallback`
-  decoded: SemanticValue | undefined
-  expected: SemanticValue
-  prematureResponses: number
-  acknowledgedBeforeResponseDelivery: boolean
-  ownerCompletedBeforeResponse: boolean
-  acknowledgedAfterResponseDelivery: boolean
 }
 
-type SubsetWireTrace = {
-  outcome: { ok: true } | { ok: false; errorName: string } | undefined
-  decoded: ReadonlyArray<SemanticValue>
-  expected: SemanticValue
-}
-
-// Clone-safe projection may remove live ownership callbacks. It must preserve
-// every supported request-data value that determines subset semantics.
-function subsetWireViolations(trace: SubsetWireTrace): Array<string> {
-  const violations: Array<string> = []
-  if (trace.outcome?.ok !== true) violations.push(`subset-transport-failed`)
-  if (
-    trace.decoded.length !== 1 ||
-    JSON.stringify(trace.decoded[0]) !== JSON.stringify(trace.expected)
-  ) {
-    violations.push(`subset-semantics-mismatch`)
-  }
-  return violations
-}
-
-// A follower acknowledgement is valid only after the registered leader owner
-// has accepted and completed the exact remote subset acquisition attempt.
-function subsetAckViolations(trace: SubsetAckTrace): Array<string> {
-  const violations: Array<string> = []
-  if (trace.ownerInvocation !== `coordinator`) {
-    violations.push(`leader-owner-not-invoked-by-coordinator`)
-  }
-  if (JSON.stringify(trace.decoded) !== JSON.stringify(trace.expected)) {
-    violations.push(`decoded-subset-mismatch`)
-  }
-  if (trace.prematureResponses !== 0) {
-    violations.push(`response-before-owner-completion`)
-  }
-  if (trace.acknowledgedBeforeResponseDelivery) {
-    violations.push(`ack-before-response-delivery`)
-  }
-  if (!trace.ownerCompletedBeforeResponse) {
-    violations.push(`response-before-owner-completion-checkpoint`)
-  }
-  if (!trace.acknowledgedAfterResponseDelivery) {
-    violations.push(`missing-ack-after-response`)
-  }
-  return violations
-}
+beforeEach(prepareCoordinatorFixture)
+afterEach(resetCoordinatorFixture)
 
 async function observeOwnerEntryOrResponse(
   ownerEntered: () => boolean,
@@ -299,8 +287,7 @@ async function observeOwnerEntryOrResponse(
 }
 
 describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
-  it(`posts the callback-bearing subset witness as clone-safe wire data`, async () => {
-    oracleRoute(`fixed history`)
+  async function runCloneSafeSubsetWitness(): Promise<void> {
     const decoded: Array<SemanticValue> = []
     const leaderAdapter = createRecordingAdapter({
       id: `leader`,
@@ -391,73 +378,29 @@ describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
         },
       ],
     ])
+  }
+  oracleProperty({
+    id: `browser-coordinator.subset-wire`,
+    law: {
+      ...coordinatorLaw,
+      limits: `The callback-bearing subset witness, posted from a follower over the controlled BroadcastChannel.`,
+    },
+    owns: [`src/browser-coordinator.ts`],
+    histories: [
+      {
+        name: `posts the callback-bearing subset witness as clone-safe wire data`,
+      },
+    ],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(coordinatorJudgment, plan, observe, () =>
+        runCloneSafeSubsetWitness(),
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  it(`calibrates the clone checker against safe and function-valued payloads`, () => {
-    oracleRoute(`calibration`)
-    const safe = {
-      collectionId: `alpha`,
-      where: { type: `eq`, field: `group`, value: `kept` },
-      limit: 2,
-    }
-    const unsafe = { ...safe, callback: () => {} }
-
-    expect(structuredClone(safe)).toEqual(safe)
-    expect(() => structuredClone(unsafe)).toThrowError(
-      expect.objectContaining({ name: `DataCloneError` }),
-    )
-
-    const expected = subsetSemantics(complexSubsetDemand(false))
-    const allowed: SubsetWireTrace = {
-      outcome: { ok: true },
-      decoded: [expected],
-      expected,
-    }
-    expect(subsetWireViolations(allowed)).toEqual([])
-    expect(
-      subsetWireViolations({
-        ...allowed,
-        outcome: { ok: false, errorName: `DataCloneError` },
-      }),
-    ).toContain(`subset-transport-failed`)
-    expect(
-      subsetWireViolations({ ...allowed, decoded: [semanticValue({})] }),
-    ).toContain(`subset-semantics-mismatch`)
-  })
-
-  it(`calibrates acknowledgement checks against entry-only and false-success faults`, () => {
-    oracleRoute(`calibration`)
-    const expected = subsetSemantics(complexSubsetDemand(false))
-    const allowed: SubsetAckTrace = {
-      ownerInvocation: `coordinator`,
-      decoded: expected,
-      expected,
-      prematureResponses: 0,
-      acknowledgedBeforeResponseDelivery: false,
-      ownerCompletedBeforeResponse: true,
-      acknowledgedAfterResponseDelivery: true,
-    }
-    expect(subsetAckViolations(allowed)).toEqual([])
-    expect(
-      subsetAckViolations({
-        ...allowed,
-        ownerCompletedBeforeResponse: false,
-      }),
-    ).toContain(`response-before-owner-completion-checkpoint`)
-    expect(
-      subsetAckViolations({
-        ...allowed,
-        ownerInvocation: `fixture-fallback`,
-        prematureResponses: 1,
-      }),
-    ).toEqual([
-      `leader-owner-not-invoked-by-coordinator`,
-      `response-before-owner-completion`,
-    ])
-  })
-
-  it(`acknowledges a follower subset only after the leader source completed it`, async () => {
-    oracleRoute(`fixed history`)
+  async function runFollowerSubsetAcknowledgement(): Promise<void> {
     const upstreamEvents: Array<{
       phase: `entered` | `completed`
       semantics: SemanticValue
@@ -656,164 +599,28 @@ describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
         },
       ],
     ])
+  }
+  oracleProperty({
+    id: `browser-coordinator.subset-ack`,
+    law: {
+      ...coordinatorLaw,
+      limits: `One follower subset whose leader source completion is held, observed at the owner-entry and response checkpoints.`,
+    },
+    owns: [`src/browser-coordinator.ts`],
+    histories: [
+      {
+        name: `acknowledges a follower subset only after the leader source completed it`,
+      },
+    ],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(coordinatorJudgment, plan, observe, () =>
+        runFollowerSubsetAcknowledgement(),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
-
-type RemoteLeaseEvent = {
-  phase: `load` | `unload`
-  token: number
-  semantics: SemanticValue
-  exactLoadedObject?: boolean
-}
-
-class RemoteLeaseOwnerLedger {
-  private nextToken = 0
-  private readonly tokens = new WeakMap<object, number>()
-  private readonly loaded = new WeakSet<object>()
-  readonly active = new Set<object>()
-  readonly events: Array<RemoteLeaseEvent> = []
-
-  private token(options: TransportedLoadSubsetOptions): number {
-    let token = this.tokens.get(options)
-    if (token === undefined) {
-      token = ++this.nextToken
-      this.tokens.set(options, token)
-    }
-    return token
-  }
-
-  readonly loadSubset = async (
-    options: TransportedLoadSubsetOptions,
-  ): Promise<void> => {
-    const token = this.token(options)
-    this.loaded.add(options)
-    this.active.add(options)
-    this.events.push({
-      phase: `load`,
-      token,
-      semantics: subsetSemantics(options as unknown as LoadSubsetOptions),
-    })
-  }
-
-  readonly unloadSubset = (options: TransportedLoadSubsetOptions): void => {
-    const token = this.token(options)
-    const exactLoadedObject = this.loaded.has(options)
-    this.active.delete(options)
-    this.events.push({
-      phase: `unload`,
-      token,
-      semantics: subsetSemantics(options as unknown as LoadSubsetOptions),
-      exactLoadedObject,
-    })
-  }
-
-  /** Callable for today's owner boundary; properties are the crash-only owner. */
-  readonly boundary = Object.assign(
-    (options: TransportedLoadSubsetOptions) => this.loadSubset(options),
-    {
-      loadSubset: this.loadSubset,
-      unloadSubset: this.unloadSubset,
-      onError: () => {},
-    },
-  )
-
-  snapshot() {
-    return {
-      loads: this.events.filter(({ phase }) => phase === `load`).length,
-      unloads: this.events.filter(({ phase }) => phase === `unload`).length,
-      active: this.active.size,
-      exactUnloads: this.events
-        .filter(
-          (event): event is RemoteLeaseEvent & { phase: `unload` } =>
-            event.phase === `unload`,
-        )
-        .every(({ exactLoadedObject }) => exactLoadedObject === true),
-    }
-  }
-}
-
-type RemoteLeaseTakeoverTrace = {
-  initialOwnerAfterAcquire: ReturnType<RemoteLeaseOwnerLedger[`snapshot`]>
-  retiredOwnerAfterTakeover: ReturnType<RemoteLeaseOwnerLedger[`snapshot`]>
-  newOwnerAfterTakeover: ReturnType<RemoteLeaseOwnerLedger[`snapshot`]>
-  newOwnerAfterRelease: ReturnType<RemoteLeaseOwnerLedger[`snapshot`]>
-}
-
-type RemoteLeaseTakeoverViolation = {
-  checkpoint: string
-  field: keyof ReturnType<RemoteLeaseOwnerLedger[`snapshot`]>
-  expected: number | boolean
-  actual: number | boolean
-}
-
-const expectedRemoteLeaseTakeoverTrace: RemoteLeaseTakeoverTrace = {
-  initialOwnerAfterAcquire: {
-    loads: 1,
-    unloads: 0,
-    active: 1,
-    exactUnloads: true,
-  },
-  retiredOwnerAfterTakeover: {
-    loads: 1,
-    unloads: 1,
-    active: 0,
-    exactUnloads: true,
-  },
-  newOwnerAfterTakeover: {
-    loads: 1,
-    unloads: 0,
-    active: 1,
-    exactUnloads: true,
-  },
-  newOwnerAfterRelease: {
-    loads: 1,
-    unloads: 1,
-    active: 0,
-    exactUnloads: true,
-  },
-}
-
-function remoteLeaseTakeoverViolations(
-  actual: RemoteLeaseTakeoverTrace,
-): Array<RemoteLeaseTakeoverViolation> {
-  const violations: Array<RemoteLeaseTakeoverViolation> = []
-  for (const checkpoint of Object.keys(
-    expectedRemoteLeaseTakeoverTrace,
-  ) as Array<keyof RemoteLeaseTakeoverTrace>) {
-    const expected = expectedRemoteLeaseTakeoverTrace[checkpoint]
-    for (const field of Object.keys(expected) as Array<keyof typeof expected>) {
-      if (actual[checkpoint][field] !== expected[field]) {
-        violations.push({
-          checkpoint,
-          field,
-          expected: expected[field],
-          actual: actual[checkpoint][field],
-        })
-      }
-    }
-  }
-  return violations
-}
-
-type CollectionScopedLeaseSnapshot = Record<
-  `alpha` | `beta`,
-  { loads: number; unloads: number; active: number }
->
-
-function collectionScopedLeaseViolations(
-  actual: CollectionScopedLeaseSnapshot,
-  expected: CollectionScopedLeaseSnapshot,
-): Array<string> {
-  const violations: Array<string> = []
-  for (const collectionId of [`alpha`, `beta`] as const) {
-    for (const field of [`loads`, `unloads`, `active`] as const) {
-      if (actual[collectionId][field] !== expected[collectionId][field]) {
-        violations.push(`${collectionId}:${field}`)
-      }
-    }
-  }
-  return violations
-}
 
 type RemoteLeaseHistoryTrace = {
   firstAfterAcquire: ReturnType<RemoteLeaseOwnerLedger[`snapshot`]>
@@ -899,26 +706,7 @@ function remoteLeaseHistoryViolations(
 }
 
 describe(`remote subset ownership lease oracle`, () => {
-  it(`calibrates collection-scoped acquisition identity against a global-id mutant`, () => {
-    oracleRoute(`calibration`)
-    const expected: CollectionScopedLeaseSnapshot = {
-      alpha: { loads: 1, unloads: 0, active: 1 },
-      beta: { loads: 1, unloads: 0, active: 1 },
-    }
-    expect(collectionScopedLeaseViolations(expected, expected)).toEqual([])
-    expect(
-      collectionScopedLeaseViolations(
-        {
-          alpha: { loads: 2, unloads: 0, active: 2 },
-          beta: { loads: 1, unloads: 0, active: 1 },
-        },
-        expected,
-      ),
-    ).toEqual([`alpha:loads`, `alpha:active`])
-  })
-
-  it(`keeps reused option identities independent per collection across bounded histories`, async () => {
-    oracleRoute(`fixed history`)
+  async function runReusedOptionIdentities(): Promise<void> {
     type Action = {
       kind: `ensure` | `release`
       collectionId: `alpha` | `beta`
@@ -1057,10 +845,29 @@ describe(`remote subset ownership lease oracle`, () => {
         ],
       ])
     }
+  }
+  oracleProperty({
+    id: `browser-coordinator.collection-scoped-lease`,
+    law: {
+      ...coordinatorLaw,
+      limits: `The bounded reused-option-identity histories across two collections.`,
+    },
+    owns: [`src/browser-coordinator.ts`],
+    histories: [
+      {
+        name: `keeps reused option identities independent per collection across bounded histories`,
+      },
+    ],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(coordinatorJudgment, plan, observe, () =>
+        runReusedOptionIdentities(),
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  it(`retains the outer Collection acquisition across leader takeover and releases both owner acquisition leases exactly`, async () => {
-    oracleRoute(`fixed history`)
+  async function runRemoteLeaseTakeover(): Promise<void> {
     type Todo = { id: string; title: string }
     const firstOwner = new RemoteLeaseOwnerLedger()
     const secondOwner = new RemoteLeaseOwnerLedger()
@@ -1190,40 +997,26 @@ describe(`remote subset ownership lease oracle`, () => {
         },
       ],
     ])
-  })
-
-  it(`calibrates the lease checker against leak, missing replay, and inexact release mutants`, () => {
-    oracleRoute(`calibration`)
-    expect(
-      remoteLeaseTakeoverViolations(expectedRemoteLeaseTakeoverTrace),
-    ).toEqual([])
-    const mutant: RemoteLeaseTakeoverTrace = structuredClone(
-      expectedRemoteLeaseTakeoverTrace,
-    )
-    mutant.retiredOwnerAfterTakeover = {
-      loads: 1,
-      unloads: 0,
-      active: 1,
-      exactUnloads: true,
-    }
-    mutant.newOwnerAfterTakeover = {
-      loads: 0,
-      unloads: 0,
-      active: 0,
-      exactUnloads: true,
-    }
-    mutant.newOwnerAfterRelease.exactUnloads = false
-    expect(
-      remoteLeaseTakeoverViolations(mutant).map(
-        ({ checkpoint, field }) => `${checkpoint}:${field}`,
+  }
+  oracleProperty({
+    id: `browser-coordinator.remote-lease-takeover`,
+    law: {
+      ...coordinatorLaw,
+      limits: `One leader takeover with a surviving outer Collection acquisition.`,
+    },
+    owns: [`src/browser-coordinator.ts`],
+    histories: [
+      {
+        name: `retains the outer Collection acquisition across leader takeover and releases both owner acquisition leases exactly`,
+      },
+    ],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(coordinatorJudgment, plan, observe, () =>
+        runRemoteLeaseTakeover(),
       ),
-    ).toEqual([
-      `retiredOwnerAfterTakeover:unloads`,
-      `retiredOwnerAfterTakeover:active`,
-      `newOwnerAfterTakeover:loads`,
-      `newOwnerAfterTakeover:active`,
-      `newOwnerAfterRelease:exactUnloads`,
-    ])
+    check: forwardAssertionJudgment,
   })
 
   function createRemoteLeaseJudgment() {
@@ -1455,6 +1248,7 @@ describe(`remote subset ownership lease oracle`, () => {
       remoteLeaseHistoryArbitrary,
       {
         id: 'browser-coordinator.remote-lease',
+        owns: [`src/browser-coordinator.ts`],
         runs: RUNS,
         fixedSeed: FIXED_SEED,
         examples: [
@@ -1475,58 +1269,6 @@ describe(`remote subset ownership lease oracle`, () => {
     )
   }
 })
-
-type RawCollectionSnapshot = {
-  registryRowCount: number
-  schemaVersion: number
-  resetEpoch: number
-  rowCount: number
-}
-
-type RawSnapshotViolation = {
-  field: keyof RawCollectionSnapshot
-  expected: number
-  actual: number
-}
-
-function rawSnapshotViolations(
-  actual: RawCollectionSnapshot,
-  expected: RawCollectionSnapshot,
-): Array<RawSnapshotViolation> {
-  return (
-    [`registryRowCount`, `schemaVersion`, `resetEpoch`, `rowCount`] as const
-  ).flatMap((field) =>
-    actual[field] === expected[field]
-      ? []
-      : [{ field, expected: expected[field], actual: actual[field] }],
-  )
-}
-
-type FreshInitOutcome =
-  { status: `fulfilled` } | { status: `rejected`; error: string }
-
-type FreshInitViolation =
-  | { kind: `missing-outcome`; index: number }
-  | { kind: `unexpected-outcome`; index: number }
-  | { kind: `rejected`; index: number; error: string }
-
-function freshInitViolations(
-  outcomes: ReadonlyArray<FreshInitOutcome>,
-): Array<FreshInitViolation> {
-  const violations: Array<FreshInitViolation> = []
-  for (let index = 0; index < 2; index++) {
-    const outcome = outcomes[index]
-    if (!outcome) {
-      violations.push({ kind: `missing-outcome`, index })
-    } else if (outcome.status === `rejected`) {
-      violations.push({ kind: `rejected`, index, error: outcome.error })
-    }
-  }
-  for (let index = 2; index < outcomes.length; index++) {
-    violations.push({ kind: `unexpected-outcome`, index })
-  }
-  return violations
-}
 
 async function readRawCollectionSnapshot(
   database: BrowserWASQLiteDatabase,
@@ -1558,8 +1300,7 @@ async function readRawCollectionSnapshot(
 }
 
 describe(`per-collection adapter and SQLite-state oracle`, () => {
-  it(`preserves alpha rows, schema, and reset epoch when beta registers a different adapter`, async () => {
-    oracleRoute(`fixed history`)
+  async function runSecondAdapterRegistration(): Promise<void> {
     let directory: string | undefined
     let database: BrowserWASQLiteDatabase | undefined
     let coordinator: BrowserCollectionCoordinator | undefined
@@ -1652,10 +1393,29 @@ describe(`per-collection adapter and SQLite-state oracle`, () => {
         },
       ],
     ])
+  }
+  oracleProperty({
+    id: `browser-coordinator.adapter-isolation`,
+    law: {
+      ...coordinatorLaw,
+      limits: `Two collections in one wa-sqlite database, the second registering a different adapter.`,
+    },
+    owns: [`src/browser-coordinator.ts`],
+    histories: [
+      {
+        name: `preserves alpha rows, schema, and reset epoch when beta registers a different adapter`,
+      },
+    ],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(coordinatorJudgment, plan, observe, () =>
+        runSecondAdapterRegistration(),
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  it(`initializes one fresh collection safely across matching adapter instances`, async () => {
-    oracleRoute(`fixed history`)
+  async function runFreshCollectionInit(): Promise<void> {
     let directory: string | undefined
     let database: BrowserWASQLiteDatabase | undefined
 
@@ -1727,169 +1487,28 @@ describe(`per-collection adapter and SQLite-state oracle`, () => {
         },
       ],
     ])
-  })
-
-  it(`calibrates SQLite-state and fresh-registry checks against mutant results`, () => {
-    oracleRoute(`calibration`)
-    const expected: RawCollectionSnapshot = {
-      registryRowCount: 1,
-      schemaVersion: 11,
-      resetEpoch: 0,
-      rowCount: 1,
-    }
-    expect(rawSnapshotViolations(expected, expected)).toEqual([])
-    expect(
-      rawSnapshotViolations(
-        {
-          registryRowCount: 0,
-          schemaVersion: 22,
-          resetEpoch: 1,
-          rowCount: 0,
-        },
-        expected,
-      ).map(({ field }) => field),
-    ).toEqual([`registryRowCount`, `schemaVersion`, `resetEpoch`, `rowCount`])
-
-    const allowed: Array<FreshInitOutcome> = [
-      { status: `fulfilled` },
-      { status: `fulfilled` },
-    ]
-    expect(freshInitViolations(allowed)).toEqual([])
-    expect(
-      freshInitViolations([
-        allowed[0]!,
-        {
-          status: `rejected`,
-          error: `UNIQUE constraint failed: collection_registry`,
-        },
-      ]),
-    ).toEqual([
+  }
+  oracleProperty({
+    id: `browser-coordinator.fresh-init`,
+    law: {
+      ...coordinatorLaw,
+      limits: `One fresh collection initialized concurrently through matching adapter instances.`,
+    },
+    owns: [`src/browser-coordinator.ts`],
+    histories: [
       {
-        kind: `rejected`,
-        index: 1,
-        error: `UNIQUE constraint failed: collection_registry`,
+        name: `initializes one fresh collection safely across matching adapter instances`,
       },
-    ])
-    expect(freshInitViolations([allowed[0]!])).toEqual([
-      { kind: `missing-outcome`, index: 1 },
-    ])
+    ],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(coordinatorJudgment, plan, observe, () =>
+        runFreshCollectionInit(),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
-
-type RoutedApply = {
-  phase: `initial-owner` | `after-takeover`
-  collectionId: CollectionName
-  adapterId: string
-}
-
-type RouteViolation = {
-  kind: `missing-apply` | `duplicate-apply` | `misrouted-apply`
-  checkpoint: RoutedApply[`phase`]
-  collectionId: CollectionName
-  expectedAdapterId: string
-  actualAdapterIds: Array<string>
-}
-
-type CoordinatorRouteObservation = {
-  phase: RoutedApply[`phase`]
-  operation: `remote-subset` | `index` | `pull`
-  collectionId: CollectionName
-  calls: Array<{
-    adapterId: string
-    collectionId: string
-    argument?: SemanticValue
-  }>
-  result: SemanticValue
-}
-
-type CoordinatorRouteViolation = {
-  operation: CoordinatorRouteObservation[`operation`]
-  checkpoint: CoordinatorRouteObservation[`phase`]
-  collectionId: CollectionName
-  field: `calls` | `result`
-  expected: SemanticValue
-  actual: SemanticValue
-}
-
-function coordinatorRouteViolations(
-  observed: ReadonlyArray<CoordinatorRouteObservation>,
-  expected: ReadonlyArray<CoordinatorRouteObservation>,
-): Array<CoordinatorRouteViolation> {
-  const violations: Array<CoordinatorRouteViolation> = []
-  for (const expectedCell of expected) {
-    const actualCell = observed.find(
-      ({ phase, operation, collectionId }) =>
-        phase === expectedCell.phase &&
-        operation === expectedCell.operation &&
-        collectionId === expectedCell.collectionId,
-    )
-    for (const field of [`calls`, `result`] as const) {
-      const expectedValue = semanticValue(expectedCell[field])
-      const actualValue = semanticValue(actualCell?.[field] ?? [])
-      if (JSON.stringify(actualValue) !== JSON.stringify(expectedValue)) {
-        violations.push({
-          operation: expectedCell.operation,
-          checkpoint: expectedCell.phase,
-          collectionId: expectedCell.collectionId,
-          field,
-          expected: expectedValue,
-          actual: actualValue,
-        })
-      }
-    }
-  }
-  return violations
-}
-
-function routeViolationDiscriminant(violation: RouteViolation): string {
-  return `${violation.kind}:${violation.checkpoint}:${violation.collectionId}`
-}
-
-function routeViolations(
-  observed: ReadonlyArray<RoutedApply>,
-  expected: ReadonlyArray<RoutedApply>,
-): Array<RouteViolation> {
-  const violations: Array<RouteViolation> = []
-  for (const expectedRoute of expected) {
-    const actualAdapterIds = observed
-      .filter(
-        ({ phase, collectionId }) =>
-          phase === expectedRoute.phase &&
-          collectionId === expectedRoute.collectionId,
-      )
-      .map(({ adapterId }) => adapterId)
-    if (actualAdapterIds.length === 0) {
-      violations.push({
-        kind: `missing-apply`,
-        checkpoint: expectedRoute.phase,
-        collectionId: expectedRoute.collectionId,
-        expectedAdapterId: expectedRoute.adapterId,
-        actualAdapterIds,
-      })
-      continue
-    }
-    if (actualAdapterIds.length !== 1) {
-      violations.push({
-        kind: `duplicate-apply`,
-        checkpoint: expectedRoute.phase,
-        collectionId: expectedRoute.collectionId,
-        expectedAdapterId: expectedRoute.adapterId,
-        actualAdapterIds,
-      })
-      continue
-    }
-    if (actualAdapterIds[0] !== expectedRoute.adapterId) {
-      violations.push({
-        kind: `misrouted-apply`,
-        checkpoint: expectedRoute.phase,
-        collectionId: expectedRoute.collectionId,
-        expectedAdapterId: expectedRoute.adapterId,
-        actualAdapterIds,
-      })
-    }
-  }
-  return violations
-}
 
 // Collection identity and elected ownership jointly select the adapter. The
 // model deliberately uses Maps instead of the coordinator's routing storage.
@@ -2003,74 +1622,7 @@ async function requestBothCollections(
 }
 
 describe(`generated collection-route histories`, () => {
-  it(`calibrates collection-key comparison against one peer-routed apply`, () => {
-    oracleRoute(`calibration`)
-    const expected: Array<RoutedApply> = [
-      {
-        phase: `initial-owner`,
-        collectionId: `alpha`,
-        adapterId: `leader-alpha`,
-      },
-      {
-        phase: `initial-owner`,
-        collectionId: `beta`,
-        adapterId: `leader-beta`,
-      },
-    ]
-    const misrouted: Array<RoutedApply> = [
-      expected[0]!,
-      { ...expected[1]!, adapterId: `leader-alpha` },
-    ]
-
-    expect(routeViolations(expected, expected)).toEqual([])
-    const [violation] = routeViolations(misrouted, expected)
-    expect(violation).toEqual({
-      kind: `misrouted-apply`,
-      checkpoint: `initial-owner`,
-      collectionId: `beta`,
-      expectedAdapterId: `leader-beta`,
-      actualAdapterIds: [`leader-alpha`],
-    })
-    expect(routeViolationDiscriminant(violation!)).toBe(
-      `misrouted-apply:initial-owner:beta`,
-    )
-
-    const routedCell: CoordinatorRouteObservation = {
-      phase: `initial-owner`,
-      operation: `index`,
-      collectionId: `alpha`,
-      calls: [
-        {
-          adapterId: `leader-alpha`,
-          collectionId: `alpha`,
-          argument: semanticValue({ signature: `alpha-index` }),
-        },
-      ],
-      result: semanticValue({ status: `fulfilled` }),
-    }
-    expect(coordinatorRouteViolations([routedCell], [routedCell])).toEqual([])
-    expect(
-      coordinatorRouteViolations(
-        [{ ...routedCell, calls: [] }],
-        [routedCell],
-      ).map(({ operation, checkpoint, collectionId, field }) => ({
-        operation,
-        checkpoint,
-        collectionId,
-        field,
-      })),
-    ).toEqual([
-      {
-        operation: `index`,
-        checkpoint: `initial-owner`,
-        collectionId: `alpha`,
-        field: `calls`,
-      },
-    ])
-  })
-
-  it(`routes every adapter-bound RPC by collection before and after leadership transfer`, async () => {
-    oracleRoute(`fixed history`)
+  async function runAdapterBoundRpcRouting(): Promise<void> {
     const makePullResult = (
       marker: string,
       latestRowVersion: number,
@@ -2317,6 +1869,33 @@ describe(`generated collection-route histories`, () => {
         },
       ],
     ])
+  }
+  oracleProperty({
+    id: `browser-coordinator.adapter-bound-rpc-routing`,
+    law: {
+      ...coordinatorLaw,
+      limits: `Two collections, a leader, a follower, and a requester over the controlled BroadcastChannel, before and after one leadership transfer.`,
+    },
+    owns: [`src/browser-coordinator.ts`],
+    histories: [
+      {
+        name: `routes every adapter-bound RPC by collection before and after leadership transfer`,
+      },
+    ],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(coordinatorJudgment, plan, observe, async () => {
+        try {
+          await runAdapterBoundRpcRouting()
+        } finally {
+          // The determinism test runs this history twice in one test, so the
+          // fixture that the hooks reset between tests is reset here too.
+          await resetCoordinatorFixture()
+          prepareCoordinatorFixture()
+        }
+      }),
+    check: forwardAssertionJudgment,
   })
 
   function createRoutingJudgment() {
@@ -2564,6 +2143,7 @@ describe(`generated collection-route histories`, () => {
       routingHistoryArbitrary,
       {
         id: 'browser-coordinator.routing',
+        owns: [`src/browser-coordinator.ts`],
         runs: RUNS,
         fixedSeed: FIXED_SEED,
         beforeCampaign: () => {
@@ -2576,25 +2156,8 @@ describe(`generated collection-route histories`, () => {
   }
 })
 
-type OwnershipObservation = {
-  collectionId: string
-  ownerAtCall?: string
-}
-
-// A source commit may apply only while the elected persistence owner holds the
-// writer boundary. Collection visibility alone does not establish ownership.
-function findUnownedWrites(
-  observations: ReadonlyArray<OwnershipObservation>,
-  electedOwner: string,
-): Array<OwnershipObservation> {
-  return observations.filter(
-    (observation) => observation.ownerAtCall !== electedOwner,
-  )
-}
-
 describe(`sync-ingested write ownership oracle`, () => {
-  it(`applies a source commit through the elected persistence owner after leadership changes`, async () => {
-    oracleRoute(`fixed history`)
+  async function runOwnedSourceCommit(): Promise<void> {
     type Todo = { id: string; title: string }
     type SourceParams = Parameters<SyncConfig<Todo, string>[`sync`]>[0]
 
@@ -2704,19 +2267,26 @@ describe(`sync-ingested write ownership oracle`, () => {
         },
       ],
     ])
-  })
-
-  it(`calibrates the owner checker against one bypass and one owned write`, () => {
-    oracleRoute(`calibration`)
-    expect(
-      findUnownedWrites(
-        [
-          { collectionId: `alpha`, ownerAtCall: `tab-b` },
-          { collectionId: `beta` },
-        ],
-        `tab-b`,
+  }
+  oracleProperty({
+    id: `browser-coordinator.write-ownership`,
+    law: {
+      ...coordinatorLaw,
+      limits: `One source commit after leadership changes, with every adapter write observed.`,
+    },
+    owns: [`src/browser-coordinator.ts`],
+    histories: [
+      {
+        name: `applies a source commit through the elected persistence owner after leadership changes`,
+      },
+    ],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(coordinatorJudgment, plan, observe, () =>
+        runOwnedSourceCommit(),
       ),
-    ).toEqual([{ collectionId: `beta` }])
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -3002,38 +2572,23 @@ describe(`follower remote-demand settlement across real tabs`, () => {
       for (const apply of [`ok`, `fails`] as const)
         for (const consumer of [`live-query`, `load`] as const)
           histories.push({ source, placement, apply, consumer })
-  it.each(histories)(
-    `settles a follower $consumer with the owner's rows: $source source, $placement, apply $apply`,
-    (history) => {
-      oracleRoute(`case`)
-      return assertRealTabFollowerHistory(history)
+  oracleProperty({
+    id: `browser-coordinator.real-tab-follower`,
+    law: {
+      ...coordinatorLaw,
+      limits: `The 16 source, placement, apply, and consumer histories across real tabs.`,
     },
-    20_000,
-  )
-})
-
-// The parts this file defines. The checks compare production observations
-// with the expectations that the models and grammars produce; the models are
-// independent of the coordinator and its adapter routing. Declared last
-// because the model classes are defined above and cannot be read earlier.
-declareOracle({
-  owns: [`src/browser-coordinator.ts`],
-  check: [
-    subsetWireViolations,
-    subsetAckViolations,
-    remoteLeaseTakeoverViolations,
-    collectionScopedLeaseViolations,
-    remoteLeaseHistoryViolations,
-    rawSnapshotViolations,
-    freshInitViolations,
-    coordinatorRouteViolations,
-    routeViolations,
-    findUnownedWrites,
-    runRealTabFollowerHistory,
-  ],
-  model: [
-    RemoteLeaseOwnerLedger,
-    PerCollectionRouteOracle,
-    expectedRealTabFollower,
-  ],
+    owns: [`src/browser-coordinator.ts`],
+    histories,
+    label: ({ source, placement, apply, consumer }) =>
+      `settles a follower ${consumer} with the owner's rows: ${source} source, ${placement}, apply ${apply}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(coordinatorJudgment, plan, observe, () =>
+        assertRealTabFollowerHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+    timeout: 20_000,
+  })
 })

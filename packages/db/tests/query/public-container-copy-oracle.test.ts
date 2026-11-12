@@ -11,7 +11,6 @@ import {
 import { materializeCompilation } from '../../src/query/live/materialized-pipeline.js'
 import { Query, eq, include } from '../../src/query/index.js'
 import { oracleProperty, pass, violation } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { Observation, Verdict } from '../oracle-config.js'
 import type { ValueResolver } from '../../src/query/live/materialized-pipeline.js'
@@ -80,12 +79,6 @@ function expectCopyFollowsLaw(
       expect(descriptors[key]?.value).toBe(descriptor.value)
   }
 }
-
-declareOracle({
-  model: [expectedCopy],
-  check: [expectCopyFollowsLaw, checkCopyPrograms, checkCopyCampaign],
-  grammar: [programs, inputGrammar],
-})
 
 // Compile a real include plan, then test its resolver on supplied public
 // values. The generic path also places the array below a record, so the driver

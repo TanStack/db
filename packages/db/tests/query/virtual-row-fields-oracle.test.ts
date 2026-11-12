@@ -62,7 +62,7 @@
  * observations. `checkWithCleanup` retains the primary mismatch as the cause
  * when Collection cleanup also fails and attempts every cleanup.
  */
-import { afterAll, describe, expect, test, vi } from 'vitest'
+import { afterAll, describe, expect, vi } from 'vitest'
 import {
   Query,
   count,
@@ -75,11 +75,14 @@ import {
 import { createCollection } from '../../src/collection/index.js'
 import { hasVirtualProps } from '../../src/virtual-props.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions } from '../utils.js'
-import { oracleReplayRequested, oracleRoute } from '../oracle-config.js'
+import { oracleProperty, oracleReplayRequested } from '../oracle-config.js'
 import {
-  metadataCollisionCases,
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
+import {
   metadataCompositions,
   metadataProjectionShapes,
 } from './virtual-row-fields-grammar-oracle.js'
@@ -87,16 +90,43 @@ import {
   checkWithCleanup,
   virtualFieldNames,
 } from './virtual-row-fields-support.js'
-import { expectedSourceMetadata } from './virtual-row-fields-source-oracle.js'
 import {
   advanceFacadeIntervals,
   checkFacadeIntervals,
 } from './includes-collection-driver-oracle.js'
+import {
+  boundaryPublicationHistories,
+  captureMetadataRows,
+  checkAttributedRows,
+  checkBoundaryPublication,
+  checkInlineMetadataValues,
+  checkMetadataPublications,
+  checkNullableSelection,
+  checkRootMetadata,
+  collisionCases,
+  expectedAttributedRows,
+  expectedBoundaryPublication,
+  expectedInlineMetadataValues,
+  expectedJoinedMetadata,
+  expectedMetadataChanges,
+  expectedNullableSelection,
+  sourceOwnsMetadata,
+} from './virtual-row-fields-model-oracle.js'
 import type { QueryBuilder } from '../../src/query/builder/index.js'
 import type {
   FacadeIntervals,
   MetadataFacade,
 } from './includes-collection-driver-oracle.js'
+
+import type {
+  AttributionContext,
+  AttributionKey,
+  AttributionRow,
+  BoundaryPublicationContext,
+  BoundaryPublicationHistory,
+  MetadataBatch,
+  MetadataResult,
+} from './virtual-row-fields-model-oracle.js'
 
 type Profile = { label: string }
 
@@ -145,112 +175,8 @@ function expectPublishedFieldClassification(
   }
 }
 
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/btree-index.ts',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/virtual-props.ts#hasVirtualProps',
-  ],
-  check: [
-    expectPublishedFieldClassification,
-    checkRootMetadata,
-    checkAttributedRows,
-  ],
-  model: [expectsVirtualFields, sourceOwnsMetadata, expectedAttributedRows],
-})
-
 // The independent non-key attribution law uses authoring shape, never selected
 // values. The published key is supplied separately by the receiving identity law.
-function sourceOwnsMetadata(shape: string): boolean {
-  return shape === `structured-spread` || shape === `functional-direct`
-}
-
-function checkRootMetadata(
-  actual: Record<(typeof virtualFieldNames)[number], unknown>,
-  expected: Record<(typeof virtualFieldNames)[number], unknown>,
-): void {
-  for (const field of virtualFieldNames)
-    expect(actual[field], field).toBe(expected[field])
-}
-
-type AttributionKey = string | number
-type AttributionRow = { id: AttributionKey; parentId: string; label: string }
-// The finite grammar varies compiler context types, but every accepted root
-// has these ordinary fields. Erase only that context union at the driver edge;
-// the full runtime shape remains independently checked below.
-type AttributionContext = {
-  schema: {}
-  baseSchema: {}
-  fromSourceName: string
-  result: { id: AttributionKey; label: string }
-  hasResult: true
-}
-// Model rows are authored source facts, never sampled from the production
-// Collection. Pending overlays affect only their named key; settlement without
-// source confirmation restores the authored base (optimistic-history contract).
-function expectedAttributedRows(
-  rows: ReadonlyArray<AttributionRow>,
-  shape: string,
-  pending: ReadonlySet<AttributionKey>,
-  sourceId: string,
-  outputId: string,
-  outputKey: (id: AttributionKey) => unknown,
-  // Single-source rows keep their source key. Joined rows use their actual
-  // default pair or explicit custom key (maintainer decision, November 5).
-  sourceKey: (id: AttributionKey) => AttributionKey = (id) => id,
-) {
-  return rows.map((row) => ({
-    ordinary:
-      shape === `structured-projection`
-        ? {
-            id: row.id,
-            label: row.label,
-            hasPendingWrites: pending.has(row.id),
-          }
-        : shape === `functional-projection`
-          ? { id: row.id, label: row.label }
-          : { ...row },
-    metadata: sourceOwnsMetadata(shape)
-      ? expectedSourceMetadata(sourceKey(row.id), sourceId, pending.has(row.id))
-      : {
-          $key: outputKey(row.id),
-          $collectionId: outputId,
-          $hasPendingWrites: false,
-          $origin: `remote`,
-        },
-  }))
-}
-function checkAttributedRows(
-  actual: ReadonlyArray<object>,
-  expected: ReturnType<typeof expectedAttributedRows>,
-): void {
-  const observed = actual.map((row) => ({
-    ordinary: Object.fromEntries(
-      Object.entries(row).filter(
-        ([name]) => !virtualFieldNames.some((field) => field === name),
-      ),
-    ),
-    metadata: Object.fromEntries(
-      virtualFieldNames.map((field) => [
-        field,
-        (row as Record<string, unknown>)[field],
-      ]),
-    ),
-  }))
-  const identity = (row: { ordinary: object }) => {
-    const { id } = row.ordinary as { id: unknown }
-    return `${typeof id}:${String(id)}`
-  }
-  const byId = (a: { ordinary: object }, b: { ordinary: object }) =>
-    identity(a).localeCompare(identity(b))
-  // Sorting permits unspecified result order but preserves every occurrence,
-  // field and extra row. No Map can collapse duplicate contributions here.
-  expect(observed.sort(byId)).toEqual([...expected].sort(byId))
-}
-
-// Each finite history has one numeric token. A state keeps that token once,
-// so repeated observations preserve the original per-history checkpoint count.
 const metadataHistoriesByState = new Map<string, Set<number>>(
   [
     `joined-pending-source`,
@@ -309,11 +235,6 @@ afterAll(() => {
   }
 })
 
-// Both boolean values are legal authored collisions. True distinguishes an
-// output-owned row's mandatory false pending flag; false distinguishes a
-// pending source-owned row. Use a legal local origin to challenge remote roots.
-const collisionCases = metadataCollisionCases
-
 /**
  * Publication distinguishes an implicit source row from an implicit joined
  * namespace. The former retains its source attribution; the latter is a new
@@ -333,182 +254,6 @@ const collisionCases = metadataCollisionCases
  * settlement without confirmation, and a later remote source update. It does
  * not claim framework timing, rejected writes, or arbitrary include depth.
  */
-type BoundaryPublicationHistory = {
-  kind:
-    | `implicit-single`
-    | `implicit-join`
-    | `inline-return`
-    | `grouped`
-    | `aggregate`
-  composition: `direct` | `query-ref`
-  pendingSource: `parent` | `child`
-  inline: `none` | `array` | `singleton`
-  collision: string
-  authoredPending: boolean
-}
-const boundaryPublicationHistories: Array<BoundaryPublicationHistory> = [
-  ...([`grouped`, `aggregate`] as const).flatMap((kind) =>
-    ([`direct`, `query-ref`] as const).map((composition) => ({
-      kind,
-      composition,
-      pendingSource: `child` as const,
-      inline: `none` as const,
-      collision: `none`,
-      authoredPending: false,
-    })),
-  ),
-  ...([`implicit-single`, `implicit-join`] as const).flatMap((kind) =>
-    ([`direct`, `query-ref`] as const).flatMap((composition) =>
-      (kind === `implicit-single`
-        ? ([`child`] as const)
-        : ([`parent`, `child`] as const)
-      ).map((pendingSource) => ({
-        kind,
-        composition,
-        pendingSource,
-        inline: `none` as const,
-        collision: `none`,
-        authoredPending: false,
-      })),
-    ),
-  ),
-  ...([`none`, `array`, `singleton`] as const).flatMap((inline) =>
-    collisionCases.flatMap(({ collision, authoredPending }) =>
-      ([`direct`, `query-ref`] as const).flatMap((composition) =>
-        ([`parent`, `child`] as const).map((pendingSource) => ({
-          kind: `inline-return` as const,
-          inline,
-          collision,
-          authoredPending,
-          composition,
-          pendingSource,
-        })),
-      ),
-    ),
-  ),
-]
-type BoundaryPublishedRow = AttributionRow & { children?: unknown }
-type BoundaryJoinedRow = {
-  parent: AttributionRow
-  chosen: AttributionRow
-}
-type BoundaryPublicationContext = Omit<AttributionContext, `result`> & {
-  result:
-    | BoundaryPublishedRow
-    | BoundaryJoinedRow
-    | { id: AttributionKey; total: number }
-}
-// This grammar also models joined namespaces and inline children. Keep its
-// carrier open to those shapes; exact fields still come from the model below.
-type BoundaryMetadataResult = {
-  ordinary: object
-  metadata: ReturnType<typeof expectedAttributedRows>[number][`metadata`]
-}
-
-// A namespace combines two source values rather than selecting either one.
-// Returning an actual source input, including a spread projected upstream,
-// retains that input's source owner. No selected metadata values choose it.
-function expectedBoundaryPublication(
-  history: BoundaryPublicationHistory,
-  parent: AttributionRow,
-  children: ReadonlyArray<AttributionRow>,
-  pending: ReadonlySet<AttributionKey>,
-  parentId: string,
-  childId: string,
-  outputId: string,
-): Array<BoundaryMetadataResult> {
-  if (history.kind === `grouped` || history.kind === `aggregate`) {
-    // Group membership and counts follow authored rows, independent of their
-    // metadata. No source row is selected whole, so publication owns metadata.
-    const counts = new Map<string, number>()
-    for (const child of children) {
-      const id = history.kind === `aggregate` ? `all` : child.parentId
-      counts.set(id, (counts.get(id) ?? 0) + 1)
-    }
-    return [...counts].map(([id, total]) => ({
-      ordinary: { id, total },
-      metadata: expectedSourceMetadata(`output-${id}`, outputId, false),
-    }))
-  }
-  if (history.kind === `implicit-single`)
-    return expectedAttributedRows(
-      children,
-      `functional-direct`,
-      pending,
-      childId,
-      outputId,
-      (id) => id,
-    )
-  if (history.kind === `implicit-join`)
-    return children
-      .filter((child) => child.parentId === parent.id)
-      .map((child) => ({
-        ordinary: {
-          parent: {
-            ...parent,
-            ...expectedSourceMetadata(
-              parent.id,
-              parentId,
-              pending.has(parent.id),
-            ),
-          },
-          chosen: {
-            ...child,
-            ...expectedSourceMetadata(child.id, childId, pending.has(child.id)),
-          },
-        },
-        metadata: expectedSourceMetadata(`result-${child.id}`, outputId, false),
-      }))
-  const selected = expectedAttributedRows(
-    [parent],
-    `functional-direct`,
-    pending,
-    parentId,
-    outputId,
-    (id) => id,
-  )[0]!
-  if (history.inline !== `none`) {
-    const values = children
-      .filter((child) => child.parentId === parent.id)
-      .map(({ id, label }) => ({ id, label }))
-    return [
-      {
-        ...selected,
-        ordinary: {
-          ...selected.ordinary,
-          children: history.inline === `singleton` ? values[0] : values,
-        },
-      },
-    ]
-  }
-  return [selected]
-}
-
-// Compare physical membership keys and every readable row field together.
-// Sorting by the entry key permits unspecified delivery order, while retaining
-// duplicate rows and mismatches between a public row's key and its entry key.
-function checkBoundaryPublication(
-  actual: ReadonlyArray<readonly [AttributionKey, object]>,
-  expected: ReadonlyArray<BoundaryMetadataResult>,
-): void {
-  const order = (
-    a: readonly [AttributionKey, object],
-    b: readonly [AttributionKey, object],
-  ) => `${typeof a[0]}:${a[0]}`.localeCompare(`${typeof b[0]}:${b[0]}`)
-  expect(
-    actual.map(([key, row]) => [key, { ...row }] as const).sort(order),
-  ).toEqual(
-    expected
-      .map(
-        ({ ordinary, metadata }) =>
-          [
-            metadata.$key as AttributionKey,
-            { ...ordinary, ...metadata },
-          ] as const,
-      )
-      .sort(order),
-  )
-}
 const boundaryPublicationCuts = [
   `initial`,
   `held`,
@@ -552,232 +297,218 @@ afterAll(() => {
       ),
     )
 })
-declareOracle({
-  model: [expectedBoundaryPublication],
-  check: [checkBoundaryPublication],
-  grammar: [boundaryPublicationHistories],
-})
-test.each(boundaryPublicationHistories)(
-  `publishes implicit and materialized-input metadata: %j`,
-  async (history) => {
-    oracleRoute(`case`)
-    boundaryPublicationHistory++
-    let parent: AttributionRow = {
-      id: `parent`,
-      parentId: `root`,
-      label: `parent-before`,
-    }
-    let children: Array<AttributionRow> = [
-      { id: `child`, parentId: `parent`, label: `before` },
-      { id: `peer`, parentId: `parent`, label: `untouched` },
-    ]
-    const parents = createCollection(
-      mockSyncCollectionOptions<AttributionRow>({
-        id: `boundary-parent`,
-        getKey: (row) => row.id,
-        initialData: [{ ...parent }],
-      }),
-    )
-    const rows = createCollection(
-      mockSyncCollectionOptions<AttributionRow>({
-        id: `boundary-child`,
-        getKey: (row) => row.id,
-        initialData: children.map((row) => ({ ...row })),
-      }),
-    )
-    rows.createIndex((row) => row.parentId, { indexType: BTreeIndex })
-    const overrides: Record<string, unknown> = {}
-    for (const field of virtualFieldNames)
-      if (history.collision === field || history.collision === `all`)
-        overrides[field] =
-          field === `$hasPendingWrites`
-            ? history.authoredPending
-            : field === `$origin`
-              ? `local`
-              : `authored`
-    const selected = (() => {
-      if (history.kind === `grouped`)
-        return new Query()
-          .from({ chosen: rows })
-          .groupBy(({ chosen }) => chosen.parentId)
-          .select(({ chosen }) => ({
-            id: chosen.parentId,
-            total: count(chosen.id),
-          }))
-      if (history.kind === `aggregate`)
-        return new Query().from({ chosen: rows }).select(({ chosen }) => ({
-          id: `all`,
+// The former case body, unchanged.
+async function judgeBoundaryPublication(
+  history: (typeof boundaryPublicationHistories)[number],
+): Promise<void> {
+  boundaryPublicationHistory++
+  let parent: AttributionRow = {
+    id: `parent`,
+    parentId: `root`,
+    label: `parent-before`,
+  }
+  let children: Array<AttributionRow> = [
+    { id: `child`, parentId: `parent`, label: `before` },
+    { id: `peer`, parentId: `parent`, label: `untouched` },
+  ]
+  const parents = createCollection(
+    mockSyncCollectionOptions<AttributionRow>({
+      id: `boundary-parent`,
+      getKey: (row) => row.id,
+      initialData: [{ ...parent }],
+    }),
+  )
+  const rows = createCollection(
+    mockSyncCollectionOptions<AttributionRow>({
+      id: `boundary-child`,
+      getKey: (row) => row.id,
+      initialData: children.map((row) => ({ ...row })),
+    }),
+  )
+  rows.createIndex((row) => row.parentId, { indexType: BTreeIndex })
+  const overrides: Record<string, unknown> = {}
+  for (const field of virtualFieldNames)
+    if (history.collision === field || history.collision === `all`)
+      overrides[field] =
+        field === `$hasPendingWrites`
+          ? history.authoredPending
+          : field === `$origin`
+            ? `local`
+            : `authored`
+  const selected = (() => {
+    if (history.kind === `grouped`)
+      return new Query()
+        .from({ chosen: rows })
+        .groupBy(({ chosen }) => chosen.parentId)
+        .select(({ chosen }) => ({
+          id: chosen.parentId,
           total: count(chosen.id),
         }))
-      if (history.kind === `implicit-single`)
-        return new Query().from({ chosen: rows })
-      if (history.kind === `implicit-join`)
-        return new Query()
-          .from({ parent: parents })
-          .innerJoin({ chosen: rows }, ({ parent: p, chosen }) =>
-            eq(p.id, chosen.parentId),
-          )
-      const projected = new Query()
+    if (history.kind === `aggregate`)
+      return new Query().from({ chosen: rows }).select(({ chosen }) => ({
+        id: `all`,
+        total: count(chosen.id),
+      }))
+    if (history.kind === `implicit-single`)
+      return new Query().from({ chosen: rows })
+    if (history.kind === `implicit-join`)
+      return new Query()
         .from({ parent: parents })
-        .select(({ parent: p }) => {
-          const child = new Query()
-            .from({ child: rows })
-            .where(({ child: c }) => eq(c.parentId, p.id))
-            .select(({ child: c }) => ({ id: c.id, label: c.label }))
-          return {
-            ...p,
-            ...overrides,
-            ...(history.inline === `none`
-              ? {}
-              : {
-                  children:
-                    history.inline === `singleton`
-                      ? materialize(child.findOne())
-                      : toArray(child),
-                }),
-          }
-        })
-      return new Query().from({ sub: projected }).fn.select(({ sub }) => sub)
-    })()
-    const live = createLiveQueryCollection({
-      query: () =>
-        (history.composition === `direct`
-          ? selected
-          : new Query().from({
-              outer: selected,
-            })) as unknown as QueryBuilder<BoundaryPublicationContext>,
-      getKey: (row) =>
-        `total` in row
-          ? `output-${row.id}`
-          : `chosen` in row
-            ? `result-${row.chosen.id}`
-            : row.id,
-    })
-    const pending = new Set<AttributionKey>()
-    const failures: Array<unknown> = []
-    const check = (cut: (typeof boundaryPublicationCuts)[number]) => {
-      boundaryPublicationHistoriesByState
-        .get(boundaryPublicationState(history, cut))!
-        .add(boundaryPublicationHistory)
-      try {
-        checkBoundaryPublication(
-          [...live.entries()],
-          expectedBoundaryPublication(
-            history,
-            parent,
-            children,
-            pending,
-            parents.id,
-            rows.id,
-            live.id,
-          ),
+        .innerJoin({ chosen: rows }, ({ parent: p, chosen }) =>
+          eq(p.id, chosen.parentId),
         )
-      } catch (error) {
-        failures.push(
-          new Error(`boundary publication ${cut}`, { cause: error }),
-        )
-      }
-    }
-    let finishMutation = async () => {}
-    await checkWithCleanup(async () => {
-      await live.preload()
-      check(`initial`)
-      const inserting =
-        history.kind === `grouped` || history.kind === `aggregate`
-      const source = history.pendingSource === `parent` ? parents : rows
-      const key = inserting
-        ? `inserted`
-        : history.pendingSource === `parent`
-          ? `parent`
-          : `child`
-      const before =
-        history.pendingSource === `parent` ? { ...parent } : { ...children[0]! }
-      if (inserting)
-        children = [
-          ...children,
-          { id: key, parentId: `parent`, label: `pending` },
-        ]
-      else if (history.pendingSource === `parent`)
-        parent = { ...parent, label: `pending` }
-      else
-        children = children.map((row) =>
-          row.id === key ? { ...row, label: `pending` } : row,
-        )
-      pending.add(key)
-      const mutation = inserting
-        ? source.insert({ id: key, parentId: `parent`, label: `pending` })
-        : source.update(key, (row) => {
-            row.label = `pending`
-          })
-      finishMutation = async () => {
-        source.utils.resolveSync()
-        finishMutation = async () => {}
-        await mutation.when(`settled`)
-      }
-      expect(source.get(key)!.$hasPendingWrites).toBe(true)
-      check(`held`)
-      await finishMutation()
-      pending.clear()
-      if (inserting) children = children.filter((row) => row.id !== key)
-      else if (history.pendingSource === `parent`) parent = before
-      else children = children.map((row) => (row.id === key ? before : row))
-      check(`settled`)
-      const remote = { ...before, id: key, label: `remote-next-use` }
-      source.utils.begin()
-      source.utils.write({
-        type: inserting ? `insert` : `update`,
-        value: remote,
+    const projected = new Query()
+      .from({ parent: parents })
+      .select(({ parent: p }) => {
+        const child = new Query()
+          .from({ child: rows })
+          .where(({ child: c }) => eq(c.parentId, p.id))
+          .select(({ child: c }) => ({ id: c.id, label: c.label }))
+        return {
+          ...p,
+          ...overrides,
+          ...(history.inline === `none`
+            ? {}
+            : {
+                children:
+                  history.inline === `singleton`
+                    ? materialize(child.findOne())
+                    : toArray(child),
+              }),
+        }
       })
-      source.utils.commit()
-      if (inserting) children = [...children, remote]
-      else if (history.pendingSource === `parent`) parent = remote
-      else children = children.map((row) => (row.id === key ? remote : row))
-      check(`remote`)
-      if (failures.length)
-        throw new AggregateError(
-          failures,
-          `Boundary publication comparisons failed`,
-          { cause: failures[0] },
-        )
-    }, [
-      () => finishMutation(),
-      () => live.cleanup(),
-      () => rows.cleanup(),
-      () => parents.cleanup(),
-    ])
-  },
-)
-
-// Calibrate the same comparison against the former source-attribution rule.
-// Mutate one metadata observation at a time; ordinary group values stay valid.
-test.each(
-  boundaryPublicationHistories.filter(
-    ({ kind }) => kind === `grouped` || kind === `aggregate`,
-  ),
-)(`rejects source metadata on a grouped output: %j`, (history) => {
-  oracleRoute(`calibration`)
-  const parent = { id: `parent`, parentId: `root`, label: `parent` }
-  const child = { id: `child`, parentId: `parent`, label: `held` }
-  const expected = expectedBoundaryPublication(
-    history,
-    parent,
-    [child],
-    new Set([child.id]),
-    `parent-source`,
-    `child-source`,
-    `output`,
-  )
-  const sourceMetadata = expectedSourceMetadata(child.id, `child-source`, true)
-  for (const field of virtualFieldNames) {
-    const wrong = expected.map(
-      ({ ordinary, metadata }) =>
-        [
-          metadata.$key as AttributionKey,
-          { ...ordinary, ...metadata, [field]: sourceMetadata[field] },
-        ] as const,
-    )
-    expect(() => checkBoundaryPublication(wrong, expected), field).toThrow()
+    return new Query().from({ sub: projected }).fn.select(({ sub }) => sub)
+  })()
+  const live = createLiveQueryCollection({
+    query: () =>
+      (history.composition === `direct`
+        ? selected
+        : new Query().from({
+            outer: selected,
+          })) as unknown as QueryBuilder<BoundaryPublicationContext>,
+    getKey: (row) =>
+      `total` in row
+        ? `output-${row.id}`
+        : `chosen` in row
+          ? `result-${row.chosen.id}`
+          : row.id,
+  })
+  const pending = new Set<AttributionKey>()
+  const failures: Array<unknown> = []
+  const check = (cut: (typeof boundaryPublicationCuts)[number]) => {
+    boundaryPublicationHistoriesByState
+      .get(boundaryPublicationState(history, cut))!
+      .add(boundaryPublicationHistory)
+    try {
+      checkBoundaryPublication(
+        [...live.entries()],
+        expectedBoundaryPublication(
+          history,
+          parent,
+          children,
+          pending,
+          parents.id,
+          rows.id,
+          live.id,
+        ),
+      )
+    } catch (error) {
+      failures.push(new Error(`boundary publication ${cut}`, { cause: error }))
+    }
   }
+  let finishMutation = async () => {}
+  await checkWithCleanup(async () => {
+    await live.preload()
+    check(`initial`)
+    const inserting = history.kind === `grouped` || history.kind === `aggregate`
+    const source = history.pendingSource === `parent` ? parents : rows
+    const key = inserting
+      ? `inserted`
+      : history.pendingSource === `parent`
+        ? `parent`
+        : `child`
+    const before =
+      history.pendingSource === `parent` ? { ...parent } : { ...children[0]! }
+    if (inserting)
+      children = [
+        ...children,
+        { id: key, parentId: `parent`, label: `pending` },
+      ]
+    else if (history.pendingSource === `parent`)
+      parent = { ...parent, label: `pending` }
+    else
+      children = children.map((row) =>
+        row.id === key ? { ...row, label: `pending` } : row,
+      )
+    pending.add(key)
+    const mutation = inserting
+      ? source.insert({ id: key, parentId: `parent`, label: `pending` })
+      : source.update(key, (row) => {
+          row.label = `pending`
+        })
+    finishMutation = async () => {
+      source.utils.resolveSync()
+      finishMutation = async () => {}
+      await mutation.when(`settled`)
+    }
+    expect(source.get(key)!.$hasPendingWrites).toBe(true)
+    check(`held`)
+    await finishMutation()
+    pending.clear()
+    if (inserting) children = children.filter((row) => row.id !== key)
+    else if (history.pendingSource === `parent`) parent = before
+    else children = children.map((row) => (row.id === key ? before : row))
+    check(`settled`)
+    const remote = { ...before, id: key, label: `remote-next-use` }
+    source.utils.begin()
+    source.utils.write({
+      type: inserting ? `insert` : `update`,
+      value: remote,
+    })
+    source.utils.commit()
+    if (inserting) children = [...children, remote]
+    else if (history.pendingSource === `parent`) parent = remote
+    else children = children.map((row) => (row.id === key ? remote : row))
+    check(`remote`)
+    if (failures.length)
+      throw new AggregateError(
+        failures,
+        `Boundary publication comparisons failed`,
+        { cause: failures[0] },
+      )
+  }, [
+    () => finishMutation(),
+    () => live.cleanup(),
+    () => rows.cleanup(),
+    () => parents.cleanup(),
+  ])
+}
+
+const boundaryPublicationLaw = `An implicit source row keeps its source attribution, an implicit joined namespace and grouped or aggregate output receive output metadata, and authored reserved fields stay data until Collection publication.`
+
+oracleProperty({
+  id: `virtual-row-fields.boundary-publication`,
+  law: {
+    statement: boundaryPublicationLaw,
+    authority: `The Collection virtual-field boundary and reserved public row fields (boundary-only metadata, maintainer decision of 2026-11-05) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+    limits: `The enumerated direct, QueryRef, join, collision, and inline-input histories at preload, held mutation, settlement, and a later remote update; no framework timing, rejected write, or arbitrary include depth.`,
+  },
+  owns: [
+    `src/collection/index.ts#createCollection`,
+    `src/indexes/btree-index.ts`,
+    `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    `src/virtual-props.ts#hasVirtualProps`,
+  ],
+  histories: boundaryPublicationHistories,
+  label: (history) =>
+    `publishes implicit and materialized-input metadata: ${JSON.stringify(history)}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(boundaryPublicationLaw, plan, observe, () =>
+      judgeBoundaryPublication(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })
 
 /**
@@ -790,454 +521,495 @@ test.each(
  * come from the independent shape rule. A held source update distinguishes
  * source metadata from output metadata before and after settlement.
  */
-test.each(
-  [false, true].flatMap((joined) =>
-    collisionCases.flatMap(({ collision, authoredPending }) =>
-      metadataProjectionShapes
-        .filter(
-          (shape) => shape !== `functional-direct` || collision === `none`,
-        )
-        .flatMap((shape) =>
-          metadataCompositions.flatMap((composition) =>
-            [false, true].map((customKey) => ({
-              joined,
-              collision,
-              authoredPending,
-              shape,
-              composition,
-              customKey,
-            })),
-          ),
+const projectionAttributionHistories = [false, true].flatMap((joined) =>
+  collisionCases.flatMap(({ collision, authoredPending }) =>
+    metadataProjectionShapes
+      .filter((shape) => shape !== `functional-direct` || collision === `none`)
+      .flatMap((shape) =>
+        metadataCompositions.flatMap((composition) =>
+          [false, true].map((customKey) => ({
+            joined,
+            collision,
+            authoredPending,
+            shape,
+            composition,
+            customKey,
+          })),
         ),
-    ),
-  ),
-)(
-  `attributes root metadata by projection shape: %j`,
-  async ({
-    joined,
-    collision,
-    authoredPending,
-    shape,
-    composition,
-    customKey,
-  }) => {
-    oracleRoute(`case`)
-    metadataHistory++
-    const parents = createCollection(
-      mockSyncCollectionOptions<{ id: string }>({
-        id: `metadata-parent`,
-        getKey: (row) => row.id,
-        initialData: [{ id: `parent` }],
-      }),
-    )
-    const rows = createCollection(
-      mockSyncCollectionOptions<{
-        id: string
-        parentId: string
-        label: string
-      }>({
-        id: `metadata-child`,
-        getKey: (row) => row.id,
-        initialData: [
-          { id: `child`, parentId: `parent`, label: `before` },
-          { id: `peer`, parentId: `parent`, label: `untouched` },
-        ],
-      }),
-    )
-    const overrides: Record<string, unknown> = {}
-    for (const field of virtualFieldNames) {
-      if (collision === field || collision === `all`)
-        overrides[field] =
-          field === `$hasPendingWrites`
-            ? authoredPending
-            : field === `$origin`
-              ? `local`
-              : `spoof`
-    }
-    const selectedQuery = (() => {
-      const q = new Query()
-      const base = joined
-        ? q
-            .from({ parent: parents })
-            .innerJoin({ chosen: rows }, ({ parent, chosen }) =>
-              eq(parent.id, chosen.parentId),
-            )
-        : q.from({ chosen: rows })
-      if (shape === `functional-direct`)
-        return base.fn.select(({ chosen }) => chosen)
-      if (shape === `functional-spread`)
-        return base.fn.select(({ chosen }) => ({ ...chosen, ...overrides }))
-      if (shape === `functional-projection`)
-        return base.fn.select(({ chosen }) => ({
-          id: chosen.id,
-          label: chosen.label,
-          ...overrides,
-        }))
-      if (shape === `structured-spread`)
-        return base.select(({ chosen }) => ({ ...chosen, ...overrides }))
-      return base.select(({ chosen }) => ({
-        id: chosen.id,
-        label: chosen.label,
-        hasPendingWrites: chosen.$hasPendingWrites,
-        ...overrides,
-      }))
-    })()
-    const compose = (query: typeof selectedQuery) => {
-      if (composition === `direct`) return query
-      if (composition.startsWith(`union`)) {
-        const emptyBranch = new Query()
-          .from({ empty: parents })
-          .where(({ empty }) => eq(empty.id, `absent`))
-          .select(({ empty }) => ({ id: empty.id, label: empty.id }))
-        const union =
-          composition === `union-last`
-            ? new Query().unionAll(emptyBranch, query)
-            : new Query().unionAll(query, emptyBranch)
-        return composition === `union-query-ref`
-          ? new Query().from({ union })
-          : union
-      }
-      if (composition === `joined-query-ref`)
-        return new Query()
-          .from({ peer: rows })
-          .innerJoin({ nested: query }, ({ peer, nested }) =>
-            eq(peer.id, nested.id),
-          )
-          .select(({ nested }) => nested)
-      const once = new Query().from({ nested: query })
-      if (composition === `functional-query-ref`)
-        return once.fn.select(({ nested }) => nested)
-      return composition === `query-ref`
-        ? once
-        : new Query().from({ outer: once })
-    }
-    const sourceOwned = sourceOwnsMetadata(shape)
-    const live = createLiveQueryCollection({
-      query: () =>
-        compose(selectedQuery) as unknown as QueryBuilder<AttributionContext>,
-      ...(customKey
-        ? {
-            getKey: (row: { id: AttributionKey }) =>
-              sourceOwned ? row.id : `projected-${row.id}`,
-          }
-        : {}),
-    })
-    const clean = createLiveQueryCollection(() =>
-      compose(
-        (() => {
-          const q = new Query()
-          const base = joined
-            ? q
-                .from({ parent: parents })
-                .innerJoin({ chosen: rows }, ({ parent, chosen }) =>
-                  eq(parent.id, chosen.parentId),
-                )
-            : q.from({ chosen: rows })
-          return base.select(({ chosen }) => ({
-            id: chosen.id,
-            label: chosen.label,
-          }))
-        })(),
       ),
-    )
-    let truth: Array<AttributionRow> = [
-      { id: `child`, parentId: `parent`, label: `before` },
-      { id: `peer`, parentId: `parent`, label: `untouched` },
-    ]
-    const pendingKeys = new Set<string>()
-    let finishMutation = async () => {}
-    const check = () => {
-      // The custom-key histories have a completely independent key prediction.
-      // The default-key histories retain the old clean-sibling key comparison
-      // only as a differential check of undocumented compiler-generated key
-      // encoding.
-      const outputKey = (id: AttributionKey) =>
-        customKey
-          ? `projected-${id}`
-          : clean.toArray.find((row) => `id` in row && row.id === id)!.$key
-      checkAttributedRows(
-        live.toArray,
-        expectedAttributedRows(
-          truth,
-          shape,
-          pendingKeys,
-          rows.id,
-          live.id,
-          outputKey,
-          joined || composition === `joined-query-ref`
-            ? (id) => (customKey ? id : (outputKey(id) as AttributionKey))
-            : (id) => id,
-        ),
-      )
-      if (customKey)
-        expect([...live.keys()].sort()).toEqual(
-          truth
-            .map((row) => (sourceOwned ? row.id : `projected-${row.id}`))
-            .sort(),
-        )
-    }
-    await checkWithCleanup(async () => {
-      await Promise.all([live.preload(), clean.preload()])
-      check()
-      if (
-        !sourceOwned &&
-        authoredPending &&
-        (collision === `$hasPendingWrites` || collision === `all`)
-      )
-        metadataHistoriesByState
-          .get(`output-rejects-authored-pending-true`)!
-          .add(metadataHistory)
-      metadataHistoriesByState.get(`multi-row`)!.add(metadataHistory)
-      if (customKey && !sourceOwned)
-        metadataHistoriesByState
-          .get(`independent-output-key`)!
-          .add(metadataHistory)
-      truth = truth.map((row) =>
-        row.id === `child` ? { ...row, label: `pending` } : row,
-      )
-      pendingKeys.add(`child`)
-      const mutation = rows.update(`child`, (row) => {
-        row.label = `pending`
-      })
-      finishMutation = async () => {
-        rows.utils.resolveSync()
-        finishMutation = async () => {}
-        await mutation.when(`settled`)
-      }
-      await vi.waitFor(() =>
-        expect(live.toArray.find((row) => row.id === `child`)).toMatchObject({
-          label: `pending`,
-        }),
-      )
-      expect(rows.get(`child`)!.$hasPendingWrites).toBe(true)
-      metadataHistoriesByState
-        .get(joined ? `joined-pending-source` : `single-pending-source`)!
-        .add(metadataHistory)
-      if (collision !== `none`)
-        metadataHistoriesByState
-          .get(`colliding-projection`)!
-          .add(metadataHistory)
-      if (shape === `functional-direct`)
-        metadataHistoriesByState.get(`functional-direct`)!.add(metadataHistory)
-      if (composition.startsWith(`union`))
-        metadataHistoriesByState.get(`union-pending`)!.add(metadataHistory)
-      if (composition.endsWith(`query-ref`))
-        metadataHistoriesByState.get(`query-ref-pending`)!.add(metadataHistory)
-      check()
-      await finishMutation()
-      pendingKeys.clear()
-      truth = truth.map((row) =>
-        row.id === `child` ? { ...row, label: `before` } : row,
-      )
-      check()
-      rows.utils.begin()
-      rows.utils.write({
-        type: `delete`,
-        value: { id: `peer`, parentId: `parent`, label: `untouched` },
-      })
-      rows.utils.commit()
-      truth = truth.filter((row) => row.id !== `peer`)
-      check()
-      metadataHistoriesByState
-        .get(`non-first-row-deleted`)!
-        .add(metadataHistory)
-    }, [
-      () => finishMutation(),
-      () => live.cleanup(),
-      () => clean.cleanup(),
-      () => rows.cleanup(),
-      () => parents.cleanup(),
-    ])
-  },
+  ),
 )
 
+// The former case body, unchanged.
+async function judgeProjectionAttribution({
+  joined,
+  collision,
+  authoredPending,
+  shape,
+  composition,
+  customKey,
+}: (typeof projectionAttributionHistories)[number]): Promise<void> {
+  metadataHistory++
+  const parents = createCollection(
+    mockSyncCollectionOptions<{ id: string }>({
+      id: `metadata-parent`,
+      getKey: (row) => row.id,
+      initialData: [{ id: `parent` }],
+    }),
+  )
+  const rows = createCollection(
+    mockSyncCollectionOptions<{
+      id: string
+      parentId: string
+      label: string
+    }>({
+      id: `metadata-child`,
+      getKey: (row) => row.id,
+      initialData: [
+        { id: `child`, parentId: `parent`, label: `before` },
+        { id: `peer`, parentId: `parent`, label: `untouched` },
+      ],
+    }),
+  )
+  const overrides: Record<string, unknown> = {}
+  for (const field of virtualFieldNames) {
+    if (collision === field || collision === `all`)
+      overrides[field] =
+        field === `$hasPendingWrites`
+          ? authoredPending
+          : field === `$origin`
+            ? `local`
+            : `spoof`
+  }
+  const selectedQuery = (() => {
+    const q = new Query()
+    const base = joined
+      ? q
+          .from({ parent: parents })
+          .innerJoin({ chosen: rows }, ({ parent, chosen }) =>
+            eq(parent.id, chosen.parentId),
+          )
+      : q.from({ chosen: rows })
+    if (shape === `functional-direct`)
+      return base.fn.select(({ chosen }) => chosen)
+    if (shape === `functional-spread`)
+      return base.fn.select(({ chosen }) => ({ ...chosen, ...overrides }))
+    if (shape === `functional-projection`)
+      return base.fn.select(({ chosen }) => ({
+        id: chosen.id,
+        label: chosen.label,
+        ...overrides,
+      }))
+    if (shape === `structured-spread`)
+      return base.select(({ chosen }) => ({ ...chosen, ...overrides }))
+    return base.select(({ chosen }) => ({
+      id: chosen.id,
+      label: chosen.label,
+      hasPendingWrites: chosen.$hasPendingWrites,
+      ...overrides,
+    }))
+  })()
+  const compose = (query: typeof selectedQuery) => {
+    if (composition === `direct`) return query
+    if (composition.startsWith(`union`)) {
+      const emptyBranch = new Query()
+        .from({ empty: parents })
+        .where(({ empty }) => eq(empty.id, `absent`))
+        .select(({ empty }) => ({ id: empty.id, label: empty.id }))
+      const union =
+        composition === `union-last`
+          ? new Query().unionAll(emptyBranch, query)
+          : new Query().unionAll(query, emptyBranch)
+      return composition === `union-query-ref`
+        ? new Query().from({ union })
+        : union
+    }
+    if (composition === `joined-query-ref`)
+      return new Query()
+        .from({ peer: rows })
+        .innerJoin({ nested: query }, ({ peer, nested }) =>
+          eq(peer.id, nested.id),
+        )
+        .select(({ nested }) => nested)
+    const once = new Query().from({ nested: query })
+    if (composition === `functional-query-ref`)
+      return once.fn.select(({ nested }) => nested)
+    return composition === `query-ref`
+      ? once
+      : new Query().from({ outer: once })
+  }
+  const sourceOwned = sourceOwnsMetadata(shape)
+  const live = createLiveQueryCollection({
+    query: () =>
+      compose(selectedQuery) as unknown as QueryBuilder<AttributionContext>,
+    ...(customKey
+      ? {
+          getKey: (row: { id: AttributionKey }) =>
+            sourceOwned ? row.id : `projected-${row.id}`,
+        }
+      : {}),
+  })
+  const clean = createLiveQueryCollection(() =>
+    compose(
+      (() => {
+        const q = new Query()
+        const base = joined
+          ? q
+              .from({ parent: parents })
+              .innerJoin({ chosen: rows }, ({ parent, chosen }) =>
+                eq(parent.id, chosen.parentId),
+              )
+          : q.from({ chosen: rows })
+        return base.select(({ chosen }) => ({
+          id: chosen.id,
+          label: chosen.label,
+        }))
+      })(),
+    ),
+  )
+  let truth: Array<AttributionRow> = [
+    { id: `child`, parentId: `parent`, label: `before` },
+    { id: `peer`, parentId: `parent`, label: `untouched` },
+  ]
+  const pendingKeys = new Set<string>()
+  let finishMutation = async () => {}
+  const check = () => {
+    // The custom-key histories have a completely independent key prediction.
+    // The default-key histories retain the old clean-sibling key comparison
+    // only as a differential check of undocumented compiler-generated key
+    // encoding.
+    const outputKey = (id: AttributionKey) =>
+      customKey
+        ? `projected-${id}`
+        : clean.toArray.find((row) => `id` in row && row.id === id)!.$key
+    checkAttributedRows(
+      live.toArray,
+      expectedAttributedRows(
+        truth,
+        shape,
+        pendingKeys,
+        rows.id,
+        live.id,
+        outputKey,
+        joined || composition === `joined-query-ref`
+          ? (id) => (customKey ? id : (outputKey(id) as AttributionKey))
+          : (id) => id,
+      ),
+    )
+    if (customKey)
+      expect([...live.keys()].sort()).toEqual(
+        truth
+          .map((row) => (sourceOwned ? row.id : `projected-${row.id}`))
+          .sort(),
+      )
+  }
+  await checkWithCleanup(async () => {
+    await Promise.all([live.preload(), clean.preload()])
+    check()
+    if (
+      !sourceOwned &&
+      authoredPending &&
+      (collision === `$hasPendingWrites` || collision === `all`)
+    )
+      metadataHistoriesByState
+        .get(`output-rejects-authored-pending-true`)!
+        .add(metadataHistory)
+    metadataHistoriesByState.get(`multi-row`)!.add(metadataHistory)
+    if (customKey && !sourceOwned)
+      metadataHistoriesByState
+        .get(`independent-output-key`)!
+        .add(metadataHistory)
+    truth = truth.map((row) =>
+      row.id === `child` ? { ...row, label: `pending` } : row,
+    )
+    pendingKeys.add(`child`)
+    const mutation = rows.update(`child`, (row) => {
+      row.label = `pending`
+    })
+    finishMutation = async () => {
+      rows.utils.resolveSync()
+      finishMutation = async () => {}
+      await mutation.when(`settled`)
+    }
+    await vi.waitFor(() =>
+      expect(live.toArray.find((row) => row.id === `child`)).toMatchObject({
+        label: `pending`,
+      }),
+    )
+    expect(rows.get(`child`)!.$hasPendingWrites).toBe(true)
+    metadataHistoriesByState
+      .get(joined ? `joined-pending-source` : `single-pending-source`)!
+      .add(metadataHistory)
+    if (collision !== `none`)
+      metadataHistoriesByState.get(`colliding-projection`)!.add(metadataHistory)
+    if (shape === `functional-direct`)
+      metadataHistoriesByState.get(`functional-direct`)!.add(metadataHistory)
+    if (composition.startsWith(`union`))
+      metadataHistoriesByState.get(`union-pending`)!.add(metadataHistory)
+    if (composition.endsWith(`query-ref`))
+      metadataHistoriesByState.get(`query-ref-pending`)!.add(metadataHistory)
+    check()
+    await finishMutation()
+    pendingKeys.clear()
+    truth = truth.map((row) =>
+      row.id === `child` ? { ...row, label: `before` } : row,
+    )
+    check()
+    rows.utils.begin()
+    rows.utils.write({
+      type: `delete`,
+      value: { id: `peer`, parentId: `parent`, label: `untouched` },
+    })
+    rows.utils.commit()
+    truth = truth.filter((row) => row.id !== `peer`)
+    check()
+    metadataHistoriesByState.get(`non-first-row-deleted`)!.add(metadataHistory)
+  }, [
+    () => finishMutation(),
+    () => live.cleanup(),
+    () => clean.cleanup(),
+    () => rows.cleanup(),
+    () => parents.cleanup(),
+  ])
+}
+
+const projectionAttributionLaw = `Projection shape controls attribution, not the spelling of selected fields: a new object has output metadata and a direct source or structured spread keeps source metadata.`
+
+oracleProperty({
+  id: `virtual-row-fields.projection-attribution`,
+  law: {
+    statement: projectionAttributionLaw,
+    authority: `The Collection virtual-field boundary and reserved public row fields (boundary-only metadata, maintainer decision of 2026-11-05) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+    limits: `The enumerated joined, collision, projection-shape, composition, and custom-key cells with one held source update.`,
+  },
+  owns: [
+    `src/collection/index.ts#createCollection`,
+    `src/indexes/btree-index.ts`,
+    `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    `src/virtual-props.ts#hasVirtualProps`,
+  ],
+  histories: projectionAttributionHistories,
+  label: (history) =>
+    `attributes root metadata by projection shape: ${JSON.stringify(history)}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(projectionAttributionLaw, plan, observe, () =>
+      judgeProjectionAttribution(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+
+// The former fixed-history body, unchanged: publish one source through the
+// row and value projections and classify every published field.
+async function judgeRuntimeBoundary(): Promise<void> {
+  const createdAt = new Date(`2026-09-20T12:34:56.000Z`)
+  const rows = createCollection(
+    mockSyncCollectionOptions<Row>({
+      id: `virtual-row-fields-runtime-oracle-source`,
+      getKey: (row) => row.id,
+      initialData: [
+        {
+          id: `row-1`,
+          profile: { label: `nested` },
+          createdAt,
+          tags: [`one`, `two`],
+        },
+      ],
+    }),
+  )
+  const missingRows = createCollection(
+    mockSyncCollectionOptions<Row>({
+      id: `virtual-row-fields-runtime-oracle-missing-source`,
+      getKey: (row) => row.id,
+      initialData: [],
+    }),
+  )
+  const live = createLiveQueryCollection((q) =>
+    q.from({ row: rows }).select(({ row }) => ({
+      id: row.id,
+      profile: row.profile,
+      createdAt: row.createdAt,
+      dates: toArray(
+        q
+          .from({ child: rows })
+          .where(({ child }) => eq(child.id, row.id))
+          .select(({ child }) => child.createdAt),
+      ),
+      firstDate: materialize(
+        q
+          .from({ child: rows })
+          .where(({ child }) => eq(child.id, row.id))
+          .select(({ child }) => child.createdAt)
+          .findOne(),
+      ),
+      wholeRows: toArray(
+        q.from({ child: rows }).where(({ child }) => eq(child.id, row.id)),
+      ),
+      selectedWholeRows: toArray(
+        q
+          .from({ child: rows })
+          .where(({ child }) => eq(child.id, row.id))
+          .select(({ child }) => child),
+      ),
+      unmatchedRows: toArray(
+        q
+          .from({ child: rows })
+          .where(({ child }) => eq(child.id, row.id))
+          .leftJoin({ missing: missingRows }, ({ child, missing }) =>
+            eq(child.id, missing.id),
+          )
+          .select(({ missing }) => missing),
+      ),
+      objects: toArray(
+        q
+          .from({ child: rows })
+          .where(({ child }) => eq(child.id, row.id))
+          .select(({ child }) => ({ label: child.profile.label })),
+      ),
+      nestedObjects: toArray(
+        q
+          .from({ child: rows })
+          .where(({ child }) => eq(child.id, row.id))
+          .select(({ child }) => ({
+            nested: { label: child.profile.label },
+          })),
+      ),
+      arrays: toArray(
+        q
+          .from({ child: rows })
+          .where(({ child }) => eq(child.id, row.id))
+          .select(({ child }) => child.tags),
+      ),
+      firstObject: materialize(
+        q
+          .from({ child: rows })
+          .where(({ child }) => eq(child.id, row.id))
+          .select(({ child }) => ({ label: child.profile.label }))
+          .findOne(),
+      ),
+    })),
+  )
+
+  await checkWithCleanup(async () => {
+    await live.preload()
+
+    const result = live.toArray[0]!
+    const observations: Array<{
+      name: string
+      subject: VirtualFieldSubject
+      value: unknown
+    }> = [
+      { name: `published query row`, subject: `row-root`, value: result },
+      {
+        name: `nested profile`,
+        subject: `nested-value`,
+        value: result.profile,
+      },
+      {
+        name: `selected Date`,
+        subject: `opaque-value`,
+        value: result.createdAt,
+      },
+      {
+        name: `toArray Date`,
+        subject: `opaque-value`,
+        value: result.dates[0],
+      },
+      {
+        name: `materialized Date`,
+        subject: `opaque-value`,
+        value: result.firstDate,
+      },
+      {
+        name: `whole-row child`,
+        subject: `whole-row-child`,
+        value: result.wholeRows[0],
+      },
+      {
+        name: `directly selected whole-row child`,
+        subject: `whole-row-child`,
+        value: result.selectedWholeRows[0],
+      },
+      {
+        name: `projected child object`,
+        subject: `projected-child`,
+        value: result.objects[0],
+      },
+      {
+        name: `projected child wrapper`,
+        subject: `projected-child`,
+        value: result.nestedObjects[0],
+      },
+      {
+        name: `nested projected value`,
+        subject: `nested-value`,
+        value: result.nestedObjects[0]!.nested,
+      },
+      {
+        name: `selected array value`,
+        subject: `opaque-value`,
+        value: result.arrays[0],
+      },
+      {
+        name: `materialized projected child`,
+        subject: `projected-child`,
+        value: result.firstObject,
+      },
+    ]
+
+    expectPublishedFieldClassification(observations)
+    expect(result.$key).toBe(`row-1`)
+    expect(result.$hasPendingWrites).toBe(false)
+    expect(result.wholeRows[0]!.$hasPendingWrites).toBe(false)
+    expect(result.selectedWholeRows[0]!.$hasPendingWrites).toBe(false)
+
+    expect(result.profile).toEqual({ label: `nested` })
+    expect(`$key` in result.profile).toBe(false)
+
+    expect(result.createdAt).toBeInstanceOf(Date)
+    expect(result.dates).toHaveLength(1)
+    expect(result.dates[0]).toBeInstanceOf(Date)
+    expect(result.firstDate).toBeInstanceOf(Date)
+
+    expect(result.wholeRows).toHaveLength(1)
+    expect(result.wholeRows[0]!.$key).toBe(`row-1`)
+    expect(result.selectedWholeRows).toHaveLength(1)
+    expect(result.selectedWholeRows[0]!.$key).toBe(`row-1`)
+    expect(`optionalProfile` in result.selectedWholeRows[0]!).toBe(false)
+    expect(result.unmatchedRows).toEqual([{}])
+    expect(result.objects).toEqual([{ label: `nested` }])
+    expect(result.nestedObjects).toEqual([{ nested: { label: `nested` } }])
+    expect(result.arrays).toEqual([[`one`, `two`]])
+    expect(result.firstObject).toEqual({ label: `nested` })
+  }, [() => live.cleanup(), () => missingRows.cleanup(), () => rows.cleanup()])
+}
+
+const runtimeBoundaryLaw = `Row roots expose genuine computed virtual fields after publication, and selected values and nested payloads do not.`
+
 describe(`virtual row field runtime boundary`, () => {
-  test(`matches the row and value classification after publication`, async () => {
-    oracleRoute(`fixed history`)
-    const createdAt = new Date(`2026-09-20T12:34:56.000Z`)
-    const rows = createCollection(
-      mockSyncCollectionOptions<Row>({
-        id: `virtual-row-fields-runtime-oracle-source`,
-        getKey: (row) => row.id,
-        initialData: [
-          {
-            id: `row-1`,
-            profile: { label: `nested` },
-            createdAt,
-            tags: [`one`, `two`],
-          },
-        ],
-      }),
-    )
-    const missingRows = createCollection(
-      mockSyncCollectionOptions<Row>({
-        id: `virtual-row-fields-runtime-oracle-missing-source`,
-        getKey: (row) => row.id,
-        initialData: [],
-      }),
-    )
-    const live = createLiveQueryCollection((q) =>
-      q.from({ row: rows }).select(({ row }) => ({
-        id: row.id,
-        profile: row.profile,
-        createdAt: row.createdAt,
-        dates: toArray(
-          q
-            .from({ child: rows })
-            .where(({ child }) => eq(child.id, row.id))
-            .select(({ child }) => child.createdAt),
-        ),
-        firstDate: materialize(
-          q
-            .from({ child: rows })
-            .where(({ child }) => eq(child.id, row.id))
-            .select(({ child }) => child.createdAt)
-            .findOne(),
-        ),
-        wholeRows: toArray(
-          q.from({ child: rows }).where(({ child }) => eq(child.id, row.id)),
-        ),
-        selectedWholeRows: toArray(
-          q
-            .from({ child: rows })
-            .where(({ child }) => eq(child.id, row.id))
-            .select(({ child }) => child),
-        ),
-        unmatchedRows: toArray(
-          q
-            .from({ child: rows })
-            .where(({ child }) => eq(child.id, row.id))
-            .leftJoin({ missing: missingRows }, ({ child, missing }) =>
-              eq(child.id, missing.id),
-            )
-            .select(({ missing }) => missing),
-        ),
-        objects: toArray(
-          q
-            .from({ child: rows })
-            .where(({ child }) => eq(child.id, row.id))
-            .select(({ child }) => ({ label: child.profile.label })),
-        ),
-        nestedObjects: toArray(
-          q
-            .from({ child: rows })
-            .where(({ child }) => eq(child.id, row.id))
-            .select(({ child }) => ({
-              nested: { label: child.profile.label },
-            })),
-        ),
-        arrays: toArray(
-          q
-            .from({ child: rows })
-            .where(({ child }) => eq(child.id, row.id))
-            .select(({ child }) => child.tags),
-        ),
-        firstObject: materialize(
-          q
-            .from({ child: rows })
-            .where(({ child }) => eq(child.id, row.id))
-            .select(({ child }) => ({ label: child.profile.label }))
-            .findOne(),
-        ),
-      })),
-    )
-
-    await checkWithCleanup(async () => {
-      await live.preload()
-
-      const result = live.toArray[0]!
-      const observations: Array<{
-        name: string
-        subject: VirtualFieldSubject
-        value: unknown
-      }> = [
-        { name: `published query row`, subject: `row-root`, value: result },
-        {
-          name: `nested profile`,
-          subject: `nested-value`,
-          value: result.profile,
-        },
-        {
-          name: `selected Date`,
-          subject: `opaque-value`,
-          value: result.createdAt,
-        },
-        {
-          name: `toArray Date`,
-          subject: `opaque-value`,
-          value: result.dates[0],
-        },
-        {
-          name: `materialized Date`,
-          subject: `opaque-value`,
-          value: result.firstDate,
-        },
-        {
-          name: `whole-row child`,
-          subject: `whole-row-child`,
-          value: result.wholeRows[0],
-        },
-        {
-          name: `directly selected whole-row child`,
-          subject: `whole-row-child`,
-          value: result.selectedWholeRows[0],
-        },
-        {
-          name: `projected child object`,
-          subject: `projected-child`,
-          value: result.objects[0],
-        },
-        {
-          name: `projected child wrapper`,
-          subject: `projected-child`,
-          value: result.nestedObjects[0],
-        },
-        {
-          name: `nested projected value`,
-          subject: `nested-value`,
-          value: result.nestedObjects[0]!.nested,
-        },
-        {
-          name: `selected array value`,
-          subject: `opaque-value`,
-          value: result.arrays[0],
-        },
-        {
-          name: `materialized projected child`,
-          subject: `projected-child`,
-          value: result.firstObject,
-        },
-      ]
-
-      expectPublishedFieldClassification(observations)
-      expect(result.$key).toBe(`row-1`)
-      expect(result.$hasPendingWrites).toBe(false)
-      expect(result.wholeRows[0]!.$hasPendingWrites).toBe(false)
-      expect(result.selectedWholeRows[0]!.$hasPendingWrites).toBe(false)
-
-      expect(result.profile).toEqual({ label: `nested` })
-      expect(`$key` in result.profile).toBe(false)
-
-      expect(result.createdAt).toBeInstanceOf(Date)
-      expect(result.dates).toHaveLength(1)
-      expect(result.dates[0]).toBeInstanceOf(Date)
-      expect(result.firstDate).toBeInstanceOf(Date)
-
-      expect(result.wholeRows).toHaveLength(1)
-      expect(result.wholeRows[0]!.$key).toBe(`row-1`)
-      expect(result.selectedWholeRows).toHaveLength(1)
-      expect(result.selectedWholeRows[0]!.$key).toBe(`row-1`)
-      expect(`optionalProfile` in result.selectedWholeRows[0]!).toBe(false)
-      expect(result.unmatchedRows).toEqual([{}])
-      expect(result.objects).toEqual([{ label: `nested` }])
-      expect(result.nestedObjects).toEqual([{ nested: { label: `nested` } }])
-      expect(result.arrays).toEqual([[`one`, `two`]])
-      expect(result.firstObject).toEqual({ label: `nested` })
-    }, [
-      () => live.cleanup(),
-      () => missingRows.cleanup(),
-      () => rows.cleanup(),
-    ])
+  oracleProperty({
+    id: `virtual-row-fields.runtime-boundary`,
+    law: {
+      statement: runtimeBoundaryLaw,
+      authority: `The Collection virtual-field boundary and reserved public row fields (boundary-only metadata, maintainer decision of 2026-11-05) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `The one fixed source row and its row and value projections after publication.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/btree-index.ts`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/virtual-props.ts#hasVirtualProps`,
+    ],
+    histories: [`matches the row and value classification after publication`],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(runtimeBoundaryLaw, plan, observe, () =>
+        judgeRuntimeBoundary(),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -1246,81 +1018,109 @@ describe(`virtual row field runtime boundary`, () => {
  * This finite grammar crosses match presence, spread order and which source
  * has a held optimistic update. All checkpoints compare the same public law.
  */
-test.each(
-  [false, true].flatMap((matched) =>
-    [false, true].flatMap((reverse) =>
-      [false, true].map((pendingRight) => ({ matched, reverse, pendingRight })),
-    ),
+const lastSpreadHistories = [false, true].flatMap((matched) =>
+  [false, true].flatMap((reverse) =>
+    [false, true].map((pendingRight) => ({ matched, reverse, pendingRight })),
   ),
-)(
-  `retains metadata from the last present spread: %j`,
-  async ({ matched, reverse, pendingRight }) => {
-    oracleRoute(`case`)
-    metadataHistory++
-    const left = createCollection(
-      mockSyncCollectionOptions<{ id: string; label: string }>({
-        id: `spread-left`,
-        getKey: (row) => row.id,
-        initialData: [{ id: `left`, label: `left` }],
-      }),
-    )
-    const right = createCollection(
-      mockSyncCollectionOptions<{
-        id: string
-        parentId: string
-        label: string
-      }>({
-        id: `spread-right`,
-        getKey: (row) => row.id,
-        initialData: [
-          {
-            id: `right`,
-            parentId: matched ? `left` : `missing`,
-            label: `right`,
-          },
-        ],
-      }),
-    )
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ left })
-        .leftJoin({ right }, ({ left: a, right: b }) => eq(a.id, b.parentId))
-        .select(({ left: a, right: b }) =>
-          reverse ? { ...b, ...a } : { ...a, ...b },
-        ),
-    )
-    const owner = matched && !reverse ? right : left
-    const key = owner === right ? `right` : `left`
-    const check = () =>
-      checkRootMetadata(live.toArray[0]!, {
-        ...owner.get(key)!,
-        $key: [...live.keys()][0],
-      })
-    await checkWithCleanup(async () => {
-      await live.preload()
-      check()
-      const mutation = pendingRight
-        ? right.update(`right`, (row) => {
-            row.label = `pending`
-          })
-        : left.update(`left`, (row) => {
-            row.label = `pending`
-          })
-      await vi.waitFor(() =>
-        expect(
-          (pendingRight ? right.get(`right`) : left.get(`left`))!
-            .$hasPendingWrites,
-        ).toBe(true),
-      )
-      if (!matched && !reverse)
-        metadataHistoriesByState.get(`null-later-spread`)!.add(metadataHistory)
-      check()
-      ;(pendingRight ? right : left).utils.resolveSync()
-      await mutation.when(`settled`)
-      check()
-    }, [() => live.cleanup(), () => left.cleanup(), () => right.cleanup()])
-  },
 )
+
+// The former case body, unchanged.
+async function judgeLastSpread({
+  matched,
+  reverse,
+  pendingRight,
+}: (typeof lastSpreadHistories)[number]): Promise<void> {
+  metadataHistory++
+  const left = createCollection(
+    mockSyncCollectionOptions<{ id: string; label: string }>({
+      id: `spread-left`,
+      getKey: (row) => row.id,
+      initialData: [{ id: `left`, label: `left` }],
+    }),
+  )
+  const right = createCollection(
+    mockSyncCollectionOptions<{
+      id: string
+      parentId: string
+      label: string
+    }>({
+      id: `spread-right`,
+      getKey: (row) => row.id,
+      initialData: [
+        {
+          id: `right`,
+          parentId: matched ? `left` : `missing`,
+          label: `right`,
+        },
+      ],
+    }),
+  )
+  const live = createLiveQueryCollection((q) =>
+    q
+      .from({ left })
+      .leftJoin({ right }, ({ left: a, right: b }) => eq(a.id, b.parentId))
+      .select(({ left: a, right: b }) =>
+        reverse ? { ...b, ...a } : { ...a, ...b },
+      ),
+  )
+  const owner = matched && !reverse ? right : left
+  const key = owner === right ? `right` : `left`
+  const check = () =>
+    checkRootMetadata(live.toArray[0]!, {
+      ...owner.get(key)!,
+      $key: [...live.keys()][0],
+    })
+  await checkWithCleanup(async () => {
+    await live.preload()
+    check()
+    const mutation = pendingRight
+      ? right.update(`right`, (row) => {
+          row.label = `pending`
+        })
+      : left.update(`left`, (row) => {
+          row.label = `pending`
+        })
+    await vi.waitFor(() =>
+      expect(
+        (pendingRight ? right.get(`right`) : left.get(`left`))!
+          .$hasPendingWrites,
+      ).toBe(true),
+    )
+    if (!matched && !reverse)
+      metadataHistoriesByState.get(`null-later-spread`)!.add(metadataHistory)
+    check()
+    ;(pendingRight ? right : left).utils.resolveSync()
+    await mutation.when(`settled`)
+    check()
+  }, [() => live.cleanup(), () => left.cleanup(), () => right.cleanup()])
+}
+
+const lastSpreadLaw = `Metadata comes from the last present structured spread, independent of join side and spread order.`
+
+oracleProperty({
+  id: `virtual-row-fields.last-spread`,
+  law: {
+    statement: lastSpreadLaw,
+    authority: `The Collection virtual-field boundary and reserved public row fields (boundary-only metadata, maintainer decision of 2026-11-05) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+    limits: `The eight enumerated matched, order, and pending cells.`,
+  },
+  owns: [
+    `src/collection/index.ts#createCollection`,
+    `src/indexes/btree-index.ts`,
+    `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    `src/virtual-props.ts#hasVirtualProps`,
+  ],
+  histories: lastSpreadHistories,
+  label: (history) =>
+    `retains metadata from the last present spread: ${JSON.stringify(history)}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(lastSpreadLaw, plan, observe, () =>
+      judgeLastSpread(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
 
 /**
  * Populated union branches retain both contributions, including numeric 1 and
@@ -1376,227 +1176,194 @@ const unionMetadataHistoriesByState = new Map<string, Set<number>>(
 )
 let unionMetadataHistory = 0
 
-test.each(unionHistories)(
-  `preserves each populated union branch: %j`,
-  async ({
-    reverse,
-    nested,
-    pendingRight,
-    collision,
-    authoredPending,
-    shape,
-  }) => {
-    oracleRoute(`case`)
-    metadataHistory++
-    unionMetadataHistory++
-    const reach = (cut: string) =>
-      unionMetadataHistoriesByState
-        .get(
-          `${nested ? `query-ref` : `direct`}/${sourceOwnsMetadata(shape) ? `source` : `output`}/${pendingRight ? `right` : `left`}/${cut}`,
-        )!
-        .add(unionMetadataHistory)
-    const initialLeft: AttributionRow = {
-      id: 1,
-      parentId: `parent`,
-      label: `same`,
-    }
-    const initialRight: AttributionRow = {
-      id: `1`,
-      parentId: `parent`,
-      label: `same`,
-    }
-    const left = createCollection(
-      mockSyncCollectionOptions<AttributionRow>({
-        id: `union-left`,
-        getKey: (row) => row.id,
-        initialData: [{ ...initialLeft }],
-      }),
-    )
-    const right = createCollection(
-      mockSyncCollectionOptions<AttributionRow>({
-        id: `union-right`,
-        getKey: (row) => row.id,
-        initialData: [{ ...initialRight }],
-      }),
-    )
-    const overrides: Record<string, unknown> = {}
-    for (const field of virtualFieldNames)
-      if (collision === field || collision === `all`)
-        overrides[field] =
-          field === `$hasPendingWrites`
-            ? authoredPending
-            : field === `$origin`
-              ? `local`
-              : `spoof`
-    const branch = (source: typeof left, alias: string) => {
-      const base = new Query().from({ [alias]: source })
-      if (shape === `functional-direct`)
-        return base.fn.select((refs) => refs[alias]!)
-      if (shape === `functional-spread`)
-        return base.fn.select((refs) => ({ ...refs[alias]!, ...overrides }))
-      if (shape === `functional-projection`)
-        return base.fn.select((refs) => ({
-          id: refs[alias]!.id,
-          label: refs[alias]!.label,
-          ...overrides,
-        }))
-      if (shape === `structured-spread`)
-        return base.select((refs) => ({ ...refs[alias]!, ...overrides }))
-      return base.select((refs) => ({
+// The former case body, unchanged.
+async function judgeUnionBranches({
+  reverse,
+  nested,
+  pendingRight,
+  collision,
+  authoredPending,
+  shape,
+}: (typeof unionHistories)[number]): Promise<void> {
+  metadataHistory++
+  unionMetadataHistory++
+  const reach = (cut: string) =>
+    unionMetadataHistoriesByState
+      .get(
+        `${nested ? `query-ref` : `direct`}/${sourceOwnsMetadata(shape) ? `source` : `output`}/${pendingRight ? `right` : `left`}/${cut}`,
+      )!
+      .add(unionMetadataHistory)
+  const initialLeft: AttributionRow = {
+    id: 1,
+    parentId: `parent`,
+    label: `same`,
+  }
+  const initialRight: AttributionRow = {
+    id: `1`,
+    parentId: `parent`,
+    label: `same`,
+  }
+  const left = createCollection(
+    mockSyncCollectionOptions<AttributionRow>({
+      id: `union-left`,
+      getKey: (row) => row.id,
+      initialData: [{ ...initialLeft }],
+    }),
+  )
+  const right = createCollection(
+    mockSyncCollectionOptions<AttributionRow>({
+      id: `union-right`,
+      getKey: (row) => row.id,
+      initialData: [{ ...initialRight }],
+    }),
+  )
+  const overrides: Record<string, unknown> = {}
+  for (const field of virtualFieldNames)
+    if (collision === field || collision === `all`)
+      overrides[field] =
+        field === `$hasPendingWrites`
+          ? authoredPending
+          : field === `$origin`
+            ? `local`
+            : `spoof`
+  const branch = (source: typeof left, alias: string) => {
+    const base = new Query().from({ [alias]: source })
+    if (shape === `functional-direct`)
+      return base.fn.select((refs) => refs[alias]!)
+    if (shape === `functional-spread`)
+      return base.fn.select((refs) => ({ ...refs[alias]!, ...overrides }))
+    if (shape === `functional-projection`)
+      return base.fn.select((refs) => ({
         id: refs[alias]!.id,
         label: refs[alias]!.label,
-        hasPendingWrites: refs[alias]!.$hasPendingWrites,
         ...overrides,
       }))
-    }
-    const a = branch(left, `leftBranch`)
-    const b = branch(right, `rightBranch`)
-    const union = reverse
-      ? new Query().unionAll(b, a)
-      : new Query().unionAll(a, b)
-    const selected = nested ? new Query().from({ union }) : union
-    const keyOf = (id: AttributionKey) => `${typeof id}:${id}`
-    const live = createLiveQueryCollection({
-      query: () => selected as unknown as QueryBuilder<AttributionContext>,
-      getKey: (row) => (sourceOwnsMetadata(shape) ? row.id : keyOf(row.id)),
-    })
-    let leftTruth = [{ ...initialLeft }]
-    let rightTruth = [{ ...initialRight }]
-    const pendingKeys = new Set<AttributionKey>()
-    const check = () =>
-      checkAttributedRows(live.toArray, [
-        ...expectedAttributedRows(
-          leftTruth,
-          shape,
-          pendingKeys,
-          left.id,
-          live.id,
-          keyOf,
-        ),
-        ...expectedAttributedRows(
-          rightTruth,
-          shape,
-          pendingKeys,
-          right.id,
-          live.id,
-          keyOf,
-        ),
-      ])
-    const pendingSource = pendingRight ? right : left
-    const pendingId = pendingRight ? initialRight.id : initialLeft.id
-    const peer = pendingRight ? left : right
-    const peerInitial = pendingRight ? initialLeft : initialRight
-    let finishMutation = async () => {}
-    await checkWithCleanup(async () => {
-      await live.preload()
-      check()
-      metadataHistoriesByState
-        .get(`two-populated-union-branches`)!
-        .add(metadataHistory)
-      metadataHistoriesByState.get(`typed-union-keys`)!.add(metadataHistory)
-      pendingKeys.add(pendingId)
-      if (pendingRight) rightTruth = [{ ...initialRight, label: `pending` }]
-      else leftTruth = [{ ...initialLeft, label: `pending` }]
-      const mutation = pendingSource.update(pendingId, (row) => {
-        row.label = `pending`
-      })
-      finishMutation = async () => {
-        pendingSource.utils.resolveSync()
-        finishMutation = async () => {}
-        await mutation.when(`settled`)
-      }
-      await vi.waitFor(() =>
-        expect(pendingSource.get(pendingId)!.$hasPendingWrites).toBe(true),
-      )
-      check()
-      reach(`held`)
-      peer.utils.begin()
-      peer.utils.write({ type: `delete`, value: { ...peerInitial } })
-      peer.utils.commit()
-      if (pendingRight) leftTruth = []
-      else rightTruth = []
-      check()
-      peer.utils.begin()
-      peer.utils.write({
-        type: `insert`,
-        value: { ...peerInitial, label: `returned` },
-      })
-      peer.utils.commit()
-      if (pendingRight) leftTruth = [{ ...initialLeft, label: `returned` }]
-      else rightTruth = [{ ...initialRight, label: `returned` }]
-      check()
-      metadataHistoriesByState
-        .get(`union-peer-reinserted`)!
-        .add(metadataHistory)
-      reach(`reinserted`)
-      await finishMutation()
-      pendingKeys.clear()
-      if (pendingRight) rightTruth = [{ ...initialRight }]
-      else leftTruth = [{ ...initialLeft }]
-      check()
-      reach(`settled`)
-    }, [
-      () => finishMutation(),
-      () => live.cleanup(),
-      () => left.cleanup(),
-      () => right.cleanup(),
+    if (shape === `structured-spread`)
+      return base.select((refs) => ({ ...refs[alias]!, ...overrides }))
+    return base.select((refs) => ({
+      id: refs[alias]!.id,
+      label: refs[alias]!.label,
+      hasPendingWrites: refs[alias]!.$hasPendingWrites,
+      ...overrides,
+    }))
+  }
+  const a = branch(left, `leftBranch`)
+  const b = branch(right, `rightBranch`)
+  const union = reverse
+    ? new Query().unionAll(b, a)
+    : new Query().unionAll(a, b)
+  const selected = nested ? new Query().from({ union }) : union
+  const keyOf = (id: AttributionKey) => `${typeof id}:${id}`
+  const live = createLiveQueryCollection({
+    query: () => selected as unknown as QueryBuilder<AttributionContext>,
+    getKey: (row) => (sourceOwnsMetadata(shape) ? row.id : keyOf(row.id)),
+  })
+  let leftTruth = [{ ...initialLeft }]
+  let rightTruth = [{ ...initialRight }]
+  const pendingKeys = new Set<AttributionKey>()
+  const check = () =>
+    checkAttributedRows(live.toArray, [
+      ...expectedAttributedRows(
+        leftTruth,
+        shape,
+        pendingKeys,
+        left.id,
+        live.id,
+        keyOf,
+      ),
+      ...expectedAttributedRows(
+        rightTruth,
+        shape,
+        pendingKeys,
+        right.id,
+        live.id,
+        keyOf,
+      ),
     ])
-  },
-)
+  const pendingSource = pendingRight ? right : left
+  const pendingId = pendingRight ? initialRight.id : initialLeft.id
+  const peer = pendingRight ? left : right
+  const peerInitial = pendingRight ? initialLeft : initialRight
+  let finishMutation = async () => {}
+  await checkWithCleanup(async () => {
+    await live.preload()
+    check()
+    metadataHistoriesByState
+      .get(`two-populated-union-branches`)!
+      .add(metadataHistory)
+    metadataHistoriesByState.get(`typed-union-keys`)!.add(metadataHistory)
+    pendingKeys.add(pendingId)
+    if (pendingRight) rightTruth = [{ ...initialRight, label: `pending` }]
+    else leftTruth = [{ ...initialLeft, label: `pending` }]
+    const mutation = pendingSource.update(pendingId, (row) => {
+      row.label = `pending`
+    })
+    finishMutation = async () => {
+      pendingSource.utils.resolveSync()
+      finishMutation = async () => {}
+      await mutation.when(`settled`)
+    }
+    await vi.waitFor(() =>
+      expect(pendingSource.get(pendingId)!.$hasPendingWrites).toBe(true),
+    )
+    check()
+    reach(`held`)
+    peer.utils.begin()
+    peer.utils.write({ type: `delete`, value: { ...peerInitial } })
+    peer.utils.commit()
+    if (pendingRight) leftTruth = []
+    else rightTruth = []
+    check()
+    peer.utils.begin()
+    peer.utils.write({
+      type: `insert`,
+      value: { ...peerInitial, label: `returned` },
+    })
+    peer.utils.commit()
+    if (pendingRight) leftTruth = [{ ...initialLeft, label: `returned` }]
+    else rightTruth = [{ ...initialRight, label: `returned` }]
+    check()
+    metadataHistoriesByState.get(`union-peer-reinserted`)!.add(metadataHistory)
+    reach(`reinserted`)
+    await finishMutation()
+    pendingKeys.clear()
+    if (pendingRight) rightTruth = [{ ...initialRight }]
+    else leftTruth = [{ ...initialLeft }]
+    check()
+    reach(`settled`)
+  }, [
+    () => finishMutation(),
+    () => live.cleanup(),
+    () => left.cleanup(),
+    () => right.cleanup(),
+  ])
+}
 
-// Calibration feeds allowed and hostile full results through the very same
-// checker. It must see faults away from the first row and retain multiplicity.
-test.each(
-  [`functional-projection`, `structured-spread`].flatMap((shape) =>
-    [
-      `missing-peer`,
-      `duplicate-peer`,
-      `missing-id`,
-      `wrong-key`,
-      `wrong-owner`,
-      `stale-pending`,
-      `wrong-origin`,
-    ].map((fault) => ({ shape, fault })),
-  ),
-)(`rejects a hostile complete metadata result: %j`, ({ shape, fault }) => {
-  oracleRoute(`case`)
-  const keyOf = (id: AttributionKey) => `key-${typeof id}:${id}`
-  const expected = [
-    ...expectedAttributedRows(
-      [{ id: 1, parentId: `parent`, label: `same` }],
-      shape,
-      new Set(),
-      `left`,
-      `output`,
-      keyOf,
+const unionBranchesLaw = `Each populated union branch keeps the attribution its own projection owns.`
+
+oracleProperty({
+  id: `virtual-row-fields.union-branches`,
+  law: {
+    statement: unionBranchesLaw,
+    authority: `The Collection virtual-field boundary and reserved public row fields (boundary-only metadata, maintainer decision of 2026-11-05) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+    limits: `The enumerated union order, nesting, pending, collision, and shape histories.`,
+  },
+  owns: [
+    `src/collection/index.ts#createCollection`,
+    `src/indexes/btree-index.ts`,
+    `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    `src/virtual-props.ts#hasVirtualProps`,
+  ],
+  histories: unionHistories,
+  label: (history) =>
+    `preserves each populated union branch: ${JSON.stringify(history)}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(unionBranchesLaw, plan, observe, () =>
+      judgeUnionBranches(plan.history),
     ),
-    ...expectedAttributedRows(
-      [{ id: `1`, parentId: `parent`, label: `same` }],
-      shape,
-      new Set([`1`]),
-      `right`,
-      `output`,
-      keyOf,
-    ),
-  ]
-  const allowed = expected.map((row) => ({ ...row.ordinary, ...row.metadata }))
-  checkAttributedRows(allowed, expected)
-  // A different legal output order remains accepted.
-  checkAttributedRows([...allowed].reverse(), expected)
-  const hostile: Array<Record<string, unknown>> = allowed.map((row) => ({
-    ...row,
-  }))
-  if (fault === `missing-peer`) hostile.pop()
-  if (fault === `duplicate-peer`) hostile.push({ ...hostile[1]! })
-  if (fault === `missing-id`) delete hostile[1]!.id
-  if (fault === `wrong-key`) hostile[1]!.$key = `wrong`
-  if (fault === `wrong-owner`) hostile[1]!.$collectionId = `left`
-  if (fault === `stale-pending`)
-    hostile[1]!.$hasPendingWrites = !expected[1]!.metadata.$hasPendingWrites
-  if (fault === `wrong-origin`)
-    hostile[1]!.$origin =
-      expected[1]!.metadata.$origin === `local` ? `remote` : `local`
-  expect(() => checkAttributedRows(hostile, expected)).toThrow()
+  check: forwardAssertionJudgment,
 })
 
 /**
@@ -1621,122 +1388,6 @@ test.each(
  * authoritative update. An untouched parent checks isolation. These bounds do
  * not cover same-source overlapping writes, truncate or provider scheduling.
  */
-type MetadataResult = ReturnType<typeof expectedAttributedRows>[number]
-function expectedJoinedMetadata(
-  leftRows: ReadonlyArray<AttributionRow>,
-  rightRows: ReadonlyArray<AttributionRow>,
-  shape: string,
-  reverse: boolean,
-  pending: ReadonlySet<AttributionKey>,
-  rightOrigin: `local` | `remote`,
-  leftId: string,
-  rightId: string,
-  outputId: string,
-): Array<MetadataResult> {
-  return leftRows.flatMap((a) => {
-    const matches = rightRows.filter((b) => b.parentId === a.id)
-    return (matches.length ? matches : [undefined]).map((b) => {
-      const spread = reverse ? { ...b, ...a } : { ...a, ...b }
-      const owner = shape === `functional-direct` || reverse || !b ? a : b
-      const selected =
-        shape.endsWith(`projection`) || shape === `functional-direct`
-          ? a
-          : spread
-      const expected = expectedAttributedRows(
-        [selected],
-        shape,
-        pending,
-        owner === b ? rightId : leftId,
-        outputId,
-        (id) => `projection-${id}`,
-      )[0]!
-      if (sourceOwnsMetadata(shape) && owner === b && !pending.has(b.id))
-        expected.metadata.$origin = rightOrigin
-      return expected
-    })
-  })
-}
-
-// Capture all row fields now. Retaining production row handles could let a
-// later metadata getter or mutation rewrite evidence from an earlier callback.
-function captureMetadataRows(rows: ReadonlyArray<object>): Array<object> {
-  return rows.map((row) => ({
-    ...row,
-    ...Object.fromEntries(
-      virtualFieldNames.map((field) => [
-        field,
-        (row as Record<string, unknown>)[field],
-      ]),
-    ),
-  }))
-}
-type MetadataBatch = {
-  rows: Array<object>
-  changes: Array<{
-    type: string
-    key: AttributionKey
-    value: object
-    previousValue?: object
-  }>
-}
-function publishedModelRows(rows: ReadonlyArray<MetadataResult>) {
-  return rows.map((row) => ({ ...row.ordinary, ...row.metadata }))
-}
-// Collection change messages are the exact before/after delta for one atomic
-// publication. Their ordering is unspecified; duplicate or omitted messages
-// remain visible because neither side collapses actual messages into a Map.
-function expectedMetadataChanges(
-  before: ReadonlyArray<MetadataResult>,
-  after: ReadonlyArray<MetadataResult>,
-) {
-  const changes: MetadataBatch[`changes`] = []
-  const same = (a: MetadataResult, b: MetadataResult) =>
-    JSON.stringify(a) === JSON.stringify(b)
-  for (const row of before) {
-    if (!after.some((next) => next.metadata.$key === row.metadata.$key))
-      changes.push({
-        type: `delete`,
-        key: row.metadata.$key as AttributionKey,
-        value: publishedModelRows([row])[0]!,
-      })
-  }
-  for (const row of after) {
-    const previous = before.find(
-      (old) => old.metadata.$key === row.metadata.$key,
-    )
-    if (!previous || !same(previous, row))
-      changes.push({
-        type: previous ? `update` : `insert`,
-        key: row.metadata.$key as AttributionKey,
-        value: publishedModelRows([row])[0]!,
-        ...(previous
-          ? { previousValue: publishedModelRows([previous])[0]! }
-          : {}),
-      })
-  }
-  return changes
-}
-function checkMetadataPublications(
-  actual: ReadonlyArray<MetadataBatch>,
-  before: ReadonlyArray<MetadataResult>,
-  after: ReadonlyArray<MetadataResult>,
-): void {
-  const expectedChanges = expectedMetadataChanges(before, after)
-  if (expectedChanges.length)
-    expect(actual.length, `owed metadata publication`).toBeGreaterThan(0)
-  const byChange = (
-    a: MetadataBatch[`changes`][number],
-    b: MetadataBatch[`changes`][number],
-  ) => `${typeof a.key}:${a.key}`.localeCompare(`${typeof b.key}:${b.key}`)
-  for (const batch of actual) {
-    checkAttributedRows(batch.rows, [...after])
-  }
-  // Compare every callback's delta together. Splitting a batch stays legal;
-  // repeating a whole batch cannot consume the same public change twice.
-  expect(actual.flatMap((batch) => batch.changes).sort(byChange)).toEqual(
-    [...expectedChanges].sort(byChange),
-  )
-}
 const metadataTimelineShapes = [
   `structured-spread`,
   `functional-spread`,
@@ -1802,365 +1453,330 @@ afterAll(() => {
       ),
     )
 })
-declareOracle({
-  model: [expectedJoinedMetadata, expectedMetadataChanges],
-  check: [checkMetadataPublications],
-  grammar: [metadataTimelineHistories],
-})
 
-test.each(metadataTimelineHistories)(
-  `publishes metadata through join and write histories: %j`,
-  async ({ shape, reverse, topology, reject, rightFirst }) => {
-    oracleRoute(`case`)
-    metadataTimelineHistory++
-    const reach = (cut: string) =>
-      metadataTimelineHistoriesByState
-        .get(`${shape}/${topology}/${cut}`)!
-        .add(metadataTimelineHistory)
-    let releaseLeft!: () => void
-    let rejectLeft!: (reason: Error) => void
-    let releaseRight!: () => void
-    let rejectRight!: (reason: Error) => void
-    const leftGate = new Promise<void>((resolve, rejectGate) => {
-      releaseLeft = resolve
-      rejectLeft = rejectGate
-    })
-    const rightGate = new Promise<void>((resolve, rejectGate) => {
-      releaseRight = resolve
-      rejectRight = rejectGate
-    })
-    // Attach rejection observers before any path can abandon construction.
-    void leftGate.catch(() => {})
-    void rightGate.catch(() => {})
-    const baseLeft: Array<AttributionRow> = [
-      { id: `a`, parentId: `unused`, label: `left-base` },
-      { id: `anchor`, parentId: `unused`, label: `untouched` },
-    ]
-    const rightRow: AttributionRow = {
-      id: `r`,
-      parentId: `a`,
-      label: `right-base`,
-    }
-    let rightBase =
-      topology === `join-key` ? [{ ...rightRow, parentId: `missing` }] : []
-    const left = createCollection({
-      ...mockSyncCollectionOptions<AttributionRow>({
-        id: `timeline-left`,
-        getKey: (row) => row.id,
-        initialData: baseLeft.map((row) => ({ ...row })),
-      }),
-      onUpdate: async () => leftGate,
-    })
-    const right = createCollection({
-      ...mockSyncCollectionOptions<AttributionRow>({
-        id: `timeline-right`,
-        getKey: (row) => row.id,
-        initialData: rightBase.map((row) => ({ ...row })),
-      }),
-      onUpdate: async () => rightGate,
-    })
-    const baseQuery = new Query()
-      .from({ a: left })
-      .leftJoin({ b: right }, ({ a, b }) => eq(a.id, b.parentId))
-    const selected =
-      shape === `functional-direct`
-        ? baseQuery.fn.select(({ a }) => a)
-        : shape === `functional-spread`
-          ? baseQuery.fn.select(({ a, b }) =>
-              reverse ? { ...b, ...a } : { ...a, ...b },
-            )
-          : shape === `functional-projection`
-            ? baseQuery.fn.select(({ a }) => ({ id: a.id, label: a.label }))
-            : shape === `structured-projection`
-              ? baseQuery.select(({ a }) => ({
-                  id: a.id,
-                  label: a.label,
-                  hasPendingWrites: a.$hasPendingWrites,
-                }))
-              : baseQuery.select(({ a, b }) =>
-                  reverse ? { ...b, ...a } : { ...a, ...b },
-                )
-    const root = createLiveQueryCollection({
-      query: () => selected as unknown as QueryBuilder<AttributionContext>,
-      getKey: (row) =>
-        sourceOwnsMetadata(shape) ? row.id : `projection-${row.id}`,
-    })
-    const downstream = createLiveQueryCollection({
-      query: (q) =>
-        q.from({ root }).select(({ root: row }) => ({
-          id: row.id,
-          label: row.label,
-          observedKey: row.$key,
-          observedCollectionId: row.$collectionId,
-          observedOrigin: row.$origin,
-          observedPending: row.$hasPendingWrites,
-        })),
-      getKey: (row) => `downstream-${row.id}`,
-    })
-    const pending = new Set<AttributionKey>()
-    let rightOrigin: `remote` | `local` = `remote`
-    let leftOverlay: AttributionRow | undefined
-    let rightOverlay: AttributionRow | undefined
-    const expectedRoot = () =>
-      expectedJoinedMetadata(
-        baseLeft.map((row) =>
-          row.id === `a` && leftOverlay ? { ...leftOverlay } : { ...row },
-        ),
-        rightOverlay
-          ? [{ ...rightOverlay }]
-          : rightBase.map((row) => ({ ...row })),
-        shape,
-        reverse,
-        pending,
-        rightOrigin,
-        left.id,
-        right.id,
-        root.id,
-      )
-    const expectedDownstream = (rows: ReadonlyArray<MetadataResult>) =>
-      rows.map((row) => ({
-        ordinary: {
-          id: (row.ordinary as { id: AttributionKey }).id,
-          label: (row.ordinary as { label: string }).label,
-          observedKey: row.metadata.$key,
-          observedCollectionId: row.metadata.$collectionId,
-          observedOrigin: row.metadata.$origin,
-          observedPending: row.metadata.$hasPendingWrites,
-        },
-        metadata: {
-          $key: `downstream-${(row.ordinary as { id: AttributionKey }).id}`,
-          $collectionId: downstream.id,
-          $hasPendingWrites: false,
-          $origin: `remote`,
-        },
-      }))
-    let previous = expectedRoot()
-    const rootBatches: Array<MetadataBatch> = []
-    const downstreamBatches: Array<MetadataBatch> = []
-    const record = (
-      collection: typeof root | typeof downstream,
-      batches: Array<MetadataBatch>,
-    ) =>
-      collection.subscribeChanges(
-        (changes) =>
-          batches.push({
-            rows: captureMetadataRows(collection.toArray),
-            changes: changes.map((change) => ({
-              type: change.type,
-              key: change.key,
-              value: captureMetadataRows([change.value])[0]!,
-              ...(change.previousValue
-                ? {
-                    previousValue: captureMetadataRows([
-                      change.previousValue,
-                    ])[0]!,
-                  }
-                : {}),
-            })),
-          }),
-        { includeInitialState: true },
-      )
-    let rootSubscription: ReturnType<typeof record> | undefined
-    let downstreamSubscription: ReturnType<typeof record> | undefined
-    let leftSettlement: Promise<unknown> | undefined
-    let rightSettlement: Promise<unknown> | undefined
-    const observe = () => {
-      const next = expectedRoot()
-      const nextDownstream = expectedDownstream(next)
-      checkAttributedRows(root.toArray, next)
-      checkAttributedRows(downstream.toArray, nextDownstream)
-      checkMetadataPublications(rootBatches, previous, next)
-      checkMetadataPublications(
-        downstreamBatches,
-        expectedDownstream(previous),
-        nextDownstream,
-      )
-      if (pending.size && expectedMetadataChanges(previous, next).length)
-        reach(`root-callback-held`)
-      if (
-        pending.size &&
-        expectedMetadataChanges(expectedDownstream(previous), nextDownstream)
-          .length
-      )
-        reach(`downstream-callback-held`)
-      rootBatches.length = 0
-      downstreamBatches.length = 0
-      previous = next
-    }
-    const writeRight = (
-      type: `insert` | `update` | `delete`,
-      row: AttributionRow,
-    ) => {
-      right.utils.begin()
-      right.utils.write({ type, value: { ...row } })
-      right.utils.commit()
-    }
-    await checkWithCleanup(async () => {
-      await downstream.preload()
-      checkAttributedRows(root.toArray, previous)
-      checkAttributedRows(downstream.toArray, expectedDownstream(previous))
-      rootSubscription = record(root, rootBatches)
-      downstreamSubscription = record(downstream, downstreamBatches)
-      checkMetadataPublications(rootBatches, [], previous)
-      checkMetadataPublications(
-        downstreamBatches,
-        [],
-        expectedDownstream(previous),
-      )
-      rootBatches.length = 0
-      downstreamBatches.length = 0
-      leftOverlay = { ...baseLeft[0]!, label: `left-pending` }
-      pending.add(`a`)
-      const leftMutation = left.update(`a`, (row) => {
-        row.label = `left-pending`
-      })
-      leftSettlement = leftMutation.when(`settled`).then(
-        () => undefined,
-        (error: unknown) => error,
-      )
-      observe()
-      rightBase = [{ ...rightRow }]
-      writeRight(topology === `join-key` ? `update` : `insert`, rightRow)
-      observe()
-      rightBase =
-        topology === `join-key` ? [{ ...rightRow, parentId: `missing` }] : []
-      writeRight(
-        topology === `join-key` ? `update` : `delete`,
-        topology === `join-key`
-          ? { ...rightRow, parentId: `missing` }
-          : rightRow,
-      )
-      observe()
-      rightBase = [{ ...rightRow }]
-      writeRight(topology === `join-key` ? `update` : `insert`, rightRow)
-      observe()
-      reach(`rematched-held`)
-      rightOverlay = { ...rightRow, label: `right-pending` }
-      pending.add(`r`)
-      const rightMutation = right.update(`r`, (row) => {
-        row.label = `right-pending`
-      })
-      rightSettlement = rightMutation.when(`settled`).then(
-        () => undefined,
-        (error: unknown) => error,
-      )
-      observe()
-      reach(`two-pending`)
-      writeRight(`update`, { ...rightRow, label: `server` })
-      // Acceptance alone changes neither the applied base nor the active overlay.
-      observe()
-      const failures = {
-        left: new Error(`authored left rejection`),
-        right: new Error(`authored right rejection`),
-      }
-      const settle = async (side: `left` | `right`) => {
-        const fails = reject === side || reject === `both`
-        const failure = failures[side]
-        if (side === `left`) {
-          pending.delete(`a`)
-          leftOverlay = undefined
-          if (fails) rejectLeft(failure)
-          else releaseLeft()
-          expect(await leftSettlement).toBe(fails ? failure : undefined)
-        } else {
-          pending.delete(`r`)
-          rightOverlay = undefined
-          rightBase = [{ ...rightRow, label: `server` }]
-          rightOrigin = fails ? `remote` : `local`
-          if (fails) rejectRight(failure)
-          else releaseRight()
-          expect(await rightSettlement).toBe(fails ? failure : undefined)
-        }
-        observe()
-        if (fails) reach(`${side}-rejected`)
-      }
-      await settle(rightFirst ? `right` : `left`)
-      reach(`first-settled`)
-      reach(rightFirst ? `right-first` : `left-first`)
-      await settle(rightFirst ? `left` : `right`)
-      reach(`both-settled`)
-      if (reject === `both`) reach(`both-rejected`)
-      rightBase = [{ ...rightRow, label: `later` }]
-      rightOrigin = `remote`
-      writeRight(`update`, rightBase[0]!)
-      observe()
-      reach(`remote-followup`)
-    }, [
-      async () => {
-        releaseLeft()
-        releaseRight()
-        await Promise.all([leftSettlement, rightSettlement])
-      },
-      async () => {
-        rootSubscription?.unsubscribe()
-      },
-      async () => {
-        downstreamSubscription?.unsubscribe()
-      },
-      () => downstream.cleanup(),
-      () => root.cleanup(),
-      () => right.cleanup(),
-      () => left.cleanup(),
-    ])
-  },
-)
-
-// Publication calibrations corrupt an earlier callback while the final public
-// answer remains correct. A final-snapshot-only check would miss these faults.
-test.each([
-  `stale-read`,
-  `stale-event`,
-  `new-previous-value`,
-  `duplicate-message`,
-  `duplicate-batch`,
-  `missing-message`,
-  `no-callback`,
-  `early-wrong-later-correct`,
-] as const)(`rejects a hostile metadata publication: %s`, (fault) => {
-  oracleRoute(`case`)
-  const base: AttributionRow = { id: `a`, parentId: `parent`, label: `before` }
-  const before = expectedAttributedRows(
-    [base],
-    `structured-spread`,
-    new Set(),
-    `source`,
-    `output`,
-    (id) => id,
-  )
-  const after = expectedAttributedRows(
-    [{ ...base, label: `pending` }],
-    `structured-spread`,
-    new Set([base.id]),
-    `source`,
-    `output`,
-    (id) => id,
-  )
-  const allowed = {
-    rows: publishedModelRows(after),
-    changes: expectedMetadataChanges(before, after),
+// The former case body, unchanged.
+async function judgeMetadataTimeline({
+  shape,
+  reverse,
+  topology,
+  reject,
+  rightFirst,
+}: (typeof metadataTimelineHistories)[number]): Promise<void> {
+  metadataTimelineHistory++
+  const reach = (cut: string) =>
+    metadataTimelineHistoriesByState
+      .get(`${shape}/${topology}/${cut}`)!
+      .add(metadataTimelineHistory)
+  let releaseLeft!: () => void
+  let rejectLeft!: (reason: Error) => void
+  let releaseRight!: () => void
+  let rejectRight!: (reason: Error) => void
+  const leftGate = new Promise<void>((resolve, rejectGate) => {
+    releaseLeft = resolve
+    rejectLeft = rejectGate
+  })
+  const rightGate = new Promise<void>((resolve, rejectGate) => {
+    releaseRight = resolve
+    rejectRight = rejectGate
+  })
+  // Attach rejection observers before any path can abandon construction.
+  void leftGate.catch(() => {})
+  void rightGate.catch(() => {})
+  const baseLeft: Array<AttributionRow> = [
+    { id: `a`, parentId: `unused`, label: `left-base` },
+    { id: `anchor`, parentId: `unused`, label: `untouched` },
+  ]
+  const rightRow: AttributionRow = {
+    id: `r`,
+    parentId: `a`,
+    label: `right-base`,
   }
-  checkMetadataPublications([allowed], before, after)
-  const hostile = structuredClone(allowed)
-  if (fault === `stale-read`)
-    (hostile.rows[0] as Record<string, unknown>).$hasPendingWrites = false
-  if (fault === `stale-event`)
-    (hostile.changes[0]!.value as Record<string, unknown>).$origin = `remote`
-  if (fault === `new-previous-value`)
-    hostile.changes[0]!.previousValue = { ...hostile.changes[0]!.value }
-  if (fault === `duplicate-message`)
-    hostile.changes.push({ ...hostile.changes[0]! })
-  if (fault === `missing-message`) hostile.changes = []
-  if (fault === `early-wrong-later-correct`)
-    (hostile.rows[0] as Record<string, unknown>).$collectionId = `wrong`
-  const trace =
-    fault === `no-callback`
-      ? []
-      : fault === `duplicate-batch`
-        ? [allowed, structuredClone(allowed)]
-        : fault === `early-wrong-later-correct`
-          ? [hostile, allowed]
-          : [hostile]
-  expect(() => checkMetadataPublications(trace, before, after)).toThrow()
+  let rightBase =
+    topology === `join-key` ? [{ ...rightRow, parentId: `missing` }] : []
+  const left = createCollection({
+    ...mockSyncCollectionOptions<AttributionRow>({
+      id: `timeline-left`,
+      getKey: (row) => row.id,
+      initialData: baseLeft.map((row) => ({ ...row })),
+    }),
+    onUpdate: async () => leftGate,
+  })
+  const right = createCollection({
+    ...mockSyncCollectionOptions<AttributionRow>({
+      id: `timeline-right`,
+      getKey: (row) => row.id,
+      initialData: rightBase.map((row) => ({ ...row })),
+    }),
+    onUpdate: async () => rightGate,
+  })
+  const baseQuery = new Query()
+    .from({ a: left })
+    .leftJoin({ b: right }, ({ a, b }) => eq(a.id, b.parentId))
+  const selected =
+    shape === `functional-direct`
+      ? baseQuery.fn.select(({ a }) => a)
+      : shape === `functional-spread`
+        ? baseQuery.fn.select(({ a, b }) =>
+            reverse ? { ...b, ...a } : { ...a, ...b },
+          )
+        : shape === `functional-projection`
+          ? baseQuery.fn.select(({ a }) => ({ id: a.id, label: a.label }))
+          : shape === `structured-projection`
+            ? baseQuery.select(({ a }) => ({
+                id: a.id,
+                label: a.label,
+                hasPendingWrites: a.$hasPendingWrites,
+              }))
+            : baseQuery.select(({ a, b }) =>
+                reverse ? { ...b, ...a } : { ...a, ...b },
+              )
+  const root = createLiveQueryCollection({
+    query: () => selected as unknown as QueryBuilder<AttributionContext>,
+    getKey: (row) =>
+      sourceOwnsMetadata(shape) ? row.id : `projection-${row.id}`,
+  })
+  const downstream = createLiveQueryCollection({
+    query: (q) =>
+      q.from({ root }).select(({ root: row }) => ({
+        id: row.id,
+        label: row.label,
+        observedKey: row.$key,
+        observedCollectionId: row.$collectionId,
+        observedOrigin: row.$origin,
+        observedPending: row.$hasPendingWrites,
+      })),
+    getKey: (row) => `downstream-${row.id}`,
+  })
+  const pending = new Set<AttributionKey>()
+  let rightOrigin: `remote` | `local` = `remote`
+  let leftOverlay: AttributionRow | undefined
+  let rightOverlay: AttributionRow | undefined
+  const expectedRoot = () =>
+    expectedJoinedMetadata(
+      baseLeft.map((row) =>
+        row.id === `a` && leftOverlay ? { ...leftOverlay } : { ...row },
+      ),
+      rightOverlay
+        ? [{ ...rightOverlay }]
+        : rightBase.map((row) => ({ ...row })),
+      shape,
+      reverse,
+      pending,
+      rightOrigin,
+      left.id,
+      right.id,
+      root.id,
+    )
+  const expectedDownstream = (rows: ReadonlyArray<MetadataResult>) =>
+    rows.map((row) => ({
+      ordinary: {
+        id: (row.ordinary as { id: AttributionKey }).id,
+        label: (row.ordinary as { label: string }).label,
+        observedKey: row.metadata.$key,
+        observedCollectionId: row.metadata.$collectionId,
+        observedOrigin: row.metadata.$origin,
+        observedPending: row.metadata.$hasPendingWrites,
+      },
+      metadata: {
+        $key: `downstream-${(row.ordinary as { id: AttributionKey }).id}`,
+        $collectionId: downstream.id,
+        $hasPendingWrites: false,
+        $origin: `remote`,
+      },
+    }))
+  let previous = expectedRoot()
+  const rootBatches: Array<MetadataBatch> = []
+  const downstreamBatches: Array<MetadataBatch> = []
+  const record = (
+    collection: typeof root | typeof downstream,
+    batches: Array<MetadataBatch>,
+  ) =>
+    collection.subscribeChanges(
+      (changes) =>
+        batches.push({
+          rows: captureMetadataRows(collection.toArray),
+          changes: changes.map((change) => ({
+            type: change.type,
+            key: change.key,
+            value: captureMetadataRows([change.value])[0]!,
+            ...(change.previousValue
+              ? {
+                  previousValue: captureMetadataRows([
+                    change.previousValue,
+                  ])[0]!,
+                }
+              : {}),
+          })),
+        }),
+      { includeInitialState: true },
+    )
+  let rootSubscription: ReturnType<typeof record> | undefined
+  let downstreamSubscription: ReturnType<typeof record> | undefined
+  let leftSettlement: Promise<unknown> | undefined
+  let rightSettlement: Promise<unknown> | undefined
+  const observe = () => {
+    const next = expectedRoot()
+    const nextDownstream = expectedDownstream(next)
+    checkAttributedRows(root.toArray, next)
+    checkAttributedRows(downstream.toArray, nextDownstream)
+    checkMetadataPublications(rootBatches, previous, next)
+    checkMetadataPublications(
+      downstreamBatches,
+      expectedDownstream(previous),
+      nextDownstream,
+    )
+    if (pending.size && expectedMetadataChanges(previous, next).length)
+      reach(`root-callback-held`)
+    if (
+      pending.size &&
+      expectedMetadataChanges(expectedDownstream(previous), nextDownstream)
+        .length
+    )
+      reach(`downstream-callback-held`)
+    rootBatches.length = 0
+    downstreamBatches.length = 0
+    previous = next
+  }
+  const writeRight = (
+    type: `insert` | `update` | `delete`,
+    row: AttributionRow,
+  ) => {
+    right.utils.begin()
+    right.utils.write({ type, value: { ...row } })
+    right.utils.commit()
+  }
+  await checkWithCleanup(async () => {
+    await downstream.preload()
+    checkAttributedRows(root.toArray, previous)
+    checkAttributedRows(downstream.toArray, expectedDownstream(previous))
+    rootSubscription = record(root, rootBatches)
+    downstreamSubscription = record(downstream, downstreamBatches)
+    checkMetadataPublications(rootBatches, [], previous)
+    checkMetadataPublications(
+      downstreamBatches,
+      [],
+      expectedDownstream(previous),
+    )
+    rootBatches.length = 0
+    downstreamBatches.length = 0
+    leftOverlay = { ...baseLeft[0]!, label: `left-pending` }
+    pending.add(`a`)
+    const leftMutation = left.update(`a`, (row) => {
+      row.label = `left-pending`
+    })
+    leftSettlement = leftMutation.when(`settled`).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    observe()
+    rightBase = [{ ...rightRow }]
+    writeRight(topology === `join-key` ? `update` : `insert`, rightRow)
+    observe()
+    rightBase =
+      topology === `join-key` ? [{ ...rightRow, parentId: `missing` }] : []
+    writeRight(
+      topology === `join-key` ? `update` : `delete`,
+      topology === `join-key` ? { ...rightRow, parentId: `missing` } : rightRow,
+    )
+    observe()
+    rightBase = [{ ...rightRow }]
+    writeRight(topology === `join-key` ? `update` : `insert`, rightRow)
+    observe()
+    reach(`rematched-held`)
+    rightOverlay = { ...rightRow, label: `right-pending` }
+    pending.add(`r`)
+    const rightMutation = right.update(`r`, (row) => {
+      row.label = `right-pending`
+    })
+    rightSettlement = rightMutation.when(`settled`).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    observe()
+    reach(`two-pending`)
+    writeRight(`update`, { ...rightRow, label: `server` })
+    // Acceptance alone changes neither the applied base nor the active overlay.
+    observe()
+    const failures = {
+      left: new Error(`authored left rejection`),
+      right: new Error(`authored right rejection`),
+    }
+    const settle = async (side: `left` | `right`) => {
+      const fails = reject === side || reject === `both`
+      const failure = failures[side]
+      if (side === `left`) {
+        pending.delete(`a`)
+        leftOverlay = undefined
+        if (fails) rejectLeft(failure)
+        else releaseLeft()
+        expect(await leftSettlement).toBe(fails ? failure : undefined)
+      } else {
+        pending.delete(`r`)
+        rightOverlay = undefined
+        rightBase = [{ ...rightRow, label: `server` }]
+        rightOrigin = fails ? `remote` : `local`
+        if (fails) rejectRight(failure)
+        else releaseRight()
+        expect(await rightSettlement).toBe(fails ? failure : undefined)
+      }
+      observe()
+      if (fails) reach(`${side}-rejected`)
+    }
+    await settle(rightFirst ? `right` : `left`)
+    reach(`first-settled`)
+    reach(rightFirst ? `right-first` : `left-first`)
+    await settle(rightFirst ? `left` : `right`)
+    reach(`both-settled`)
+    if (reject === `both`) reach(`both-rejected`)
+    rightBase = [{ ...rightRow, label: `later` }]
+    rightOrigin = `remote`
+    writeRight(`update`, rightBase[0]!)
+    observe()
+    reach(`remote-followup`)
+  }, [
+    async () => {
+      releaseLeft()
+      releaseRight()
+      await Promise.all([leftSettlement, rightSettlement])
+    },
+    async () => {
+      rootSubscription?.unsubscribe()
+    },
+    async () => {
+      downstreamSubscription?.unsubscribe()
+    },
+    () => downstream.cleanup(),
+    () => root.cleanup(),
+    () => right.cleanup(),
+    () => left.cleanup(),
+  ])
+}
+
+const metadataTimelineLaw = `Metadata publications through join and write histories match the model at every read, event, and downstream callback cut.`
+
+oracleProperty({
+  id: `virtual-row-fields.metadata-timeline`,
+  law: {
+    statement: metadataTimelineLaw,
+    authority: `The Collection virtual-field boundary and reserved public row fields (boundary-only metadata, maintainer decision of 2026-11-05) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+    limits: `The enumerated shape, order, topology, rejection, and right-first timeline histories.`,
+  },
+  owns: [
+    `src/collection/index.ts#createCollection`,
+    `src/indexes/btree-index.ts`,
+    `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    `src/virtual-props.ts#hasVirtualProps`,
+  ],
+  histories: metadataTimelineHistories,
+  label: (history) =>
+    `publishes metadata through join and write histories: ${JSON.stringify(history)}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(metadataTimelineLaw, plan, observe, () =>
+      judgeMetadataTimeline(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })
 
 /**
@@ -2180,49 +1796,6 @@ test.each([
  * authored shapes. Only single-source child keys are modeled here; composite
  * compiler key encoding, facade mutation and provider scheduling are excluded.
  */
-function expectedInlineMetadataValues(
-  rows: ReadonlyArray<AttributionRow>,
-  shape: string,
-  pending: ReadonlySet<AttributionKey>,
-  sourceId: string,
-  overrides: Readonly<Record<string, unknown>>,
-): Array<object> {
-  return rows.map((row) => {
-    const source = expectedAttributedRows(
-      [row],
-      `structured-spread`,
-      pending,
-      sourceId,
-      `unused`,
-      (id) => id,
-    )[0]!
-    const selected = shape.endsWith(`projection`)
-      ? expectedAttributedRows(
-          [row],
-          shape,
-          pending,
-          sourceId,
-          `unused`,
-          (id) => id,
-        )[0]!.ordinary
-      : { ...source.ordinary, ...source.metadata }
-    return shape === `functional-direct`
-      ? selected
-      : { ...selected, ...overrides }
-  })
-}
-function checkInlineMetadataValues(
-  actual: ReadonlyArray<object>,
-  expected: ReadonlyArray<object>,
-): void {
-  // These values are flat authored records. Sorting ignores unspecified order,
-  // but preserves every selected property and duplicate occurrence.
-  const byId = (a: object, b: object) =>
-    String((a as { id: unknown }).id).localeCompare(
-      String((b as { id: unknown }).id),
-    )
-  expect([...actual].sort(byId)).toEqual([...expected].sort(byId))
-}
 const facadeMetadataHistories = collisionCases.flatMap(
   ({ collision, authoredPending }) =>
     metadataTimelineShapes
@@ -2280,277 +1853,260 @@ afterAll(() => {
       ),
     )
 })
-declareOracle({
-  model: [expectedInlineMetadataValues],
-  check: [checkInlineMetadataValues],
-  grammar: [facadeMetadataHistories],
-})
-test.each(facadeMetadataHistories)(
-  `receives metadata through shared facade intervals: %j`,
-  async ({
-    collision,
-    authoredPending,
-    shape,
-    destinationPopulated,
-    reject,
-  }) => {
-    oracleRoute(`case`)
-    facadeMetadataHistory++
-    const reach = (cut: string) =>
-      facadeMetadataHistoriesByState
-        .get(`${shape}/${cut}`)!
-        .add(facadeMetadataHistory)
-    let release!: () => void
-    let rejectWrite!: (error: Error) => void
-    const gate = new Promise<void>((resolve, rejectGate) => {
-      release = resolve
-      rejectWrite = rejectGate
-    })
-    void gate.catch(() => {})
-    let parentTruth = [
-      { id: `p1`, parentId: `a` },
-      { id: `p2`, parentId: `a` },
-      { id: `empty`, parentId: `empty` },
-    ]
-    const initialChildren: Array<AttributionRow> = [
-      { id: `c1`, parentId: `a`, label: `first` },
-      { id: `c2`, parentId: `a`, label: `second` },
-      ...(destinationPopulated
-        ? [{ id: `c3`, parentId: `b`, label: `destination` }]
-        : []),
-    ]
-    let childTruth = initialChildren.map((row) => ({ ...row }))
-    const parents = createCollection(
-      mockSyncCollectionOptions({
-        id: `facade-metadata-parents`,
-        getKey: (row: { id: string; parentId: string }) => row.id,
-        initialData: parentTruth.map((row) => ({ ...row })),
-      }),
-    )
-    const children = createCollection({
-      ...mockSyncCollectionOptions<AttributionRow>({
-        id: `facade-metadata-children`,
-        getKey: (row) => row.id,
-        initialData: initialChildren.map((row) => ({ ...row })),
-      }),
-      onUpdate: async () => gate,
-    })
-    const overrides: Record<string, unknown> = {}
-    for (const field of virtualFieldNames)
-      if (collision === field || collision === `all`)
-        overrides[field] =
-          field === `$hasPendingWrites`
-            ? authoredPending
-            : field === `$origin`
-              ? `local`
-              : `spoof`
-    const live = createLiveQueryCollection((q) =>
-      q.from({ parent: parents }).select(({ parent }) => {
-        const childRows = () => {
-          const base = new Query()
-            .from({ child: children })
-            .where(({ child }) => eq(child.parentId, parent.parentId))
-          const selected =
-            shape === `functional-direct`
-              ? base.fn.select(({ child }) => child)
-              : shape === `functional-projection`
-                ? base.fn.select(({ child }) => ({
+// The former case body, unchanged.
+async function judgeFacadeMetadata({
+  collision,
+  authoredPending,
+  shape,
+  destinationPopulated,
+  reject,
+}: (typeof facadeMetadataHistories)[number]): Promise<void> {
+  facadeMetadataHistory++
+  const reach = (cut: string) =>
+    facadeMetadataHistoriesByState
+      .get(`${shape}/${cut}`)!
+      .add(facadeMetadataHistory)
+  let release!: () => void
+  let rejectWrite!: (error: Error) => void
+  const gate = new Promise<void>((resolve, rejectGate) => {
+    release = resolve
+    rejectWrite = rejectGate
+  })
+  void gate.catch(() => {})
+  let parentTruth = [
+    { id: `p1`, parentId: `a` },
+    { id: `p2`, parentId: `a` },
+    { id: `empty`, parentId: `empty` },
+  ]
+  const initialChildren: Array<AttributionRow> = [
+    { id: `c1`, parentId: `a`, label: `first` },
+    { id: `c2`, parentId: `a`, label: `second` },
+    ...(destinationPopulated
+      ? [{ id: `c3`, parentId: `b`, label: `destination` }]
+      : []),
+  ]
+  let childTruth = initialChildren.map((row) => ({ ...row }))
+  const parents = createCollection(
+    mockSyncCollectionOptions({
+      id: `facade-metadata-parents`,
+      getKey: (row: { id: string; parentId: string }) => row.id,
+      initialData: parentTruth.map((row) => ({ ...row })),
+    }),
+  )
+  const children = createCollection({
+    ...mockSyncCollectionOptions<AttributionRow>({
+      id: `facade-metadata-children`,
+      getKey: (row) => row.id,
+      initialData: initialChildren.map((row) => ({ ...row })),
+    }),
+    onUpdate: async () => gate,
+  })
+  const overrides: Record<string, unknown> = {}
+  for (const field of virtualFieldNames)
+    if (collision === field || collision === `all`)
+      overrides[field] =
+        field === `$hasPendingWrites`
+          ? authoredPending
+          : field === `$origin`
+            ? `local`
+            : `spoof`
+  const live = createLiveQueryCollection((q) =>
+    q.from({ parent: parents }).select(({ parent }) => {
+      const childRows = () => {
+        const base = new Query()
+          .from({ child: children })
+          .where(({ child }) => eq(child.parentId, parent.parentId))
+        const selected =
+          shape === `functional-direct`
+            ? base.fn.select(({ child }) => child)
+            : shape === `functional-projection`
+              ? base.fn.select(({ child }) => ({
+                  id: child.id,
+                  label: child.label,
+                  ...overrides,
+                }))
+              : shape === `structured-projection`
+                ? base.select(({ child }) => ({
                     id: child.id,
                     label: child.label,
+                    hasPendingWrites: child.$hasPendingWrites,
                     ...overrides,
                   }))
-                : shape === `structured-projection`
-                  ? base.select(({ child }) => ({
-                      id: child.id,
-                      label: child.label,
-                      hasPendingWrites: child.$hasPendingWrites,
+                : // Explicit virtual reads make the inline selected shape independent of
+                  // whether source metadata properties happen to be enumerable.
+                  shape === `functional-spread`
+                  ? base.fn.select(({ child }) => ({
+                      ...child,
+                      $key: child.$key,
+                      $collectionId: child.$collectionId,
+                      $origin: child.$origin,
+                      $hasPendingWrites: child.$hasPendingWrites,
                       ...overrides,
                     }))
-                  : // Explicit virtual reads make the inline selected shape independent of
-                    // whether source metadata properties happen to be enumerable.
-                    shape === `functional-spread`
-                    ? base.fn.select(({ child }) => ({
-                        ...child,
-                        $key: child.$key,
-                        $collectionId: child.$collectionId,
-                        $origin: child.$origin,
-                        $hasPendingWrites: child.$hasPendingWrites,
-                        ...overrides,
-                      }))
-                    : base.select(({ child }) => ({
-                        ...child,
-                        $key: child.$key,
-                        $collectionId: child.$collectionId,
-                        $origin: child.$origin,
-                        $hasPendingWrites: child.$hasPendingWrites,
-                        ...overrides,
-                      }))
-          return selected as unknown as QueryBuilder<AttributionContext>
-        }
-        return {
-          id: parent.id,
-          parentId: parent.parentId,
-          children: include(childRows()),
-          array: toArray(childRows()),
-          materialized: materialize(childRows()),
-        }
-      }),
+                  : base.select(({ child }) => ({
+                      ...child,
+                      $key: child.$key,
+                      $collectionId: child.$collectionId,
+                      $origin: child.$origin,
+                      $hasPendingWrites: child.$hasPendingWrites,
+                      ...overrides,
+                    }))
+        return selected as unknown as QueryBuilder<AttributionContext>
+      }
+      return {
+        id: parent.id,
+        parentId: parent.parentId,
+        children: include(childRows()),
+        array: toArray(childRows()),
+        materialized: materialize(childRows()),
+      }
+    }),
+  )
+  const pending = new Set<AttributionKey>()
+  let intervals: FacadeIntervals<string> = { active: new Map(), next: 0 }
+  const observedIntervals = new Map<number, MetadataFacade>()
+  const observe = (cut?: `held` | `reactivated`) => {
+    expect(
+      live.toArray
+        .map(({ id, parentId }) => ({ id, parentId }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    ).toEqual([...parentTruth].sort((a, b) => a.id.localeCompare(b.id)))
+    intervals = advanceFacadeIntervals(
+      intervals,
+      parentTruth.map((row) => row.parentId),
     )
-    const pending = new Set<AttributionKey>()
-    let intervals: FacadeIntervals<string> = { active: new Map(), next: 0 }
-    const observedIntervals = new Map<number, MetadataFacade>()
-    const observe = (cut?: `held` | `reactivated`) => {
-      expect(
-        live.toArray
-          .map(({ id, parentId }) => ({ id, parentId }))
-          .sort((a, b) => a.id.localeCompare(b.id)),
-      ).toEqual([...parentTruth].sort((a, b) => a.id.localeCompare(b.id)))
-      intervals = advanceFacadeIntervals(
-        intervals,
-        parentTruth.map((row) => row.parentId),
+    checkFacadeIntervals(
+      intervals,
+      live.toArray.map((row) => ({
+        group: row.parentId,
+        facade: row.children,
+      })),
+      observedIntervals,
+    )
+    for (const parent of parentTruth) {
+      const actual = live.get(parent.id)!
+      const expectedChildren = childTruth.filter(
+        (child) => child.parentId === parent.parentId,
       )
-      checkFacadeIntervals(
-        intervals,
-        live.toArray.map((row) => ({
-          group: row.parentId,
-          facade: row.children,
-        })),
-        observedIntervals,
-      )
-      for (const parent of parentTruth) {
-        const actual = live.get(parent.id)!
-        const expectedChildren = childTruth.filter(
-          (child) => child.parentId === parent.parentId,
-        )
-        if (!expectedChildren.length) reach(`active-empty-ready`)
-        checkAttributedRows(
-          actual.children.toArray,
-          expectedAttributedRows(
-            expectedChildren,
-            shape,
-            pending,
-            children.id,
-            actual.children.id,
-            (id) => id,
-          ),
-        )
-        const expectedInline = expectedInlineMetadataValues(
+      if (!expectedChildren.length) reach(`active-empty-ready`)
+      checkAttributedRows(
+        actual.children.toArray,
+        expectedAttributedRows(
           expectedChildren,
           shape,
           pending,
           children.id,
-          overrides,
-        )
-        checkInlineMetadataValues(actual.array, expectedInline)
-        checkInlineMetadataValues(actual.materialized, expectedInline)
-        if (cut && expectedChildren.length) {
-          for (const form of [`facade`, `toArray`, `materialize`])
-            facadeMetadataHistoriesByState
-              .get(`${shape}/${form}/${cut}`)!
-              .add(facadeMetadataHistory)
-        }
+          actual.children.id,
+          (id) => id,
+        ),
+      )
+      const expectedInline = expectedInlineMetadataValues(
+        expectedChildren,
+        shape,
+        pending,
+        children.id,
+        overrides,
+      )
+      checkInlineMetadataValues(actual.array, expectedInline)
+      checkInlineMetadataValues(actual.materialized, expectedInline)
+      if (cut && expectedChildren.length) {
+        for (const form of [`facade`, `toArray`, `materialize`])
+          facadeMetadataHistoriesByState
+            .get(`${shape}/${form}/${cut}`)!
+            .add(facadeMetadataHistory)
       }
     }
-    const move = (id: string, parentId: string) => {
-      parentTruth = parentTruth.map((row) =>
-        row.id === id ? { ...row, parentId } : row,
-      )
-      parents.utils.begin()
-      parents.utils.write({ type: `update`, value: { id, parentId } })
-      parents.utils.commit()
-      observe()
-    }
-    let settlement: Promise<unknown> | undefined
-    await checkWithCleanup(async () => {
-      await live.preload()
-      observe()
-      childTruth = childTruth.map((row) =>
-        row.id === `c1` ? { ...row, label: `pending` } : row,
-      )
-      pending.add(`c1`)
-      const mutation = children.update(`c1`, (row) => {
-        row.label = `pending`
-      })
-      settlement = mutation.when(`settled`).then(
-        () => undefined,
-        (error: unknown) => error,
-      )
-      observe(`held`)
-      reach(`shared-held`)
-      move(`p1`, `b`)
-      move(`p2`, `b`)
-      reach(`last-route-retired`)
-      move(`p1`, `a`)
-      observe(`reactivated`)
-      reach(`reactivated-held`)
-      childTruth = initialChildren.map((row) => ({ ...row }))
-      pending.clear()
-      const failure = new Error(`authored facade child rejection`)
-      if (reject) rejectWrite(failure)
-      else release()
-      expect(await settlement).toBe(reject ? failure : undefined)
-      observe()
-      reach(`settled`)
-      childTruth = childTruth.map((row) =>
-        row.id === `c1` ? { ...row, label: `later` } : row,
-      )
-      children.utils.begin()
-      children.utils.write({
-        type: `update`,
-        value: { id: `c1`, parentId: `a`, label: `later` },
-      })
-      children.utils.commit()
-      observe()
-      reach(`later-source`)
-      move(`p2`, `a`)
-      reach(`reshared`)
-    }, [
-      async () => {
-        release()
-        await settlement
-      },
-      () => live.cleanup(),
-      () => children.cleanup(),
-      () => parents.cleanup(),
-    ])
-  },
-)
-
-// Inline values must not receive a facade's publication metadata. These
-// controls run the same selected-shape model for absent and authored fields.
-test.each([`none`, `$key`, `$hasPendingWrites`, `all`] as const)(
-  `rejects facade enrichment of an inline value: %s`,
-  (collision) => {
-    oracleRoute(`calibration`)
-    const overrides: Record<string, unknown> = {}
-    for (const field of virtualFieldNames)
-      if (collision === field || collision === `all`)
-        overrides[field] =
-          field === `$hasPendingWrites`
-            ? true
-            : field === `$origin`
-              ? `local`
-              : `authored`
-    const expected = expectedInlineMetadataValues(
-      [{ id: `child`, parentId: `a`, label: `value` }],
-      `functional-projection`,
-      new Set(),
-      `source`,
-      overrides,
+  }
+  const move = (id: string, parentId: string) => {
+    parentTruth = parentTruth.map((row) =>
+      row.id === id ? { ...row, parentId } : row,
     )
-    checkInlineMetadataValues(expected, expected)
-    const hostile = [
-      {
-        ...expected[0],
-        $key: `compiler-key`,
-        $collectionId: `facade`,
-        $origin: `remote`,
-        $hasPendingWrites: false,
-      },
-    ]
-    expect(() => checkInlineMetadataValues(hostile, expected)).toThrow()
+    parents.utils.begin()
+    parents.utils.write({ type: `update`, value: { id, parentId } })
+    parents.utils.commit()
+    observe()
+  }
+  let settlement: Promise<unknown> | undefined
+  await checkWithCleanup(async () => {
+    await live.preload()
+    observe()
+    childTruth = childTruth.map((row) =>
+      row.id === `c1` ? { ...row, label: `pending` } : row,
+    )
+    pending.add(`c1`)
+    const mutation = children.update(`c1`, (row) => {
+      row.label = `pending`
+    })
+    settlement = mutation.when(`settled`).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    observe(`held`)
+    reach(`shared-held`)
+    move(`p1`, `b`)
+    move(`p2`, `b`)
+    reach(`last-route-retired`)
+    move(`p1`, `a`)
+    observe(`reactivated`)
+    reach(`reactivated-held`)
+    childTruth = initialChildren.map((row) => ({ ...row }))
+    pending.clear()
+    const failure = new Error(`authored facade child rejection`)
+    if (reject) rejectWrite(failure)
+    else release()
+    expect(await settlement).toBe(reject ? failure : undefined)
+    observe()
+    reach(`settled`)
+    childTruth = childTruth.map((row) =>
+      row.id === `c1` ? { ...row, label: `later` } : row,
+    )
+    children.utils.begin()
+    children.utils.write({
+      type: `update`,
+      value: { id: `c1`, parentId: `a`, label: `later` },
+    })
+    children.utils.commit()
+    observe()
+    reach(`later-source`)
+    move(`p2`, `a`)
+    reach(`reshared`)
+  }, [
+    async () => {
+      release()
+      await settlement
+    },
+    () => live.cleanup(),
+    () => children.cleanup(),
+    () => parents.cleanup(),
+  ])
+}
+
+const facadeMetadataLaw = `Collection facades publish the metadata their projection owns across shared facade intervals, and inline values keep their authored fields.`
+
+oracleProperty({
+  id: `virtual-row-fields.facade-intervals`,
+  law: {
+    statement: facadeMetadataLaw,
+    authority: `The Collection virtual-field boundary and reserved public row fields (boundary-only metadata, maintainer decision of 2026-11-05) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+    limits: `The enumerated collision, pending, shape, destination, and rejection facade histories.`,
   },
-)
+  owns: [
+    `src/collection/index.ts#createCollection`,
+    `src/indexes/btree-index.ts`,
+    `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    `src/virtual-props.ts#hasVirtualProps`,
+  ],
+  histories: facadeMetadataHistories,
+  label: (history) =>
+    `receives metadata through shared facade intervals: ${JSON.stringify(history)}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(facadeMetadataLaw, plan, observe, () =>
+      judgeFacadeMetadata(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
 
 /**
  * A nullable whole-row selection yields either the complete source row or an
@@ -2561,48 +2117,6 @@ test.each([`none`, `$key`, `$hasPendingWrites`, `all`] as const)(
  * Compiler-generated empty-row keys are checked against the facade's own public
  * keys, not against an independent key-encoding model.
  */
-function expectedNullableSelection(
-  match: { id: string; label: string } | undefined,
-  sourceId: string,
-  facadeId: string,
-  facadeKey: string | number,
-): { inline: Array<object>; facade: Array<object> } {
-  const inline = match
-    ? [
-        {
-          ...match,
-          $key: match.id,
-          $collectionId: sourceId,
-          $origin: `remote`,
-          $hasPendingWrites: false,
-        },
-      ]
-    : [{}]
-  return {
-    inline,
-    facade: match
-      ? inline.map((row) => ({ ...row, $key: facadeKey }))
-      : [
-          {
-            $key: facadeKey,
-            $collectionId: facadeId,
-            $origin: `remote`,
-            $hasPendingWrites: false,
-          },
-        ],
-  }
-}
-function checkNullableSelection(
-  actual: {
-    facade: ReadonlyArray<object>
-    inline: ReadonlyArray<ReadonlyArray<object>>
-  },
-  expected: ReturnType<typeof expectedNullableSelection>,
-): void {
-  checkInlineMetadataValues(actual.facade, expected.facade)
-  for (const value of actual.inline)
-    checkInlineMetadataValues(value, expected.inline)
-}
 const nullableFacadeHistories = [false, true].map((initialMatch) => ({
   initialMatch,
 }))
@@ -2620,123 +2134,107 @@ afterAll(() =>
     `nullable whole-row facade`,
   ).toEqual([]),
 )
-declareOracle({
-  model: [expectedNullableSelection],
-  check: [checkNullableSelection],
-  grammar: [nullableFacadeHistories],
-})
-test.each(nullableFacadeHistories)(
-  `publishes nullable whole rows through a facade: %j`,
-  async ({ initialMatch }) => {
-    oracleRoute(`case`)
-    nullableFacadeHistory++
-    const children = createCollection(
-      mockSyncCollectionOptions<{ id: string }>({
-        id: `nullable-facade-children`,
-        getKey: (row) => row.id,
-        initialData: [{ id: `child` }],
-      }),
-    )
-    const authored = { id: `child`, label: `source` }
-    let match = initialMatch ? { ...authored } : undefined
-    const matches = createCollection(
-      mockSyncCollectionOptions<typeof authored>({
-        id: `nullable-facade-matches`,
-        getKey: (row) => row.id,
-        initialData: match ? [{ ...authored }] : [],
-      }),
-    )
-    children.createIndex((row) => row.id, { indexType: BTreeIndex })
-    matches.createIndex((row) => row.id, { indexType: BTreeIndex })
-    const live = createLiveQueryCollection((q) =>
-      q.from({ parent: children }).select(({ parent }) => {
-        const selected = q
-          .from({ child: children })
-          .where(({ child }) => eq(child.id, parent.id))
-          .leftJoin({ maybe: matches }, ({ child, maybe }) =>
-            eq(child.id, maybe.id),
-          )
-          .select(({ maybe }) => maybe)
-        return {
-          id: parent.id,
-          children: include(selected),
-          array: toArray(selected),
-          materialized: materialize(selected),
-          first: materialize(selected.findOne()),
-        }
-      }),
-    )
-    const observe = () => {
-      const parent = live.toArray[0]!
-      expect(live.toArray).toHaveLength(1)
-      const keys = [...parent.children.keys()]
-      expect(keys).toHaveLength(1)
-      checkNullableSelection(
-        {
-          facade: parent.children.toArray,
-          inline: [parent.array, parent.materialized, [parent.first!]],
-        },
-        expectedNullableSelection(
-          match,
-          matches.id,
-          parent.children.id,
-          keys[0]!,
-        ),
-      )
-      nullableFacadeHistoriesByState
-        .get(match ? `matched` : `unmatched`)!
-        .add(nullableFacadeHistory)
-    }
-    await checkWithCleanup(async () => {
-      await live.preload()
-      observe()
-      for (let i = 0; i < 2; i++) {
-        matches.utils.begin()
-        matches.utils.write({
-          type: match ? `delete` : `insert`,
-          value: { ...authored },
-        })
-        matches.utils.commit()
-        match = match ? undefined : { ...authored }
-        observe()
-      }
-    }, [
-      () => live.cleanup(),
-      () => matches.cleanup(),
-      () => children.cleanup(),
-    ])
-  },
-)
-
-// The same nullable-boundary checker must reject lost facade metadata, enriched
-// inline emptiness and a missing ordinary field on a complete source row.
-test.each([
-  `empty-facade-metadata`,
-  `empty-inline-enriched`,
-  `matched-field-missing`,
-] as const)(`rejects a hostile nullable whole-row observation: %s`, (fault) => {
-  oracleRoute(`calibration`)
-  const expected = expectedNullableSelection(
-    fault === `matched-field-missing`
-      ? { id: `child`, label: `source` }
-      : undefined,
-    `source`,
-    `facade`,
-    `generated-key`,
+// The former case body, unchanged.
+async function judgeNullableFacade({
+  initialMatch,
+}: (typeof nullableFacadeHistories)[number]): Promise<void> {
+  nullableFacadeHistory++
+  const children = createCollection(
+    mockSyncCollectionOptions<{ id: string }>({
+      id: `nullable-facade-children`,
+      getKey: (row) => row.id,
+      initialData: [{ id: `child` }],
+    }),
   )
-  const observed = {
-    facade: structuredClone(expected.facade),
-    inline: [structuredClone(expected.inline)],
-  }
-  checkNullableSelection(observed, expected)
-  if (fault === `empty-facade-metadata`) observed.facade = [{}]
-  else if (fault === `empty-inline-enriched`)
-    observed.inline = [structuredClone(expected.facade)]
-  else
-    observed.facade = observed.facade.map((row) =>
-      Object.fromEntries(
-        Object.entries(row).filter(([key]) => key !== `label`),
+  const authored = { id: `child`, label: `source` }
+  let match = initialMatch ? { ...authored } : undefined
+  const matches = createCollection(
+    mockSyncCollectionOptions<typeof authored>({
+      id: `nullable-facade-matches`,
+      getKey: (row) => row.id,
+      initialData: match ? [{ ...authored }] : [],
+    }),
+  )
+  children.createIndex((row) => row.id, { indexType: BTreeIndex })
+  matches.createIndex((row) => row.id, { indexType: BTreeIndex })
+  const live = createLiveQueryCollection((q) =>
+    q.from({ parent: children }).select(({ parent }) => {
+      const selected = q
+        .from({ child: children })
+        .where(({ child }) => eq(child.id, parent.id))
+        .leftJoin({ maybe: matches }, ({ child, maybe }) =>
+          eq(child.id, maybe.id),
+        )
+        .select(({ maybe }) => maybe)
+      return {
+        id: parent.id,
+        children: include(selected),
+        array: toArray(selected),
+        materialized: materialize(selected),
+        first: materialize(selected.findOne()),
+      }
+    }),
+  )
+  const observe = () => {
+    const parent = live.toArray[0]!
+    expect(live.toArray).toHaveLength(1)
+    const keys = [...parent.children.keys()]
+    expect(keys).toHaveLength(1)
+    checkNullableSelection(
+      {
+        facade: parent.children.toArray,
+        inline: [parent.array, parent.materialized, [parent.first!]],
+      },
+      expectedNullableSelection(
+        match,
+        matches.id,
+        parent.children.id,
+        keys[0]!,
       ),
     )
-  expect(() => checkNullableSelection(observed, expected)).toThrow()
+    nullableFacadeHistoriesByState
+      .get(match ? `matched` : `unmatched`)!
+      .add(nullableFacadeHistory)
+  }
+  await checkWithCleanup(async () => {
+    await live.preload()
+    observe()
+    for (let i = 0; i < 2; i++) {
+      matches.utils.begin()
+      matches.utils.write({
+        type: match ? `delete` : `insert`,
+        value: { ...authored },
+      })
+      matches.utils.commit()
+      match = match ? undefined : { ...authored }
+      observe()
+    }
+  }, [() => live.cleanup(), () => matches.cleanup(), () => children.cleanup()])
+}
+
+const nullableFacadeLaw = `A nullable whole-row selection publishes through a facade with the facade's metadata when matched and an empty value otherwise.`
+
+oracleProperty({
+  id: `virtual-row-fields.nullable-facade`,
+  law: {
+    statement: nullableFacadeLaw,
+    authority: `The Collection virtual-field boundary and reserved public row fields (boundary-only metadata, maintainer decision of 2026-11-05) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+    limits: `The two enumerated initial-match histories.`,
+  },
+  owns: [
+    `src/collection/index.ts#createCollection`,
+    `src/indexes/btree-index.ts`,
+    `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    `src/virtual-props.ts#hasVirtualProps`,
+  ],
+  histories: nullableFacadeHistories,
+  label: (history) =>
+    `publishes nullable whole rows through a facade: ${JSON.stringify(history)}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(nullableFacadeLaw, plan, observe, () =>
+      judgeNullableFacade(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })

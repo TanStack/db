@@ -28,7 +28,6 @@ import { expect, vi } from 'vitest'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { createRowStore } from '../src/store-materialization'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-config'
 import {
   forwardAssertionJudgment,
@@ -562,11 +561,6 @@ oracleProperty({
   check: forwardAssertionJudgment,
 })
 
-declareOracle({
-  grammar: [histories, nativeParentHistories],
-  check: [compare, compareArray],
-})
-
 /**
  * The materializer's own data-field boundary preserves descriptor visibility
  * and supplies native shape notifications. This is a helper-only law: Core
@@ -718,11 +712,6 @@ oracleProperty({
     ),
   model: recordedAssertionJudgment,
   check: forwardAssertionJudgment,
-})
-
-declareOracle({
-  grammar: [visibilityHistories],
-  check: [compareVisibility],
 })
 
 /**
@@ -957,12 +946,6 @@ oracleProperty({
     ),
   model: recordedAssertionJudgment,
   check: forwardAssertionJudgment,
-})
-
-declareOracle({
-  model: [expectedLabel],
-  grammar: [getterHistories],
-  check: [compareLabel],
 })
 
 /**
@@ -1287,11 +1270,6 @@ oracleProperty({
     ),
   model: recordedAssertionJudgment,
   check: forwardAssertionJudgment,
-})
-declareOracle({
-  model: [enumerationBudget, semanticGraph],
-  grammar: [graphHistories],
-  check: [compareGraph, compareGraphValues],
 })
 
 /**
@@ -1677,11 +1655,6 @@ oracleProperty({
   model: recordedAssertionJudgment,
   check: forwardAssertionJudgment,
 })
-declareOracle({
-  model: [expectedCallable],
-  grammar: [callableHistories],
-  check: [compareCallable],
-})
 
 /**
  * An own user data field keeps its ordinary current-result meaning even when
@@ -1985,11 +1958,6 @@ oracleProperty({
   model: recordedAssertionJudgment,
   check: forwardAssertionJudgment,
 })
-declareOracle({
-  model: [expectedReservedField],
-  grammar: [reservedFieldHistories],
-  check: [compareReservedField],
-})
 
 /**
  * Arrays retain their admitted inherited methods in a Solid listener. The
@@ -2209,9 +2177,4 @@ oracleProperty({
     ),
   model: recordedAssertionJudgment,
   check: forwardAssertionJudgment,
-})
-declareOracle({
-  model: [expectedMethods],
-  grammar: [methodHistories],
-  check: [compareMethods],
 })

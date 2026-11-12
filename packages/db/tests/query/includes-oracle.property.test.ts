@@ -1,6 +1,12 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { oracleAssertion } from '../oracle-assertion-adapter.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from '../oracle-assertion-adapter.js'
 import {
   concat,
   createLiveQueryCollection,
@@ -16,13 +22,11 @@ import {
   withOracleCleanup,
 } from '../utils.js'
 import {
-  oracleFixedSeed,
+  oracleProperty,
   oraclePropertyOptions,
   oracleReplayRequested,
-  oracleRoute,
   oracleRuns,
 } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { hash } from '../../../db-ivm/src/hashing/hash.js'
 import {
   DISTINCT_REACH_STATES,
@@ -45,14 +49,10 @@ import {
   withPendingWorkCleanup,
 } from './includes-structural-support.js'
 import {
-  assertDisjointRelationshipKeys,
   batchChild,
   batchRoot,
   createConnectedBatchBranches,
-  createRouteLifecycleScenario,
   createVisibleRelationshipScenario,
-  otherBranch,
-  rowAt,
   transitionHistoryBranches,
   updateFullRowBatchModels,
   updateModel,
@@ -69,16 +69,40 @@ import {
   scopedScenarioArbitrary,
   sortedRequests,
 } from './includes-scope-identity-oracle.js'
+import {
+  branchDeliveryOrders,
+  compareRows,
+  createInitiallySharedRouteResubscribeScenario,
+  createIntraBatchRekeyRouteReuseScenarios,
+  createMergeIntoSharedRouteScenarios,
+  createMovedChildReplacementScenarios,
+  createRekeyRouteReuseScenarios,
+  createRelationshipBatchShapeMatrix,
+  createSharedRouteLastSubscriberScenario,
+  createSharedRouteLifetimeScenarios,
+  createSnapshotOnResubscribeScenarios,
+  createTransitionHistoryScenario,
+  destinationHistories,
+  destinationHistoryScenarioArbitrary,
+  expectEveryHistoryStepVisible,
+  expectEveryRouteTransitionVisible,
+  independentTransitionScenarioArbitrary,
+  independentTransitionShapes,
+  levelArbitrary,
+  movedChildReplacementMirrorsArbitrary,
+  recompute,
+  recomputeFullRowBatchScenario,
+  rekeyRouteReuseScenarioArbitrary,
+  relationshipBatchFixtureArbitrary,
+  transitionHistoryPlacements,
+  transitionHistoryScenariosArbitrary,
+  visibleRelationshipScenarioArbitrary,
+} from './includes-history-grammar-oracle.js'
 import type {
-  ConnectedBranch,
   FullRowBatchScenario,
   FullRowBatchStep,
   IncludeDepth,
-  RouteLifecycleScenario,
-  RouteTransitionDescriptor,
   VisibleRelationshipScenario,
-  VisibleRelationshipScenarioOptions,
-  VisibleScalarNoise,
 } from './includes-route-grammar-oracle.js'
 import type {
   ChildRow,
@@ -102,77 +126,16 @@ import type {
   ScopedShape,
 } from './includes-scope-identity-oracle.js'
 
-type HistoryAction = {
-  type: `put` | `delete` | `optimisticConfirm` | `optimisticRollback`
-  level: 0 | IncludeDepth
-  id: number
-  parentGroup: number
-  group: number
-  value: number
-  position: number
-}
+import type {
+  HistoryAction,
+  HistoryScenarioPair,
+  OracleNode,
+  VisibleRelationshipTransition,
+} from './includes-history-grammar-oracle.js'
 
 type Scenario = {
   depth: IncludeDepth
   history: Array<HistoryAction>
-}
-
-type OracleNode = RootRow & {
-  children?: Array<OracleNode>
-}
-
-type RelationshipNode = {
-  id: number
-  value?: unknown
-  children?: unknown
-}
-
-function isRelationshipNode(value: unknown): value is RelationshipNode {
-  return (
-    typeof value === `object` &&
-    value !== null &&
-    `id` in value &&
-    typeof value.id === `number`
-  )
-}
-
-function findRelationshipNode(
-  value: unknown,
-  id: number,
-): RelationshipNode | undefined {
-  if (!Array.isArray(value)) return undefined
-
-  for (const entry of value) {
-    if (!isRelationshipNode(entry)) continue
-    if (entry.id === id) return entry
-    const nested = findRelationshipNode(entry.children, id)
-    if (nested) return nested
-  }
-  return undefined
-}
-
-function hasDirectChild(value: unknown, parentId: number, childId: number) {
-  const parent = findRelationshipNode(value, parentId)
-  return (
-    Array.isArray(parent?.children) &&
-    parent.children.some(
-      (child) => isRelationshipNode(child) && child.id === childId,
-    )
-  )
-}
-
-type RelationshipProjectionNode = {
-  id: number
-  children?: Array<RelationshipProjectionNode>
-}
-
-function relationshipOnly(
-  nodes: ReadonlyArray<OracleNode>,
-): Array<RelationshipProjectionNode> {
-  return nodes.map(({ id, children }) => ({
-    id,
-    ...(children ? { children: relationshipOnly(children) } : {}),
-  }))
 }
 
 type MaterializeRoot = { id: number; middleId: number }
@@ -219,21 +182,6 @@ const depthArbitrary = fc.constantFrom<IncludeDepth>(1, 2, 3, 4)
 // property; other matrix cells cannot delay or obscure that reproduction.
 function generatedCampaigns(runs: number, property: string, fixedSeed: number) {
   return [{ label: `fixed and random`, options: { runs, property, fixedSeed } }]
-}
-
-function levelArbitrary(
-  depth: IncludeDepth,
-): fc.Arbitrary<HistoryAction[`level`]> {
-  switch (depth) {
-    case 1:
-      return fc.constantFrom(0, 1)
-    case 2:
-      return fc.constantFrom(0, 1, 2)
-    case 3:
-      return fc.constantFrom(0, 1, 2, 3)
-    case 4:
-      return fc.constantFrom(0, 1, 2, 3, 4)
-  }
 }
 
 function actionArbitrary(depth: IncludeDepth): fc.Arbitrary<HistoryAction> {
@@ -443,73 +391,6 @@ const confirmedChildReorderSeed: Scenario = {
     },
   ],
 }
-
-function compareRows(left: RootRow, right: RootRow): number {
-  return left.position - right.position || left.id - right.id
-}
-
-// This is intentionally independent of the live-query implementation. It is
-// the simple, full-recompute semantics reference for the incremental system.
-function recompute(
-  roots: Map<number, RootRow>,
-  levels: Array<Map<number, ChildRow>>,
-  depth: IncludeDepth,
-): Array<OracleNode> {
-  const materializeLevel = (
-    level: number,
-    parentGroup: number,
-  ): Array<OracleNode> =>
-    [...levels[level]!.values()]
-      .filter((row) => row.parentGroup === parentGroup)
-      .sort(compareRows)
-      .map((row) => {
-        const node: OracleNode = {
-          id: row.id,
-          group: row.group,
-          value: row.value,
-          position: row.position,
-        }
-        if (level + 1 < depth) {
-          node.children = materializeLevel(level + 1, row.group)
-        }
-        return node
-      })
-
-  return [...roots.values()].sort(compareRows).map((root) => ({
-    id: root.id,
-    group: root.group,
-    value: root.value,
-    position: root.position,
-    children: materializeLevel(0, root.group),
-  }))
-}
-
-// Collection delivery metadata is independent of include materialization.
-// Compare only the user-defined row shape modeled by the recompute oracle.
-declareOracle({
-  owns: [
-    'src/collection/change-events.ts#createFilterFunctionFromExpression',
-    'src/collection/index.ts#createCollection',
-    'src/query/equality-value-identity.ts#createValueIdentity',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/live/public-key-reduction.ts#routeKey',
-    'src/query/query-once.ts#queryOnce',
-  ],
-  check: [
-    expectScenarioMatches,
-    expectFullRowBatchScenarioMatches,
-    expectFlatMaterializationScenarioMatches,
-    expectMaterializeScenarioMatches,
-  ],
-  model: [
-    recompute,
-    recomputeFullRowBatchScenario,
-    recomputeFlatMaterialization,
-    recomputeMaterialize,
-  ],
-
-  grammar: [independentTransitionPrefix],
-})
 
 function createIncrementalQuery(depth: IncludeDepth, sources: Sources) {
   const { roots } = sources
@@ -1212,1443 +1093,6 @@ function fullRowBatchScenarioAtDepthArbitrary(
     })
 }
 
-type VisibleRelationshipTransition = `reparent` | `rekey`
-type BranchDeliveryOrder = `forward` | `reverse`
-const branchDeliveryOrders: ReadonlyArray<BranchDeliveryOrder> = [
-  `forward`,
-  `reverse`,
-]
-
-function deliverBranches(
-  branches: readonly [ConnectedBranch, ConnectedBranch],
-  order: BranchDeliveryOrder,
-): readonly [ConnectedBranch, ConnectedBranch] {
-  return order === `forward` ? branches : [branches[1], branches[0]]
-}
-
-function deliveredBranchIndex(
-  branch: 0 | 1,
-  order: BranchDeliveryOrder,
-): 0 | 1 {
-  return order === `forward` ? branch : otherBranch(branch)
-}
-
-type VisibleRelationshipScenarios = {
-  transitionOnly: VisibleRelationshipScenario
-  stateful: VisibleRelationshipScenario
-}
-
-function visibleRelationshipScenarioArbitrary(
-  depth: IncludeDepth,
-  transition: VisibleRelationshipTransition,
-  targetLevel: IncludeDepth,
-): fc.Arbitrary<VisibleRelationshipScenarios> {
-  const branchArbitrary = fc.constantFrom<0 | 1>(0, 1)
-  const scalarNoiseArbitrary = (
-    side: VisibleScalarNoise[`side`],
-    branch: fc.Arbitrary<0 | 1>,
-  ): fc.Arbitrary<VisibleScalarNoise> =>
-    fc.record({
-      side: fc.constant(side),
-      level: levelArbitrary(depth),
-      branch,
-      value: fc.integer({ min: -3, max: 3 }),
-      position: fc.integer({ min: -2, max: 2 }),
-    })
-
-  return fc
-    .record({
-      sourceBranch: branchArbitrary,
-      leftIdBase: fc.integer({ min: 100, max: 500 }),
-      leftGroupBase: fc.integer({ min: 600, max: 1_000 }),
-      rightIdBase: fc.integer({ min: 1_100, max: 1_500 }),
-      rightGroupBase: fc.integer({ min: 1_600, max: 2_000 }),
-      rekeyGroup: fc.integer({ min: 2_100, max: 2_500 }),
-      beforeNoise: scalarNoiseArbitrary(`before`, branchArbitrary),
-      extraBeforeNoise: fc.array(
-        scalarNoiseArbitrary(`before`, branchArbitrary),
-        { maxLength: 4 },
-      ),
-      afterValues: fc.array(scalarNoiseArbitrary(`after`, branchArbitrary), {
-        minLength: 1,
-        maxLength: 5,
-      }),
-    })
-    .map(
-      ({
-        sourceBranch,
-        leftIdBase,
-        leftGroupBase,
-        rightIdBase,
-        rightGroupBase,
-        rekeyGroup,
-        beforeNoise,
-        extraBeforeNoise,
-        afterValues,
-      }) => {
-        const connectedNoise: Array<VisibleScalarNoise> = [
-          beforeNoise,
-          ...extraBeforeNoise,
-          ...afterValues,
-        ]
-        const options = {
-          depth,
-          targetLevel,
-          sourceBranch,
-          branches: [
-            { idBase: leftIdBase, groupBase: leftGroupBase },
-            { idBase: rightIdBase, groupBase: rightGroupBase },
-          ],
-          ...(transition === `rekey`
-            ? { transition, rekeyGroup }
-            : { transition }),
-        } satisfies Omit<VisibleRelationshipScenarioOptions, `noise`>
-
-        return {
-          transitionOnly: createVisibleRelationshipScenario({
-            ...options,
-            noise: [],
-          }),
-          stateful: createVisibleRelationshipScenario({
-            ...options,
-            noise: connectedNoise,
-          }),
-        }
-      },
-    )
-}
-
-type GeneratedBranchOptions = {
-  leftIdBase: number
-  leftGroupBase: number
-  rightIdBase: number
-  rightGroupBase: number
-}
-
-const generatedBranchArbitraries = {
-  leftIdBase: fc.integer({ min: 100, max: 500 }),
-  leftGroupBase: fc.integer({ min: 600, max: 1_000 }),
-  rightIdBase: fc.integer({ min: 1_100, max: 1_500 }),
-  rightGroupBase: fc.integer({ min: 1_600, max: 2_000 }),
-}
-
-function createGeneratedBranches({
-  leftIdBase,
-  leftGroupBase,
-  rightIdBase,
-  rightGroupBase,
-}: GeneratedBranchOptions): readonly [ConnectedBranch, ConnectedBranch] {
-  return [
-    { idBase: leftIdBase, groupBase: leftGroupBase },
-    { idBase: rightIdBase, groupBase: rightGroupBase },
-  ]
-}
-
-type TransitionHistoryScenario = FullRowBatchScenario & {
-  historyStartStepIndex: number
-}
-
-type TransitionHistoryScenarioOptions = {
-  depth: IncludeDepth
-  targetLevel: IncludeDepth
-  firstTransition: VisibleRelationshipTransition
-  secondTransition: VisibleRelationshipTransition
-  sourceBranch: 0 | 1
-  branches: readonly [ConnectedBranch, ConnectedBranch]
-  rekeyGroups: readonly [number, number]
-  insertedLevels: readonly [IncludeDepth, IncludeDepth]
-  insertedValues: readonly [number, number]
-  insertedPositions: readonly [number, number]
-}
-
-function createTransitionHistoryScenario({
-  depth,
-  targetLevel,
-  firstTransition,
-  secondTransition,
-  sourceBranch,
-  branches,
-  rekeyGroups,
-  insertedLevels,
-  insertedValues,
-  insertedPositions,
-}: TransitionHistoryScenarioOptions): TransitionHistoryScenario {
-  // Fresh keys keep this matrix green through both transitions. Separate
-  // state-aware families below reuse retired routes and replace existing rows,
-  // so those histories remain shrinkable without masking later steps.
-  const insertedRows = [
-    {
-      id: 3_000,
-      group: 2_700,
-      value: insertedValues[0],
-      position: insertedPositions[0],
-    },
-    {
-      id: 3_001,
-      group: 2_800,
-      value: insertedValues[1],
-      position: insertedPositions[1],
-    },
-  ] as const
-  assertDisjointRelationshipKeys(depth, branches, {
-    extraIds: insertedRows.map(({ id }) => id),
-    extraGroups: [...rekeyGroups, ...insertedRows.map(({ group }) => group)],
-  })
-
-  const steps = createConnectedBatchBranches(depth, branches)
-  const historyStartStepIndex = steps.length
-  const source = branches[sourceBranch]
-  let current = {
-    ...batchChild(
-      source.idBase + targetLevel,
-      source.groupBase + targetLevel - 1,
-      source.idBase + targetLevel,
-      0,
-    ),
-    group: source.groupBase + targetLevel,
-  }
-  const appendStep = (
-    level: IncludeDepth,
-    changes: Array<SyncChange<ChildRow>>,
-  ): void => {
-    steps.push({ level, changes })
-  }
-  const insertRow = (
-    row: (typeof insertedRows)[number],
-    level: IncludeDepth,
-  ): ChildRow => {
-    if (level !== targetLevel && level !== targetLevel + 1) {
-      throw new Error(`History inserts must touch the target or its child`)
-    }
-    return {
-      ...row,
-      parentGroup: level === targetLevel ? current.parentGroup : current.group,
-    }
-  }
-  const transition = (
-    kind: VisibleRelationshipTransition,
-    rekeyGroup: number,
-  ): void => {
-    const currentParentBranch = branches.findIndex(
-      ({ groupBase }) => current.parentGroup === groupBase + targetLevel - 1,
-    )
-    if (currentParentBranch !== 0 && currentParentBranch !== 1) {
-      throw new Error(`Transition target has no visible parent branch`)
-    }
-    const destination = branches[otherBranch(currentParentBranch)]
-    current = {
-      ...current,
-      parentGroup:
-        kind === `reparent`
-          ? destination.groupBase + targetLevel - 1
-          : current.parentGroup,
-      group: kind === `rekey` ? rekeyGroup : current.group,
-    }
-    appendStep(targetLevel, [{ type: `update`, value: current }])
-  }
-  const interleaveTransition = (
-    kind: VisibleRelationshipTransition,
-    rekeyGroup: number,
-    row: (typeof insertedRows)[number],
-    level: IncludeDepth,
-  ): void => {
-    if (kind === `rekey`) {
-      if (level !== targetLevel + 1) {
-        throw new Error(`Rekey histories must seed the new child route`)
-      }
-      transition(kind, rekeyGroup)
-      appendStep(level, [{ type: `insert`, value: insertRow(row, level) }])
-      return
-    }
-
-    const inserted = insertRow(row, level)
-    appendStep(level, [{ type: `insert`, value: inserted }])
-    transition(kind, rekeyGroup)
-    appendStep(level, [{ type: `delete`, value: inserted }])
-  }
-
-  interleaveTransition(
-    firstTransition,
-    rekeyGroups[0],
-    insertedRows[0],
-    insertedLevels[0],
-  )
-  interleaveTransition(
-    secondTransition,
-    rekeyGroups[1],
-    insertedRows[1],
-    insertedLevels[1],
-  )
-
-  return {
-    depth,
-    steps,
-    historyStartStepIndex,
-  }
-}
-
-function transitionHistoryPlacements(
-  depth: IncludeDepth,
-  firstTransition: VisibleRelationshipTransition,
-  secondTransition: VisibleRelationshipTransition,
-): Array<{
-  targetLevel: IncludeDepth
-  insertedLevels: readonly [IncludeDepth, IncludeDepth]
-}> {
-  // A rekey needs one child level so it changes relationship membership. It
-  // also fails when two descendant levels remain. The single-transition matrix
-  // covers that failure and will turn red when this continuation can be widened.
-  const minimumTargetLevel =
-    firstTransition === `rekey` || secondTransition === `rekey`
-      ? Math.max(1, depth - 1)
-      : 1
-  const maximumTargetLevel =
-    firstTransition === `rekey` || secondTransition === `rekey`
-      ? depth - 1
-      : depth
-  const placements: Array<{
-    targetLevel: IncludeDepth
-    insertedLevels: readonly [IncludeDepth, IncludeDepth]
-  }> = []
-
-  for (let level = minimumTargetLevel; level <= maximumTargetLevel; level++) {
-    const targetLevel = level as IncludeDepth
-    const insertedLevels = (
-      transition: VisibleRelationshipTransition,
-    ): ReadonlyArray<IncludeDepth> =>
-      transition === `rekey`
-        ? [(targetLevel + 1) as IncludeDepth]
-        : targetLevel < depth
-          ? [targetLevel, (targetLevel + 1) as IncludeDepth]
-          : [targetLevel]
-
-    for (const firstInsertedLevel of insertedLevels(firstTransition)) {
-      for (const secondInsertedLevel of insertedLevels(secondTransition)) {
-        placements.push({
-          targetLevel,
-          insertedLevels: [firstInsertedLevel, secondInsertedLevel],
-        })
-      }
-    }
-  }
-
-  return placements
-}
-
-function transitionHistoryScenariosArbitrary(
-  depth: IncludeDepth,
-  firstTransition: VisibleRelationshipTransition,
-  secondTransition: VisibleRelationshipTransition,
-  sourceBranch: 0 | 1,
-): fc.Arbitrary<ReadonlyArray<TransitionHistoryScenario>> {
-  const placements = transitionHistoryPlacements(
-    depth,
-    firstTransition,
-    secondTransition,
-  )
-
-  return fc
-    .record({
-      ...generatedBranchArbitraries,
-      firstRekeyGroup: fc.integer({ min: 2_100, max: 2_300 }),
-      secondRekeyGroup: fc.integer({ min: 2_400, max: 2_600 }),
-      firstInsertedValue: fc.integer({ min: -3, max: 3 }),
-      secondInsertedValue: fc.integer({ min: -3, max: 3 }),
-      firstInsertedPosition: fc.integer({ min: -2, max: 2 }),
-      secondInsertedPosition: fc.integer({ min: -2, max: 2 }),
-    })
-    .map(
-      ({
-        leftIdBase,
-        leftGroupBase,
-        rightIdBase,
-        rightGroupBase,
-        firstRekeyGroup,
-        secondRekeyGroup,
-        firstInsertedValue,
-        secondInsertedValue,
-        firstInsertedPosition,
-        secondInsertedPosition,
-      }) =>
-        placements.map(({ targetLevel, insertedLevels }) =>
-          createTransitionHistoryScenario({
-            depth,
-            targetLevel,
-            firstTransition,
-            secondTransition,
-            sourceBranch,
-            branches: createGeneratedBranches({
-              leftIdBase,
-              leftGroupBase,
-              rightIdBase,
-              rightGroupBase,
-            }),
-            rekeyGroups: [firstRekeyGroup, secondRekeyGroup],
-            insertedLevels,
-            insertedValues: [firstInsertedValue, secondInsertedValue],
-            insertedPositions: [firstInsertedPosition, secondInsertedPosition],
-          }),
-        ),
-    )
-}
-
-function expectEveryHistoryStepVisible(
-  scenario: TransitionHistoryScenario,
-): void {
-  for (
-    let stepIndex = scenario.historyStartStepIndex;
-    stepIndex < scenario.steps.length;
-    stepIndex++
-  ) {
-    const before = relationshipOnly(
-      recomputeFullRowBatchScenario(scenario, stepIndex),
-    )
-    const after = relationshipOnly(
-      recomputeFullRowBatchScenario(scenario, stepIndex + 1),
-    )
-    oracleAssertion('includes oracle.property comparison 1610', () =>
-      expect(after).not.toEqual(before),
-    )
-  }
-}
-
-function expectEveryRouteTransitionVisible(
-  scenario: RouteLifecycleScenario,
-): void {
-  for (const stepIndex of scenario.transitionStepIndexes) {
-    const before = relationshipOnly(
-      recomputeFullRowBatchScenario(scenario, stepIndex),
-    )
-    const after = relationshipOnly(
-      recomputeFullRowBatchScenario(scenario, stepIndex + 1),
-    )
-    oracleAssertion('includes oracle.property comparison 1624', () =>
-      expect(after).not.toEqual(before),
-    )
-  }
-}
-
-const independentTransitionShapes = [
-  `ancestor-descendant`,
-  `descendant-ancestor`,
-  `sibling`,
-  `cross-branch`,
-  `root`,
-] as const
-
-type IndependentTransitionShape = (typeof independentTransitionShapes)[number]
-
-function independentFreshRoutesArbitrary(
-  shape: IndependentTransitionShape,
-): fc.Arbitrary<readonly [number, number]> {
-  const first = fc.integer({ min: 2_100, max: 2_400 })
-  if (shape === `sibling`) {
-    return fc.tuple(first, fc.integer({ min: 2_500, max: 2_800 }))
-  }
-  if (shape === `ancestor-descendant` || shape === `root`) {
-    return first.map((route) => [route, 2_500] as const)
-  }
-  return fc.constant([2_100, 2_500] as const)
-}
-
-function independentTransitionDescriptors(
-  shape: IndependentTransitionShape,
-  branches: readonly [ConnectedBranch, ConnectedBranch],
-  freshRoutes: readonly [number, number],
-): ReadonlyArray<RouteTransitionDescriptor> {
-  switch (shape) {
-    case `ancestor-descendant`:
-      return [
-        {
-          kind: `reparent`,
-          level: 1,
-          row: 0,
-          destination: {
-            strategy: `merge`,
-            route: branches[1].groupBase,
-          },
-        },
-        {
-          kind: `rekey`,
-          level: 2,
-          row: 0,
-          destination: { strategy: `fresh`, route: freshRoutes[0] },
-        },
-      ]
-    case `descendant-ancestor`:
-      return [
-        {
-          kind: `rekey`,
-          level: 2,
-          row: 0,
-          destination: { strategy: `fresh`, route: freshRoutes[0] },
-        },
-        {
-          kind: `reparent`,
-          level: 1,
-          row: 0,
-          destination: {
-            strategy: `merge`,
-            route: branches[1].groupBase,
-          },
-        },
-      ]
-    case `sibling`:
-      return [
-        {
-          kind: `rekey`,
-          level: 2,
-          row: 0,
-          destination: { strategy: `fresh`, route: freshRoutes[0] },
-        },
-        {
-          kind: `rekey`,
-          level: 2,
-          row: 1,
-          destination: { strategy: `fresh`, route: freshRoutes[1] },
-        },
-      ]
-    case `cross-branch`:
-      return [
-        {
-          kind: `reparent`,
-          level: 2,
-          row: 0,
-          destination: {
-            strategy: `merge`,
-            route: branches[1].groupBase + 1,
-          },
-        },
-        {
-          kind: `reparent`,
-          level: 2,
-          row: 1,
-          destination: {
-            strategy: `merge`,
-            route: branches[0].groupBase + 1,
-          },
-        },
-      ]
-    case `root`:
-      return [
-        {
-          kind: `rekey`,
-          level: 0,
-          row: 0,
-          destination: { strategy: `fresh`, route: freshRoutes[0] },
-        },
-        {
-          kind: `reparent`,
-          level: 1,
-          row: 1,
-          destination: { strategy: `merge`, route: freshRoutes[0] },
-        },
-      ]
-  }
-}
-
-function independentTransitionPrefix(
-  shape: IndependentTransitionShape,
-  branches: readonly [ConnectedBranch, ConnectedBranch],
-): Array<FullRowBatchStep> {
-  const prefix = createConnectedBatchBranches(3, branches)
-  if (shape !== `sibling`) return prefix
-
-  const secondSiblingId = rowAt(branches, 1, 2)
-  return prefix.map((step) =>
-    step.level === 2
-      ? {
-          ...step,
-          changes: step.changes.map((change) =>
-            change.value.id === secondSiblingId
-              ? {
-                  ...change,
-                  value: {
-                    ...change.value,
-                    parentGroup: branches[0].groupBase + 1,
-                  },
-                }
-              : change,
-          ),
-        }
-      : step,
-  )
-}
-
-function independentTransitionScenarioArbitrary(
-  shape: IndependentTransitionShape,
-): fc.Arbitrary<RouteLifecycleScenario> {
-  return fc
-    .record({
-      ...generatedBranchArbitraries,
-      freshRoutes: independentFreshRoutesArbitrary(shape),
-    })
-    .map(({ freshRoutes, ...branchOptions }) => {
-      const branches = createGeneratedBranches(branchOptions)
-      return createRouteLifecycleScenario({
-        depth: 3,
-        branches,
-        prefixSteps: independentTransitionPrefix(shape, branches),
-        descriptors: independentTransitionDescriptors(
-          shape,
-          branches,
-          freshRoutes,
-        ),
-      })
-    })
-}
-
-const destinationHistories = [
-  `fresh`,
-  `restore`,
-  `merge-split`,
-  `retired`,
-] as const
-
-type DestinationHistory = (typeof destinationHistories)[number]
-
-function destinationHistoryDescriptors(
-  history: DestinationHistory,
-  branches: readonly [ConnectedBranch, ConnectedBranch],
-  freshRoute: number,
-): ReadonlyArray<RouteTransitionDescriptor> {
-  const originalRoute = branches[0].groupBase + 2
-  const sharedRoute = branches[1].groupBase + 2
-  const first: RouteTransitionDescriptor = {
-    kind: `rekey`,
-    level: 2,
-    row: 0,
-    destination: { strategy: `fresh`, route: freshRoute },
-  }
-
-  switch (history) {
-    case `fresh`:
-      return [first]
-    case `restore`:
-      return [
-        first,
-        {
-          ...first,
-          destination: { strategy: `restore`, route: originalRoute },
-        },
-      ]
-    case `merge-split`:
-      return [
-        {
-          ...first,
-          destination: { strategy: `merge`, route: sharedRoute },
-        },
-        {
-          ...first,
-          destination: { strategy: `split`, route: freshRoute },
-        },
-      ]
-    case `retired`:
-      return [
-        first,
-        {
-          kind: `rekey`,
-          level: 2,
-          row: 1,
-          destination: { strategy: `retired`, route: originalRoute },
-        },
-      ]
-  }
-}
-
-function destinationHistoryScenarioArbitrary(
-  history: DestinationHistory,
-): fc.Arbitrary<RouteLifecycleScenario> {
-  return fc
-    .record({
-      ...generatedBranchArbitraries,
-      freshRoute: fc.integer({ min: 2_100, max: 2_400 }),
-    })
-    .map(({ freshRoute, ...branchOptions }) => {
-      const branches = createGeneratedBranches(branchOptions)
-      return createRouteLifecycleScenario({
-        depth: 3,
-        branches,
-        descriptors: destinationHistoryDescriptors(
-          history,
-          branches,
-          freshRoute,
-        ),
-      })
-    })
-}
-
-function createInitiallySharedRoutePrefix(
-  depth: IncludeDepth,
-  parentLevel: 0 | 1 | 2,
-  branches: readonly [ConnectedBranch, ConnectedBranch],
-  enteringRow: 0 | 1 = 1,
-): Array<FullRowBatchStep> {
-  const enteringId = rowAt(branches, enteringRow, parentLevel)
-  const sharedRoute = branches[otherBranch(enteringRow)].groupBase + parentLevel
-  return createConnectedBatchBranches(depth, branches).map((step) => {
-    if (step.level !== parentLevel) return step
-
-    if (step.level === 0) {
-      return {
-        level: 0,
-        changes: step.changes.map((change) =>
-          change.value.id === enteringId
-            ? { ...change, value: { ...change.value, group: sharedRoute } }
-            : change,
-        ),
-      }
-    }
-
-    return {
-      level: step.level,
-      changes: step.changes.map((change) =>
-        change.value.id === enteringId
-          ? { ...change, value: { ...change.value, group: sharedRoute } }
-          : change,
-      ),
-    }
-  })
-}
-
-function createMergeIntoSharedRouteScenarios(
-  parentLevel: 0 | 1 | 2,
-  enteringRow: 0 | 1,
-): HistoryScenarioPair {
-  const depth = (parentLevel + 1) as IncludeDepth
-  const branches = transitionHistoryBranches
-  const existingRow = otherBranch(enteringRow)
-  const sharedRoute = branches[existingRow].groupBase + parentLevel
-  const candidate = createRouteLifecycleScenario({
-    depth,
-    branches,
-    descriptors: [
-      {
-        kind: `rekey`,
-        level: parentLevel,
-        row: enteringRow,
-        destination: { strategy: `merge`, route: sharedRoute },
-      },
-    ],
-  })
-  expectEveryRouteTransitionVisible(candidate)
-
-  return {
-    control: {
-      depth,
-      steps: createInitiallySharedRoutePrefix(
-        depth,
-        parentLevel,
-        branches,
-        enteringRow,
-      ),
-    },
-    candidate,
-  }
-}
-
-function createSharedRouteLastSubscriberScenario(
-  parentLevel: 0 | 1 | 2,
-): FullRowBatchScenario {
-  const depth = (parentLevel + 1) as IncludeDepth
-  const branches = transitionHistoryBranches
-  const childLevel = depth
-  const sharedRoute = branches[0].groupBase + parentLevel
-  const childId = rowAt(branches, 0, childLevel)
-  const child = {
-    ...batchChild(childId, sharedRoute, childId, 0),
-    group: branches[0].groupBase + childLevel,
-  }
-  const descriptors: ReadonlyArray<RouteTransitionDescriptor> = [
-    {
-      kind: `rekey`,
-      level: parentLevel,
-      row: 0,
-      destination: { strategy: `split`, route: 2_100 + parentLevel },
-    },
-    {
-      kind: `rekey`,
-      level: parentLevel,
-      row: 1,
-      destination: { strategy: `fresh`, route: 2_200 + parentLevel },
-    },
-  ]
-  const scenario = createRouteLifecycleScenario({
-    depth,
-    branches,
-    descriptors,
-    prefixSteps: createInitiallySharedRoutePrefix(depth, parentLevel, branches),
-    trailingSteps: [
-      {
-        level: childLevel,
-        changes: [
-          { type: `update`, value: { ...child, value: child.value + 1 } },
-        ],
-      },
-    ],
-  })
-  expectEveryRouteTransitionVisible(scenario)
-  return scenario
-}
-
-function createSnapshotOnResubscribeScenarios(
-  parentLevel: 0 | 1 | 2,
-): HistoryScenarioPair {
-  const depth = (parentLevel + 1) as IncludeDepth
-  const branches = transitionHistoryBranches
-  const childLevel = depth
-  const originalRoute = branches[0].groupBase + parentLevel
-  const childId = rowAt(branches, 0, childLevel)
-  const child = {
-    ...batchChild(childId, originalRoute, childId, 0),
-    group: branches[0].groupBase + childLevel,
-  }
-  const updatedChild = { ...child, value: child.value + 1 }
-  const prefix = createConnectedBatchBranches(depth, branches)
-  const childUpdate: FullRowBatchStep = {
-    level: childLevel,
-    changes: [{ type: `update`, value: updatedChild }],
-  }
-  const candidate = createRouteLifecycleScenario({
-    depth,
-    branches,
-    descriptors: [
-      {
-        kind: `rekey`,
-        level: parentLevel,
-        row: 0,
-        destination: { strategy: `fresh`, route: 2_300 + parentLevel },
-      },
-      {
-        kind: `rekey`,
-        level: parentLevel,
-        row: 0,
-        destination: { strategy: `restore`, route: originalRoute },
-        stepsBefore: [childUpdate],
-      },
-    ],
-  })
-  expectEveryRouteTransitionVisible(candidate)
-  const control: FullRowBatchScenario = {
-    depth,
-    steps: [...prefix, childUpdate],
-  }
-
-  return {
-    control,
-    candidate,
-  }
-}
-
-function createInitiallySharedRouteResubscribeScenario(
-  parentLevel: 0 | 1 | 2,
-): HistoryScenarioPair {
-  const depth = (parentLevel + 1) as IncludeDepth
-  const branches = transitionHistoryBranches
-  const childLevel = depth
-  const sharedRoute = branches[0].groupBase + parentLevel
-  const childId = rowAt(branches, 0, childLevel)
-  const child = {
-    ...batchChild(childId, sharedRoute, childId, 0),
-    group: branches[0].groupBase + childLevel,
-  }
-  const scenario = createRouteLifecycleScenario({
-    depth,
-    branches,
-    prefixSteps: createInitiallySharedRoutePrefix(depth, parentLevel, branches),
-    descriptors: [
-      {
-        kind: `rekey`,
-        level: parentLevel,
-        row: 0,
-        destination: { strategy: `split`, route: 2_100 + parentLevel },
-      },
-      {
-        kind: `rekey`,
-        level: parentLevel,
-        row: 1,
-        destination: { strategy: `fresh`, route: 2_200 + parentLevel },
-      },
-      {
-        kind: `rekey`,
-        level: parentLevel,
-        row: 1,
-        destination: { strategy: `restore`, route: sharedRoute },
-        stepsBefore: [
-          {
-            level: childLevel,
-            changes: [
-              {
-                type: `update`,
-                value: { ...child, value: child.value + 1 },
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  })
-  expectEveryRouteTransitionVisible(scenario)
-  return {
-    control: createSharedRouteLastSubscriberScenario(parentLevel),
-    candidate: scenario,
-  }
-}
-
-type HistoryScenarioPair = {
-  control: FullRowBatchScenario
-  greenVariants?: ReadonlyArray<FullRowBatchScenario>
-  candidate: FullRowBatchScenario
-}
-
-type RekeyRouteReuseOptions = {
-  depth: 2 | 3 | 4
-  sourceBranch: 0 | 1
-  branches: readonly [ConnectedBranch, ConnectedBranch]
-  rekeyGroup: number
-  insertedId: number
-  insertedValue: number
-  insertedPosition: number
-}
-
-function createRekeyRouteReuseFixture({
-  depth,
-  sourceBranch,
-  branches,
-  rekeyGroup,
-  insertedId,
-  insertedValue,
-  insertedPosition,
-}: RekeyRouteReuseOptions): {
-  prefix: Array<FullRowBatchStep>
-  rekey: FullRowBatchStep
-  reuse: FullRowBatchStep
-} {
-  const targetLevel = (depth - 1) as IncludeDepth
-  assertDisjointRelationshipKeys(depth, branches, {
-    extraIds: [insertedId],
-    extraGroups: [rekeyGroup],
-  })
-
-  const prefix = createConnectedBatchBranches(depth, branches)
-  const source = branches[sourceBranch]
-  const parentGroup = source.groupBase + targetLevel - 1
-  const oldGroup = source.groupBase + targetLevel
-  const inserted = {
-    ...batchChild(insertedId, parentGroup, insertedValue, insertedPosition),
-    group: oldGroup,
-  }
-  const insertOldRoute: FullRowBatchStep = {
-    level: targetLevel,
-    changes: [{ type: `insert`, value: inserted }],
-  }
-  const rekey: FullRowBatchStep = {
-    level: targetLevel,
-    changes: [
-      {
-        type: `update`,
-        value: {
-          ...batchChild(
-            source.idBase + targetLevel,
-            parentGroup,
-            source.idBase + targetLevel,
-            0,
-          ),
-          group: rekeyGroup,
-        },
-      },
-    ],
-  }
-
-  return {
-    prefix,
-    rekey,
-    reuse: insertOldRoute,
-  }
-}
-
-function createRekeyRouteReuseScenarios(
-  options: RekeyRouteReuseOptions,
-): HistoryScenarioPair {
-  const { depth } = options
-  const { prefix, rekey, reuse } = createRekeyRouteReuseFixture(options)
-
-  return {
-    control: { depth, steps: [...prefix, reuse] },
-    candidate: { depth, steps: [...prefix, rekey, reuse] },
-  }
-}
-
-function createIntraBatchRekeyRouteReuseScenarios(
-  options: RekeyRouteReuseOptions,
-): HistoryScenarioPair {
-  const { depth } = options
-  const { prefix, rekey, reuse } = createRekeyRouteReuseFixture(options)
-  if (rekey.level === 0 || rekey.level !== reuse.level) {
-    throw new Error(`Intra-batch route reuse must share a child level`)
-  }
-
-  return {
-    control: {
-      depth,
-      steps: [
-        ...prefix,
-        { level: rekey.level, changes: [...reuse.changes, ...rekey.changes] },
-      ],
-    },
-    candidate: {
-      depth,
-      steps: [
-        ...prefix,
-        { level: rekey.level, changes: [...rekey.changes, ...reuse.changes] },
-      ],
-    },
-  }
-}
-
-function rekeyRouteReuseScenarioArbitrary(
-  depth: 2 | 3 | 4,
-  sourceBranch: 0 | 1,
-  createScenario: (
-    options: RekeyRouteReuseOptions,
-  ) => HistoryScenarioPair = createRekeyRouteReuseScenarios,
-): fc.Arbitrary<HistoryScenarioPair> {
-  return fc
-    .record({
-      ...generatedBranchArbitraries,
-      rekeyGroup: fc.integer({ min: 2_100, max: 2_600 }),
-      insertedId: fc.integer({ min: 3_000, max: 3_200 }),
-      insertedValue: fc.integer({ min: -3, max: 3 }),
-      insertedPosition: fc.integer({ min: -2, max: 2 }),
-    })
-    .map(
-      ({
-        leftIdBase,
-        leftGroupBase,
-        rightIdBase,
-        rightGroupBase,
-        rekeyGroup,
-        insertedId,
-        insertedValue,
-        insertedPosition,
-      }) =>
-        createScenario({
-          depth,
-          sourceBranch,
-          branches: createGeneratedBranches({
-            leftIdBase,
-            leftGroupBase,
-            rightIdBase,
-            rightGroupBase,
-          }),
-          rekeyGroup,
-          insertedId,
-          insertedValue,
-          insertedPosition,
-        }),
-    )
-}
-
-type MovedChildReplacementOptions = {
-  depth: 3 | 4
-  targetLevel: IncludeDepth
-  sourceBranch: 0 | 1
-  branches: readonly [ConnectedBranch, ConnectedBranch]
-  insertedId: number
-  insertedValue: number
-  insertedPosition: number
-}
-
-function createMovedChildReplacementScenarios({
-  depth,
-  targetLevel,
-  sourceBranch,
-  branches,
-  insertedId,
-  insertedValue,
-  insertedPosition,
-}: MovedChildReplacementOptions): HistoryScenarioPair {
-  if (targetLevel + 2 > depth) {
-    throw new Error(`Child replacement needs a visible grandchild`)
-  }
-  assertDisjointRelationshipKeys(depth, branches, {
-    extraIds: [insertedId],
-  })
-
-  const prefix = createConnectedBatchBranches(depth, branches)
-  const source = branches[sourceBranch]
-  const destination = branches[otherBranch(sourceBranch)]
-  const targetGroup = source.groupBase + targetLevel
-  const childLevel = (targetLevel + 1) as IncludeDepth
-  const childGroup = source.groupBase + childLevel
-  const existingChild = {
-    ...batchChild(
-      source.idBase + childLevel,
-      targetGroup,
-      source.idBase + childLevel,
-      0,
-    ),
-    group: childGroup,
-  }
-  const replacementChild = {
-    ...batchChild(insertedId, targetGroup, insertedValue, insertedPosition),
-    group: childGroup,
-  }
-  const replaceChild: Array<FullRowBatchStep> = [
-    {
-      level: childLevel,
-      changes: [{ type: `delete`, value: existingChild }],
-    },
-    {
-      level: childLevel,
-      changes: [{ type: `insert`, value: replacementChild }],
-    },
-  ]
-  const reparent: FullRowBatchStep = {
-    level: targetLevel,
-    changes: [
-      {
-        type: `update`,
-        value: {
-          ...batchChild(
-            source.idBase + targetLevel,
-            destination.groupBase + targetLevel - 1,
-            source.idBase + targetLevel,
-            0,
-          ),
-          group: targetGroup,
-        },
-      },
-    ],
-  }
-  const atomicReplacement = (
-    order: `delete-first` | `insert-first`,
-  ): FullRowBatchScenario => ({
-    depth,
-    steps: [
-      ...prefix,
-      reparent,
-      {
-        level: childLevel,
-        changes:
-          order === `delete-first`
-            ? [
-                { type: `delete`, value: existingChild },
-                { type: `insert`, value: replacementChild },
-              ]
-            : [
-                { type: `insert`, value: replacementChild },
-                { type: `delete`, value: existingChild },
-              ],
-      },
-    ],
-  })
-  return {
-    control: { depth, steps: [...prefix, ...replaceChild] },
-    greenVariants: [
-      atomicReplacement(`delete-first`),
-      atomicReplacement(`insert-first`),
-    ],
-    candidate: { depth, steps: [...prefix, reparent, ...replaceChild] },
-  }
-}
-
-function movedChildReplacementMirrorsArbitrary(
-  depth: 3 | 4,
-  targetLevel: IncludeDepth,
-  sourceBranch: 0 | 1,
-): fc.Arbitrary<Record<BranchDeliveryOrder, HistoryScenarioPair>> {
-  return fc
-    .record({
-      ...generatedBranchArbitraries,
-      insertedId: fc.integer({ min: 3_000, max: 3_200 }),
-      insertedValue: fc.integer({ min: -3, max: 3 }),
-      insertedPosition: fc.integer({ min: -2, max: 2 }),
-    })
-    .map(
-      ({
-        leftIdBase,
-        leftGroupBase,
-        rightIdBase,
-        rightGroupBase,
-        insertedId,
-        insertedValue,
-        insertedPosition,
-      }) => {
-        const branches = createGeneratedBranches({
-          leftIdBase,
-          leftGroupBase,
-          rightIdBase,
-          rightGroupBase,
-        })
-        const createMirror = (deliveryOrder: BranchDeliveryOrder) =>
-          createMovedChildReplacementScenarios({
-            depth,
-            targetLevel,
-            sourceBranch: deliveredBranchIndex(sourceBranch, deliveryOrder),
-            branches: deliverBranches(branches, deliveryOrder),
-            insertedId,
-            insertedValue,
-            insertedPosition,
-          })
-
-        return {
-          forward: createMirror(`forward`),
-          reverse: createMirror(`reverse`),
-        }
-      },
-    )
-}
-
-type RelationshipBatchDelivery = `split` | `atomic`
-type RelationshipBatchOrder = `delete-insert` | `insert-delete`
-type ReplacementPublicId = `same` | `new`
-type ReplacementRoute = `handoff` | `fresh`
-type AncestorUpdateShape = `route-only` | `route-and-position`
-
-type RelationshipBatchShape = {
-  delivery: RelationshipBatchDelivery
-  order: RelationshipBatchOrder
-  publicId: ReplacementPublicId
-  route: ReplacementRoute
-  ancestorUpdate: AncestorUpdateShape
-}
-
-type RelationshipBatchShapeOptions = GeneratedBranchOptions & {
-  shape: RelationshipBatchShape
-  replacementId: number
-  replacementGroup: number
-  replacementValue: number
-  replacementPosition: number
-  movedPosition: number
-}
-
-function createRelationshipBatchShapeScenarios({
-  shape,
-  replacementId,
-  replacementGroup,
-  replacementValue,
-  replacementPosition,
-  movedPosition,
-  ...branchOptions
-}: RelationshipBatchShapeOptions): HistoryScenarioPair {
-  const depth = 3
-  const branches = createGeneratedBranches(branchOptions)
-  assertDisjointRelationshipKeys(depth, branches, {
-    extraIds: shape.publicId === `new` ? [replacementId] : [],
-    extraGroups: shape.route === `fresh` ? [replacementGroup] : [],
-  })
-
-  const source = branches[0]
-  const destination = branches[1]
-  const prefix = createConnectedBatchBranches(depth, branches)
-  const targetLevel = 1
-  const childLevel = 2
-  const targetId = source.idBase + targetLevel
-  const childId = source.idBase + childLevel
-  const targetGroup = source.groupBase + targetLevel
-  const childGroup = source.groupBase + childLevel
-  const currentTarget = {
-    ...batchChild(targetId, source.groupBase, targetId, 0),
-    group: targetGroup,
-  }
-  const movedTarget = {
-    ...currentTarget,
-    parentGroup: destination.groupBase,
-    position:
-      shape.ancestorUpdate === `route-and-position`
-        ? movedPosition
-        : currentTarget.position,
-  }
-  const currentChild = {
-    ...batchChild(childId, targetGroup, childId, 0),
-    group: childGroup,
-  }
-  const replacementChild = {
-    ...currentChild,
-    id: shape.publicId === `same` ? childId : replacementId,
-    group: shape.route === `handoff` ? childGroup : replacementGroup,
-    value: replacementValue,
-    position: replacementPosition,
-  }
-  const replacementChanges: Array<SyncChange<ChildRow>> =
-    shape.order === `delete-insert`
-      ? [
-          { type: `delete`, value: currentChild },
-          { type: `insert`, value: replacementChild },
-        ]
-      : [
-          { type: `insert`, value: replacementChild },
-          { type: `delete`, value: currentChild },
-        ]
-  const replacementSteps: Array<FullRowBatchStep> =
-    shape.delivery === `atomic`
-      ? [{ level: childLevel, changes: replacementChanges }]
-      : replacementChanges.map((change): FullRowBatchStep => ({
-          level: childLevel,
-          changes: [change],
-        }))
-  const positionOnlyTarget = {
-    ...currentTarget,
-    position: movedTarget.position,
-  }
-  const controlMoveSteps: Array<FullRowBatchStep> =
-    shape.ancestorUpdate === `route-and-position`
-      ? [
-          {
-            level: targetLevel,
-            changes: [{ type: `update`, value: positionOnlyTarget }],
-          },
-        ]
-      : []
-
-  return {
-    // The same replacement history without the relationship move is the
-    // adjacent control for every shape cell. Preserve the position change so
-    // the only candidate difference is route membership.
-    control: {
-      depth,
-      steps: [...prefix, ...controlMoveSteps, ...replacementSteps],
-    },
-    candidate: {
-      depth,
-      steps: [
-        ...prefix,
-        {
-          level: targetLevel,
-          changes: [{ type: `update`, value: movedTarget }],
-        },
-        ...replacementSteps,
-      ],
-    },
-  }
-}
-
-const relationshipBatchFixtureArbitrary: fc.Arbitrary<
-  Omit<RelationshipBatchShapeOptions, `shape`>
-> = fc.record({
-  ...generatedBranchArbitraries,
-  replacementId: fc.integer({ min: 3_000, max: 3_200 }),
-  replacementGroup: fc.integer({ min: 2_700, max: 2_900 }),
-  replacementValue: fc.integer({ min: -3, max: 3 }),
-  replacementPosition: fc.integer({ min: -2, max: 2 }),
-  movedPosition: fc.constantFrom(-2, -1, 1, 2),
-})
-
-type RelationshipBatchShapeCell = {
-  shape: RelationshipBatchShape
-  scenarios: HistoryScenarioPair
-}
-
-function createRelationshipBatchShapeMatrix(
-  fixture: Omit<RelationshipBatchShapeOptions, `shape`>,
-  publicId: ReplacementPublicId,
-  route: ReplacementRoute,
-  ancestorUpdate: AncestorUpdateShape,
-): Array<RelationshipBatchShapeCell> {
-  const cells: Array<RelationshipBatchShapeCell> = []
-
-  for (const delivery of [`split`, `atomic`] as const) {
-    for (const order of [`delete-insert`, `insert-delete`] as const) {
-      // Inserting the same public id before the batch retires its existing row is a
-      // duplicate-key error, not a valid alternate delivery of the same final
-      // state. The new-id cells exercise insert-before-delete in both forms.
-      if (publicId === `same` && order === `insert-delete`) continue
-      const shape = {
-        delivery,
-        order,
-        publicId,
-        route,
-        ancestorUpdate,
-      } satisfies RelationshipBatchShape
-      cells.push({
-        shape,
-        scenarios: createRelationshipBatchShapeScenarios({
-          ...fixture,
-          shape,
-        }),
-      })
-    }
-  }
-
-  return cells
-}
-
-function createSharedRouteLifetimeScenarios(
-  parentLevel: 0 | 1,
-): HistoryScenarioPair {
-  if (parentLevel === 0) {
-    const departed = batchRoot(100, 600, 100, 0)
-    const remaining = batchRoot(1_100, 600, 1_100, 1)
-    const child = { ...batchChild(101, 600, 101, 0), group: 601 }
-    const controlSteps: Array<FullRowBatchStep> = [
-      { level: 0, changes: [{ type: `insert`, value: departed }] },
-      { level: 1, changes: [{ type: `insert`, value: child }] },
-      {
-        level: 0,
-        changes: [{ type: `update`, value: { ...departed, group: 700 } }],
-      },
-      {
-        level: 1,
-        changes: [
-          { type: `update`, value: { ...child, value: child.value + 1 } },
-        ],
-      },
-    ]
-    const candidateSteps: Array<FullRowBatchStep> = [
-      {
-        level: 0,
-        changes: [
-          { type: `insert`, value: departed },
-          { type: `insert`, value: remaining },
-        ],
-      },
-      ...controlSteps.slice(1),
-    ]
-
-    return {
-      control: { depth: 1, steps: controlSteps },
-      candidate: { depth: 1, steps: candidateSteps },
-    }
-  }
-
-  const root = batchRoot(100, 600, 100, 0)
-  const departed = { ...batchChild(101, 600, 101, 0), group: 601 }
-  const remaining = { ...batchChild(1_101, 600, 1_101, 1), group: 601 }
-  const child = { ...batchChild(102, 601, 102, 0), group: 602 }
-  const controlSteps: Array<FullRowBatchStep> = [
-    { level: 0, changes: [{ type: `insert`, value: root }] },
-    { level: 1, changes: [{ type: `insert`, value: departed }] },
-    { level: 2, changes: [{ type: `insert`, value: child }] },
-    {
-      level: 1,
-      changes: [{ type: `update`, value: { ...departed, group: 700 } }],
-    },
-    {
-      level: 2,
-      changes: [
-        { type: `update`, value: { ...child, value: child.value + 1 } },
-      ],
-    },
-  ]
-  const candidateSteps: Array<FullRowBatchStep> = [
-    controlSteps[0]!,
-    {
-      level: 1,
-      changes: [
-        { type: `insert`, value: departed },
-        { type: `insert`, value: remaining },
-      ],
-    },
-    ...controlSteps.slice(2),
-  ]
-
-  return {
-    control: { depth: 2, steps: controlSteps },
-    candidate: { depth: 2, steps: candidateSteps },
-  }
-}
-
 async function expectFullRowBatchScenarioMatches({
   depth,
   steps,
@@ -2670,20 +1114,6 @@ async function expectHistoryScenarioPairMatches({
     await expectFullRowBatchScenarioMatches(greenVariant)
   }
   await expectFullRowBatchScenarioMatches(candidate)
-}
-
-function recomputeFullRowBatchScenario(
-  { depth, steps }: FullRowBatchScenario,
-  stepCount: number,
-): Array<OracleNode> {
-  const roots = new Map<number, RootRow>()
-  const levels = Array.from({ length: 4 }, () => new Map<number, ChildRow>())
-
-  for (const step of steps.slice(0, stepCount)) {
-    updateFullRowBatchModels(step, roots, levels)
-  }
-
-  return recompute(roots, levels, depth)
 }
 
 type FlatMaterialization = `array` | `concat`
@@ -3200,653 +1630,803 @@ const {
   insertedPosition: 0,
 })
 
-describe(`includes recompute oracle`, () => {
-  fcTest(
-    `distinguishes optimistic syntax from delivered rollback and no-op cuts`,
-    async () => {
-      oracleRoute(`fixed history`)
-      const driver = createStructuralTraceDriver(1)
-      const row = { id: 1, parentGroup: 1, group: 1, value: 1, position: 0 }
-      const history: Array<HistoryAction> = [
-        { ...row, type: `put`, level: 0 },
-        { ...row, type: `put`, level: 1 },
-        { ...row, type: `optimisticRollback`, level: 0, id: 999 },
-        { ...row, type: `optimisticRollback`, level: 0 },
-        { ...row, type: `optimisticRollback`, level: 0, group: 2 },
-        { ...row, type: `optimisticRollback`, level: 0 },
-      ]
-      expect(classifyScenarioSyntax({ depth: 1, history })).toEqual([
-        `depth=1`,
-        `syntactic-route-changes=many`,
-        `has-optimistic-syntax=true`,
-        `has-delete-syntax=false`,
-      ])
-      const observations: Array<{
-        cuts: Array<{ group: number | undefined; childIds: Array<number> }>
-        settledGroup: number | undefined
-        settledChildIds: Array<number>
-        absentRoot: boolean
-      }> = []
-      await runTrace({
-        steps: history,
-        driver: {
-          ...driver,
-          apply: async (action, context, checkpoint) => {
-            const observe = () => ({
-              group: context.sources.roots.collection.get(1)?.group,
-              childIds:
-                [...context.incremental.values()][0]?.children.map(
-                  (child) => child.id,
-                ) ?? [],
-            })
-            const cuts: Array<ReturnType<typeof observe>> = []
-            await driver.apply(action, context, () => {
-              checkpoint()
-              cuts.push(observe())
-            })
-            const settled = observe()
-            observations.push({
-              cuts,
-              settledGroup: settled.group,
-              settledChildIds: settled.childIds,
-              absentRoot: !context.sources.roots.collection.has(999),
-            })
-          },
-        },
-        projection: structuralProjection,
-      })
-      const restored = {
-        settledGroup: 1,
-        settledChildIds: [1],
-        absentRoot: true,
-      }
-      expect(observations.slice(2)).toEqual([
-        { ...restored, cuts: [] },
-        { ...restored, cuts: [] },
-        {
-          ...restored,
-          cuts: [
-            { group: 2, childIds: [] },
-            { group: 1, childIds: [1] },
-          ],
-        },
-        { ...restored, cuts: [] },
-      ])
-    },
-  )
+const optimisticCutsLaw = `An optimistic rollback publishes checkpoints only when it is delivered and changes a route; a rollback of an absent row or a no-op publishes none, and every settled cut restores the synced rows.`
+const applyCheckpointsLaw = `The structural trace driver checks every ordinary root and child change at one synchronous checkpoint before apply yields.`
+const omittedChildLaw = `After each source change, the live include rows equal the recomputed relationship tree at that public checkpoint.`
+const failedOptimisticCleanupLaw = `A failed optimistic checkpoint fails its transaction, leaves no pending work, and cleans up every Collection, keeping the checkpoint failure and suppressing a later cleanup failure.`
+const composedTransitionLaw = `Composed rekey and reparent transitions with two descendant levels match recomputation at every visible step.`
+const materializeReferenceUpdateLaw = `Nested scalar materialization follows a reference update to the redirected shared row.`
+const incrementalLaw = `The live include rows equal a naive recomputation after every incremental change.`
+const fullRowBatchLaw = `Visible multi-row source batches publish the recomputed relationship tree at every checkpoint.`
+const historyPairLaw = `A shared-route lifecycle history and its controls each publish the recomputed relationship tree at every checkpoint.`
+const flatMaterializationLaw = `Flat array and concat materializations follow an intra-batch child hand-off.`
+const materializeLaw = `Nested scalar materialization publishes the recomputed deepest row.`
 
-  fcTest(
-    `checks ordinary root and child changes before yielding from apply`,
-    async () => {
-      oracleRoute(`fixed history`)
-      const driver = createStructuralTraceDriver(1)
-      const row = { id: 1, parentGroup: 1, group: 1, value: 1, position: 0 }
-      const history: Array<HistoryAction> = [
-        { ...row, type: `put`, level: 0 },
-        { ...row, type: `put`, level: 1 },
-        { ...row, type: `delete`, level: 1 },
-        { ...row, type: `delete`, level: 0 },
-      ]
-      const beforeAwait: Array<number> = []
-      await runTrace({
-        steps: history,
-        driver: {
-          ...driver,
-          apply: (action, context, checkpoint) => {
-            let checkpoints = 0
-            const result = driver.apply(action, context, () => {
-              checkpoints++
-              return checkpoint()
-            })
-            beforeAwait.push(checkpoints)
-            return result
-          },
-        },
-        projection: structuralProjection,
-      })
-      expect(beforeAwait).toEqual([1, 1, 1, 1])
-    },
-  )
+const composedTransitionCells = (
+  [
+    [3, 1],
+    [4, 2],
+  ] as const
+).flatMap(([depth, targetLevel]) =>
+  ([0, 1] as const).flatMap((sourceBranch) =>
+    (
+      [
+        [`rekey`, `rekey`],
+        [`rekey`, `reparent`],
+        [`reparent`, `rekey`],
+      ] as const
+    ).map(([firstTransition, secondTransition]) => ({
+      depth,
+      targetLevel,
+      sourceBranch,
+      firstTransition,
+      secondTransition,
+    })),
+  ),
+)
 
-  fcTest(
-    `rejects an omitted child at its first public checkpoint`,
-    async () => {
-      oracleRoute(`calibration`)
-      const row = { id: 1, parentGroup: 1, group: 1, value: 1, position: 0 }
-      await expect(
-        runTrace({
-          steps: [
-            { ...row, type: `put`, level: 0 },
-            { ...row, type: `put`, level: 1 },
-          ] as Array<HistoryAction>,
-          driver: createStructuralTraceDriver(1),
-          projection: {
-            ...structuralProjection,
-            observe: (context) => {
-              const actual = structuralProjection.observe(context)
-              if (!context.levels[0]!.has(row.id)) return actual
-              // First verify the real query result. Then inject one plausible
-              // wrong public result to calibrate the comparison at this cut.
-              structuralProjection.assertEqual(
-                actual,
-                structuralProjection.recompute(context),
-              )
-              return [{ id: 1, group: 1, value: 1, position: 0, children: [] }]
+// The former fixed-history body, unchanged.
+async function judgeOptimisticCuts(): Promise<void> {
+  const driver = createStructuralTraceDriver(1)
+  const row = { id: 1, parentGroup: 1, group: 1, value: 1, position: 0 }
+  const history: Array<HistoryAction> = [
+    { ...row, type: `put`, level: 0 },
+    { ...row, type: `put`, level: 1 },
+    { ...row, type: `optimisticRollback`, level: 0, id: 999 },
+    { ...row, type: `optimisticRollback`, level: 0 },
+    { ...row, type: `optimisticRollback`, level: 0, group: 2 },
+    { ...row, type: `optimisticRollback`, level: 0 },
+  ]
+  expect(classifyScenarioSyntax({ depth: 1, history })).toEqual([
+    `depth=1`,
+    `syntactic-route-changes=many`,
+    `has-optimistic-syntax=true`,
+    `has-delete-syntax=false`,
+  ])
+  const observations: Array<{
+    cuts: Array<{ group: number | undefined; childIds: Array<number> }>
+    settledGroup: number | undefined
+    settledChildIds: Array<number>
+    absentRoot: boolean
+  }> = []
+  await runTrace({
+    steps: history,
+    driver: {
+      ...driver,
+      apply: async (action, context, checkpoint) => {
+        const observe = () => ({
+          group: context.sources.roots.collection.get(1)?.group,
+          childIds:
+            [...context.incremental.values()][0]?.children.map(
+              (child) => child.id,
+            ) ?? [],
+        })
+        const cuts: Array<ReturnType<typeof observe>> = []
+        await driver.apply(action, context, () => {
+          checkpoint()
+          cuts.push(observe())
+        })
+        const settled = observe()
+        observations.push({
+          cuts,
+          settledGroup: settled.group,
+          settledChildIds: settled.childIds,
+          absentRoot: !context.sources.roots.collection.has(999),
+        })
+      },
+    },
+    projection: structuralProjection,
+  })
+  const restored = {
+    settledGroup: 1,
+    settledChildIds: [1],
+    absentRoot: true,
+  }
+  expect(observations.slice(2)).toEqual([
+    { ...restored, cuts: [] },
+    { ...restored, cuts: [] },
+    {
+      ...restored,
+      cuts: [
+        { group: 2, childIds: [] },
+        { group: 1, childIds: [1] },
+      ],
+    },
+    { ...restored, cuts: [] },
+  ])
+}
+
+// The former fixed-history body, unchanged.
+async function judgeApplyCheckpoints(): Promise<void> {
+  const driver = createStructuralTraceDriver(1)
+  const row = { id: 1, parentGroup: 1, group: 1, value: 1, position: 0 }
+  const history: Array<HistoryAction> = [
+    { ...row, type: `put`, level: 0 },
+    { ...row, type: `put`, level: 1 },
+    { ...row, type: `delete`, level: 1 },
+    { ...row, type: `delete`, level: 0 },
+  ]
+  const beforeAwait: Array<number> = []
+  await runTrace({
+    steps: history,
+    driver: {
+      ...driver,
+      apply: (action, context, checkpoint) => {
+        let checkpoints = 0
+        const result = driver.apply(action, context, () => {
+          checkpoints++
+          return checkpoint()
+        })
+        beforeAwait.push(checkpoints)
+        return result
+      },
+    },
+    projection: structuralProjection,
+  })
+  expect(beforeAwait).toEqual([1, 1, 1, 1])
+}
+
+// The history that the omitted-child calibration corrupts.
+const omittedChildRow = {
+  id: 1,
+  parentGroup: 1,
+  group: 1,
+  value: 1,
+  position: 0,
+}
+const omittedChildHistories = [
+  {
+    row: omittedChildRow,
+    steps: [
+      { ...omittedChildRow, type: `put`, level: 0 },
+      { ...omittedChildRow, type: `put`, level: 1 },
+    ] as Array<HistoryAction>,
+  },
+]
+
+// The former case body, unchanged, for one level and cleanup-failure cell.
+async function judgeFailedOptimisticCleanup(
+  level: 0 | 1,
+  cleanupFails: boolean,
+): Promise<void> {
+  const driver = createStructuralTraceDriver(1)
+  const failure = new Error(`Core checkpoint failed`)
+  const cleanupFailure = new Error(`Core live cleanup failed after disposal`)
+  let context: StructuralTraceContext | undefined
+  let transaction: PendingTransaction | undefined
+  const put = (target: 0 | 1): HistoryAction => ({
+    type: `put`,
+    level: target,
+    id: 1,
+    parentGroup: 1,
+    group: 1,
+    value: 1,
+    position: 0,
+  })
+  await expect(
+    runTrace({
+      steps: [
+        put(0),
+        put(1),
+        { ...put(level), type: `optimisticConfirm`, value: 2 },
+      ],
+      driver: {
+        ...driver,
+        setup: () => {
+          const current = createStructuralTraceContext(1)
+          context = current
+          if (cleanupFails) {
+            const cleanup = current.incremental.cleanup.bind(
+              current.incremental,
+            )
+            current.incremental.cleanup = async () => {
+              await cleanup()
+              throw cleanupFailure
+            }
+          }
+          return current
+        },
+      },
+      projection: {
+        ...structuralProjection,
+        assertEqual: (actual, expected) => {
+          structuralProjection.assertEqual(actual, expected)
+          const entry = [...context!.pendingWork][0]
+          if (entry) {
+            transaction = entry.transaction
+            throw failure
+          }
+        },
+      },
+    }),
+  ).rejects.toBe(failure)
+  expect(
+    (failure as Error & { suppressed?: Array<unknown> }).suppressed,
+  ).toEqual(cleanupFails ? [cleanupFailure] : undefined)
+  if (!context) throw new Error(`Expected core trace context`)
+  expect(transaction?.state).toBe(`failed`)
+  expect(context.pendingWork.size).toBe(0)
+  for (const collection of [
+    context.incremental,
+    context.sources.roots.collection,
+    ...context.sources.levels.map((source) => source.collection),
+  ])
+    expect(collection.status).toBe(`cleaned-up`)
+}
+
+// The former fixed history's scenario, built unchanged; the shared full-row
+// batch check replays it.
+function createRootEnteringLiveRouteScenario(): FullRowBatchScenario {
+  const branches = transitionHistoryBranches
+  const prefix = createConnectedBatchBranches(1, branches)
+  const childStep = prefix.find((step) => step.level === 1)
+  if (!childStep || childStep.level !== 1) throw new Error(`Missing children`)
+  const scenario: FullRowBatchScenario = {
+    depth: 1,
+    steps: [
+      prefix[0]!,
+      {
+        level: 1,
+        changes: [
+          ...childStep.changes,
+          {
+            type: `insert`,
+            value: {
+              ...batchChild(3_000, branches[0].groupBase, 3_000, -1),
+              group: 2_500,
             },
           },
-        }),
-      ).rejects.toMatchObject({ checkpoint: 3 })
-    },
-  )
-
-  for (const level of [0, 1] as const) {
-    for (const cleanupFails of [false, true]) {
-      fcTest(
-        `cleans failed optimistic checkpoint at level ${level} with cleanup failure=${cleanupFails}`,
-        async () => {
-          oracleRoute(`case`)
-          const driver = createStructuralTraceDriver(1)
-          const failure = new Error(`Core checkpoint failed`)
-          const cleanupFailure = new Error(
-            `Core live cleanup failed after disposal`,
-          )
-          let context: StructuralTraceContext | undefined
-          let transaction: PendingTransaction | undefined
-          const put = (target: 0 | 1): HistoryAction => ({
-            type: `put`,
-            level: target,
-            id: 1,
-            parentGroup: 1,
-            group: 1,
-            value: 1,
-            position: 0,
-          })
-          await expect(
-            runTrace({
-              steps: [
-                put(0),
-                put(1),
-                { ...put(level), type: `optimisticConfirm`, value: 2 },
-              ],
-              driver: {
-                ...driver,
-                setup: () => {
-                  const current = createStructuralTraceContext(1)
-                  context = current
-                  if (cleanupFails) {
-                    const cleanup = current.incremental.cleanup.bind(
-                      current.incremental,
-                    )
-                    current.incremental.cleanup = async () => {
-                      await cleanup()
-                      throw cleanupFailure
-                    }
-                  }
-                  return current
-                },
-              },
-              projection: {
-                ...structuralProjection,
-                assertEqual: (actual, expected) => {
-                  structuralProjection.assertEqual(actual, expected)
-                  const entry = [...context!.pendingWork][0]
-                  if (entry) {
-                    transaction = entry.transaction
-                    throw failure
-                  }
-                },
-              },
-            }),
-          ).rejects.toBe(failure)
-          expect(
-            (failure as Error & { suppressed?: Array<unknown> }).suppressed,
-          ).toEqual(cleanupFails ? [cleanupFailure] : undefined)
-          if (!context) throw new Error(`Expected core trace context`)
-          expect(transaction?.state).toBe(`failed`)
-          expect(context.pendingWork.size).toBe(0)
-          for (const collection of [
-            context.incremental,
-            context.sources.roots.collection,
-            ...context.sources.levels.map((source) => source.collection),
-          ])
-            expect(collection.status).toBe(`cleaned-up`)
-        },
-      )
-    }
-  }
-
-  fcTest(`the sibling topology targets rows under one parent`, () => {
-    oracleRoute(`fixed history`)
-    const branches = transitionHistoryBranches
-    const prefix = independentTransitionPrefix(`sibling`, branches)
-    const levelTwo = prefix.find((step) => step.level === 2)
-    if (!levelTwo || levelTwo.level !== 2) throw new Error(`Missing level 2`)
-    const first = levelTwo.changes.find(
-      (change) => change.value.id === rowAt(branches, 0, 2),
-    )
-    const second = levelTwo.changes.find(
-      (change) => change.value.id === rowAt(branches, 1, 2),
-    )
-    if (!first || !second) throw new Error(`Missing sibling targets`)
-
-    expect(first.value.parentGroup).toBe(second.value.parentGroup)
-  })
-
-  fcTest(`the descendant remains attached before its ancestor moves`, () => {
-    oracleRoute(`fixed history`)
-    const branches = transitionHistoryBranches
-    const scenario = createRouteLifecycleScenario({
-      depth: 3,
-      branches,
-      descriptors: independentTransitionDescriptors(
-        `descendant-ancestor`,
-        branches,
-        [2_100, 2_500],
-      ),
-    })
-    const ancestorTransitionStep = scenario.transitionStepIndexes[1]
-    if (ancestorTransitionStep === undefined) {
-      throw new Error(`Missing ancestor transition`)
-    }
-    const beforeAncestorMove = recomputeFullRowBatchScenario(
-      scenario,
-      ancestorTransitionStep,
-    )
-
-    expect(
-      hasDirectChild(
-        beforeAncestorMove,
-        rowAt(branches, 0, 1),
-        rowAt(branches, 0, 2),
-      ),
-    ).toBe(true)
-  })
-
-  fcTest(`reconstructs every supported two-transition placement`, () => {
-    oracleRoute(`fixed seed`)
-    // The generated green product is depth 1–4, both transition kinds in
-    // both positions, and every supported insertion level. Rekey needs a
-    // child level. Rekey with two descendant levels has narrower explicit
-    // composed witnesses at [depth, target] = [3, 1] and [4, 2], but is
-    // outside this generated green family.
-    const expectedCounts = {
-      reparent: { reparent: [1, 5, 9, 13], rekey: [0, 2, 2, 2] },
-      rekey: { reparent: [0, 2, 2, 2], rekey: [0, 1, 1, 1] },
-    } as const
-    for (const depth of [1, 2, 3, 4] as const) {
-      for (const first of [`reparent`, `rekey`] as const) {
-        for (const second of [`reparent`, `rekey`] as const) {
-          const placements = transitionHistoryPlacements(depth, first, second)
-          expect(placements).toHaveLength(
-            expectedCounts[first][second][depth - 1]!,
-          )
-          const [generated] = fc.sample(
-            transitionHistoryScenariosArbitrary(depth, first, second, 0),
-            oracleFixedSeed(1725, { numRuns: 1 }),
-          )
-          expect(generated).toHaveLength(placements.length)
-          for (const [index, scenario] of generated!.entries()) {
-            const placement = placements[index]!
-            const insertedLevels = scenario.steps
-              .slice(scenario.historyStartStepIndex)
-              .filter((step) =>
-                step.changes.some((change) => change.type === `insert`),
-              )
-              .map((step) => step.level)
-            expect(insertedLevels).toEqual(placement.insertedLevels)
-            expectEveryHistoryStepVisible(scenario)
-          }
-        }
-      }
-    }
-
-    // A nearby invalid history attempts to rekey without seeding the child
-    // route. The constructor rejects it before the production driver runs.
-    expect(() =>
-      createTransitionHistoryScenario({
-        depth: 3,
-        targetLevel: 2,
-        firstTransition: `rekey`,
-        secondTransition: `reparent`,
-        sourceBranch: 0,
-        branches: transitionHistoryBranches,
-        rekeyGroups: [2_100, 2_400],
-        insertedLevels: [2, 2],
-        insertedValues: [1, 2],
-        insertedPositions: [-2, 2],
-      }),
-    ).toThrow(/Rekey histories must seed the new child route/)
-  })
-
-  fcTest(
-    `keeps each route-history topology and destination in the grammar`,
-    () => {
-      oracleRoute(`fixed history`)
-      expect(independentTransitionShapes).toEqual([
-        `ancestor-descendant`,
-        `descendant-ancestor`,
-        `sibling`,
-        `cross-branch`,
-        `root`,
-      ])
-      expect(destinationHistories).toEqual([
-        `fresh`,
-        `restore`,
-        `merge-split`,
-        `retired`,
-      ])
-      const branches = transitionHistoryBranches
-      const shapeTraces = independentTransitionShapes.map((shape) => {
-        const descriptors = independentTransitionDescriptors(
-          shape,
-          branches,
-          [2_100, 2_500],
-        )
-        const scenario = createRouteLifecycleScenario({
-          depth: 3,
-          branches,
-          prefixSteps: independentTransitionPrefix(shape, branches),
-          descriptors,
-        })
-        expectEveryRouteTransitionVisible(scenario)
-        return JSON.stringify(
-          scenario.transitionStepIndexes.map((stepIndex) =>
-            relationshipOnly(
-              recomputeFullRowBatchScenario(scenario, stepIndex + 1),
-            ),
-          ),
-        )
-      })
-      // Removing one named shape drops one distinct public relationship trace.
-      expect(new Set(shapeTraces).size).toBe(5)
-
-      const destinationTraces = destinationHistories.map((history) => {
-        const descriptors = destinationHistoryDescriptors(
-          history,
-          branches,
-          2_100,
-        )
-        const scenario = createRouteLifecycleScenario({
-          depth: 3,
-          branches,
-          descriptors,
-        })
-        expectEveryRouteTransitionVisible(scenario)
-        return JSON.stringify(
-          scenario.transitionStepIndexes.map((stepIndex) =>
-            relationshipOnly(
-              recomputeFullRowBatchScenario(scenario, stepIndex + 1),
-            ),
-          ),
-        )
-      })
-      expect(new Set(destinationTraces).size).toBe(4)
-
-      // The fixture bands admit both endpoints without overlapping route keys.
-      for (const [idBase, groupBase, otherIdBase, otherGroupBase, fresh] of [
-        [100, 600, 1_100, 1_600, 2_100],
-        [500, 1_000, 1_500, 2_000, 2_400],
-      ] as const) {
-        const edgeBranches = [
-          { idBase, groupBase },
-          { idBase: otherIdBase, groupBase: otherGroupBase },
-        ] as const
-        for (const history of destinationHistories) {
-          const scenario = createRouteLifecycleScenario({
-            depth: 3,
-            branches: edgeBranches,
-            descriptors: destinationHistoryDescriptors(
-              history,
-              edgeBranches,
-              fresh,
-            ),
-          })
-          expectEveryRouteTransitionVisible(scenario)
-        }
-      }
-    },
-  )
-
-  fcTest(`reconstructs and distinguishes the split/atomic batch matrix`, () => {
-    oracleRoute(`fixed history`)
-    const fixture = {
-      leftIdBase: 100,
-      leftGroupBase: 600,
-      rightIdBase: 1_100,
-      rightGroupBase: 1_600,
-      replacementId: 3_000,
-      replacementGroup: 2_700,
-      replacementValue: -3,
-      replacementPosition: -2,
-      movedPosition: 2,
-    }
-    const candidate = (
-      change: Partial<RelationshipBatchShape> = {},
-    ): FullRowBatchScenario =>
-      createRelationshipBatchShapeScenarios({
-        ...fixture,
-        shape: {
-          delivery: `split`,
-          order: `delete-insert`,
-          publicId: `new`,
-          route: `handoff`,
-          ancestorUpdate: `route-only`,
-          ...change,
-        },
-      }).candidate
-    const final = (scenario: FullRowBatchScenario) =>
-      recomputeFullRowBatchScenario(scenario, scenario.steps.length)
-
-    let cells = 0
-    for (const publicId of [`same`, `new`] as const) {
-      for (const route of [`handoff`, `fresh`] as const) {
-        for (const ancestorUpdate of [
-          `route-only`,
-          `route-and-position`,
-        ] as const) {
-          const matrix = createRelationshipBatchShapeMatrix(
-            fixture,
-            publicId,
-            route,
-            ancestorUpdate,
-          )
-          expect(matrix).toHaveLength(publicId === `same` ? 2 : 4)
-          expect(matrix.map(({ shape }) => shape.delivery)).toContain(`split`)
-          expect(matrix.map(({ shape }) => shape.delivery)).toContain(`atomic`)
-          if (publicId === `same`)
-            expect(
-              matrix.every(({ shape }) => shape.order === `delete-insert`),
-            ).toBe(true)
-          else
-            expect(matrix.map(({ shape }) => shape.order)).toContain(
-              `insert-delete`,
-            )
-          cells += matrix.length
-        }
-      }
-    }
-    expect(cells).toBe(24)
-
-    // Ablating any semantic axis removes a distinct public observation or
-    // checkpoint. Delivery and order agree only at the terminal state: their
-    // intermediate cuts, which the production driver checks, differ.
-    const baseline = candidate()
-    expect(final(candidate({ publicId: `same` }))).not.toEqual(final(baseline))
-    expect(final(candidate({ route: `fresh` }))).not.toEqual(final(baseline))
-    expect(
-      final(candidate({ ancestorUpdate: `route-and-position` })),
-    ).not.toEqual(final(baseline))
-    const atomic = candidate({ delivery: `atomic` })
-    expect(atomic.steps).toHaveLength(baseline.steps.length - 1)
-    expect(final(atomic)).toEqual(final(baseline))
-    const insertFirst = candidate({ order: `insert-delete` })
-    expect(final(insertFirst)).toEqual(final(baseline))
-    expect(
-      recomputeFullRowBatchScenario(insertFirst, insertFirst.steps.length - 1),
-    ).not.toEqual(
-      recomputeFullRowBatchScenario(baseline, baseline.steps.length - 1),
-    )
-
-    // Same-id insert-before-delete is excluded from this grammar because its
-    // intermediate cut can hold two rows with one public key. This check
-    // proves the generator omits that schedule; it does not test a product
-    // rejection. The fixture extremes stay within disjoint key bands.
-    for (const edgeFixture of [
-      fixture,
-      {
-        ...fixture,
-        leftIdBase: 500,
-        leftGroupBase: 1_000,
-        rightIdBase: 1_500,
-        rightGroupBase: 2_000,
-        replacementId: 3_200,
-        replacementGroup: 2_900,
-        replacementValue: 3,
-        replacementPosition: 2,
-        movedPosition: -2,
+        ],
       },
-    ]) {
-      const matrix = createRelationshipBatchShapeMatrix(
-        edgeFixture,
-        `same`,
-        `handoff`,
-        `route-only`,
-      )
-      expect(matrix.some(({ shape }) => shape.order === `insert-delete`)).toBe(
-        false,
-      )
-      for (const { scenarios } of matrix) {
-        expect(final(scenarios.candidate)).not.toEqual(final(scenarios.control))
-      }
-    }
+      {
+        level: 0,
+        changes: [
+          {
+            type: `update`,
+            value: batchRoot(
+              branches[1].idBase,
+              branches[0].groupBase,
+              branches[1].idBase,
+              0,
+            ),
+          },
+        ],
+      },
+    ],
+  }
+  return scenario
+}
+
+// The former case body, unchanged, for one composed-transition cell.
+async function judgeComposedTransition({
+  depth,
+  targetLevel,
+  sourceBranch,
+  firstTransition,
+  secondTransition,
+}: (typeof composedTransitionCells)[number]): Promise<void> {
+  const childLevel = (targetLevel + 1) as IncludeDepth
+  const scenario = createTransitionHistoryScenario({
+    depth,
+    targetLevel,
+    firstTransition,
+    secondTransition,
+    sourceBranch,
+    branches: transitionHistoryBranches,
+    rekeyGroups: [2_100, 2_400],
+    insertedLevels: [childLevel, childLevel],
+    insertedValues: [31, 47],
+    insertedPositions: [1, -1],
   })
+  expectEveryHistoryStepVisible(scenario)
+  await expectFullRowBatchScenarioMatches(scenario)
+}
 
-  fcTest(`keeps retired-route and moved-child matrix cuts distinct`, () => {
-    oracleRoute(`fixed seed`)
-    for (const depth of [2, 3, 4] as const) {
-      for (const sourceBranch of [0, 1] as const) {
-        const [split] = fc.sample(
-          rekeyRouteReuseScenarioArbitrary(depth, sourceBranch),
-          oracleFixedSeed(1726, { numRuns: 1 }),
-        )
-        const [atomic] = fc.sample(
-          rekeyRouteReuseScenarioArbitrary(
-            depth,
-            sourceBranch,
-            createIntraBatchRekeyRouteReuseScenarios,
-          ),
-          oracleFixedSeed(1733, { numRuns: 1 }),
-        )
-        expect(split).toBeDefined()
-        expect(atomic).toBeDefined()
-        const outcome = (scenario: FullRowBatchScenario) =>
-          relationshipOnly(
-            recomputeFullRowBatchScenario(scenario, scenario.steps.length),
-          )
-        expect(outcome(split!.candidate)).not.toEqual(outcome(split!.control))
-        expect(split!.candidate.steps).toHaveLength(
-          split!.control.steps.length + 1,
-        )
-        expect(outcome(atomic!.candidate)).toEqual(outcome(atomic!.control))
-        const controlLast = atomic!.control.steps.at(-1)!
-        const candidateLast = atomic!.candidate.steps.at(-1)!
-        expect(controlLast.changes.map(({ type }) => type)).toEqual([
-          `insert`,
-          `update`,
-        ])
-        expect(candidateLast.changes.map(({ type }) => type)).toEqual([
-          `update`,
-          `insert`,
-        ])
-      }
-    }
+const materializeReferenceUpdateHistories = [
+  {
+    name: `nested scalar materialization follows a reference update`,
+    steps: [
+      { type: `insert`, insert: `root-1` },
+      { type: `insert`, insert: `middle-1` },
+      { type: `insert`, insert: `shared-1` },
+      { type: `insert`, insert: `leaf-1` },
+      { type: `redirectMiddle`, id: 1, sharedId: 2 },
+    ] as Array<MaterializeTraceStep>,
+  },
+]
 
-    // Replacing a moved child needs a grandchild that can expose the route.
-    // This is the depth/target-level range of the generated mirror family.
-    for (const [depth, targetLevel] of [
+// Named regressions of the incremental-history grammar, replayed through its
+// shared recomputation check.
+const incrementalFixedHistories: Array<{ name: string; scenario: Scenario }> = [
+  {
+    name: `supports repeated optimistic rollbacks in one history`,
+    scenario: {
+      depth: 1,
+      history: [
+        {
+          type: `put`,
+          level: 0,
+          id: 0,
+          parentGroup: 0,
+          group: 0,
+          value: 0,
+          position: 0,
+        },
+        {
+          type: `put`,
+          level: 1,
+          id: 0,
+          parentGroup: 0,
+          group: 0,
+          value: 0,
+          position: 0,
+        },
+        {
+          type: `optimisticRollback`,
+          level: 1,
+          id: 0,
+          parentGroup: 0,
+          group: 0,
+          value: 1,
+          position: 0,
+        },
+        {
+          type: `optimisticRollback`,
+          level: 1,
+          id: 0,
+          parentGroup: 0,
+          group: 0,
+          value: 2,
+          position: 0,
+        },
+      ],
+    },
+  },
+  {
+    name: `confirmed child reorder matches recomputation`,
+    scenario: confirmedChildReorderSeed,
+  },
+]
+
+// Named full-row batch histories, replayed through the shared full-row batch
+// check.
+const fullRowFixedHistories: Array<{
+  name: string
+  scenario: FullRowBatchScenario
+}> = [
+  {
+    name: `a root entering a live route receives its ordered snapshot`,
+    scenario: createRootEnteringLiveRouteScenario(),
+  },
+  ...([0, 1, 2] as const).map((parentLevel) => ({
+    name: `matches recomputation when the last level-${parentLevel} shared-route subscriber leaves`,
+    scenario: createSharedRouteLastSubscriberScenario(parentLevel),
+  })),
+  ...(
+    [
       [3, 1],
       [4, 1],
       [4, 2],
-    ] as const) {
-      for (const sourceBranch of [0, 1] as const) {
-        const [mirrors] = fc.sample(
-          movedChildReplacementMirrorsArbitrary(
-            depth,
-            targetLevel,
-            sourceBranch,
-          ),
-          oracleFixedSeed(1727, { numRuns: 1 }),
-        )
-        for (const order of branchDeliveryOrders) {
-          const pair = mirrors![order]
-          const outcome = (scenario: FullRowBatchScenario) =>
-            recomputeFullRowBatchScenario(scenario, scenario.steps.length)
-          expect(pair.greenVariants).toHaveLength(2)
-          expect(outcome(pair.candidate)).not.toEqual(outcome(pair.control))
-          for (const atomic of pair.greenVariants!)
-            expect(outcome(atomic)).toEqual(outcome(pair.candidate))
-        }
-      }
-    }
-    expect(() =>
-      createMovedChildReplacementScenarios({
-        depth: 3,
-        targetLevel: 2,
-        sourceBranch: 0,
-        branches: transitionHistoryBranches,
-        insertedId: 3_000,
-        insertedValue: 0,
-        insertedPosition: 0,
-      }),
-    ).toThrow(/needs a visible grandchild/)
+    ] as const
+  ).map(([depth, targetLevel]) => ({
+    name: `later updates propagate through a reparented subtree at depth ${depth}, level ${targetLevel}`,
+    scenario: createReparentedSubtreeUpdateScenario(depth, targetLevel),
+  })),
+  {
+    name: `rekeying a row detaches two descendant levels`,
+    scenario: minimalRekeyScenario,
+  },
+  {
+    name: `reusing a rekeyed row's old route does not resurrect its child`,
+    scenario: rekeyRouteResurrectionScenario,
+  },
+  {
+    name: `matches recomputation when sharing a route without rekeying its existing row`,
+    scenario: rekeyRouteReuseControl,
+  },
+  {
+    name: `replacing a moved subtree child retains its grandchild`,
+    scenario: movedSubtreeChildReplacementScenario,
+  },
+  {
+    name: `matches recomputation when replacing a child without reparenting its ancestor`,
+    scenario: childReplacementControl,
+  },
+  {
+    name: `matches recomputation for full-row sync batches`,
+    scenario: { depth: 1, steps: fullRowBatchTrace },
+  },
+  {
+    name: `a reinserted parent drops its old shared route`,
+    scenario: fullRowSharedRoutingSeed,
+  },
+]
+
+// Named shared-route lifecycle pairs, replayed through the shared pair check.
+const historyPairFixedHistories: Array<{
+  name: string
+  pair: HistoryScenarioPair
+}> = [
+  ...([0, 1, 2] as const).flatMap((parentLevel) => [
+    ...([0, 1] as const).map((enteringRow) => ({
+      name: `matches recomputation when level-${parentLevel} row ${enteringRow} enters a live shared route`,
+      pair: createMergeIntoSharedRouteScenarios(parentLevel, enteringRow),
+    })),
+    {
+      name: `matches recomputation after a level-${parentLevel} route resubscribes`,
+      pair: createSnapshotOnResubscribeScenarios(parentLevel),
+    },
+    {
+      name: `matches recomputation when an initially shared level-${parentLevel} route retires, changes, and resubscribes`,
+      pair: createInitiallySharedRouteResubscribeScenario(parentLevel),
+    },
+  ]),
+  ...([0, 1] as const).map((parentLevel) => ({
+    name: `a departed level-${parentLevel} shared-route subscriber ignores later child updates`,
+    pair: createSharedRouteLifetimeScenarios(parentLevel),
+  })),
+]
+
+describe(`includes recompute oracle`, () => {
+  oracleProperty({
+    id: `includes.optimistic-cuts`,
+    law: {
+      statement: optimisticCutsLaw,
+      authority: `The state-equivalence, route-lifecycle, transition-history, and batch-partition laws (normative laws 2–5 and 8) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `One fixed depth-1 history of optimistic rollbacks.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/equality-value-identity.ts#createValueIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/public-key-reduction.ts#routeKey`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: [
+      `distinguishes optimistic syntax from delivered rollback and no-op cuts`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(optimisticCutsLaw, plan, observe, () =>
+        judgeOptimisticCuts(),
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  fcTest(
-    `a root entering a live route receives its ordered snapshot`,
-    async () => {
-      oracleRoute(`fixed history`)
-      const branches = transitionHistoryBranches
-      const prefix = createConnectedBatchBranches(1, branches)
-      const childStep = prefix.find((step) => step.level === 1)
-      if (!childStep || childStep.level !== 1)
-        throw new Error(`Missing children`)
-      const scenario: FullRowBatchScenario = {
-        depth: 1,
-        steps: [
-          prefix[0]!,
-          {
-            level: 1,
-            changes: [
-              ...childStep.changes,
-              {
-                type: `insert`,
-                value: {
-                  ...batchChild(3_000, branches[0].groupBase, 3_000, -1),
-                  group: 2_500,
-                },
-              },
-            ],
-          },
-          {
-            level: 0,
-            changes: [
-              {
-                type: `update`,
-                value: batchRoot(
-                  branches[1].idBase,
-                  branches[0].groupBase,
-                  branches[1].idBase,
-                  0,
-                ),
-              },
-            ],
-          },
-        ],
-      }
-
-      await expectFullRowBatchScenarioMatches(scenario)
+  oracleProperty({
+    id: `includes.apply-checkpoints`,
+    law: {
+      statement: applyCheckpointsLaw,
+      authority: `The state-equivalence, route-lifecycle, transition-history, and batch-partition laws (normative laws 2–5 and 8) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `One fixed depth-1 put and delete history.`,
     },
-  )
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/equality-value-identity.ts#createValueIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/public-key-reduction.ts#routeKey`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: [
+      `checks ordinary root and child changes before yielding from apply`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(applyCheckpointsLaw, plan, observe, () =>
+        judgeApplyCheckpoints(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes.omitted-child`,
+    law: {
+      statement: omittedChildLaw,
+      authority: `The state-equivalence, route-lifecycle, transition-history, and batch-partition laws (normative laws 2–5 and 8) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `One fixed depth-1 root and child put history, replayed through the structural driver and recomputation, and its omitted-child calibration.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/equality-value-identity.ts#createValueIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/public-key-reduction.ts#routeKey`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: omittedChildHistories,
+    label: () => `matches recomputation after a root and its child are put`,
+    resolve: (history) => ({ ...history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(omittedChildLaw, plan, observe, () =>
+        runTrace({
+          steps: plan.steps,
+          driver: createStructuralTraceDriver(1),
+          projection: structuralProjection,
+        }),
+      ),
+    check: forwardAssertionJudgment,
+    calibrations: [
+      {
+        name: `rejects an omitted child at its first public checkpoint`,
+        law: omittedChildLaw,
+        // The former calibration body. After verifying the real query result,
+        // the projection injects one plausible wrong public result. Exactly the
+        // old matcher: only a failure at checkpoint 3 counts as the check
+        // rejecting it. The shared structural check marks its own comparison
+        // failures, so any other failure is rethrown without that marking and
+        // fails this calibration, as it failed the old test.
+        driver: (plan, observe) =>
+          recordAssertionJudgment(omittedChildLaw, plan, observe, async () => {
+            const row = plan.row
+            try {
+              await runTrace({
+                steps: plan.steps,
+                driver: createStructuralTraceDriver(1),
+                projection: {
+                  ...structuralProjection,
+                  observe: (context) => {
+                    const actual = structuralProjection.observe(context)
+                    if (!context.levels[0]!.has(row.id)) return actual
+                    structuralProjection.assertEqual(
+                      actual,
+                      structuralProjection.recompute(context),
+                    )
+                    return [
+                      { id: 1, group: 1, value: 1, position: 0, children: [] },
+                    ]
+                  },
+                },
+              })
+            } catch (error) {
+              if (
+                error instanceof Error &&
+                (error as Error & { checkpoint?: unknown }).checkpoint === 3
+              )
+                rejectAt(`omitted child calibration`, error)
+              throw new Error(
+                `the omitted-child corruption failed outside the expected rejection: ${String(error)}`,
+              )
+            }
+          }),
+      },
+    ],
+  })
+
+  oracleProperty({
+    id: `includes.failed-optimistic-cleanup`,
+    law: {
+      statement: failedOptimisticCleanupLaw,
+      authority: `The state-equivalence, route-lifecycle, transition-history, and batch-partition laws (normative laws 2–5 and 8) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `The four enumerated level and cleanup-failure cells over one depth-1 history.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/equality-value-identity.ts#createValueIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/public-key-reduction.ts#routeKey`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: ([0, 1] as const).flatMap((level) =>
+      [false, true].map((cleanupFails) => ({ level, cleanupFails })),
+    ),
+    label: ({ level, cleanupFails }) =>
+      `cleans failed optimistic checkpoint at level ${level} with cleanup failure=${cleanupFails}`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(failedOptimisticCleanupLaw, plan, observe, () =>
+        judgeFailedOptimisticCleanup(plan.level, plan.cleanupFails),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes.composed-transitions`,
+    law: {
+      statement: composedTransitionLaw,
+      authority: `The state-equivalence, route-lifecycle, transition-history, and batch-partition laws (normative laws 2–5 and 8) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `The twelve enumerated depth, level, source-branch, and transition-pair cells with two descendant levels.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/equality-value-identity.ts#createValueIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/public-key-reduction.ts#routeKey`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: composedTransitionCells,
+    label: ({ depth, sourceBranch, firstTransition, secondTransition }) =>
+      `matches composed ${firstTransition} → ${secondTransition} with two descendant levels at depth ${depth}, branch ${sourceBranch}`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(composedTransitionLaw, plan, observe, () =>
+        judgeComposedTransition(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes.materialize-reference-update`,
+    law: {
+      statement: materializeReferenceUpdateLaw,
+      authority: `The state-equivalence, route-lifecycle, transition-history, and batch-partition laws (normative laws 2–5 and 8) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `One fixed insert-and-redirect history over distinct intermediates.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/equality-value-identity.ts#createValueIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/public-key-reduction.ts#routeKey`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: materializeReferenceUpdateHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        materializeReferenceUpdateLaw,
+        plan,
+        observe,
+        () =>
+          runTrace({
+            steps: plan.history.steps,
+            driver: createMaterializeTraceDriver(false),
+            projection: materializeProjection,
+          }),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes.full-row-fixed`,
+    law: {
+      statement: fullRowBatchLaw,
+      authority: `The state-equivalence, route-lifecycle, transition-history, and batch-partition laws (normative laws 2–5 and 8) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `Named full-row batch histories that the generated matrices do not take back, replayed through the shared full-row batch check.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/equality-value-identity.ts#createValueIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/public-key-reduction.ts#routeKey`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: fullRowFixedHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(fullRowBatchLaw, plan, observe, () =>
+        expectFullRowBatchScenarioMatches(plan.history.scenario),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes.history-pair-fixed`,
+    law: {
+      statement: historyPairLaw,
+      authority: `The state-equivalence, route-lifecycle, transition-history, and batch-partition laws (normative laws 2–5 and 8) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `Named shared-route merge, resubscribe, retirement, and departure pairs, replayed through the shared pair check.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/equality-value-identity.ts#createValueIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/public-key-reduction.ts#routeKey`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: historyPairFixedHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(historyPairLaw, plan, observe, () =>
+        expectHistoryScenarioPairMatches(plan.history.pair),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes.flat-materialization-cases`,
+    law: {
+      statement: flatMaterializationLaw,
+      authority: `The state-equivalence, route-lifecycle, transition-history, and batch-partition laws (normative laws 2–5 and 8) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `The two enumerated flat materializations over one intra-batch hand-off scenario.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/equality-value-identity.ts#createValueIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/public-key-reduction.ts#routeKey`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: [`array`, `concat`] as Array<FlatMaterialization>,
+    label: (materialization) =>
+      `${materialization} follows an intra-batch child hand-off`,
+    resolve: (materialization) => ({ materialization }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(flatMaterializationLaw, plan, observe, () =>
+        expectFlatMaterializationScenarioMatches(
+          plan.materialization,
+          intraBatchChildHandOffScenario,
+        ),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes.incremental-fixed`,
+    law: {
+      statement: incrementalLaw,
+      authority: `The state-equivalence, route-lifecycle, transition-history, and batch-partition laws (normative laws 2–5 and 8) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `Two named regressions of the incremental-history grammar.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/equality-value-identity.ts#createValueIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/public-key-reduction.ts#routeKey`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: incrementalFixedHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(incrementalLaw, plan, observe, () =>
+        expectScenarioMatches(plan.history.scenario),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes.materialize-fixed`,
+    law: {
+      statement: materializeLaw,
+      authority: `The state-equivalence, route-lifecycle, transition-history, and batch-partition laws (normative laws 2–5 and 8) in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
+      limits: `The named shared-intermediate materialization seed.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/equality-value-identity.ts#createValueIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/public-key-reduction.ts#routeKey`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: [
+      {
+        name: `shared scalar materialization preserves the deepest row`,
+        scenario: sharedMaterializeSeed,
+      },
+    ],
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(materializeLaw, plan, observe, () =>
+        expectMaterializeScenarioMatches(plan.history.scenario),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   for (const [shapeIndex, shape] of independentTransitionShapes.entries()) {
     const property = `includes.matrix.independent-${shape}`
@@ -3858,7 +2438,17 @@ describe(`includes recompute oracle`, () => {
     )) {
       registerIncludesProperty(
         [arbitrary],
-        options,
+        {
+          ...options,
+          owns: [
+            `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+            `src/collection/index.ts#createCollection`,
+            `src/query/equality-value-identity.ts#createValueIdentity`,
+            `src/query/live-query-collection.ts#createLiveQueryCollection`,
+            `src/query/live/public-key-reduction.ts#routeKey`,
+            `src/query/query-once.ts#queryOnce`,
+          ],
+        },
         `matches recomputation for independent ${shape} relationship targets [${property}, ${label}]`,
         async (scenario) => {
           expectEveryRouteTransitionVisible(scenario)
@@ -3878,7 +2468,17 @@ describe(`includes recompute oracle`, () => {
     )) {
       registerIncludesProperty(
         [arbitrary],
-        options,
+        {
+          ...options,
+          owns: [
+            `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+            `src/collection/index.ts#createCollection`,
+            `src/query/equality-value-identity.ts#createValueIdentity`,
+            `src/query/live-query-collection.ts#createLiveQueryCollection`,
+            `src/query/live/public-key-reduction.ts#routeKey`,
+            `src/query/query-once.ts#queryOnce`,
+          ],
+        },
         `matches recomputation for the ${history} route destination history [${property}, ${label}]`,
         async (scenario) => {
           expectEveryRouteTransitionVisible(scenario)
@@ -3887,112 +2487,6 @@ describe(`includes recompute oracle`, () => {
       )
     }
   }
-
-  for (const parentLevel of [0, 1, 2] as const) {
-    for (const enteringRow of [0, 1] as const) {
-      fcTest(
-        `matches recomputation when level-${parentLevel} row ${enteringRow} enters a live shared route`,
-        () => {
-          oracleRoute(`case`)
-          return expectHistoryScenarioPairMatches(
-            createMergeIntoSharedRouteScenarios(parentLevel, enteringRow),
-          )
-        },
-      )
-    }
-
-    fcTest(
-      `matches recomputation when the last level-${parentLevel} shared-route subscriber leaves`,
-      () => {
-        oracleRoute(`case`)
-        return expectFullRowBatchScenarioMatches(
-          createSharedRouteLastSubscriberScenario(parentLevel),
-        )
-      },
-    )
-
-    fcTest(
-      `matches recomputation after a level-${parentLevel} route resubscribes`,
-      () => {
-        oracleRoute(`case`)
-        return expectHistoryScenarioPairMatches(
-          createSnapshotOnResubscribeScenarios(parentLevel),
-        )
-      },
-    )
-
-    fcTest(
-      `matches recomputation when an initially shared level-${parentLevel} route retires, changes, and resubscribes`,
-      () => {
-        oracleRoute(`case`)
-        return expectHistoryScenarioPairMatches(
-          createInitiallySharedRouteResubscribeScenario(parentLevel),
-        )
-      },
-    )
-  }
-
-  for (const materialization of [`array`, `concat`] as const) {
-    fcTest(`${materialization} follows an intra-batch child hand-off`, () => {
-      oracleRoute(`case`)
-      return expectFlatMaterializationScenarioMatches(
-        materialization,
-        intraBatchChildHandOffScenario,
-      )
-    })
-  }
-
-  for (const [depth, targetLevel] of [
-    [3, 1],
-    [4, 1],
-    [4, 2],
-  ] as const) {
-    fcTest(
-      `later updates propagate through a reparented subtree at depth ${depth}, level ${targetLevel}`,
-      () => {
-        oracleRoute(`case`)
-        return expectFullRowBatchScenarioMatches(
-          createReparentedSubtreeUpdateScenario(depth, targetLevel),
-        )
-      },
-    )
-  }
-
-  fcTest(`rekeying a row detaches two descendant levels`, () => {
-    oracleRoute(`fixed history`)
-    return expectFullRowBatchScenarioMatches(minimalRekeyScenario)
-  })
-
-  fcTest(
-    `reusing a rekeyed row's old route does not resurrect its child`,
-    () => {
-      oracleRoute(`fixed history`)
-      return expectFullRowBatchScenarioMatches(rekeyRouteResurrectionScenario)
-    },
-  )
-
-  fcTest(
-    `matches recomputation when sharing a route without rekeying its existing row`,
-    () => {
-      oracleRoute(`fixed history`)
-      return expectFullRowBatchScenarioMatches(rekeyRouteReuseControl)
-    },
-  )
-
-  fcTest(`replacing a moved subtree child retains its grandchild`, () => {
-    oracleRoute(`fixed history`)
-    return expectFullRowBatchScenarioMatches(
-      movedSubtreeChildReplacementScenario,
-    )
-  })
-
-  fcTest(
-    `matches recomputation when replacing a child without reparenting its ancestor`,
-    () => {
-      oracleRoute(`fixed history`)
-      return expectFullRowBatchScenarioMatches(childReplacementControl)
-    },
-  )
 
   for (const depth of [2, 3, 4] as const) {
     for (const sourceBranch of [0, 1] as const) {
@@ -4008,7 +2502,17 @@ describe(`includes recompute oracle`, () => {
       )) {
         registerIncludesProperty(
           [retiredArbitrary],
-          options,
+          {
+            ...options,
+            owns: [
+              `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+              `src/collection/index.ts#createCollection`,
+              `src/query/equality-value-identity.ts#createValueIdentity`,
+              `src/query/live-query-collection.ts#createLiveQueryCollection`,
+              `src/query/live/public-key-reduction.ts#routeKey`,
+              `src/query/query-once.ts#queryOnce`,
+            ],
+          },
           `reuses a retired route at depth ${depth}, branch ${sourceBranch} [${retiredProperty}, ${label}]`,
           (...args: Parameters<typeof expectHistoryScenarioPairMatches>) => {
             return expectHistoryScenarioPairMatches(...args)
@@ -4029,7 +2533,17 @@ describe(`includes recompute oracle`, () => {
       )) {
         registerIncludesProperty(
           [intraBatchArbitrary],
-          options,
+          {
+            ...options,
+            owns: [
+              `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+              `src/collection/index.ts#createCollection`,
+              `src/query/equality-value-identity.ts#createValueIdentity`,
+              `src/query/live-query-collection.ts#createLiveQueryCollection`,
+              `src/query/live/public-key-reduction.ts#routeKey`,
+              `src/query/query-once.ts#queryOnce`,
+            ],
+          },
           `handles intra-batch rekey then retired-route reuse at depth ${depth}, branch ${sourceBranch} [${intraBatchProperty}, ${label}]`,
           (...args: Parameters<typeof expectHistoryScenarioPairMatches>) => {
             return expectHistoryScenarioPairMatches(...args)
@@ -4037,18 +2551,6 @@ describe(`includes recompute oracle`, () => {
         )
       }
     }
-  }
-
-  for (const parentLevel of [0, 1] as const) {
-    fcTest(
-      `a departed level-${parentLevel} shared-route subscriber ignores later child updates`,
-      () => {
-        oracleRoute(`case`)
-        return expectHistoryScenarioPairMatches(
-          createSharedRouteLifetimeScenarios(parentLevel),
-        )
-      },
-    )
   }
 
   for (const depth of [3, 4] as const) {
@@ -4067,7 +2569,17 @@ describe(`includes recompute oracle`, () => {
         )) {
           registerIncludesProperty(
             [arbitrary],
-            options,
+            {
+              ...options,
+              owns: [
+                `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+                `src/collection/index.ts#createCollection`,
+                `src/query/equality-value-identity.ts#createValueIdentity`,
+                `src/query/live-query-collection.ts#createLiveQueryCollection`,
+                `src/query/live/public-key-reduction.ts#routeKey`,
+                `src/query/query-once.ts#queryOnce`,
+              ],
+            },
             `matches forward/reverse delivery mirrors when replacing a moved child at depth ${depth}, level ${targetLevel}, source ${sourceBranch} [${property}, ${label}]`,
             async (scenarios) => {
               for (const deliveryOrder of branchDeliveryOrders) {
@@ -4097,7 +2609,17 @@ describe(`includes recompute oracle`, () => {
         )) {
           registerIncludesProperty(
             [relationshipBatchFixtureArbitrary],
-            options,
+            {
+              ...options,
+              owns: [
+                `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+                `src/collection/index.ts#createCollection`,
+                `src/query/equality-value-identity.ts#createValueIdentity`,
+                `src/query/live-query-collection.ts#createLiveQueryCollection`,
+                `src/query/live/public-key-reduction.ts#routeKey`,
+                `src/query/query-once.ts#queryOnce`,
+              ],
+            },
             `matches the split/atomic replacement matrix for ${publicId} public id, ${route} route, ${ancestorUpdate} [${property}, ${label}]`,
             async (fixture) => {
               const cells = createRelationshipBatchShapeMatrix(
@@ -4153,7 +2675,17 @@ describe(`includes recompute oracle`, () => {
   )) {
     registerIncludesProperty(
       flatMaterializationArbitraries,
-      options,
+      {
+        ...options,
+        owns: [
+          `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+          `src/collection/index.ts#createCollection`,
+          `src/query/equality-value-identity.ts#createValueIdentity`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+          `src/query/live/public-key-reduction.ts#routeKey`,
+          `src/query/query-once.ts#queryOnce`,
+        ],
+      },
       `matches recomputation for flat materializations [${flatMaterializationProperty}, ${label}]`,
       (kind, scenario) => {
         return expectFlatMaterializationScenarioMatches(kind, scenario)
@@ -4171,7 +2703,17 @@ describe(`includes recompute oracle`, () => {
     )) {
       registerIncludesProperty(
         [arbitrary],
-        options,
+        {
+          ...options,
+          owns: [
+            `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+            `src/collection/index.ts#createCollection`,
+            `src/query/equality-value-identity.ts#createValueIdentity`,
+            `src/query/live-query-collection.ts#createLiveQueryCollection`,
+            `src/query/live/public-key-reduction.ts#routeKey`,
+            `src/query/query-once.ts#queryOnce`,
+          ],
+        },
         `matches recomputation for visible multi-row batches at depth ${depth} [${property}, ${label}]`,
         (...args: Parameters<typeof expectFullRowBatchScenarioMatches>) => {
           return expectFullRowBatchScenarioMatches(...args)
@@ -4198,7 +2740,17 @@ describe(`includes recompute oracle`, () => {
         )) {
           registerIncludesProperty(
             [visibleArbitrary],
-            options,
+            {
+              ...options,
+              owns: [
+                `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+                `src/collection/index.ts#createCollection`,
+                `src/query/equality-value-identity.ts#createValueIdentity`,
+                `src/query/live-query-collection.ts#createLiveQueryCollection`,
+                `src/query/live/public-key-reduction.ts#routeKey`,
+                `src/query/query-once.ts#queryOnce`,
+              ],
+            },
             `matches recomputation for a visible ${transition} at depth ${depth}, level ${targetLevel} [${visibleProperty}, ${label}]`,
             async (scenarios) => {
               for (const scenario of [
@@ -4259,7 +2811,17 @@ describe(`includes recompute oracle`, () => {
           )) {
             registerIncludesProperty(
               [arbitrary],
-              options,
+              {
+                ...options,
+                owns: [
+                  `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+                  `src/collection/index.ts#createCollection`,
+                  `src/query/equality-value-identity.ts#createValueIdentity`,
+                  `src/query/live-query-collection.ts#createLiveQueryCollection`,
+                  `src/query/live/public-key-reduction.ts#routeKey`,
+                  `src/query/query-once.ts#queryOnce`,
+                ],
+              },
               `matches recomputation for ${firstTransition} → ${secondTransition} histories at depth ${depth}, branch ${sourceBranch} [${property}, ${label}]`,
               async (scenarios) => {
                 for (const scenario of scenarios) {
@@ -4274,115 +2836,6 @@ describe(`includes recompute oracle`, () => {
     }
   }
 
-  for (const [depth, targetLevel] of [
-    [3, 1],
-    [4, 2],
-  ] as const) {
-    for (const sourceBranch of [0, 1] as const) {
-      for (const [firstTransition, secondTransition] of [
-        [`rekey`, `rekey`],
-        [`rekey`, `reparent`],
-        [`reparent`, `rekey`],
-      ] as const) {
-        fcTest(
-          `matches composed ${firstTransition} → ${secondTransition} with two descendant levels at depth ${depth}, branch ${sourceBranch}`,
-          async () => {
-            oracleRoute(`case`)
-            const childLevel = (targetLevel + 1) as IncludeDepth
-            const scenario = createTransitionHistoryScenario({
-              depth,
-              targetLevel,
-              firstTransition,
-              secondTransition,
-              sourceBranch,
-              branches: transitionHistoryBranches,
-              rekeyGroups: [2_100, 2_400],
-              insertedLevels: [childLevel, childLevel],
-              insertedValues: [31, 47],
-              insertedPositions: [1, -1],
-            })
-            expectEveryHistoryStepVisible(scenario)
-            await expectFullRowBatchScenarioMatches(scenario)
-          },
-        )
-      }
-    }
-  }
-
-  fcTest(`nested scalar materialization follows a reference update`, () => {
-    oracleRoute(`fixed history`)
-    return runTrace({
-      steps: [
-        { type: `insert`, insert: `root-1` },
-        { type: `insert`, insert: `middle-1` },
-        { type: `insert`, insert: `shared-1` },
-        { type: `insert`, insert: `leaf-1` },
-        { type: `redirectMiddle`, id: 1, sharedId: 2 },
-      ],
-      driver: createMaterializeTraceDriver(false),
-      projection: materializeProjection,
-    })
-  })
-
-  fcTest(`matches recomputation for full-row sync batches`, async () => {
-    oracleRoute(`fixed history`)
-    await runTrace({
-      steps: fullRowBatchTrace,
-      driver: createFullRowBatchTraceDriver(1),
-      projection: structuralProjection,
-    })
-  })
-
-  fcTest(`a reinserted parent drops its old shared route`, () => {
-    oracleRoute(`fixed history`)
-    return expectFullRowBatchScenarioMatches(fullRowSharedRoutingSeed)
-  })
-
-  fcTest(`supports repeated optimistic rollbacks in one history`, async () => {
-    oracleRoute(`fixed history`)
-    await expectScenarioMatches({
-      depth: 1,
-      history: [
-        {
-          type: `put`,
-          level: 0,
-          id: 0,
-          parentGroup: 0,
-          group: 0,
-          value: 0,
-          position: 0,
-        },
-        {
-          type: `put`,
-          level: 1,
-          id: 0,
-          parentGroup: 0,
-          group: 0,
-          value: 0,
-          position: 0,
-        },
-        {
-          type: `optimisticRollback`,
-          level: 1,
-          id: 0,
-          parentGroup: 0,
-          group: 0,
-          value: 1,
-          position: 0,
-        },
-        {
-          type: `optimisticRollback`,
-          level: 1,
-          id: 0,
-          parentGroup: 0,
-          group: 0,
-          value: 2,
-          position: 0,
-        },
-      ],
-    })
-  })
-
   for (const { label, options } of generatedCampaigns(
     40,
     `includes.incremental-history`,
@@ -4390,7 +2843,17 @@ describe(`includes recompute oracle`, () => {
   )) {
     registerIncludesProperty(
       [scenarioArbitrary],
-      options,
+      {
+        ...options,
+        owns: [
+          `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+          `src/collection/index.ts#createCollection`,
+          `src/query/equality-value-identity.ts#createValueIdentity`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+          `src/query/live/public-key-reduction.ts#routeKey`,
+          `src/query/query-once.ts#queryOnce`,
+        ],
+      },
       `matches naive recomputation after every incremental change [${label}]`,
       (...args: Parameters<typeof expectScenarioMatches>) => {
         return expectScenarioMatches(...args)
@@ -4408,7 +2871,17 @@ describe(`includes recompute oracle`, () => {
   )) {
     registerIncludesProperty(
       [distinctMaterializationArbitrary],
-      options,
+      {
+        ...options,
+        owns: [
+          `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+          `src/collection/index.ts#createCollection`,
+          `src/query/equality-value-identity.ts#createValueIdentity`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+          `src/query/live/public-key-reduction.ts#routeKey`,
+          `src/query/query-once.ts#queryOnce`,
+        ],
+      },
       `matches recomputation for nested scalar materialization [${label}]`,
       (...args: Parameters<typeof expectMaterializeScenarioMatches>) => {
         return expectMaterializeScenarioMatches(...args)
@@ -4447,7 +2920,17 @@ describe(`includes recompute oracle`, () => {
   )) {
     registerIncludesProperty(
       alphaArbitraries,
-      options,
+      {
+        ...options,
+        owns: [
+          `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+          `src/collection/index.ts#createCollection`,
+          `src/query/equality-value-identity.ts#createValueIdentity`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+          `src/query/live/public-key-reduction.ts#routeKey`,
+          `src/query/query-once.ts#queryOnce`,
+        ],
+      },
       `is unchanged by alpha-renaming, sibling declaration order, or an unrelated sibling [${label}]`,
       async (rootRows, childRows) => {
         const roots = createControlledCollection<RootRow>(
@@ -4579,7 +3062,17 @@ describe(`includes recompute oracle`, () => {
   )) {
     registerIncludesProperty(
       [confirmedValueArbitrary],
-      options,
+      {
+        ...options,
+        owns: [
+          `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+          `src/collection/index.ts#createCollection`,
+          `src/query/equality-value-identity.ts#createValueIdentity`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+          `src/query/live/public-key-reduction.ts#routeKey`,
+          `src/query/query-once.ts#queryOnce`,
+        ],
+      },
       `optimistic updates converge to confirmed-only state [${label}]`,
       async (confirmedValue) => {
         const roots = createControlledCollection<RootRow>(`convergence-roots`, [
@@ -4652,16 +3145,6 @@ describe(`includes recompute oracle`, () => {
       },
     )
   }
-
-  fcTest(`confirmed child reorder matches recomputation`, () => {
-    oracleRoute(`fixed history`)
-    return expectScenarioMatches(confirmedChildReorderSeed)
-  })
-
-  fcTest(`shared scalar materialization preserves the deepest row`, () => {
-    oracleRoute(`fixed history`)
-    return expectMaterializeScenarioMatches(sharedMaterializeSeed)
-  })
 })
 
 /**
@@ -4994,39 +3477,68 @@ const fixedScopeWitnesses: Array<[string, ScopedScenario]> = [
   ],
 ]
 
-describe(`includes alpha-renaming across lexical scopes`, () => {
-  fcTest(
-    `an include that reuses a joined subquery alias keeps the reported rows`,
+const scopedAlphaFixedHistories: Array<{
+  name: string
+  scenario: ScopedScenario
+  expected?: Array<ScopedResultRow>
+}> = [
+  {
+    name: `an include that reuses a joined subquery alias keeps the reported rows`,
     // Issue #1975: only part 1 has a ref for client 1; parts 1 and 2 are
     // active.
-    () => {
-      oracleRoute(`fixed history`)
-      return expectScopedAlphaRenamingHolds(
-        {
-          ...fixedScopeWitnesses[0]![1],
-          parts: [
-            { id: 1, active: true },
-            { id: 2, active: true },
-          ],
-          refs: [
-            { id: 10, partId: 1, clientId: 1 },
-            { id: 20, partId: 2, clientId: 2 },
-          ],
-          notes: [],
-        },
-        [{ id: 1, active: true, members: [{ id: 10, clientId: 1 }] }],
-      )
+    scenario: {
+      ...fixedScopeWitnesses[0]![1],
+      parts: [
+        { id: 1, active: true },
+        { id: 2, active: true },
+      ],
+      refs: [
+        { id: 10, partId: 1, clientId: 1 },
+        { id: 20, partId: 2, clientId: 2 },
+      ],
+      notes: [],
     },
-  )
+    expected: [{ id: 1, active: true, members: [{ id: 10, clientId: 1 }] }],
+  },
+  ...fixedScopeWitnesses.flatMap(([name, scenario]) =>
+    ([`eager`, `onDemand`] as const).map((mode) => ({
+      name: `${name} [${mode}]`,
+      scenario: { ...scenario, mode },
+    })),
+  ),
+]
 
-  for (const [name, scenario] of fixedScopeWitnesses) {
-    for (const mode of [`eager`, `onDemand`] as const) {
-      fcTest(`${name} [${mode}]`, () => {
-        oracleRoute(`case`)
-        return expectScopedAlphaRenamingHolds({ ...scenario, mode })
-      })
-    }
-  }
+const scopedAlphaLaw = `Changing accepted aliases to other legal names in a structured plan does not change an explicitly projected result, its source requests, or its rows when lexical scopes reuse names.`
+
+describe(`includes alpha-renaming across lexical scopes`, () => {
+  oracleProperty({
+    id: `includes.scoped-alpha-fixed`,
+    law: {
+      statement: scopedAlphaLaw,
+      authority: `ARCHITECTURE.md normative law 1 (alpha-renaming) and the Identity section, stated above.`,
+      limits: `The reported regression and each fixed optimizer witness in eager and on-demand modes.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/query/equality-value-identity.ts#createValueIdentity`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/public-key-reduction.ts#routeKey`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: scopedAlphaFixedHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(scopedAlphaLaw, plan, observe, () =>
+        expectScopedAlphaRenamingHolds(
+          plan.history.scenario,
+          plan.history.expected,
+        ),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   for (const { label, options } of generatedCampaigns(
     80,
@@ -5035,7 +3547,17 @@ describe(`includes alpha-renaming across lexical scopes`, () => {
   )) {
     registerIncludesProperty(
       [scopedScenarioArbitrary],
-      options,
+      {
+        ...options,
+        owns: [
+          `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+          `src/collection/index.ts#createCollection`,
+          `src/query/equality-value-identity.ts#createValueIdentity`,
+          `src/query/live-query-collection.ts#createLiveQueryCollection`,
+          `src/query/live/public-key-reduction.ts#routeKey`,
+          `src/query/query-once.ts#queryOnce`,
+        ],
+      },
       `is unchanged when lexical scopes reuse alias names [${label}]`,
       (scenario) => {
         return expectScopedAlphaRenamingHolds(scenario)
@@ -5080,6 +3602,14 @@ for (const campaign of generatedCampaigns(
         [distinctHistory],
         {
           ...campaign.options,
+          owns: [
+            `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+            `src/collection/index.ts#createCollection`,
+            `src/query/equality-value-identity.ts#createValueIdentity`,
+            `src/query/live-query-collection.ts#createLiveQueryCollection`,
+            `src/query/live/public-key-reduction.ts#routeKey`,
+            `src/query/query-once.ts#queryOnce`,
+          ],
           beforeCampaign: () => {
             groups = collidingRouteGroups()
             for (const state of counts.keys()) counts.set(state, 0)

@@ -5,11 +5,20 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import { BasicIndex } from '../src/index'
+import { PropRef } from '../src/query/ir'
+import {
+  assertIndexAgreement,
+  expectedEventTrace,
+  expectedRowsAfter,
+  perKeyEventTrace,
+} from './change-event-history-model-oracle.js'
 import {
   cases,
   generateSequences,
   mirrorRows,
   oneKeyCases,
+  replacement,
   twoKeyCases,
 } from './change-event-history-fixture.js'
 import type { Key, Op } from './change-event-history-fixture.js'
@@ -46,5 +55,43 @@ describe(`change-event history oracle`, () => {
         ]),
       ),
     ).not.toEqual(expected)
+  })
+
+  it(`rejects a deferred message with the right name but wrong row fields`, () => {
+    const sequence: Array<Op> = [
+      { kind: `insert`, key: 1, step: 1 },
+      { kind: `update`, key: 1, step: 2 },
+    ]
+    const expected = expectedEventTrace(sequence)
+    expect(
+      perKeyEventTrace([
+        {
+          type: `insert`,
+          key: 1,
+          value: { id: 1, name: `v1`, fileId: `f2` },
+        },
+        {
+          type: `update`,
+          key: 1,
+          value: { id: 1, name: `v2`, fileId: `f1` },
+          previousValue: { id: 1, name: `v1`, fileId: `f2` },
+        },
+      ]),
+    ).not.toEqual(expected)
+  })
+
+  it(`rejects a missing live key in the index checker`, () => {
+    expect(replacement.map(({ kind, key }) => [kind, key])).toEqual([
+      [`delete`, 1],
+      [`delete`, 2],
+      [`insert`, 1],
+      [`insert`, 2],
+    ])
+    const expected = expectedRowsAfter([1, 2], replacement)
+    const index = new BasicIndex<number>(1, new PropRef([`fileId`]))
+    index.build([...expected])
+    assertIndexAgreement(index, expected)
+    index.remove(1, expected.get(1))
+    expect(() => assertIndexAgreement(index, expected)).toThrowError(/expected/)
   })
 })

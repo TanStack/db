@@ -6,7 +6,6 @@
  * oracle's existing overlay judgment, shared with its persisted receivers.
  * It models authored rows and writes, never Query generations or cache events.
  */
-import { declareOracle } from '../../db/tests/oracle-declaration'
 
 export type MergeRow<Value = string> = { id: string; value: Value }
 export type PrecedenceWrite<Value> =
@@ -25,5 +24,3 @@ export function mergeDirectWritesOverFetch<Value>(
     [...rows.values()].map((row) => [row.id, row.value]),
   )
 }
-
-declareOracle({ model: [mergeDirectWritesOverFetch] })
