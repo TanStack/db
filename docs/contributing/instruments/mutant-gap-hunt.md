@@ -12,8 +12,8 @@ distinguish a mistake. Keep test bodies and assertions out of the design brief.
 ## Operation
 
 1. **Design plausible mistakes before reading the tests.** Start with semantic,
-   type-plausible edits near the changed boundaries: a lost operand, wrong
-   prior value, premature clear, duplicated event, changed ordering, or skipped
+   type-plausible edits near the changed boundaries: a lost operand, wrong prior
+   value, premature clear, duplicated event, changed ordering, or skipped
    callback. Turn each open review question into a candidate. If code is called
    dead, try removing it. In a larger hunt, spread candidates across the
    affected files and boundaries rather than clustering where edits are easy.
@@ -39,8 +39,8 @@ distinguish a mistake. Keep test bodies and assertions out of the design brief.
    source; it is no oracle gap. If that freedom seems undesirable, take the
    question to law discovery or adversarial review at the suitability level.
    Grade an equivalence claim at a named revision: equivalent by invariant,
-   equivalent only on instrumented reached histories with a positive control,
-   or evidence-limited and unresolved. The last is not an equivalence verdict.
+   equivalent only on instrumented reached histories with a positive control, or
+   evidence-limited and unresolved. The last is not an equivalence verdict.
    Check all relevant entry paths, including reentry and environment-specific
    branches; one unreachable path does not establish general equivalence. Probe
    the nearest unusual legal history before accepting an unreachability claim.
@@ -53,11 +53,11 @@ distinguish a mistake. Keep test bodies and assertions out of the design brief.
    clean git status in its checkout.
 4. **Repair the oracle chain, when authorized.** Locate the missing law, model
    rule, history action, production path, recorder, or assertion. Extend the
-   primary owner where it can express the distinction. Show that the extension
-   rejects the motivating mutant and a nearby plausible wrong design without
-   rejecting a legal alternative. For a bug on the baseline, demonstrate the
-   production RED before its repair. Update the coverage map when the owner's
-   reach or limits change. For a claimed oracle repair, follow
+   primary oracle owner where it can express the distinction. Show that the
+   extension rejects the motivating mutant and a nearby plausible wrong design
+   without rejecting a legal alternative. For a bug on the baseline, demonstrate
+   the production RED before its repair. Update the coverage map when the oracle
+   owner's reach or limits change. For a claimed oracle repair, follow
    [ORC-012](../oracle-rubric.md#orc-012-review-evidence): at closeout,
    verdict-critical evidence outside the executable oracle belongs in a
    versioned review record tied to the exact reviewed head. This card also asks

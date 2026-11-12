@@ -11,13 +11,16 @@
  */
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterAll, beforeAll, describe, expect, vi } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { afterAll, beforeAll, expect, vi } from 'vitest'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { openBrowserWASQLiteOPFSDatabase } from '../src/opfs-database'
 import {
   findRequestOrderViolation,
@@ -39,7 +42,6 @@ type CoopVFSHandle = {
   returnHandle: () => void
   isWaiting: () => boolean
 }
-
 // The compiled WASM, the shared VFS files, and the current VFS survive module
 // re-evaluation.
 const harness = vi.hoisted(() => ({
@@ -47,7 +49,6 @@ const harness = vi.hoisted(() => ({
   files: new Map<string, unknown>(),
   vfs: undefined as CoopVFSHandle | undefined,
 }))
-
 vi.mock(`@journeyapps/wa-sqlite/dist/wa-sqlite.mjs`, async (importOriginal) => {
   const real = await importOriginal<{
     default: (options: object) => Promise<unknown>
@@ -75,7 +76,6 @@ vi.mock(`@journeyapps/wa-sqlite/dist/wa-sqlite.mjs`, async (importOriginal) => {
       }),
   }
 })
-
 // OPFSCoopSyncVFS's lock protocol over MemoryVFS storage. While another
 // connection holds the handle, the first lock queues its reacquisition on
 // retryOps and returns SQLITE_BUSY. A lock while that request is in progress
@@ -90,16 +90,16 @@ vi.mock(`@journeyapps/wa-sqlite/src/examples/OPFSCoopSyncVFS.js`, async () => {
     ) => {
       isReady: () => Promise<void>
       mapNameToFile: Map<string, unknown>
-      _module: { retryOps: Array<Promise<void>> }
+      _module: {
+        retryOps: Array<Promise<void>>
+      }
     }
   }
   const SQLITE_OK = 0
   const SQLITE_BUSY = 5
-
   class CoopMemoryVFS extends MemoryVFS implements CoopVFSHandle {
     private handleTaken = false
     private reacquisition: undefined | (() => void)
-
     static async create(name: string, module: unknown) {
       const vfs = new CoopMemoryVFS(name, module)
       await vfs.isReady()
@@ -107,21 +107,17 @@ vi.mock(`@journeyapps/wa-sqlite/src/examples/OPFSCoopSyncVFS.js`, async () => {
       harness.vfs = vfs
       return vfs
     }
-
     takeHandle(): void {
       this.handleTaken = true
     }
-
     returnHandle(): void {
       this.handleTaken = false
       this.reacquisition?.()
       this.reacquisition = undefined
     }
-
     isWaiting(): boolean {
       return this.reacquisition !== undefined
     }
-
     jLock(): number {
       if (!this.handleTaken) return SQLITE_OK
       if (this.reacquisition === undefined) {
@@ -136,26 +132,20 @@ vi.mock(`@journeyapps/wa-sqlite/src/examples/OPFSCoopSyncVFS.js`, async () => {
   }
   return { OPFSCoopSyncVFS: CoopMemoryVFS }
 })
-
 const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0))
-
 // The worker module listens on this global. Each request and each response
 // crosses the bridge in its own task, and a terminated bridge delivers nothing.
 let deliverToWorker: (request: BrowserOPFSWorkerRequest) => void
 const requestOwners = new Map<string, BridgeWorker>()
-
 class BridgeWorker {
   private readonly listeners = new Set<(event: Event) => void>()
   private terminated = false
-
   addEventListener(type: string, listener: (event: Event) => void): void {
     if (type === `message`) this.listeners.add(listener)
   }
-
   removeEventListener(type: string, listener: (event: Event) => void): void {
     if (type === `message`) this.listeners.delete(listener)
   }
-
   postMessage(request: BrowserOPFSWorkerRequest): void {
     if (this.terminated) return
     requestOwners.set(request.requestId, this)
@@ -163,7 +153,6 @@ class BridgeWorker {
       if (!this.terminated) deliverToWorker(request)
     }, 0)
   }
-
   receive(response: BrowserOPFSWorkerResponse): void {
     setTimeout(() => {
       if (this.terminated) return
@@ -172,12 +161,10 @@ class BridgeWorker {
       }
     }, 0)
   }
-
   terminate(): void {
     this.terminated = true
   }
 }
-
 const nodeHandleControl: AccessHandleControl = {
   take: () => {
     harness.vfs!.takeHandle()
@@ -200,7 +187,6 @@ const nodeHandleControl: AccessHandleControl = {
     return Promise.resolve()
   },
 }
-
 beforeAll(async () => {
   vi.stubGlobal(`Worker`, BridgeWorker)
   vi.stubGlobal(`navigator`, {
@@ -227,13 +213,10 @@ beforeAll(async () => {
   })
   await import(`../src/opfs-worker`)
 })
-
 afterAll(() => {
   vi.unstubAllGlobals()
 })
-
 let databaseSequence = 0
-
 async function runRequestOrderHistory(
   history: RequestOrderHistory,
 ): Promise<void> {
@@ -244,9 +227,10 @@ async function runRequestOrderHistory(
     history,
     `order-${databaseSequence}.sqlite`,
   )
-  expect(findRequestOrderViolation(history, observation)).toBeUndefined()
+  oracleAssertion('existing comparison at 245', () =>
+    expect(findRequestOrderViolation(history, observation)).toBeUndefined(),
+  )
 }
-
 const requestOrderHistory = fc
   .array(fc.constantFrom<ExecuteKind>(`insert`, `select`), {
     minLength: 1,
@@ -266,30 +250,40 @@ const requestOrderHistory = fc
       executeAfterClose: fc.boolean(),
     }),
   )
-
 const requestOrderProperty = `opfs.request-order`
-
-describe(`OPFS request order oracle (Node driver)`, () => {
-  // A path replay of this property selects only its random campaign.
-  oracleReplayTest(fcTest).prop([requestOrderHistory], {
-    seed: 1849,
-    numRuns: oracleRuns(24),
-    examples: requestOrderExamples.map((history): [RequestOrderHistory] => [
-      history,
-    ]),
-    verbose: true,
-  })(
-    `answers requests in order and closes after them (fixed)`,
-    runRequestOrderHistory,
-  )
-  oracleReplayTest(fcTest, requestOrderProperty).prop([requestOrderHistory], {
-    ...oraclePropertyOptions(24, requestOrderProperty),
-    examples: requestOrderExamples.map((history): [RequestOrderHistory] => [
-      history,
-    ]),
-    verbose: true,
-  })(
-    `answers requests in order and closes after them (random)`,
-    runRequestOrderHistory,
-  )
+declareOracle({
+  check: [runRequestOrderHistory],
+  grammar: [requestOrderHistory],
+})
+const requestOrderLaw = {
+  statement: `The existing request-order model judges ordered request completion, close, and late execute behavior through the real worker module.`,
+  authority: `The shared opfs-request-order-oracle.ts contract and worker protocol.`,
+  limits: `The existing in-process WASM driver and VFS access-handle control; no native browser lock-manager claim.`,
+}
+oracleProperty({
+  id: requestOrderProperty,
+  law: requestOrderLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  histories: { arbitrary: requestOrderHistory, runs: 24, fixedSeeds: [1849] },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`OPFS request order`, plan, observe, () =>
+      runRequestOrderHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+oracleProperty({
+  id: `opfs.request-order-fixed`,
+  law: requestOrderLaw,
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  histories: requestOrderExamples.map((history, index) => ({ history, index })),
+  label: (entry) => String(entry.index),
+  resolve: (entry) => ({ history: entry.history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`OPFS request order`, plan, observe, () =>
+      runRequestOrderHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })

@@ -33,7 +33,7 @@ import ts from 'typescript'
 import { afterAll, expect, test } from 'vitest'
 import * as publicDb from '../../src/index.js'
 import { declareOracle } from '../oracle-declaration.js'
-import { createOracleReach } from '../oracle-reach.js'
+import { oracleRoute } from '../oracle-config.js'
 import { checkWithCleanup } from './virtual-row-fields-support.js'
 import {
   metadataCompositions as compositions,
@@ -272,16 +272,27 @@ const states = [
   `union-removal`,
   `construction-admitted`,
 ]
-const reach = createOracleReach(`virtual row public types`, states, {
-  replaying: false,
-})
+// Each finite history has one numeric token. A state keeps that token once,
+// so repeated observations preserve the original per-history checkpoint count.
+const historiesByState = new Map<string, Set<number>>(
+  states.map((state) => [state, new Set<number>()]),
+)
+let publicTypeHistory = 0
 let publicTypesEntered = false
 afterAll(() => {
   if (!publicTypesEntered) return
-  reach.assertReached()
+  expect(
+    [...historiesByState].filter(([, histories]) => histories.size < 1),
+    `virtual row public types`,
+  ).toEqual([])
   console.info(
     `virtual row public types reach`,
-    Object.fromEntries(reach.counts()),
+    Object.fromEntries(
+      [...historiesByState].map(([state, histories]) => [
+        state,
+        histories.size,
+      ]),
+    ),
   )
 })
 
@@ -912,6 +923,7 @@ function checkConsumer(diagnostics: ReadonlyArray<ts.Diagnostic>): void {
   ).toBe(``)
 }
 declareOracle({
+  owns: ['src/index.ts'],
   grammar: [
     typeShapes,
     authoredCollisions,
@@ -930,13 +942,15 @@ declareOracle({
 test.each(typeShapes)(
   `preserves generated public row/value types: %j`,
   async (shape) => {
+    oracleRoute(`case`)
     publicTypesEntered = true
-    reach.beginHistory()
+    publicTypeHistory++
     const consumer = consumerSource(shape)
     await checkConsumerConstruction(consumer.source)
-    reach.reach(`construction-admitted`)
+    historiesByState.get(`construction-admitted`)!.add(publicTypeHistory)
     const diagnostics = compileConsumer(consumer.source)
-    for (const state of consumer.states) reach.reach(state)
+    for (const state of consumer.states)
+      historiesByState.get(state)!.add(publicTypeHistory)
     checkConsumer(diagnostics)
   },
   30_000,
@@ -956,6 +970,7 @@ test.each([
 ] as const)(
   `rejects a hostile public type observation: %s`,
   (fault) => {
+    oracleRoute(`case`)
     const consumer = consumerSource(
       fault === `one-branch-readonly` ? typeShapes[1]! : typeShapes[0]!,
       new Set([
@@ -1029,6 +1044,7 @@ test.each([
 test.each([`non-record-facade`, `missing-index-type`] as const)(
   `rejects an illegal generated construction at admission: %s`,
   async (fault) => {
+    oracleRoute(`calibration`)
     const consumer = consumerSource(
       typeShapes[0]!,
       new Set([`inline/array/toArray`]),

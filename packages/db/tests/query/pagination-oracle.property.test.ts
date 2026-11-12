@@ -1,4 +1,4 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { BTreeIndex } from '../../src/index.js'
 import { createCollection } from '../../src/collection/index.js'
@@ -7,15 +7,17 @@ import { createLiveQueryCollection } from '../../src/query/live-query-collection
 import { and, eq } from '../../src/query/builder/functions.js'
 import { PropRef } from '../../src/query/ir.js'
 import { makeComparator } from '../../src/utils/comparison.js'
-import {
-  oracleRandomParameters,
-  readOracleRunConfig,
-} from '../oracle-config.js'
+import { oracleProperty, oracleRoute } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
+import {
+  compareAt,
+  observeComparison,
+  recordedComparison,
+} from './ordered-comparison-oracle.js'
 import { cleanupAll } from './pagination-support.js'
 import { registerLimitAdmissionOracle } from './limit-admission-oracle.js'
 import type { PageRow } from './pagination-support.js'
@@ -53,19 +55,19 @@ import type {
  * acquisition releases, visible rows, readiness, errors, and every
  * publication cut.
  *
- * Finite products pin boundary cells; fixed and random fast-check histories
+ * Finite products cover boundary cells; fixed and random fast-check histories
  * explore adjacent legal actions. Fault probes establish that wrong order,
  * false coverage, duplicate work, partial publication, and bad delete payloads
  * are observable. The model does not infer rows beyond provider evidence.
  *
- * The fixed C-01 through C-09 custom-collation lane declares an independent
+ * The fixed C-01 through C-09 custom-collation histories declare an independent
  * rank relation and literal public-key sequences. It crosses ascending and
  * descending order, scan and auto-index execution, inherited and per-order
  * configuration, bounded and unbounded queries, a later ordered source that
  * inherits the leading source's default, an output Collection with a different
  * downstream default, comparator-equal keys, and hostile provider order. It
- * also requires exactly one initial filtered full-source acquisition. This
- * lane establishes local custom ordering only; it does not authorize custom
+ * also requires exactly one initial filtered full-source acquisition. These
+ * histories establish local custom ordering only; it does not authorize custom
  * cursor pagination, comparator-aware range predicates, or backend collation
  * parity.
  */
@@ -208,12 +210,18 @@ function expectPredicateBehavior(
   accepted: ReadonlyArray<PageRow>,
   rejected: ReadonlyArray<PageRow>,
 ) {
-  expect(where).toBeDefined()
+  compareAt(`pagination-oracle.property.test.ts:214`, () =>
+    expect(where).toBeDefined(),
+  )
   for (const row of accepted) {
-    expect(evaluateReferenceExpression(where!, row)).toBe(true)
+    compareAt(`pagination-oracle.property.test.ts:216`, () =>
+      expect(evaluateReferenceExpression(where!, row)).toBe(true),
+    )
   }
   for (const row of rejected) {
-    expect(evaluateReferenceExpression(where!, row)).not.toBe(true)
+    compareAt(`pagination-oracle.property.test.ts:219`, () =>
+      expect(evaluateReferenceExpression(where!, row)).not.toBe(true),
+    )
   }
 }
 
@@ -241,20 +249,35 @@ function expectPendingMutationRequestWork(
   scenario: PendingMutationScenario,
   explicitPublicKeyOrder = true,
 ) {
-  expect(result.mutationRepairRequests.length).toBeLessThanOrEqual(
-    (scenario.ranks.length + 1) * 8,
+  compareAt(`pagination-oracle.property.test.ts:247`, () =>
+    expect(result.mutationRepairRequests.length).toBeLessThanOrEqual(
+      (scenario.ranks.length + 1) * 8,
+    ),
   )
   for (const request of result.mutationRepairRequests) {
     if (request.orderBy) {
-      expect(orderSignature(request)).toStrictEqual(
-        expectedOrderSignature(scenario.direction, explicitPublicKeyOrder),
+      compareAt(`pagination-oracle.property.test.ts:252`, () =>
+        expect(orderSignature(request)).toStrictEqual(
+          expectedOrderSignature(scenario.direction, explicitPublicKeyOrder),
+        ),
       )
-      expect(request.limit).toBeDefined()
-      if (!request.cursor) expect([undefined, 0]).toContain(request.offset)
+      compareAt(`pagination-oracle.property.test.ts:255`, () =>
+        expect(request.limit).toBeDefined(),
+      )
+      if (!request.cursor)
+        compareAt(`pagination-oracle.property.test.ts:256`, () =>
+          expect([undefined, 0]).toContain(request.offset),
+        )
     } else if (request.where) {
-      expect(request.limit).toBeUndefined()
-      expect(request.cursor).toBeUndefined()
-      expect(request.offset).toBeUndefined()
+      compareAt(`pagination-oracle.property.test.ts:258`, () =>
+        expect(request.limit).toBeUndefined(),
+      )
+      compareAt(`pagination-oracle.property.test.ts:259`, () =>
+        expect(request.cursor).toBeUndefined(),
+      )
+      compareAt(`pagination-oracle.property.test.ts:260`, () =>
+        expect(request.offset).toBeUndefined(),
+      )
       const kind = classifyWhereOnlyRepairRequest(request, scenario)
       if (kind === `filtered-full-source`) {
         expectPredicateBehavior(
@@ -279,11 +302,21 @@ function expectPendingMutationRequestWork(
         )
       }
     } else {
-      expect(request.orderBy).toBeUndefined()
-      expect(request.where).toBeUndefined()
-      expect(request.limit).toBeUndefined()
-      expect(request.cursor).toBeUndefined()
-      expect(request.offset).toBeUndefined()
+      compareAt(`pagination-oracle.property.test.ts:285`, () =>
+        expect(request.orderBy).toBeUndefined(),
+      )
+      compareAt(`pagination-oracle.property.test.ts:286`, () =>
+        expect(request.where).toBeUndefined(),
+      )
+      compareAt(`pagination-oracle.property.test.ts:287`, () =>
+        expect(request.limit).toBeUndefined(),
+      )
+      compareAt(`pagination-oracle.property.test.ts:288`, () =>
+        expect(request.cursor).toBeUndefined(),
+      )
+      compareAt(`pagination-oracle.property.test.ts:289`, () =>
+        expect(request.offset).toBeUndefined(),
+      )
     }
   }
 }
@@ -590,10 +623,6 @@ const nullableCursorScenarioArbitrary: fc.Arbitrary<NullableCursorScenario> =
     direction: fc.constantFrom(`asc` as const, `desc` as const),
   })
 
-const { multiplier, ...replay } = readOracleRunConfig()
-const orderedScenarioRuns = 12 * multiplier
-const transitionScenarioRuns = 8 * multiplier
-
 let collectionSequence = 0
 
 function referenceWindow(
@@ -634,7 +663,9 @@ function expectWindowRows(
   actual: ReadonlyArray<PublicPageRow>,
   expected: ReadonlyArray<PublicPageRow>,
 ): void {
-  expect(actual).toEqual(expected)
+  compareAt(`pagination-oracle.property.test.ts:640`, () =>
+    expect(actual).toEqual(expected),
+  )
 }
 
 function projectPageRow(row: PageRow): PublicPageRow {
@@ -912,8 +943,10 @@ async function runMultiOrderScenario(
   const work = async () => {
     await live.preload()
     try {
-      expect(Array.from(live.values(), ({ id }) => id)).toEqual(
-        referenceMultiOrder(scenario),
+      compareAt(`pagination-oracle.property.test.ts:924`, () =>
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual(
+          referenceMultiOrder(scenario),
+        ),
       )
     } catch (error) {
       throw new TraceAssertionError(0, error)
@@ -980,11 +1013,11 @@ async function runNullableCursorScenario(
 
   const work = async () => {
     const preload = live.preload()
-    expect(pending.length).toBeGreaterThan(0)
+    compareAt(`pagination-oracle.property.test.ts:992`, () =>
+      expect(pending.length).toBeGreaterThan(0),
+    )
     // Settling one request can append its boundary-refinement request.
-    // eslint-disable-next-line @typescript-eslint/prefer-for-of
-    for (let index = 0; index < pending.length; index++) {
-      const request = pending[index]!
+    for (const request of pending) {
       begin()
       for (const row of rowsForLoadSubset(orderedRows, request.options)) {
         if (delivered.has(row.id)) continue
@@ -999,7 +1032,9 @@ async function runNullableCursorScenario(
     await preload
 
     try {
-      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+      compareAt(`pagination-oracle.property.test.ts:1011`, () =>
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1]),
+      )
     } catch (error) {
       throw new TraceAssertionError(0, error)
     }
@@ -1070,11 +1105,13 @@ async function runPaginationStateScenario(
 
       const expectCurrentWindow = (checkpoint: number) => {
         try {
-          expect(readCurrentWindow()).toEqual(
-            referenceWindowRows(
-              visibleRows([...rows.values()], scenario.includeFilter),
-              scenario.direction,
-              currentWindow,
+          compareAt(`pagination-oracle.property.test.ts:1082`, () =>
+            expect(readCurrentWindow()).toEqual(
+              referenceWindowRows(
+                visibleRows([...rows.values()], scenario.includeFilter),
+                scenario.direction,
+                currentWindow,
+              ),
             ),
           )
         } catch (error) {
@@ -1085,8 +1122,12 @@ async function runPaginationStateScenario(
       try {
         await live.preload()
         expectCurrentWindow(0)
-        expect(live.status).toBe(`ready`)
-        expect(live.utils.lastSubsetError).toBeUndefined()
+        compareAt(`pagination-oracle.property.test.ts:1097`, () =>
+          expect(live.status).toBe(`ready`),
+        )
+        compareAt(`pagination-oracle.property.test.ts:1098`, () =>
+          expect(live.utils.lastSubsetError).toBeUndefined(),
+        )
         publicationSubscription = live.subscribeChanges(
           (changes) =>
             publications.push({
@@ -1126,14 +1167,20 @@ async function runPaginationStateScenario(
             }
           }
           expectCurrentWindow(index + 1)
-          expect(live.status).toBe(`ready`)
-          expect(live.utils.lastSubsetError).toBeUndefined()
+          compareAt(`pagination-oracle.property.test.ts:1138`, () =>
+            expect(live.status).toBe(`ready`),
+          )
+          compareAt(`pagination-oracle.property.test.ts:1139`, () =>
+            expect(live.utils.lastSubsetError).toBeUndefined(),
+          )
           const afterRows = readCurrentWindow()
           const expectedChanges = expectedPageChanges(beforeRows, afterRows)
-          expect(publications.slice(publicationCount)).toEqual(
-            expectedChanges.length > 0
-              ? [{ changes: expectedChanges, rows: afterRows }]
-              : [],
+          compareAt(`pagination-oracle.property.test.ts:1142`, () =>
+            expect(publications.slice(publicationCount)).toEqual(
+              expectedChanges.length > 0
+                ? [{ changes: expectedChanges, rows: afterRows }]
+                : [],
+            ),
           )
         }
       } finally {
@@ -1248,18 +1295,28 @@ async function runOnDemandPaginationScenario(
   const work = async () => {
     const preloadPublicationCount = publications.length
     const preload = live.preload()
-    expect(Array.from(live.values())).toHaveLength(0)
+    compareAt(`pagination-oracle.property.test.ts:1260`, () =>
+      expect(Array.from(live.values())).toHaveLength(0),
+    )
     await preload
-    expect(live.status).toBe(`ready`)
-    expect(live.utils.lastSubsetError).toBeUndefined()
+    compareAt(`pagination-oracle.property.test.ts:1262`, () =>
+      expect(live.status).toBe(`ready`),
+    )
+    compareAt(`pagination-oracle.property.test.ts:1263`, () =>
+      expect(live.utils.lastSubsetError).toBeUndefined(),
+    )
     if (initialWindow.limit > 0) {
-      expect(loads.length).toBeGreaterThan(0)
+      compareAt(`pagination-oracle.property.test.ts:1265`, () =>
+        expect(loads.length).toBeGreaterThan(0),
+      )
     }
     try {
-      expect(
-        Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
-      ).toEqual(
-        referenceWindowRows(expectedRows, scenario.direction, initialWindow),
+      compareAt(`pagination-oracle.property.test.ts:1268`, () =>
+        expect(
+          Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
+        ).toEqual(
+          referenceWindowRows(expectedRows, scenario.direction, initialWindow),
+        ),
       )
     } catch (error) {
       throw new TraceAssertionError(0, error)
@@ -1269,26 +1326,30 @@ async function runOnDemandPaginationScenario(
       scenario.direction,
       initialWindow,
     )
-    expect(publications.slice(preloadPublicationCount)).toEqual([
-      ...(initialExpected.length > 0
-        ? [
-            {
-              changes: expectedPageChanges([], initialExpected),
-              rows: initialExpected,
-              status: `loading`,
-            },
-          ]
-        : []),
-      // A real source acquisition uses one empty batch to wake subscriptions
-      // when the initial source set becomes ready, even if it produced no
-      // visible rows. A zero window needs no acquisition or wake-up.
-      ...(initialWindow.limit > 0
-        ? [{ changes: [], rows: initialExpected, status: `ready` }]
-        : []),
-    ])
+    compareAt(`pagination-oracle.property.test.ts:1281`, () =>
+      expect(publications.slice(preloadPublicationCount)).toEqual([
+        ...(initialExpected.length > 0
+          ? [
+              {
+                changes: expectedPageChanges([], initialExpected),
+                rows: initialExpected,
+                status: `loading`,
+              },
+            ]
+          : []),
+        // A real source acquisition uses one empty batch to wake subscriptions
+        // when the initial source set becomes ready, even if it produced no
+        // visible rows. A zero window needs no acquisition or wake-up.
+        ...(initialWindow.limit > 0
+          ? [{ changes: [], rows: initialExpected, status: `ready` }]
+          : []),
+      ]),
+    )
 
     if (scenario.localRowsBeforeFirstRequest) {
-      expect(loads).toHaveLength(0)
+      compareAt(`pagination-oracle.property.test.ts:1300`, () =>
+        expect(loads).toHaveLength(0),
+      )
       const publicationCount = publications.length
       begin()
       for (const row of scenario.localRowsBeforeFirstRequest) {
@@ -1296,8 +1357,12 @@ async function runOnDemandPaginationScenario(
         write({ type: `insert`, value: { ...row } })
       }
       commit()
-      expect(publications).toHaveLength(publicationCount)
-      expect(Array.from(live.values())).toHaveLength(0)
+      compareAt(`pagination-oracle.property.test.ts:1308`, () =>
+        expect(publications).toHaveLength(publicationCount),
+      )
+      compareAt(`pagination-oracle.property.test.ts:1309`, () =>
+        expect(Array.from(live.values())).toHaveLength(0),
+      )
     }
 
     for (const [index, window] of scenario.windows.slice(1).entries()) {
@@ -1305,18 +1370,28 @@ async function runOnDemandPaginationScenario(
       const publicationCount = publications.length
       const result = live.utils.setWindow(window)
       if (result instanceof Promise) {
-        expect(
-          Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
-        ).toEqual(before)
+        compareAt(`pagination-oracle.property.test.ts:1317`, () =>
+          expect(
+            Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
+          ).toEqual(before),
+        )
       }
       if (result instanceof Promise) await result
-      expect(live.status).toBe(`ready`)
-      expect(live.utils.lastSubsetError).toBeUndefined()
+      compareAt(`pagination-oracle.property.test.ts:1322`, () =>
+        expect(live.status).toBe(`ready`),
+      )
+      compareAt(`pagination-oracle.property.test.ts:1323`, () =>
+        expect(live.utils.lastSubsetError).toBeUndefined(),
+      )
 
       try {
-        expect(
-          Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
-        ).toEqual(referenceWindowRows(expectedRows, scenario.direction, window))
+        compareAt(`pagination-oracle.property.test.ts:1326`, () =>
+          expect(
+            Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
+          ).toEqual(
+            referenceWindowRows(expectedRows, scenario.direction, window),
+          ),
+        )
       } catch (error) {
         throw new TraceAssertionError(index + 1, error)
       }
@@ -1326,10 +1401,12 @@ async function runOnDemandPaginationScenario(
         window,
       )
       const expectedChanges = expectedPageChanges(before, after)
-      expect(publications.slice(publicationCount)).toEqual(
-        expectedChanges.length > 0
-          ? [{ changes: expectedChanges, rows: after, status: `ready` }]
-          : [],
+      compareAt(`pagination-oracle.property.test.ts:1338`, () =>
+        expect(publications.slice(publicationCount)).toEqual(
+          expectedChanges.length > 0
+            ? [{ changes: expectedChanges, rows: after, status: `ready` }]
+            : [],
+        ),
       )
     }
 
@@ -1349,30 +1426,44 @@ async function runOnDemandPaginationScenario(
     ]
     for (const load of loads) {
       if (load.orderBy) {
-        expect(load.orderBy).toMatchObject(expectedOrderBy)
+        compareAt(`pagination-oracle.property.test.ts:1361`, () =>
+          expect(load.orderBy).toMatchObject(expectedOrderBy),
+        )
       } else if (load.where) {
         // Boundary refinement asks for the complete tie class with an exact
         // predicate. Prefix and cursor requests still carry the source order.
-        expect(load.limit).toBeUndefined()
+        compareAt(`pagination-oracle.property.test.ts:1365`, () =>
+          expect(load.limit).toBeUndefined(),
+        )
       } else {
         // If the same finite prefix cannot fill the local window, one
         // unbounded request safely establishes the remaining source rows.
-        expect(load.cursor).toBeUndefined()
-        expect(load.limit).toBeUndefined()
-        expect(load.offset).toBeUndefined()
+        compareAt(`pagination-oracle.property.test.ts:1369`, () =>
+          expect(load.cursor).toBeUndefined(),
+        )
+        compareAt(`pagination-oracle.property.test.ts:1370`, () =>
+          expect(load.limit).toBeUndefined(),
+        )
+        compareAt(`pagination-oracle.property.test.ts:1371`, () =>
+          expect(load.offset).toBeUndefined(),
+        )
       }
     }
-    expect(
-      loads.length,
-      JSON.stringify(
-        loads.map(({ limit, offset, cursor, where }) => ({
-          limit,
-          offset,
-          cursor,
-          where,
-        })),
+    compareAt(`pagination-oracle.property.test.ts:1374`, () =>
+      expect(
+        loads.length,
+        JSON.stringify(
+          loads.map(({ limit, offset, cursor, where }) => ({
+            limit,
+            offset,
+            cursor,
+            where,
+          })),
+        ),
+      ).toBeLessThanOrEqual(
+        scenario.windows.length * (expectedRows.length + 2),
       ),
-    ).toBeLessThanOrEqual(scenario.windows.length * (expectedRows.length + 2))
+    )
     assertLoads?.(loads)
   }
   await withHistoryCleanup(work, () => [
@@ -2023,7 +2114,9 @@ async function runPendingMutationScenario(
       capture(`preload-call`)
       let finalLimit = scenario.limit
       if (scenario.responseOutcome === `resolve`) {
-        expect(pending).toHaveLength(1)
+        compareAt(`pagination-oracle.property.test.ts:2035`, () =>
+          expect(pending).toHaveLength(1),
+        )
         if (timing === `before-response`) applyMutation()
         await settlePending()
         await preload
@@ -2048,7 +2141,9 @@ async function runPendingMutationScenario(
         await preload
         await flushPromises()
         capturePending = true
-        expect(pending).toHaveLength(0)
+        compareAt(`pagination-oracle.property.test.ts:2060`, () =>
+          expect(pending).toHaveLength(0),
+        )
         finalLimit += 1
         stage = `failed-window`
         const failedWindow = live.utils.setWindow({
@@ -2057,12 +2152,16 @@ async function runPendingMutationScenario(
         })
         observe(`failed-window`, failedWindow)
         capture(`failed-window-call`)
-        expect(failedWindow).toBeInstanceOf(Promise)
+        compareAt(`pagination-oracle.property.test.ts:2069`, () =>
+          expect(failedWindow).toBeInstanceOf(Promise),
+        )
         const observedFailure = (failedWindow as Promise<void>).then(
           () => undefined,
           (error: unknown) => error,
         )
-        expect(pending).toHaveLength(1)
+        compareAt(`pagination-oracle.property.test.ts:2074`, () =>
+          expect(pending).toHaveLength(1),
+        )
         if (timing === `before-response`) applyMutation()
         pending[0]!.responseStarted = true
         pending[0]!.deferred.reject(cursorError)
@@ -2071,9 +2170,16 @@ async function runPendingMutationScenario(
         await flushPromises()
         await settlePending()
         capture(`recovery-drain`)
-        expect(await observedFailure).toBe(cursorError)
-        expect(live.status).toBe(`ready`)
-        expect(live.utils.lastSubsetError).toBe(cursorError)
+        const observedFailureValue = await observedFailure
+        compareAt(`pagination-oracle.property.test.ts:2083`, () =>
+          expect(observedFailureValue).toBe(cursorError),
+        )
+        compareAt(`pagination-oracle.property.test.ts:2084`, () =>
+          expect(live.status).toBe(`ready`),
+        )
+        compareAt(`pagination-oracle.property.test.ts:2085`, () =>
+          expect(live.utils.lastSubsetError).toBe(cursorError),
+        )
 
         stage = `retry`
         const retry = live.utils.setWindow({ offset: 0, limit: finalLimit })
@@ -2083,15 +2189,21 @@ async function runPendingMutationScenario(
         await settlePending()
         await flushPromises()
         await observedRetry
-        expect(live.status).toBe(`ready`)
-        expect(live.utils.lastSubsetError).toBe(cursorError)
+        compareAt(`pagination-oracle.property.test.ts:2095`, () =>
+          expect(live.status).toBe(`ready`),
+        )
+        compareAt(`pagination-oracle.property.test.ts:2096`, () =>
+          expect(live.utils.lastSubsetError).toBe(cursorError),
+        )
       }
 
       await Promise.all(outstanding)
       capture(`final`)
       const heldCut = () => {
         const cut = cuts.find(({ held, phase }) => held && phase !== `callback`)
-        expect(cut, `held mutation cut reached`).toBeDefined()
+        compareAt(`pagination-oracle.property.test.ts:2103`, () =>
+          expect(cut, `held mutation cut reached`).toBeDefined(),
+        )
         return cut!
       }
       if (fault === `held-publication`)
@@ -2111,12 +2223,16 @@ async function runPendingMutationScenario(
       }
       if (fault === `wrong-rejection`) {
         const outcome = outcomes.find(({ label }) => label === `failed-window`)
-        expect(outcome?.state, `failed caller reached`).toBe(`rejected`)
+        compareAt(`pagination-oracle.property.test.ts:2123`, () =>
+          expect(outcome?.state, `failed caller reached`).toBe(`rejected`),
+        )
         outcome!.error = new Error(`cursor failed`)
       }
       if (fault === `callback-key` || fault === `callback-value`) {
         const cut = cuts.find(({ changes }) => changes.length > 0)
-        expect(cut, `mutation callback reached`).toBeDefined()
+        compareAt(`pagination-oracle.property.test.ts:2128`, () =>
+          expect(cut, `mutation callback reached`).toBeDefined(),
+        )
         if (fault === `callback-key`)
           cut!.changes[0]!.key = String(cut!.changes[0]!.key)
         else cut!.changes[0]!.value.rank = 999
@@ -2125,19 +2241,23 @@ async function runPendingMutationScenario(
         const change = cuts
           .flatMap((cut) => cut.changes)
           .find((message) => message.type === `delete`)
-        expect(change, `mutation delete callback reached`).toBeDefined()
+        compareAt(`pagination-oracle.property.test.ts:2137`, () =>
+          expect(change, `mutation delete callback reached`).toBeDefined(),
+        )
         change!.value = { ...change!.value, rank: 999 }
       }
       if (fault === `final-value`) cuts.at(-1)!.rows[0]!.rank = 999
 
       try {
-        expect(
-          Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
-        ).toEqual(
-          referenceWindowRows([...rows.values()], scenario.direction, {
-            offset: 0,
-            limit: finalLimit,
-          }),
+        compareAt(`pagination-oracle.property.test.ts:2143`, () =>
+          expect(
+            Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
+          ).toEqual(
+            referenceWindowRows([...rows.values()], scenario.direction, {
+              offset: 0,
+              limit: finalLimit,
+            }),
+          ),
         )
       } catch (error) {
         throw new PendingMutationTraceAssertionError(
@@ -2157,20 +2277,29 @@ async function runPendingMutationScenario(
       let initialPublished = false
       for (const cut of cuts) {
         for (const change of cut.changes) {
-          expect(typeof change.key, `mutation native callback key`).toBe(
-            `number`,
+          compareAt(`pagination-oracle.property.test.ts:2169`, () =>
+            expect(typeof change.key, `mutation native callback key`).toBe(
+              `number`,
+            ),
           )
-          expect(change.key, `mutation callback key owns value`).toBe(
-            change.value.id,
+          compareAt(`pagination-oracle.property.test.ts:2172`, () =>
+            expect(change.key, `mutation callback key owns value`).toBe(
+              change.value.id,
+            ),
           )
-          expect(replica.has(change.key), `mutation callback predecessor`).toBe(
-            change.type !== `insert`,
+          compareAt(`pagination-oracle.property.test.ts:2175`, () =>
+            expect(
+              replica.has(change.key),
+              `mutation callback predecessor`,
+            ).toBe(change.type !== `insert`),
           )
           if (change.type === `delete`) {
-            expect(
-              change.value,
-              `mutation deleted callback full value`,
-            ).toStrictEqual(replica.get(change.key))
+            compareAt(`pagination-oracle.property.test.ts:2179`, () =>
+              expect(
+                change.value,
+                `mutation deleted callback full value`,
+              ).toStrictEqual(replica.get(change.key)),
+            )
             replica.delete(change.key)
           } else replica.set(change.key, change.value)
         }
@@ -2179,84 +2308,121 @@ async function runPendingMutationScenario(
             a: Record<string, unknown>,
             b: Record<string, unknown>,
           ) => (a.id as number) - (b.id as number)
-          expect(
-            [...replica.values()].sort(byId),
-            `mutation callback replica full values`,
-          ).toStrictEqual([...cut.rows].sort(byId))
+          compareAt(`pagination-oracle.property.test.ts:2191`, () =>
+            expect(
+              [...replica.values()].sort(byId),
+              `mutation callback replica full values`,
+            ).toStrictEqual([...cut.rows].sort(byId)),
+          )
         }
         if (cut.stage === `initial`) {
           const preloadState = cut.outcomes.find(
             ({ label }) => label === `preload`,
           )!.state
           if (cut.held) {
-            expect(cut.rows, `held mutation publication`).toStrictEqual([])
-            expect(preloadState, `held mutation logical settlement`).toBe(
-              `pending`,
+            compareAt(`pagination-oracle.property.test.ts:2201`, () =>
+              expect(cut.rows, `held mutation publication`).toStrictEqual([]),
+            )
+            compareAt(`pagination-oracle.property.test.ts:2202`, () =>
+              expect(preloadState, `held mutation logical settlement`).toBe(
+                `pending`,
+              ),
             )
           } else if (cut.rows.length > 0 || preloadState === `fulfilled`) {
-            expect(
-              cut.rows,
-              `complete initial mutation publication`,
-            ).toStrictEqual(cut.expected)
+            compareAt(`pagination-oracle.property.test.ts:2206`, () =>
+              expect(
+                cut.rows,
+                `complete initial mutation publication`,
+              ).toStrictEqual(cut.expected),
+            )
           }
           if (initialPublished)
-            expect(
-              cut.rows.length,
-              `initial mutation publication cannot withdraw`,
-            ).toBeGreaterThan(0)
+            compareAt(`pagination-oracle.property.test.ts:2212`, () =>
+              expect(
+                cut.rows.length,
+                `initial mutation publication cannot withdraw`,
+              ).toBeGreaterThan(0),
+            )
           if (cut.rows.length > 0) initialPublished = true
-          expect(cut.window, `held mutation window`).toStrictEqual({
-            offset: 0,
-            limit: initialLimit,
-          })
+          compareAt(`pagination-oracle.property.test.ts:2217`, () =>
+            expect(cut.window, `held mutation window`).toStrictEqual({
+              offset: 0,
+              limit: initialLimit,
+            }),
+          )
         } else if (cut.stage === `failed-window`) {
-          expect(
-            cut.rows,
-            `failed mutation keeps complete baseline`,
-          ).toStrictEqual([{ ...firstDelivered }])
-          expect(cut.window, `held mutation window`).toStrictEqual({
-            offset: 0,
-            limit: 1,
-          })
+          compareAt(`pagination-oracle.property.test.ts:2222`, () =>
+            expect(
+              cut.rows,
+              `failed mutation keeps complete baseline`,
+            ).toStrictEqual([{ ...firstDelivered }]),
+          )
+          compareAt(`pagination-oracle.property.test.ts:2226`, () =>
+            expect(cut.window, `held mutation window`).toStrictEqual({
+              offset: 0,
+              limit: 1,
+            }),
+          )
           const failed = cut.outcomes.find(
             ({ label }) => label === `failed-window`,
           )
           if (cut.held && failed)
-            expect(failed.state, `held mutation logical settlement`).not.toBe(
-              `fulfilled`,
+            compareAt(`pagination-oracle.property.test.ts:2234`, () =>
+              expect(failed.state, `held mutation logical settlement`).not.toBe(
+                `fulfilled`,
+              ),
             )
         }
       }
-      expect(
-        outcomes.map(({ label }) => label),
-        `all mutation callers observed`,
-      ).toStrictEqual(
-        scenario.responseOutcome === `reject`
-          ? [`preload`, `failed-window`, `retry`]
-          : [
-              `preload`,
-              ...(finalLimitAfterMutation === undefined ? [] : [`widen`]),
-            ],
+      compareAt(`pagination-oracle.property.test.ts:2239`, () =>
+        expect(
+          outcomes.map(({ label }) => label),
+          `all mutation callers observed`,
+        ).toStrictEqual(
+          scenario.responseOutcome === `reject`
+            ? [`preload`, `failed-window`, `retry`]
+            : [
+                `preload`,
+                ...(finalLimitAfterMutation === undefined ? [] : [`widen`]),
+              ],
+        ),
       )
       for (const outcome of outcomes) {
         if (outcome.label === `failed-window`) {
-          expect(outcome.state, `failed mutation caller state`).toBe(`rejected`)
-          expect(outcome.error, `failed mutation caller exact error`).toBe(
-            cursorError,
+          compareAt(`pagination-oracle.property.test.ts:2252`, () =>
+            expect(outcome.state, `failed mutation caller state`).toBe(
+              `rejected`,
+            ),
+          )
+          compareAt(`pagination-oracle.property.test.ts:2253`, () =>
+            expect(outcome.error, `failed mutation caller exact error`).toBe(
+              cursorError,
+            ),
           )
         } else
-          expect(outcome.state, `mutation caller fulfilled`).toBe(`fulfilled`)
+          compareAt(`pagination-oracle.property.test.ts:2257`, () =>
+            expect(outcome.state, `mutation caller fulfilled`).toBe(
+              `fulfilled`,
+            ),
+          )
       }
-      expect(cuts.at(-1)!.rows, `complete final mutation values`).toStrictEqual(
-        referenceWindowRows([...rows.values()], scenario.direction, {
-          offset: 0,
-          limit: finalLimit,
-        }),
+      compareAt(`pagination-oracle.property.test.ts:2259`, () =>
+        expect(
+          cuts.at(-1)!.rows,
+          `complete final mutation values`,
+        ).toStrictEqual(
+          referenceWindowRows([...rows.values()], scenario.direction, {
+            offset: 0,
+            limit: finalLimit,
+          }),
+        ),
       )
-      expect(
-        cuts.at(-1)!.window,
-        `complete final mutation window`,
-      ).toStrictEqual({ offset: 0, limit: finalLimit })
+      compareAt(`pagination-oracle.property.test.ts:2265`, () =>
+        expect(
+          cuts.at(-1)!.window,
+          `complete final mutation window`,
+        ).toStrictEqual({ offset: 0, limit: finalLimit }),
+      )
       return {
         mutationRepairRequests:
           mutationRequestStart === undefined
@@ -2561,7 +2727,9 @@ async function runPendingHistoryScenario(
         { includeInitialState: false },
       )
       capture(`initial-held`)
-      expect(pending).toHaveLength(1)
+      compareAt(`pagination-oracle.property.test.ts:2573`, () =>
+        expect(pending).toHaveLength(1),
+      )
 
       updateFirstDelivered(scenario.firstRank)
       capture(`first-update`)
@@ -2569,7 +2737,9 @@ async function runPendingHistoryScenario(
       capture(`narrow`)
       track(live.utils.setWindow({ offset: 0, limit: scenario.wideLimit }))
       capture(`wide`)
-      expect(pending.length).toBeGreaterThan(0)
+      compareAt(`pagination-oracle.property.test.ts:2581`, () =>
+        expect(pending.length).toBeGreaterThan(0),
+      )
       updateFirstDelivered(scenario.secondRank)
       capture(`second-update`)
 
@@ -2590,10 +2760,12 @@ async function runPendingHistoryScenario(
       }
       await Promise.all(outstanding)
       capture(`final`)
-      expect(
-        outcomes.every(({ settled, rejected }) => settled && !rejected),
-        `all logical requests fulfilled`,
-      ).toBe(true)
+      compareAt(`pagination-oracle.property.test.ts:2602`, () =>
+        expect(
+          outcomes.every(({ settled, rejected }) => settled && !rejected),
+          `all logical requests fulfilled`,
+        ).toBe(true),
+      )
 
       // Corrupt captured real observations, never the runtime or the authority.
       if (fault === `partial-publication`)
@@ -2610,7 +2782,9 @@ async function runPendingHistoryScenario(
         const index = cuts.findIndex(
           (cut) => cut.phase === `callback` && cut.rows.length > 0,
         )
-        expect(index, `complete callback reached`).toBeGreaterThanOrEqual(0)
+        compareAt(`pagination-oracle.property.test.ts:2622`, () =>
+          expect(index, `complete callback reached`).toBeGreaterThanOrEqual(0),
+        )
         const complete = cuts[index]!
         cuts.splice(
           index + 1,
@@ -2636,7 +2810,9 @@ async function runPendingHistoryScenario(
       }
       if (fault === `wrong-callback-value` || fault === `wrong-callback-key`) {
         const changed = cuts.find((cut) => cut.changes.length > 0)
-        expect(changed, `real callback reached`).toBeDefined()
+        compareAt(`pagination-oracle.property.test.ts:2648`, () =>
+          expect(changed, `real callback reached`).toBeDefined(),
+        )
         const change = changed!.changes[0]!
         if (fault === `wrong-callback-key`) change.key = String(change.key)
         else change.value.rank = 99999
@@ -2650,18 +2826,26 @@ async function runPendingHistoryScenario(
       let published = false
       for (const cut of cuts) {
         if (published)
-          expect(
-            cut.rows.length,
-            `published window cannot withdraw`,
-          ).toBeGreaterThan(0)
+          compareAt(`pagination-oracle.property.test.ts:2662`, () =>
+            expect(
+              cut.rows.length,
+              `published window cannot withdraw`,
+            ).toBeGreaterThan(0),
+          )
         if (cut.rows.length > 0) published = true
         for (const change of cut.changes) {
-          expect(typeof change.key, `native callback key`).toBe(`number`)
-          expect(change.key, `callback key owns value`).toBe(change.value.id)
-          expect(
-            replica.has(change.key),
-            `callback operation predecessor`,
-          ).toBe(change.type !== `insert`)
+          compareAt(`pagination-oracle.property.test.ts:2668`, () =>
+            expect(typeof change.key, `native callback key`).toBe(`number`),
+          )
+          compareAt(`pagination-oracle.property.test.ts:2669`, () =>
+            expect(change.key, `callback key owns value`).toBe(change.value.id),
+          )
+          compareAt(`pagination-oracle.property.test.ts:2670`, () =>
+            expect(
+              replica.has(change.key),
+              `callback operation predecessor`,
+            ).toBe(change.type !== `insert`),
+          )
           if (change.type === `delete`) replica.delete(change.key)
           else replica.set(change.key, change.value)
         }
@@ -2670,48 +2854,67 @@ async function runPendingHistoryScenario(
             left: Record<string, unknown>,
             right: Record<string, unknown>,
           ) => (left.id as number) - (right.id as number)
-          expect(
-            [...replica.values()].sort(byId),
-            `callback replica full values`,
-          ).toStrictEqual([...cut.rows].sort(byId))
+          compareAt(`pagination-oracle.property.test.ts:2682`, () =>
+            expect(
+              [...replica.values()].sort(byId),
+              `callback replica full values`,
+            ).toStrictEqual([...cut.rows].sort(byId)),
+          )
         }
         if (cut.held) {
-          expect(
-            cut.rows,
-            `held initial publication ${cut.phase}`,
-          ).toStrictEqual([])
-          expect(cut.window, `held initial window ${cut.phase}`).toStrictEqual({
-            offset: 0,
-            limit: scenario.initialLimit,
-          })
-          expect(cut.settled, `held logical settlement ${cut.phase}`).toBe(
-            false,
+          compareAt(`pagination-oracle.property.test.ts:2688`, () =>
+            expect(
+              cut.rows,
+              `held initial publication ${cut.phase}`,
+            ).toStrictEqual([]),
+          )
+          compareAt(`pagination-oracle.property.test.ts:2692`, () =>
+            expect(
+              cut.window,
+              `held initial window ${cut.phase}`,
+            ).toStrictEqual({
+              offset: 0,
+              limit: scenario.initialLimit,
+            }),
+          )
+          compareAt(`pagination-oracle.property.test.ts:2696`, () =>
+            expect(cut.settled, `held logical settlement ${cut.phase}`).toBe(
+              false,
+            ),
           )
         } else if (
           cut.rows.length === 0 &&
           !cut.windowSettled &&
           cut.phase !== `final`
         ) {
-          expect(cut.window, `unpublished initial window`).toStrictEqual({
-            offset: 0,
-            limit: scenario.initialLimit,
-          })
+          compareAt(`pagination-oracle.property.test.ts:2704`, () =>
+            expect(cut.window, `unpublished initial window`).toStrictEqual({
+              offset: 0,
+              limit: scenario.initialLimit,
+            }),
+          )
         } else {
-          expect(cut.rows, `complete publication ${cut.phase}`).toStrictEqual(
-            completeRows,
+          compareAt(`pagination-oracle.property.test.ts:2709`, () =>
+            expect(cut.rows, `complete publication ${cut.phase}`).toStrictEqual(
+              completeRows,
+            ),
           )
           // getWindow reports Promise-settled state, not the publication callback.
           const target = { offset: 0, limit: scenario.wideLimit }
           if (cut.windowSettled || cut.phase === `final`) {
-            expect(
-              cut.window,
-              `settled complete window ${cut.phase}`,
-            ).toStrictEqual(target)
+            compareAt(`pagination-oracle.property.test.ts:2715`, () =>
+              expect(
+                cut.window,
+                `settled complete window ${cut.phase}`,
+              ).toStrictEqual(target),
+            )
           } else {
-            expect(
-              [target, { offset: 0, limit: scenario.initialLimit }],
-              `pending window metadata ${cut.phase}`,
-            ).toContainEqual(cut.window)
+            compareAt(`pagination-oracle.property.test.ts:2720`, () =>
+              expect(
+                [target, { offset: 0, limit: scenario.initialLimit }],
+                `pending window metadata ${cut.phase}`,
+              ).toContainEqual(cut.window),
+            )
           }
         }
       }
@@ -2726,7 +2929,9 @@ async function runPendingHistoryScenario(
           scenario.direction,
           { offset: 0, limit: scenario.wideLimit },
         )
-        expect(actual).toEqual(expected)
+        compareAt(`pagination-oracle.property.test.ts:2738`, () =>
+          expect(actual).toEqual(expected),
+        )
       } catch (error) {
         throw new PendingHistoryTraceAssertionError(
           error,
@@ -2849,6 +3054,7 @@ registerLimitAdmissionOracle()
 
 describe(`pagination recomputation oracle`, () => {
   it(`refills a joined result window through a contract-compliant source`, async () => {
+    oracleRoute(`fixed history`)
     type ParentRow = { id: number; rank: number; groupId: number }
     type ChildRow = { id: number; groupId: number }
     const parents = [
@@ -2897,6 +3103,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`loads the full ordered source when no continuation index exists`, async () => {
+    oracleRoute(`fixed history`)
     type ParentRow = { id: number; rank: number; groupId: number }
     type ChildRow = { id: number; groupId: number }
     const parents = [
@@ -2946,6 +3153,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`refines a joined foreign order term through the source tie class`, async () => {
+    oracleRoute(`fixed history`)
     type ParentRow = { id: number; sourceRank: number; childId: number }
     type ChildRow = { id: number; score: number }
     const parents = [
@@ -2996,6 +3204,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`materializes an empty source window`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationScenario({
       ranks: [],
       direction: `asc`,
@@ -3004,6 +3213,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`materializes an offset past the final row`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationScenario({
       ranks: [0, 1],
       direction: `asc`,
@@ -3012,6 +3222,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`materializes an initially empty zero-limit window`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationScenario({
       ranks: [0, 1, 2],
       direction: `asc`,
@@ -3020,6 +3231,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`rejects the right NaN window members in the wrong order`, () => {
+    oracleRoute(`calibration`)
     const rows = [
       { id: 1, rank: 10 },
       { id: 2, rank: 20 },
@@ -3068,6 +3280,7 @@ describe(`pagination recomputation oracle`, () => {
   ])(
     `orders a $direction eager window with a NaN or finite middle rank`,
     async ({ direction, ranks, expectedIds, limit }) => {
+      oracleRoute(`case`)
       const rows = ranks.map((rank, index) => ({ id: index + 1, rank }))
       const modeled = referenceWindow(rows, direction, { offset: 0, limit })
       expect(modeled).toEqual(expectedIds)
@@ -3084,6 +3297,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`keeps a NaN window coherent through equal and changed source ranks`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationStateScenario({
       ranks: [10, 20, NaN, 30, 40],
       direction: `desc`,
@@ -3099,6 +3313,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`clears and restores a nonempty window across a zero limit`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationScenario({
       ranks: [0, 1, 2],
       direction: `asc`,
@@ -3111,6 +3326,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`advances past an implicit public-key tie class`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationScenario({
       ranks: [1, 2, 3, 4, 5, 5, 5, 5, 5, 5, 11, 12, 13, 14, 15, 16],
       direction: `asc`,
@@ -3126,6 +3342,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`keeps implicit ties stable across filtered source mutations`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationStateScenario({
       ranks: [0, 0, 0, 1, 1, 1],
       direction: `asc`,
@@ -3155,6 +3372,7 @@ describe(`pagination recomputation oracle`, () => {
       expected: [2],
     },
   ])(`updates a row that $name`, async ({ keeps, action, expected }) => {
+    oracleRoute(`case`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 1],
       keeps,
@@ -3182,6 +3400,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`discovered trace: loads an on-demand window after a zero limit`, async () => {
+    oracleRoute(`fixed history`)
     await runOnDemandPaginationScenario({
       ranks: [0, 0],
       direction: `asc`,
@@ -3193,6 +3412,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`widens an offset on-demand window after starting at zero limit`, async () => {
+    oracleRoute(`fixed history`)
     await runOnDemandPaginationScenario({
       ranks: [-1, 0, 0, 0, -1, 0],
       direction: `asc`,
@@ -3206,6 +3426,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`starts an on-demand source prefix after opening a zero window with a local row`, async () => {
+    oracleRoute(`fixed history`)
     await runOnDemandPaginationScenario(
       {
         ranks: [0, 1],
@@ -3235,6 +3456,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `keeps a failed $direction window private after $replayDelivery source replay until explicit retry`,
     async ({ direction, replayDelivery }) => {
+      oracleRoute(`case`)
       const rows: Array<PageRow> = [
         { id: 1, rank: 1 },
         { id: 2, rank: 2 },
@@ -3330,6 +3552,7 @@ describe(`pagination recomputation oracle`, () => {
   ])(
     `recovers the first $failureKind-rejected ordered request for window $offset:$limit from the full source`,
     async ({ failureKind, ...window }) => {
+      oracleRoute(`case`)
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },
         { id: 2, rank: 1 },
@@ -3423,6 +3646,7 @@ describe(`pagination recomputation oracle`, () => {
   it.each([`error`, `AbortError`] as const)(
     `does not derive a retry cursor from rows written by a %s request`,
     async (failureKind) => {
+      oracleRoute(`case`)
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },
         { id: 2, rank: 1 },
@@ -3566,6 +3790,7 @@ describe(`pagination recomputation oracle`, () => {
   ] satisfies ReadonlyArray<readonly [string, PendingMutation]>)(
     `%s repairs an expressible order with a bounded prefix request`,
     async (_name, mutation) => {
+      oracleRoute(`case`)
       const result = await runPendingMutationScenario(
         {
           ranks: [0, 1, 2, 3],
@@ -3583,6 +3808,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`finishes bounded repair when a visible delete leaves the source underfilled`, async () => {
+    oracleRoute(`fixed history`)
     const result = await runPendingMutationScenario(
       {
         ranks: [0, 1, 2],
@@ -3611,6 +3837,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`rejects a malformed bounded-repair request trace`, () => {
+    oracleRoute(`calibration`)
     const malformed: PendingMutationResult = {
       mutationRepairRequests: [
         {
@@ -3639,6 +3866,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`distinguishes a filtered full-source fallback from a repair tie predicate`, () => {
+    oracleRoute(`fixed history`)
     const filter = eq(new PropRef([`keep`]), true)
     const scenario: PendingMutationScenario = {
       ranks: [0, 1, 2],
@@ -3665,6 +3893,7 @@ describe(`pagination recomputation oracle`, () => {
   it.each([false, true])(
     `repairs a capped prefix through its first-column tie and cursor refill (explicit key=%s)`,
     async (explicitPublicKeyOrder) => {
+      oracleRoute(`case`)
       const result = await runPendingMutationScenario(
         {
           ranks: [0, 1, 1, 2],
@@ -3736,6 +3965,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `holds a $direction page and concurrent live insert when its boundary refinement fails by $delivery`,
     async ({ direction, delivery }) => {
+      oracleRoute(`case`)
       const sign = direction === `asc` ? 1 : -1
       const rows: Array<PageRow> = [
         { id: 1, rank: sign },
@@ -3833,6 +4063,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`recovers a failed tie boundary from the authoritative full source`, async () => {
+    oracleRoute(`fixed history`)
     const authoritativeRows: Array<PageRow> = [
       { id: 1, rank: -1 },
       // A provider may return equal-order rows in any order. The local public
@@ -3932,6 +4163,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`rejects a reentrant window move when an ordered request writes and then throws`, async () => {
+    oracleRoute(`fixed history`)
     const authoritativeRows: Array<PageRow> = [
       { id: 1, rank: 0 },
       { id: 2, rank: 1 },
@@ -4005,7 +4237,9 @@ describe(`pagination recomputation oracle`, () => {
       await expect(
         Promise.resolve(live.utils.setWindow({ offset: 0, limit: 2 })),
       ).rejects.toBe(failure)
-      expect(reentrantError).toMatchObject({ name: `SetWindowReentrancyError` })
+      expect(reentrantError).toMatchObject({
+        name: `SetWindowReentrancyError`,
+      })
       expect(requests).toHaveLength(initialRequestCount + 1)
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
 
@@ -4024,6 +4258,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `rejects a window move reentered from startup request $requestNumber after $delivery delivery`,
     async ({ delivery, requestNumber }) => {
+      oracleRoute(`case`)
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },
         { id: 2, rank: 1 },
@@ -4091,7 +4326,9 @@ describe(`pagination recomputation oracle`, () => {
         await live.preload()
         expect(requests).toBeGreaterThanOrEqual(requestNumber)
         expect(nestedResult).toBeUndefined()
-        expect(nestedError).toMatchObject({ name: `SetWindowReentrancyError` })
+        expect(nestedError).toMatchObject({
+          name: `SetWindowReentrancyError`,
+        })
         expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
         await live.utils.setWindow({ offset: 0, limit: 2 })
@@ -4104,6 +4341,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`rejects a window move reentered from a public change callback`, async () => {
+    oracleRoute(`fixed history`)
     const authoritativeRows: Array<PageRow> = [
       { id: 1, rank: 0, keep: true },
       { id: 2, rank: 1, keep: true },
@@ -4185,6 +4423,7 @@ describe(`pagination recomputation oracle`, () => {
   it.each([`return-only`, `write-after-cleanup`])(
     `rejects a window move when its sync run is cleaned up: %s`,
     async (delivery) => {
+      oracleRoute(`case`)
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },
         { id: 2, rank: 1 },
@@ -4254,6 +4493,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`tracks an asynchronous cursor continuation after synchronous satisfaction`, async () => {
+    oracleRoute(`fixed history`)
     const rows: Array<PageRow> = [
       { id: 1, rank: 1 },
       { id: 2, rank: 2 },
@@ -4344,6 +4584,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`refines locale-ordered continuations locally when predicate IR cannot express the collation`, async () => {
+    oracleRoute(`fixed history`)
     const rows: Array<LocaleCursorRow> = [
       { id: 1, label: `item2` },
       { id: 2, label: `item10` },
@@ -4395,9 +4636,7 @@ describe(`pagination recomputation oracle`, () => {
       const preload = live.preload()
       expect(pending).toHaveLength(1)
       // Settling one request can append its boundary-refinement request.
-      // eslint-disable-next-line @typescript-eslint/prefer-for-of
-      for (let index = 0; index < pending.length; index++) {
-        const request = pending[index]!
+      for (const request of pending) {
         begin()
         for (const row of rowsForLoadSubset(rows, request.options)) {
           if (delivered.has(row.id)) continue
@@ -4521,30 +4760,42 @@ describe(`pagination recomputation oracle`, () => {
     ],
   ] satisfies ReadonlyArray<readonly [string, MultiOrderScenario]>)(
     `%s`,
-    async (_name, scenario) => runMultiOrderScenario(scenario),
+    async (_name, scenario) => {
+      oracleRoute(`case`)
+      return runMultiOrderScenario(scenario)
+    },
   )
 
-  fcTest.prop([multiOrderScenarioArbitrary], {
-    numRuns: orderedScenarioRuns,
-    seed: 1663,
-  })(
-    `matches multi-column nullable ordering for a fixed seed`,
-    runMultiOrderScenario,
-  )
+  oracleProperty({
+    id: `pagination.multi-order`,
+    law: {
+      statement: `matches multi-column nullable ordering for a random or replayed seed`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
+    histories: {
+      arbitrary: multiOrderScenarioArbitrary,
+      runs: 12,
+      fixedSeeds: [1663],
+    },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const scenario = history
 
-  fcTest.prop(
-    [multiOrderScenarioArbitrary],
-    oracleRandomParameters(
-      orderedScenarioRuns,
-      replay,
-      `pagination.multi-order`,
-    ),
-  )(
-    `matches multi-column nullable ordering for a random or replayed seed`,
-    runMultiOrderScenario,
-  )
+        await runMultiOrderScenario(scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+  })
 
   it(`continues an indexed multi-column window from its leading boundary`, async () => {
+    oracleRoute(`fixed history`)
     const rows: Array<MultiOrderRow> = [
       { id: 3, primary: 0, secondary: 2 },
       { id: 2, primary: 0, secondary: 1 },
@@ -4591,25 +4842,33 @@ describe(`pagination recomputation oracle`, () => {
     }
   })
 
-  fcTest.prop([nullableCursorScenarioArbitrary], {
-    numRuns: transitionScenarioRuns,
-    seed: 1665,
-  })(
-    `matches nullable cursor ordering while an async response is pending for a fixed seed`,
-    runNullableCursorScenario,
-  )
+  oracleProperty({
+    id: `pagination.nullable-cursor`,
+    law: {
+      statement: `matches nullable cursor ordering while an async response is pending for a random or replayed seed`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
+    histories: {
+      arbitrary: nullableCursorScenarioArbitrary,
+      runs: 8,
+      fixedSeeds: [1665],
+    },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const scenario = history
 
-  fcTest.prop(
-    [nullableCursorScenarioArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.nullable-cursor`,
-    ),
-  )(
-    `matches nullable cursor ordering while an async response is pending for a random or replayed seed`,
-    runNullableCursorScenario,
-  )
+        await runNullableCursorScenario(scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+  })
 
   it.each([
     [`boundary insert`, { type: `insert`, row: { id: 5, rank: 0.5 } }],
@@ -4621,6 +4880,7 @@ describe(`pagination recomputation oracle`, () => {
   ] satisfies ReadonlyArray<readonly [string, PendingMutation]>)(
     `%s converges before and after a pending response`,
     async (_name, mutation) => {
+      oracleRoute(`case`)
       const scenario: PendingMutationScenario = {
         ranks: [0, 1, 2, 3],
         direction: `asc`,
@@ -4663,6 +4923,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `rejects a reached $fault in a $responseOutcome mutation history`,
     async ({ responseOutcome, fault, message }) => {
+      oracleRoute(`case`)
       const scenario: PendingMutationScenario = {
         ranks: [0, 1, 2, 3],
         direction: `asc`,
@@ -4685,6 +4946,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`rejects a wrong deleted payload before removing its replica row`, async () => {
+    oracleRoute(`calibration`)
     const scenario: PendingMutationScenario = {
       ranks: [0, 1, 2, 3],
       direction: `asc`,
@@ -4712,6 +4974,7 @@ describe(`pagination recomputation oracle`, () => {
   ] satisfies ReadonlyArray<readonly [string, PendingMutation]>)(
     `revalidates a finite ordered prefix after a settled SSE %s`,
     async (_name, mutation) => {
+      oracleRoute(`case`)
       await runPendingMutationScenario(
         {
           ranks: [0, 1, 2, 3, 4, 5, 6, 7],
@@ -4726,6 +4989,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`retains a finite inactive prefix across shrink, SSE, and re-expansion`, async () => {
+    oracleRoute(`fixed history`)
     const rows = new Map<number, PageRow>(
       Array.from({ length: 5 }, (_, index) => [
         index + 1,
@@ -4799,6 +5063,7 @@ describe(`pagination recomputation oracle`, () => {
   it.each([`asc`, `desc`] as const)(
     `refreshes from the start when one SSE batch moves the retained prefix (%s)`,
     async (direction) => {
+      oracleRoute(`case`)
       const rows = new Map<number, PageRow>(
         Array.from({ length: 6 }, (_, index) => [
           index + 1,
@@ -4907,6 +5172,7 @@ describe(`pagination recomputation oracle`, () => {
   >)(
     `keeps an SSE %s that arrives during boundary refinement`,
     async (_name, mutation, expectedIds, expectedWideIds) => {
+      oracleRoute(`case`)
       const rows = new Map<number, PageRow>(
         Array.from({ length: 6 }, (_, index) => [
           index + 1,
@@ -5055,6 +5321,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`does not use a new row beyond finite coverage as a widening boundary`, async () => {
+    oracleRoute(`fixed history`)
     await runPendingMutationScenario(
       {
         ranks: [0, 1, 2, 3, 4, 5, 6, 7],
@@ -5069,6 +5336,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`discovered trace: a settled rank update refreshes top-k membership`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PendingMutationScenario = {
       ranks: [0, 0, 1],
       direction: `desc`,
@@ -5080,6 +5348,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`a rejected cursor does not treat a live insert as remote coverage`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PendingMutationScenario = {
       ranks: [0, -1, 0],
       direction: `asc`,
@@ -5090,17 +5359,6 @@ describe(`pagination recomputation oracle`, () => {
 
     await runPendingMutationScenario(scenario, `before-response`)
   })
-
-  fcTest.prop([pendingMutationScenarioArbitrary, responseTimingArbitrary], {
-    numRuns: transitionScenarioRuns,
-    seed: 1660,
-  })(
-    `matches recomputation when source mutations cross a pending cursor response for a fixed seed`,
-    async (scenario, timing) => {
-      const result = await runPendingMutationScenario(scenario, timing)
-      expectPendingMutationRequestWork(result, scenario)
-    },
-  )
 
   it.each(
     ([`insert`, `update`, `delete`] as const).flatMap((mutationKind) =>
@@ -5113,6 +5371,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `covers pending %s with a %s response %s deterministically`,
     async (mutationKind, responseOutcome, timing) => {
+      oracleRoute(`case`)
       const mutation: PendingMutation =
         mutationKind === `insert`
           ? { type: `insert`, row: { id: 5, rank: -1 } }
@@ -5132,33 +5391,42 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
-  fcTest.prop(
-    [pendingMutationScenarioArbitrary, responseTimingArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.pending-mutation`,
-    ),
-  )(
-    `matches recomputation when source mutations cross a pending cursor response for a random or replayed seed`,
-    async (scenario, timing) => {
-      const result = await runPendingMutationScenario(scenario, timing)
-      expectPendingMutationRequestWork(result, scenario)
+  oracleProperty({
+    id: `pagination.pending-mutation`,
+    law: {
+      statement: `matches recomputation when source mutations cross a pending cursor response for a random or replayed seed`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
     },
-  )
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
+    histories: {
+      arbitrary: fc.tuple(
+        pendingMutationScenarioArbitrary,
+        responseTimingArbitrary,
+      ),
+      runs: 8,
+      fixedSeeds: [1660],
+    },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const [scenario, timing] = history
 
-  it(
-    `discovered trace: retries a rejected cursor after a source and window transition`,
-    runRejectedCursorRetryAfterMutation,
-  )
+        const result = await runPendingMutationScenario(scenario, timing)
+        expectPendingMutationRequestWork(result, scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+  })
 
-  fcTest.prop([pendingHistoryScenarioArbitrary], {
-    numRuns: transitionScenarioRuns,
-    seed: 1664,
-  })(
-    `matches recomputation across multi-action pending histories for a fixed seed`,
-    runPendingHistoryScenario,
-  )
+  it(`discovered trace: retries a rejected cursor after a source and window transition`, async () => {
+    oracleRoute(`fixed history`)
+    await runRejectedCursorRetryAfterMutation()
+  })
 
   it.each([
     [`partial-publication`, `held initial publication`],
@@ -5171,6 +5439,7 @@ describe(`pagination recomputation oracle`, () => {
   ] as const)(
     `rejects %s in a captured pending history`,
     async (fault, message) => {
+      oracleRoute(`calibration`)
       const scenario: PendingHistoryScenario = {
         ranks: [0, 0, 1, 2],
         direction: `asc`,
@@ -5187,24 +5456,41 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
-  fcTest.prop(
-    [pendingHistoryScenarioArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.pending-history`,
-    ),
-  )(
-    `matches recomputation across multi-action pending histories for a random or replayed seed`,
-    runPendingHistoryScenario,
-  )
+  oracleProperty({
+    id: `pagination.pending-history`,
+    law: {
+      statement: `matches recomputation across multi-action pending histories for a random or replayed seed`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
+    histories: {
+      arbitrary: pendingHistoryScenarioArbitrary,
+      runs: 8,
+      fixedSeeds: [1664],
+    },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const scenario = history
 
-  it(
-    `discovered trace: an in-flight request does not underfill a new window`,
-    expectInflightRequestFillsNewWindow,
-  )
+        await runPendingHistoryScenario(scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+  })
+
+  it(`discovered trace: an in-flight request does not underfill a new window`, async () => {
+    oracleRoute(`fixed history`)
+    await expectInflightRequestFillsNewWindow()
+  })
 
   it(`discovered trace: a row moving across an offset window must refill its boundary`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0, 0],
       direction: `desc`,
@@ -5215,6 +5501,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`retains authoritative rows when a later window admits a prior insert`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0],
       direction: `asc`,
@@ -5228,6 +5515,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`restores an out-of-window insert when a later offset selects it`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0],
       direction: `asc`,
@@ -5241,6 +5529,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`restores an out-of-window rank update when a later offset selects it`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0, 0],
       direction: `asc`,
@@ -5254,6 +5543,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`discovered trace: inserting at an empty offset boundary refills the window`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0],
       direction: `asc`,
@@ -5268,6 +5558,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`discovered trace: an insert before a later offset does not skip its new boundary`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [-1, -1, 0, -1, 0, -1, 0, 1, 1],
       direction: `asc`,
@@ -5282,6 +5573,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`discovered trace: an async cursor loads the full offset window`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationScenario = {
       ranks: [0, 0, 0, 0, 0, 0, 1],
       direction: `asc`,
@@ -5294,6 +5586,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`discovered trace: an async cursor crosses an offset before filling one row`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationScenario = {
       ranks: [0, 0, -1],
       direction: `asc`,
@@ -5318,6 +5611,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `bounds requests for an underfilled source: $direction, explicit key=$explicitPublicKeyOrder, filter=$includeFilter`,
     async (structure) => {
+      oracleRoute(`case`)
       await runOnDemandPaginationScenario({
         ...structure,
         ranks: [0, 0],
@@ -5329,7 +5623,6 @@ describe(`pagination recomputation oracle`, () => {
 
   for (const [index, structure] of paginationStructures.entries()) {
     const name = `key=${structure.explicitPublicKeyOrder ? `explicit` : `implicit`}, filter=${structure.includeFilter ? `on` : `off`}, insertion=${structure.reverseInsertion ? `reverse` : `forward`}`
-    const cellRuns = Math.max(1, Math.ceil(transitionScenarioRuns / 8))
     const runWindowCell = async (scenario: PaginationScenario) => {
       const complete = { ...scenario, ...structure }
       await runPaginationScenario(complete)
@@ -5339,78 +5632,116 @@ describe(`pagination recomputation oracle`, () => {
       await runPaginationStateScenario({ ...scenario, ...structure })
     }
 
-    fcTest.prop([scenarioPayloadArbitrary], {
-      numRuns: cellRuns,
-      seed: 16_570 + index,
-    })(`covers ${name} window paths for a fixed seed`, runWindowCell)
-    fcTest.prop(
-      [scenarioPayloadArbitrary],
-      oracleRandomParameters(
-        cellRuns,
-        replay,
-        `pagination.matrix.window-${index}`,
-      ),
-    )(
-      `covers ${name} window paths for a random or replayed seed [pagination.matrix.window-${index}]`,
-      runWindowCell,
-    )
+    oracleProperty({
+      id: `pagination.matrix.window-${index}`,
+      law: {
+        statement: `covers ${name} window paths for a random or replayed seed [pagination.matrix.window-${index}]`,
+        authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+        limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/utils/comparison.ts#makeComparator',
+      ],
+      histories: {
+        arbitrary: scenarioPayloadArbitrary,
+        runs: 1,
+        fixedSeeds: [16_570 + index],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          const scenario = history
 
-    fcTest.prop([stateScenarioPayloadArbitrary], {
-      numRuns: cellRuns,
-      seed: 16_580 + index,
-    })(`covers ${name} state paths for a fixed seed`, runStateCell)
-    fcTest.prop(
-      [stateScenarioPayloadArbitrary],
-      oracleRandomParameters(
-        cellRuns,
-        replay,
-        `pagination.matrix.state-${index}`,
-      ),
-    )(
-      `covers ${name} state paths for a random or replayed seed [pagination.matrix.state-${index}]`,
-      runStateCell,
-    )
+          await runWindowCell(scenario)
+        }),
+      check: (_history, _observations, verdict) => verdict,
+    })
+
+    oracleProperty({
+      id: `pagination.matrix.state-${index}`,
+      law: {
+        statement: `covers ${name} state paths for a random or replayed seed [pagination.matrix.state-${index}]`,
+        authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+        limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/utils/comparison.ts#makeComparator',
+      ],
+      histories: {
+        arbitrary: stateScenarioPayloadArbitrary,
+        runs: 1,
+        fixedSeeds: [16_580 + index],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          const scenario = history
+
+          await runStateCell(scenario)
+        }),
+      check: (_history, _observations, verdict) => verdict,
+    })
   }
 
-  fcTest.prop([scenarioArbitrary], {
-    numRuns: orderedScenarioRuns,
-    seed: 1657,
-  })(
-    `matches full recomputation across ordered windows for a fixed seed`,
-    runPaginationScenario,
-  )
+  oracleProperty({
+    id: `pagination.ordered-window`,
+    law: {
+      statement: `matches full recomputation across ordered windows for a random or replayed seed`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
+    histories: { arbitrary: scenarioArbitrary, runs: 12, fixedSeeds: [1657] },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const scenario = history
 
-  fcTest.prop(
-    [scenarioArbitrary],
-    oracleRandomParameters(
-      orderedScenarioRuns,
-      replay,
-      `pagination.ordered-window`,
-    ),
-  )(
-    `matches full recomputation across ordered windows for a random or replayed seed`,
-    runPaginationScenario,
-  )
+        await runPaginationScenario(scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+  })
 
-  fcTest.prop([stateScenarioArbitrary], {
-    numRuns: transitionScenarioRuns,
-    seed: 1658,
-  })(
-    `matches full recomputation across source and window transitions for a fixed seed`,
-    runPaginationStateScenario,
-  )
+  oracleProperty({
+    id: `pagination.window-transition`,
+    law: {
+      statement: `matches full recomputation across source and window transitions for a random or replayed seed`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
+    histories: {
+      arbitrary: stateScenarioArbitrary,
+      runs: 8,
+      fixedSeeds: [1658],
+    },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const scenario = history
 
-  fcTest.prop(
-    [stateScenarioArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.window-transition`,
-    ),
-  )(
-    `matches full recomputation across source and window transitions for a random or replayed seed`,
-    runPaginationStateScenario,
-  )
+        await runPaginationStateScenario(scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+  })
 
   it.each(
     ([`asc`, `desc`] as const).flatMap((direction) =>
@@ -5428,6 +5759,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `fetches linear row volume while traversing settled pages: %j`,
     async ({ direction, mode, explicitPublicKeyOrder, pageSize }) => {
+      oracleRoute(`case`)
       const pageCount = 10
       const rows = Array.from({ length: pageCount * pageSize }, (_, rank) => ({
         id: rank + 1,
@@ -5494,6 +5826,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `refills an ordered window past $count pending optimistic $mutation row(s)`,
     async ({ mutation, count }) => {
+      oracleRoute(`case`)
       const remote = [1, 2, 3, 4, 5].map((id) => ({ id, rank: id }))
       const delivered = new Set<number>()
       const requests: Array<LoadSubsetOptions> = []
@@ -5628,6 +5961,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `does not count $count optimistic $mutation row(s) as $transport provider coverage after a $initialLimit-row window`,
     async ({ mutation, count, initialLimit, transport }) => {
+      oracleRoute(`case`)
       const remote = [1, 2, 3, 4, 5, 6, 7].map((id) => ({ id, rank: id }))
       const finalLimit = mutation === `insert-before` ? count + 2 : count + 1
       const delivered = new Set<number>()
@@ -5780,6 +6114,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `keeps eager window membership when moving past an intervening insert: %j`,
     async ({ direction, explicitPublicKeyOrder, tied, limit }) => {
+      oracleRoute(`case`)
       const sign = direction === `asc` ? 1 : -1
       await runPaginationStateScenario({
         direction,
@@ -5814,6 +6149,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `keeps live observations separate from a settled acquisition: %j`,
     async ({ direction, timing, rank, transport }) => {
+      oracleRoute(`case`)
       const sign = direction === `asc` ? 1 : -1
       await runPendingMutationScenario(
         {
@@ -5832,6 +6168,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`discovered trace: a rank update must refill a top-1 window`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0],
       direction: `asc`,
@@ -5842,6 +6179,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`refills an implicit tie window when a visible row moves below it`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationStateScenario({
       ranks: [0, 0, 0, -1, 0],
       direction: `desc`,
@@ -5856,6 +6194,7 @@ describe(`pagination recomputation oracle`, () => {
   it.each([`resolve`, `reject`] as const)(
     `keeps the last complete implicit window while background recovery %ss`,
     async (settlement) => {
+      oracleRoute(`case`)
       const authoritativeRows = new Map<number, PageRow>([
         [1, { id: 1, rank: 0, keep: true }],
         [2, { id: 2, rank: 1, keep: true }],
@@ -5991,6 +6330,7 @@ describe(`pagination recomputation oracle`, () => {
   ] as const)(
     `refills an implicit %s tie window after a rank update`,
     async (_name, ranks, initialWindow, id, rank) => {
+      oracleRoute(`case`)
       await runPaginationStateScenario({
         ranks: [...ranks],
         direction: `asc`,
@@ -6004,6 +6344,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`opens an implicit tie window from zero at the lowest public key`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationStateScenario({
       ranks: [0],
       direction: `asc`,
@@ -6020,6 +6361,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`ignores an out-of-window insert when refilling after a delete`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [100, 90, 80, 70],
       direction: `desc`,
@@ -6033,6 +6375,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`ignores an out-of-window rank update when refilling after a delete`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0, 0],
       direction: `asc`,
@@ -6047,6 +6390,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`ignores an out-of-window rank update when the visible row leaves`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0, 0],
       direction: `asc`,
@@ -6061,6 +6405,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`refills untouched rows when widening after an out-of-window rank update`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0, 0],
       direction: `desc`,
@@ -6075,6 +6420,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`rebuilds the full boundary when widening after an out-of-window rank update`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [1, 0, 1, 0, 1],
       direction: `desc`,
@@ -6089,6 +6435,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`ignores an out-of-window insert when widening a tied window`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0],
       direction: `asc`,
@@ -6102,10 +6449,12 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`expands a multi-column boundary before choosing top-K`, async () => {
+    oracleRoute(`fixed history`)
     await expectMultiOrderBoundaryMatches()
   })
 
   it(`rejects a real provider entry hidden by a copied pre-cleanup trace`, async () => {
+    oracleRoute(`calibration`)
     const scenario = {
       providerRows: [
         { id: 1, rank: 1, label: `first` },
@@ -6124,6 +6473,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`expands a provider tie before applying the public-key tie-breaker`, async () => {
+    oracleRoute(`fixed history`)
     const loads = await runAdversarialOrderedProviderScenario({
       providerRows: [
         { id: 2, rank: 0, label: `second` },
@@ -6141,6 +6491,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`does not derive an ordered boundary from another demand's local row`, async () => {
+    oracleRoute(`fixed history`)
     const unrelated = { id: 100, rank: 100, label: `unrelated` }
     const loads = await runAdversarialOrderedProviderScenario({
       providerRows: [
@@ -6159,6 +6510,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`refines an initial locale window without trusting provider collation`, async () => {
+    oracleRoute(`fixed history`)
     const loads = await runAdversarialOrderedProviderScenario({
       // Lexical provider order disagrees with locale numeric order.
       providerRows: [
@@ -6238,6 +6590,7 @@ describe(`pagination recomputation oracle`, () => {
   ] as const)(
     `uses one filtered full-source acquisition for custom collation ($cell)`,
     async ({ direction, autoIndex, sourceDefault, bounded, outputDefault }) => {
+      oracleRoute(`case`)
       await runCustomCollationScenario({
         direction,
         autoIndex,
@@ -6249,6 +6602,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`uses the leading source custom collation when ordering a later source (C-08 multi-source inheritance)`, async () => {
+    oracleRoute(`fixed history`)
     type ScopeRow = { id: number; groupId: number }
     const scope = createCollection(
       mockSyncCollectionOptions({
@@ -6323,6 +6677,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`inherits collection locale options through scan and auto-index ordering`, async () => {
+    oracleRoute(`fixed history`)
     const defaultOnly = createCollection<{ id: number }>({
       getKey: (row) => row.id,
       defaultStringCollation: { stringSort: `locale` },
@@ -6376,6 +6731,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`refines an initial reference-ordered window locally`, async () => {
+    oracleRoute(`fixed history`)
     const first = { value: `first` }
     const second = { value: `second` }
     // Fix their runtime reference order before the provider returns the
@@ -6405,6 +6761,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `refines invalid Date ties with an unbounded local-order request ($direction, nulls $nulls)`,
     async ({ direction, nulls }) => {
+      oracleRoute(`case`)
       const invalid = new Date(Number.NaN)
       const loads = await runAdversarialOrderedProviderScenario({
         providerRows: [
@@ -6424,6 +6781,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`uses an ascending index for a bounded descending demand`, async () => {
+    oracleRoute(`fixed history`)
     const rows: Array<PageRow> = [
       { id: 3, rank: 1 },
       { id: 1, rank: 0 },
@@ -6502,6 +6860,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`stabilizes an on-demand window with a NaN public-key tie`, async () => {
+    oracleRoute(`fixed history`)
     const loads = await runAdversarialOrderedProviderScenario({
       providerRows: [
         { id: 1, rank: 0, label: `finite` },
@@ -6523,6 +6882,7 @@ describe(`pagination recomputation oracle`, () => {
   ] as const)(
     `keeps null placement and $direction across source refinement ($nulls)`,
     async ({ direction, nulls, expectedIds }) => {
+      oracleRoute(`case`)
       const providerRows = [
         { id: 1, rank: null, label: `null` },
         { id: 2, rank: 0, label: `zero` },
@@ -6541,28 +6901,35 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
-  fcTest.prop([scenarioArbitrary], {
-    numRuns: transitionScenarioRuns,
-    seed: 1659,
-  })(
-    `matches full recomputation when exact async cursor loads widen ordered coverage for a fixed seed`,
-    runOnDemandPaginationScenario,
-  )
+  oracleProperty({
+    id: `pagination.async-cursor`,
+    law: {
+      statement: `matches full recomputation when exact async cursor loads widen ordered coverage for a random or replayed seed`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/utils/comparison.ts#makeComparator',
+    ],
+    histories: { arbitrary: scenarioArbitrary, runs: 8, fixedSeeds: [1659] },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const scenario = history
 
-  fcTest.prop(
-    [scenarioArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.async-cursor`,
-    ),
-  )(
-    `matches full recomputation when exact async cursor loads widen ordered coverage for a random or replayed seed`,
-    runOnDemandPaginationScenario,
-  )
+        await runOnDemandPaginationScenario(scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+  })
 
   it.each([`forward`, `reverse`] as const)(
     `keeps concurrent on-demand windows correct under %s completion`,
-    expectOnDemandWindowsAreCompletionOrderIndependent,
+    async (scenario) => {
+      oracleRoute(`case`)
+      await expectOnDemandWindowsAreCompletionOrderIndependent(scenario)
+    },
   )
 })

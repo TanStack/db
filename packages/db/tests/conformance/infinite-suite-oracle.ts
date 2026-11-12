@@ -21,7 +21,7 @@
  * infinite-suite-harness.ts.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { createOracleReach } from '../oracle-reach'
+import { oracleRoute } from '../oracle-config'
 import { declareOracle } from '../oracle-declaration.js'
 import {
   captureError,
@@ -174,6 +174,9 @@ function expectNoPagesAfterRejection(handle: InfiniteQueryHandle): void {
  * overlapping-window model predicts the committed prefix, its continuation, and
  * the retained error after overlapping window outcomes.
  */
+// Owns no production entry in packages/db: this module checks the public
+// observations that each framework driver passes it, so the framework packages
+// that run it own the entries it judges.
 declareOracle({
   check: [expectReadyObservationsMatchSource],
   model: [expectedOverlappingWindow],
@@ -183,7 +186,7 @@ export function runInfiniteQuerySuite(
   rawDriver: InfiniteQueryDriver,
   registerUnitScenarios: (context: InfiniteQueryContext) => void,
 ): void {
-  const registry = scenarioRegistry(rawDriver.knownGaps)
+  const registry = scenarioRegistry(rawDriver.limits)
   const state = createScenarioState()
   const driver = wrapDriver(rawDriver, state)
   const lifetime = scenarioLifetime(state)
@@ -198,7 +201,14 @@ export function runInfiniteQuerySuite(
   ) => {
     registry.register(key)
     const label = `[${key}] ${name}`
-    it(label, () => runScenario(state, fn), timeoutMs)
+    it(
+      label,
+      () => {
+        oracleRoute(`case`)
+        return runScenario(state, fn)
+      },
+      timeoutMs,
+    )
   }
 
   describe(`infinite-query conformance :: ${driver.name}`, () => {
@@ -1568,18 +1578,15 @@ export function runInfiniteQuerySuite(
         }
         // Declared reach: the states where a claim must outlive the query
         // that made it.
-        const reach = createOracleReach<ReachState>(
-          `infinite source-id claim memory`,
-          [
-            `swap after an intervening query`,
-            `revisit after an intervening query`,
-          ],
-        )
+        const requiredStates: ReadonlyArray<ReachState> = [
+          `swap after an intervening query`,
+          `revisit after an intervening query`,
+        ]
+        const observedStates = new Set<ReachState>()
         const picks: ReadonlyArray<Pick> = [`A`, `B`, `C`]
         for (const start of [`A`, `C`] as const) {
           for (const second of picks) {
             for (const third of picks) {
-              reach.beginHistory()
               const history: Array<Pick> = [start]
               const handle = driver.mountControllable(
                 (q, pick: Pick) =>
@@ -1593,7 +1600,7 @@ export function runInfiniteQuerySuite(
               expectPageRows(handle.current(), pagesOf[start], 3)
               for (const next of [second, third]) {
                 const reached = reachedState(history, next)
-                if (reached) reach.reach(reached)
+                if (reached) observedStates.add(reached)
                 if (driver.comparesQueryIdentity && collides(history, next)) {
                   const error = await captureRejection(async () => {
                     handle.setParamSync(next)
@@ -1642,7 +1649,11 @@ export function runInfiniteQuerySuite(
             }
           }
         }
-        reach.assertReached()
+        expect(
+          requiredStates.filter(
+            (checkpoint) => !observedStates.has(checkpoint),
+          ),
+        ).toEqual([])
 
         if (!driver.comparesQueryIdentity) return
         // Keyed dimension (comparing bindings only), as in the live suite:
@@ -1661,10 +1672,11 @@ export function runInfiniteQuerySuite(
             sourceOf[base(next)].collection.id
         type KeyedReachState =
           `claim crosses a keyed step` | `keyed step after a claim`
-        const keyedReach = createOracleReach<KeyedReachState>(
-          `infinite source-id claim memory with keys`,
-          [`claim crosses a keyed step`, `keyed step after a claim`],
-        )
+        const requiredKeyedStates: ReadonlyArray<KeyedReachState> = [
+          `claim crosses a keyed step`,
+          `keyed step after a claim`,
+        ]
+        const observedKeyedStates = new Set<KeyedReachState>()
         const mountKeyed = driver.mountKeyedControllable
         // Every comparing driver supplies the keyed form.
         expect(mountKeyed).toBeDefined()
@@ -1672,7 +1684,6 @@ export function runInfiniteQuerySuite(
         for (const start of [`A`, `C`, `AK`] as const) {
           for (const second of keyedPicks) {
             for (const third of keyedPicks) {
-              keyedReach.beginHistory()
               const history: Array<KeyedPick> = [start]
               const handle = mountKeyed!(
                 (q, pick: KeyedPick) =>
@@ -1697,7 +1708,7 @@ export function runInfiniteQuerySuite(
                   claimIndex >= 0 &&
                   history.slice(claimIndex + 1).some(isKeyed)
                 ) {
-                  keyedReach.reach(`claim crosses a keyed step`)
+                  observedKeyedStates.add(`claim crosses a keyed step`)
                 }
                 if (
                   isKeyed(next) &&
@@ -1709,7 +1720,7 @@ export function runInfiniteQuerySuite(
                         sourceOf[base(next)].collection.id,
                   )
                 ) {
-                  keyedReach.reach(`keyed step after a claim`)
+                  observedKeyedStates.add(`keyed step after a claim`)
                 }
                 if (claimIndex >= 0) {
                   const error = await captureRejection(async () => {
@@ -1732,7 +1743,11 @@ export function runInfiniteQuerySuite(
             }
           }
         }
-        keyedReach.assertReached()
+        expect(
+          requiredKeyedStates.filter(
+            (checkpoint) => !observedKeyedStates.has(checkpoint),
+          ),
+        ).toEqual([])
       },
       // 18 histories of three steps each, and 75 keyed histories for a
       // comparing binding.

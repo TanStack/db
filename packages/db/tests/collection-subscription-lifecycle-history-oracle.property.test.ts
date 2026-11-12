@@ -1,5 +1,5 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterAll, describe, expect, it as vitestIt } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { afterAll, beforeEach, describe, expect, it as vitestIt } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
@@ -15,6 +15,8 @@ import {
   expectedParkedReloadDemand,
   greenLifecycleHistories,
   greenLifecycleHistoryArbitrary,
+  lifecycleCommandArbitrary,
+  lifecycleRowLabels,
   mixedAbortedRestartHistory,
   parkedReloadDemandCases,
   pendingSupersessionHistory,
@@ -24,14 +26,20 @@ import {
   syncLifecycleHistoryArbitrary,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
 import { flushPromises, withOracleCleanup } from './utils.js'
-import { createOracleReach } from './oracle-reach.js'
+import { oracleProperty } from './oracle-property.js'
+import { subscriptionComparison } from './collection-subscription-property-registration.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+} from './oracle-assertion-adapter.js'
 import {
   oraclePropertyOptions,
-  oracleRandomParameters,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   readOracleRunConfig,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 import type {
   DemandName,
@@ -43,10 +51,12 @@ import type {
   LifecycleUnloadEvent,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
 
-const { multiplier, ...replay } = readOracleRunConfig()
+const { multiplier } = readOracleRunConfig()
 const it = oracleReplayTest(vitestIt)
-const fixedCampaign = oracleReplayTest(fcTest)
-const randomCampaign = (property: string) => oracleReplayTest(fcTest, property)
+
+declareOracle({
+  check: [runHistory],
+})
 
 /**
  * # What settles a demand created while a Collection is cleaned up?
@@ -72,6 +82,7 @@ describe(`demand created while its Collection is cleaned up`, () => {
   it.each(cleanedRestartDemandCases)(
     `$syncMode source with $loader loader, $replacement replacement, and $interruption`,
     async (history) => {
+      oracleRoute(`case`)
       const expected = expectedCleanedRestartDemand(history)
       let syncRuns = 0
       let physicalAcquisitions = 0
@@ -132,7 +143,9 @@ describe(`demand created while its Collection is cleaned up`, () => {
 
       await withOracleCleanup(async () => {
         publishRow(`old`)
-        expect([...visible.values()]).toEqual([{ id: `old` }])
+        oracleAssertion(`lifecycle history comparison at 148`, () =>
+          expect([...visible.values()]).toEqual([{ id: `old` }]),
+        )
         await collection.cleanup()
         let resultState: `pending` | `fulfilled` | `rejected` = `pending`
         let result: unknown
@@ -154,19 +167,25 @@ describe(`demand created while its Collection is cleaned up`, () => {
           },
         })
 
-        expect(result).toBeInstanceOf(Promise)
-        expect(resultState).toBe(`pending`)
+        oracleAssertion(`lifecycle history comparison at 170`, () =>
+          expect(result).toBeInstanceOf(Promise),
+        )
+        oracleAssertion(`lifecycle history comparison at 171`, () =>
+          expect(resultState).toBe(`pending`),
+        )
 
         collection.startSyncImmediate()
         await flushPromises()
 
         if (expected.beforeEagerReady) {
-          expect({
-            physicalAcquisitions,
-            result: resultState,
-            status: subscription.status,
-            collectionStatus: collection.status,
-          }).toEqual(expected.beforeEagerReady)
+          oracleAssertion(`lifecycle history comparison at 177`, () =>
+            expect({
+              physicalAcquisitions,
+              result: resultState,
+              status: subscription.status,
+              collectionStatus: collection.status,
+            }).toEqual(expected.beforeEagerReady),
+          )
 
           if (history.interruption === `truncate`) {
             operations.begin()
@@ -178,12 +197,14 @@ describe(`demand created while its Collection is cleaned up`, () => {
           }
           if (expected.afterInterruption) {
             await flushPromises()
-            expect({
-              physicalAcquisitions,
-              result: resultState,
-              status: subscription.status,
-              collectionStatus: collection.status,
-            }).toEqual(expected.afterInterruption)
+            oracleAssertion(`lifecycle history comparison at 194`, () =>
+              expect({
+                physicalAcquisitions,
+                result: resultState,
+                status: subscription.status,
+                collectionStatus: collection.status,
+              }).toEqual(expected.afterInterruption),
+            )
           }
 
           // A failed first load ends its sync run; only a reload starts the
@@ -196,13 +217,15 @@ describe(`demand created while its Collection is cleaned up`, () => {
           await flushPromises()
         }
 
-        expect({
-          physicalAcquisitions,
-          result: resultState,
-          status: subscription.status,
-          rows: [...visible.values()],
-          collectionStatus: collection.status,
-        }).toEqual(expected.settled)
+        oracleAssertion(`lifecycle history comparison at 212`, () =>
+          expect({
+            physicalAcquisitions,
+            result: resultState,
+            status: subscription.status,
+            rows: [...visible.values()],
+            collectionStatus: collection.status,
+          }).toEqual(expected.settled),
+        )
       }, [() => subscription.unsubscribe(), () => collection.cleanup()])
     },
   )
@@ -219,6 +242,7 @@ describe(`demand created while its Collection is cleaned up`, () => {
  */
 describe(`demand parked behind a failed first load across a reload`, () => {
   it.each(parkedReloadDemandCases)(`new run: $newRun`, async (history) => {
+    oracleRoute(`case`)
     const expected = expectedParkedReloadDemand(history)
     let syncRuns = 0
     let loads = 0
@@ -282,13 +306,15 @@ describe(`demand parked behind a failed first load across a reload`, () => {
         laterSnapshot()
         await flushPromises()
       }
-      expect({
-        loads,
-        unloads,
-        result,
-        status: subscription.status,
-        collectionStatus: collection.status,
-      }).toEqual(expected)
+      oracleAssertion(`lifecycle history comparison at 299`, () =>
+        expect({
+          loads,
+          unloads,
+          result,
+          status: subscription.status,
+          collectionStatus: collection.status,
+        }).toEqual(expected),
+      )
     }, [() => subscription.unsubscribe(), () => collection.cleanup()])
   })
 })
@@ -440,6 +466,8 @@ function updateCallerOutcomes(
   }
 }
 
+const replacementPendingReachLabel = `replacement-load-replaces-pending-attempt`
+
 async function runHistory(
   history: ReadonlyArray<LifecycleCommand>,
   runOptions: {
@@ -460,6 +488,12 @@ async function runHistory(
   const check = runOptions.continueAfterMismatch ? expect.soft : expect
   const failures = new Map<number, Error>()
   const abortFailures = new Map<number, Error>()
+  // Judged at each checkpoint, not inside the adapter: a throw from
+  // loadSubset would reject the acquisition instead of failing the oracle.
+  const replacementAbortViolations: Array<string> = []
+  const driverReach = new Set<string>()
+  // Attempts the model had already aborted before the current command.
+  let abortedBeforeStep = new Set<number>()
   const abortFailureForAttempt = (attemptId: number): Error => {
     let failure = abortFailures.get(attemptId)
     if (!failure) {
@@ -627,6 +661,26 @@ async function runHistory(
               )
             }
             watchCoreAbortListeners(observed.id, options.signal)
+            // Law (header: "A replay that replaces an attempt aborts it
+            // too"): every attempt that this command's replay replaces, one
+            // the model aborts in this step, is aborted before its
+            // replacement loads. Attempts aborted in earlier steps were
+            // judged in those steps. The model has already reduced this
+            // command, so the check reads the aborts it recorded.
+            for (const earlier of runtimeAttempts.values()) {
+              if (earlier.id === observed.id) continue
+              const replaced = model.attempts[earlier.id]
+              if (!replaced?.aborted || abortedBeforeStep.has(earlier.id))
+                continue
+              // Reach: the replaced attempt had no settled outcome in the
+              // model when its replacement loaded.
+              if (replaced.outcome === undefined)
+                driverReach.add(replacementPendingReachLabel)
+              if (!earlier.options.signal?.aborted)
+                replacementAbortViolations.push(
+                  `replaced attempt ${earlier.id} is not aborted before replacement ${observed.id} loads`,
+                )
+            }
             owner.attemptId = observed.id
             attemptByOptions.set(options, observed.id)
             observedLoads.push(observed)
@@ -670,71 +724,124 @@ async function runHistory(
       observedTrace,
       expectedTrace: model.trace,
     })
-    check(observedLoads, context).toEqual(model.loads)
-    check(observedUnloads, context).toEqual(model.unloads)
-    check(
-      observedErrors.map(({ attemptId }) => attemptId),
-      context,
-    ).toEqual(model.errors.map(({ attemptId }) => attemptId))
+    oracleAssertion(`lifecycle history comparison at 715`, () =>
+      check(observedLoads, context).toEqual(model.loads),
+    )
+    oracleAssertion(`lifecycle history comparison at 716`, () =>
+      check(observedUnloads, context).toEqual(model.unloads),
+    )
+    oracleAssertion(`lifecycle history comparison at 717`, () =>
+      check(
+        observedErrors.map(({ attemptId }) => attemptId),
+        context,
+      ).toEqual(model.errors.map(({ attemptId }) => attemptId)),
+    )
     for (const [index, { error }] of observedErrors.entries()) {
-      check(error, context).toBe(model.errors[index]?.error)
+      oracleAssertion(`lifecycle history comparison at 722`, () =>
+        check(error, context).toBe(model.errors[index]?.error),
+      )
     }
     for (const { result } of returnedResults) {
-      check(result === true || result instanceof Promise, context).toBe(true)
+      oracleAssertion(`lifecycle history comparison at 725`, () =>
+        check(result === true || result instanceof Promise, context).toBe(true),
+      )
     }
-    check(returnedResults.length, `caller outcome count: ${context}`).toBe(
-      expectedCallers.length,
+    oracleAssertion(`lifecycle history comparison at 727`, () =>
+      check(returnedResults.length, `caller outcome count: ${context}`).toBe(
+        expectedCallers.length,
+      ),
     )
     for (const [index, expected] of expectedCallers.entries()) {
       const actual = returnedResults[index]!.outcome
+      const expectedOutcome = expected.outcome
       const message = `caller outcome ${index}: ${context}`
-      if (expected.outcome.status === `aborted`) {
-        check(actual.status, message).toBe(`rejected`)
+      if (expectedOutcome.status === `aborted`) {
+        oracleAssertion(`lifecycle history comparison at 734`, () =>
+          check(actual.status, message).toBe(`rejected`),
+        )
         if (actual.status === `rejected`)
-          check(actual.error, message).toMatchObject({ name: `AbortError` })
-      } else if (expected.outcome.status === `normalized-rejection`) {
-        check(actual.status, message).toBe(`rejected`)
+          oracleAssertion(`lifecycle history comparison at 736`, () =>
+            check(actual.error, message).toMatchObject({ name: `AbortError` }),
+          )
+      } else if (expectedOutcome.status === `normalized-rejection`) {
+        oracleAssertion(`lifecycle history comparison at 738`, () =>
+          check(actual.status, message).toBe(`rejected`),
+        )
         if (actual.status === `rejected`) {
-          check(actual.error, message).toBeInstanceOf(Error)
-          check(actual.error, message).toMatchObject({
-            message: String(expected.outcome.source),
-          })
-          if (!normalizedRejections.has(expected.outcome.source))
-            normalizedRejections.set(expected.outcome.source, actual.error)
-          check(actual.error, message).toBe(
-            normalizedRejections.get(expected.outcome.source),
+          oracleAssertion(`lifecycle history comparison at 740`, () =>
+            check(actual.error, message).toBeInstanceOf(Error),
+          )
+          oracleAssertion(`lifecycle history comparison at 741`, () =>
+            check(actual.error, message).toMatchObject({
+              message: String(expectedOutcome.source),
+            }),
+          )
+          if (!normalizedRejections.has(expectedOutcome.source))
+            normalizedRejections.set(expectedOutcome.source, actual.error)
+          oracleAssertion(`lifecycle history comparison at 746`, () =>
+            check(actual.error, message).toBe(
+              normalizedRejections.get(expectedOutcome.source),
+            ),
           )
         }
       } else {
-        check(actual, message).toEqual(expected.outcome)
+        oracleAssertion(`lifecycle history comparison at 751`, () =>
+          check(actual, message).toEqual(expectedOutcome),
+        )
         if (
           actual.status === `rejected` &&
-          expected.outcome.status === `rejected`
+          expectedOutcome.status === `rejected`
         ) {
-          check(actual.error, message).toBe(expected.outcome.error)
+          oracleAssertion(`lifecycle history comparison at 756`, () =>
+            check(actual.error, message).toBe(expectedOutcome.error),
+          )
         }
       }
     }
-    check(observedResults, context).toEqual(model.results)
-    check(observedStatuses, context).toEqual(model.statuses)
-    check(subscription.status, context).toBe(model.status)
-    check(subscription.lastError, context).toBe(model.lastError)
-    check(collection.status, context).toBe(model.collectionStatus)
-    check(publications, context).toEqual(
-      Array.from({ length: model.publications }, () => []),
+    oracleAssertion(`lifecycle history comparison at 760`, () =>
+      check(observedResults, context).toEqual(model.results),
     )
-    check(observedTrace, context).toEqual(model.trace)
+    oracleAssertion(`lifecycle history comparison at 761`, () =>
+      check(observedStatuses, context).toEqual(model.statuses),
+    )
+    oracleAssertion(`lifecycle history comparison at 762`, () =>
+      check(subscription.status, context).toBe(model.status),
+    )
+    oracleAssertion(`lifecycle history comparison at 763`, () =>
+      check(subscription.lastError, context).toBe(model.lastError),
+    )
+    oracleAssertion(`lifecycle history comparison at 764`, () =>
+      check(collection.status, context).toBe(model.collectionStatus),
+    )
+    oracleAssertion(`lifecycle history comparison at 765`, () =>
+      check(publications, context).toEqual(
+        Array.from({ length: model.publications }, () => []),
+      ),
+    )
+    oracleAssertion(`lifecycle history comparison at 768`, () =>
+      check(observedTrace, context).toEqual(model.trace),
+    )
+    oracleAssertion(`lifecycle history comparison at 769`, () =>
+      check(
+        replacementAbortViolations,
+        `replaced attempts are aborted before their replacements load (header: "A replay that replaces an attempt aborts it too"): ${context}`,
+      ).toEqual([]),
+    )
     for (const attempt of model.attempts)
       if (attempt.outcome !== undefined && !attempt.aborted)
-        check(
-          coreAbortListeners.get(attempt.id)?.size ?? 0,
-          `abort listeners kept by settled attempt ${attempt.id}: ${context}`,
-        ).toBe(0)
+        oracleAssertion(`lifecycle history comparison at 775`, () =>
+          check(
+            coreAbortListeners.get(attempt.id)?.size ?? 0,
+            `abort listeners kept by settled attempt ${attempt.id}: ${context}`,
+          ).toBe(0),
+        )
     for (const attempt of model.attempts) {
-      check(
-        runtimeAttempts.get(attempt.id)?.options.signal?.aborted,
-        context,
-      ).toBe(attempt.aborted)
+      oracleAssertion(`lifecycle history comparison at 780`, () =>
+        check(
+          runtimeAttempts.get(attempt.id)?.options.signal?.aborted,
+          context,
+        ).toBe(attempt.aborted),
+      )
     }
   }
 
@@ -787,6 +894,9 @@ async function runHistory(
       }
       const runtimeAttempt =
         command.type === `settle` ? selectRuntimeAttempt(command) : undefined
+      abortedBeforeStep = new Set(
+        model.attempts.flatMap(({ id, aborted }) => (aborted ? [id] : [])),
+      )
       const effect = reduceLifecycle(model, command)
       if (command.type === `request` && effect.ownerId !== undefined) {
         const result = model.results.at(-1)!
@@ -810,8 +920,10 @@ async function runHistory(
       }
       updateCallerOutcomes(expectedCallers, model, command, failedAttempts)
       if (command.type === `request`) {
-        check(effect.ownerId).toBe(
-          model.unsubscribed ? undefined : runtimeOwner?.id,
+        oracleAssertion(`lifecycle history comparison at 862`, () =>
+          check(effect.ownerId).toBe(
+            model.unsubscribed ? undefined : runtimeOwner?.id,
+          ),
         )
         const result = subscription.requestSnapshot({
           where: where[command.demand],
@@ -866,15 +978,21 @@ async function runHistory(
             observedTrace.push({ type: `result`, attemptId, resultKind })
           },
         })
-        check(result).toBe(effect.requestResult)
+        oracleAssertion(`lifecycle history comparison at 918`, () =>
+          check(result).toBe(effect.requestResult),
+        )
       } else if (command.type === `abort`) {
-        check(effect.ownerId).toBe(runtimeOwner?.id)
+        oracleAssertion(`lifecycle history comparison at 920`, () =>
+          check(effect.ownerId).toBe(runtimeOwner?.id),
+        )
         if (runtimeOwner) {
           runtimeOwner.aborted = true
           runtimeOwner.controller.abort()
         }
       } else if (command.type === `release`) {
-        check(effect.ownerId).toBe(runtimeOwner?.id)
+        oracleAssertion(`lifecycle history comparison at 926`, () =>
+          check(effect.ownerId).toBe(runtimeOwner?.id),
+        )
         if (runtimeOwner) {
           if (runtimeOwner.attemptId !== undefined) {
             runtimeAttempts.get(runtimeOwner.attemptId)!.current = false
@@ -895,7 +1013,9 @@ async function runHistory(
           }
           runtimeOwners.splice(runtimeOwners.indexOf(owner), 1)
         }
-        check(effect.ownerIds ?? []).toEqual(retired)
+        oracleAssertion(`lifecycle history comparison at 947`, () =>
+          check(effect.ownerIds ?? []).toEqual(retired),
+        )
         // One demand change is one release call.
         subscription.releaseSnapshot(
           ...command.release.map((demand) => where[demand]),
@@ -905,7 +1025,9 @@ async function runHistory(
           where[command.replaced],
         ])
       } else if (command.type === `settle`) {
-        check(effect.attemptId).toBe(runtimeAttempt?.id)
+        oracleAssertion(`lifecycle history comparison at 957`, () =>
+          check(effect.attemptId).toBe(runtimeAttempt?.id),
+        )
         if (effect.attemptId === undefined) {
           // Neither model found an effective settlement.
         } else if (!runtimeAttempt?.deferred) {
@@ -929,7 +1051,9 @@ async function runHistory(
         syncOps?.truncate()
         const receipt = syncOps?.commit()
         if (observedActive && !observedUnsubscribed && model.owners.length) {
-          check(subscription.status).toBe(`loadingSubset`)
+          oracleAssertion(`lifecycle history comparison at 981`, () =>
+            check(subscription.status).toBe(`loadingSubset`),
+          )
         }
         if (receipt !== true) await receipt
       } else if (command.type === `cleanup`) {
@@ -951,7 +1075,10 @@ async function runHistory(
           observedActive = true
         }
         collection.startSyncImmediate()
-        if (queuesReplay) check(subscription.status).toBe(`loadingSubset`)
+        if (queuesReplay)
+          oracleAssertion(`lifecycle history comparison at 1003`, () =>
+            check(subscription.status).toBe(`loadingSubset`),
+          )
       } else {
         for (const attempt of runtimeAttempts.values()) attempt.current = false
         subscription.unsubscribe()
@@ -963,16 +1090,30 @@ async function runHistory(
       runOptions.onResultCheckpoint?.(command, returnedResults, failures)
     }
     if (runOptions.retiredDelivery) {
-      check(observedUnsubscribed).toBe(true)
-      check(collection.subscriberCount).toBe(0)
-      check(runtimeAttempts.size).toBe(1)
+      oracleAssertion(`lifecycle history comparison at 1015`, () =>
+        check(observedUnsubscribed).toBe(true),
+      )
+      oracleAssertion(`lifecycle history comparison at 1016`, () =>
+        check(collection.subscriberCount).toBe(0),
+      )
+      oracleAssertion(`lifecycle history comparison at 1017`, () =>
+        check(runtimeAttempts.size).toBe(1),
+      )
       const attempt = runtimeAttempts.get(0)
       if (!attempt?.deferred)
         throw new Error(`Missing retired acquisition attempt`)
-      check(attempt.settled).toBe(false)
-      check(attempt.options.signal?.aborted).toBe(true)
-      check(returnedResults).toHaveLength(1)
-      check(returnedResults[0]?.outcome.status).toBe(`pending`)
+      oracleAssertion(`lifecycle history comparison at 1021`, () =>
+        check(attempt.settled).toBe(false),
+      )
+      oracleAssertion(`lifecycle history comparison at 1022`, () =>
+        check(attempt.options.signal?.aborted).toBe(true),
+      )
+      oracleAssertion(`lifecycle history comparison at 1023`, () =>
+        check(returnedResults).toHaveLength(1),
+      )
+      oracleAssertion(`lifecycle history comparison at 1024`, () =>
+        check(returnedResults[0]?.outcome.status).toBe(`pending`),
+      )
 
       const observeTerminal = () => ({
         loads: observedLoads.map((load) => ({ ...load })),
@@ -997,19 +1138,31 @@ async function runHistory(
       else attempt.deferred.reject(attempt.failure)
       await flushPromises()
       const delivered = observeTerminal()
-      check(delivered).toEqual(retired)
-      check(delivered.lastError).toBe(retired.lastError)
+      oracleAssertion(`lifecycle history comparison at 1049`, () =>
+        check(delivered).toEqual(retired),
+      )
+      oracleAssertion(`lifecycle history comparison at 1050`, () =>
+        check(delivered.lastError).toBe(retired.lastError),
+      )
       for (const [index, { error }] of delivered.errors.entries()) {
-        check(error).toBe(retired.errors[index]?.error)
+        oracleAssertion(`lifecycle history comparison at 1052`, () =>
+          check(error).toBe(retired.errors[index]?.error),
+        )
       }
       const outcome = returnedResults[0]!.outcome
       if (runOptions.retiredDelivery === `resolve`) {
-        check(outcome).toEqual({ status: `fulfilled`, value: undefined })
+        oracleAssertion(`lifecycle history comparison at 1056`, () =>
+          check(outcome).toEqual({ status: `fulfilled`, value: undefined }),
+        )
       } else {
-        check(outcome.status).toBe(`rejected`)
+        oracleAssertion(`lifecycle history comparison at 1058`, () =>
+          check(outcome.status).toBe(`rejected`),
+        )
         if (outcome.status !== `rejected`)
           throw new Error(`Missing late rejection`)
-        check(outcome.error).toBe(attempt.failure)
+        oracleAssertion(`lifecycle history comparison at 1061`, () =>
+          check(outcome.error).toBe(attempt.failure),
+        )
       }
       terminalReach.add(
         `retired-attempt-delivery:${runOptions.retiredDelivery}`,
@@ -1039,7 +1192,7 @@ async function runHistory(
     )
   }
   if (primaryFailed) throw primaryFailure
-  return new Set([...model.reach, ...terminalReach])
+  return new Set([...model.reach, ...terminalReach, ...driverReach])
 }
 
 if (
@@ -1061,6 +1214,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   it.each([`resolve`, `reject`] as const)(
     `retains an earlier peer failure after aborting it while another peer will %s`,
     async (outcome) => {
+      oracleRoute(`case`)
       await runHistory(
         [
           { type: `cleanup` },
@@ -1077,6 +1231,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )
 
   it(`shares one normalized replay rejection among surviving detached callers`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory(
       [
         { type: `cleanup` },
@@ -1102,6 +1257,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   ] as const)(
     `holds detached callers for their peer until %s`,
     async (finish) => {
+      oracleRoute(`case`)
       const history: Array<LifecycleCommand> = [
         { type: `cleanup` },
         { type: `request`, demand: `a` },
@@ -1119,18 +1275,23 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
         cancellation: `reject`,
         onResultCheckpoint: (_command, callers) => {
           if (checkpoints++ === 4) {
-            expect(callers.map(({ outcome }) => outcome.status)).toEqual([
-              `pending`,
-              `pending`,
-            ])
+            oracleAssertion(`lifecycle history comparison at 1174`, () =>
+              expect(callers.map(({ outcome }) => outcome.status)).toEqual([
+                `pending`,
+                `pending`,
+              ]),
+            )
           }
         },
       })
-      expect(checkpoints).toBe(6)
+      oracleAssertion(`lifecycle history comparison at 1181`, () =>
+        expect(checkpoints).toBe(6),
+      )
     },
   )
 
   it(`does not revive a discarded caller when its logical demand restarts`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       { type: `cleanup` },
       { type: `request`, demand: `a` },
@@ -1151,6 +1312,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       ),
     ),
   )(`checks corrupted caller outcomes: %j`, async ({ origin, fault }) => {
+    oracleRoute(`calibration`)
     const history: Array<LifecycleCommand> = [
       ...(origin === `detached` ? [{ type: `cleanup` } as const] : []),
       { type: `request`, demand: `a` },
@@ -1162,12 +1324,15 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
         fault === `wrong-error` ? `reject` : `resolve`,
       ),
     ]
-    await expect(runHistory(history, { callerFault: fault })).rejects.toThrow(
-      `caller outcome`,
+    await oracleAssertion(`lifecycle history comparison at 1219`, () =>
+      expect(runHistory(history, { callerFault: fault })).rejects.toThrow(
+        `caller outcome`,
+      ),
     )
   })
 
   it(`retains the caller mismatch and a separate cleanup failure`, async () => {
+    oracleRoute(`calibration`)
     const cleanupFailure = new Error(`cleanup sentinel`)
     let reported: unknown
     try {
@@ -1186,25 +1351,37 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     } catch (error) {
       reported = error
     }
-    expect(reported).toBeInstanceOf(AggregateError)
+    oracleAssertion(`lifecycle history comparison at 1244`, () =>
+      expect(reported).toBeInstanceOf(AggregateError),
+    )
     const combined = reported as AggregateError
-    expect((combined.cause as Error).message).toContain(`caller outcome`)
-    expect(combined.errors).toHaveLength(1)
-    expect((combined.errors[0] as Error).cause).toBe(cleanupFailure)
+    oracleAssertion(`lifecycle history comparison at 1246`, () =>
+      expect((combined.cause as Error).message).toContain(`caller outcome`),
+    )
+    oracleAssertion(`lifecycle history comparison at 1247`, () =>
+      expect(combined.errors).toHaveLength(1),
+    )
+    oracleAssertion(`lifecycle history comparison at 1248`, () =>
+      expect((combined.errors[0] as Error).cause).toBe(cleanupFailure),
+    )
   })
 
   for (const outcome of [`resolve`, `reject`] as const) {
     it(`keeps terminal observations unchanged when a retired acquisition attempt ${outcome}s`, async () => {
+      oracleRoute(`fixed history`)
       const reach = await runHistory(
         [{ type: `request`, demand: `a` }, { type: `unsubscribe` }],
         { retiredDelivery: outcome },
       )
-      expect(reach).toContain(`retired-attempt-delivery:${outcome}`)
+      oracleAssertion(`lifecycle history comparison at 1258`, () =>
+        expect(reach).toContain(`retired-attempt-delivery:${outcome}`),
+      )
     })
   }
 
   for (const firstOutcome of [`resolve`, `reject`] as const) {
     it(`settles only the corresponding returned result when the first acquisition ${firstOutcome}s`, async () => {
+      oracleRoute(`fixed history`)
       const secondOutcome = firstOutcome === `resolve` ? `reject` : `resolve`
       const history: Array<LifecycleCommand> = [
         { type: `request`, demand: `a` },
@@ -1237,27 +1414,43 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       let cut = 0
       await runHistory(history, {
         onResultCheckpoint: (_command, results, failures) => {
-          expect(results.map(({ outcome }) => outcome.status)).toEqual(
-            expectedStatuses[cut++],
+          oracleAssertion(`lifecycle history comparison at 1297`, () =>
+            expect(results.map(({ outcome }) => outcome.status)).toEqual(
+              expectedStatuses[cut++],
+            ),
           )
           for (const [index, returned] of results.entries()) {
-            expect(returned.attemptId).toBe(index)
-            expect(returned.result).toBeInstanceOf(Promise)
+            oracleAssertion(`lifecycle history comparison at 1301`, () =>
+              expect(returned.attemptId).toBe(index),
+            )
+            oracleAssertion(`lifecycle history comparison at 1302`, () =>
+              expect(returned.result).toBeInstanceOf(Promise),
+            )
             if (identities.length === index) identities.push(returned.result)
-            expect(returned.result).toBe(identities[index])
-            if (returned.outcome.status === `fulfilled`) {
-              expect(returned.outcome.value).toBeUndefined()
-            } else if (returned.outcome.status === `rejected`) {
-              expect(returned.outcome.error).toBe(failures.get(index))
+            oracleAssertion(`lifecycle history comparison at 1304`, () =>
+              expect(returned.result).toBe(identities[index]),
+            )
+            const outcome = returned.outcome
+            if (outcome.status === `fulfilled`) {
+              oracleAssertion(`lifecycle history comparison at 1306`, () =>
+                expect(outcome.value).toBeUndefined(),
+              )
+            } else if (outcome.status === `rejected`) {
+              oracleAssertion(`lifecycle history comparison at 1308`, () =>
+                expect(outcome.error).toBe(failures.get(index)),
+              )
             }
           }
         },
       })
-      expect(cut).toBe(4)
+      oracleAssertion(`lifecycle history comparison at 1313`, () =>
+        expect(cut).toBe(4),
+      )
     })
   }
 
   it(`covers every required command and cross-phase transition`, async () => {
+    oracleRoute(`case`)
     const reach = new Set<string>()
     for (const history of [
       ...greenLifecycleHistories,
@@ -1304,15 +1497,20 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       `request-while-cleaned`,
       `partial-generation-supersession`,
     ])
-    expect([...required].filter((label) => !reach.has(label))).toEqual([])
+    oracleAssertion(`lifecycle history comparison at 1365`, () =>
+      expect([...required].filter((label) => !reach.has(label))).toEqual([]),
+    )
   })
 
   it(`names the overlapping replay transition in the model`, () => {
+    oracleRoute(`case`)
     const model = createLifecycleModel()
     for (const command of pendingSupersessionHistory) {
       reduceLifecycle(model, command)
     }
-    expect(model.reach).toContain(`overlapping-replay`)
+    oracleAssertion(`lifecycle history comparison at 1374`, () =>
+      expect(model.reach).toContain(`overlapping-replay`),
+    )
   })
 
   it.each([
@@ -1337,11 +1535,13 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   ])(
     `does not wait for an aborted load to settle for $name`,
     async ({ history }) => {
+      oracleRoute(`case`)
       await runHistory(history)
     },
   )
 
   it(`releases exact ownership while older replay work is pending`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory(
       [
         ...pendingSupersessionHistory,
@@ -1367,6 +1567,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )(
     `tracks $cancellation cancellation across $replays replay(s) ending in $outcome`,
     async ({ cancellation, replays, outcome }) => {
+      oracleRoute(`case`)
       await runHistory(
         [
           { type: `request`, demand: `a` },
@@ -1403,11 +1604,13 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   ])(
     `queues replay without reacquiring an aborted demand on $name`,
     async ({ history }) => {
+      oracleRoute(`case`)
       await runHistory(history)
     },
   )
 
   it(`does not release an unacquired replacement after an aborted demand replays`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory(
       [
         ...abortReplayHistory,
@@ -1420,6 +1623,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   })
 
   it(`replays a live peer without reacquiring an aborted demand`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       { type: `request`, demand: `a` },
       { type: `request`, demand: `b` },
@@ -1445,6 +1649,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   })
 
   it(`restarts a live peer without reacquiring an aborted demand and completes teardown`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory(mixedAbortedRestartHistory, {
       continueAfterMismatch: true,
     })
@@ -1472,11 +1677,13 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   it.each(syncReplayScenarios)(
     `settles queued synchronous $transition with $ownerCount owner(s), abort=$abortFirst`,
     async ({ history }) => {
+      oracleRoute(`case`)
       await runHistory(history, { acquisitionMode: `sync-success` })
     },
   )
 
   it(`preserves acquisition lease ownership across queued synchronous replay`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory(syncLifecycleHistory, {
       acquisitionMode: `sync-success`,
       continueAfterMismatch: true,
@@ -1537,6 +1744,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   }>)(
     `continues through the full synchronous replay suffix for $name`,
     async ({ history }) => {
+      oracleRoute(`case`)
       await runHistory(history, {
         acquisitionMode: `sync-success`,
         continueAfterMismatch: true,
@@ -1545,6 +1753,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )
 
   it(`publishes a new snapshot while canceled initial work still holds readiness`, async () => {
+    oracleRoute(`fixed history`)
     // Seed 1413322355, path 757:13:15:15:9:9:9. This checks an empty snapshot
     // notification: initial readiness is not a replacement publication gate.
     await runHistory(
@@ -1582,6 +1791,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   })
 
   it(`keeps a new snapshot private after failed restart`, async () => {
+    oracleRoute(`fixed history`)
     // Minimized from seed 317005625 at 100×. The mismatch is an empty
     // notification, not lost rows: failed replacement must keep reads private.
     await runHistory(
@@ -1624,32 +1834,83 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     'change:between-releases-would-publish': `judging between releases would publish a replay the change fails`,
     'change:between-releases-would-fail': `judging between releases would fail a replay the change publishes`,
   } as const
-  const demandChangeReach = createOracleReach(
-    `subscription-lifecycle.demand-change`,
-    Object.values(demandChangeReachStates),
-  )
+  const demandChangeReached = new Set<string>()
+  // Preserve the old aggregate minimum-one census across the same campaigns.
+  // Native determinism probes and the added constructed random campaign do
+  // not supply reach to the original campaigns' aggregate gate.
+  let countingCampaign = true
+  beforeEach(({ task }) => {
+    countingCampaign =
+      (task.name === `random seed` &&
+        task.suite?.name !== `subscription-lifecycle.constructed-history`) ||
+      task.name.startsWith(`fixed seed `) ||
+      !task.suite?.name.startsWith(`subscription-lifecycle.`)
+  })
   let demandChangeHistoriesRan = false
   afterAll(() => {
-    if (demandChangeHistoriesRan) demandChangeReach.assertReached()
+    if (demandChangeHistoriesRan && !oracleReplayRequested())
+      oracleAssertion(`lifecycle history comparison at 1708`, () =>
+        expect(
+          Object.values(demandChangeReachStates).filter(
+            (state) => !demandChangeReached.has(state),
+          ),
+        ).toEqual([]),
+      )
   })
   const runDemandChangeHistory = async (
     history: ReadonlyArray<LifecycleCommand>,
     cancellation: `manual` | `reject` = `manual`,
   ) => {
-    demandChangeReach.beginHistory()
     const reached = await runHistory(history, { cancellation })
+    if (!countingCampaign) return
+    markLifecycleRows(reached)
     for (const [label, state] of Object.entries(demandChangeReachStates))
-      if (reached.has(label)) demandChangeReach.reach(state)
+      if (reached.has(label)) demandChangeReached.add(state)
   }
 
   it(`judges a replay once after a change that retires a replacement and a pending owner`, async () => {
+    oracleRoute(`fixed history`)
     const reached = await runHistory(changeRetiresReplacementHistory)
-    expect(reached).toContain(`change:between-releases-would-publish`)
+    oracleAssertion(`lifecycle history comparison at 1724`, () =>
+      expect(reached).toContain(`change:between-releases-would-publish`),
+    )
   })
+
+  // Two owners across a truncate: each replacement load judges the attempts
+  // this command's replay replaces. These replay the shared driver and model.
+  it.each([
+    {
+      name: `an aborted peer and a pending owner`,
+      history: [
+        { type: `request`, demand: `a` },
+        { type: `request`, demand: `b` },
+        { type: `abort`, demand: `a` },
+        { type: `truncate` },
+      ],
+    },
+    {
+      name: `an abort after the first replay`,
+      history: [
+        { type: `request`, demand: `a` },
+        { type: `request`, demand: `b` },
+        { type: `truncate` },
+        { type: `abort`, demand: `a` },
+        { type: `truncate` },
+      ],
+    },
+  ] satisfies Array<{ name: string; history: Array<LifecycleCommand> }>)(
+    `replaces each owner's pending attempt before its replacement loads for $name`,
+    async ({ history }) => {
+      oracleRoute(`fixed history`)
+      await runHistory(history)
+      await runHistory(history, { cancellation: `reject` })
+    },
+  )
 
   // Prompt cancellation of the replaced owner's replay load is a settlement:
   // the held replacement covers it, so the replay publishes.
   it(`publishes a replay when a covered owner's replay load is canceled`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory(
       [
         { type: `request`, demand: `c` },
@@ -1704,86 +1965,183 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   ] satisfies Array<{ name: string; history: Array<LifecycleCommand> }>)(
     `keeps a replay failed when $name`,
     async ({ history }) => {
+      oracleRoute(`case`)
       await runDemandChangeHistory(history)
     },
   )
 
-  const runs = 80 * multiplier
   const cancellationArbitrary = fc.constantFrom(
     `manual` as const,
     `reject` as const,
   )
 
-  fixedCampaign.prop([greenLifecycleHistoryArbitrary, cancellationArbitrary], {
-    numRuns: runs,
-    seed: 1_657_003,
-  })(
-    `matches the pure lifecycle model for a fixed seed`,
-    async (history, cancellation) => {
-      await runHistory(history, { cancellation })
+  // A replacement load that replaces a pending attempt is the state the
+  // replacement-abort law judges. The campaigns must reach it.
+  const replacementReachStates = {
+    [replacementPendingReachLabel]: `a replacement load while its replaced attempt is pending`,
+  } as const
+  const replacementReached = new Set<string>()
+  const lifecycleRowsReached = new Set<string>()
+  const markLifecycleRows = (reached: ReadonlySet<string>) => {
+    for (const row of lifecycleRowLabels)
+      if (reached.has(row)) lifecycleRowsReached.add(row)
+  }
+  let greenHistoriesRan = false
+  afterAll(() => {
+    if (oracleReplayRequested()) return
+    if (greenHistoriesRan)
+      oracleAssertion(`lifecycle history comparison at 1841`, () =>
+        expect(
+          Object.values(replacementReachStates).filter(
+            (state) => !replacementReached.has(state),
+          ),
+        ).toEqual([]),
+      )
+    if (greenHistoriesRan || demandChangeHistoriesRan)
+      oracleAssertion(`lifecycle history comparison at 1843`, () =>
+        expect(
+          lifecycleRowLabels.filter((row) => !lifecycleRowsReached.has(row)),
+        ).toEqual([]),
+      )
+  })
+  const runGreenHistory = async (
+    history: ReadonlyArray<LifecycleCommand>,
+    cancellation: `manual` | `reject`,
+  ) => {
+    const reached = await runHistory(history, { cancellation })
+    if (!countingCampaign) return
+    greenHistoriesRan = true
+    if (reached.has(replacementPendingReachLabel))
+      replacementReached.add(
+        replacementReachStates[replacementPendingReachLabel],
+      )
+    markLifecycleRows(reached)
+  }
+
+  // Constructed prefixes reach the two pairs that no generated history
+  // produced: a replacement followed by a change that names no owned demand,
+  // and a replacement after a restart. Each prefix is the shortest legal path
+  // the lifecycle table search found, followed by a random tail.
+  const constructedPrefixes: ReadonlyArray<ReadonlyArray<LifecycleCommand>> = [
+    [
+      { type: `request`, demand: `a` },
+      { type: `request`, demand: `b` },
+      { type: `replace`, demand: `a`, replaced: `b` },
+      { type: `change`, release: [`c`] },
+    ],
+    [
+      { type: `request`, demand: `a` },
+      { type: `request`, demand: `b` },
+      { type: `cleanup` },
+      { type: `restart` },
+      { type: `replace`, demand: `a`, replaced: `b` },
+    ],
+  ]
+  const constructedPrefixArbitrary = fc
+    .tuple(
+      fc.constantFrom(...constructedPrefixes),
+      fc.array(lifecycleCommandArbitrary, { maxLength: 8 }),
+    )
+    .map(([prefix, tail]) => [...prefix, ...tail])
+  // Each registration retains its former grammar and fixed-seed draw sequence.
+  // Constructed prefixes also receive the native API's fresh campaign.
+  oracleProperty({
+    id: `subscription-lifecycle.constructed-history`,
+    law: {
+      statement: `Logical demand, physical acquisition, caller outcomes, and replacement authority follow the independent lifecycle history.`,
+      authority: `The shared lifecycle grammar and this file's contract prose; Collection lifecycle and ARCHITECTURE laws 9 and 10.`,
+      limits: `The unchanged controlled adapter command grammar and post-command observations; row contents and real provider behavior remain separately owned.`,
     },
-    120_000,
-  )
-  randomCampaign(`subscription-lifecycle.async-history`).prop(
-    [greenLifecycleHistoryArbitrary, cancellationArbitrary],
-    oracleRandomParameters(
-      runs,
-      replay,
+    // What this oracle owns: the gap report judges the subscription's logical
+    // demand and physical acquisition bookkeeping in subscription.ts, as the
+    // histories below drive it, by this file's tests. The lifecycle model lives in
+    // the grammar companion, which declares it.
+    owns: [`src/collection/subscription.ts`],
+    histories: {
+      arbitrary: fc.tuple(constructedPrefixArbitrary, cancellationArbitrary),
+      runs: 80,
+      fixedSeeds: [1657011],
+    },
+    ...subscriptionComparison<[Array<LifecycleCommand>, `manual` | `reject`]>(
+      `subscription-lifecycle.constructed-history`,
+      async ([history, cancellation]) => {
+        await runGreenHistory(history, cancellation)
+      },
+    ),
+    check: forwardAssertionJudgment,
+    timeout: 120_000,
+  })
+  oracleProperty({
+    id: `subscription-lifecycle.async-history`,
+    law: {
+      statement: `Logical demand, physical acquisition, caller outcomes, and replacement authority follow the independent lifecycle history.`,
+      authority: `The shared lifecycle grammar and this file's contract prose; Collection lifecycle and ARCHITECTURE laws 9 and 10.`,
+      limits: `The unchanged controlled adapter command grammar and post-command observations; row contents and real provider behavior remain separately owned.`,
+    },
+    owns: [`src/collection/subscription.ts`],
+    histories: {
+      arbitrary: fc.tuple(
+        greenLifecycleHistoryArbitrary,
+        cancellationArbitrary,
+      ),
+      runs: 80,
+      fixedSeeds: [1657003],
+    },
+    ...subscriptionComparison<[Array<LifecycleCommand>, `manual` | `reject`]>(
       `subscription-lifecycle.async-history`,
+      async ([history, cancellation]) => {
+        await runGreenHistory(history, cancellation)
+      },
     ),
-  )(
-    `matches the pure lifecycle model for a random or replayed seed`,
-    async (history, cancellation) => {
-      await runHistory(history, { cancellation })
+    check: forwardAssertionJudgment,
+    timeout: 120_000,
+  })
+  oracleProperty({
+    id: `subscription-lifecycle.demand-change`,
+    law: {
+      statement: `Logical demand, physical acquisition, caller outcomes, and replacement authority follow the independent lifecycle history.`,
+      authority: `The shared lifecycle grammar and this file's contract prose; Collection lifecycle and ARCHITECTURE laws 9 and 10.`,
+      limits: `The unchanged controlled adapter command grammar and post-command observations; row contents and real provider behavior remain separately owned.`,
     },
-    120_000,
-  )
-  fixedCampaign.prop(
-    [demandChangeLifecycleHistoryArbitrary, cancellationArbitrary],
-    { numRuns: 5 * runs, seed: 1_657_005 },
-  )(
-    `judges a replay once per demand change for a fixed seed`,
-    async (history, cancellation) => {
-      demandChangeHistoriesRan = true
-      await runDemandChangeHistory(history, cancellation)
+    owns: [`src/collection/subscription.ts`],
+    histories: {
+      arbitrary: fc.tuple(
+        demandChangeLifecycleHistoryArbitrary,
+        cancellationArbitrary,
+      ),
+      runs: 400,
+      fixedSeeds: [1657005],
     },
-    // Five times the base budget; a run multiplier scales its histories.
-    120_000 * multiplier,
-  )
-  randomCampaign(`subscription-lifecycle.demand-change`).prop(
-    [demandChangeLifecycleHistoryArbitrary, cancellationArbitrary],
-    oracleRandomParameters(
-      5 * runs,
-      replay,
+    ...subscriptionComparison<[Array<LifecycleCommand>, `manual` | `reject`]>(
       `subscription-lifecycle.demand-change`,
+      async ([history, cancellation]) => {
+        if (countingCampaign) demandChangeHistoriesRan = true
+        await runDemandChangeHistory(history, cancellation)
+      },
     ),
-  )(
-    `judges a replay once per demand change for a random or replayed seed`,
-    async (history, cancellation) => {
-      demandChangeHistoriesRan = true
-      await runDemandChangeHistory(history, cancellation)
+    check: forwardAssertionJudgment,
+    timeout: 120_000 * multiplier,
+  })
+  oracleProperty({
+    id: `subscription-lifecycle.sync-history`,
+    law: {
+      statement: `Synchronous acquisitions refine the same independent lifecycle history.`,
+      authority: `The shared lifecycle grammar and this file's synchronous acquisition contract.`,
+      limits: `The unchanged synchronous success grammar; asynchronous outcomes use the adjacent owners.`,
     },
-    // Five times the base budget; a run multiplier scales its histories.
-    120_000 * multiplier,
-  )
-  fixedCampaign.prop([syncLifecycleHistoryArbitrary], {
-    numRuns: runs,
-    seed: 1_657_004,
-  })(
-    `matches synchronous success histories for a fixed seed`,
-    async (history) => {
-      await runHistory(history, { acquisitionMode: `sync-success` })
+    owns: [`src/collection/subscription.ts`],
+    histories: {
+      arbitrary: syncLifecycleHistoryArbitrary,
+      runs: 80,
+      fixedSeeds: [1_657_004],
     },
-    120_000,
-  )
-  randomCampaign(`subscription-lifecycle.sync-history`).prop(
-    [syncLifecycleHistoryArbitrary],
-    oracleRandomParameters(runs, replay, `subscription-lifecycle.sync-history`),
-  )(
-    `matches synchronous success histories for a random or replayed seed`,
-    async (history) => {
-      await runHistory(history, { acquisitionMode: `sync-success` })
-    },
-    120_000,
-  )
+    ...subscriptionComparison<Array<LifecycleCommand>>(
+      `subscription-lifecycle.sync-history`,
+      async (history) => {
+        await runHistory(history, { acquisitionMode: `sync-success` })
+      },
+    ),
+    check: forwardAssertionJudgment,
+    timeout: 120_000,
+  })
 })

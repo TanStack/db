@@ -19,6 +19,7 @@ import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { declareOracle } from './oracle-declaration.js'
+import { oracleRoute } from './oracle-config.js'
 import type { SyncConfig } from '../src/types.js'
 
 type Row = { id: number; value: string }
@@ -67,7 +68,11 @@ function expectReentrantStatuses(
   expect(statuses).toEqual(last === false ? [] : ['ready'])
 }
 
+// What this oracle owns: the gap report judges how a truncate's replacement
+// rows set the Collection's readiness, in the sync path of sync.ts, by this
+// file's tests.
 declareOracle({
+  owns: [`src/collection/sync.ts`],
   check: [expectReplacementStatus, expectReentrantStatuses],
   model: [expectedReplacementStatus],
 })
@@ -75,6 +80,7 @@ declareOracle({
 it.each(cells)(
   'replacement readiness follows the final authored intent: %j',
   async ({ status, held, first, last }) => {
+    oracleRoute(`case`)
     let sync!: Sync
     const finish = createDeferred<void>()
     const c = createCollection<Row, number>({
@@ -146,6 +152,7 @@ it.each(cells)(
 it.each(intents.flatMap((first) => intents.map((last) => ({ first, last }))))(
   'composes readiness of reentrant replacement batches: %j',
   async ({ first, last }) => {
+    oracleRoute(`case`)
     let sync!: Sync
     const c = createCollection<Row, number>({
       getKey: (row) => row.id,

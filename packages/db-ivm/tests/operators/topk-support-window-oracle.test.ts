@@ -1,5 +1,5 @@
 import { writeSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it as vitestIt } from 'vitest'
 import fc from 'fast-check'
 import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
@@ -8,17 +8,19 @@ import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalI
 import { groupedTopKWithFractionalIndex } from '../../src/operators/groupedTopKWithFractionalIndex.js'
 import { orderByWithFractionalIndex } from '../../src/operators/orderBy.js'
 import {
-  oraclePropertyOptions,
   oracleReplayTest,
-  oracleRuns,
+  oracleRoute,
 } from '../../../db/tests/oracle-config.js'
 import { declareOracle } from '../../../db/tests/oracle-declaration.js'
-import { createOracleReach } from '../../../db/tests/oracle-reach.js'
+import { oracleProperty } from '../../../db/tests/oracle-property.js'
+import { atOracleCheckpoint } from '../../../db/tests/oracle-failure-fidelity.js'
 import {
-  atOracleCheckpoint,
-  createOracleFailureFidelity,
-} from '../../../db/tests/oracle-failure-fidelity.js'
+  checkTopKComparisons,
+  topKRecorder,
+  topKReferences,
+} from './topk-property-oracle.js'
 import { TopKRelation } from './topk-relation-oracle.js'
+import type { TopKComparisonRecorder } from './topk-relation-oracle.js'
 import type { TopKWithFractionalIndexOptions } from '../../src/operators/topKWithFractionalIndex.js'
 
 declareOracle({
@@ -38,13 +40,13 @@ declareOracle({
  * calibrate that checker without exercising production.
  *
  * The grammar covers five finite scalar keys, one fixed payload per key,
- * support 0..3, and offset/limit 0..6. The numeric-window lane also reaches
+ * support 0..3, and offset/limit 0..6. The numeric-window grammar also reaches
  * safe-integer offsets and widths near Number.MAX_SAFE_INTEGER. Every input turn and window move has
  * a graph-run checkpoint for output rows and reported window size.
- * The pinned 0/1/2 support crossing and boundary history distinguish presence
+ * The fixed 0/1/2 support crossing and boundary history distinguish presence
  * from raw multiplicity and inclusive from displaced window cuts. Row replacements,
  * multiple groups, negative net support, and downstream lazy acquisition are
- * outside this owner. The numeric lane does observe the empty output message
+ * outside this owner. The numeric-window grammar does observe the empty output message
  * that lets a downstream graph respond to changed requested demand.
  */
 
@@ -78,20 +80,7 @@ function requestedWindowChanged(before: Window, after: Window): boolean {
 // The fixed and random campaigns share the same property, recorder, checks,
 // and run budget. A path replay of this property selects only its random
 // campaign; a seed without a path reseeds it.
-const supportWindowProperty = `ivm.topk-support-window`
-const runs = oracleRuns(100)
-const campaigns = [
-  {
-    name: `fixed`,
-    test: oracleReplayTest(it),
-    parameters: { numRuns: runs, seed: 409033 },
-  },
-  {
-    name: `random`,
-    test: oracleReplayTest(it, supportWindowProperty),
-    parameters: oraclePropertyOptions(100, supportWindowProperty),
-  },
-]
+const it = oracleReplayTest(vitestIt)
 // Slot chooses typed identity and rank; support chooses the presence crossing;
 // offset chooses the first selected rank; limit chooses window width. Removing
 // any of these axes loses its corresponding distinction. The grammar rejects
@@ -123,134 +112,149 @@ describe.each([
   { name: `array`, operator: topKWithFractionalIndex },
   { name: `grouped`, operator: grouped },
 ])(`Signed support and window oracle: $name`, ({ operator }) => {
-  for (const campaign of campaigns)
-    campaign.test(
-      `matches counted typed keys at every cut (${campaign.name} campaign)`,
-      () => {
-        let firstFailure:
-          | {
-              observation: `rows` | `size`
-              checkpoint: `input` | `move`
-              step: number
-              steps: Array<Step>
-              message: string
-            }
-          | undefined
-        fc.assert(
-          fc.property(
-            fc.array(
-              fc.record({
-                slot: fc.integer({ min: 0, max: keys.length - 1 }),
-                support: fc.integer({ min: 0, max: 3 }),
-                offset: fc.integer({ min: 0, max: 6 }),
-                limit: fc.integer({ min: 0, max: 6 }),
-              }),
-              { minLength: 1, maxLength: 35 },
-            ),
-            (steps) => {
-              const graph = new D2()
-              const input = graph.newInput<[Key, Row]>()
-              const relation = new TopKRelation<Key>()
-              const counts = new Map<Key, number>()
-              let window = { offset: 0, limit: 3 }
-              let size!: () => number
-              let move!: (options: typeof window) => void
-              const rowFor = (key: Key): Row => ({
-                id: 10 - keys.indexOf(key),
-                value: `tie`,
-              })
-              input.pipe(
-                operator(() => 0, {
-                  ...window,
-                  setSizeCallback: (getSize) => {
-                    size = getSize
-                  },
-                  setWindowFn: (setWindow) => {
-                    move = setWindow
-                  },
-                }),
-                output((message) => relation.add(message.getInner())),
-              )
-              graph.finalize()
-              expect(size).toBeTypeOf(`function`)
-              expect(move).toBeTypeOf(`function`)
-              const check = (
-                checkpoint: `input` | `move`,
-                step: number,
-              ): boolean => {
-                const selected = selectedWindowKeys(
-                  orderedKeys.filter((key) => (counts.get(key) ?? 0) > 0),
-                  window,
-                )
-                const assertAt = (
-                  observation: `rows` | `size`,
-                  assertion: () => void,
-                ): boolean => {
-                  try {
-                    assertion()
-                    return true
-                  } catch (error) {
-                    firstFailure ??= {
-                      observation,
-                      checkpoint,
-                      step,
-                      steps: [...steps],
-                      message:
-                        error instanceof Error ? error.message : String(error),
-                    }
-                    // A smaller history is a replay only if it violates the
-                    // same observation at the same graph-run checkpoint.
-                    if (
-                      firstFailure.observation === observation &&
-                      firstFailure.checkpoint === checkpoint
-                    ) {
-                      if (error instanceof Error)
-                        error.message += `\nOriginal ${firstFailure.observation} mismatch after ${firstFailure.checkpoint} run at step ${firstFailure.step}: ${firstFailure.message}; generated history: ${JSON.stringify(firstFailure.steps)}`
-                      throw error
-                    }
-                    return false
-                  }
-                }
-                if (
-                  !assertAt(`rows`, () =>
-                    relation.expectRows(
-                      selected.map((key) => [key, rowFor(key).id, `tie`]),
-                    ),
-                  )
-                )
-                  return false
-                return assertAt(`size`, () =>
-                  expect(size()).toBe(selected.length),
-                )
-              }
-              // Pin positivity crossings before every generated history.
-              const history = [1, 2, 1, 0, 2, 1, 0].map((support) => ({
-                slot: 0,
-                support,
-                offset: 0,
-                limit: 3,
-              }))
-              for (const [index, action] of [...history, ...steps].entries()) {
-                const key = keys[action.slot]!
-                const weight = action.support - (counts.get(key) ?? 0)
-                counts.set(key, action.support)
-                input.sendData(new MultiSet([[[key, rowFor(key)], weight]]))
-                graph.run()
-                if (!check(`input`, index)) return
-                window = { offset: action.offset, limit: action.limit }
-                move(window)
-                graph.run()
-                if (!check(`move`, index)) return
-              }
-            },
-          ),
-          {
-            ...campaign.parameters,
-            examples: [[boundaryHistory]],
+  let firstFailure:
+    | {
+        observation: `rows` | `size`
+        checkpoint: `input` | `move`
+        step: number
+        steps: Array<Step>
+        message: string
+      }
+    | undefined
+  beforeEach(() => {
+    firstFailure = undefined
+  })
+  oracleProperty<Array<Step>, Array<unknown>>({
+    id: `ivm.topk-support-window`,
+    law: {
+      statement: `Select positive typed-key support at every input and window-move cut, with unit indexed output and the reported selected size.`,
+      authority: `The existing top-K support/window contract documented above.`,
+      limits: `The original five-key, support 0..3 and offset/limit 0..6 grammar, with one payload per key.`,
+    },
+    // What this oracle owns: the gap report judges these entries, and their
+    // reference trees within the package, by this file's tests.
+    owns: [
+      `src/operators/topKWithFractionalIndex.ts#topKWithFractionalIndex`,
+      `src/operators/groupedTopKWithFractionalIndex.ts#groupedTopKWithFractionalIndex`,
+      `src/operators/orderBy.ts#orderByWithFractionalIndex`,
+    ],
+    histories: {
+      arbitrary: fc.array(
+        fc.record({
+          slot: fc.integer({ min: 0, max: keys.length - 1 }),
+          support: fc.integer({ min: 0, max: 3 }),
+          offset: fc.integer({ min: 0, max: 6 }),
+          limit: fc.integer({ min: 0, max: 6 }),
+        }),
+        { minLength: 1, maxLength: 35 },
+      ),
+      runs: 100,
+      fixedSeeds: [409033],
+      fixed: [
+        { name: `support and boundary history`, history: boundaryHistory },
+      ],
+    },
+    model: topKReferences,
+    driver: (steps, observe) => {
+      const graph = new D2()
+      const input = graph.newInput<[Key, Row]>()
+      const recorder = topKRecorder(observe)
+      const relation = new TopKRelation<Key>(recorder.record)
+      const counts = new Map<Key, number>()
+      let window = { offset: 0, limit: 3 }
+      let size!: () => number
+      let move!: (options: typeof window) => void
+      const rowFor = (key: Key): Row => ({
+        id: 10 - keys.indexOf(key),
+        value: `tie`,
+      })
+      input.pipe(
+        operator(() => 0, {
+          ...window,
+          setSizeCallback: (getSize) => {
+            size = getSize
           },
+          setWindowFn: (setWindow) => {
+            move = setWindow
+          },
+        }),
+        output((message) => relation.add(message.getInner())),
+      )
+      graph.finalize()
+      recorder.record(`size callback installed`, typeof size, `function`)
+      expect(size).toBeTypeOf(`function`)
+      recorder.record(`move callback installed`, typeof move, `function`)
+      expect(move).toBeTypeOf(`function`)
+      const check = (checkpoint: `input` | `move`, step: number): boolean => {
+        recorder.at(checkpoint)
+        const selected = selectedWindowKeys(
+          orderedKeys.filter((key) => (counts.get(key) ?? 0) > 0),
+          window,
         )
-      },
-    )
+        const assertAt = (
+          observation: `rows` | `size`,
+          assertion: () => void,
+        ): boolean => {
+          try {
+            assertion()
+            return true
+          } catch (error) {
+            firstFailure ??= {
+              observation,
+              checkpoint,
+              step,
+              steps: [...steps],
+              message: error instanceof Error ? error.message : String(error),
+            }
+            // A smaller history is a replay only if it violates the
+            // same observation at the same graph-run checkpoint.
+            if (
+              firstFailure.observation === observation &&
+              firstFailure.checkpoint === checkpoint
+            ) {
+              if (error instanceof Error)
+                error.message += `\nOriginal ${firstFailure.observation} mismatch after ${firstFailure.checkpoint} run at step ${firstFailure.step}: ${firstFailure.message}; generated history: ${JSON.stringify(firstFailure.steps)}`
+              throw error
+            }
+            return false
+          }
+        }
+        if (
+          !assertAt(`rows`, () =>
+            relation.expectRows(
+              selected.map((key) => [key, rowFor(key).id, `tie`]),
+            ),
+          )
+        )
+          return false
+        return assertAt(`size`, () => {
+          const actualSize = size()
+          recorder.record(`size`, actualSize, selected.length)
+          expect(actualSize).toBe(selected.length)
+        })
+      }
+      // Fix positivity crossings before every generated history.
+      const history = [1, 2, 1, 0, 2, 1, 0].map((support) => ({
+        slot: 0,
+        support,
+        offset: 0,
+        limit: 3,
+      }))
+      for (const [index, action] of [...history, ...steps].entries()) {
+        const key = keys[action.slot]!
+        const weight = action.support - (counts.get(key) ?? 0)
+        counts.set(key, action.support)
+        input.sendData(new MultiSet([[[key, rowFor(key)], weight]]))
+        graph.run()
+        if (!check(`input`, index)) return
+        window = { offset: action.offset, limit: action.limit }
+        move(window)
+        graph.run()
+        if (!check(`move`, index)) return
+      }
+    },
+    check: checkTopKComparisons,
+  })
 })
 
 /**
@@ -261,7 +265,7 @@ describe.each([
  * message is this operator boundary's demand signal, not source completeness.
  * Extra graph messages remain permitted, including for unchanged requested sets.
  *
- * This lane keeps three to five positive typed keys installed. It varies the
+ * This grammar keeps three to five positive typed keys installed. It varies the
  * installed size, near-maximum offset, finite width, and empty-range gap.
  * The four profiles distinguish overflowing arithmetic, work proportional to
  * absent ranks, exact width retention after a partial move, and lost demand
@@ -275,7 +279,6 @@ type NumericWindowInput = {
   width: number
   gap: number
 }
-const numericWindowProperty = `ivm.topk-numeric-window`
 const numericWindowInput = fc.record({
   installed: fc.integer({ min: 3, max: keys.length }),
   nearMaximum: fc.integer({ min: 0, max: 2 }),
@@ -329,6 +332,7 @@ function checkNumericWindow(
   size: number,
   moveSignals: number,
   before?: Window,
+  record?: TopKComparisonRecorder,
 ) {
   const selected = selectedWindowKeys(present, window)
   const checks = [
@@ -339,11 +343,18 @@ function checkNumericWindow(
           selected.map((key) => [key, 10 - keys.indexOf(key), `tie`]),
         ),
     ],
-    [`size`, () => expect(size).toBe(selected.length)],
+    [
+      `size`,
+      () => {
+        record?.(`size`, size, selected.length)
+        expect(size).toBe(selected.length)
+      },
+    ],
     [
       `demand`,
       () => {
         if (before && requestedWindowChanged(before, window)) {
+          record?.(`demand`, moveSignals > 0, true)
           expect(
             moveSignals,
             `changed requested window must drive graph demand`,
@@ -380,136 +391,146 @@ describe.each([
   { name: `grouped`, operator: grouped },
 ])(`Numeric window oracle: $name`, ({ operator }) => {
   for (const profile of [`offset`, `width`, `partial`, `demand`] as const) {
-    for (const campaign of [
-      {
-        name: `fixed`,
-        test: oracleReplayTest(it),
-        parameters: { numRuns: runs, seed: 2291 },
-      },
-      {
-        name: `random`,
-        test: oracleReplayTest(it, numericWindowProperty),
-        parameters: oraclePropertyOptions(100, numericWindowProperty),
-      },
-    ]) {
-      campaign.test(
-        `preserves ${profile} bounds and demand (${campaign.name} campaign)`,
-        () => {
-          const profileState =
-            profile === `offset`
-              ? `large offset move returned`
-              : profile === `width`
-                ? `large width move returned`
-                : profile === `partial`
-                  ? `partial move returned to installed rows`
-                  : `empty installed range changed demand`
-          const reach = createOracleReach(
-            `${numericWindowProperty}.${profile}`,
-            [profileState, `returned to installed rows`],
-            { fixedHistories: 1 },
+    describe(profile, () => {
+      const profileState =
+        profile === `offset`
+          ? `large offset move returned`
+          : profile === `width`
+            ? `large width move returned`
+            : profile === `partial`
+              ? `partial move returned to installed rows`
+              : `empty installed range changed demand`
+      const states = [profileState, `returned to installed rows`]
+      let firstFailure:
+        { step: number; error: NumericWindowMismatch } | undefined
+      beforeEach(() => {
+        firstFailure = undefined
+      })
+      oracleProperty<NumericWindowInput, Array<unknown>>({
+        id: `ivm.topk-numeric-window`,
+        law: {
+          statement: `Finite authored bounds preserve selected rows, reported size, partial bounds and changed-window demand.`,
+          authority: `The existing numeric-window and demand contracts documented above.`,
+          limits: `The original three-to-five-key safe-integer numeric profiles; no CPU threshold or provider-acquisition claim.`,
+        },
+        owns: [
+          `src/operators/topKWithFractionalIndex.ts#topKWithFractionalIndex`,
+          `src/operators/groupedTopKWithFractionalIndex.ts#groupedTopKWithFractionalIndex`,
+          `src/operators/orderBy.ts#orderByWithFractionalIndex`,
+        ],
+        histories: {
+          arbitrary: numericWindowInput,
+          runs: 100,
+          fixedSeeds: [2291],
+          states,
+          constructed: [
+            {
+              name: `numeric profile and return`,
+              enters: states,
+              build: (generated) => generated,
+            },
+          ],
+          fixed: [
+            {
+              name: `numeric window regression`,
+              history: numericWindowExample,
+              enters: states,
+            },
+          ],
+        },
+        model: topKReferences,
+        driver: (generated, observe) => {
+          const recorder = topKRecorder(observe)
+          const reach = { reach: (state: string) => observe(`reach`, state) }
+          const begun = generated === numericWindowExample ? 1 : 2
+          const graph = new D2()
+          const input = graph.newInput<[Key, Row]>()
+          const relation = new TopKRelation<Key>(recorder.record)
+          const present = orderedKeys.slice(0, generated.installed)
+          let window: Window = { offset: 0, limit: 1 }
+          let size!: () => number
+          let move!: (options: Partial<Window>) => void
+          let signals = 0
+          input.pipe(
+            operator(() => 0, {
+              ...window,
+              setSizeCallback: (getSize) => {
+                size = getSize
+              },
+              setWindowFn: (setWindow) => {
+                move = setWindow
+              },
+            }),
+            output((message) => {
+              signals++
+              relation.add(message.getInner())
+            }),
           )
-          let begun = 0
-          let firstFailure:
-            { step: number; error: NumericWindowMismatch } | undefined
-          try {
-            fc.assert(
-              fc.property(numericWindowInput, (generated) => {
-                reach.beginHistory({ fixed: begun++ === 0 })
-                const graph = new D2()
-                const input = graph.newInput<[Key, Row]>()
-                const relation = new TopKRelation<Key>()
-                const present = orderedKeys.slice(0, generated.installed)
-                let window: Window = { offset: 0, limit: 1 }
-                let size!: () => number
-                let move!: (options: Partial<Window>) => void
-                let signals = 0
-                input.pipe(
-                  operator(() => 0, {
-                    ...window,
-                    setSizeCallback: (getSize) => {
-                      size = getSize
-                    },
-                    setWindowFn: (setWindow) => {
-                      move = setWindow
-                    },
-                  }),
-                  output((message) => {
-                    signals++
-                    relation.add(message.getInner())
-                  }),
-                )
-                graph.finalize()
-                input.sendData(
-                  new MultiSet(
-                    present.map((key) => [
-                      [key, { id: 10 - keys.indexOf(key), value: `tie` }],
-                      1,
-                    ]),
-                  ),
-                )
-                graph.run()
-                const checkAt = (step: number, before?: Window): boolean => {
-                  try {
-                    checkNumericWindow(
-                      relation,
-                      present,
-                      window,
-                      size(),
-                      signals,
-                      before,
-                    )
-                    return true
-                  } catch (error) {
-                    if (!(error instanceof NumericWindowMismatch)) throw error
-                    firstFailure ??= { step, error }
-                    // Reject reductions that switch observation or move boundary.
-                    if (
-                      firstFailure.step !== step ||
-                      firstFailure.error.observation !== error.observation
-                    )
-                      return false
-                    error.message += `\nOriginal ${firstFailure.error.observation} mismatch at move ${firstFailure.step}: ${firstFailure.error.message}`
-                    throw error
-                  }
-                }
-                if (!checkAt(-1)) return
-                for (const [index, options] of numericWindowHistory(
-                  profile,
-                  generated,
-                ).entries()) {
-                  const before = window
-                  window = { ...window, ...options }
-                  signals = 0
-                  // Log only the fixed history. An external watchdog can then
-                  // distinguish a move that never returns from setup failure.
-                  if (begun === 1)
-                    writeSync(
-                      1,
-                      `numeric-window ${profile} move ${index} entered ${JSON.stringify(options)}\n`,
-                    )
-                  move(options)
-                  graph.run()
-                  if (!checkAt(index, before)) return
-                  if (
-                    index ===
-                    (profile === `partial` ? 1 : profile === `demand` ? 3 : 0)
-                  )
-                    reach.reach(profileState)
-                  if (index === 7) reach.reach(`returned to installed rows`)
-                }
-              }),
-              { ...campaign.parameters, examples: [[numericWindowExample]] },
+          graph.finalize()
+          input.sendData(
+            new MultiSet(
+              present.map((key) => [
+                [key, { id: 10 - keys.indexOf(key), value: `tie` }],
+                1,
+              ]),
+            ),
+          )
+          graph.run()
+          const checkAt = (step: number, before?: Window): boolean => {
+            recorder.at(`move ${step}`)
+            try {
+              checkNumericWindow(
+                relation,
+                present,
+                window,
+                size(),
+                signals,
+                before,
+                recorder.record,
+              )
+              return true
+            } catch (error) {
+              if (!(error instanceof NumericWindowMismatch)) throw error
+              firstFailure ??= { step, error }
+              // Reject reductions that switch observation or move boundary.
+              if (
+                firstFailure.step !== step ||
+                firstFailure.error.observation !== error.observation
+              )
+                return false
+              error.message += `\nOriginal ${firstFailure.error.observation} mismatch at move ${firstFailure.step}: ${firstFailure.error.message}`
+              throw error
+            }
+          }
+          if (!checkAt(-1)) return
+          for (const [index, options] of numericWindowHistory(
+            profile,
+            generated,
+          ).entries()) {
+            const before = window
+            window = { ...window, ...options }
+            signals = 0
+            // Log only the fixed history. An external watchdog can then
+            // distinguish a move that never returns from setup failure.
+            if (begun === 1)
+              writeSync(
+                1,
+                `numeric-window ${profile} move ${index} entered ${JSON.stringify(options)}\n`,
+              )
+            move(options)
+            graph.run()
+            if (!checkAt(index, before)) return
+            if (
+              index ===
+              (profile === `partial` ? 1 : profile === `demand` ? 3 : 0)
             )
-            reach.assertReached()
-          } finally {
-            writeSync(
-              1,
-              `${numericWindowProperty}.${profile} ${campaign.name} reach ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-            )
+              reach.reach(profileState)
+            if (index === 7) reach.reach(`returned to installed rows`)
           }
         },
-      )
-    }
+        check: checkTopKComparisons,
+      })
+    })
   }
 })
 
@@ -524,7 +545,7 @@ describe.each([
  * with installed ranks; clamping its offset before applying width changes it.
  * Negative limits and fractional bounds have no authority here and stay out.
  *
- * This lane adds the missing offset domain without replacing the support or
+ * This grammar adds the missing offset domain without replacing the support or
  * large-numeric campaigns. Installed cardinality, negative depth, width and gap
  * distinguish absolute intervals from JavaScript's end-relative slice indices.
  * A legal support tail adds nearby edits and moves. A constructive prefix
@@ -536,7 +557,7 @@ describe.each([
  * one-group top-K and the public orderBy wrapper. Where the public size getter
  * accepts a predicate, an always-true predicate must count the same selected
  * rows. Multiple groups, varying prefix predicates and downstream acquisition
- * remain outside this lane. Mismatches
+ * remain outside this grammar. Mismatches
  * accumulate through the history so a size defect cannot hide row movement or
  * a source-edit defect. A runtime interruption remains a separate failure.
  */
@@ -595,12 +616,14 @@ const ordered: typeof topKWithFractionalIndex = <K extends string | number, T>(
 function checkNegativeWindowHistory(
   operator: typeof topKWithFractionalIndex,
   generated: NegativeWindowHistory,
-  reach: ReturnType<typeof createOracleReach<(typeof negativeStates)[number]>>,
+  reach: { reach: (state: (typeof negativeStates)[number]) => void },
   countsLeading: boolean,
+  observe?: (checkpoint: string, value: unknown) => void,
 ) {
   const graph = new D2()
   const input = graph.newInput<[Key, Row]>()
-  const relation = new TopKRelation<Key>()
+  const recorder = observe ? topKRecorder(observe) : undefined
+  const relation = new TopKRelation<Key>(recorder?.record)
   const counts = new Map<Key, number>()
   let window: Window = {
     offset: generated.installed + generated.gap,
@@ -634,18 +657,23 @@ function checkNegativeWindowHistory(
     }
   }
   const check = (checkpoint: string) => {
+    recorder?.at(checkpoint)
     const present = orderedKeys.filter((key) => (counts.get(key) ?? 0) > 0)
     const selected = selectedWindowKeys(present, window)
     compare(`absolute-rank rows`, checkpoint, () =>
       relation.expectRows(selected.map((key) => [key, rowFor(key).id, `tie`])),
     )
-    compare(`selected window size`, checkpoint, () =>
-      expect(size()).toBe(selected.length),
-    )
+    compare(`selected window size`, checkpoint, () => {
+      const actualSize = size()
+      recorder?.record(`selected window size`, actualSize, selected.length)
+      expect(actualSize).toBe(selected.length)
+    })
     if (countsLeading)
-      compare(`leading window size`, checkpoint, () =>
-        expect(size(() => true)).toBe(selected.length),
-      )
+      compare(`leading window size`, checkpoint, () => {
+        const actualSize = size(() => true)
+        recorder?.record(`leading window size`, actualSize, selected.length)
+        expect(actualSize).toBe(selected.length)
+      })
   }
   const setSupport = (key: Key, support: number, checkpoint: string) => {
     const weight = support - (counts.get(key) ?? 0)
@@ -713,6 +741,7 @@ declareOracle({
 // wrong rows to the same signed-output checker; no production helper supplies
 // the expected answer, and no output normalization removes the distinction.
 it(`rejects end-relative slicing and offset-first clamping`, () => {
+  oracleRoute(`calibration`)
   const present = orderedKeys.slice(0, 3)
   for (const window of [
     { offset: -2, limit: 1 },
@@ -755,61 +784,54 @@ describe.each([
 ])(
   `Absolute-rank negative window oracle: $name`,
   ({ name, operator, property }) => {
-    for (const campaign of [`fixed`, `random`] as const) {
-      const test =
-        campaign === `fixed`
-          ? oracleReplayTest(it)
-          : oracleReplayTest(it, property)
-      test(`preserves rank intersections and source edits (${campaign})`, async () => {
-        const reach = createOracleReach(
-          `${property}/${name}/${campaign}`,
-          negativeStates,
-          { fixedHistories: negativeWindowExamples.length },
-        )
-        const fidelity = createOracleFailureFidelity<NegativeWindowHistory>()
-        let begun = 0
-        try {
-          await fidelity.assert(() =>
-            fc.assert(
-              fc.asyncProperty(negativeWindowHistory, async (history) => {
-                reach.beginHistory({
-                  fixed: begun++ < negativeWindowExamples.length,
-                })
-                await fidelity.run(history, () =>
-                  checkNegativeWindowHistory(
-                    operator,
-                    history,
-                    reach,
-                    name !== `grouped`,
-                  ),
-                )
-              }),
-              campaign === `fixed`
-                ? {
-                    seed: 2316,
-                    numRuns: oracleRuns(100) + negativeWindowExamples.length,
-                    examples: negativeWindowExamples,
-                  }
-                : oraclePropertyOptions(100, property, {
-                    examples: negativeWindowExamples,
-                  }),
-            ),
-          )
-          reach.assertReached()
-        } finally {
-          console.info(
-            `negative window reach ${name}/${campaign}`,
-            Object.fromEntries(reach.counts()),
-          )
-        }
-      })
-    }
+    oracleProperty<NegativeWindowHistory, Array<unknown>>({
+      id: property,
+      law: {
+        statement: `Negative offsets select absolute rank intersections and retain signed row, size and source-edit fidelity.`,
+        authority: `The maintainer's 2026-11-02 absolute-rank decision documented above.`,
+        limits: `The original negative-depth, installed-cardinality, width, gap and legal support-tail grammar; multiple groups and downstream acquisition remain outside this owner.`,
+      },
+      owns: [
+        `src/operators/topKWithFractionalIndex.ts#topKWithFractionalIndex`,
+        `src/operators/groupedTopKWithFractionalIndex.ts#groupedTopKWithFractionalIndex`,
+        `src/operators/orderBy.ts#orderByWithFractionalIndex`,
+      ],
+      histories: {
+        arbitrary: negativeWindowHistory,
+        runs: 100,
+        fixedSeeds: [2316],
+        states: negativeStates,
+        constructed: [
+          {
+            name: `negative-window transitions`,
+            enters: negativeStates,
+            build: (history) => history,
+          },
+        ],
+        fixed: negativeWindowExamples.map(([history], index) => ({
+          name: `negative window regression ${index}`,
+          history,
+          enters: negativeStates,
+        })),
+      },
+      model: topKReferences,
+      driver: (history, observe) =>
+        checkNegativeWindowHistory(
+          operator,
+          history,
+          { reach: (state) => observe(`reach`, state) },
+          name !== `grouped`,
+          observe,
+        ),
+      check: checkTopKComparisons,
+    })
   },
 )
 
 it.each([-2, 2])(
   `rejects excess signed weight %s across a moved window`,
   (weight) => {
+    oracleRoute(`calibration`)
     const check = (corrupt: boolean) => {
       const relation = new TopKRelation<Key>()
       relation.add([[[1, [{ id: 9, value: `tie` }, `a0`]], 1]])

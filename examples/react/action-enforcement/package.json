@@ -11,24 +11,24 @@
     "test": "node --test eslint-rules/*test.js && vitest run"
   },
   "dependencies": {
-    "@tanstack/query-core": "^5.90.20",
-    "@tanstack/query-db-collection": "^1.5.1",
-    "@tanstack/react-db": "^1.0.0-rc.1.4",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "@tanstack/query-core": "^5.107.1",
+    "@tanstack/query-db-collection": "^1.5.2",
+    "@tanstack/react-db": "^1.0.0-rc.1.5",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.2",
-    "@testing-library/react": "^16.3.2",
-    "@types/react": "^19.2.13",
-    "@types/react-dom": "^19.2.3",
-    "@typescript-eslint/eslint-plugin": "^8.55.0",
-    "@typescript-eslint/parser": "^8.55.0",
+    "@eslint/js": "^9.39.5",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@typescript-eslint/eslint-plugin": "^8.72.1",
+    "@typescript-eslint/parser": "^8.72.1",
     "@vitejs/plugin-react": "^6.2.1",
-    "eslint": "^9.39.2",
+    "eslint": "^9.39.5",
     "globals": "^16.5.0",
     "typescript": "^5.9.2",
-    "vite": "^8.3.5",
+    "vite": "^8.3.6",
     "vite-tsconfig-paths": "^6.1.1"
   }
 }

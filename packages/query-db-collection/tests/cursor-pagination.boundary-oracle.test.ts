@@ -1,18 +1,20 @@
 // @vitest-environment jsdom
 import { createCollection } from '@tanstack/db'
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import {
-  oraclePropertyOptions,
-  readOracleRunConfig,
-} from '../../db/tests/oracle-config.js'
+  differs,
+  oracleProperty,
+  pass,
+} from '../../db/tests/oracle-property.js'
 import { createCursorPager, queryCollectionOptions } from '../src/index.js'
 import {
   makeClient,
   rowsFor,
   tick,
 } from './cursor-pagination-boundary-support.js'
+import type { Observation, Verdict } from '../../db/tests/oracle-property.js'
 
 /**
  * # Do browser-facing readers release the right cursor work?
@@ -34,18 +36,41 @@ import {
  */
 
 const fixedSeed = 1_779_013
-const replay = readOracleRunConfig()
 
-/** Ordinary campaigns use the same property, observation, and run budget. */
-async function assertBoundaryProperty<Ts>(
-  property: fc.IAsyncProperty<Ts>,
-  name: string,
-): Promise<void> {
-  if (replay.replayPath !== undefined && replay.replayProperty !== name) return
-  const options = oraclePropertyOptions(30, name)
-  if (replay.replaySeed === undefined)
-    await fc.assert(property, { ...options, seed: fixedSeed })
-  await fc.assert(property, options)
+// The model states the browser boundary outcomes without Query state or pager
+// bookkeeping. Each trace records those same public facts before cleanup.
+function nestedBoundaryModel(size: number, replace: boolean) {
+  return {
+    fetchStatus: `idle`,
+    outcome: replace,
+    ...(replace
+      ? { rows: rowsFor(size).map((row) => ({ ...row, version: 1 })) }
+      : { status: `error`, errorName: `AbortError` }),
+    logged: replace ? 0 : 1,
+  }
+}
+
+function checkBoundaryTrace(
+  trace: ReadonlyArray<Observation>,
+  expected: Readonly<Record<string, unknown>>,
+): Verdict {
+  for (const observation of trace) {
+    const verdict = differs(
+      observation.checkpoint,
+      `cursor fetch boundary`,
+      observation.value,
+      expected[observation.checkpoint],
+    )
+    if (verdict) return verdict
+  }
+  return (
+    differs(
+      `complete boundary`,
+      `cursor fetch boundary`,
+      trace.length,
+      Object.keys(expected).length,
+    ) ?? pass
+  )
 }
 
 async function finishBoundaryCleanup(
@@ -71,11 +96,30 @@ async function finishBoundaryCleanup(
 }
 
 describe(`cursor Query fetch boundaries`, () => {
-  it.each([false, true])(
-    `nested row query settles when pages cancel; replacement=%s`,
-    async (replace) => {
-      await assertBoundaryProperty(
-        fc.asyncProperty(fc.integer({ min: 1, max: 4 }), async (size) => {
+  describe.each([false, true])(
+    `nested cancellation replacement=%s`,
+    (replace) => {
+      oracleProperty({
+        id: `cursor-pagination.nested-cancellation`,
+        law: {
+          statement: `Canceling nested pages rejects preload; replacing pages fulfills it with replacement rows.`,
+          authority: `cursor-pagination/README.md, Contract before implementation; createCursorPager and queryCollectionOptions`,
+          limits: `Two controlled pages of one to four rows; no changing HTTP endpoint.`,
+        },
+        // What this oracle owns: the cursor pager's reader and nested-query boundaries
+        // (createCursorPager) and the QueryCollection preload that reads through it
+        // (queryCollectionOptions). Its generated properties carry their own checks.
+        owns: [
+          `src/cursor-pagination.ts#createCursorPager`,
+          `src/query.ts#queryCollectionOptions`,
+        ],
+        histories: {
+          arbitrary: fc.integer({ min: 1, max: 4 }),
+          runs: 30,
+          fixedSeeds: [fixedSeed],
+        },
+        model: (size) => nestedBoundaryModel(size, replace),
+        driver: async (size, observe) => {
           const client = makeClient()
           const rows = rowsFor(size)
           const key = [`resource`, `pages`]
@@ -123,26 +167,29 @@ describe(`cursor Query fetch boundaries`, () => {
               await client.refetchQueries({ queryKey: key, exact: true })
             } else await client.cancelQueries({ queryKey: key, exact: true })
             await tick()
-            expect(
+            observe(
+              `fetchStatus`,
               client.getQueryState([`resource`, `rows`])?.fetchStatus,
-            ).toBe(`idle`)
+            )
             const outcome = await pending
-            expect(outcome.ok).toBe(replace)
+            observe(`outcome`, outcome.ok)
             if (replace)
-              expect(
+              observe(
+                `rows`,
                 [...collection.values()].map(({ id, version: rowVersion }) => ({
                   id,
                   version: rowVersion,
                 })),
-              ).toEqual(rows.map((row) => ({ ...row, version: 1 })))
+              )
             else {
-              expect(client.getQueryState([`resource`, `rows`])?.status).toBe(
-                `error`,
+              observe(
+                `status`,
+                client.getQueryState([`resource`, `rows`])?.status,
               )
               if (!outcome.ok && `error` in outcome)
-                expect((outcome.error as Error).name).toBe(`AbortError`)
+                observe(`errorName`, (outcome.error as Error).name)
             }
-            expect(logged).toHaveBeenCalledTimes(replace ? 0 : 1)
+            observe(`logged`, logged.mock.calls.length)
           } catch (error) {
             primaryFailure = error
             throw error
@@ -157,64 +204,82 @@ describe(`cursor Query fetch boundaries`, () => {
               primaryFailure,
             )
           }
-        }),
-        `cursor-pagination.nested-cancellation`,
-      )
+        },
+        check: (_size, trace, expected) => checkBoundaryTrace(trace, expected),
+      })
     },
   )
 
-  it(`reader abort releases its queue without canceling shared transport`, async () => {
-    await assertBoundaryProperty(
-      fc.asyncProperty(fc.integer({ min: 1, max: 4 }), async (size) => {
-        const client = makeClient(),
-          rows = rowsFor(size),
-          entered = createDeferred<AbortSignal>(),
-          release = createDeferred<void>()
-        const pager = createCursorPager({
-          queryClient: client,
-          queryKey: [`abort`],
-          fetchPage: async (cursor, signal) => {
-            if (cursor) {
-              entered.resolve(signal)
-              await release.promise
-            }
-            return {
-              rows: rows.slice(cursor ? size : 0, cursor ? rows.length : size),
-              nextCursor: cursor ? null : `next`,
-            }
-          },
-        })
-        await pager.read({ limit: size })
-        const abort = new AbortController(),
-          reason = new Error(`reader left`)
-        let state: unknown = `pending`
-        const pending = pager.read({}, abort.signal).then(
-          () => {
-            state = `success`
-          },
-          (error) => {
-            state = error
-          },
+  oracleProperty({
+    id: `cursor-pagination.reader-abort`,
+    law: {
+      statement: `A reader abort rejects that reader with its reason and leaves shared Query transport active.`,
+      authority: `cursor-pagination/README.md, Contract before implementation; createCursorPager`,
+      limits: `Two controlled pages of one to four rows; no changing HTTP endpoint.`,
+    },
+    owns: [
+      `src/cursor-pagination.ts#createCursorPager`,
+      `src/query.ts#queryCollectionOptions`,
+    ],
+    histories: {
+      arbitrary: fc.integer({ min: 1, max: 4 }),
+      runs: 30,
+      fixedSeeds: [fixedSeed],
+    },
+    model: (size) => ({
+      reasonIdentity: true,
+      transportAborted: false,
+      rows: rowsFor(size).slice(0, size),
+    }),
+    driver: async (size, observe) => {
+      const client = makeClient(),
+        rows = rowsFor(size),
+        entered = createDeferred<AbortSignal>(),
+        release = createDeferred<void>()
+      const pager = createCursorPager({
+        queryClient: client,
+        queryKey: [`abort`],
+        fetchPage: async (cursor, signal) => {
+          if (cursor) {
+            entered.resolve(signal)
+            await release.promise
+          }
+          return {
+            rows: rows.slice(cursor ? size : 0, cursor ? rows.length : size),
+            nextCursor: cursor ? null : `next`,
+          }
+        },
+      })
+      await pager.read({ limit: size })
+      const abort = new AbortController(),
+        reason = new Error(`reader left`)
+      let state: unknown = `pending`
+      const pending = pager.read({}, abort.signal).then(
+        () => {
+          state = `success`
+        },
+        (error) => {
+          state = error
+        },
+      )
+      let primaryFailure: unknown
+      try {
+        const transport = await entered.promise
+        abort.abort(reason)
+        await tick()
+        observe(`reasonIdentity`, state === reason)
+        observe(`transportAborted`, transport.aborted)
+        observe(`rows`, await pager.read({ limit: size }))
+      } catch (error) {
+        primaryFailure = error
+        throw error
+      } finally {
+        await finishBoundaryCleanup(
+          [() => release.resolve(), () => pending, () => client.clear()],
+          primaryFailure,
         )
-        let primaryFailure: unknown
-        try {
-          const transport = await entered.promise
-          abort.abort(reason)
-          await tick()
-          expect(state).toBe(reason)
-          expect(transport.aborted).toBe(false)
-          expect(await pager.read({ limit: size })).toEqual(rows.slice(0, size))
-        } catch (error) {
-          primaryFailure = error
-          throw error
-        } finally {
-          await finishBoundaryCleanup(
-            [() => release.resolve(), () => pending, () => client.clear()],
-            primaryFailure,
-          )
-        }
-      }),
-      `cursor-pagination.reader-abort`,
-    )
+      }
+    },
+    check: (_size, trace, expected) => checkBoundaryTrace(trace, expected),
   })
 })

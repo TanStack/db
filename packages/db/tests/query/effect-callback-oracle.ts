@@ -31,7 +31,6 @@
  */
 import { expect } from 'vitest'
 import { declareOracle } from '../oracle-declaration.js'
-import { createOracleReach } from '../oracle-reach.js'
 import { checkWithCleanup } from './virtual-row-fields-support.js'
 import type { DeltaEvent, EffectConfig } from '../../src/query/effect.js'
 
@@ -112,13 +111,30 @@ export function callbackHistoryId(h: CallbackHistory) {
   return `${h.representation}/${h.profile}/${h.skipInitial}/${h.ordered ? `ordered` : `unordered`}`
 }
 export function callbackReach(path: string) {
-  return createOracleReach(
-    `Effect callback delivery ${path}`,
+  // This bounded grammar executes each authored history once. Keep the
+  // complete matrix of required cuts and count each cut once per execution.
+  const counts = new Map<string, number>(
     callbackHistories.flatMap((h) =>
-      cuts.map((cut) => `${callbackHistoryId(h)}/${cut}`),
+      cuts.map((cut) => [`${callbackHistoryId(h)}/${cut}`, 0] as const),
     ),
-    { replaying: false },
   )
+  return {
+    record(state: string) {
+      const count = counts.get(state)
+      if (count === undefined)
+        throw new Error(
+          `Effect callback delivery ${path}: undeclared cut ${state}`,
+        )
+      counts.set(state, count + 1)
+    },
+    counts: () => new Map(counts),
+    assertReached() {
+      expect(
+        [...counts].filter(([, count]) => count < 1),
+        `Effect callback delivery ${path}`,
+      ).toEqual([])
+    },
+  }
 }
 
 class PrivatePayload {
@@ -220,7 +236,7 @@ export async function runCallbackHistory(
   driver: CallbackDriver,
   reach: ReturnType<typeof callbackReach>,
 ) {
-  reach.beginHistory()
+  const observedCuts = new Set<string>()
   const observed: Array<Observation> = []
   let recording = false
   let comparisonReads = 0
@@ -309,7 +325,10 @@ export async function runCallbackHistory(
     }
     observed.length = 0
     before = after
-    reach.reach(`${callbackHistoryId(history)}/${name}`)
+    if (!observedCuts.has(name)) {
+      reach.record(`${callbackHistoryId(history)}/${name}`)
+      observedCuts.add(name)
+    }
   }
   await checkWithCleanup(async () => {
     handle = await driver.mount({

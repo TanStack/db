@@ -55,8 +55,8 @@ import { Query, coalesce, eq } from '../../src/query/index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { createTransaction } from '../../src/transactions.js'
 import { declareOracle } from '../oracle-declaration.js'
-import { createOracleReach } from '../oracle-reach.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
+import { oracleRoute } from '../oracle-config.js'
 import { expectedSourceMetadata } from './virtual-row-fields-source-oracle.js'
 import {
   checkWithCleanup,
@@ -305,6 +305,7 @@ afterAll(() => {
 test.each(callbackHistories)(
   `delivers current values across callback profiles: %j`,
   async (history) => {
+    oracleRoute(`case`)
     ranDelivery = true
     await runCallbackHistory(
       history,
@@ -366,9 +367,9 @@ function sidesOf(history: History): Array<Side> {
 function historyId(history: History): string {
   return `${pathOf(history)}/confirm-${history.confirm.join(`+`) || `none`}/reject-${history.reject.join(`+`) || `none`}/settle-${history.rightFirst ? `right` : `left`}-first`
 }
-// Declare each finite lane's owed comparisons independently. Aggregate path
-// totals would let one omitted right-source action borrow another lane's reach.
-// Outcome and confirmation premises determine which cuts are legal in a lane.
+// Declare each finite campaign's owed comparisons independently. Aggregate path
+// totals would let one omitted right-source action borrow another campaign's reach.
+// Outcome and confirmation premises determine which cuts are legal in a campaign.
 function requiredEffectCuts(history: History): Array<string> {
   const sides = sidesOf(history)
   return [
@@ -390,34 +391,51 @@ function requiredEffectCuts(history: History): Array<string> {
     `final-drain`,
   ]
 }
-const effectMetadataReach = createOracleReach(
-  `effect explicit source metadata`,
-  effectMetadataHistories.flatMap((history) =>
-    [`batch`, `named`].flatMap((channel) =>
-      requiredEffectCuts(history).map(
-        (cut) => `${historyId(history)}/${channel}/${cut}`,
+// Each finite history has one numeric token. A state keeps that token once,
+// so repeated observations preserve the original per-history checkpoint count.
+const effectMetadataHistoriesByState = new Map<string, Set<number>>(
+  effectMetadataHistories
+    .flatMap((history) =>
+      [`batch`, `named`].flatMap((channel) =>
+        requiredEffectCuts(history).map(
+          (cut) => `${historyId(history)}/${channel}/${cut}`,
+        ),
       ),
-    ),
-  ),
-  // This exhaustive grammar has no seed/path replay. An unrelated replay
-  // environment must not exempt its required finite lanes from reach.
-  { replaying: false },
+    )
+    .map((state) => [state, new Set<number>()]),
 )
+let effectMetadataHistory = 0
 const effectPassedCuts = new Map<string, number>()
 let enteredEffectHistories = 0
 afterAll(() => {
   // A checker-only selector enters no production history. Once any native
-  // history runs, every finite lane still owes its complete declared reach.
-  if (enteredEffectHistories > 0) effectMetadataReach.assertReached()
+  // history runs, every finite campaign still owes its complete declared reach.
+  if (enteredEffectHistories > 0)
+    expect(
+      [...effectMetadataHistoriesByState].filter(
+        ([, histories]) => histories.size < 1,
+      ),
+      `effect explicit source metadata`,
+    ).toEqual([])
   if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
     console.info(
       `effect metadata reach`,
-      Object.fromEntries(effectMetadataReach.counts()),
+      Object.fromEntries(
+        [...effectMetadataHistoriesByState].map(([state, histories]) => [
+          state,
+          histories.size,
+        ]),
+      ),
       `passed comparisons`,
       Object.fromEntries(effectPassedCuts),
     )
 })
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/effect.ts#createEffect',
+    'src/transactions.ts#createTransaction',
+  ],
   model: [visibleSource, expectedEffectRows, expectedEffectDelta],
   check: [checkEffectDelta],
   grammar: [effectMetadataHistories],
@@ -570,13 +588,18 @@ function startEffect(
 test.each(effectMetadataHistories)(
   `delivers explicitly selected source metadata through Effects: %j`,
   async (history) => {
+    oracleRoute(`case`)
     enteredEffectHistories++
-    effectMetadataReach.beginHistory()
+    effectMetadataHistory++
     const path = pathOf(history)
     const id = historyId(history)
     const reach = (cut: string) => {
-      effectMetadataReach.reach(`${id}/batch/${cut}`)
-      effectMetadataReach.reach(`${id}/named/${cut}`)
+      effectMetadataHistoriesByState
+        .get(`${id}/batch/${cut}`)!
+        .add(effectMetadataHistory)
+      effectMetadataHistoriesByState
+        .get(`${id}/named/${cut}`)!
+        .add(effectMetadataHistory)
     }
     const leftMain: SourceRow = {
       id: history.kind === `union` ? 1 : `a`,
@@ -824,6 +847,7 @@ declareOracle({ grammar: [effectFaults] })
 test.each(effectFaults)(
   `rejects a hostile Effect metadata ledger: %s`,
   (fault) => {
+    oracleRoute(`calibration`)
     const row = (id: Key, pending: boolean): ProjectedRow => ({
       id,
       side: `left`,
@@ -927,6 +951,7 @@ function calibrationLedger(
   }
 }
 test(`permits reordered delivery and fresh opaque keys after an exit`, () => {
+  oracleRoute(`fixed history`)
   const before = calibrationRows(false)
   const after = calibrationRows(true)
   const active: KeyIntervals = new Map()
@@ -949,6 +974,7 @@ test(`permits reordered delivery and fresh opaque keys after an exit`, () => {
   checkEffectDelta(calibrationLedger(survivor, oldKey), survivor, active)
 })
 test(`permits empty callback partitions while preserving exact delta events`, () => {
+  oracleRoute(`fixed history`)
   const before = calibrationRows(false)
   const after = calibrationRows(true)
   const active: KeyIntervals = new Map()
@@ -965,6 +991,7 @@ test(`permits empty callback partitions while preserving exact delta events`, ()
   }
 })
 test(`records scalar callback values before later object mutation`, () => {
+  oracleRoute(`fixed history`)
   const before = calibrationRows(false)
   const after = calibrationRows(true)
   const keyFor = (row: ProjectedRow) => occurrence(row)
@@ -989,6 +1016,7 @@ test(`records scalar callback values before later object mutation`, () => {
   checkEffectDelta(ledger, expected, active)
 })
 test(`preserves later interval judgments after an invalid unknown update`, () => {
+  oracleRoute(`fixed history`)
   const before = calibrationRows(false)
   const after = calibrationRows(true)
   const keyFor = (row: ProjectedRow) => occurrence(row)
@@ -1047,20 +1075,32 @@ function boundaryId(history: (typeof boundaryHistories)[number]) {
   return `${history.representation}/${history.kind}/${history.present}/${history.grouped}`
 }
 const boundaryCuts = [`initial`, `sequence`, `absent`, `reentry`, `next-use`]
-const boundaryReach = createOracleReach(
-  `Effect membership independent of projection equality`,
-  boundaryHistories.flatMap((history) =>
-    boundaryCuts.map((cut) => `${boundaryId(history)}/${cut}`),
-  ),
-  { replaying: false },
+const boundaryHistoriesByState = new Map<string, Set<number>>(
+  boundaryHistories
+    .flatMap((history) =>
+      boundaryCuts.map((cut) => `${boundaryId(history)}/${cut}`),
+    )
+    .map((state) => [state, new Set<number>()]),
 )
+let boundaryHistory = 0
 let enteredBoundary = false
 afterAll(() => {
-  if (enteredBoundary) boundaryReach.assertReached()
+  if (enteredBoundary)
+    expect(
+      [...boundaryHistoriesByState].filter(
+        ([, histories]) => histories.size < 1,
+      ),
+      `Effect membership independent of projection equality`,
+    ).toEqual([])
   if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
     console.info(
       `Effect membership reach`,
-      Object.fromEntries(boundaryReach.counts()),
+      Object.fromEntries(
+        [...boundaryHistoriesByState].map(([state, histories]) => [
+          state,
+          histories.size,
+        ]),
+      ),
     )
 })
 function boundaryModelRows(
@@ -1108,8 +1148,9 @@ declareOracle({ model: [boundaryModelRows], grammar: [boundaryHistories] })
 test.each(boundaryHistories)(
   `classifies callback-visible membership across coalesced source histories: %j`,
   async (history) => {
+    oracleRoute(`case`)
     enteredBoundary = true
-    boundaryReach.beginHistory()
+    boundaryHistory++
     const main: SourceRow = {
       id: `a`,
       parentId: `unused`,
@@ -1176,7 +1217,10 @@ test.each(boundaryHistories)(
       before = after
       checkedBatch = ledger.batches.length
       checkedNamed = ledger.named.length
-      if (name) boundaryReach.reach(`${boundaryId(history)}/${name}`)
+      if (name)
+        boundaryHistoriesByState
+          .get(`${boundaryId(history)}/${name}`)!
+          .add(boundaryHistory)
     }
     // The model applies the authored source operation directly. Production
     // receives the same operation through public sync writes and scheduling.

@@ -73,6 +73,31 @@ export const ssrSnapshotHistoryArbitrary = fc
         name: `server ${index + 1}`,
       })),
     }),
+    (value) => {
+      // Fixed and constructed histories use the same generated language.
+      // This inverse changes no generation: it reconstructs the pre-map count
+      // and optional action flags, while rejecting rows the mapper cannot author.
+      const history = value as SsrSnapshotHistory
+      if (
+        !Array.isArray(history.rows) ||
+        Array.from(history.rows).some(
+          (row, index) =>
+            row.id !== String(index + 1) || row.name !== `server ${index + 1}`,
+        )
+      )
+        throw new Error(`Invalid SSR snapshot rows`)
+      return {
+        preparation: history.preparation,
+        sourceState: history.sourceState,
+        count: history.rows.length,
+        serverWrite:
+          history.serverWrite === undefined ? false : history.serverWrite,
+        browserWrite:
+          history.browserWrite === undefined ? false : history.browserWrite,
+        browserPreload:
+          history.browserPreload === undefined ? false : history.browserPreload,
+      }
+    },
   )
 
 export function expectedSsrSnapshot(history: SsrSnapshotHistory) {
@@ -237,7 +262,7 @@ export function expectedSsrRuntimeErrorViews(history: SsrRuntimeErrorHistory) {
  * hydrated readers and authored browser rows. A mount follows at least one
  * authoritative reader. Same and different rows, including ready-empty and
  * loading-empty server views, distinguish row equality from readiness equality.
- * Server/browser writes remain in the adjacent handoff grammar: this lane
+ * Server/browser writes remain in the adjacent handoff grammar: this grammar
  * isolates a change of receiving reader after a completed handoff.
  *
  * Removing initialization kind loses the mount/hydrate distinction. Removing
@@ -280,42 +305,95 @@ export const ssrReceivingHistoryArbitrary = fc
       `marked` as const,
     ),
   })
-  .map((value): SsrReceivingHistory => {
-    const rows = Array.from(
-      { length: value.preparation === `none` ? 0 : value.count },
-      (_, index) => ({ id: String(index + 1), name: `server ${index + 1}` }),
-    )
-    return {
-      snapshot: {
-        preparation: value.preparation,
-        sourceState:
-          value.preparation === `none`
-            ? `idle`
-            : value.preparation === `query` || value.ready
-              ? `ready`
-              : `loading`,
-        rows,
-      },
-      browserRows: value.sameRows
-        ? rows.map((row) => ({ ...row }))
-        : Array.from({ length: value.browserCount }, (_, index) => ({
-            id: String(index + 1),
-            name: `browser ${index + 1}`,
-          })),
-      initializationKind: value.initializationKind,
-      mountLocation:
-        value.initializationKind === `mount` ? value.mountLocation : `root`,
-      providerNesting:
-        value.initializationKind === `mount` &&
-        value.providerNesting === `marked`
-          ? `inherit`
-          : value.providerNesting,
-      previousReaders:
-        value.initializationKind === `mount`
-          ? Math.max(1, value.previousReaders)
-          : value.previousReaders,
-    }
-  })
+  .map(
+    (value): SsrReceivingHistory => {
+      const rows = Array.from(
+        { length: value.preparation === `none` ? 0 : value.count },
+        (_, index) => ({ id: String(index + 1), name: `server ${index + 1}` }),
+      )
+      return {
+        snapshot: {
+          preparation: value.preparation,
+          sourceState:
+            value.preparation === `none`
+              ? `idle`
+              : value.preparation === `query` || value.ready
+                ? `ready`
+                : `loading`,
+          rows,
+        },
+        browserRows: value.sameRows
+          ? rows.map((row) => ({ ...row }))
+          : Array.from({ length: value.browserCount }, (_, index) => ({
+              id: String(index + 1),
+              name: `browser ${index + 1}`,
+            })),
+        initializationKind: value.initializationKind,
+        mountLocation:
+          value.initializationKind === `mount` ? value.mountLocation : `root`,
+        providerNesting:
+          value.initializationKind === `mount` &&
+          value.providerNesting === `marked`
+            ? `inherit`
+            : value.providerNesting,
+        previousReaders:
+          value.initializationKind === `mount`
+            ? Math.max(1, value.previousReaders)
+            : value.previousReaders,
+      }
+    },
+    (value) => {
+      const history = value as SsrReceivingHistory
+      const { snapshot, browserRows, initializationKind, previousReaders } =
+        history
+      const mountLocation = history.mountLocation ?? `root`
+      const providerNesting = history.providerNesting ?? `none`
+      const authored = (rows: SsrSnapshotHistory[`rows`], prefix: string) =>
+        rows.length <= 3 &&
+        rows.every(
+          (row, index) =>
+            row.id === String(index + 1) &&
+            row.name === `${prefix} ${index + 1}` &&
+            Object.keys(row).length === 2,
+        )
+      const sameRows =
+        JSON.stringify(snapshot.rows) === JSON.stringify(browserRows)
+      if (
+        !authored(snapshot.rows, `server`) ||
+        (!sameRows && !authored(browserRows, `browser`)) ||
+        snapshot.serverWrite ||
+        snapshot.browserWrite ||
+        snapshot.browserPreload ||
+        ![`none`, `source`, `query`].includes(snapshot.preparation) ||
+        (snapshot.preparation === `none`
+          ? snapshot.sourceState !== `idle` || snapshot.rows.length !== 0
+          : snapshot.preparation === `query`
+            ? snapshot.sourceState !== `ready`
+            : ![`ready`, `loading`].includes(snapshot.sourceState)) ||
+        ![`hydrate`, `mount`].includes(initializationKind) ||
+        !Number.isInteger(previousReaders) ||
+        previousReaders < 0 ||
+        previousReaders > 2 ||
+        ![`root`, `child`].includes(mountLocation) ||
+        ![`none`, `inherit`, `marked`].includes(providerNesting) ||
+        (initializationKind === `hydrate` && mountLocation !== `root`) ||
+        (initializationKind === `mount` &&
+          (previousReaders < 1 || providerNesting === `marked`))
+      )
+        throw new Error(`Not an authored SSR receiving history`)
+      return {
+        preparation: snapshot.preparation,
+        ready: snapshot.sourceState === `ready`,
+        count: snapshot.rows.length,
+        browserCount: browserRows.length,
+        sameRows,
+        initializationKind,
+        previousReaders,
+        mountLocation,
+        providerNesting,
+      }
+    },
+  )
 
 // The judgment reuses the preparation model. Browser rows are authored input,
 // not a read from the production query; readiness follows the completed source

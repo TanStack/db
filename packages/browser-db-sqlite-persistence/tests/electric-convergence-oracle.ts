@@ -55,4 +55,6 @@ export function sourceHeadViolation(
   return undefined
 }
 
+// Owns nothing: this module holds the model and check only. The production
+// path is driven by the multi-tab Electric test (multi-tab-electric-oracle.test.ts), which declares the owned entry.
 declareOracle({ check: [sourceHeadViolation] })

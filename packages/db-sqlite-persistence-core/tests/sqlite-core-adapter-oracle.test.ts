@@ -17,14 +17,15 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
+import { oracleProperty } from '../../db/tests/oracle-config.js'
 import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRuns,
-  recordOracleReplay,
-} from '../../db/tests/oracle-config.js'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   bigintBoundary,
@@ -39,11 +40,7 @@ import {
   single,
   violation,
 } from './sqlite-core-adapter-binding-support'
-import type {
-  Kind,
-  Spec,
-  Violation,
-} from './sqlite-core-adapter-binding-support'
+import type { Kind, Spec } from './sqlite-core-adapter-binding-support'
 import type {
   SQLiteCoreAdapterHarnessFactory,
   Todo,
@@ -146,27 +143,31 @@ class ResetResumeOracleViolation extends Error {
   }
 }
 
-function hasSameResetResumeFailure(
-  left: ResetResumeOracleViolation,
-  right: ResetResumeOracleViolation,
-): boolean {
-  const signature = (failure: ResetResumeOracleViolation): string =>
-    JSON.stringify({
-      law: String(failure.law),
-      discriminant: String(failure.discriminant),
-      checkpoint: String(failure.observation.checkpoint),
-      expectedMetadataClass:
-        failure.expected.metadataKeys.length === 0 ? `empty` : `nonempty`,
-      actualMetadataClass:
-        failure.actual.metadataKeys.length === 0 ? `empty` : `nonempty`,
-    })
-  return signature(left) === signature(right)
-}
-
 function resumeKindOf(value: unknown): unknown {
   return value && typeof value === `object`
     ? (value as Record<string, unknown>).kind
     : undefined
+}
+
+// Keep the old shrink/replay failure signature as the native checkpoint. A
+// reduction must retain the lineage discriminant and both metadata classes.
+function resetResumeFailureSignature(
+  history: ResetResumeHistory,
+  observation: ResetResumeObservation,
+): string {
+  return JSON.stringify({
+    law: `reset-resume.baseline-lineage`,
+    discriminant: destroysPersistedBaseline(history)
+      ? `reset-retained-metadata`
+      : `non-reset-metadata-changed`,
+    checkpoint: observation.checkpoint,
+    expectedMetadataClass:
+      expectedResetResumeMetadata(history).metadataKeys.length === 0
+        ? `empty`
+        : `nonempty`,
+    actualMetadataClass:
+      observation.metadataKeys.length === 0 ? `empty` : `nonempty`,
+  })
 }
 
 function expectResetResumeLaw(
@@ -177,13 +178,15 @@ function expectResetResumeLaw(
   // record coupled to the destroyed baseline. Compatible reopen and raw
   // external row loss do not give this generic layer authority to interpret an
   // Electric cursor, so they preserve the metadata exactly at this checkpoint.
-  expect(
-    {
-      metadataKeys: observation.metadataKeys,
-      resumeKind: resumeKindOf(observation.resumeState),
-    },
-    `reset clears all collection metadata; non-reset core transitions preserve it`,
-  ).toEqual(expectedResetResumeMetadata(history))
+  oracleAssertion(resetResumeFailureSignature(history, observation), () =>
+    expect(
+      {
+        metadataKeys: observation.metadataKeys,
+        resumeKind: resumeKindOf(observation.resumeState),
+      },
+      `reset clears all collection metadata; non-reset core transitions preserve it`,
+    ).toEqual(expectedResetResumeMetadata(history)),
+  )
 }
 
 function attachResetResumeCleanupDiagnostics(
@@ -399,38 +402,60 @@ async function observeResetResumeHistory(
 
     try {
       // Positive reach evidence is separate from the semantic accusation.
-      expect(observation.schemaVersion).toBe(nextSchemaVersion)
-      expect(observation.resetEpoch).toBe(usesSchemaReset ? 1 : 0)
-      expect(observation.durableRows).toEqual(
-        (history.transition === `schema-reset`
-          ? []
-          : history.transition === `partial-restore`
-            ? expectedRows.slice(0, -1)
-            : history.transition === `external-row-loss`
-              ? expectedRows.slice(1)
-              : expectedRows
-        )
-          .map((value) => ({ key: value.id, value }))
-          .sort((a, b) => String(a.key).localeCompare(String(b.key))),
+      oracleAssertion(
+        `expect(observation.schemaVersion).toBe(nextSchemaVersion)`,
+        () => expect(observation.schemaVersion).toBe(nextSchemaVersion),
       )
-      expect(observation.tombstones).toEqual(
-        usesSchemaReset
-          ? []
-          : [{ key: `s:deleted-before-baseline`, rowVersion: 1 }],
+      oracleAssertion(
+        `expect(observation.resetEpoch).toBe(usesSchemaReset ? 1 : 0)`,
+        () => expect(observation.resetEpoch).toBe(usesSchemaReset ? 1 : 0),
       )
-      expect(observation.appliedTransactions).toEqual(
-        history.transition === `schema-reset`
-          ? []
-          : history.transition === `partial-restore`
-            ? [{ txId: `partial-restore`, rowVersion: 2 }]
-            : [{ txId: `seed-baseline`, rowVersion: 1 }],
+      oracleAssertion(
+        `expect(observation.durableRows).toEqual( (history.transition === 'schema-reset' ? [] : history.trans`,
+        () =>
+          expect(observation.durableRows).toEqual(
+            (history.transition === `schema-reset`
+              ? []
+              : history.transition === `partial-restore`
+                ? expectedRows.slice(0, -1)
+                : history.transition === `external-row-loss`
+                  ? expectedRows.slice(1)
+                  : expectedRows
+            )
+              .map((value) => ({ key: value.id, value }))
+              .sort((a, b) => String(a.key).localeCompare(String(b.key))),
+          ),
       )
-      expect(observation.latestRowVersion).toBe(
-        history.transition === `schema-reset`
-          ? 0
-          : history.transition === `partial-restore`
-            ? 2
-            : 1,
+      oracleAssertion(
+        `expect(observation.tombstones).toEqual( usesSchemaReset ? [] : [{ key: 's:deleted-before-baseline', `,
+        () =>
+          expect(observation.tombstones).toEqual(
+            usesSchemaReset
+              ? []
+              : [{ key: `s:deleted-before-baseline`, rowVersion: 1 }],
+          ),
+      )
+      oracleAssertion(
+        `expect(observation.appliedTransactions).toEqual( history.transition === 'schema-reset' ? [] : histor`,
+        () =>
+          expect(observation.appliedTransactions).toEqual(
+            history.transition === `schema-reset`
+              ? []
+              : history.transition === `partial-restore`
+                ? [{ txId: `partial-restore`, rowVersion: 2 }]
+                : [{ txId: `seed-baseline`, rowVersion: 1 }],
+          ),
+      )
+      oracleAssertion(
+        `expect(observation.latestRowVersion).toBe( history.transition === 'schema-reset' ? 0 : history.trans`,
+        () =>
+          expect(observation.latestRowVersion).toBe(
+            history.transition === `schema-reset`
+              ? 0
+              : history.transition === `partial-restore`
+                ? 2
+                : 1,
+          ),
       )
     } catch (error) {
       failurePhase = `reach`
@@ -527,7 +552,7 @@ export function runSQLiteResetResumeOracleTests(
    *
    * Observed result and known omissions: exact settled rows, exact metadata
    * keys, and whether the durable Electric state is absent/reset/resume. The
-   * external-loss lane proves the generic adapter leaves metadata reachable;
+   * external-loss grammar proves the generic adapter leaves metadata reachable;
    * only the persisted+Electric suite judges whether that cursor is safe to
    * consume. The injected loss is not a claim that arbitrary SQL is a
    * supported public API. Partial resumed updates and SDK framing retain
@@ -539,226 +564,242 @@ export function runSQLiteResetResumeOracleTests(
    * is removed after evidence capture. The failure reports first and reduced
    * histories plus a verified fast-check seed/path replay.
    */
-  oracleReplayTest(it, `sqlite-resume.baseline-lineage`)(
-    `resets collection metadata with its persisted baseline across generated adapter reopen histories`,
-    async () => {
-      const historyArbitrary = fc
-        .constantFrom<ResetResumeHistory[`transition`]>(
-          `compatible-reopen`,
-          `schema-reset`,
-          `partial-restore`,
-          `external-row-loss`,
-        )
-        .chain((transition) =>
-          fc.record<ResetResumeHistory>({
-            fromSchemaVersion: fc.integer({ min: 1, max: 4 }),
-            rows: fc
-              .uniqueArray(fc.integer({ min: 0, max: 20 }), {
-                minLength:
-                  transition === `partial-restore`
-                    ? 2
-                    : transition === `external-row-loss`
-                      ? 1
-                      : 0,
-                maxLength: 4,
-              })
-              .map((ids) =>
-                ids
-                  .sort((left, right) => left - right)
-                  .map((id) => ({
-                    id: String(id),
-                    title: `row-${id}`,
-                    createdAt: `2026-01-01T00:00:00.000Z`,
-                    score: id,
-                  })),
-              ),
-            resumeKind: fc.constantFrom(`none`, `reset`, `resume`),
-            transition: fc.constant(transition),
-            reopensBeforeTransition: fc.integer({ min: 0, max: 2 }),
-            reopensAfterTransition: fc.integer({ min: 0, max: 2 }),
-            unrelatedMetadataKeys: fc.uniqueArray(
-              fc.constantFrom(`gc`, `provider`, `custom`),
-              { maxLength: 3 },
-            ),
-          }),
-        )
-
-      // A seed-only shared run reseeds this campaign. Ordinary runs keep the
-      // fixed seed 1659, and a path replay runs once from its recorded path.
-      const parameters = oraclePropertyOptions(
-        24,
-        `sqlite-resume.baseline-lineage`,
-      )
-
-      let originalFailure: ResetResumeOracleViolation | undefined
-      const property = fc.asyncProperty(historyArbitrary, async (history) => {
-        try {
-          await observeResetResumeHistory(history, harnessFactory)
-        } catch (error) {
-          if (
-            originalFailure === undefined &&
-            error instanceof ResetResumeOracleViolation
-          ) {
-            originalFailure = error
-          }
-          throw error
-        }
-      })
-      const failure = await fc.check(property, {
-        ...parameters,
-        seed: parameters.seed ?? 1659,
-        ...(parameters.path === undefined ? {} : { endOnFailure: true }),
-      })
-      if (!failure.failed) return
-      if (
-        !(failure.errorInstance instanceof ResetResumeOracleViolation) ||
-        originalFailure === undefined ||
-        failure.counterexamplePath === null
-      ) {
-        throw failure.errorInstance
-      }
-      if (!hasSameResetResumeFailure(originalFailure, failure.errorInstance)) {
-        throw new Error(
-          `Shrinking changed the reset/resume law or observation checkpoint`,
-        )
-      }
-
-      const replay = await fc.check(
-        fc.asyncProperty(historyArbitrary, async (history) => {
-          await observeResetResumeHistory(history, harnessFactory)
-        }),
-        {
-          seed: failure.seed,
-          path: failure.counterexamplePath,
-          endOnFailure: true,
-        },
-      )
-      if (
-        !replay.failed ||
-        !(replay.errorInstance instanceof ResetResumeOracleViolation) ||
-        JSON.stringify(replay.counterexample) !==
-          JSON.stringify(failure.counterexample) ||
-        !hasSameResetResumeFailure(failure.errorInstance, replay.errorInstance)
-      ) {
-        throw new Error(
-          `Reset/resume oracle replay did not reproduce the intended violation`,
-        )
-      }
-
-      const reducedFailure = failure.errorInstance
-      throw new Error(
-        `Reset/resume baseline-lineage violation. ` +
-          `seed=${failure.seed} path=${failure.counterexamplePath} ` +
-          `law=${reducedFailure.law} ` +
-          `discriminant=${reducedFailure.discriminant} ` +
-          `checkpoint=${reducedFailure.observation.checkpoint} ` +
-          `originalTrace=${JSON.stringify(originalFailure.history)} ` +
-          `reducedTrace=${JSON.stringify(reducedFailure.history)} ` +
-          `expected=${JSON.stringify(reducedFailure.expected)} ` +
-          `actual=${JSON.stringify(reducedFailure.actual)} ` +
-          `observation=${JSON.stringify(reducedFailure.observation)} ` +
-          `replay=verified ` +
-          `cleanup=${reducedFailure.cleanupEvidence}`,
-        { cause: reducedFailure },
-      )
-    },
-    120_000,
-  )
-
-  it(`leaves externally inconsistent metadata reachable for consumer validation`, async () => {
-    const observation = await observeResetResumeHistory(
-      {
-        fromSchemaVersion: 1,
-        rows: [
-          {
-            id: `1`,
-            title: `lost externally`,
-            createdAt: `2026-01-01T00:00:00.000Z`,
-            score: 1,
-          },
-          {
-            id: `2`,
-            title: `survives`,
-            createdAt: `2026-01-01T00:00:00.000Z`,
-            score: 2,
-          },
-        ],
-        resumeKind: `resume`,
-        transition: `external-row-loss`,
-        reopensBeforeTransition: 1,
-        reopensAfterTransition: 1,
-        unrelatedMetadataKeys: [`provider`],
-      },
-      harnessFactory,
+  const historyArbitrary = fc
+    .constantFrom<ResetResumeHistory[`transition`]>(
+      `compatible-reopen`,
+      `schema-reset`,
+      `partial-restore`,
+      `external-row-loss`,
+    )
+    .chain((transition) =>
+      fc.record<ResetResumeHistory>({
+        fromSchemaVersion: fc.integer({ min: 1, max: 4 }),
+        rows: fc
+          .uniqueArray(fc.integer({ min: 0, max: 20 }), {
+            minLength:
+              transition === `partial-restore`
+                ? 2
+                : transition === `external-row-loss`
+                  ? 1
+                  : 0,
+            maxLength: 4,
+          })
+          .map((ids) =>
+            ids
+              .sort((left, right) => left - right)
+              .map((id) => ({
+                id: String(id),
+                title: `row-${id}`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: id,
+              })),
+          ),
+        resumeKind: fc.constantFrom(`none`, `reset`, `resume`),
+        transition: fc.constant(transition),
+        reopensBeforeTransition: fc.integer({ min: 0, max: 2 }),
+        reopensAfterTransition: fc.integer({ min: 0, max: 2 }),
+        unrelatedMetadataKeys: fc.uniqueArray(
+          fc.constantFrom(`gc`, `provider`, `custom`),
+          { maxLength: 3 },
+        ),
+      }),
     )
 
-    expect(observation.metadataKeys).toEqual([
-      `electric:resume`,
-      `oracle:provider`,
-    ])
-    expect(resumeKindOf(observation.resumeState)).toBe(`resume`)
-  }, 30_000)
+  oracleProperty({
+    id: `sqlite-resume.baseline-lineage`,
+    law: {
+      statement: `A destructive schema reset clears metadata together with its persisted baseline; compatible reopen and raw row loss preserve it.`,
+      authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
+      limits: `The unchanged bounded reopen grammar and supplied host harness at the after-persistence-transition-reopen checkpoint.`,
+    },
+    owns: [`src/sqlite-core-adapter.ts`],
+    histories: { arbitrary: historyArbitrary, runs: 24, fixedSeeds: [1659] },
+    driver: (history: ResetResumeHistory, observeFact) =>
+      recordAssertionJudgment(
+        `sqlite-resume.baseline-lineage`,
+        history,
+        observeFact,
+        () => observeResetResumeHistory(history, harnessFactory).then(() => {}),
+      ),
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+    timeout: 120000,
+  })
 
-  it(`requires complete metadata reset while preserving non-reset metadata`, () => {
-    const compatibleEmpty: ResetResumeHistory = {
-      fromSchemaVersion: 1,
-      rows: [],
-      resumeKind: `resume`,
-      transition: `compatible-reopen`,
-      reopensBeforeTransition: 0,
-      reopensAfterTransition: 1,
-      unrelatedMetadataKeys: [`provider`],
-    }
-    const observation: ResetResumeObservation = {
-      checkpoint: `after-persistence-transition-reopen`,
-      resetEpoch: 0,
-      schemaVersion: 1,
-      durableRows: [],
-      tombstones: [],
-      appliedTransactions: [],
-      latestRowVersion: 1,
-      metadataKeys: [`electric:resume`, `oracle:provider`],
-      resumeState: { kind: `resume`, offset: `10_0` },
-    }
-    expect(() =>
-      expectResetResumeLaw(compatibleEmpty, observation),
-    ).not.toThrow()
-    expect(() =>
-      expectResetResumeLaw(
-        { ...compatibleEmpty, transition: `external-row-loss` },
-        observation,
+  oracleProperty({
+    id: `sqlite-resume.baseline-lineage.external-metadata`,
+    law: {
+      statement: `Reset clears baseline metadata while non-reset transitions preserve it.`,
+      authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
+      limits: `The unchanged finite reset/resume control and comparison.`,
+    },
+    owns: [`src/sqlite-core-adapter.ts`],
+    histories: [
+      {
+        name: `leaves externally inconsistent metadata reachable for consumer validation`,
+      },
+    ],
+    driver: (history: { name: string }, observeFact) =>
+      recordAssertionJudgment(
+        `sqlite-resume.baseline-lineage.external-metadata`,
+        history,
+        observeFact,
+        () =>
+          (async () => {
+            const observation = await observeResetResumeHistory(
+              {
+                fromSchemaVersion: 1,
+                rows: [
+                  {
+                    id: `1`,
+                    title: `lost externally`,
+                    createdAt: `2026-01-01T00:00:00.000Z`,
+                    score: 1,
+                  },
+                  {
+                    id: `2`,
+                    title: `survives`,
+                    createdAt: `2026-01-01T00:00:00.000Z`,
+                    score: 2,
+                  },
+                ],
+                resumeKind: `resume`,
+                transition: `external-row-loss`,
+                reopensBeforeTransition: 1,
+                reopensAfterTransition: 1,
+                unrelatedMetadataKeys: [`provider`],
+              },
+              harnessFactory,
+            )
+
+            oracleAssertion(
+              `expect(observation.metadataKeys).toEqual([ 'electric:resume', 'oracle:provider', ])`,
+              () =>
+                expect(observation.metadataKeys).toEqual([
+                  `electric:resume`,
+                  `oracle:provider`,
+                ]),
+            )
+            oracleAssertion(
+              `expect(resumeKindOf(observation.resumeState)).toBe('resume')`,
+              () =>
+                expect(resumeKindOf(observation.resumeState)).toBe(`resume`),
+            )
+          })(),
       ),
-    ).not.toThrow()
-    expect(() =>
-      expectResetResumeLaw(
-        { ...compatibleEmpty, transition: `schema-reset` },
-        { ...observation, resetEpoch: 1, schemaVersion: 2 },
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+    timeout: 120000,
+  })
+
+  oracleProperty({
+    id: `sqlite-resume.baseline-lineage.calibration`,
+    law: {
+      statement: `Reset clears baseline metadata while non-reset transitions preserve it.`,
+      authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
+      limits: `The unchanged finite reset/resume control and comparison.`,
+    },
+    owns: [`src/sqlite-core-adapter.ts`],
+    histories: [
+      {
+        name: `requires complete metadata reset while preserving non-reset metadata`,
+      },
+    ],
+    driver: (history: { name: string }, observeFact) =>
+      recordAssertionJudgment(
+        `sqlite-resume.baseline-lineage.calibration`,
+        history,
+        observeFact,
+        () =>
+          (() => {
+            const compatibleEmpty: ResetResumeHistory = {
+              fromSchemaVersion: 1,
+              rows: [],
+              resumeKind: `resume`,
+              transition: `compatible-reopen`,
+              reopensBeforeTransition: 0,
+              reopensAfterTransition: 1,
+              unrelatedMetadataKeys: [`provider`],
+            }
+            const observation: ResetResumeObservation = {
+              checkpoint: `after-persistence-transition-reopen`,
+              resetEpoch: 0,
+              schemaVersion: 1,
+              durableRows: [],
+              tombstones: [],
+              appliedTransactions: [],
+              latestRowVersion: 1,
+              metadataKeys: [`electric:resume`, `oracle:provider`],
+              resumeState: { kind: `resume`, offset: `10_0` },
+            }
+            oracleAssertion(
+              `expect(() => expectResetResumeLaw(compatibleEmpty, observation), ).not.toThrow()`,
+              () =>
+                expect(() =>
+                  expectResetResumeLaw(compatibleEmpty, observation),
+                ).not.toThrow(),
+            )
+            oracleAssertion(
+              `expect(() => expectResetResumeLaw( { ...compatibleEmpty, transition: 'external-row-loss' }, observat`,
+              () =>
+                expect(() =>
+                  expectResetResumeLaw(
+                    { ...compatibleEmpty, transition: `external-row-loss` },
+                    observation,
+                  ),
+                ).not.toThrow(),
+            )
+            oracleAssertion(
+              `expect(() => expectResetResumeLaw( { ...compatibleEmpty, transition: 'schema-reset' }, { ...observat`,
+              () =>
+                expect(() =>
+                  expectResetResumeLaw(
+                    { ...compatibleEmpty, transition: `schema-reset` },
+                    { ...observation, resetEpoch: 1, schemaVersion: 2 },
+                  ),
+                ).toThrowError(
+                  expect.objectContaining({ name: `AssertionError` }),
+                ),
+            )
+            oracleAssertion(
+              `expect(() => expectResetResumeLaw( { ...compatibleEmpty, transition: 'schema-reset' }, { ...observat`,
+              () =>
+                expect(() =>
+                  expectResetResumeLaw(
+                    { ...compatibleEmpty, transition: `schema-reset` },
+                    {
+                      ...observation,
+                      resetEpoch: 1,
+                      schemaVersion: 2,
+                      metadataKeys: [`oracle:provider`],
+                      resumeState: undefined,
+                    },
+                  ),
+                ).toThrowError(
+                  expect.objectContaining({ name: `AssertionError` }),
+                ),
+            )
+            oracleAssertion(
+              `expect(() => expectResetResumeLaw( { ...compatibleEmpty, transition: 'schema-reset' }, { ...observat`,
+              () =>
+                expect(() =>
+                  expectResetResumeLaw(
+                    { ...compatibleEmpty, transition: `schema-reset` },
+                    {
+                      ...observation,
+                      resetEpoch: 1,
+                      schemaVersion: 2,
+                      metadataKeys: [],
+                      resumeState: undefined,
+                    },
+                  ),
+                ).not.toThrow(),
+            )
+          })(),
       ),
-    ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
-    expect(() =>
-      expectResetResumeLaw(
-        { ...compatibleEmpty, transition: `schema-reset` },
-        {
-          ...observation,
-          resetEpoch: 1,
-          schemaVersion: 2,
-          metadataKeys: [`oracle:provider`],
-          resumeState: undefined,
-        },
-      ),
-    ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
-    expect(() =>
-      expectResetResumeLaw(
-        { ...compatibleEmpty, transition: `schema-reset` },
-        {
-          ...observation,
-          resetEpoch: 1,
-          schemaVersion: 2,
-          metadataKeys: [],
-          resumeState: undefined,
-        },
-      ),
-    ).not.toThrow()
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+    timeout: 120000,
   })
 }
 
@@ -808,7 +849,7 @@ export function runSQLiteResetResumeOracleTests(
  *
  * Refinement: require the exact rows, reached predicate SELECTs, no
  * SQLite error, and no statement above its declared binding cap. The original 900-item
- * OR-chunk lowering is the hostile design: it reaches the intended SELECT and
+ * OR-chunk lowering is the mutant design: it reaches the intended SELECT and
  * fails the public result/binding comparison. The legacy CLI test interpolates
  * literals, so it cannot exercise this boundary.
  *
@@ -892,150 +933,242 @@ const generated = fc.oneof(
     .map(([kind, a, b]) => nested(kind, a, b)),
 )
 
-const BINDING_PROPERTY = `sqlite-persistence.binding-capacity`
-const bindingFixedIt = oracleReplayTest(it)
-
 export function runSQLiteBindingCapacityOracleSuite(): void {
   describe(`SQLite subset binding-capacity oracle`, () => {
-    bindingFixedIt(
-      `returns exact rows at single-list, statement-total, and typed boundaries`,
-      async () => {
-        const failures: Array<string> = []
-        for (const spec of fixed) {
-          const observation = await observe(spec)
-          const problem = violation(spec, observation)
-          if (problem)
-            failures.push(
-              `${spec.label}: ${problem.kind}@${problem.checkpoint}: ${problem.message}`,
-            )
-        }
-        expect(failures).toEqual([])
+    oracleProperty({
+      id: `sqlite-persistence.binding-capacity.corpus`,
+      law: {
+        statement: `Supported subset predicates return exact rows within the connection binding cap.`,
+        authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
+        limits: `The unchanged finite binding-capacity control and receiving path.`,
       },
-    )
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: [
+        {
+          name: `returns exact rows at single-list, statement-total, and typed boundaries`,
+        },
+      ],
+      driver: (history: { name: string }, observeFact) =>
+        recordAssertionJudgment(
+          `sqlite-persistence.binding-capacity.corpus`,
+          history,
+          observeFact,
+          () =>
+            (async () => {
+              const failures: Array<string> = []
+              for (const spec of fixed) {
+                const observation = await observe(spec)
+                const problem = violation(spec, observation)
+                if (problem)
+                  failures.push(
+                    `${spec.label}: ${problem.kind}@${problem.checkpoint}: ${problem.message}`,
+                  )
+              }
+              oracleAssertion(`expect(failures).toEqual([])`, () =>
+                expect(failures).toEqual([]),
+              )
+            })(),
+        ),
+      model: recordedAssertionJudgment,
+      check: forwardAssertionJudgment,
+      timeout: 120000,
+    })
 
-    bindingFixedIt(
-      `honors total capacity through transactionWithDriver`,
-      async () => {
-        const failures: Array<string> = []
-        for (const spec of [
-          single(`string`, 999),
-          single(`string`, 1000),
-          dual(`string`, 500, 500, `or`),
-          single(`bigint`, 1000),
-        ]) {
-          const observation = await observe(spec, true)
-          const problem = violation(spec, observation)
-          if (problem)
-            failures.push(
-              `${spec.label}: ${problem.kind}@${problem.checkpoint}: ${problem.message}`,
-            )
-        }
-        expect(failures).toEqual([])
+    oracleProperty({
+      id: `sqlite-persistence.binding-capacity.transaction`,
+      law: {
+        statement: `Supported subset predicates return exact rows within the connection binding cap.`,
+        authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
+        limits: `The unchanged finite binding-capacity control and receiving path.`,
       },
-    )
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: [
+        { name: `honors total capacity through transactionWithDriver` },
+      ],
+      driver: (history: { name: string }, observeFact) =>
+        recordAssertionJudgment(
+          `sqlite-persistence.binding-capacity.transaction`,
+          history,
+          observeFact,
+          () =>
+            (async () => {
+              const failures: Array<string> = []
+              for (const spec of [
+                single(`string`, 999),
+                single(`string`, 1000),
+                dual(`string`, 500, 500, `or`),
+                single(`bigint`, 1000),
+              ]) {
+                const observation = await observe(spec, true)
+                const problem = violation(spec, observation)
+                if (problem)
+                  failures.push(
+                    `${spec.label}: ${problem.kind}@${problem.checkpoint}: ${problem.message}`,
+                  )
+              }
+              oracleAssertion(`expect(failures).toEqual([])`, () =>
+                expect(failures).toEqual([]),
+              )
+            })(),
+        ),
+      model: recordedAssertionJudgment,
+      check: forwardAssertionJudgment,
+      timeout: 120000,
+    })
 
-    bindingFixedIt(
-      `honors the root connection limit when a distinct transaction driver omits it`,
-      async () => {
-        for (const count of [100, 101]) {
-          const spec: Spec = {
-            label: `${count}-scalar-conjunction`,
-            valueKind: `string`,
-            connective: `and`,
-            clauses: Array.from({ length: count }, () => ({
-              field: `a`,
-              kind: `eq`,
-              values: [`target`],
-            })),
-          }
-          const observation = await observe(spec, true, 100, true)
-          expect(violation(spec, observation, 100)).toBeUndefined()
-          const predicateReads = observation.attempts.filter((entry) =>
-            entry.sql.startsWith(`SELECT key, value, metadata, row_version`),
-          )
-          expect(predicateReads).toHaveLength(1)
-          expect(predicateReads[0]?.bindings).toBe(count === 100 ? 100 : 0)
-        }
+    oracleProperty({
+      id: `sqlite-persistence.binding-capacity.root-limit`,
+      law: {
+        statement: `Supported subset predicates return exact rows within the connection binding cap.`,
+        authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
+        limits: `The unchanged finite binding-capacity control and receiving path.`,
       },
-    )
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: [
+        {
+          name: `honors the root connection limit when a distinct transaction driver omits it`,
+        },
+      ],
+      driver: (history: { name: string }, observeFact) =>
+        recordAssertionJudgment(
+          `sqlite-persistence.binding-capacity.root-limit`,
+          history,
+          observeFact,
+          () =>
+            (async () => {
+              for (const count of [100, 101]) {
+                const spec: Spec = {
+                  label: `${count}-scalar-conjunction`,
+                  valueKind: `string`,
+                  connective: `and`,
+                  clauses: Array.from({ length: count }, () => ({
+                    field: `a`,
+                    kind: `eq`,
+                    values: [`target`],
+                  })),
+                }
+                const observation = await observe(spec, true, 100, true)
+                oracleAssertion(
+                  `expect(violation(spec, observation, 100)).toBeUndefined()`,
+                  () =>
+                    expect(violation(spec, observation, 100)).toBeUndefined(),
+                )
+                const predicateReads = observation.attempts.filter((entry) =>
+                  entry.sql.startsWith(
+                    `SELECT key, value, metadata, row_version`,
+                  ),
+                )
+                oracleAssertion(`expect(predicateReads).toHaveLength(1)`, () =>
+                  expect(predicateReads).toHaveLength(1),
+                )
+                oracleAssertion(
+                  `expect(predicateReads[0]?.bindings).toBe(count === 100 ? 100 : 0)`,
+                  () =>
+                    expect(predicateReads[0]?.bindings).toBe(
+                      count === 100 ? 100 : 0,
+                    ),
+                )
+              }
+            })(),
+        ),
+      model: recordedAssertionJudgment,
+      check: forwardAssertionJudgment,
+      timeout: 120000,
+    })
 
-    bindingFixedIt(
-      `never submits an over-capacity statement with many scalar predicates`,
-      async () => {
-        const scalarStress: Spec = {
-          label: `1000-scalar-conjunction`,
-          valueKind: `string`,
-          connective: `and`,
-          clauses: Array.from({ length: 1000 }, () => ({
-            field: `a`,
-            kind: `eq`,
-            values: [`target`],
-          })),
-        }
-        const observation = await observe(scalarStress)
-        expect(violation(scalarStress, observation)).toBeUndefined()
-        const predicateReads = observation.attempts.filter((entry) =>
-          entry.sql.startsWith(`SELECT key, value, metadata, row_version`),
-        )
-        expect(predicateReads).toHaveLength(1)
-        expect(predicateReads[0]?.bindings).toBe(0)
+    oracleProperty({
+      id: `sqlite-persistence.binding-capacity.scalar-stress`,
+      law: {
+        statement: `Supported subset predicates return exact rows within the connection binding cap.`,
+        authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
+        limits: `The unchanged finite binding-capacity control and receiving path.`,
       },
-    )
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: [
+        {
+          name: `never submits an over-capacity statement with many scalar predicates`,
+        },
+      ],
+      driver: (history: { name: string }, observeFact) =>
+        recordAssertionJudgment(
+          `sqlite-persistence.binding-capacity.scalar-stress`,
+          history,
+          observeFact,
+          () =>
+            (async () => {
+              const scalarStress: Spec = {
+                label: `1000-scalar-conjunction`,
+                valueKind: `string`,
+                connective: `and`,
+                clauses: Array.from({ length: 1000 }, () => ({
+                  field: `a`,
+                  kind: `eq`,
+                  values: [`target`],
+                })),
+              }
+              const observation = await observe(scalarStress)
+              oracleAssertion(
+                `expect(violation(scalarStress, observation)).toBeUndefined()`,
+                () =>
+                  expect(violation(scalarStress, observation)).toBeUndefined(),
+              )
+              const predicateReads = observation.attempts.filter((entry) =>
+                entry.sql.startsWith(
+                  `SELECT key, value, metadata, row_version`,
+                ),
+              )
+              oracleAssertion(`expect(predicateReads).toHaveLength(1)`, () =>
+                expect(predicateReads).toHaveLength(1),
+              )
+              oracleAssertion(
+                `expect(predicateReads[0]?.bindings).toBe(0)`,
+                () => expect(predicateReads[0]?.bindings).toBe(0),
+              )
+            })(),
+        ),
+      model: recordedAssertionJudgment,
+      check: forwardAssertionJudgment,
+      timeout: 120000,
+    })
 
-    async function campaign(
-      label: string,
-      parameters: { numRuns: number; seed?: number; path?: string },
-    ) {
-      let firstFailure: Violation | undefined
-      const property = fc.asyncProperty(generated, async (spec) => {
-        assert.ok(legalSpec(spec))
-        const observation = await observe(spec)
-        const problem = violation(spec, observation)
-        if (problem) {
-          firstFailure ??= problem
-          throw new Error(
-            `${spec.label}: ${problem.kind}@${problem.checkpoint}: ${problem.message}${observation.cleanupError ? `; cleanup=${observation.cleanupError}` : ``}`,
-          )
-        }
-      })
-      const details = await fc.check(property, parameters)
-      recordOracleReplay(BINDING_PROPERTY, details)
-      const reduced = details.counterexample?.[0]
-      const reducedProblem = reduced
-        ? violation(reduced, await observe(reduced))
-        : undefined
-      const sameViolation =
-        !details.failed ||
-        Boolean(
-          firstFailure &&
-          reducedProblem &&
-          firstFailure.kind === reducedProblem.kind &&
-          firstFailure.checkpoint === reducedProblem.checkpoint,
-        )
-      expect(
-        details.failed,
-        `${label}: seed=${details.seed} path=${details.counterexamplePath ?? ``} first=${firstFailure?.kind ?? ``}@${firstFailure?.checkpoint ?? ``} reduced=${reducedProblem?.kind ?? ``}@${reducedProblem?.checkpoint ?? ``} sameViolation=${sameViolation}; ${details.error ?? ``}`,
-      ).toBe(false)
-    }
-
-    bindingFixedIt(
-      `preserves exact rows across fixed-seed binding histories`,
-      async () => {
-        await campaign(`fixed seed`, {
-          numRuns: oracleRuns(BINDING_RUNS),
-          seed: BINDING_FIXED_SEED,
-        })
+    oracleProperty({
+      id: `sqlite-persistence.binding-capacity`,
+      law: {
+        statement: `Supported predicates return exactly their matching rows without exceeding the SQLite connection binding cap.`,
+        authority: `Existing SQLite core adapter contract and reset/resume lineage decision recorded beside this owner.`,
+        limits: `The unchanged generated typed/list-length/connective grammar, native prepared statements and cleanup observations.`,
       },
-    )
-    // Runs in ordinary and seed-only runs, and as the replay of its property.
-    oracleReplayTest(it, BINDING_PROPERTY)(
-      `preserves exact rows across random-seed binding histories`,
-      async () => {
-        await campaign(
-          `random seed`,
-          oraclePropertyOptions(BINDING_RUNS, BINDING_PROPERTY),
-        )
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: {
+        arbitrary: generated,
+        runs: BINDING_RUNS,
+        fixedSeeds: [BINDING_FIXED_SEED],
       },
-    )
+      driver: (history: Spec, observeFact) =>
+        recordAssertionJudgment(
+          `sqlite-persistence.binding-capacity`,
+          history,
+          observeFact,
+          () =>
+            (async () => {
+              assert.ok(legalSpec(history))
+              const observation = await observe(history)
+              const problem = violation(history, observation)
+              oracleAssertion(
+                problem
+                  ? `${problem.kind}@${problem.checkpoint}`
+                  : `binding result and statement capacity`,
+                () =>
+                  expect(
+                    problem,
+                    `${history.label}: ${problem?.kind ?? ``}@${problem?.checkpoint ?? ``}; ${problem?.message ?? ``}${observation.cleanupError ? `; cleanup=${observation.cleanupError}` : ``}`,
+                  ).toBeUndefined(),
+              )
+            })(),
+        ),
+      model: recordedAssertionJudgment,
+      check: forwardAssertionJudgment,
+      timeout: 120000,
+    })
   })
 }

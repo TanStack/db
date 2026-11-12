@@ -7,6 +7,7 @@ import {
   materialize,
   toArray,
 } from '../../src/query/index.js'
+import { oracleRoute } from '../oracle-config.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import {
   Projection,
@@ -64,6 +65,10 @@ import type {
  */
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   model: [expectedGroupChildren, expectedOperatorRows],
   grammar: [cells, orderedPairCells, valueCells, renamedCells, operatorCells],
 })
@@ -102,6 +107,7 @@ function expectedOperatorRows(
 
 describe(`functional projection output compatibility`, () => {
   it(`covers the declared output and renamed-field products`, () => {
+    oracleRoute(`case`)
     expect(valueCells).toHaveLength(48)
     expect(renamedCells).toHaveLength(24)
     expect(operatorCells).toHaveLength(18)
@@ -119,6 +125,7 @@ describe(`functional projection output compatibility`, () => {
   it.each(operatorCells)(
     `$form / $operator / reads-include=$readsInclude consumes the projected value`,
     async ({ form, operator, readsInclude }) => {
+      oracleRoute(`case`)
       const parents = createControlledCollection(`operator-parent`, [
         { id: 1, group: 1, base: 3 },
         { id: 2, group: 2, base: 5 },
@@ -246,6 +253,7 @@ describe(`functional projection output compatibility`, () => {
   it.each(renamedCells)(
     `$form / $projection / $consumer / sibling=$withSibling materializes inputs before renaming them`,
     async ({ form, consumer, projection, withSibling }) => {
+      oracleRoute(`case`)
       const parents = createControlledCollection(`renamed-parent`, [
         { id: 1, group: 1, siblingGroup: 2 },
       ])
@@ -473,6 +481,7 @@ describe(`functional projection output compatibility`, () => {
 
 describe(`functional include projection boundary grammar`, () => {
   it(`covers every declared boundary product without duplicate cells`, () => {
+    oracleRoute(`case`)
     expect(cells).toHaveLength(54)
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(54)
     expect(orderedPairCells).toHaveLength(27)
@@ -486,6 +495,7 @@ describe(`functional include projection boundary grammar`, () => {
   it.each([...cells, ...orderedPairCells])(
     `$boundary / $form / $output / $initial`,
     async ({ boundary, form, output, initial }) => {
+      oracleRoute(`case`)
       const parents = createControlledCollection(`projection-parents`, [
         { id: 1, group: 1 },
       ])

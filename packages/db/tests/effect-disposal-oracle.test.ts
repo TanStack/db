@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createCollection, createEffect } from '../src/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { captureMicrotaskErrors, flushPromises } from './utils.js'
+import { oracleRoute } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 
 /**
@@ -74,7 +75,10 @@ function expectUncaughtReports(
   )
 }
 
+// What this oracle owns: the gap report judges every function in
+// query/effect.ts by this file's disposal matrix.
 declareOracle({
+  owns: [`src/query/effect.ts`],
   check: [expectCallerOutcomes, expectUncaughtReports],
   model: [expectedUncaughtReports],
 })
@@ -83,6 +87,7 @@ describe(`Effect disposal outcome oracle`, () => {
   it.each(scenarios)(
     `joins all callers to one attempt: %j`,
     async ({ reentry, pendingHandler, outcome }) => {
+      oracleRoute(`case`)
       const failure = new Error(`release failed`)
       // The thrown value the model expects to see reported, if any.
       const reported = expectedUncaughtReports(outcome, failure)

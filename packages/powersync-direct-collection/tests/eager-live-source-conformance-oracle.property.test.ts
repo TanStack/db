@@ -1,19 +1,14 @@
-import { fc } from '@fast-check/vitest'
-import { describe, it } from 'vitest'
-import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   checkEagerLiveSourceHistory,
-  eagerLiveSourceHistoryArb,
   eagerLiveSourceModel,
-  eagerLiveSourceProperty,
-  reachStatesFor,
 } from '../../db-adapter-conformance/src'
+import {
+  checkEagerLiveSourceObservations,
+  eagerLiveSourceHistories,
+  eagerLiveSourceOracle,
+} from '../../db-adapter-conformance/tests/eager-live-source-property-oracle'
 import { directConformanceDriver } from './conformance-driver'
 
 /**
@@ -32,44 +27,24 @@ import { directConformanceDriver } from './conformance-driver'
  * about the PowerSync service needs a receiving witness against it.
  */
 
-const property = `adapter-conformance.eager-live-source.powersync-direct`
 const driver = directConformanceDriver()
-const historyArb = eagerLiveSourceHistoryArb(driver)
-// `field-removed` needs a held row with a note and a later upsert without
-// one: 200 histories reached it as few as two times.
-const runs = 400
-const campaignTimeoutMs = 600_000
+const histories = eagerLiveSourceHistories(driver)
 
-async function campaign(options: fc.Parameters<[unknown]>) {
-  const reach = createOracleReach(property, reachStatesFor(driver), {
-    minimum: 5,
-  })
-  await fc.assert(eagerLiveSourceProperty(driver, reach), options)
-  return reach
-}
-
-describe(`eager live-source conformance: direct PowerSync`, () => {
-  oracleReplayTest(it)(
-    `conforms on a fixed-seed campaign`,
-    async () => {
-      const reach = await campaign({ seed: 2118, numRuns: oracleRuns(runs) })
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-
-  oracleReplayTest(it, property)(
-    `conforms on a random campaign or a replayed seed`,
-    async () => {
-      const reach = await campaign(oraclePropertyOptions(runs, property))
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
+oracleProperty({
+  id: `adapter-conformance.eager-live-source.powersync-direct`,
+  owns: [`src/index.ts#powerSyncCollectionOptions`],
+  ...eagerLiveSourceOracle(driver),
+  check: checkEagerLiveSourceObservations,
+  histories: {
+    ...histories,
+    runs: 400,
+    fixedSeeds: [2118],
+  },
+  timeout: 600_000,
 })
 
 declareOracle({
-  check: [checkEagerLiveSourceHistory, eagerLiveSourceProperty],
+  check: [checkEagerLiveSourceHistory],
   model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-  grammar: [historyArb],
+  grammar: [histories.arbitrary],
 })

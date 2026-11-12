@@ -1,14 +1,20 @@
 import fc from 'fast-check'
-import { expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
 import {
-  oraclePropertyOptions,
+  oracleProperty,
   oracleReplayRequested,
-  readOracleRunConfig,
+  oracleRoute,
 } from './oracle-config.js'
-import { createOracleReach } from './oracle-reach.js'
+import { declareOracle } from './oracle-declaration.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import { resetCleanupQueue, withOracleCleanup } from './utils.js'
 import {
   checkGcObservation,
@@ -22,7 +28,6 @@ import type { IdleCallbackFunction } from '../src/utils/browser-polyfills.js'
 import type { Deferred } from '../src/deferred.js'
 import type * as BrowserPolyfills from '../src/utils/browser-polyfills'
 
-const runConfig = readOracleRunConfig()
 // The boundary driver splits
 // elapsed timer delivery from host idle opportunities, including zero budget.
 const idleHost = vi.hoisted(() => ({
@@ -112,10 +117,11 @@ const boundaryStates = [
   `automatic-cleanup-pending-rollback`,
   `automatic-cleanup-rejected`,
 ] as const
-let boundaryReach = createOracleReach(boundaryPropertyName, boundaryStates)
 
-async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
-  boundaryReach.beginHistory()
+async function runBoundaryHistory(
+  history: BoundaryHistory,
+  enter: (state: (typeof boundaryStates)[number]) => void = () => {},
+): Promise<void> {
   vi.useFakeTimers()
   vi.setSystemTime(0)
   resetCleanupQueue()
@@ -197,43 +203,70 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
         model.transactions[slot] === `persisting`,
     )
     const tracked = [...collection._state.transactions.values()]
-    expect(
-      tracked.length === unsettled.length &&
-        tracked.every((transaction) => unsettled.includes(transaction)),
+    oracleAssertion(
       `${label}: tracked transactions are exactly the unsettled identities`,
-    ).toBe(true)
+      () =>
+        expect(
+          tracked.length === unsettled.length &&
+            tracked.every((transaction) => unsettled.includes(transaction)),
+          `${label}: tracked transactions are exactly the unsettled identities`,
+        ).toBe(true),
+    )
     // Promise outcomes follow controlled source evidence, independently of
     // production's pending-preload flag and cached promise. Concurrent cold
     // calls share one promise; a warm call is already fulfilled.
     for (const preload of preloads) {
-      expect(preload.actual, `${label}: preload outcome`).toBe(preload.expected)
+      oracleAssertion(`${label}: preload outcome`, () =>
+        expect(preload.actual, `${label}: preload outcome`).toBe(
+          preload.expected,
+        ),
+      )
       if (preload.expected === `rejected`)
-        expect(preload.reason, `${label}: preload rejection identity`).toBe(
-          preloadFailure,
+        oracleAssertion(`${label}: preload rejection identity`, () =>
+          expect(preload.reason, `${label}: preload rejection identity`).toBe(
+            preloadFailure,
+          ),
         )
     }
     if (model.cleaningUp) {
-      expect(collection.status, `${label}: held cleanup public status`).toBe(
-        cleanupStatus,
+      oracleAssertion(`${label}: held cleanup public status`, () =>
+        expect(collection.status, `${label}: held cleanup public status`).toBe(
+          cleanupStatus,
+        ),
       )
-      expect(cleanupSettled, `${label}: cleanup settlement is held`).toBe(false)
+      oracleAssertion(`${label}: cleanup settlement is held`, () =>
+        expect(cleanupSettled, `${label}: cleanup settlement is held`).toBe(
+          false,
+        ),
+      )
     }
     if (model.retired && cleanupPromise) {
-      expect(cleanupSettled, `${label}: cleanup settled`).toBe(true)
+      oracleAssertion(`${label}: cleanup settled`, () =>
+        expect(cleanupSettled, `${label}: cleanup settled`).toBe(true),
+      )
       if (history.cleanupRejects) {
         // Sync cleanup exposes its public wrapper and retains the exact cause.
-        expect(cleanupError, `${label}: public cleanup failure`).toMatchObject({
-          name: `SyncCleanupError`,
-        })
-        expect(
-          (cleanupError as Error).cause,
-          `${label}: exact adapter cause`,
-        ).toBe(cleanupFailure)
+        oracleAssertion(`${label}: public cleanup failure`, () =>
+          expect(
+            cleanupError,
+            `${label}: public cleanup failure`,
+          ).toMatchObject({
+            name: `SyncCleanupError`,
+          }),
+        )
+        oracleAssertion(`${label}: exact adapter cause`, () =>
+          expect(
+            (cleanupError as Error).cause,
+            `${label}: exact adapter cause`,
+          ).toBe(cleanupFailure),
+        )
       } else
-        expect(
-          cleanupError,
-          `${label}: successful adapter cleanup`,
-        ).toBeUndefined()
+        oracleAssertion(`${label}: successful adapter cleanup`, () =>
+          expect(
+            cleanupError,
+            `${label}: successful adapter cleanup`,
+          ).toBeUndefined(),
+        )
     }
   }
   await withOracleCleanup(async () => {
@@ -241,10 +274,12 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
     check(`start`)
     for (const [index, action] of history.actions.entries()) {
       if (history.interaction)
-        expect(
-          gcActionLegal(model, action),
-          `constructive interaction action ${index}`,
-        ).toBe(true)
+        oracleAssertion(`constructive interaction action ${index}`, () =>
+          expect(
+            gcActionLegal(model, action),
+            `constructive interaction action ${index}`,
+          ).toBe(true),
+        )
       if (!gcActionLegal(model, action)) continue
       const deadlineBefore = gcDeadline(model)
       const phaseBefore =
@@ -256,7 +291,7 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
           (phase) => phase === `pending` || phase === `persisting`,
         ).length >= 3
       )
-        boundaryReach.reach(`interaction-delayed-commit`)
+        enter(`interaction-delayed-commit`)
       if (
         history.interaction &&
         action.kind === `settle` &&
@@ -264,13 +299,13 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
           (phase, slot) => slot < action.slot && phase === `persisting`,
         )
       )
-        boundaryReach.reach(`interaction-nonfifo-settlement`)
+        enter(`interaction-nonfifo-settlement`)
       if (action.kind === `insert`) {
-        if (idleHost.callbacks.size) boundaryReach.reach(`queued-idle-renewal`)
+        if (idleHost.callbacks.size) enter(`queued-idle-renewal`)
         const handler = createDeferred<void>()
         handlers.push(handler)
         if (history.direct && action.commit) {
-          boundaryReach.reach(`write-started-sync`)
+          enter(`write-started-sync`)
           transactions.push(collection.insert({ id: transactions.length + 1 }))
         } else {
           const transaction = createTransaction({
@@ -284,7 +319,7 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
           if (action.commit) void transaction.commit().catch(() => {})
         }
       } else if (action.kind === `commit`) {
-        boundaryReach.reach(`delayed-commit`)
+        enter(`delayed-commit`)
         void transactions[action.slot]!.commit().catch(() => {})
       } else if (action.kind === `settle`) {
         const handler = handlers[action.slot]!
@@ -292,35 +327,36 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
         else handler.reject(new Error(`handler failed`))
       } else if (action.kind === `rollback`) {
         transactions[action.slot]!.rollback()
-        if (phaseBefore === `pending`) boundaryReach.reach(`pending-rollback`)
+        if (phaseBefore === `pending`) enter(`pending-rollback`)
       } else if (action.kind === `subscribe`) {
         subscriptions.push(collection.subscribeChanges(() => {}))
       } else if (action.kind === `unsubscribe`) {
         subscriptions.pop()!.unsubscribe()
         if (model.transactions.includes(`pending`))
-          boundaryReach.reach(`pending-last-unsubscribe`)
+          enter(`pending-last-unsubscribe`)
         if (model.subscribers === 1 && model.gcTime < 50 && model.gcTime > 0)
-          boundaryReach.reach(`last-unsubscribe-short`)
+          enter(`last-unsubscribe-short`)
       } else if (action.kind === `preload`) {
         if (
           history.interaction &&
           transactionSettlements > 0 &&
           model.transactions.includes(`persisting`)
         )
-          boundaryReach.reach(`interaction-preload-between-settlements`)
+          enter(`interaction-preload-between-settlements`)
         if (model.ready) {
           warmPreloads++
           if (model.transactions.includes(`persisting`))
-            boundaryReach.reach(`warm-preload-persisting`)
-          if (idleHost.callbacks.size)
-            boundaryReach.reach(`warm-preload-queued-idle`)
-          if (warmPreloads > 1) boundaryReach.reach(`warm-preload-repeated`)
+            enter(`warm-preload-persisting`)
+          if (idleHost.callbacks.size) enter(`warm-preload-queued-idle`)
+          if (warmPreloads > 1) enter(`warm-preload-repeated`)
         }
         const promise = collection.preload()
         if (model.preload) {
-          boundaryReach.reach(`concurrent-preload`)
-          expect(promise, `concurrent preload shares its attempt`).toBe(
-            preloads.at(-1)!.promise,
+          enter(`concurrent-preload`)
+          oracleAssertion(`concurrent preload shares its attempt`, () =>
+            expect(promise, `concurrent preload shares its attempt`).toBe(
+              preloads.at(-1)!.promise,
+            ),
           )
         }
         const observation: (typeof preloads)[number] = {
@@ -343,12 +379,12 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
         for (const preload of preloads)
           if (preload.expected === `pending`) preload.expected = `fulfilled`
         if (model.preload && !model.transactions.includes(`persisting`))
-          boundaryReach.reach(`preload-last-release`)
+          enter(`preload-last-release`)
       } else if (action.kind === `preload-failure`) {
         fail(preloadFailure)
         for (const preload of preloads)
           if (preload.expected === `pending`) preload.expected = `rejected`
-        boundaryReach.reach(
+        enter(
           model.transactions.includes(`persisting`)
             ? `preload-failure-held`
             : `preload-failure-last`,
@@ -371,22 +407,24 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
         if (startsHeldCleanup) {
           // Join the operation that the idle callback started. The callback,
           // not this observer, must have invoked adapter cleanup first.
-          expect(adapterCleanupCalls, `GC started adapter cleanup`).toBe(1)
+          oracleAssertion(`GC started adapter cleanup`, () =>
+            expect(adapterCleanupCalls, `GC started adapter cleanup`).toBe(1),
+          )
           observeCleanup()
-          boundaryReach.reach(`automatic-cleanup-held`)
+          enter(`automatic-cleanup-held`)
         }
         if (
           model.transactions.includes(`pending`) &&
           model.now >= deadlineBefore
         )
-          boundaryReach.reach(`pending-does-not-hold`)
-        if (model.cleaningUp) boundaryReach.reach(`async-cleanup-pending-idle`)
+          enter(`pending-does-not-hold`)
+        if (model.cleaningUp) enter(`async-cleanup-pending-idle`)
         if (
           model.subscribers > 0 &&
           model.transactions.includes(`pending`) &&
           model.now >= Math.max(model.gcTime, 50)
         )
-          boundaryReach.reach(`pending-subscription-held`)
+          enter(`pending-subscription-held`)
       } else if (action.kind === `cleanup-start`) {
         cleanupStatus = collection.status
         observeCleanup()
@@ -394,26 +432,25 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
         if (history.cleanupRejects) cleanupGate.reject(cleanupFailure)
         else cleanupGate.resolve()
         await cleanupPromise
-        if (history.cleanupRejects)
-          boundaryReach.reach(`automatic-cleanup-rejected`)
+        if (history.cleanupRejects) enter(`automatic-cleanup-rejected`)
       } else await collection.cleanup()
       stepGcModel(model, action)
       if (action.kind === `settle` || action.kind === `rollback`)
         transactionSettlements++
       if (history.interaction && model.subscribers >= 2)
-        boundaryReach.reach(`interaction-subscriber-multiplicity`)
+        enter(`interaction-subscriber-multiplicity`)
       if (
         history.interaction &&
         model.transactions.filter((phase) => phase === `persisting`).length >= 3
       )
-        boundaryReach.reach(`interaction-three-persisting`)
+        enter(`interaction-three-persisting`)
       if (
         history.asyncCleanup &&
         action.kind === `rollback` &&
         model.cleaningUp &&
         history.automaticCleanup
       )
-        boundaryReach.reach(`automatic-cleanup-pending-rollback`)
+        enter(`automatic-cleanup-pending-rollback`)
       if (
         action.kind === `cleanup-start` ||
         (action.kind === `idle` && model.cleaningUp)
@@ -428,29 +465,29 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
           model.gcTime > 0 &&
           model.gcTime < 50
         )
-          boundaryReach.reach(`startup-release-before-floor`)
+          enter(`startup-release-before-floor`)
         if (model.now >= 50 && model.gcTime > 0 && model.gcTime < 50)
-          boundaryReach.reach(`late-release-short`)
+          enter(`late-release-short`)
         if (model.transactions.includes(`persisting`))
-          boundaryReach.reach(`sibling-persisting`)
+          enter(`sibling-persisting`)
         const peer = action.slot === 0 ? 1 : 0
         if (model.transactions[peer] === `persisting`)
-          boundaryReach.reach(
+          enter(
             action.slot === 0 ? `sibling-oldest-first` : `sibling-newest-first`,
           )
-        if (model.cleaningUp) boundaryReach.reach(`async-cleanup-settlement`)
+        if (model.cleaningUp) enter(`async-cleanup-settlement`)
         if (model.retired) {
-          boundaryReach.reach(`retired-settlement`)
+          enter(`retired-settlement`)
           if (
             model.transactions.some(
               (phase) => phase === `pending` || phase === `persisting`,
             )
           )
-            boundaryReach.reach(`retired-sibling-held`)
+            enter(`retired-sibling-held`)
         }
       }
       if (model.gcTime <= 0 || !Number.isFinite(model.gcTime))
-        boundaryReach.reach(`disabled-gc`)
+        enter(`disabled-gc`)
       await flush()
       check(`step ${index} ${action.kind}`)
     }
@@ -496,7 +533,7 @@ const boundaryParameters = fc.record({
   ),
   siblingPending: fc.boolean(),
 })
-const boundaryLaneHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
+const boundaryGrammarHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
   ...[
     `startup`,
     `unsubscribe`,
@@ -513,7 +550,7 @@ const boundaryLaneHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
     `async-cleanup-held`,
     `async-cleanup-retired`,
     `async-cleanup-single`,
-  ].map((lane) =>
+  ].map((grammar) =>
     boundaryParameters.map((parameters): BoundaryHistory => {
       const {
         gcTime,
@@ -531,15 +568,15 @@ const boundaryLaneHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
         siblingPending,
       } = parameters
       const actions: Array<GcAction> = []
-      const asyncCleanup = lane.startsWith(`async-cleanup`)
-      // The two cleanup timing lanes always preserve a sibling. A separate
-      // single-transaction lane keeps the nearby no-survivor boundary.
+      const asyncCleanup = grammar.startsWith(`async-cleanup`)
+      // The two cleanup timing grammars always preserve a sibling. A separate
+      // single-transaction grammar keeps the nearby no-survivor boundary.
       const hasSibling = asyncCleanup
-        ? lane !== `async-cleanup-single`
+        ? grammar !== `async-cleanup-single`
         : sibling
-      const settleAfterCleanup = lane === `async-cleanup-retired`
-      const failedPreload = lane.startsWith(`failed-preload`)
-      const preloadLast = lane === `failed-preload-last`
+      const settleAfterCleanup = grammar === `async-cleanup-retired`
+      const failedPreload = grammar.startsWith(`failed-preload`)
+      const preloadLast = grammar === `failed-preload-last`
       const settleTransaction = (slot: number, result = outcome): GcAction =>
         result === `rollback`
           ? { kind: `rollback`, slot }
@@ -554,22 +591,22 @@ const boundaryLaneHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
           actions.push({ kind: `preload` })
         }
       }
-      if (lane === `warm-preload`)
+      if (grammar === `warm-preload`)
         actions.push(
           { kind: `advance`, elapsedMs: Math.max(gcTime, 50) },
           { kind: `preload` },
         )
-      if (lane === `unsubscribe`) actions.push({ kind: `subscribe` })
-      if (lane === `idle`) {
+      if (grammar === `unsubscribe`) actions.push({ kind: `subscribe` })
+      if (grammar === `idle`) {
         actions.push({ kind: `advance`, elapsedMs: Math.max(gcTime, 50) + 1 })
         for (let i = 0; i < noTimePeriods; i++)
           actions.push({ kind: `idle`, hasTime: false, didTimeout: false })
       }
       actions.push({
         kind: `insert`,
-        commit: !lane.startsWith(`pending`) && lane !== `delayed-commit`,
+        commit: !grammar.startsWith(`pending`) && grammar !== `delayed-commit`,
       })
-      if (lane === `pending-subscribed`) {
+      if (grammar === `pending-subscribed`) {
         actions.push(
           { kind: `subscribe` },
           { kind: `advance`, elapsedMs: Math.max(gcTime, 50) + age + 1 },
@@ -580,23 +617,23 @@ const boundaryLaneHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
           { kind: `advance`, elapsedMs: 1 },
           { kind: `idle`, hasTime: true, didTimeout: false },
         )
-      } else if (lane === `pending` || lane === `pending-alone`) {
+      } else if (grammar === `pending` || grammar === `pending-alone`) {
         actions.push({ kind: `advance`, elapsedMs: Math.max(gcTime, 50) - 1 })
-        if (lane === `pending`) actions.push({ kind: `rollback`, slot: 0 })
+        if (grammar === `pending`) actions.push({ kind: `rollback`, slot: 0 })
         actions.push({ kind: `advance`, elapsedMs: 2 })
       } else {
-        if (lane === `delayed-commit`) {
+        if (grammar === `delayed-commit`) {
           actions.push(
             { kind: `advance`, elapsedMs: age },
             { kind: `commit`, slot: 0 },
           )
         }
-        if (lane === `preload` || failedPreload) preload()
+        if (grammar === `preload` || failedPreload) preload()
         if (hasSibling)
           actions.push({ kind: `insert`, commit: !pendingSibling })
-        if (lane === `unsubscribe`) actions.push({ kind: `unsubscribe` })
+        if (grammar === `unsubscribe`) actions.push({ kind: `unsubscribe` })
         actions.push({ kind: `advance`, elapsedMs: age })
-        if (lane === `warm-preload`) preload()
+        if (grammar === `warm-preload`) preload()
         if (asyncCleanup) actions.push({ kind: `cleanup-start` })
         if (asyncCleanup && settleAfterCleanup)
           actions.push({ kind: `cleanup-settle` })
@@ -611,7 +648,7 @@ const boundaryLaneHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
               ? { kind: `rollback`, slot: lastSlot }
               : settleTransaction(lastSlot, siblingOutcome),
           )
-        if (lane === `preload`) actions.push({ kind: `ready` })
+        if (grammar === `preload`) actions.push({ kind: `ready` })
         if (failedPreload && preloadLast)
           actions.push({ kind: `preload-failure` })
         if (asyncCleanup)
@@ -625,15 +662,15 @@ const boundaryLaneHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
       }
       actions.push({ kind: `idle`, hasTime: true, didTimeout: timeout })
       // Test just below the startup floor and after every finite deadline.
-      if (lane === `startup` && age < 49)
+      if (grammar === `startup` && age < 49)
         actions.push(
           { kind: `advance`, elapsedMs: 49 - age },
           { kind: `idle`, hasTime: true, didTimeout: false },
         )
       // Derive boundary cuts from the independent law, not production timers.
       const reference = createGcModel(
-        lane === `disabled` ? disabledTime : gcTime,
-        lane !== `preload` && !failedPreload,
+        grammar === `disabled` ? disabledTime : gcTime,
+        grammar !== `preload` && !failedPreload,
       )
       for (const action of actions)
         if (gcActionLegal(reference, action)) stepGcModel(reference, action)
@@ -652,9 +689,9 @@ const boundaryLaneHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
         { kind: `cleanup` },
       )
       return {
-        gcTime: lane === `disabled` ? disabledTime : gcTime,
-        direct: direct && lane === `startup`,
-        ready: lane !== `preload` && !failedPreload,
+        gcTime: grammar === `disabled` ? disabledTime : gcTime,
+        direct: direct && grammar === `startup`,
+        ready: grammar !== `preload` && !failedPreload,
         asyncCleanup,
         actions,
       }
@@ -666,7 +703,7 @@ const boundaryLaneHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
 // The prefix establishes subscriber multiplicity, three persisting siblings,
 // a delayed commit, non-FIFO settlement and a warm preload between releases.
 // Generated suffixes then recombine those owners instead of only varying a
-// predefined lane's parameters. A maximum of seven transaction slots and three
+// predefined grammar's parameters. A maximum of seven transaction slots and three
 // subscribers keeps shrinking and exact-key observations small. Every emitted
 // action is legal; the production driver rejects a skipped interaction action.
 // Removing this arbitrary loses those crossings. Removing its suffix preserves
@@ -846,30 +883,77 @@ const automaticCleanupHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc
   })
 
 const boundaryHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
-  { arbitrary: boundaryLaneHistoryArbitrary, weight: 5 },
+  { arbitrary: boundaryGrammarHistoryArbitrary, weight: 5 },
   { arbitrary: interactionHistoryArbitrary, weight: 1 },
   { arbitrary: automaticCleanupHistoryArbitrary, weight: 1 },
 )
 
-it.each(
-  runConfig.replaySeed === undefined ? [20261026, undefined] : [undefined],
-)(
-  `preserves retention across transaction phases and idle delivery (seed %s)`,
-  async (seed) => {
-    boundaryReach = createOracleReach(boundaryPropertyName, boundaryStates)
-    await fc.assert(
-      fc.asyncProperty(boundaryHistoryArbitrary, runBoundaryHistory),
-      {
-        ...oraclePropertyOptions(250, boundaryPropertyName),
-        ...(seed === undefined ? {} : { seed }),
-      },
-    )
-    boundaryReach.assertReached()
-    console.info(
-      `GC boundary reach: ${JSON.stringify(Object.fromEntries(boundaryReach.counts()))}`,
-    )
-  },
-)
+declareOracle({
+  grammar: [boundaryHistoryArbitrary],
+})
+
+// Preserve the original campaign-local counts: one hit per history and
+// every one of the 33 existing states reached at least once per campaign.
+describe(`GC boundary campaign reach`, () => {
+  let counts = new Map<(typeof boundaryStates)[number], number>()
+  beforeEach(() => {
+    counts = new Map(boundaryStates.map((state) => [state, 0]))
+  })
+  afterEach(({ task }) => {
+    if (
+      task.name !== `determinism` &&
+      task.result?.state !== `fail` &&
+      !oracleReplayRequested()
+    ) {
+      for (const state of boundaryStates)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(1)
+      console.info(
+        `GC boundary reach: ${JSON.stringify(Object.fromEntries(counts))}`,
+      )
+    }
+  })
+  oracleProperty({
+    id: boundaryPropertyName,
+    law: {
+      statement: `Collection retention follows independently modeled logical holds, release and handoff deadlines, and controlled host idle opportunities across transaction and cleanup phases.`,
+      authority: `BaseCollectionConfig.gcTime and the shared GC retention oracle's maintainer decisions`,
+      limits: `The existing controlled timing and transaction grammar; cleanup restart, pending-row restoration, provider I/O and arbitrary host scheduling remain outside this driver.`,
+    },
+    // What this oracle owns: the gap report judges the garbage-collection
+    // retention of Collections, in lifecycle.ts, by this file's tests. The
+    // companion retention module declares the shared check and model that these
+    // histories are compared with.
+    owns: [`src/collection/lifecycle.ts`],
+    histories: {
+      arbitrary: boundaryHistoryArbitrary,
+      runs: 250,
+      fixedSeeds: [20261026],
+      measured: boundaryStates,
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) => {
+      const entered = new Set<(typeof boundaryStates)[number]>()
+      return recordAssertionJudgment(
+        `Collection GC retention`,
+        plan,
+        observe,
+        () =>
+          runBoundaryHistory(plan.history, (state) => {
+            if (!entered.has(state)) {
+              entered.add(state)
+              counts.set(state, counts.get(state)! + 1)
+              observe(`reach`, state)
+            }
+          }),
+      )
+    },
+    check: forwardAssertionJudgment,
+  })
+})
 
 // Reconstruction witnesses use the same model, production driver and comparison
 // as the generated property; they preserve the three review traces for diagnosis.
@@ -996,5 +1080,8 @@ const boundaryExamples: Array<{ name: string; history: BoundaryHistory }> = [
 ]
 it.skipIf(oracleReplayRequested()).each(boundaryExamples)(
   `reconstructs $name`,
-  async ({ history }) => runBoundaryHistory(history),
+  async ({ history }) => {
+    oracleRoute(`fixed history`)
+    await runBoundaryHistory(history)
+  },
 )

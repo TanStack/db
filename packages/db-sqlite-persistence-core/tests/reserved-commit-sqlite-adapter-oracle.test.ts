@@ -40,8 +40,7 @@
 
 import { DatabaseSync } from 'node:sqlite'
 import { createCollection } from '@tanstack/db'
-import { afterEach, describe, expect, it } from 'vitest'
-import { createOracleReach } from '../../db/tests/oracle-reach.js'
+import { afterEach, describe, expect } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
@@ -50,6 +49,14 @@ import {
   eagerStorageTarget,
   persistedCollectionOptions,
 } from '../src'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+
 import type { ProtocolEnvelope, SQLiteDriver, TxCommitted } from '../src'
 import type { SyncConfig } from '@tanstack/db'
 import type { SQLInputValue } from 'node:sqlite'
@@ -230,7 +237,9 @@ const openPeerTabHarness = async ({
   const start = async () => {
     await collection.preload()
     await waitFor(() =>
-      expect(collection.get('row-1')).toMatchObject({ value: 'initial' }),
+      oracleAssertion('existing comparison at 236', () =>
+        expect(collection.get('row-1')).toMatchObject({ value: 'initial' }),
+      ),
     )
   }
   /** Commits a row change from the peer tab into the shared database and returns its broadcast notice. */
@@ -372,10 +381,6 @@ describe('reserved commits across real-adapter hydrations', () => {
     })
     cleanups.push(() => harness.database.close())
     cleanups.push(() => harness.collection.cleanup())
-    const reach = createOracleReach('sqlite.reserved-commit-hydration', [
-      'hydration entered its scope while reserved',
-    ])
-    reach.beginHistory()
     // row-1's durable value just before the reservation, from the history.
     let durableBefore = 'initial'
     const notice =
@@ -451,7 +456,6 @@ describe('reserved commits across real-adapter hydrations', () => {
       await blocker
       await reached(entered, 'hydration entered its scope')
     }
-    reach.reach('hydration entered its scope while reserved')
     // Commits the innermost transaction first; a rejection keeps its name,
     // so an abort and a cross-cycle failure stay distinct.
     const settle = async () => {
@@ -466,29 +470,47 @@ describe('reserved commits across real-adapter hydrations', () => {
     if (nesting === 'nested') outcomes.push(await settle())
     outcomes.push(await settle())
     const loadOutcome = await load
-    reach.assertReached()
     const expected = expectedAdapterOutcome(history)
     const expectedValue = expected.commitAccepted ? 'refetched' : durableBefore
     await waitFor(() =>
-      expect(harness.collection.get('row-1')).toMatchObject({
-        value: expectedValue,
-      }),
+      oracleAssertion('existing comparison at 476', () =>
+        expect(harness.collection.get('row-1')).toMatchObject({
+          value: expectedValue,
+        }),
+      ),
     )
     // A subset load that waited runs after the reservation and succeeds.
-    expect({
-      outcomes,
-      nestedRow: harness.collection.get('row-2')?.value,
-      status: harness.collection.status,
-      loadOutcome,
-    }).toEqual(expected.observation)
+    oracleAssertion('existing comparison at 481', () =>
+      expect({
+        outcomes,
+        nestedRow: harness.collection.get('row-2')?.value,
+        status: harness.collection.status,
+        loadOutcome,
+      }).toEqual(expected.observation),
+    )
   }
   declareOracle({
     check: [runAdapterHistory],
     model: [expectedAdapterOutcome],
     grammar: [adapterHistories],
   })
-  it.each(adapterHistories)(
-    'keeps a reserved commit lawful across a real-adapter hydration ($route, $timing, $nesting, $ending)',
-    runAdapterHistory,
-  )
+  oracleProperty({
+    id: `sqlite.reserved-commit-hydration`,
+    law: {
+      statement: `The retained independent SQLite model judges the existing legal histories at every original observation checkpoint.`,
+      authority: `The existing contract and authority stated beside this oracle's model.`,
+      limits: `The existing bounded SQLite histories, production paths, and observations; no expanded coverage claim.`,
+    },
+    owns: [`src/sqlite-core-adapter.ts`, `src/persisted.ts`],
+    histories: adapterHistories,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`existing SQLite judgment`, plan, observe, () =>
+        runAdapterHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+    label: (history) =>
+      `${history.route}, ${history.timing}, ${history.nesting}, ${history.ending}`,
+  })
 })

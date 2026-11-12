@@ -1,10 +1,19 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { expect, it } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DuplicateKeySyncError } from '../src/errors.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  oracleProperty,
+  oracleReplayRequested,
+  oracleRoute,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
-import { createOracleReach } from './oracle-reach.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import {
   historyRow,
   optimisticHistory,
@@ -14,7 +23,7 @@ import type {
   RetainedRow,
   SyncActions,
 } from './collection-state-retention-fixture.js'
-import type { OptimisticStep } from './optimistic-history-oracle.js'
+import type { HistoryRow, OptimisticStep } from './optimistic-history-oracle.js'
 import type { Collection } from '../src/collection/index.js'
 
 /**
@@ -69,10 +78,7 @@ const retainedRowArbitrary = fc.record({
   ),
 })
 
-// Each generated campaign declares its own reach and checks it when it
-// ends; pinned replays record none.
-let retentionReach:
-  ReturnType<typeof createOracleReach<`sign-only-reinsert`>> | undefined
+type RetentionState = `sign-only-reinsert`
 
 function snapshotRetainedRow(row: RetainedRow): RetainedRow {
   return { id: row.id, value: row.value }
@@ -150,6 +156,7 @@ function applyAction(
   action: RetentionAction,
   model: Map<number, RetainedRow>,
   sync: SyncActions,
+  enter: (state: RetentionState) => void,
 ): void {
   sync.begin()
   switch (action.type) {
@@ -160,18 +167,20 @@ function applyAction(
         previous.value === action.row.value &&
         !Object.is(previous.value, action.row.value)
       ) {
-        retentionReach?.reach(`sign-only-reinsert`)
+        enter(`sign-only-reinsert`)
       }
       if (
         previous !== undefined &&
         !Object.is(previous.value, action.row.value)
       ) {
-        expect(() =>
-          sync.write({
-            type: `insert`,
-            value: snapshotRetainedRow(action.row),
-          }),
-        ).toThrow(DuplicateKeySyncError)
+        oracleAssertion('applyAction', () =>
+          expect(() =>
+            sync.write({
+              type: `insert`,
+              value: snapshotRetainedRow(action.row),
+            }),
+          ).toThrow(DuplicateKeySyncError),
+        )
         break
       }
       const expectedRow = snapshotRetainedRow(action.row)
@@ -202,7 +211,7 @@ function applyAction(
     case `reentrantRestart`:
       throw new Error(`Restart actions require the lifecycle driver`)
   }
-  expect(sync.commit()).toBe(true)
+  oracleAssertion('applyAction', () => expect(sync.commit()).toBe(true))
 }
 
 /**
@@ -212,7 +221,9 @@ function applyAction(
 function writeFromEndedRun(sync: SyncActions): void {
   sync.begin()
   sync.write({ type: `insert`, value: { id: 9, value: 9 } })
-  expect(sync.commit(), `stale sync run commit`).toBe(true)
+  oracleAssertion(`stale sync run commit`, () =>
+    expect(sync.commit(), `stale sync run commit`).toBe(true),
+  )
 }
 
 function expectRetainedState(
@@ -222,25 +233,33 @@ function expectRetainedState(
   const expectedRows = [...model.entries()].sort(([a], [b]) => a - b)
   const retainedRows = [...collection.base.entries()].sort(([a], [b]) => a - b)
 
-  expect(retainedRows).toEqual(expectedRows)
-  expect(
-    [...collection._state.rowOrigins.keys()]
-      .filter((key) => !model.has(key))
-      .sort((a, b) => a - b),
-  ).toEqual([])
-  expect(
-    [...collection.state.entries()]
-      .map(([key, row]) => [key, { id: row.id, value: row.value }] as const)
-      .sort(([a], [b]) => a - b),
-  ).toEqual(expectedRows)
+  oracleAssertion('expectRetainedState', () =>
+    expect(retainedRows).toEqual(expectedRows),
+  )
+  oracleAssertion('expectRetainedState', () =>
+    expect(
+      [...collection._state.rowOrigins.keys()]
+        .filter((key) => !model.has(key))
+        .sort((a, b) => a - b),
+    ).toEqual([]),
+  )
+  oracleAssertion('expectRetainedState', () =>
+    expect(
+      [...collection.state.entries()]
+        .map(([key, row]) => [key, { id: row.id, value: row.value }] as const)
+        .sort(([a], [b]) => a - b),
+    ).toEqual(expectedRows),
+  )
 }
 
-declareOracle({ check: [expectRetainedState] })
+declareOracle({
+  check: [expectRetainedState],
+})
 
 async function runRetentionHistory(
   actions: ReadonlyArray<RetentionAction>,
+  enter: (state: RetentionState) => void = () => {},
 ): Promise<void> {
-  retentionReach?.beginHistory()
   const harness = createRetentionHarness()
   const { collection } = harness
   const model = new Map<number, RetainedRow>()
@@ -326,69 +345,81 @@ async function runRetentionHistory(
           type: `update`,
           value: snapshotRetainedRow(triggerRow),
         })
-        expect(oldSync.commit()).toBe(true)
-        expect(restarted).toBe(true)
-        expect(restartedSync).toBeDefined()
+        oracleAssertion('runRetentionHistory', () =>
+          expect(oldSync.commit()).toBe(true),
+        )
+        oracleAssertion('runRetentionHistory', () =>
+          expect(restarted).toBe(true),
+        )
+        oracleAssertion('runRetentionHistory', () =>
+          expect(restartedSync).toBeDefined(),
+        )
         if (restartedSync === undefined) {
           throw new Error(`restarted sync run was not captured`)
         }
         if (action.commitPhase === `insideListener`) {
-          expect(restartedReceipt).toBeDefined()
+          oracleAssertion('runRetentionHistory', () =>
+            expect(restartedReceipt).toBeDefined(),
+          )
           if (restartedReceipt !== true) await restartedReceipt
         } else {
           // The new run's transaction is open here, so a stale write that
           // reached it would apply with the new run's commit.
           writeFromEndedRun(oldSync)
-          expect(restartedSync.commit()).toBe(true)
+          oracleAssertion('runRetentionHistory', () =>
+            expect(restartedSync!.commit()).toBe(true),
+          )
         }
         const triggerRows = new Map(model)
         triggerRows.set(expectedTriggerRow.id, expectedTriggerRow)
-        expect(batches).toEqual([
-          {
-            changes: [
-              {
-                type: triggerType,
-                key: expectedTriggerRow.id,
-                row: expectedTriggerRow,
-                previousRow: model.get(expectedTriggerRow.id),
-              },
-            ],
-            rows: [...triggerRows.values()].sort(
-              (left, right) => left.id - right.id,
-            ),
-          },
-          {
-            // This subscriber observed the trigger, but did not request the
-            // earlier initial state. Restart retracts its known old-sync-run row.
-            changes: [
-              {
-                type: `delete`,
-                key: expectedTriggerRow.id,
-                row: expectedTriggerRow,
-                previousRow: undefined,
-              },
-            ],
-            rows: [],
-          },
-          {
-            changes: [
-              {
-                type: `insert`,
-                key: expectedRestartedRow.id,
-                row: expectedRestartedRow,
-                previousRow: undefined,
-              },
-            ],
-            rows: [expectedRestartedRow],
-          },
-        ])
+        oracleAssertion('runRetentionHistory', () =>
+          expect(batches).toEqual([
+            {
+              changes: [
+                {
+                  type: triggerType,
+                  key: expectedTriggerRow.id,
+                  row: expectedTriggerRow,
+                  previousRow: model.get(expectedTriggerRow.id),
+                },
+              ],
+              rows: [...triggerRows.values()].sort(
+                (left, right) => left.id - right.id,
+              ),
+            },
+            {
+              // This subscriber observed the trigger, but did not request the
+              // earlier initial state. Restart retracts its known old-sync-run row.
+              changes: [
+                {
+                  type: `delete`,
+                  key: expectedTriggerRow.id,
+                  row: expectedTriggerRow,
+                  previousRow: undefined,
+                },
+              ],
+              rows: [],
+            },
+            {
+              changes: [
+                {
+                  type: `insert`,
+                  key: expectedRestartedRow.id,
+                  row: expectedRestartedRow,
+                  previousRow: undefined,
+                },
+              ],
+              rows: [expectedRestartedRow],
+            },
+          ]),
+        )
         subscription.unsubscribe()
 
         await cleanup
         model.clear()
         model.set(expectedRestartedRow.id, expectedRestartedRow)
       } else {
-        applyAction(action, model, harness.sync)
+        applyAction(action, model, harness.sync, enter)
       }
       expectRetainedState(collection, model)
     }
@@ -416,6 +447,7 @@ async function runRetentionHistory(
 }
 
 it(`retains only keys in the authoritative synced state`, async () => {
+  oracleRoute(`fixed history`)
   await runRetentionHistory([
     { type: `insert`, row: { id: 1, value: 1 } },
     { type: `insert`, row: { id: 2, value: 2 } },
@@ -427,6 +459,7 @@ it(`retains only keys in the authoritative synced state`, async () => {
 })
 
 it(`retains a missing row introduced by a sync update`, async () => {
+  oracleRoute(`fixed history`)
   await runRetentionHistory([{ type: `update`, row: { id: 1, value: 1 } }])
 })
 
@@ -439,6 +472,7 @@ it.each(
 )(
   `retains an old-sync-run %s and a restarted row committed %s`,
   async (triggerType, commitPhase) => {
+    oracleRoute(`case`)
     await runRetentionHistory([
       ...(triggerType === `update`
         ? ([{ type: `insert`, row: { id: 1, value: 1 } }] as const)
@@ -453,6 +487,7 @@ it.each(
 )
 
 it(`releases retained keys after long unique-key churn`, async () => {
+  oracleRoute(`fixed history`)
   const keyCount = 1_000
   const actions: Array<RetentionAction> = []
   for (let key = 0; key < keyCount; key++) {
@@ -481,35 +516,64 @@ const retentionHistory = fc
   )
   .map((elements) => elements.flat())
 
-async function retentionCampaign(
-  campaign: string,
-  options: Parameters<typeof fc.assert>[1],
-): Promise<void> {
-  retentionReach = createOracleReach(
-    `collection-state.retention (${campaign})`,
-    [`sign-only-reinsert`],
-    { minimum: 5 },
-  )
-  try {
-    await fc.assert(
-      fc.asyncProperty(retentionHistory, runRetentionHistory),
-      options,
+// Keep the original per-history dedupe and five-history minimum for
+// sign-only reinsertion, independently in each generated campaign.
+describe(`retained state campaign reach`, () => {
+  let signOnlyReinserts = 0
+  beforeEach(() => {
+    signOnlyReinserts = 0
+  })
+  afterEach(({ task }) => {
+    if (
+      task.name !== `determinism` &&
+      task.result?.state !== `fail` &&
+      !oracleReplayRequested()
     )
-    retentionReach.assertReached()
-  } finally {
-    retentionReach = undefined
-  }
-}
+      expect(
+        signOnlyReinserts,
+        `sign-only-reinsert history minimum`,
+      ).toBeGreaterThanOrEqual(5)
+  })
+  oracleProperty({
+    id: `collection-state.retention`,
+    law: {
+      statement: `Retained Collection state follows the independent source Map across source changes and sync-run cleanup and restart.`,
+      authority: `The Collection sync and cleanup contracts, including the signed-zero reinsertion decision stated above`,
+      limits: `The existing four-key source grammar and controlled restart callbacks; broader provider timing and concurrent local mutation histories remain outside this driver.`,
+    },
+    // What this oracle owns: the gap report judges the retained Collection state,
+    // in state.ts and the sync writes that feed it in sync.ts, by this file's
+    // tests.
+    owns: [`src/collection/state.ts`, `src/collection/sync.ts`],
+    histories: {
+      arbitrary: retentionHistory,
+      runs: 100,
+      fixedSeeds: [1_902],
+      measured: [`sign-only-reinsert`],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) => {
+      const entered = new Set<RetentionState>()
+      return recordAssertionJudgment(
+        `collection-state.retention`,
+        plan,
+        observe,
+        () =>
+          runRetentionHistory(plan.history, (state) => {
+            if (!entered.has(state)) {
+              entered.add(state)
+              signOnlyReinserts++
+              observe(`reach`, state)
+            }
+          }),
+      )
+    },
+    check: forwardAssertionJudgment,
+  })
+})
 
-it(`matches retained authoritative state with a fixed seed`, () =>
-  retentionCampaign(`fixed`, { numRuns: oracleRuns(100), seed: 1_902 }))
-it(`matches retained authoritative state with a random or replayed seed`, () =>
-  retentionCampaign(
-    `random`,
-    oraclePropertyOptions(100, `collection-state.retention`),
-  ))
-
-// The partial-update lane reuses those histories and marks source batches
+// The partial-update production path reuses those histories and marks source batches
 // partial from a separate stream, so the full-mode campaigns keep their
 // seeded histories. It runs with the default `partial` row update mode.
 const markPartial = (step: OptimisticStep, partial: boolean): OptimisticStep =>
@@ -528,7 +592,7 @@ const partialHistory = fc
     steps: history.steps.map((step, index) => markPartial(step, marks[index]!)),
   }))
 
-// These are replay programs for the same model and driver as randomized runs,
+// These are fixed histories for the same model and driver as randomized runs,
 // not separate assertions that only know the reported final state.
 it.each(
   [false, true].flatMap((acceptBeforeTruncate) =>
@@ -543,6 +607,7 @@ it.each(
 )(
   `drops a direct deletion at settlement across replacement and later sync: %j`,
   async ({ acceptBeforeTruncate, replacementHasKey, reinsert }) => {
+    oracleRoute(`case`)
     const row = { id: 1, a: 1, b: 2, c: 3 }
     const steps: Array<OptimisticStep> = [
       { type: `delete`, key: 1, optimistic: true },
@@ -584,7 +649,7 @@ it.each(
   },
 )
 
-// Replays of review probes. A sync transaction still open when the mutation
+// Fixed histories from review probes. A sync transaction still open when the mutation
 // settles is not accepted, so it holds nothing and attributes nothing: after
 // it commits or aborts, a later remote write is remote. A completed key that
 // no queued sync touches stays remote while another key's sync is held.
@@ -595,6 +660,7 @@ it.each(
 )(
   `attributes nothing to a sync transaction open at settlement: %j`,
   async ({ optimistic, commit }) => {
+    oracleRoute(`case`)
     const counts = await runOptimisticHistory(
       [{ id: 1, a: 0, b: 0, c: 0 }],
       [
@@ -623,6 +689,7 @@ it.each(
   },
 )
 it(`keeps an unrelated completed key remote while another key's sync is held`, async () => {
+  oracleRoute(`fixed history`)
   await runOptimisticHistory(
     [
       { id: 1, a: 0, b: 0, c: 0 },
@@ -648,10 +715,11 @@ it(`keeps an unrelated completed key remote while another key's sync is held`, a
     ],
   )
 })
-// Replays of random-campaign counterexamples. A rollback while a sync
+// Fixed regressions of random-campaign counterexamples. A rollback while a sync
 // transaction on its key is still open must publish the drop. When two
 // completed transactions are held on one key, the newer one's row shows.
 it(`publishes a rollback while a sync transaction on its key is open`, async () => {
+  oracleRoute(`fixed history`)
   await runOptimisticHistory(
     [],
     [
@@ -683,6 +751,7 @@ it(`publishes a rollback while a sync transaction on its key is open`, async () 
   )
 })
 it(`shows the newer of two held completed rows on one key`, async () => {
+  oracleRoute(`fixed history`)
   await runOptimisticHistory(
     [],
     [
@@ -726,9 +795,10 @@ it(`shows the newer of two held completed rows on one key`, async () => {
   )
 })
 
-// Replay of a random-campaign counterexample. A confirmed delete must clear the
+// Fixed regression of a random-campaign counterexample. A confirmed delete must clear the
 // key's local attribution, so a later source reinsert is remote.
 it(`attributes a source reinsert after a confirmed delete to the source`, async () => {
+  oracleRoute(`fixed history`)
   const row = { id: 2, a: 0, b: 0, c: 0 }
   const counts = await runOptimisticHistory(
     [],
@@ -769,6 +839,7 @@ it(`attributes a source reinsert after a confirmed delete to the source`, async 
 })
 
 it(`writes source inserts and deletes in the fixed campaign`, async () => {
+  oracleRoute(`fixed seed`)
   const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 40 })
   let inserts = 0
   let deletes = 0
@@ -785,6 +856,7 @@ it(`writes source inserts and deletes in the fixed campaign`, async () => {
 })
 
 it(`writes distinguishing partial updates in the fixed partial campaign`, async () => {
+  oracleRoute(`fixed seed`)
   const histories = fc.sample(partialHistory, { seed: 86104, numRuns: 40 })
   let distinguishing = 0
   for (const { initial, steps } of histories) {
@@ -800,6 +872,7 @@ it(`writes distinguishing partial updates in the fixed partial campaign`, async 
 // visible row only by a zero's sign. Neither the pending-writes flag nor
 // deep equality without signed zeros sees that change.
 it(`writes zero-sign edits over in-flight writes in the fixed campaign`, async () => {
+  oracleRoute(`fixed seed`)
   const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 40 })
   let zeroSignEdits = 0
   for (const { initial, steps } of histories) {
@@ -809,12 +882,12 @@ it(`writes zero-sign edits over in-flight writes in the fixed campaign`, async (
   expect(zeroSignEdits).toBeGreaterThan(0)
 })
 
-// Pinned replays for a source delete of a key the source never held. The
+// Fixed histories for a source delete of a key the source never held. The
 // backend accepted an optimistic insert, then deleted the row before the
 // source streamed it. The model's drain applies the delete to the applied
 // synced rows, where it changes nothing, so the visible result follows from
 // the settlement-drop law alone. The driver compares every step with the
-// model; each count below proves the replay reached its premise.
+// model; each count below proves the fixed history reached its premise.
 function absentKeyDelete(truncate = false) {
   return {
     type: `sync` as const,
@@ -831,6 +904,7 @@ function absentKeyDelete(truncate = false) {
 it.each([`while persisting`, `inside the handler`] as const)(
   `removes a settled insert in its drop publication when the source deletes a key it never held %s`,
   async (delivery) => {
+    oracleRoute(`case`)
     const inHandler = delivery === `inside the handler`
     const counts = await runOptimisticHistory(
       [{ id: 2, a: 0, b: 0, c: 0 }],
@@ -855,6 +929,7 @@ it.each([`while persisting`, `inside the handler`] as const)(
 // Once the optimistic state has dropped, the key is absent from the visible
 // rows, and the delete changes nothing a reader can see.
 it(`leaves the visible rows unchanged when the source deletes a never-held key after the drop`, async () => {
+  oracleRoute(`fixed history`)
   const counts = await runOptimisticHistory(
     [{ id: 2, a: 0, b: 0, c: 0 }],
     [
@@ -873,6 +948,7 @@ it(`leaves the visible rows unchanged when the source deletes a never-held key a
 it.each([false, true])(
   `keeps a persisting insert's optimistic row when the source deletes a key it never held, truncate=%s`,
   async (truncate) => {
+    oracleRoute(`case`)
     const counts = await runOptimisticHistory(
       [{ id: 2, a: 0, b: 0, c: 0 }],
       [
@@ -896,6 +972,7 @@ it.each(
 )(
   `publishes a request confirmed inside its own handler at settlement: %j`,
   async ({ kind, awaitReceipt }) => {
+    oracleRoute(`case`)
     const existing = { id: 1, a: 0, b: 0, c: 0 }
     const confirmed = { id: 1, a: 1, b: 1, c: 1 }
     const batch = {
@@ -948,6 +1025,7 @@ it.each(
 )(
   `keeps validated defaults with authored fields until settlement: %j`,
   async ({ truncate, success }) => {
+    oracleRoute(`case`)
     for (const insertDefault of [3, 11])
       await runOptimisticHistory(
         [],
@@ -981,6 +1059,7 @@ const partialOverPersistingDefault = (
 it.each([3, 11])(
   `merges a held partial update into the source row under a persisting schema default (%i)`,
   async (insertDefault) => {
+    oracleRoute(`case`)
     const counts = await runOptimisticHistory(
       [{ id: 1, a: 0, b: 0, c: 7 }],
       partialOverPersistingDefault(insertDefault),
@@ -992,6 +1071,7 @@ it.each([3, 11])(
   },
 )
 it(`rejects a partial update applied as a full replacement`, async () => {
+  oracleRoute(`calibration`)
   const steps = partialOverPersistingDefault(3)
   await runOptimisticHistory([{ id: 1, a: 0, b: 0, c: 7 }], steps, undefined, {
     insertDefault: 3,
@@ -1010,6 +1090,7 @@ it(`rejects a partial update applied as a full replacement`, async () => {
   )
 })
 it(`rejects a default lost only after settlement`, async () => {
+  oracleRoute(`calibration`)
   const steps = defaultHistory(true, true)
   await runOptimisticHistory([], steps, undefined, { insertDefault: 3 })
   await expect(
@@ -1027,74 +1108,98 @@ const acceptedSnapshotReplayProperty = {
   'during delete': `collection-state.accepted-snapshot.during-delete`,
   'after rollback': `collection-state.accepted-snapshot.after-rollback`,
 } as const
-it.each(
-  ([`before delete`, `during delete`, `after rollback`] as const).flatMap(
-    (timing) => [86105, undefined].map((seed) => ({ timing, seed })),
-  ),
-)(
-  `drops a completed row at settlement around truncate $timing (seed $seed)`,
-  async ({ timing, seed }) => {
-    await fc.assert(
-      fc.asyncProperty(historyRow, fc.boolean(), async (row, reject) => {
-        const truncate: OptimisticStep = {
-          type: `sync`,
-          rows: [],
-          truncate: true,
-          copies: 1,
-        }
-        const counts = await runOptimisticHistory(
-          [{ id: row.id, a: 9, b: 9, c: 9 }],
-          [
-            {
-              type: `edit`,
-              key: row.id,
-              fields: { a: row.a, b: row.b, c: row.c },
-              optimistic: true,
-            },
-            { type: `settle`, slot: 0, success: true, cascade: false },
-            ...(timing === `before delete` ? [truncate] : []),
-            { type: `delete`, key: row.id, optimistic: true },
-            ...(timing === `during delete` ? [truncate] : []),
-            {
-              type: `settle`,
-              slot: 0,
-              success: false,
-              cascade: false,
-              failure: reject ? `reject` : `rollback`,
-            },
-            ...(timing === `after rollback` ? [truncate] : []),
-            // The completed row already dropped at settlement. Preserve later
-            // key reuse after an ordinary sync.
-            {
-              type: `sync`,
-              rows: [],
-              truncate: false,
-              copies: 1,
-            },
-            {
-              type: `edit`,
-              key: row.id,
-              fields: { a: row.a + 1 },
-              optimistic: true,
-            },
-            { type: `settle`, slot: 0, success: true, cascade: false },
-          ],
-        )
-        // A truncate before the delete removes the row the delete would name.
-        const deletes = timing === `before delete` ? 0 : 1
-        expect(counts.deletes).toBe(deletes)
-        expect(counts.settlements).toBe(2 + deletes)
-      }),
-      seed === undefined
-        ? oraclePropertyOptions(30, acceptedSnapshotReplayProperty[timing])
-        : { seed, numRuns: oracleRuns(30) },
-    )
-  },
-)
+async function runAcceptedSnapshotHistory(
+  timing: keyof typeof acceptedSnapshotReplayProperty,
+  [row, reject]: [HistoryRow, boolean],
+): Promise<void> {
+  const truncate: OptimisticStep = {
+    type: `sync`,
+    rows: [],
+    truncate: true,
+    copies: 1,
+  }
+  const counts = await runOptimisticHistory(
+    [{ id: row.id, a: 9, b: 9, c: 9 }],
+    [
+      {
+        type: `edit`,
+        key: row.id,
+        fields: { a: row.a, b: row.b, c: row.c },
+        optimistic: true,
+      },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+      ...(timing === `before delete` ? [truncate] : []),
+      { type: `delete`, key: row.id, optimistic: true },
+      ...(timing === `during delete` ? [truncate] : []),
+      {
+        type: `settle`,
+        slot: 0,
+        success: false,
+        cascade: false,
+        failure: reject ? `reject` : `rollback`,
+      },
+      ...(timing === `after rollback` ? [truncate] : []),
+      // The completed row already dropped at settlement. Preserve later
+      // key reuse after an ordinary sync.
+      {
+        type: `sync`,
+        rows: [],
+        truncate: false,
+        copies: 1,
+      },
+      {
+        type: `edit`,
+        key: row.id,
+        fields: { a: row.a + 1 },
+        optimistic: true,
+      },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+    ],
+  )
+  // A truncate before the delete removes the row the delete would name.
+  const deletes = timing === `before delete` ? 0 : 1
+  oracleAssertion('runAcceptedSnapshotHistory', () =>
+    expect(counts.deletes).toBe(deletes),
+  )
+  oracleAssertion('runAcceptedSnapshotHistory', () =>
+    expect(counts.settlements).toBe(2 + deletes),
+  )
+}
+for (const timing of [
+  `before delete`,
+  `during delete`,
+  `after rollback`,
+] as const) {
+  oracleProperty({
+    id: acceptedSnapshotReplayProperty[timing],
+    law: {
+      statement: `A completed optimistic row drops at settlement and a truncate around deletion does not revive it.`,
+      authority: `The optimistic snapshot, settlement and source replacement laws in optimistic-history-oracle.ts`,
+      limits: `The existing one-key truncate and delete ordering grammar with controlled source work; other provider hosts and arbitrary overlapping histories remain outside this driver.`,
+    },
+    owns: [`src/collection/state.ts`, `src/collection/sync.ts`],
+    histories: {
+      arbitrary: fc.tuple(historyRow, fc.boolean()),
+      runs: 30,
+      fixedSeeds: [86105],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        acceptedSnapshotReplayProperty[timing],
+        plan,
+        observe,
+        () => runAcceptedSnapshotHistory(timing, plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
+}
 
 it.each([true, false])(
   `replays an insert and its update across settlement, accepted=%s`,
   async (success) => {
+    oracleRoute(`case`)
     await runOptimisticHistory(
       [],
       [
@@ -1107,6 +1212,7 @@ it.each([true, false])(
 it.each([true, false])(
   `hides a sync row behind an optimistic row until settlement, truncate=%s`,
   async (truncate) => {
+    oracleRoute(`case`)
     await runOptimisticHistory(
       [{ id: 1, a: 0, b: 0, c: 0 }],
       [
@@ -1123,6 +1229,7 @@ it.each([true, false])(
   },
 )
 it(`publishes prior optimistic ownership when rollback reveals an identical authoritative row`, async () => {
+  oracleRoute(`fixed history`)
   await runOptimisticHistory(
     [{ id: 3, a: 0, b: 0, c: 0 }],
     [
@@ -1135,6 +1242,7 @@ it(`publishes prior optimistic ownership when rollback reveals an identical auth
   )
 })
 it(`publishes the subscriber-visible row when a buffered optimistic update becomes a delete`, async () => {
+  oracleRoute(`fixed history`)
   const counts = await runOptimisticHistory(
     [],
     [
@@ -1167,6 +1275,7 @@ it.each(
 )(
   `drops each settled delete and edit across settlement orders: %j`,
   async ({ truncate, editSettlesFirst, insertAccepted }) => {
+    oracleRoute(`case`)
     const replacement: OptimisticStep = {
       type: `sync`,
       rows: [],
@@ -1202,25 +1311,38 @@ it.each(
     })
   },
 )
-fcTest.prop([optimisticHistory], { numRuns: oracleRuns(100), seed: 86103 })(
-  `matches optimistic ownership and publication histories with a fixed seed`,
-  async ({ initial, steps }) => {
-    await runOptimisticHistory(initial, steps)
+oracleProperty({
+  id: `collection-state.optimistic-history`,
+  law: {
+    statement: `Optimistic ownership, row publication and request settlement follow the independent history model.`,
+    authority: `The optimistic snapshot and settlement laws in optimistic-history-oracle.ts`,
+    limits: `The existing bounded optimistic-history grammar and controlled Collection sync path; provider acknowledgement timing and other framework hosts remain outside this driver.`,
   },
-)
-fcTest.prop(
-  [optimisticHistory],
-  oraclePropertyOptions(100, `collection-state.optimistic-history`),
-)(
-  `matches optimistic ownership and publication histories with a random or replayed seed`,
-  async ({ initial, steps }) => {
-    await runOptimisticHistory(initial, steps)
+  owns: [`src/collection/state.ts`, `src/collection/sync.ts`],
+  histories: {
+    arbitrary: optimisticHistory,
+    runs: 100,
+    fixedSeeds: [86103],
   },
-)
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `collection-state.optimistic-history`,
+      plan,
+      observe,
+      async () => {
+        const { initial, steps } = plan.history
+        await runOptimisticHistory(initial, steps)
+      },
+    ),
+  check: forwardAssertionJudgment,
+})
 // An aborted open batch never applies, so the source's own rows must return
 // to their state before it. A later partial update then omits `c` again, and
 // the Collection keeps the held `c`. Shrunk from seed -526998278.
 it(`merges a partial update after an aborted source delete`, async () => {
+  oracleRoute(`fixed history`)
   const counts = await runOptimisticHistory(
     [{ id: 1, a: 0, b: 0, c: 0 }],
     [
@@ -1253,22 +1375,32 @@ it(`merges a partial update after an aborted source delete`, async () => {
     distinguishingPartialUpdates: 1,
   })
 })
-fcTest.prop([partialHistory], { numRuns: oracleRuns(100), seed: 86104 })(
-  `matches partial-update histories with a fixed seed`,
-  async ({ initial, steps }) => {
-    await runOptimisticHistory(initial, steps, undefined, {
-      partialUpdates: true,
-    })
+oracleProperty({
+  id: `collection-state.optimistic-history-partial`,
+  law: {
+    statement: `Partial source updates preserve omitted fields through optimistic ownership, publication and settlement histories.`,
+    authority: `The partial-update and optimistic settlement laws in optimistic-history-oracle.ts`,
+    limits: `The existing partial marks over the bounded optimistic-history grammar and controlled Collection sync path; provider timing and other framework hosts remain outside this driver.`,
   },
-)
-fcTest.prop(
-  [partialHistory],
-  oraclePropertyOptions(100, `collection-state.optimistic-history-partial`),
-)(
-  `matches partial-update histories with a random or replayed seed`,
-  async ({ initial, steps }) => {
-    await runOptimisticHistory(initial, steps, undefined, {
-      partialUpdates: true,
-    })
+  owns: [`src/collection/state.ts`, `src/collection/sync.ts`],
+  histories: {
+    arbitrary: partialHistory,
+    runs: 100,
+    fixedSeeds: [86104],
   },
-)
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `collection-state.optimistic-history-partial`,
+      plan,
+      observe,
+      async () => {
+        const { initial, steps } = plan.history
+        await runOptimisticHistory(initial, steps, undefined, {
+          partialUpdates: true,
+        })
+      },
+    ),
+  check: forwardAssertionJudgment,
+})

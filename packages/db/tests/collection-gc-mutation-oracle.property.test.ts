@@ -1,5 +1,5 @@
 import fc from 'fast-check'
-import { expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
@@ -10,11 +10,17 @@ import {
   stepGcModel,
 } from './collection-gc-retention-oracle.js'
 import {
-  oraclePropertyOptions,
+  oracleProperty,
   oracleReplayRequested,
-  readOracleRunConfig,
+  oracleRoute,
 } from './oracle-config.js'
-import { createOracleReach } from './oracle-reach.js'
+import { declareOracle } from './oracle-declaration.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import { resetCleanupQueue, withOracleCleanup } from './utils.js'
 import type { GcAction, GcModel } from './collection-gc-retention-oracle.js'
 import type { IdleCallbackFunction } from '../src/utils/browser-polyfills.js'
@@ -83,8 +89,6 @@ const states = [
   `retired-after-fail`,
   `retired-after-rollback`,
 ] as const
-let reach = createOracleReach(propertyName, states)
-const runConfig = readOracleRunConfig()
 type Side = `a` | `b`
 type Row = { id: number; value: number }
 type Shape = (typeof states)[0 | 1 | 2 | 3]
@@ -99,8 +103,10 @@ type History = {
 }
 const sides: Array<Side> = [`a`, `b`]
 
-async function runMutationHistory(history: History): Promise<void> {
-  reach.beginHistory()
+async function runMutationHistory(
+  history: History,
+  enter: (state: (typeof states)[number]) => void,
+): Promise<void> {
   vi.useFakeTimers()
   vi.setSystemTime(0)
   resetCleanupQueue()
@@ -182,20 +188,29 @@ async function runMutationHistory(history: History): Promise<void> {
         [1],
         expected.map((row) => row.id),
       )
-      expect(
-        [...collections[side].values()].map(({ id, value }) => ({ id, value })),
-        `${label} ${side}: full rows`,
-      ).toEqual(expected)
+      oracleAssertion(`${label} ${side}: full rows`, () =>
+        expect(
+          [...collections[side].values()].map(({ id, value }) => ({
+            id,
+            value,
+          })),
+          `${label} ${side}: full rows`,
+        ).toEqual(expected),
+      )
       const tracked = [...collections[side]._state.transactions.values()]
       const active =
         model.transactions[0] === `pending` ||
         model.transactions[0] === `persisting`
-      expect(tracked.length, `${label} ${side}: tracking count`).toBe(
-        active ? 1 : 0,
+      oracleAssertion(`${label} ${side}: tracking count`, () =>
+        expect(tracked.length, `${label} ${side}: tracking count`).toBe(
+          active ? 1 : 0,
+        ),
       )
       if (active)
-        expect(tracked[0], `${label} ${side}: tracking identity`).toBe(
-          transaction,
+        oracleAssertion(`${label} ${side}: tracking identity`, () =>
+          expect(tracked[0], `${label} ${side}: tracking identity`).toBe(
+            transaction,
+          ),
         )
     }
   }
@@ -264,8 +279,14 @@ async function runMutationHistory(history: History): Promise<void> {
     for (const side of touched)
       stepGcModel(models[side], { kind: `mutate`, commit: true })
     await flush()
-    expect(transaction.state, `handler genuinely persists`).toBe(`persisting`)
-    expect(handlerCalls, `one mutation handler starts`).toBe(1)
+    oracleAssertion(`handler genuinely persists`, () =>
+      expect(transaction!.state, `handler genuinely persists`).toBe(
+        `persisting`,
+      ),
+    )
+    oracleAssertion(`one mutation handler starts`, () =>
+      expect(handlerCalls, `one mutation handler starts`).toBe(1),
+    )
     check(`admitted`)
     if (history.lastUnsubscribe) {
       for (const subscription of subscriptions.splice(0))
@@ -273,26 +294,33 @@ async function runMutationHistory(history: History): Promise<void> {
       for (const side of touched)
         stepGcModel(models[side], { kind: `unsubscribe` })
     }
-    reach.reach(history.lastUnsubscribe ? `last-unsubscribe` : `no-subscriber`)
+    enter(history.lastUnsubscribe ? `last-unsubscribe` : `no-subscriber`)
     await advance(Math.max(history.gcTime, 50) + history.age + 1)
     await idle()
     check(`past the unheld deadline while persisting`)
-    expect(receipt, `caller still waits`).toBe(`pending`)
-    reach.reach(history.shape)
+    oracleAssertion(`caller still waits`, () =>
+      expect(receipt, `caller still waits`).toBe(`pending`),
+    )
+    enter(history.shape)
     if (history.shape === `shared-cancel`) {
-      expect(
-        transaction.mutations.some(
-          (mutation) => mutation.collection === collections[history.firstSide],
-        ),
-        `cancelled Collection has no surviving mutation`,
-      ).toBe(false)
-      expect(
-        transaction.mutations.some(
-          (mutation) => mutation.collection === collections[otherSide],
-        ),
-        `peer keeps a real mutation`,
-      ).toBe(true)
-      reach.reach(
+      oracleAssertion(`cancelled Collection has no surviving mutation`, () =>
+        expect(
+          transaction!.mutations.some(
+            (mutation) =>
+              mutation.collection === collections[history.firstSide],
+          ),
+          `cancelled Collection has no surviving mutation`,
+        ).toBe(false),
+      )
+      oracleAssertion(`peer keeps a real mutation`, () =>
+        expect(
+          transaction!.mutations.some(
+            (mutation) => mutation.collection === collections[otherSide],
+          ),
+          `peer keeps a real mutation`,
+        ).toBe(true),
+      )
+      enter(
         history.firstSide === `a`
           ? `cancelled-a-retained`
           : `cancelled-b-retained`,
@@ -308,8 +336,10 @@ async function runMutationHistory(history: History): Promise<void> {
     for (const side of touched) stepGcModel(models[side], action)
     await flush()
     check(`handler settled`)
-    expect(receipt, `caller settlement`).toBe(
-      history.outcome === `complete` ? `fulfilled` : `rejected`,
+    oracleAssertion(`caller settlement`, () =>
+      expect(receipt, `caller settlement`).toBe(
+        history.outcome === `complete` ? `fulfilled` : `rejected`,
+      ),
     )
     const deadline = gcDeadline(models[history.firstSide])
     await advance(deadline - models[history.firstSide].now - 1)
@@ -318,7 +348,7 @@ async function runMutationHistory(history: History): Promise<void> {
     await advance(1)
     await idle()
     check(`at renewed deadline`)
-    reach.reach(`retired-after-${history.outcome}`)
+    enter(`retired-after-${history.outcome}`)
   }, [
     async () => {
       for (const subscription of subscriptions) subscription.unsubscribe()
@@ -353,22 +383,73 @@ const historyArbitrary = fc.record({
   age: fc.integer({ min: 0, max: 80 }),
   sourceValue: fc.integer({ min: -3, max: 3 }),
 })
-it.each(
-  runConfig.replaySeed === undefined ? [20261026, undefined] : [undefined],
-)(
-  `retains every touched Collection across mutation shapes (seed %s)`,
-  async (seed) => {
-    reach = createOracleReach(propertyName, states)
-    await fc.assert(fc.asyncProperty(historyArbitrary, runMutationHistory), {
-      ...oraclePropertyOptions(150, propertyName),
-      ...(seed === undefined ? {} : { seed }),
-    })
-    reach.assertReached()
-    console.info(
-      `GC mutation reach: ${JSON.stringify(Object.fromEntries(reach.counts()))}`,
-    )
-  },
-)
+declareOracle({
+  grammar: [historyArbitrary],
+})
+
+// Keep the original per-history dedupe, campaign reset and one-history
+// minimum for every declared state. Native measured reach reports the same
+// entries; this gate preserves the original aggregate requirement.
+describe(`mutation retention campaign reach`, () => {
+  let counts = new Map<(typeof states)[number], number>()
+  beforeEach(() => {
+    counts = new Map(states.map((state) => [state, 0]))
+  })
+  afterEach(({ task }) => {
+    if (
+      task.name !== `determinism` &&
+      task.result?.state !== `fail` &&
+      !oracleReplayRequested()
+    ) {
+      for (const state of states)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(1)
+      console.info(
+        `GC mutation reach: ${JSON.stringify(Object.fromEntries(counts))}`,
+      )
+    }
+  })
+  oracleProperty({
+    id: propertyName,
+    law: {
+      statement: `Every Collection touched by a persisting transaction retains its sync run, including a Collection whose mutations merge away, until its independently modeled GC deadline.`,
+      authority: `BaseCollectionConfig.gcTime and transaction-ownership-oracle admission contract stated above`,
+      limits: `The existing controlled idle-delivery mutation grammar; queued sync writes, multiple local transactions, restart, provider I/O and offline or paced mutations are outside this driver.`,
+    },
+    // What this oracle owns: the gap report judges the garbage-collection
+    // retention of Collections touched by a mutation, in lifecycle.ts, by this
+    // file's tests. The companion retention module declares the shared check and
+    // model.
+    owns: [`src/collection/lifecycle.ts`],
+    histories: {
+      arbitrary: historyArbitrary,
+      runs: 150,
+      fixedSeeds: [20261026],
+      measured: states,
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) => {
+      const entered = new Set<(typeof states)[number]>()
+      return recordAssertionJudgment(
+        `mutation GC retention`,
+        plan,
+        observe,
+        () =>
+          runMutationHistory(plan.history, (state) => {
+            if (!entered.has(state)) {
+              entered.add(state)
+              counts.set(state, counts.get(state)! + 1)
+              observe(`reach`, state)
+            }
+          }),
+      )
+    },
+    check: forwardAssertionJudgment,
+  })
+})
 
 // An independently supplied projection is still an exact membership obligation.
 // It cannot waive missing, stale or extra keys, even when default insert-slot
@@ -376,6 +457,7 @@ it.each(
 it.skipIf(oracleReplayRequested())(
   `rejects corruption of a supplied mutation projection`,
   () => {
+    oracleRoute(`calibration`)
     const model = createGcModel(100)
     stepGcModel(model, { kind: `mutate`, commit: true })
     const observation = {

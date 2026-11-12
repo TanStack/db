@@ -3,8 +3,8 @@ import { fc } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import {
   missingRowMetadataHistoriesArbitrary,
-  persistedPeerLane,
-  persistedPeerOnDemandLane,
+  persistedPeerGrammar,
+  persistedPeerOnDemandGrammar,
   queuedMetadataRepairHistoriesArbitrary,
   runSessionHistory,
   seedReinsertReloadReplay,
@@ -52,7 +52,7 @@ it(`rejects a recovery schedule whose boundary the driver cannot hold`, async ()
         bare: false,
         value: 0,
       },
-      () => createSQLiteDriver(persistedPeerOnDemandLane),
+      () => createSQLiteDriver(persistedPeerOnDemandGrammar),
     ),
   ).rejects.toThrow(`commit completed without reaching after-application`)
 })
@@ -88,13 +88,15 @@ it(`rejects a wrong durable write even when a later queued write repairs it`, as
     numRuns: 1,
   })[0]!
   for (const { history, bare, held } of cases) {
-    const baseline = await runSessionHistory(persistedPeerLane, history, () =>
-      createPersistedDriver(true, true, false, true),
+    const baseline = await runSessionHistory(
+      persistedPeerGrammar,
+      history,
+      () => createPersistedDriver(true, true, false, true),
     )
     expect(baseline.mismatch).toBeUndefined()
     let injected = false
-    const hostile = await runSessionHistory(
-      persistedPeerLane,
+    const mutant = await runSessionHistory(
+      persistedPeerGrammar,
       history,
       async () => {
         const driver = await createPersistedDriver(true, true, false, true)
@@ -121,8 +123,8 @@ it(`rejects a wrong durable write even when a later queued write repairs it`, as
       },
     )
     expect(injected, `${bare}/${held}`).toBe(true)
-    expect(hostile.mismatch?.law).toContain(`keeping metadata does not write`)
-    expect(hostile.mismatch?.action).not.toBe(`settle`)
+    expect(mutant.mismatch?.law).toContain(`keeping metadata does not write`)
+    expect(mutant.mismatch?.action).not.toBe(`settle`)
   }
 }, 30_000)
 
@@ -133,21 +135,26 @@ const hosts: Array<{ name: string; create: () => Promise<SessionDriver> }> = [
   },
   {
     name: `SQLite`,
-    create: () => createSQLiteDriver(persistedPeerOnDemandLane),
+    create: () => createSQLiteDriver(persistedPeerOnDemandGrammar),
   },
 ]
 it.each(hosts)(
   `rejects wrong source metadata that appears only after reload ($name)`,
   async ({ create, name }) => {
-    const lane =
-      name === `SQLite` ? persistedPeerOnDemandLane : persistedPeerLane
+    const productionPath =
+      name === `SQLite` ? persistedPeerOnDemandGrammar : persistedPeerGrammar
     expect(
-      (await runSessionHistory(lane, seedReinsertReloadReplay, create))
-        .mismatch,
+      (
+        await runSessionHistory(
+          productionPath,
+          seedReinsertReloadReplay,
+          create,
+        )
+      ).mismatch,
     ).toBeUndefined()
     let reached = false
     const result = await runSessionHistory(
-      lane,
+      productionPath,
       seedReinsertReloadReplay,
       async () => {
         const driver = await create()
@@ -191,7 +198,7 @@ it.each(recoveryPhases)(
       runRecoverySchedule(
         { phase, interruption: `seed`, bare: false, value: 7 },
         async () => {
-          const driver = await createSQLiteDriver(persistedPeerOnDemandLane)
+          const driver = await createSQLiteDriver(persistedPeerOnDemandGrammar)
           const hold = driver.holdRecovery
           let holding = false
           driver.holdRecovery = (selected) => {
@@ -235,7 +242,7 @@ it.each(recoveryPhases)(
       runRecoverySchedule(
         { phase, interruption: `cleanup`, bare: true, value: 7 },
         async () => {
-          const driver = await createSQLiteDriver(persistedPeerOnDemandLane)
+          const driver = await createSQLiteDriver(persistedPeerOnDemandGrammar)
           const stop = driver.stopSource
           const observe = driver.observe
           let ended = false

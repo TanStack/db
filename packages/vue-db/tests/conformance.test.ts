@@ -272,7 +272,7 @@ const vueDriver: LiveQueryDriver = {
   mountCollection,
   mountConfig,
   mountDisabled,
-  knownGaps: [],
+  limits: [],
   features: { serverSnapshot: false, suspense: false, pooledEqFilters: true },
 }
 

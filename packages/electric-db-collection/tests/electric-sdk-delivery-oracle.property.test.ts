@@ -1,16 +1,30 @@
 import fc from 'fast-check'
-import { expect, it, vi } from 'vitest'
-import { IR, createCollection } from '@tanstack/db'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import {
+  IR,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+} from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import {
-  oraclePropertyOptions,
+  oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import {
+  oracleProperty,
+  violation as oracleViolation,
+  pass,
+} from '../../db/tests/oracle-property'
+import {
+  checkExistingElectricComparison,
+  existingElectricComparison,
+} from './electric-property-oracle'
 import {
   controlledHttp,
   deferred,
@@ -28,7 +42,12 @@ import {
   createRetryModel,
   expectedRetryObservation,
 } from './electric-retry-decision-model'
-import { storageTargetId } from './electric-persistence-fixture'
+import {
+  managedTagPersistence,
+  storageTargetId,
+} from './electric-persistence-fixture'
+import type { Observation } from '../../db/tests/oracle-property'
+import type { TestRow } from './electric-persistence-fixture'
 import type { Item, Request } from './electric-sdk-delivery-support'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src'
@@ -43,7 +62,7 @@ import type { Message } from '@electric-sql/client'
 import type * as ElectricSdkModule from '@electric-sql/client'
 
 // Observe the real constructor boundary without changing the installed SDK's
-// options, prototype, methods, or HTTP behavior. Only the rotation lane enables
+// options, prototype, methods, or HTTP behavior. Only the rotation grammar enables
 // the callback; every construction still executes the original ShapeStream.
 const sdkConstruction = vi.hoisted(() => ({
   observe: undefined as (() => void) | undefined,
@@ -87,8 +106,8 @@ vi.mock(`@electric-sql/client`, async (importOriginal) => {
  * full-shape network read. Concurrent demands share one SDK cursor, so their
  * snapshot requests must run in order. The hand-written two-launch and
  * concurrent cases in electric-sdk-delivery.test.ts illustrate those laws at
- * HTTP, local-read, public-row, and settlement boundaries; no declared check
- * in this file compares the scoped-restart history with a model.
+ * HTTP, local-read, public-row, and settlement boundaries; the resume-checkpoint family below models cursor persistence and the
+ * next launch independently of the adapter and SDK cursor state.
  * A coordinator notification after the scoped A snapshot changes an unrelated
  * durable row. The source Map still predicts A for its active predicate. The
  * post-notification public comparison must retain A; the persistence capability
@@ -96,7 +115,7 @@ vi.mock(`@electric-sql/client`, async (importOriginal) => {
  * A real node:sqlite cold-launch witness starts with an incompatible partial
  * cache and no reset marker. It must exclude that row before and after the
  * installed SDK returns an empty source snapshot for the demanded predicate.
- * A source-release lane, documented at its property, checks that cleanup
+ * A source-release grammar, documented at its property, checks that cleanup
  * removes every listener that a run's streams registered on `document`.
  *
  * These finite HTTP fixtures do not prove that a live Electric service emits
@@ -109,7 +128,7 @@ vi.mock(`@electric-sql/client`, async (importOriginal) => {
 // TANSTACK_DB_ORACLE_PATH, and TANSTACK_DB_ORACLE_PROPERTY. For example:
 // TANSTACK_DB_ORACLE_SEED=20260917 TANSTACK_DB_ORACLE_PATH=0 \
 // TANSTACK_DB_ORACLE_PROPERTY=electric.sdk-snapshot-delivery \
-// pnpm --dir packages/electric-db-collection exec vitest run tests/electric-sdk-delivery-oracle.property.test.ts -t 'replay'
+// pnpm --dir packages/electric-db-collection exec vitest run tests/electric-sdk-delivery-oracle.property.test.ts
 // Ordinary tests stand aside during any path replay, which runs one property.
 const fixedCase = oracleReplayTest(it)
 // TANSTACK_DB_ELECTRIC_SDK_DELIVERY_FAULT is a fault-injection switch, not a
@@ -133,43 +152,57 @@ declareOracle({
     runClientRetryCell,
     checkSourceRelease,
     checkManagedRotation,
+    checkResumeCheckpoint,
   ],
-  model: [createRetryModel, applyRetryModel, expectedRetryObservation],
+  model: [
+    createRetryModel,
+    applyRetryModel,
+    expectedRetryObservation,
+    expectedResumeCheckpoint,
+  ],
 })
 
 // Scaled with the run multiplier, so stress campaigns keep their budget.
 const campaignTimeoutMs = oracleRuns(30_000)
 
-function sdkCampaigns(
-  propertyId: string,
-  name: string,
-  fixedSeed: number,
-  violation: { reset: () => void; report: (error: unknown) => unknown },
-  run: (seed?: number) => Promise<void>,
-): void {
-  const runCampaign = async (seed?: number) => {
-    violation.reset()
-    try {
-      await run(seed)
-    } catch (error) {
-      throw violation.report(error)
-    }
-  }
-  // A path replay of the property runs only the random campaign, from its
-  // path. The fixed campaign stands aside during every path replay.
-  // A campaign answers dozens of histories over real client backoff, so it
-  // can outlast the default timeout on a loaded runner.
-  oracleReplayTest(it)(
-    `${name} (fixed)`,
-    () => runCampaign(fixedSeed),
-    campaignTimeoutMs,
-  )
-  oracleReplayTest(it, propertyId)(
-    `${name} (random)`,
-    () => runCampaign(),
-    campaignTimeoutMs,
-  )
-}
+// Native campaign tests retain the old campaign-local shrink predicate and
+// minimum-one census. Fixed calibration tests reset this bookkeeping too, but
+// do not acquire campaign reach obligations. Snapshot constructions below
+// additionally enforce every required state on each generated construction.
+const resumeViolations: Array<ReturnType<typeof sameViolation>> = []
+beforeEach(() => {
+  snapshotViolation.reset()
+  membershipViolation.reset()
+  rotationViolation.reset()
+  releaseViolation.reset()
+  for (const judgment of resumeViolations) judgment.reset()
+  snapshotObservedStates.clear()
+  rotationObservedStates.clear()
+  releaseObservedStates.clear()
+})
+afterEach(({ task }) => {
+  // The old census ran only after a successful campaign. Preserve an earlier
+  // law/driver failure as primary, and stand aside during path replay.
+  if (task.result?.errors?.length || oracleReplayRequested()) return
+  if (task.name !== `random seed` && !task.name.startsWith(`fixed seed `))
+    return
+  const property = task.suite?.name
+  const census:
+    | { expected: ReadonlyArray<string>; observed: ReadonlySet<string> }
+    | undefined =
+    property === `electric.sdk-snapshot-delivery`
+      ? { expected: snapshotStates, observed: snapshotObservedStates }
+      : property === `electric.sdk-rotation-release`
+        ? { expected: rotationStates, observed: rotationObservedStates }
+        : property === `electric.sdk-source-release`
+          ? { expected: releaseStates, observed: releaseObservedStates }
+          : undefined
+  if (census !== undefined)
+    expect(
+      census.expected.filter((state) => !census.observed.has(state)),
+      `${property}: existing campaign state census`,
+    ).toEqual([])
+})
 
 function violationCheckpoint(error: unknown): string {
   if (!(error instanceof Error)) return `${typeof error}:${String(error)}`
@@ -211,6 +244,18 @@ function sameViolation() {
   }
 }
 
+async function retainSdkViolation(
+  judgment: ReturnType<typeof sameViolation>,
+  history: unknown,
+  run: () => Promise<void>,
+): Promise<void> {
+  try {
+    await judgment.check(history, run)
+  } catch (error) {
+    throw judgment.report(error)
+  }
+}
+
 let sequence = 0
 
 function resetResumeMetadata(): SyncMetadataApi<string | number> {
@@ -244,18 +289,16 @@ type SnapshotReachState =
   | `live-outage-led-by-throw`
   | `live-outage-crossed-by-throw`
   | `retired-evidence-after-restart`
-const createSnapshotReach = () =>
-  createOracleReach<SnapshotReachState>(`electric.sdk-snapshot-delivery`, [
-    `subset-attempts-past-threshold`,
-    `live-pauses-past-threshold`,
-    `live-outage`,
-    `live-outage-with-synchronous-throws`,
-    `live-outage-led-by-throw`,
-    `live-outage-crossed-by-throw`,
-    `retired-evidence-after-restart`,
-  ])
-// Each campaign declares its own reach.
-let snapshotReach = createSnapshotReach()
+const snapshotStates: ReadonlyArray<SnapshotReachState> = [
+  `subset-attempts-past-threshold`,
+  `live-pauses-past-threshold`,
+  `live-outage`,
+  `live-outage-with-synchronous-throws`,
+  `live-outage-led-by-throw`,
+  `live-outage-crossed-by-throw`,
+  `retired-evidence-after-restart`,
+]
+const snapshotObservedStates = new Set<SnapshotReachState>()
 
 /**
  * Retried subset attempts: how many HTTP 503 responses each subset request
@@ -279,8 +322,12 @@ async function checkSnapshots(
   cleanupFailure?: Error,
   setupFault?: { primary: Error; cleanup?: Error },
   retries: SubsetRetries = { failures: [], extraLoads: 0 },
+  observeState?: (state: SnapshotReachState) => void,
 ) {
-  snapshotReach.beginHistory()
+  const reached = (state: SnapshotReachState) => {
+    snapshotObservedStates.add(state)
+    observeState?.(state)
+  }
   const http = controlledHttp()
   // Live attempts the app's fetchClient still throws on, and every failed
   // live attempt the provider made, in order.
@@ -398,13 +445,7 @@ async function checkSnapshots(
         (_, i) => width + 1 + i,
       ),
     ]
-    // Each load pauses the live request; five pause it past the threshold.
-    if (lowerBounds.length >= 5)
-      snapshotReach.reach(`live-pauses-past-threshold`)
     for (const [index, lowerBound] of lowerBounds.entries()) {
-      if ((retries.failures[index] ?? 0) >= 5) {
-        snapshotReach.reach(`subset-attempts-past-threshold`)
-      }
       // Distinct predicates prevent request deduplication; the second response
       // overlaps prior rows and changes their payload, and the last is empty.
       if (index === 1) for (const item of source) item.name += `-changed`
@@ -425,6 +466,8 @@ async function checkSnapshots(
         (error: unknown) => ({ ok: false as const, error }),
       )
       let request = await atCheckpoint(http.take(true), `snapshot request`)
+      // The fifth distinct snapshot request confirms five live pauses.
+      if (index >= 4) reached(`live-pauses-past-threshold`)
       // A subset request's attempts that the client retries belong to that
       // request, not to the source: the source node shows no problem
       // (glossary, request error), however many fail in a row.
@@ -438,6 +481,7 @@ async function checkSnapshots(
           http.take(true),
           `retried snapshot request`,
         )
+        if (attempt >= 4) reached(`subset-attempts-past-threshold`)
         sourceHealth(`snapshot ${index} attempt ${attempt} source health`)
       }
       expect(
@@ -505,15 +549,15 @@ async function checkSnapshots(
         }
         // The outage follows the attempts the provider made, not the plan.
         outage = made.length >= 5
-        if (outage) snapshotReach.reach(`live-outage`)
+        if (outage) reached(`live-outage`)
         if (outage && made.slice(0, 5).includes(`throw`)) {
-          snapshotReach.reach(`live-outage-with-synchronous-throws`)
+          reached(`live-outage-with-synchronous-throws`)
         }
         if (outage && made[0] === `throw`) {
-          snapshotReach.reach(`live-outage-led-by-throw`)
+          reached(`live-outage-led-by-throw`)
         }
         if (made[4] === `throw`) {
-          snapshotReach.reach(`live-outage-crossed-by-throw`)
+          reached(`live-outage-crossed-by-throw`)
         }
         sourceHealth(`source health after live attempts`)
       }
@@ -610,7 +654,7 @@ async function checkSnapshots(
       (await acceptedAfterImport())[1],
       `exported txid evidence once the restarted run is ready`,
     ).toBe(true)
-    snapshotReach.reach(`retired-evidence-after-restart`)
+    reached(`retired-evidence-after-restart`)
   }, [
     { label: `snapshot collection`, release: () => collection.cleanup() },
     {
@@ -660,7 +704,7 @@ async function checkSnapshots(
 // outage: a subset request's retried attempts and a live pause are not
 // failures of the source, and a subset's end does not end its outage.
 const snapshotViolation = sameViolation()
-const snapshotProperty = fc.asyncProperty(
+const snapshotHistoryArbitrary = fc.tuple(
   fc.integer({ min: 2, max: 4 }),
   fc.string({ maxLength: 10 }),
   fc.record({
@@ -670,8 +714,53 @@ const snapshotProperty = fc.asyncProperty(
       maxLength: 7,
     }),
   }),
-  (width, name, retries) =>
-    snapshotViolation.check({ width, name, retries }, () =>
+)
+type SnapshotHistory = [number, string, SubsetRetries]
+const snapshotConstructionStates = new WeakMap<
+  SnapshotHistory,
+  ReadonlyArray<string>
+>()
+const snapshotReachedByHistory = new WeakMap<
+  SnapshotHistory,
+  Set<SnapshotReachState>
+>()
+
+// Preserve width, payload and optional retries. Splice only the premises for
+// the existing census: five subset retries, five pauses, and live failures
+// whose first and fifth attempts throw. The middle attempts and suffix still
+// vary. Every construction is a fresh tuple inside the arbitrary's bounds.
+// Without this splice, seed 361651584 misses an outage crossed by a throw.
+function constructSnapshotHistory([
+  width,
+  name,
+  retries,
+]: SnapshotHistory): SnapshotHistory {
+  const history: SnapshotHistory = [
+    width,
+    name,
+    {
+      failures: [
+        Math.max(5, retries.failures[0] ?? 0),
+        ...retries.failures.slice(1),
+      ],
+      extraLoads: Math.max(2, retries.extraLoads),
+      live: [
+        `throw`,
+        ...Array.from({ length: 3 }, (_, i) => retries.live?.[i + 1] ?? `http`),
+        `throw`,
+        ...(retries.live?.slice(5) ?? []),
+      ],
+    },
+  ]
+  snapshotConstructionStates.set(history, snapshotStates)
+  return history
+}
+
+const snapshotComparison = existingElectricComparison(
+  `electric.sdk-snapshot-delivery`,
+  (history: SnapshotHistory) => {
+    const [width, name, retries] = history
+    return retainSdkViolation(snapshotViolation, { width, name, retries }, () =>
       checkSnapshots(
         width,
         name,
@@ -679,25 +768,86 @@ const snapshotProperty = fc.asyncProperty(
         undefined,
         undefined,
         retries,
+        (state) => snapshotReachedByHistory.get(history)?.add(state),
       ),
-    ),
-)
-sdkCampaigns(
-  `electric.sdk-snapshot-delivery`,
-  `applies installed-SDK snapshot deliveries against an independent overlapping source`,
-  20260917,
-  snapshotViolation,
-  async (seed) => {
-    snapshotReach = createSnapshotReach()
-    await fc.assert(snapshotProperty, {
-      ...oraclePropertyOptions(40, `electric.sdk-snapshot-delivery`),
-      ...(seed === undefined ? {} : { seed }),
-    })
-    snapshotReach.assertReached()
+    )
   },
 )
 
+// The pinned framework checks seed-derived constructions. This check also
+// enforces the same obligations for fresh constructions in generated runs.
+// Product mismatches remain primary; missing reach cannot replace their law.
+function checkSnapshotConstruction(
+  plan: { history: SnapshotHistory },
+  trace: ReadonlyArray<Observation>,
+  judgment: ReturnType<typeof snapshotComparison.model>,
+) {
+  if (judgment.kind !== `pass`) return judgment
+  const reached = new Set(
+    trace
+      .filter(({ checkpoint }) => checkpoint === `reach`)
+      .map(({ value }) => value),
+  )
+  const missing = (snapshotConstructionStates.get(plan.history) ?? []).filter(
+    (state) => !reached.has(state),
+  )
+  return missing.length
+    ? oracleViolation(
+        `constructed states`,
+        `constructed history did not enter ${missing.join(`, `)}`,
+        `constructed reach`,
+      )
+    : pass
+}
+
+oracleProperty({
+  id: `electric.sdk-snapshot-delivery`,
+  law: {
+    statement: `Installed-SDK snapshot deliveries agree with the independent overlapping source.`,
+    authority: `The snapshot-delivery contract and independent source/health judgments stated beside checkSnapshots.`,
+    limits: `The unchanged finite HTTP, overlap, retry, and outage grammar over the installed SDK; no live Electric-service or native-host claim.`,
+  },
+  owns: [`src/electric.ts#electricCollectionOptions`],
+  histories: {
+    arbitrary: snapshotHistoryArbitrary,
+    states: snapshotStates,
+    constructed: [
+      {
+        name: `subset retries, live pauses, throw-led and throw-crossed outage, restart`,
+        enters: snapshotStates,
+        build: constructSnapshotHistory,
+      },
+    ],
+    runs: 40,
+    fixedSeeds: [20260917],
+  },
+  ...snapshotComparison,
+  driver: async (plan, observe) => {
+    const reached = new Set<SnapshotReachState>()
+    snapshotReachedByHistory.set(plan.history, reached)
+    await snapshotComparison.driver(plan, observe)
+    for (const state of reached) observe(`reach`, state)
+  },
+  check: checkSnapshotConstruction,
+  calibrations: snapshotStates.map((state) => ({
+    name: `omits constructed ${state}`,
+    law: `constructed reach`,
+    corrupt: (
+      trace: ReadonlyArray<Observation>,
+      plan: { history: SnapshotHistory },
+    ) =>
+      snapshotConstructionStates.has(plan.history)
+        ? trace.filter(
+            ({ checkpoint, value }) =>
+              checkpoint !== `reach` || value !== state,
+          )
+        : undefined,
+  })),
+  timeout: campaignTimeoutMs,
+})
+
 fixedCase(`detects dropped snapshot rows`, async () => {
+  oracleRoute(`calibration`)
   await expect(checkSnapshots(2, `payload`, true)).rejects.toMatchObject({
     name: `AssertionError`,
     message: expect.stringContaining(`snapshot 0 applied rows`),
@@ -707,6 +857,7 @@ fixedCase(`detects dropped snapshot rows`, async () => {
 fixedCase(
   `retains the snapshot law and checkpoint when cleanup also fails`,
   async () => {
+    oracleRoute(`calibration`)
     const cleanupFailure = new Error(`injected cleanup failure`)
     const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
     const subscribe = ShapeStream.prototype.subscribe
@@ -743,6 +894,7 @@ fixedCase(
 fixedCase(
   `restores the SDK setup resources after construction fails`,
   async () => {
+    oracleRoute(`case`)
     const primary = new Error(`collection construction failed`)
     const secondary = new Error(`provider release failed`)
     const subscribe = ShapeStream.prototype.subscribe
@@ -936,28 +1088,37 @@ async function checkMembership(
 // move-out leaves the right group active; it distinguishes OR from a wrong
 // rule that requires both groups to remain active.
 const membershipViolation = sameViolation()
-const membershipProperty = fc.asyncProperty(
+const membershipHistoryArbitrary = fc.tuple(
   fc.integer({ min: 1, max: 2 }),
   fc.integer({ min: 1, max: 2 }),
   fc.integer({ min: 1, max: 3 }),
-  (left, right, cycles) =>
-    membershipViolation.check({ left, right, cycles }, () =>
-      checkMembership(left, right, cycles, replayFault === `move-in`),
-    ),
 )
-sdkCampaigns(
-  `electric.sdk-dnf-membership`,
-  `preserves DNF visibility through installed-SDK silent move-in cycles`,
-  20260918,
-  membershipViolation,
-  (seed) =>
-    fc.assert(membershipProperty, {
-      ...oraclePropertyOptions(12, `electric.sdk-dnf-membership`),
-      ...(seed === undefined ? {} : { seed }),
-    }),
-)
+oracleProperty({
+  id: `electric.sdk-dnf-membership`,
+  law: {
+    statement: `DNF visibility survives installed-SDK silent move-in cycles.`,
+    authority: `The independent tag-group membership contract and checkMembership comparison stated above.`,
+    limits: `The unchanged disjoint two-group, one-to-three-cycle HTTP grammar; arbitrary provider frames and unmatched move-ins remain outside this owner.`,
+  },
+  owns: [`src/electric.ts#electricCollectionOptions`],
+  histories: {
+    arbitrary: membershipHistoryArbitrary,
+    runs: 12,
+    fixedSeeds: [20260918],
+  },
+  ...existingElectricComparison(
+    `electric.sdk-dnf-membership`,
+    ([left, right, cycles]: [number, number, number]) =>
+      retainSdkViolation(membershipViolation, { left, right, cycles }, () =>
+        checkMembership(left, right, cycles, replayFault === `move-in`),
+      ),
+  ),
+  check: checkExistingElectricComparison,
+  timeout: campaignTimeoutMs,
+})
 
 fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
+  oracleRoute(`calibration`)
   await expect(checkMembership(1, 1, 1, true)).rejects.toMatchObject({
     name: `AssertionError`,
     message: expect.stringContaining(`after silent move-in`),
@@ -968,7 +1129,7 @@ fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
  * # The retry-decision law through the installed Electric client
  *
  * The retry-decision oracle in `electric-oracle.property.test.ts` drives the
- * adapter through a controlled ShapeStream. This lane receives the same law
+ * adapter through a controlled ShapeStream. This receiving path receives the same law
  * through the installed `@electric-sql/client`, its retry policy, and HTTP.
  * It uses the same independent model (`electric-retry-decision-model.ts`).
  *
@@ -992,7 +1153,7 @@ fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
  * load. An eager or progressive Collection has no subset demand before its
  * first ready, so its demand is the readiness wait (`preload()`).
  *
- * At each checkpoint the lane compares the Collection status, each demand's
+ * At each checkpoint the receiving path compares the Collection status, each demand's
  * settlement, whether the snapshot's row is visible, and two pairs of waits
  * that no evidence satisfies, one started with the history and one started
  * at the checkpoint, with the model:
@@ -1208,7 +1369,10 @@ async function runClientRetryCell(
 
 fixedCase.each(clientRetryCells)(
   `installed client: %s in %s mode with an onError %s follows the retry-decision model`,
-  (outcome, mode, decision) => runClientRetryCell(outcome, mode, decision),
+  (outcome, mode, decision) => {
+    oracleRoute(`case`)
+    return runClientRetryCell(outcome, mode, decision)
+  },
   60_000,
 )
 
@@ -1237,7 +1401,7 @@ fixedCase.each(clientRetryCells)(
  * retired HTTP snapshot arrives while rotation is held, just before replacement
  * snapshots, or after replacement settlement. A forwarding constructor observer
  * records listener ownership before invoking the real SDK. It does not release
- * resources or replace SDK behavior. This lane
+ * resources or replace SDK behavior. This receiving path
  * covers sequential rotations in an on-demand run with the installed browser
  * SDK; overlapping rotations, other SDK versions, and native hosts remain separate.
  * Both retained demands must remain pending until replacement source responses
@@ -1246,26 +1410,18 @@ fixedCase.each(clientRetryCells)(
  */
 type RetiredSnapshotCut =
   `during-rotation` | `before-snapshots` | `after-snapshots`
-const createRotationReach = () =>
-  createOracleReach<
-    | RetiredSnapshotCut
-    | `first-session`
-    | `replacement-session`
-    | `demands-await-replacement`
-    | `retired-target-observed`
-  >(`electric.sdk-rotation-release`, [
-    `during-rotation`,
-    `before-snapshots`,
-    `after-snapshots`,
-    `first-session`,
-    `replacement-session`,
-    `demands-await-replacement`,
-    `retired-target-observed`,
-  ])
-let rotationReach: ReturnType<typeof createRotationReach> | undefined
+const rotationStates = [
+  `during-rotation`,
+  `before-snapshots`,
+  `after-snapshots`,
+  `first-session`,
+  `replacement-session`,
+  `demands-await-replacement`,
+  `retired-target-observed`,
+]
+const rotationObservedStates = new Set<string>()
 
 async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
-  rotationReach?.beginHistory()
   const listeners = recordVisibilityListeners()
   const http = controlledHttp()
   const rows = new Map<string, Map<number, Item>>([
@@ -1480,6 +1636,8 @@ async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
       expect(listeners.registered()).toBe(round + 1)
 
       const deliverRetiredSnapshot = async () => {
+        const retiredMetadata = new Map(metadata.get(retiredStorageId))
+        const currentMetadata = new Map(metadata.get(storageId))
         respond(oldSnapshot, { id: oldId, name: `late-old` }, round * 4 + 1)
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
         expect(collection.get(oldId)).toBeUndefined()
@@ -1487,7 +1645,14 @@ async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
           rows.get(retiredStorageId)!.has(oldId),
           `retired response in retired cache`,
         ).toBe(false)
-        rotationReach?.reach(`retired-target-observed`)
+        expect(
+          metadata.get(retiredStorageId),
+          `retired response metadata`,
+        ).toEqual(retiredMetadata)
+        expect(metadata.get(storageId), `current generation metadata`).toEqual(
+          currentMetadata,
+        )
+        rotationObservedStates.add(`retired-target-observed`)
       }
       if (retiredSnapshotCut === `during-rotation`)
         await deliverRetiredSnapshot()
@@ -1502,14 +1667,14 @@ async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
         beforeConstruction[round + 1],
         `retired listeners before replacement construction`,
       ).toBe(0)
-      rotationReach?.reach(retiredSnapshotCut)
-      rotationReach?.reach(
+      rotationObservedStates.add(retiredSnapshotCut)
+      rotationObservedStates.add(
         round === 0 ? `first-session` : `replacement-session`,
       )
       if (retiredSnapshotCut === `before-snapshots`)
         await deliverRetiredSnapshot()
       await assertDemandsPending(`demands before replacement source responses`)
-      rotationReach?.reach(`demands-await-replacement`)
+      rotationObservedStates.add(`demands-await-replacement`)
 
       // The replacement SDK first reacquires the old demand, then the new one.
       // Empty snapshots for oldId distinguish source authority from the old
@@ -1564,38 +1729,41 @@ async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
   ])
 }
 
-fixedCase(`discards an old SDK snapshot after managed cache rotation`, () =>
-  checkManagedRotation([`after-snapshots`]),
-)
+fixedCase(`discards an old SDK snapshot after managed cache rotation`, () => {
+  oracleRoute(`case`)
+  return checkManagedRotation([`after-snapshots`])
+})
 const rotationViolation = sameViolation()
-sdkCampaigns(
-  `electric.sdk-rotation-release`,
-  `releases retired SDK resources before constructing a replacement`,
-  20261026,
-  rotationViolation,
-  async (seed) => {
-    rotationReach = createRotationReach()
-    await fc.assert(
-      fc.asyncProperty(
-        fc.array(
-          fc.constantFrom<RetiredSnapshotCut>(
-            `during-rotation`,
-            `before-snapshots`,
-            `after-snapshots`,
-          ),
-          { minLength: 1, maxLength: 3 },
-        ),
-        (cuts) =>
-          rotationViolation.check(cuts, () => checkManagedRotation(cuts)),
-      ),
-      {
-        ...oraclePropertyOptions(40, `electric.sdk-rotation-release`),
-        ...(seed === undefined ? {} : { seed }),
-      },
-    )
-    rotationReach.assertReached()
+oracleProperty({
+  id: `electric.sdk-rotation-release`,
+  law: {
+    statement: `Retired SDK resources are released before constructing a replacement.`,
+    authority: `The Electric resource-retirement and persisted-cache rotation contracts stated beside checkManagedRotation.`,
+    limits: `The unchanged one-to-three sequential rotations through installed-SDK HTTP delivery and a Map-backed persistence adapter; no overlapping rotations or native-host claim.`,
   },
-)
+  owns: [`src/electric.ts#electricCollectionOptions`],
+  histories: {
+    arbitrary: fc.array(
+      fc.constantFrom<RetiredSnapshotCut>(
+        `during-rotation`,
+        `before-snapshots`,
+        `after-snapshots`,
+      ),
+      { minLength: 1, maxLength: 3 },
+    ),
+    runs: 40,
+    fixedSeeds: [20261026],
+  },
+  ...existingElectricComparison(
+    `electric.sdk-rotation-release`,
+    (cuts: ReadonlyArray<RetiredSnapshotCut>) =>
+      retainSdkViolation(rotationViolation, cuts, () =>
+        checkManagedRotation(cuts),
+      ),
+  ),
+  check: checkExistingElectricComparison,
+  timeout: campaignTimeoutMs,
+})
 
 /**
  * # Cleanup releases the installed client's stream listeners
@@ -1646,10 +1814,10 @@ sdkCampaigns(
  * bound and one-registration-per-run calibration describe this installed SDK
  * and the driver's one-stream topology, rather than a universal SDK policy.
  *
- * Limits: the lane observes the browser listener in jsdom. Client versions
+ * Limits: the receiving path observes the browser listener in jsdom. Client versions
  * that observe React Native's AppState instead register through a runtime
- * adapter, which this lane does not install. A live Electric service and
- * snapshot requests are outside this lane. The managed cache rotation case
+ * adapter, which this receiving path does not install. A live Electric service and
+ * snapshot requests are outside this receiving path. The managed cache rotation case
  * above replaces a provider session within one run; it receives the same law
  * for the retired session.
  */
@@ -1671,22 +1839,19 @@ type ReleaseState =
   | `cleanup-during-reset`
   | `cleanup-during-retry-decision`
 
-const createReleaseReach = () =>
-  createOracleReach<ReleaseState>(`electric.sdk-source-release`, [
-    `cleanup-while-loading`,
-    `cleanup-after-ready`,
-    `cleanup-after-give-up`,
-    `cleanup-after-abort`,
-    `cleanup-of-restarted-run`,
-    `cleanup-after-partial-delivery`,
-    `cleanup-during-reset`,
-    `cleanup-during-retry-decision`,
-  ])
-// Each campaign declares its own reach.
-let releaseReach = createReleaseReach()
+const releaseStates: ReadonlyArray<ReleaseState> = [
+  `cleanup-while-loading`,
+  `cleanup-after-ready`,
+  `cleanup-after-give-up`,
+  `cleanup-after-abort`,
+  `cleanup-of-restarted-run`,
+  `cleanup-after-partial-delivery`,
+  `cleanup-during-reset`,
+  `cleanup-during-retry-decision`,
+]
+const releaseObservedStates = new Set<ReleaseState>()
 
 async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
-  releaseReach.beginHistory()
   const listeners = recordVisibilityListeners()
   const http = controlledHttp()
   const external = new AbortController()
@@ -1805,7 +1970,7 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
         )
         request.respond(new Response(`transient`, { status: 503 }))
         await vi.waitFor(() => expect(onErrorCalls).toBe(calls + 1))
-        releaseReach.reach(`cleanup-during-retry-decision`)
+        releaseObservedStates.add(`cleanup-during-retry-decision`)
         check(`run ${index} pending decision`)
       } else if (request && run.end === `give-up`) {
         const calls = onErrorCalls
@@ -1821,7 +1986,7 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
         check(`run ${index} abort`)
       }
 
-      releaseReach.reach(
+      releaseObservedStates.add(
         external.signal.aborted
           ? `cleanup-after-abort`
           : !sending
@@ -1830,11 +1995,11 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
               ? `cleanup-after-ready`
               : `cleanup-while-loading`,
       )
-      if (index > 0) releaseReach.reach(`cleanup-of-restarted-run`)
+      if (index > 0) releaseObservedStates.add(`cleanup-of-restarted-run`)
       if (pendingAnswers.has(`row`))
-        releaseReach.reach(`cleanup-after-partial-delivery`)
+        releaseObservedStates.add(`cleanup-after-partial-delivery`)
       if (pendingAnswers.has(`reset`))
-        releaseReach.reach(`cleanup-during-reset`)
+        releaseObservedStates.add(`cleanup-during-reset`)
       await collection.cleanup()
       activeRuns = 0
       check(`run ${index} cleanup`)
@@ -1858,6 +2023,7 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
 fixedCase.each([`eager`, `on-demand`, `progressive`] as const)(
   `releases listeners after incomplete delivery in %s mode`,
   async (mode) => {
+    oracleRoute(`case`)
     for (const answer of [`row`, `reset`] as const)
       for (const end of [
         `open`,
@@ -1871,49 +2037,448 @@ fixedCase.each([`eager`, `on-demand`, `progressive`] as const)(
 )
 
 const releaseViolation = sameViolation()
-const releaseProperty = fc.asyncProperty(
-  fc.record({
-    mode: fc.constantFrom(
-      `eager` as const,
-      `on-demand` as const,
-      `progressive` as const,
-    ),
-    runs: fc.array(
-      fc.record({
-        answers: fc.array(
-          fc.constantFrom(
-            `row` as const,
-            `up-to-date` as const,
-            `reset` as const,
-            `retry` as const,
-          ),
-          { maxLength: 3 },
+const releaseHistoryArbitrary = fc.record({
+  mode: fc.constantFrom(
+    `eager` as const,
+    `on-demand` as const,
+    `progressive` as const,
+  ),
+  runs: fc.array(
+    fc.record({
+      answers: fc.array(
+        fc.constantFrom(
+          `row` as const,
+          `up-to-date` as const,
+          `reset` as const,
+          `retry` as const,
         ),
-        end: fc.constantFrom(
-          `open` as const,
-          `give-up` as const,
-          `abort` as const,
-          `deciding-retry` as const,
-          `deciding-give-up` as const,
-        ),
-      }),
-      { minLength: 1, maxLength: 3 },
-    ),
-  }),
-  (history: ReleaseHistory) =>
-    releaseViolation.check(history, () => checkSourceRelease(history)),
-)
-sdkCampaigns(
-  `electric.sdk-source-release`,
-  `releases every installed-SDK stream listener when a sync run is cleaned up`,
-  20261024,
-  releaseViolation,
-  async (seed) => {
-    releaseReach = createReleaseReach()
-    await fc.assert(releaseProperty, {
-      ...oraclePropertyOptions(40, `electric.sdk-source-release`),
-      ...(seed === undefined ? {} : { seed }),
-    })
-    releaseReach.assertReached()
+        { maxLength: 3 },
+      ),
+      end: fc.constantFrom(
+        `open` as const,
+        `give-up` as const,
+        `abort` as const,
+        `deciding-retry` as const,
+        `deciding-give-up` as const,
+      ),
+    }),
+    { minLength: 1, maxLength: 3 },
+  ),
+})
+oracleProperty({
+  id: `electric.sdk-source-release`,
+  law: {
+    statement: `Every installed-SDK stream listener is released when its sync run is cleaned up.`,
+    authority: `The resource-ownership law and EventTarget-calibrated listener comparison stated beside checkSourceRelease.`,
+    limits: `The unchanged one-to-three-run browser-SDK grammar in jsdom; React Native AppState and arbitrary provider schedules remain separate.`,
   },
-)
+  owns: [`src/electric.ts#electricCollectionOptions`],
+  histories: {
+    arbitrary: releaseHistoryArbitrary,
+    runs: 40,
+    fixedSeeds: [20261024],
+  },
+  ...existingElectricComparison(
+    `electric.sdk-source-release`,
+    (history: ReleaseHistory) =>
+      retainSdkViolation(releaseViolation, history, () =>
+        checkSourceRelease(history),
+      ),
+  ),
+  check: checkExistingElectricComparison,
+  timeout: campaignTimeoutMs,
+})
+
+/**
+ * A completed scoped snapshot establishes rows and a durable continuation
+ * checkpoint. The Electric guide's persisted-resume contract requires the
+ * response's handle/offset, not the cursor from the preceding response.
+ * The independent model uses only authored HTTP positions and source rows.
+ * It never reads ShapeStream state to predict durable metadata.
+ *
+ * Each history starts changes-only. Direct and live-query consumers perform
+ * two distinct demands. The cursor consumer makes two physical requests in
+ * one admitted demand. Successful histories restart; rejected writes stop at
+ * rejection. Each tag/consumer/empty-second-response/delivery lane runs fixed
+ * and random campaigns of generated positions and payloads. Distinct demands
+ * avoid deduplication. Increasing positions are legal; regressing ones are not.
+ * The first load distinguishes an absent cursor, the second a stale cursor,
+ * and the empty neighbor requires progress without a row write. Tagged restart
+ * must quarantine cache-only rows; its reset policy is owned separately.
+ *
+ * The real installed SDK receives controlled HTTP. Comparisons run immediately
+ * after successful acquisition settlement, then after a fresh launch's demand.
+ * No extra polling may repair a missing durable checkpoint after settlement.
+ * This does not establish a real server's framing, native SQLite durability,
+ * intermediate row/cursor atomic publication, or arbitrary provider schedules.
+ */
+function expectedResumeCheckpoint(offset: number, tagged: boolean) {
+  return {
+    kind: `resume`,
+    handle: `shape`,
+    offset: `${offset}_0`,
+    requiresTagState: tagged,
+  }
+}
+
+// Virtual Collection metadata is outside this source payload law.
+function checkpointRow(row: TestRow | undefined) {
+  return row && { id: row.id, name: row.name, stable: row.stable }
+}
+
+type ResumeCheckpointHistory = { base: number; gap: number; name: string }
+type ResumeCheckpointLane = {
+  tagged: boolean
+  consumer: `direct` | `live-query` | `cursor`
+  emptySecond: boolean
+  delivery: `apply` | `hold` | `reject`
+}
+async function checkResumeCheckpoint(
+  history: ResumeCheckpointHistory,
+  { tagged, consumer, emptySecond, delivery }: ResumeCheckpointLane,
+) {
+  const expectedCuts =
+    delivery === `reject`
+      ? [`checkpoint-rejected`]
+      : [
+          ...(consumer === `cursor` ? [`next-request`] : [`cold-cursor`]),
+          `advanced-cursor`,
+          `fresh-launch-demand`,
+          ...(delivery === `hold` ? [`held-checkpoint`] : []),
+        ]
+  const observedCuts = new Set<string>()
+  const fixture = managedTagPersistence()
+  const entered = deferred<void>()
+  const release = deferred<void>()
+  const checkpointError = new Error(`checkpoint storage failed`)
+  let intercepted = false
+  const apply = fixture.adapter.applyCommittedTx.bind(fixture.adapter)
+  fixture.adapter.applyCommittedTx = async (target, tx) => {
+    if (
+      !intercepted &&
+      tx.collectionMetadataMutations?.some(
+        (mutation) =>
+          mutation.type !== `delete` &&
+          mutation.key === `electric:resume` &&
+          typeof mutation.value === `object` &&
+          mutation.value !== null &&
+          `kind` in mutation.value &&
+          mutation.value.kind === `resume`,
+      )
+    ) {
+      intercepted = true
+      entered.resolve()
+      if (delivery === `hold`) await release.promise
+      if (delivery === `reject`) throw checkpointError
+    }
+    return apply(target, tx)
+  }
+  const http = controlledHttp()
+  const collectionId = `sdk-resume-checkpoint-${++sequence}`
+  const create = () =>
+    createCollection(
+      persistedCollectionOptions<
+        TestRow,
+        string | number,
+        never,
+        ElectricCollectionUtils<TestRow>
+      >({
+        ...electricCollectionOptions<TestRow>({
+          id: collectionId,
+          shapeOptions: {
+            url: `http://test-url/${collectionId}`,
+            params: { table: `rows` },
+            fetchClient: http.fetchClient,
+          },
+          syncMode: `on-demand`,
+          startSync: true,
+          getKey: (row) => row.id,
+        }),
+        persistence: { adapter: fixture.adapter },
+      }),
+    )
+  const first = create()
+  let current = first
+  const queries: Array<{ cleanup: () => Promise<void> }> = []
+  let firstLaunch = true
+  const demand = (id: number) => {
+    if (consumer === `cursor` && firstLaunch) {
+      const field = new IR.PropRef([`id`])
+      return Promise.resolve(
+        current._sync.loadSubset({
+          limit: 10,
+          orderBy: [
+            {
+              expression: field,
+              compareOptions: {
+                direction: `asc`,
+                nulls: `last`,
+                stringSort: `lexical`,
+              },
+            },
+          ],
+          cursor: {
+            whereCurrent: new IR.Func(`eq`, [field, new IR.Value(1)]),
+            whereFrom: new IR.Func(`gt`, [field, new IR.Value(1)]),
+            lastKey: 1,
+          },
+        }),
+      )
+    }
+    if (consumer === `direct` || consumer === `cursor`)
+      return Promise.resolve(
+        current._sync.loadSubset({
+          where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
+        }),
+      )
+    const source = current
+    const query = createLiveQueryCollection({
+      startSync: false,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .where(({ row }) => eq(row.id, id))
+          .select(({ row }) => ({
+            id: row.id,
+            name: row.name,
+            stable: row.stable,
+          })),
+    })
+    queries.push(query)
+    return query.preload()
+  }
+  const respond = (
+    request: Request,
+    id: number,
+    offset: number,
+    empty: boolean,
+  ) => {
+    const cursorFrom = consumer === `cursor` && firstLaunch && id === 2
+    expect(request.url.searchParams.get(`subset__where`)).toBe(
+      cursorFrom ? `"id" > $1` : `"id" = $1`,
+    )
+    expect(
+      JSON.parse(request.url.searchParams.get(`subset__params`) ?? `null`),
+    ).toEqual({ 1: String(cursorFrom ? 1 : id) })
+    request.respond(
+      new Response(
+        JSON.stringify({
+          metadata: {
+            xmin: `10`,
+            xmax: `20`,
+            xip_list: [],
+            database_lsn: `10`,
+            snapshot_mark: offset,
+          },
+          data: empty
+            ? []
+            : [
+                {
+                  key: String(id),
+                  value: {
+                    id: String(id),
+                    name: history.name,
+                    stable: `retained`,
+                  },
+                  headers: {
+                    operation: `insert`,
+                    ...(tagged ? { tags: [`selected`] } : {}),
+                  },
+                },
+              ],
+        }),
+        {
+          headers: {
+            ...headers(offset),
+            'electric-schema': JSON.stringify({
+              id: { type: `int4` },
+              name: { type: `text` },
+              stable: { type: `text` },
+            }),
+          },
+        },
+      ),
+    )
+  }
+  await withElectricCleanup(async () => {
+    const initial = await atCheckpoint(http.take(), `checkpoint first stream`)
+    expect(initial.url.searchParams.get(`log`)).toBe(`changes_only`)
+    let queued:
+      { loading: ReturnType<typeof demand>; request: Request } | undefined
+    for (const id of [1, 2]) {
+      let settlement = `pending`
+      const loading = queued?.loading ?? demand(id)
+      void loading.then(
+        () => {
+          settlement = `fulfilled`
+        },
+        () => {
+          settlement = `rejected`
+        },
+      )
+      const offset = history.base + (id - 1) * history.gap
+      respond(
+        queued?.request ??
+          (await atCheckpoint(http.take(true), `checkpoint snapshot ${id}`)),
+        id,
+        offset,
+        id === 2 && emptySecond,
+      )
+      if (id === 1 && delivery !== `apply`) {
+        await atCheckpoint(
+          Promise.race([
+            entered.promise,
+            loading.then(
+              () => undefined,
+              () => undefined,
+            ),
+          ]),
+          `durable checkpoint or load settlement`,
+        )
+        expect(
+          intercepted,
+          `load cannot finish without its durable checkpoint`,
+        ).toBe(true)
+        if (delivery === `reject`) {
+          // The persistence contract exposes its named durability error and
+          // preserves the storage failure as the local cause (core README).
+          await expect(loading).rejects.toMatchObject({
+            name: `PersistedCollectionDurabilityError`,
+            cause: checkpointError,
+          })
+          observedCuts.add(`checkpoint-rejected`)
+          return
+        }
+        // The adapter reached the durable write, which stays held. Yield only
+        // to expose an incorrectly early load settlement at this semantic cut.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(settlement, `load waits for durable cursor`).toBe(`pending`)
+        observedCuts.add(`held-checkpoint`)
+        if (consumer === `cursor`) {
+          // Both requests belong to one admitted cursor demand, so this cut
+          // bypasses the persistence wrapper's next-demand hydration barrier.
+          queued = {
+            loading,
+            request: await atCheckpoint(
+              http.take(true),
+              `next physical snapshot while checkpoint is held`,
+            ),
+          }
+          observedCuts.add(`next-request`)
+          release.resolve()
+          continue
+        }
+        release.resolve()
+      }
+      await atCheckpoint(loading, `checkpoint demand ${id} applied`)
+      expect(
+        fixture.metadata().get(`electric:resume`),
+        `durable cursor at successful demand settlement`,
+      ).toMatchObject(expectedResumeCheckpoint(offset, tagged))
+      expect(checkpointRow(current.get(id))).toEqual(
+        id === 2 && emptySecond
+          ? undefined
+          : { id, name: history.name, stable: `retained` },
+      )
+      observedCuts.add(id === 1 ? `cold-cursor` : `advanced-cursor`)
+    }
+    for (const query of queries.splice(0)) await query.cleanup()
+    await first.cleanup()
+    firstLaunch = false
+    current = create()
+    const resumed = await atCheckpoint(
+      http.take(),
+      `checkpoint restarted stream`,
+    )
+    expect(resumed.url.searchParams.get(`log`)).toBe(`changes_only`)
+    expect(resumed.url.searchParams.get(`offset`)).toBe(
+      tagged ? `now` : `${history.base + history.gap}_0`,
+    )
+    expect(resumed.url.searchParams.get(`handle`)).toBe(tagged ? null : `shape`)
+    const loading = demand(1)
+    void loading.catch(() => undefined)
+    respond(
+      await atCheckpoint(http.take(true), `checkpoint restarted snapshot`),
+      1,
+      history.base + history.gap + 1,
+      false,
+    )
+    await atCheckpoint(loading, `checkpoint restarted demand applied`)
+    expect(checkpointRow(current.get(1))).toEqual({
+      id: 1,
+      name: history.name,
+      stable: `retained`,
+    })
+    expect(fixture.rows().get(1)?.value).toEqual(checkpointRow(current.get(1)))
+    if (tagged)
+      expect(fixture.metadata().get(`electric:resume`)).toMatchObject({
+        kind: `reset`,
+      })
+    observedCuts.add(`fresh-launch-demand`)
+  }, [
+    () => release.resolve(),
+    async () => {
+      for (const query of queries) await query.cleanup()
+    },
+    () => current.cleanup(),
+    () => first.cleanup(),
+    () => http.close(),
+    () => expect(http.activeCount()).toBe(0),
+  ])
+  if (!oracleReplayRequested())
+    expect(expectedCuts.filter((cut) => !observedCuts.has(cut))).toEqual([])
+  console.log(
+    `ORACLE_REACH`,
+    JSON.stringify({
+      property: `electric.sdk-resume-checkpoint`,
+      tagged,
+      consumer,
+      emptySecond,
+      delivery,
+      counts: Object.fromEntries(
+        expectedCuts.map((cut) => [cut, Number(observedCuts.has(cut))]),
+      ),
+    }),
+  )
+}
+for (const tagged of [false, true])
+  for (const consumer of [`direct`, `live-query`, `cursor`] as const)
+    for (const emptySecond of [false, true])
+      for (const delivery of [`apply`, `hold`, `reject`] as const) {
+        if (consumer === `cursor` && delivery !== `hold`) continue
+        const property = `electric.sdk-resume-checkpoint.${tagged}.${consumer}.${emptySecond}.${delivery}`
+        const violation = sameViolation()
+        resumeViolations.push(violation)
+        oracleProperty({
+          id: property,
+          law: {
+            statement: `Each completed SDK snapshot cursor persists before demand settlement, tagged=${tagged} consumer=${consumer} emptySecond=${emptySecond} delivery=${delivery}.`,
+            authority: `The independent authored-HTTP-position model and persisted-resume contract stated beside checkResumeCheckpoint.`,
+            limits: `The unchanged bounded two-demand, restart, cursor and durable-settlement receiving lane; no additional provider schedules or native-host claim.`,
+          },
+          owns: [`src/electric.ts#electricCollectionOptions`],
+          histories: {
+            arbitrary: fc.record({
+              base: fc.integer({ min: 1, max: 30 }),
+              gap: fc.integer({ min: 1, max: 5 }),
+              name: fc.string({ minLength: 1, maxLength: 8 }),
+            }),
+            runs: 8,
+            fixedSeeds: [20261109],
+          },
+          ...existingElectricComparison(
+            property,
+            (history: ResumeCheckpointHistory) =>
+              retainSdkViolation(violation, history, () =>
+                checkResumeCheckpoint(history, {
+                  tagged,
+                  consumer,
+                  emptySecond,
+                  delivery,
+                }),
+              ),
+          ),
+          check: checkExistingElectricComparison,
+          timeout: campaignTimeoutMs,
+        })
+      }

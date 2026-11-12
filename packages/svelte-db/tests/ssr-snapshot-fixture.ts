@@ -59,7 +59,7 @@ export async function renderSsrSnapshotHistory(
       if (history.sourceState === `ready`) await warming
       else void warming.catch(() => {})
     }
-    // Register the warmed source for normalized dehydration. This lane models
+    // Register the warmed source for normalized dehydration. This `source` preparation models
     // explicit source registration, not another awaited preload operation.
     if (history.preparation === `source`) client.collection(descriptor)
     if (

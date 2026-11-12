@@ -1,12 +1,13 @@
 import { D2, MultiSet, output } from '@tanstack/db-ivm'
-import { describe, expect, test } from 'vitest'
+import { expect } from 'vitest'
 import { coalesce } from '../../../src/query/builder/functions.js'
 import { processGroupBy } from '../../../src/query/compiler/group-by.js'
 import { grouping } from '../../../src/query/compiler/grouping.js'
 import { createValueIdentity } from '../../../src/query/equality-value-identity.js'
 import { Aggregate, Func, PropRef, Value } from '../../../src/query/ir.js'
+import { oracleProperty, pass, violation } from '../../oracle-config.js'
 import { declareOracle } from '../../oracle-declaration.js'
-import { createOracleReach } from '../../oracle-reach.js'
+import type { Observation, Verdict } from '../../oracle-config.js'
 import type { Select } from '../../../src/query/ir.js'
 import type { KeyedNamespacedRow } from '../../../src/types.js'
 
@@ -108,132 +109,199 @@ function compareGroupRows(
   expect(observed).toEqual(expect.arrayContaining(expected))
 }
 
+// The finite histories keep the original thirty combinations and all five
+// replacement checkpoints. The checker requires each checkpoint, so removing
+// one cannot silently remove its former reach obligation.
+function modelGroupHistory(scenario: Case) {
+  return snapshots.map(({ checkpoint, rows }) => ({
+    checkpoint,
+    rows: expectedGroupRows(rows, scenario),
+  }))
+}
+
+function driveGroupHistory(
+  scenario: Case,
+  observe: (checkpoint: string, value: unknown) => void,
+): void {
+  const { grouped, selection, having } = scenario
+  const graph = new D2()
+  const input = graph.newInput<KeyedNamespacedRow>()
+  const groupRef = new PropRef([`row`, `group`])
+  const total = new Aggregate(`sum`, [new PropRef([`row`, `amount`])], grouping)
+  // The selected alias deliberately resembles a compiler-generated field.
+  const select: Select | undefined =
+    selection === `none`
+      ? undefined
+      : {
+          ...(grouped ? { group: groupRef } : {}),
+          [totalAlias]:
+            selection === `plain`
+              ? total
+              : new Func(`add`, [
+                  coalesce(total, 0),
+                  grouped ? groupRef : new Value(0),
+                ]),
+        }
+  let actual = new MultiSet<Result>()
+  processGroupBy(
+    input,
+    grouped ? [groupRef] : [],
+    createValueIdentity(),
+    (ref: { path: Array<string> }) => ref.path[0] === `row`,
+    having === `expression`
+      ? [
+          selection === `none`
+            ? new Value(true)
+            : new Func(`gt`, [
+                new PropRef([`$selected`, totalAlias]),
+                new Value(5),
+              ]),
+        ]
+      : having === `false` || having === `null`
+        ? [
+            having === `false`
+              ? new Value(false)
+              : new Func<boolean>(`gt`, [new Value(null), new Value(5)]),
+          ]
+        : undefined,
+    select,
+    having === `function`
+      ? [
+          (row: { $selected: Record<string, number> }) =>
+            selection === `none` || row.$selected[totalAlias]! > 5,
+        ]
+      : undefined,
+  ).pipe(
+    output((delta) => {
+      actual = actual
+        .concat(
+          delta.map(([key, row]) => {
+            observe(`group key`, { key, reportedKey: row.$key })
+            return { key, selected: row.$selected }
+          }),
+        )
+        .consolidate()
+    }),
+  )
+  graph.finalize()
+
+  let previous = new MultiSet<KeyedNamespacedRow>()
+  // Each snapshot is delivered as a weighted replacement. Compare only after
+  // the actual D2 graph drains; no public Collection is synthesized by the test.
+  for (const { checkpoint, rows } of snapshots) {
+    const next = new MultiSet<KeyedNamespacedRow>(
+      rows.map((row) => [
+        [
+          String(row.id),
+          {
+            row: {
+              ...row,
+              $hasPendingWrites: row.local,
+              $origin: row.local ? `local` : `remote`,
+            },
+          },
+        ],
+        1,
+      ]),
+    )
+    input.sendData(previous.negate().concat(next))
+    graph.run()
+    previous = next
+    observe(checkpoint, actual.getInner())
+  }
+}
+
+function checkGroupHistory(
+  _scenario: Case,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof modelGroupHistory>,
+): Verdict {
+  for (const observation of trace) {
+    if (observation.checkpoint !== `group key`) continue
+    const { key, reportedKey } = observation.value as {
+      key: unknown
+      reportedKey: unknown
+    }
+    if (!Object.is(key, reportedKey))
+      return violation(
+        `group key`,
+        `the group row reports a different key`,
+        `group key`,
+      )
+  }
+  for (const snapshot of expected) {
+    const observation = trace.find(
+      ({ checkpoint }) => checkpoint === snapshot.checkpoint,
+    )
+    if (observation === undefined)
+      return violation(
+        snapshot.checkpoint,
+        `the replacement checkpoint is missing`,
+        `group batch`,
+      )
+    try {
+      compareGroupRows(
+        new MultiSet(observation.value as Array<[Result, number]>),
+        snapshot.rows,
+      )
+    } catch (error) {
+      return {
+        kind: `violation`,
+        checkpoint: snapshot.checkpoint,
+        difference: String(error),
+        law: `group batch`,
+        cause: error,
+      }
+    }
+  }
+  return pass
+}
+
 declareOracle({
-  model: [expectedGroupRows],
-  check: [compareGroupRows],
+  model: [expectedGroupRows, modelGroupHistory],
+  check: [compareGroupRows, checkGroupHistory],
   grammar: [cases, snapshots],
 })
 
-describe(`group-by component batch refinement`, () => {
-  test.each(cases)(
-    `recomputes keyed selections: grouped=$grouped, select=$selection, having=$having`,
-    (scenario) => {
-      const { grouped, selection, having } = scenario
-      const graph = new D2()
-      const input = graph.newInput<KeyedNamespacedRow>()
-      const groupRef = new PropRef([`row`, `group`])
-      const total = new Aggregate(
-        `sum`,
-        [new PropRef([`row`, `amount`])],
-        grouping,
+oracleProperty({
+  id: `compiler.group-by.batch`,
+  law: {
+    statement: `Group reduction agrees with batch partitioning and aggregation after every input replacement, with one keyed selection per retained nonempty group.`,
+    authority: `The aggregate and group laws in live/ARCHITECTURE.md and the boundary-only metadata decision of 2026-11-05, stated above.`,
+    limits: `The original thirty finite grouping, selection and HAVING combinations over five replacement snapshots; no Collection, correlated-route, metadata-attribution or group-ordering claim.`,
+  },
+  owns: [`src/query/compiler/group-by.ts#processGroupBy`],
+  histories: cases,
+  label: ({ grouped, selection, having }) =>
+    `grouped=${grouped}, select=${selection}, having=${having}`,
+  model: modelGroupHistory,
+  driver: driveGroupHistory,
+  check: checkGroupHistory,
+  calibrations: (
+    [`lost group`, `wrong key`, `wrong value`, `duplicate weight`] as const
+  ).map((fault) => ({
+    name: fault,
+    law: `group batch`,
+    corrupt: (trace: ReadonlyArray<Observation>) => {
+      const populated = trace.find(
+        ({ checkpoint }) => checkpoint === `populated`,
       )
-      // The selected alias deliberately resembles a compiler-generated field.
-      const select: Select | undefined =
-        selection === `none`
-          ? undefined
-          : {
-              ...(grouped ? { group: groupRef } : {}),
-              [totalAlias]:
-                selection === `plain`
-                  ? total
-                  : new Func(`add`, [
-                      coalesce(total, 0),
-                      grouped ? groupRef : new Value(0),
-                    ]),
-            }
-      let actual = new MultiSet<Result>()
-      processGroupBy(
-        input,
-        grouped ? [groupRef] : [],
-        createValueIdentity(),
-        (ref: { path: Array<string> }) => ref.path[0] === `row`,
-        having === `expression`
-          ? [
-              selection === `none`
-                ? new Value(true)
-                : new Func(`gt`, [
-                    new PropRef([`$selected`, totalAlias]),
-                    new Value(5),
-                  ]),
-            ]
-          : having === `false` || having === `null`
-            ? [
-                having === `false`
-                  ? new Value(false)
-                  : new Func<boolean>(`gt`, [new Value(null), new Value(5)]),
-              ]
-            : undefined,
-        select,
-        having === `function`
-          ? [
-              (row: { $selected: Record<string, number> }) =>
-                selection === `none` || row.$selected[totalAlias]! > 5,
-            ]
-          : undefined,
-      ).pipe(
-        output((delta) => {
-          actual = actual
-            .concat(
-              delta.map(([key, row]) => {
-                expect(row.$key).toBe(key)
-                return { key, selected: row.$selected }
-              }),
-            )
-            .consolidate()
-        }),
+      if (populated === undefined) return undefined
+      const original = populated.value as Array<[Result, number]>
+      if (original.length === 0) return undefined
+      const rows = original.map(([row, weight]): [Result, number] => [
+        { ...row },
+        weight,
+      ])
+      if (fault === `lost group`) rows.pop()
+      if (fault === `wrong key`) rows[0]![0].key = `wrong-group`
+      if (fault === `wrong value`) rows[0]![0].selected = { [totalAlias]: -1 }
+      if (fault === `duplicate weight`) rows[0]![1] = 2
+      return trace.map((observation) =>
+        observation === populated
+          ? { ...observation, value: rows }
+          : observation,
       )
-      graph.finalize()
-
-      const reach = createOracleReach(
-        `compiler.group-by.batch`,
-        snapshots.map(({ checkpoint }) => checkpoint),
-      )
-      reach.beginHistory()
-      let previous = new MultiSet<KeyedNamespacedRow>()
-      // Each snapshot is delivered as a weighted replacement. Compare only after
-      // the actual D2 graph drains; no public Collection is synthesized by the test.
-      for (const { checkpoint, rows } of snapshots) {
-        const next = new MultiSet<KeyedNamespacedRow>(
-          rows.map((row) => [
-            [
-              String(row.id),
-              {
-                row: {
-                  ...row,
-                  $hasPendingWrites: row.local,
-                  $origin: row.local ? `local` : `remote`,
-                },
-              },
-            ],
-            1,
-          ]),
-        )
-        input.sendData(previous.negate().concat(next))
-        graph.run()
-        previous = next
-        reach.reach(checkpoint)
-        compareGroupRows(actual, expectedGroupRows(rows, scenario))
-      }
-      reach.assertReached()
     },
-  )
-
-  test.each([
-    `lost group`,
-    `wrong key`,
-    `wrong value`,
-    `duplicate weight`,
-  ] as const)(`rejects a batch observation with %s`, (fault) => {
-    const expected = expectedGroupRows(initial, {
-      grouped: true,
-      selection: `plain`,
-      having: `none`,
-    })
-    const rows = expected.map((row): [Result, number] => [{ ...row }, 1])
-    if (fault === `lost group`) rows.pop()
-    if (fault === `wrong key`) rows[0]![0].key = `wrong-group`
-    if (fault === `wrong value`) rows[0]![0].selected = { [totalAlias]: -1 }
-    if (fault === `duplicate weight`) rows[0]![1] = 2
-    expect(() => compareGroupRows(new MultiSet(rows), expected)).toThrow()
-  })
+  })),
 })

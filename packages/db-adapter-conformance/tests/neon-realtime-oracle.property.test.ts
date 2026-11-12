@@ -1,19 +1,16 @@
-import { fc } from '@fast-check/vitest'
-import { describe, it } from 'vitest'
-import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { describe } from 'vitest'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   checkEagerLiveSourceHistory,
   eagerLiveSourceHistoryArb,
   eagerLiveSourceModel,
-  eagerLiveSourceProperty,
-  reachStatesFor,
 } from '../src'
+import {
+  checkEagerLiveSourceObservations,
+  eagerLiveSourceHistories,
+  eagerLiveSourceOracle,
+} from './eager-live-source-property-oracle'
 import { neonRealtimeDriver } from './neon/neon-realtime-driver'
 
 /**
@@ -33,45 +30,31 @@ import { neonRealtimeDriver } from './neon/neon-realtime-driver'
  * about Neon's real client needs a receiving witness against it.
  */
 
-const property = `adapter-conformance.eager-live-source.neon-realtime`
-const driver = neonRealtimeDriver()
-const historyArb = eagerLiveSourceHistoryArb(driver)
-// `field-removed` needs a held row with a note and a later upsert without
-// one; at 400 histories every seed tried reached it at least 11 times.
-const runs = 400
-// Timed waits sleep past their timeout, so a passing campaign takes seconds.
-const campaignTimeoutMs = 120_000
-
-async function campaign(options: fc.Parameters<[unknown]>) {
-  const reach = createOracleReach(property, reachStatesFor(driver), {
-    minimum: 5,
-  })
-  await fc.assert(eagerLiveSourceProperty(driver, reach), options)
-  return reach
-}
-
 describe(`eager live-source conformance: Neon Realtime adapter`, () => {
-  oracleReplayTest(it)(
-    `conforms on a fixed-seed campaign`,
-    async () => {
-      const reach = await campaign({ seed: 2118, numRuns: oracleRuns(runs) })
-      reach.assertReached()
+  const property = `adapter-conformance.eager-live-source.neon-realtime`
+  const driver = neonRealtimeDriver()
+  const historyArb = eagerLiveSourceHistoryArb(driver)
+  // Preserve the old 400-history fixed/fresh budgets and minimum five
+  // declared-state entries through the shared constructed-history recipes.
+  const runs = 400
+  const campaignTimeoutMs = 120_000
+  oracleProperty({
+    id: property,
+    ...eagerLiveSourceOracle(driver),
+    check: checkEagerLiveSourceObservations,
+    histories: {
+      ...eagerLiveSourceHistories(driver),
+      runs,
+      fixedSeeds: [2118],
     },
-    campaignTimeoutMs,
-  )
+    timeout: campaignTimeoutMs,
+  })
 
-  oracleReplayTest(it, property)(
-    `conforms on a random campaign or a replayed seed`,
-    async () => {
-      const reach = await campaign(oraclePropertyOptions(runs, property))
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-})
-
-declareOracle({
-  check: [checkEagerLiveSourceHistory, eagerLiveSourceProperty],
-  model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-  grammar: [historyArb],
+  // The adapter under test is vendored in tests/neon; this package's src is
+  // the shared oracle. This receiving path owns no shipped entry point.
+  declareOracle({
+    check: [checkEagerLiveSourceHistory],
+    model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
+    grammar: [historyArb],
+  })
 })

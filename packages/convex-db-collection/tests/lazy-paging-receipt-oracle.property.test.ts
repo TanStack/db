@@ -22,8 +22,15 @@
 import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import { oracleRoute } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import type {
@@ -31,6 +38,15 @@ import type {
   SyncAppliedReceipt,
   SyncConfig,
 } from '@tanstack/db'
+
+type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
+type AssertionReach = {
+  beginHistory: () => void
+  reach: (state: string) => void
+}
+
+// Owns no convex source: this grammar drives @tanstack/db Collection receipts with its own adapter, not the convex pager.
+declareOracle({})
 
 type Row = { id: string; text: string }
 const gate = () => {
@@ -186,8 +202,12 @@ async function receiptHistory(
     return attempt
   }
   const accept = (id: string, values: Array<string>, owners: Array<number>) => {
-    expect(values.every((fact) => available.has(fact) || fact === `peer`)).toBe(
-      true,
+    oracleAssertion(
+      `lazy-paging-receipt-oracle.property.test.ts:195:toBe`,
+      () =>
+        expect(
+          values.every((fact) => available.has(fact) || fact === `peer`),
+        ).toBe(true),
     )
     controls.begin()
     for (const fact of values)
@@ -207,10 +227,14 @@ async function receiptHistory(
     const applied = () => {
       try {
         for (const fact of values)
-          expect(
-            source.base.get(fact)?.text,
-            `receipt fulfilled before its base facts applied`,
-          ).toBe(h.text)
+          oracleAssertion(
+            `lazy-paging-receipt-oracle.property.test.ts:216:toBe`,
+            () =>
+              expect(
+                source.base.get(fact)?.text,
+                `receipt fulfilled before its base facts applied`,
+              ).toBe(h.text),
+          )
         batch.applied = true
         model.apply(id)
       } catch (error) {
@@ -234,16 +258,24 @@ async function receiptHistory(
       // success. Each response group really crosses this adapter's input gate.
       await turns()
       if (errors.length) throw errors[0]
-      expect(a.outcome, `success without source response`).toBeUndefined()
+      oracleAssertion(
+        `lazy-paging-receipt-oracle.property.test.ts:243:toBeUndefined`,
+        () =>
+          expect(a.outcome, `success without source response`).toBeUndefined(),
+      )
       for (let i = 0; i < responses.length; i++) {
         for (const fact of responses[i]!) available.add(fact)
         if (i < responses.length - 1) {
           await turns()
           if (errors.length) throw errors[0]
-          expect(
-            a.outcome,
-            `success with an undelivered response`,
-          ).toBeUndefined()
+          oracleAssertion(
+            `lazy-paging-receipt-oracle.property.test.ts:249:toBeUndefined`,
+            () =>
+              expect(
+                a.outcome,
+                `success with an undelivered response`,
+              ).toBeUndefined(),
+          )
         }
       }
       providerDone.resolve()
@@ -267,22 +299,38 @@ async function receiptHistory(
       shared.done.resolve()
       await turns()
       if (errors.length) throw errors[0]
-      expect(
-        peer.outcome,
-        `unrelated held work stranded the established peer`,
-      ).toBe(`success`)
-      if (h.batches > 1) {
-        expect(
-          shared.outcome,
-          `shared caller skipped an establishing receipt`,
-        ).toBeUndefined()
-        if (!h.cancel)
+      oracleAssertion(
+        `lazy-paging-receipt-oracle.property.test.ts:276:toBe`,
+        () =>
           expect(
-            a.outcome,
-            `caller skipped its exact receipt set`,
-          ).toBeUndefined()
-        expect(accepted.slice(2).every((batch) => batch.receipt !== true)).toBe(
-          true,
+            peer.outcome,
+            `unrelated held work stranded the established peer`,
+          ).toBe(`success`),
+      )
+      if (h.batches > 1) {
+        oracleAssertion(
+          `lazy-paging-receipt-oracle.property.test.ts:281:toBeUndefined`,
+          () =>
+            expect(
+              shared.outcome,
+              `shared caller skipped an establishing receipt`,
+            ).toBeUndefined(),
+        )
+        if (!h.cancel)
+          oracleAssertion(
+            `lazy-paging-receipt-oracle.property.test.ts:286:toBeUndefined`,
+            () =>
+              expect(
+                a.outcome,
+                `caller skipped its exact receipt set`,
+              ).toBeUndefined(),
+          )
+        oracleAssertion(
+          `lazy-paging-receipt-oracle.property.test.ts:290:toBe`,
+          () =>
+            expect(
+              accepted.slice(2).every((batch) => batch.receipt !== true),
+            ).toBe(true),
         )
       }
       // Accepted work is no longer cancelable; even the canceled caller owes
@@ -291,8 +339,14 @@ async function receiptHistory(
       await blocker.when('settled')
       await turns()
       if (errors.length) throw errors[0]
-      expect(shared.outcome).toBe(`success`)
-      expect(a.outcome).toBe(h.cancel ? `canceled` : `success`)
+      oracleAssertion(
+        `lazy-paging-receipt-oracle.property.test.ts:300:toBe`,
+        () => expect(shared.outcome).toBe(`success`),
+      )
+      oracleAssertion(
+        `lazy-paging-receipt-oracle.property.test.ts:301:toBe`,
+        () => expect(a.outcome).toBe(h.cancel ? `canceled` : `success`),
+      )
       // Identical facts are already visible, but a newly establishing receipt
       // still waits. Content coincidence must not stand in for that receipt.
       const same = acquire(5, `idempotent`, [facts[0]!])
@@ -304,26 +358,39 @@ async function receiptHistory(
       secondBlocker.mutate(() =>
         source.insert({ id: `second-overlay`, text: `overlay` }),
       )
-      expect(accept(`same-facts`, [facts[0]!], [5])).not.toBe(true)
+      oracleAssertion(
+        `lazy-paging-receipt-oracle.property.test.ts:313:toBe`,
+        () => expect(accept(`same-facts`, [facts[0]!], [5])).not.toBe(true),
+      )
       same.done.resolve()
       await turns()
       if (errors.length) throw errors[0]
-      expect(
-        same.outcome,
-        `visible facts hid a held establishing receipt`,
-      ).toBeUndefined()
+      oracleAssertion(
+        `lazy-paging-receipt-oracle.property.test.ts:317:toBeUndefined`,
+        () =>
+          expect(
+            same.outcome,
+            `visible facts hid a held establishing receipt`,
+          ).toBeUndefined(),
+      )
       release()
       await secondBlocker.when('settled')
       await turns()
       if (errors.length) throw errors[0]
-      expect(same.outcome).toBe(`success`)
+      oracleAssertion(
+        `lazy-paging-receipt-oracle.property.test.ts:325:toBe`,
+        () => expect(same.outcome).toBe(`success`),
+      )
       // Cached success owes no new receipt: the same authored facts already apply.
       const cached = acquire(4, `cached`, facts)
       cached.done.resolve()
       await turns()
       if (errors.length) throw errors[0]
       model.complete()
-      expect(cached.outcome).toBe(`success`)
+      oracleAssertion(
+        `lazy-paging-receipt-oracle.property.test.ts:332:toBe`,
+        () => expect(cached.outcome).toBe(`success`),
+      )
       for (const key of [96, 97]) {
         const count = key === 96 ? 1 : h.batches
         const required = Array.from(
@@ -333,20 +400,33 @@ async function receiptHistory(
         const synchronous = acquire(key, `true-${key}`, required)
         await turns()
         if (errors.length) throw errors[0]
-        expect(synchronous.outcome).toBe(`success`)
+        oracleAssertion(
+          `lazy-paging-receipt-oracle.property.test.ts:342:toBe`,
+          () => expect(synchronous.outcome).toBe(`success`),
+        )
       }
       const rejected = acquire(95, `rejected`, [])
       await turns()
       if (errors.length) throw errors[0]
-      expect(rejected.outcome).toBe(`rejected`)
+      oracleAssertion(
+        `lazy-paging-receipt-oracle.property.test.ts:347:toBe`,
+        () => expect(rejected.outcome).toBe(`rejected`),
+      )
       model.acquire(`true`, facts)
-      expect(source._sync.loadSubset({ limit: 98 })).toBe(true)
+      oracleAssertion(
+        `lazy-paging-receipt-oracle.property.test.ts:349:toBe`,
+        () => expect(source._sync.loadSubset({ limit: 98 })).toBe(true),
+      )
       model.observe(`true`, `success`)
       model.acquire(`throw`, [])
       const throwing = { limit: 99 }
       // Core normalizes a synchronous adapter throw into a rejected load.
-      await expect(source._sync.loadSubset(throwing)).rejects.toThrow(
-        `authored throw`,
+      await oracleAssertion(
+        `lazy-paging-receipt-oracle.property.test.ts:354:toThrow`,
+        () =>
+          expect(source._sync.loadSubset(throwing)).rejects.toThrow(
+            `authored throw`,
+          ),
       )
       model.observe(`throw`, `rejected`)
       model.complete()
@@ -359,10 +439,45 @@ async function receiptHistory(
   )
 }
 
-it(`checks exact shared receipt obligations independently of response partition`, async () => {
-  await runOracleCampaign(
-    `CONVEX_LAZY_EXACT_RECEIPT_ORACLE`,
-    [
+const convex_lazy_exact_receiptHistory = fc.record({
+  responses: fc.integer({ min: 1, max: 3 }),
+  batches: fc.integer({ min: 2, max: 3 }),
+  reverse: fc.boolean(),
+  text: fc.string({ maxLength: 8 }),
+})
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_lazy_exact_receiptJudgment(
+  h: AssertionHistory<typeof convex_lazy_exact_receiptHistory>,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  for (const cancel of [false, true]) await receiptHistory({ ...h, cancel })
+  for (const state of [
+    `response-held-before-acceptance`,
+    `idempotent-establishing-receipt`,
+    `zero-one-many-receipts`,
+    `shared-establishment`,
+    `cancellation-between-receipts`,
+    `unrelated-peer-progress`,
+    `true-and-throw`,
+    `quiescent-settlement`,
+  ] as const)
+    reach.reach(state)
+}
+
+oracleProperty({
+  id: `convex.lazy-exact-receipt`,
+  law: {
+    statement: `checks exact shared receipt obligations independently of response partition`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+  },
+  histories: {
+    arbitrary: convex_lazy_exact_receiptHistory,
+    runs: 60,
+    fixedSeeds: [20261027],
+    states: [
       `response-held-before-acceptance`,
       `idempotent-establishing-receipt`,
       `zero-one-many-receipts`,
@@ -372,37 +487,35 @@ it(`checks exact shared receipt obligations independently of response partition`
       `true-and-throw`,
       `quiescent-settlement`,
     ] as const,
-    (reach, parameters) =>
-      fc.assert(
-        fc.asyncProperty(
-          fc.record({
-            responses: fc.integer({ min: 1, max: 3 }),
-            batches: fc.integer({ min: 2, max: 3 }),
-            reverse: fc.boolean(),
-            text: fc.string({ maxLength: 8 }),
-          }),
-          async (h) => {
-            reach.beginHistory()
-            for (const cancel of [false, true])
-              await receiptHistory({ ...h, cancel })
-            for (const state of [
-              `response-held-before-acceptance`,
-              `idempotent-establishing-receipt`,
-              `zero-one-many-receipts`,
-              `shared-establishment`,
-              `cancellation-between-receipts`,
-              `unrelated-peer-progress`,
-              `true-and-throw`,
-              `quiescent-settlement`,
-            ] as const)
-              reach.reach(state)
-          },
-        ),
-        { numRuns: oracleRuns(60), ...parameters },
-      ),
-    { fixedSeed: 20261027 },
-  )
-}, 60000)
+    constructed: [
+      {
+        name: `existing constructive history`,
+        enters: [
+          `response-held-before-acceptance`,
+          `idempotent-establishing-receipt`,
+          `zero-one-many-receipts`,
+          `shared-establishment`,
+          `cancellation-between-receipts`,
+          `unrelated-peer-progress`,
+          `true-and-throw`,
+          `quiescent-settlement`,
+        ] as const,
+        build: (generated) => generated,
+      },
+    ],
+  },
+  resolve: (generated) => ({ history: generated }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  driver: async (plan, observe) =>
+    recordAssertionJudgment(`convex.lazy-exact-receipt`, plan, observe, () =>
+      convex_lazy_exact_receiptJudgment(plan.history, {
+        beginHistory: () => {},
+        reach: (state) => observe(`reach`, state),
+      }),
+    ),
+  timeout: 60000,
+})
 
 it.each([
   `borrow-peer`,
@@ -414,17 +527,22 @@ it.each([
 ] as const)(
   `rejects the %s faulty adapter at the real Collection boundary`,
   async (fault) => {
-    await expect(
-      receiptHistory(
-        {
-          responses: 3,
-          batches: 2,
-          cancel: fault === `prompt-cancel`,
-          reverse: false,
-          text: ``,
-        },
-        fault,
-      ),
-    ).rejects.toThrow(/receipt (law|progress)/)
+    oracleRoute(`calibration`)
+    await oracleAssertion(
+      `lazy-paging-receipt-oracle.property.test.ts:434:toThrow`,
+      () =>
+        expect(
+          receiptHistory(
+            {
+              responses: 3,
+              batches: 2,
+              cancel: fault === `prompt-cancel`,
+              reverse: false,
+              text: ``,
+            },
+            fault,
+          ),
+        ).rejects.toThrow(/receipt (law|progress)/),
+    )
   },
 )

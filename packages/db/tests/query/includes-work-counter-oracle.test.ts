@@ -1,11 +1,7 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
-import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRuns,
-} from '../oracle-config.js'
-import { createOracleReach } from '../oracle-reach.js'
+import { oracleAssertion } from '../oracle-assertion-adapter.js'
+import { oracleFixedSeed, oracleRoute, oracleRuns } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
@@ -20,6 +16,8 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
+import { requiredIncludesObservations } from './includes-state-observations.js'
+import { registerIncludesProperty } from './includes-registration-oracle.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import {
   cleanupAfterOracle,
@@ -63,8 +61,8 @@ import type {
  * The input grammar varies an integer filler count from 1 through 24. Zero is
  * the ablated baseline; negative and fractional counts are invalid fixture
  * sizes. Joined queries vary unrelated links and join targets separately.
- * The join-free query grows every source together. Counts 1, 2, and 3 pin the
- * smallest valid boundary, 24 pins the upper bound, and fixed and random
+ * The join-free query grows every source together. Counts 1, 2, and 3 cover the
+ * smallest valid boundary, 24 covers the upper bound, and fixed and random
  * campaigns sample the range.
  *
  * The boundary conditions matter. Collections preload before they receive
@@ -105,11 +103,19 @@ async function expectCorrelatedJoinWorkBound(
     },
     joinTargets: true,
   })
-  expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
-  expect(scaled.result).toEqual(baseline.result)
-  expect(baseline.sourceWork).toEqual(joinedBaselineWork)
+  oracleAssertion('includes work-counter-oracle comparison 112', () =>
+    expect(baseline.result).toEqual(expectedResult({ joinTargets: true })),
+  )
+  oracleAssertion('includes work-counter-oracle comparison 113', () =>
+    expect(scaled.result).toEqual(baseline.result),
+  )
+  oracleAssertion('includes work-counter-oracle comparison 114', () =>
+    expect(baseline.sourceWork).toEqual(joinedBaselineWork),
+  )
 
-  expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork)
+  oracleAssertion('includes work-counter-oracle comparison 116', () =>
+    expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork),
+  )
 }
 
 async function expectJoinTargetWorkBound(fillerCount: number): Promise<void> {
@@ -124,10 +130,18 @@ async function expectJoinTargetWorkBound(fillerCount: number): Promise<void> {
     joinTargets: true,
   })
 
-  expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
-  expect(scaled.result).toEqual(baseline.result)
-  expect(baseline.sourceWork).toEqual(joinedBaselineWork)
-  expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork)
+  oracleAssertion('includes work-counter-oracle comparison 131', () =>
+    expect(baseline.result).toEqual(expectedResult({ joinTargets: true })),
+  )
+  oracleAssertion('includes work-counter-oracle comparison 132', () =>
+    expect(scaled.result).toEqual(baseline.result),
+  )
+  oracleAssertion('includes work-counter-oracle comparison 133', () =>
+    expect(baseline.sourceWork).toEqual(joinedBaselineWork),
+  )
+  oracleAssertion('includes work-counter-oracle comparison 134', () =>
+    expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork),
+  )
 }
 
 async function expectJoinFreeWorkBound(fillerCount: number): Promise<void> {
@@ -142,23 +156,22 @@ async function expectJoinFreeWorkBound(fillerCount: number): Promise<void> {
     joinTargets: false,
   })
 
-  expect(baseline.result).toEqual(expectedResult({ joinTargets: false }))
-  expect(scaled.result).toEqual(baseline.result)
-  expect(baseline.sourceWork).toEqual(joinFreeBaselineWork)
-  expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork)
+  oracleAssertion('includes work-counter-oracle comparison 149', () =>
+    expect(baseline.result).toEqual(expectedResult({ joinTargets: false })),
+  )
+  oracleAssertion('includes work-counter-oracle comparison 150', () =>
+    expect(scaled.result).toEqual(baseline.result),
+  )
+  oracleAssertion('includes work-counter-oracle comparison 151', () =>
+    expect(baseline.sourceWork).toEqual(joinFreeBaselineWork),
+  )
+  oracleAssertion('includes work-counter-oracle comparison 152', () =>
+    expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork),
+  )
 }
 
-function campaigns(fixedSeed: number, property: string, baseRuns = 6) {
-  return [
-    {
-      name: `fixed`,
-      options: { numRuns: oracleRuns(baseRuns), seed: fixedSeed },
-    },
-    {
-      name: `random or replayed`,
-      options: oraclePropertyOptions(baseRuns, property),
-    },
-  ]
+function campaigns(fixedSeed: number, property: string, runs = 6) {
+  return [{ name: `fixed and random`, options: { runs, property, fixedSeed } }]
 }
 
 describe(`includes deterministic work-counter oracle`, () => {
@@ -172,38 +185,61 @@ describe(`includes deterministic work-counter oracle`, () => {
   })
 
   it.each([1, 2, 3])(
-    `pins the work bound at the small filler boundary (%i)`,
-    expectCorrelatedJoinWorkBound,
+    `checks the work bound at the small filler boundary (%i)`,
+    (...args: Parameters<typeof expectCorrelatedJoinWorkBound>) => {
+      oracleRoute(`case`)
+      return expectCorrelatedJoinWorkBound(...args)
+    },
   )
-  it(`pins the joined-link filler range endpoint`, () =>
-    expectCorrelatedJoinWorkBound(24))
+  it(`checks the joined-link filler range endpoint`, () => {
+    oracleRoute(`fixed history`)
+    return expectCorrelatedJoinWorkBound(24)
+  })
   it.each([1, 24])(
-    `pins join-target growth at filler count %i`,
-    expectJoinTargetWorkBound,
+    `checks join-target growth at filler count %i`,
+    (...args: Parameters<typeof expectJoinTargetWorkBound>) => {
+      oracleRoute(`case`)
+      return expectJoinTargetWorkBound(...args)
+    },
   )
   it.each([1, 24])(
-    `pins join-free growth at filler count %i`,
-    expectJoinFreeWorkBound,
+    `checks join-free growth at filler count %i`,
+    (...args: Parameters<typeof expectJoinFreeWorkBound>) => {
+      oracleRoute(`case`)
+      return expectJoinFreeWorkBound(...args)
+    },
   )
 
   for (const campaign of campaigns(1709, `includes-work.correlated-links`)) {
-    fcTest.prop([fc.integer({ min: 1, max: 24 })], campaign.options)(
+    registerIncludesProperty(
+      [fc.integer({ min: 1, max: 24 })],
+      campaign.options,
       `a join preserves correlated source pushdown (${campaign.name})`,
-      expectCorrelatedJoinWorkBound,
+      (...args: Parameters<typeof expectCorrelatedJoinWorkBound>) => {
+        return expectCorrelatedJoinWorkBound(...args)
+      },
     )
   }
 
   for (const campaign of campaigns(170_900, `includes-work.join-targets`)) {
-    fcTest.prop([fc.integer({ min: 1, max: 24 })], campaign.options)(
+    registerIncludesProperty(
+      [fc.integer({ min: 1, max: 24 })],
+      campaign.options,
       `indexed join-target growth keeps source work flat (${campaign.name})`,
-      expectJoinTargetWorkBound,
+      (...args: Parameters<typeof expectJoinTargetWorkBound>) => {
+        return expectJoinTargetWorkBound(...args)
+      },
     )
   }
 
   for (const campaign of campaigns(17_090, `includes-work.join-free`)) {
-    fcTest.prop([fc.integer({ min: 1, max: 24 })], campaign.options)(
+    registerIncludesProperty(
+      [fc.integer({ min: 1, max: 24 })],
+      campaign.options,
       `join-free correlated includes keep source work flat (${campaign.name})`,
-      expectJoinFreeWorkBound,
+      (...args: Parameters<typeof expectJoinFreeWorkBound>) => {
+        return expectJoinFreeWorkBound(...args)
+      },
     )
   }
 })
@@ -289,8 +325,8 @@ describe(`includes deterministic work-counter oracle`, () => {
  * Collection delivers more change batches to the query than the initial load
  * at preload, or than the step's own parent write. The generated campaigns
  * skip only the work bound at refill checkpoints and still check the rows.
- * Replays pin every known trace and allow exactly the one extra child row
- * each shows, and pinned forward moves allow none. Each generated campaign
+ * Fixed regressions cover every known trace and allow exactly the one extra child row
+ * each shows, and fixed forward moves allow none. Each generated campaign
  * counts the forward moves its own runs check strictly and requires some.
  *
  * ## Histories
@@ -833,36 +869,46 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
     const expectWindow = (label: string): Array<ShownRow> => {
       const units = sortedUnits()
       const actual = shownRows()
-      expect(
-        actual.map((row) => row.rank),
-        `${label}: ranks`,
-      ).toEqual(
-        units
-          .slice(shown.offset, shown.offset + shown.limit)
-          .map((unit) => unit.rank),
+      oracleAssertion('includes work-counter-oracle comparison 854', () =>
+        expect(
+          actual.map((row) => row.rank),
+          `${label}: ranks`,
+        ).toEqual(
+          units
+            .slice(shown.offset, shown.offset + shown.limit)
+            .map((unit) => unit.rank),
+        ),
       )
       const byKey = new Map(units.map((unit) => [unit.key, unit]))
       for (const row of actual) {
         const unit = byKey.get(row.key)
-        expect(unit, `${label}: ${row.key} is a unit`).toBeDefined()
-        expect([row.rank, row.group], `${label}: ${row.key}`).toEqual([
-          unit!.rank,
-          unit!.group,
-        ])
-        expect(row.kids, `${label}: ${row.key} include`).toEqual(
-          modelKids(
-            row.group,
-            testCase.childForm,
-            children,
-            grandchildren,
-            keptChildren,
+        oracleAssertion('includes work-counter-oracle comparison 865', () =>
+          expect(unit, `${label}: ${row.key} is a unit`).toBeDefined(),
+        )
+        oracleAssertion('includes work-counter-oracle comparison 866', () =>
+          expect([row.rank, row.group], `${label}: ${row.key}`).toEqual([
+            unit!.rank,
+            unit!.group,
+          ]),
+        )
+        oracleAssertion('includes work-counter-oracle comparison 870', () =>
+          expect(row.kids, `${label}: ${row.key} include`).toEqual(
+            modelKids(
+              row.group,
+              testCase.childForm,
+              children,
+              grandchildren,
+              keptChildren,
+            ),
           ),
         )
       }
-      expect(
-        new Set(actual.map((row) => row.key)).size,
-        `${label}: distinct rows`,
-      ).toBe(actual.length)
+      oracleAssertion('includes work-counter-oracle comparison 880', () =>
+        expect(
+          new Set(actual.map((row) => row.key)).size,
+          `${label}: distinct rows`,
+        ).toBe(actual.length),
+      )
       return actual
     }
     const childrenOf = (rows: Iterable<ShownRow>) => {
@@ -889,16 +935,22 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
     if (startSettled !== true) await startSettled
     await new Promise((resolve) => setTimeout(resolve, 0))
     let before = expectWindow(`rows after preload`)
-    expect(live.utils.getWindow(), `window after preload`).toEqual(shown)
-    const preloadLoads = Math.max(0, parentBatches - 1)
-    expect(childWork(), `child rows loaded by preload`).toBeLessThanOrEqual(
-      workBound(childrenOf(before), preloadLoads),
+    oracleAssertion('includes work-counter-oracle comparison 910', () =>
+      expect(live.utils.getWindow(), `window after preload`).toEqual(shown),
     )
-    expect(
-      grandWork().delivered,
-      `grandchild rows loaded by preload`,
-    ).toBeLessThanOrEqual(
-      workBound(grandchildrenOf(shownKids(before)), preloadLoads),
+    const preloadLoads = Math.max(0, parentBatches - 1)
+    oracleAssertion('includes work-counter-oracle comparison 912', () =>
+      expect(childWork(), `child rows loaded by preload`).toBeLessThanOrEqual(
+        workBound(childrenOf(before), preloadLoads),
+      ),
+    )
+    oracleAssertion('includes work-counter-oracle comparison 915', () =>
+      expect(
+        grandWork().delivered,
+        `grandchild rows loaded by preload`,
+      ).toBeLessThanOrEqual(
+        workBound(grandchildrenOf(shownKids(before)), preloadLoads),
+      ),
     )
 
     let windowBefore: { offset: number; limit: number } | undefined
@@ -977,7 +1029,11 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
       }
       await new Promise((resolve) => setTimeout(resolve, 0))
       const after = expectWindow(`rows after step ${step}`)
-      expect(live.utils.getWindow(), `window after step ${step}`).toEqual(shown)
+      oracleAssertion('includes work-counter-oracle comparison 998', () =>
+        expect(live.utils.getWindow(), `window after step ${step}`).toEqual(
+          shown,
+        ),
+      )
       const beforeKeys = new Set(before.map((row) => row.key))
       const shownGroups = new Set(before.map((row) => row.group))
       // A step may newly load only the groups of rows that entered the
@@ -1020,21 +1076,25 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
         : command.type === `insert-child` || command.type === `delete-child`
           ? 1
           : freshGroup
-      expect(
-        childWork() - childBefore,
-        `child rows loaded by step ${step}`,
-      ).toBeLessThanOrEqual(
-        workBound(
-          [...children.values()].filter((child) => loadable.has(child.group))
-            .length + written,
-          stepLoads,
+      oracleAssertion('includes work-counter-oracle comparison 1041', () =>
+        expect(
+          childWork() - childBefore,
+          `child rows loaded by step ${step}`,
+        ).toBeLessThanOrEqual(
+          workBound(
+            [...children.values()].filter((child) => loadable.has(child.group))
+              .length + written,
+            stepLoads,
+          ),
         ),
       )
-      expect(
-        grandWork().delivered - grandBefore,
-        `grandchild rows loaded by step ${step}`,
-      ).toBeLessThanOrEqual(
-        workBound(grandchildrenOf(kidsEntered) + freshGroup, stepLoads),
+      oracleAssertion('includes work-counter-oracle comparison 1051', () =>
+        expect(
+          grandWork().delivered - grandBefore,
+          `grandchild rows loaded by step ${step}`,
+        ).toBeLessThanOrEqual(
+          workBound(grandchildrenOf(kidsEntered) + freshGroup, stepLoads),
+        ),
       )
       before = after
     }
@@ -1060,6 +1120,12 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
 // checks compare each scaled fixture with its minimal baseline run. The grammar
 // is the windowed history generator, which the reconstruction test samples.
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/local-only.ts#localOnlyCollectionOptions',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [
     checkWindowedIncludeWork,
     expectCorrelatedJoinWorkBound,
@@ -1074,12 +1140,12 @@ declareOracle({
 // reconstruction check below counts them.
 const WINDOW_RUNS = 60
 
-/** A pinned case: its strict forward-move tally is not reach evidence. */
+/** A fixed history: its strict forward-move tally is not reach evidence. */
 async function expectWindowedIncludeWork(testCase: WindowCase): Promise<void> {
   await checkWindowedIncludeWork(testCase)
 }
 
-const pinnedWindowCase: WindowCase = {
+const fixedWindowCase: WindowCase = {
   parents: 8,
   groups: 8,
   copies: [],
@@ -1098,9 +1164,10 @@ const pinnedWindowCase: WindowCase = {
 describe(`includes work under an ordered parent window`, () => {
   it.each([false, true])(
     `loads children only for a late page's parents (distinct=%s)`,
-    (distinct) =>
-      expectWindowedIncludeWork({
-        ...pinnedWindowCase,
+    (distinct) => {
+      oracleRoute(`case`)
+      return expectWindowedIncludeWork({
+        ...fixedWindowCase,
         parents: 40,
         groups: 40,
         childrenPerGroup: 3,
@@ -1108,22 +1175,26 @@ describe(`includes work under an ordered parent window`, () => {
         distinct,
         offset: 20,
         history: [{ type: `move`, offset: 10, limit: 3 }],
-      }),
+      })
+    },
   )
 
   it.each([`ordered`, `limited`, `limited-nested`] as const)(
     `moves the parent window, not the %s child's`,
-    (childForm) =>
-      expectWindowedIncludeWork({
-        ...pinnedWindowCase,
+    (childForm) => {
+      oracleRoute(`case`)
+      return expectWindowedIncludeWork({
+        ...fixedWindowCase,
         childForm,
         history: [{ type: `move`, offset: 3, limit: 2 }],
-      }),
+      })
+    },
   )
 
-  it(`collapses parents whose selected values match under distinct`, () =>
-    expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+  it(`collapses parents whose selected values match under distinct`, () => {
+    oracleRoute(`fixed history`)
+    return expectWindowedIncludeWork({
+      ...fixedWindowCase,
       copies: [
         { pick: 1, group: true },
         { pick: 2, group: false },
@@ -1131,22 +1202,26 @@ describe(`includes work under an ordered parent window`, () => {
       distinct: true,
       limit: 3,
       history: [{ type: `insert-parent`, copy: 3 }],
-    }))
+    })
+  })
 
-  it(`creates no static child demand from a static parent filter`, () =>
-    expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+  it(`creates no static child demand from a static parent filter`, () => {
+    oracleRoute(`fixed history`)
+    return expectWindowedIncludeWork({
+      ...fixedWindowCase,
       childSource: `on-demand`,
       parentFilter: [0, 1, 2, 3, 4],
       offset: 3,
       limit: 1,
-    }))
+    })
+  })
 
   // On demand, a group's children arrive only through a load, so a fresh
   // parent past the narrowed window must not load them.
-  it(`stops routing rows that setWindow drops from an orderBy-only parent`, () =>
-    expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+  it(`stops routing rows that setWindow drops from an orderBy-only parent`, () => {
+    oracleRoute(`fixed history`)
+    return expectWindowedIncludeWork({
+      ...fixedWindowCase,
       childrenPerGroup: 3,
       childSource: `on-demand`,
       parentForm: `orderOnly`,
@@ -1154,47 +1229,55 @@ describe(`includes work under an ordered parent window`, () => {
         { type: `move`, offset: 0, limit: 2 },
         { type: `insert-parent`, copy: null },
       ],
-    }))
+    })
+  })
 
-  it(`loads one page of children for a findOne parent`, () =>
-    expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+  it(`loads one page of children for a findOne parent`, () => {
+    oracleRoute(`fixed history`)
+    return expectWindowedIncludeWork({
+      ...fixedWindowCase,
       childForm: `findOne`,
       parentForm: `findOne`,
       offset: 5,
-    }))
+    })
+  })
 
   // A window requested before start can drop rows a static filter names,
   // so static child demand must not load their children.
-  it(`creates no static child demand under a window requested before start`, () =>
-    expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+  it(`creates no static child demand under a window requested before start`, () => {
+    oracleRoute(`fixed history`)
+    return expectWindowedIncludeWork({
+      ...fixedWindowCase,
       childForm: `ordered`,
       childSource: `on-demand`,
       parentForm: `orderOnly`,
       parentFilter: [0, 1, 2, 3, 4, 5],
       startWindow: { offset: 0, limit: 1 },
-    }))
+    })
+  })
 
   // A child's static filter names a child whose parent the window drops, so
   // its grandchild demand must wait for the window too.
-  it(`creates no static grandchild demand below a windowed parent`, () =>
-    expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+  it(`creates no static grandchild demand below a windowed parent`, () => {
+    oracleRoute(`fixed history`)
+    return expectWindowedIncludeWork({
+      ...fixedWindowCase,
       parents: 10,
       groups: 10,
       childrenPerGroup: 1,
       childForm: `nested`,
       limit: 1,
       childFilter: [5],
-    }))
+    })
+  })
 
   // A window requested before start that moves a findOne past its one named
   // correlation value drops that row, so its children must not load; one at
   // offset 0 drops nothing, so its static demand still starts at once.
-  it(`creates no static child demand for a findOne moved past its named value before start`, () =>
-    expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+  it(`creates no static child demand for a findOne moved past its named value before start`, () => {
+    oracleRoute(`fixed history`)
+    return expectWindowedIncludeWork({
+      ...fixedWindowCase,
       parents: 21,
       groups: 11,
       childrenPerGroup: 1,
@@ -1202,7 +1285,8 @@ describe(`includes work under an ordered parent window`, () => {
       findOneOffset: false,
       parentFilter: [10],
       startWindow: { offset: 1, limit: 1 },
-    }))
+    })
+  })
 
   // Forward moves load more parent rows, so the generated campaigns cannot
   // check them strictly; these do, with no overshoot allowed.
@@ -1213,9 +1297,10 @@ describe(`includes work under an ordered parent window`, () => {
     [`on-demand`, true],
   ] as const)(
     `moves the window forward strictly (%s children, distinct=%s)`,
-    (childSource, distinct) =>
-      expectWindowedIncludeWork({
-        ...pinnedWindowCase,
+    (childSource, distinct) => {
+      oracleRoute(`case`)
+      return expectWindowedIncludeWork({
+        ...fixedWindowCase,
         parents: 40,
         groups: 40,
         childrenPerGroup: 2,
@@ -1226,7 +1311,8 @@ describe(`includes work under an ordered parent window`, () => {
           { type: `move`, offset: 30, limit: 2 },
         ],
         overshoot: 0,
-      }),
+      })
+    },
   )
 
   // Replays of transient top-K rows (#2151). Each shows the correct
@@ -1238,7 +1324,7 @@ describe(`includes work under an ordered parent window`, () => {
     [
       `a desc held row moved to the lowest rank`,
       {
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 24,
         groups: 12,
         childrenPerGroup: 1,
@@ -1251,7 +1337,7 @@ describe(`includes work under an ordered parent window`, () => {
     [
       `an asc held row moved to the highest rank`,
       {
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 36,
         groups: 18,
         childrenPerGroup: 1,
@@ -1263,7 +1349,7 @@ describe(`includes work under an ordered parent window`, () => {
     [
       `a tie at the window edge during preload (late page)`,
       {
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 38,
         groups: 19,
         copies: [{ pick: 735_689_178, group: false }],
@@ -1276,7 +1362,7 @@ describe(`includes work under an ordered parent window`, () => {
     [
       `ties at the window edge during preload (two rows)`,
       {
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 33,
         groups: 17,
         copies: [
@@ -1294,7 +1380,7 @@ describe(`includes work under an ordered parent window`, () => {
     [
       `ties at the window edge during preload (first row)`,
       {
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 11,
         groups: 6,
         copies: [
@@ -1311,7 +1397,7 @@ describe(`includes work under an ordered parent window`, () => {
     [
       `a window move while the loader refills`,
       {
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 33,
         groups: 17,
         childrenPerGroup: 1,
@@ -1325,15 +1411,17 @@ describe(`includes work under an ordered parent window`, () => {
       },
     ],
   ]
-  it.each(transient)(`bounds a transient top-K row: %s`, (_, testCase) =>
-    expectWindowedIncludeWork({ ...testCase, overshoot: 1 }),
-  )
+  it.each(transient)(`bounds a transient top-K row: %s`, (_, testCase) => {
+    oracleRoute(`case`)
+    return expectWindowedIncludeWork({ ...testCase, overshoot: 1 })
+  })
 
   // The same replays fail when no overshoot is allowed, so each one reaches
   // a transient row and the loader-activity observation sees it.
   it.each(transient)(
     `reaches a transient top-K row: %s`,
     async (_, testCase) => {
+      oracleRoute(`calibration`)
       await expect(
         checkWindowedIncludeWork({ ...testCase, overshoot: 0 }),
       ).rejects.toThrow(/child rows loaded by/)
@@ -1342,11 +1430,12 @@ describe(`includes work under an ordered parent window`, () => {
 
   // Reconstruction: the fixed campaign's executed cases reach each premise.
   it(`reaches every window dimension in the executed fixed cases`, () => {
+    oracleRoute(`fixed seed`)
     const cases = fc
-      .sample(fc.tuple(windowCase), {
-        numRuns: oracleRuns(WINDOW_RUNS),
-        seed: 2137,
-      })
+      .sample(
+        fc.tuple(windowCase),
+        oracleFixedSeed(2137, { numRuns: oracleRuns(WINDOW_RUNS) }),
+      )
       .map(([testCase]) => testCase)
     const count = (premise: (testCase: WindowCase) => boolean) =>
       cases.filter(premise).length
@@ -1393,24 +1482,33 @@ describe(`includes work under an ordered parent window`, () => {
     // Reach witness: the campaign's own runs must check some forward
     // window moves strictly. A failing run throws before the tally is read,
     // so shrinking never counts.
-    it(
-      `a parent window bounds child loading (${campaign.name})`,
-      async () => {
-        let strictForwardMoves = 0
-        await fc.assert(
-          fc.asyncProperty(windowCase, async (testCase) => {
-            strictForwardMoves += await checkWindowedIncludeWork(testCase)
-          }),
-          campaign.options,
-        )
-        expect(
-          strictForwardMoves,
-          `strictly checked forward moves`,
-        ).toBeGreaterThan(0)
-      },
-      // Each run builds its own Collections; allow time per run.
-      oracleRuns(WINDOW_RUNS) * 100,
-    )
+    ;(() => {
+      let strictForwardMoves = 0
+      registerIncludesProperty(
+        [windowCase],
+        {
+          ...campaign.options,
+          beforeCampaign: () => {
+            strictForwardMoves = 0
+          },
+          afterCampaign: () => {
+            oracleAssertion(
+              'includes work-counter-oracle comparison 1453',
+              () =>
+                expect(
+                  strictForwardMoves,
+                  `strictly checked forward moves`,
+                ).toBeGreaterThan(0),
+            )
+          },
+        },
+        `a parent window bounds child loading (${campaign.name})`,
+        async (testCase) => {
+          strictForwardMoves += await checkWindowedIncludeWork(testCase)
+        },
+        oracleRuns(WINDOW_RUNS) * 100,
+      )
+    })()
   }
 })
 
@@ -1477,14 +1575,21 @@ function expectPayloadValue(
   blockCount: number,
   tick: number,
 ): void {
-  expect(observed.map(({ id, document }) => ({ id, document }))).toEqual([
-    { id: 1, document: expectedPayloadDocument(blockCount, tick) },
-  ])
-  expect(observed[0]!.document).toBe(sourceDocument)
+  oracleAssertion('includes work-counter-oracle comparison 1532', () =>
+    expect(observed.map(({ id, document }) => ({ id, document }))).toEqual([
+      { id: 1, document: expectedPayloadDocument(blockCount, tick) },
+    ]),
+  )
+  oracleAssertion('includes work-counter-oracle comparison 1535', () =>
+    expect(observed[0]!.document).toBe(sourceDocument),
+  )
 }
 
 async function expectPayloadWork(blockCount: number): Promise<void> {
-  const reach = createOracleReach(`projection-payload`, payloadBoundaries)
+  const reach = requiredIncludesObservations(
+    `projection-payload`,
+    payloadBoundaries,
+  )
   const failures: Array<unknown> = []
   for (const boundary of payloadBoundaries) {
     reach.beginHistory()
@@ -1675,10 +1780,12 @@ async function expectPayloadWork(blockCount: number): Promise<void> {
         ) as ReadonlyArray<{ id: number; document: unknown }>
         if (tick === 0 && observed.length === 1) reach.reach(boundary)
         expectPayloadValue(observed, document, blockCount, tick)
-        expect(
-          scans,
-          `${boundary}: source payload descriptor scans at tick ${tick}`,
-        ).toBe(0)
+        oracleAssertion('includes work-counter-oracle comparison 1733', () =>
+          expect(
+            scans,
+            `${boundary}: source payload descriptor scans at tick ${tick}`,
+          ).toBe(0),
+        )
       }
     } catch (error) {
       primaryFailure = error
@@ -1710,6 +1817,7 @@ const payloadExamples: Array<[number]> = [[0], [1], [20], [40]]
 it.each(payloadExamples)(
   `rejects a source payload mutated in place (%i blocks)`,
   (blockCount) => {
+    oracleRoute(`calibration`)
     const document = expectedPayloadDocument(blockCount, 0)
     document.tick = -1
     expect(() =>
@@ -1718,28 +1826,18 @@ it.each(payloadExamples)(
   },
 )
 
-for (const campaign of [
+registerIncludesProperty(
+  [fc.integer({ min: 0, max: 40 })],
   {
-    name: `fixed`,
-    options: {
-      numRuns: oracleRuns(8) + payloadExamples.length,
-      seed: 2355,
-      examples: payloadExamples,
-    },
+    property: payloadProperty,
+    runs: 8,
+    fixedSeed: 2355,
+    examples: payloadExamples,
   },
-  {
-    name: `random or replayed`,
-    options: oraclePropertyOptions(8, payloadProperty, {
-      examples: payloadExamples,
-    }),
+  `nested source payloads need no metadata descriptor scans (fixed and random)`,
+  (blockCount) => {
+    // The options are built when the file loads, so each run registers its
+    // campaign's route.
+    return expectPayloadWork(blockCount)
   },
-]) {
-  const register =
-    campaign.name === `fixed`
-      ? oracleReplayTest(fcTest)
-      : oracleReplayTest(fcTest, payloadProperty)
-  register.prop([fc.integer({ min: 0, max: 40 })], campaign.options)(
-    `nested source payloads need no metadata descriptor scans (${campaign.name})`,
-    expectPayloadWork,
-  )
-}
+)

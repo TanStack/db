@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/preact-db",
-  "version": "1.0.0-rc.1.4",
+  "version": "1.0.0-rc.1.5",
   "description": "Preact integration for @tanstack/db",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -48,7 +48,7 @@
     "preact": ">=10.0.0"
   },
   "devDependencies": {
-    "@vitest/coverage-istanbul": "^5.0.5",
-    "preact": "^11.0.1"
+    "@vitest/coverage-istanbul": "^5.1.0",
+    "preact": "^11.2.0"
   }
 }

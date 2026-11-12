@@ -1,5 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, test } from 'vitest'
+import { oracleAssertion } from '../oracle-assertion-adapter.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
@@ -12,13 +13,10 @@ import {
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
-import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRuns,
-} from '../oracle-config.js'
+import { oracleRoute } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
+import { registerIncludesProperty } from './includes-registration-oracle.js'
 import {
   assertDeleteIdentityEvents,
   assertFacadeRootSnapshots,
@@ -80,9 +78,9 @@ import type {
  *
  * The history grammar varies parent and child writes, route movement, shared
  * buckets, dormant buckets, ordering, parent-dependent filters, and joins. It
- * also varies optimistic confirmation and rollback. A bounded exhaustive lane covers every
- * two-step history in the smallest relationship domain. Random histories add
- * longer combinations and shrink failures.
+ * also varies optimistic confirmation and rollback. A bounded exhaustive
+ * campaign covers every two-step history in the smallest relationship domain.
+ * Random histories add longer combinations and shrink failures.
  *
  * The Map model stores current source Collection rows. It combines all D2
  * relation, route, and bucket state into the public result recomputation; it
@@ -91,15 +89,15 @@ import type {
  *
  * Grammar controls: the fixed route-retirement, dormant-bucket, shared-bucket,
  * and child-order witnesses reconstruct the key relationship histories. The
- * generated action lane needs both parent and child writes: removing either
+ * generated action grammar needs both parent and child writes: removing either
  * loses route transitions or child-only facade changes. Its IDs (parents 0–3,
  * children 10–14), groups (-3–3), values (-5–5), and 1–16 actions are bounded;
- * the exhaustive lane includes empty initial relations and zero actions. A
+ * the bounded exhaustive campaign includes empty initial relations and zero actions. A
  * repeated key becomes an update, so the grammar rejects a duplicate insert.
- * The public-key lane crosses one-digit and two-digit IDs to expose lexical
+ * The public-key grammar crosses one-digit and two-digit IDs to expose lexical
  * sorting; allowing equal IDs would collapse the two-row premise. The order
- * lane uses adjacent swaps among 2–8 rows; a one-row case cannot move. The
- * optimistic lane uses group/value -10–10 and disjoint IDs 10–100/101–200.
+ * grammar uses adjacent swaps among 2–8 rows; a one-row case cannot move. The
+ * optimistic grammar uses group/value -10–10 and disjoint IDs 10–100/101–200.
  * Its rollback and confirmation steps distinguish temporary from retained
  * child rows; a delete of an absent child is excluded.
  *
@@ -299,17 +297,23 @@ const collectionProjection: TraceProjection<
     }
   },
   assertEqual(observed, expected) {
-    expect(observed.rows).toEqual(expected.rows)
-    expect(observed.publications).toEqual(expected.publications)
+    oracleAssertion('includes collection-oracle.property comparison 306', () =>
+      expect(observed.rows).toEqual(expected.rows),
+    )
+    oracleAssertion('includes collection-oracle.property comparison 307', () =>
+      expect(observed.publications).toEqual(expected.publications),
+    )
     // The mixed fixture has array/materialized siblings, so user-value changes
     // require root events. Separate tests cover bare-facade identity. Do not
     // prohibit metadata-only events for otherwise unchanged rows here.
     const changedKeys = new Set(expected.events.map((event) => event.key))
-    expect(
-      observed.events
-        .filter((event) => changedKeys.has(event.key))
-        .sort((a, b) => Number(a.key) - Number(b.key)),
-    ).toEqual(expected.events)
+    oracleAssertion('includes collection-oracle.property comparison 312', () =>
+      expect(
+        observed.events
+          .filter((event) => changedKeys.has(event.key))
+          .sort((a, b) => Number(a.key) - Number(b.key)),
+      ).toEqual(expected.events),
+    )
     return undefined
   },
 }
@@ -329,6 +333,11 @@ function expectedOrderedRows(
 // the expected events from the prior and current rows. The projection passes it
 // to every trace as `recompute`, so each history reaches it.
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   model: [recompute, diffParents, expectedOrderedRows],
 })
 
@@ -383,7 +392,7 @@ const optimisticChildArbitrary = fc.record({
   value: fc.integer({ min: -10, max: 10 }),
 })
 
-// Enumeration proves the small finite domain. The generated lane explores
+// Enumeration proves the small finite domain. The generated campaign explores
 // longer histories over a wider value domain. Neither replaces the other.
 function enumerateActionSequences(
   actions: ReadonlyArray<CollectionAction>,
@@ -421,6 +430,7 @@ describe(`Collection-valued includes oracle`, () => {
   fcTest(
     `root event observations reject missing, repeated, and corrupt changed-row events`,
     async () => {
+      oracleRoute(`calibration`)
       const driver = createCollectionDriver(
         [{ id: 1, group: 1 }],
         [{ id: 10, parentGroup: 1, value: 1 }],
@@ -471,6 +481,7 @@ describe(`Collection-valued includes oracle`, () => {
       fcTest(
         `settles ${kind} after a checkpoint failure (rollback throws=${failRollback})`,
         async () => {
+          oracleRoute(`case`)
           const row = { id: 10, parentGroup: 1, value: 1 }
           const { driver, pending } = createOptimisticCollectionDriver(
             1,
@@ -558,25 +569,19 @@ describe(`Collection-valued includes oracle`, () => {
       projection: collectionProjection,
     })
 
-  oracleReplayTest(fcTest).prop([collectionScenarioArbitrary], {
-    numRuns: oracleRuns(30),
-    seed: 1_658_101,
-  })(
-    `keeps Collection, toArray, and materialize equivalent across fixed relationship histories`,
-    runRelationshipHistory,
-  )
-
-  oracleReplayTest(fcTest, relationshipProperty).prop(
+  registerIncludesProperty(
     [collectionScenarioArbitrary],
-    oraclePropertyOptions(30, relationshipProperty),
-  )(
-    `keeps Collection, toArray, and materialize equivalent across random or replayed relationship histories`,
-    runRelationshipHistory,
+    { property: relationshipProperty, runs: 30, fixedSeed: 1658101 },
+    `keeps Collection, toArray, and materialize equivalent across fixed relationship histories`,
+    (...args: Parameters<typeof runRelationshipHistory>) => {
+      return runRelationshipHistory(...args)
+    },
   )
 
   fcTest(
     `exhaustively matches every two-step history in the smallest relationship domain`,
     async () => {
+      oracleRoute(`case`)
       const initialStates = [
         { parents: [] as Array<ParentRow>, children: [] as Array<ChildRow> },
         { parents: [{ id: 0, group: 0 }], children: [] as Array<ChildRow> },
@@ -612,8 +617,9 @@ describe(`Collection-valued includes oracle`, () => {
 
   fcTest(
     `publishes independently compiled equivalent child relations coherently`,
-    () =>
-      runTrace({
+    () => {
+      oracleRoute(`fixed history`)
+      return runTrace({
         steps: [{ type: `deleteChild`, id: 10 }],
         driver: createCollectionDriver(
           [{ id: 0, group: 0 }],
@@ -621,21 +627,27 @@ describe(`Collection-valued includes oracle`, () => {
           false,
         ),
         projection: collectionProjection,
-      }),
+      })
+    },
   )
 
-  fcTest(`replays a dormant bucket when its first parent route activates`, () =>
-    runTrace({
-      steps: [{ type: `putParent`, row: { id: 1, group: 7 } }],
-      driver: createCollectionDriver(
-        [],
-        [{ id: 10, parentGroup: 7, value: 1 }],
-      ),
-      projection: collectionProjection,
-    }),
+  fcTest(
+    `replays a dormant bucket when its first parent route activates`,
+    () => {
+      oracleRoute(`fixed history`)
+      return runTrace({
+        steps: [{ type: `putParent`, row: { id: 1, group: 7 } }],
+        driver: createCollectionDriver(
+          [],
+          [{ id: 10, parentGroup: 7, value: 1 }],
+        ),
+        projection: collectionProjection,
+      })
+    },
   )
 
   fcTest(`retiring a route leaves a held facade empty and ready`, async () => {
+    oracleRoute(`fixed history`)
     let retiredFacade: IncludedChildCollection | undefined
     const heldSnapshots: Array<{
       status: string | undefined
@@ -708,6 +720,7 @@ describe(`Collection-valued includes oracle`, () => {
   })
 
   fcTest(`a delete event preserves the published facade identity`, async () => {
+    oracleRoute(`fixed history`)
     let publishedFacade: IncludedChildCollection | undefined
     const events: Array<DeleteIdentityObservation> = []
     const eventSnapshots: Array<Array<DeleteIdentityObservation>> = []
@@ -772,8 +785,9 @@ describe(`Collection-valued includes oracle`, () => {
     assertDeleteIdentityEvents(eventSnapshots[1]!, true)
   })
 
-  fcTest(`reactivating a retired route restores its current snapshot`, () =>
-    runTrace({
+  fcTest(`reactivating a retired route restores its current snapshot`, () => {
+    oracleRoute(`fixed history`)
+    return runTrace({
       steps: [
         { type: `putParent`, row: { id: 1, group: 2 } },
         { type: `putParent`, row: { id: 1, group: 1 } },
@@ -786,12 +800,13 @@ describe(`Collection-valued includes oracle`, () => {
         ],
       ),
       projection: collectionProjection,
-    }),
-  )
+    })
+  })
 
   fcTest(
     `facade application failure leaves no partial state or publication`,
     async () => {
+      oracleRoute(`fixed history`)
       const driver = createCollectionDriver(
         [{ id: 1, group: 1 }],
         [
@@ -865,6 +880,7 @@ describe(`Collection-valued includes oracle`, () => {
   )
 
   fcTest(`facade events observe the matching root publication`, async () => {
+    oracleRoute(`fixed history`)
     const driver = createCollectionDriver(
       [{ id: 1, group: 1 }],
       [
@@ -900,6 +916,7 @@ describe(`Collection-valued includes oracle`, () => {
   fcTest(
     `shared facades remain active until their last parent departs`,
     async () => {
+      oracleRoute(`fixed history`)
       const driver = createCollectionDriver(
         [
           { id: 1, group: 1 },
@@ -1022,17 +1039,38 @@ describe(`Collection-valued includes oracle`, () => {
         const expectedIds = [smallId, wideId]
         const facadeIds = result.facade.toArray.map((child) => child.id)
 
-        expect(facadeIds).toEqual(expectedIds)
-        expect(result.array.map((child) => child.id)).toEqual(expectedIds)
-        expect(result.materialized.map((child) => child.id)).toEqual(
-          expectedIds,
+        oracleAssertion(
+          'includes collection-oracle.property comparison 1042',
+          () => expect(facadeIds).toEqual(expectedIds),
         )
-        expect(result.first?.id).toBe(smallId)
-        expect(result.joined).toBe(`${smallId}${wideId}`)
+        oracleAssertion(
+          'includes collection-oracle.property comparison 1043',
+          () =>
+            expect(result.array.map((child) => child.id)).toEqual(expectedIds),
+        )
+        oracleAssertion(
+          'includes collection-oracle.property comparison 1044',
+          () =>
+            expect(result.materialized.map((child) => child.id)).toEqual(
+              expectedIds,
+            ),
+        )
+        oracleAssertion(
+          'includes collection-oracle.property comparison 1047',
+          () => expect(result.first?.id).toBe(smallId),
+        )
+        oracleAssertion(
+          'includes collection-oracle.property comparison 1048',
+          () => expect(result.joined).toBe(`${smallId}${wideId}`),
+        )
         // The public-key assertion rejects a plausible lexical reversal.
-        expect(() =>
-          expect([...facadeIds].reverse()).toEqual(expectedIds),
-        ).toThrow()
+        oracleAssertion(
+          'includes collection-oracle.property comparison 1050',
+          () =>
+            expect(() =>
+              expect([...facadeIds].reverse()).toEqual(expectedIds),
+            ).toThrow(),
+        )
       },
       () => [
         () => live.cleanup(),
@@ -1042,20 +1080,13 @@ describe(`Collection-valued includes oracle`, () => {
     )
   }
 
-  oracleReplayTest(fcTest).prop([publicKeyOrderArbitrary], {
-    numRuns: oracleRuns(20),
-    seed: 1_658_102,
-  })(
-    `uses one raw public-key order across Collection and inline materializations with a fixed seed`,
-    runPublicKeyOrder,
-  )
-
-  oracleReplayTest(fcTest, publicKeyOrderProperty).prop(
+  registerIncludesProperty(
     [publicKeyOrderArbitrary],
-    oraclePropertyOptions(20, publicKeyOrderProperty),
-  )(
-    `uses one raw public-key order across Collection and inline materializations with a random or replayed seed`,
-    runPublicKeyOrder,
+    { property: publicKeyOrderProperty, runs: 20, fixedSeed: 1658102 },
+    `uses one raw public-key order across Collection and inline materializations with a fixed seed`,
+    (...args: Parameters<typeof runPublicKeyOrder>) => {
+      return runPublicKeyOrder(...args)
+    },
   )
 
   const runLayoutSwap = async ({
@@ -1130,11 +1161,15 @@ describe(`Collection-valued includes oracle`, () => {
         await live.preload()
         const facade = live.get(1)!.facade
         const initialIds = initialRows.map(({ id }) => id)
-        expect(project()).toEqual({
-          ...expectedMaterializations(initialIds),
-          first: initialIds[0],
-          joined: initialRows.map(({ label }) => label).join(``),
-        })
+        oracleAssertion(
+          'includes collection-oracle.property comparison 1143',
+          () =>
+            expect(project()).toEqual({
+              ...expectedMaterializations(initialIds),
+              first: initialIds[0],
+              joined: initialRows.map(({ label }) => label).join(``),
+            }),
+        )
 
         const first = initialRows[swapIndex]!
         const second = initialRows[swapIndex + 1]!
@@ -1148,20 +1183,31 @@ describe(`Collection-valued includes oracle`, () => {
           expectedIds[swapIndex]!,
         ]
 
-        expect(live.get(1)!.facade).toBe(facade)
-        expect(project()).toEqual({
-          ...expectedMaterializations(expectedIds),
-          first: expectedIds[0],
-          joined: expectedIds.join(``),
-        })
+        oracleAssertion(
+          'includes collection-oracle.property comparison 1161',
+          () => expect(live.get(1)!.facade).toBe(facade),
+        )
+        oracleAssertion(
+          'includes collection-oracle.property comparison 1162',
+          () =>
+            expect(project()).toEqual({
+              ...expectedMaterializations(expectedIds),
+              first: expectedIds[0],
+              joined: expectedIds.join(``),
+            }),
+        )
         // The same result check rejects a facade that kept its prior layout.
-        expect(() =>
-          expect(project()).toEqual({
-            ...expectedMaterializations(initialIds),
-            first: initialIds[0],
-            joined: initialRows.map(({ label }) => label).join(``),
-          }),
-        ).toThrow()
+        oracleAssertion(
+          'includes collection-oracle.property comparison 1168',
+          () =>
+            expect(() =>
+              expect(project()).toEqual({
+                ...expectedMaterializations(initialIds),
+                first: initialIds[0],
+                joined: initialRows.map(({ label }) => label).join(``),
+              }),
+            ).toThrow(),
+        )
       },
       () => [
         () => live.cleanup(),
@@ -1171,20 +1217,13 @@ describe(`Collection-valued includes oracle`, () => {
     )
   }
 
-  oracleReplayTest(fcTest).prop([orderSwapArbitrary], {
-    numRuns: oracleRuns(20),
-    seed: 1_658_103,
-  })(
-    `propagates order-only child swaps through every materialization with a fixed seed`,
-    runLayoutSwap,
-  )
-
-  oracleReplayTest(fcTest, layoutSwapProperty).prop(
+  registerIncludesProperty(
     [orderSwapArbitrary],
-    oraclePropertyOptions(20, layoutSwapProperty),
-  )(
-    `propagates order-only child swaps through every materialization with a random or replayed seed`,
-    runLayoutSwap,
+    { property: layoutSwapProperty, runs: 20, fixedSeed: 1658103 },
+    `propagates order-only child swaps through every materialization with a fixed seed`,
+    (...args: Parameters<typeof runLayoutSwap>) => {
+      return runLayoutSwap(...args)
+    },
   )
 
   for (const { intermediate, final } of [
@@ -1195,6 +1234,7 @@ describe(`Collection-valued includes oracle`, () => {
     fcTest(
       `a held ordered child repair publishes ${intermediate}-to-${final} through the facade`,
       async () => {
+        oracleRoute(`case`)
         type OrderedChild = {
           id: number
           parentGroup: number
@@ -1405,6 +1445,7 @@ describe(`Collection-valued includes oracle`, () => {
   fcTest(
     `a held child truncate replay publishes an A-to-B-to-A reorder through the facade`,
     async () => {
+      oracleRoute(`fixed history`)
       type OrderedChild = {
         id: number
         parentGroup: number
@@ -1588,6 +1629,7 @@ describe(`Collection-valued includes oracle`, () => {
   fcTest(
     `optimistic rollback comparison rejects a retained child row`,
     async () => {
+      oracleRoute(`calibration`)
       const row = { id: 10, parentGroup: 1, value: 2 }
       const { driver } = createOptimisticCollectionDriver(1)
       const context = await driver.setup()
@@ -1613,20 +1655,13 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
-  oracleReplayTest(fcTest).prop([optimisticChildArbitrary], {
-    numRuns: oracleRuns(20),
-    seed: 1_658_104,
-  })(
-    `matches optimistic child settlement histories with a fixed seed`,
-    runOptimisticChildHistory,
-  )
-
-  oracleReplayTest(fcTest, optimisticChildProperty).prop(
+  registerIncludesProperty(
     [optimisticChildArbitrary],
-    oraclePropertyOptions(20, optimisticChildProperty),
-  )(
-    `matches optimistic child settlement histories with a random or replayed seed`,
-    runOptimisticChildHistory,
+    { property: optimisticChildProperty, runs: 20, fixedSeed: 1658104 },
+    `matches optimistic child settlement histories with a fixed seed`,
+    (...args: Parameters<typeof runOptimisticChildHistory>) => {
+      return runOptimisticChildHistory(...args)
+    },
   )
 })
 
@@ -1641,6 +1676,7 @@ test.each([
   `missing-group`,
   `active-status`,
 ] as const)(`rejects a hostile facade interval observation: %s`, (fault) => {
+  oracleRoute(`calibration`)
   const original: MetadataFacade = {
     id: `original`,
     status: `ready`,

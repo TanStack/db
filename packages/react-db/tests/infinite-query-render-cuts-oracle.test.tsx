@@ -40,6 +40,7 @@ import {
 } from '@tanstack/db'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveQuery } from '../src/useLiveQuery'
 import {
@@ -183,7 +184,13 @@ async function checkAbandonedRenderAcquisitions(
   )
 }
 
-declareOracle({ check: [checkAbandonedRenderAcquisitions] })
+declareOracle({
+  owns: [
+    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+  ],
+  check: [checkAbandonedRenderAcquisitions],
+})
 
 describe(`on-demand sources match useLiveQuery`, () => {
   it.each([
@@ -193,11 +200,13 @@ describe(`on-demand sources match useLiveQuery`, () => {
   ])(
     `starts no acquisition attempt for a render that never commits, as useLiveQuery does (%o)`,
     async ({ form, wrapped }) => {
+      oracleRoute(`case`)
       await checkAbandonedRenderAcquisitions(form, wrapped)
     },
   )
 
   it(`requests the first window and commits the first value as useLiveQuery does across a StrictMode double render`, async () => {
+    oracleRoute(`fixed history`)
     const reference = await firstWindowLoadsForStrictMount(`live`)
     // No provider work before commit: the on-demand window is unpublished.
     expect(reference.firstCommit).toEqual({ status: `loading`, ids: [] })
@@ -221,6 +230,7 @@ declareOracle({ model: [expectedReadyFirstCommit] })
 
 describe(`agreement with useLiveQuery`, () => {
   it(`commits the same ready rows first as useLiveQuery for a synchronous source`, async () => {
+    oracleRoute(`fixed history`)
     const source = makeSyncSource(10)
     const firstCommit = (
       useResult: () => { status: string; data: Array<Row> },

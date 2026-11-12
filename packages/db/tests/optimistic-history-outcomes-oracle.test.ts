@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { createDeferred } from '../src/deferred.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  oracleProperty,
+  oracleReplayRequested,
+  oracleRoute,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
-import { createOracleReach } from './oracle-reach.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import {
   expectHistoryOutcome,
   observeHistoryPromise,
@@ -31,7 +40,12 @@ import type {
 
 // The outcome checker is imported from the companion, which does not declare
 // it. This file's calibrations reach it through the same check.
-declareOracle({ check: [expectHistoryOutcome] })
+// What this oracle owns: the gap report judges the request-outcome paths of
+// transactions (src/transactions.ts) by this file's outcome matrix, its
+// generated failed-request histories, and its completion histories.
+declareOracle({
+  check: [expectHistoryOutcome],
+})
 
 type Scenario = {
   existing: boolean
@@ -67,12 +81,14 @@ async function runOutcomeScenario(scenario: Scenario) {
   // The existing independent history model judges rows, immutable requests,
   // downstream state and every outcome. These inputs cannot become no-op edits.
   const counts = await runOptimisticHistory(initial, steps)
-  expect(counts).toMatchObject({
-    edits: 2,
-    failures: 1,
-    settlements: settlePeer ? 2 : 1,
-    queued: queued ? 1 : 0,
-  })
+  oracleAssertion('runOutcomeScenario', () =>
+    expect(counts).toMatchObject({
+      edits: 2,
+      failures: 1,
+      settlements: settlePeer ? 2 : 1,
+      queued: queued ? 1 : 0,
+    }),
+  )
 }
 
 describe(`Optimistic request outcome histories`, () => {
@@ -86,34 +102,45 @@ describe(`Optimistic request outcome histories`, () => {
     ),
   )
   it.each(cells)(`observes exact request outcomes: %j`, async (cell) => {
+    oracleRoute(`case`)
     for (const queued of [false, true]) {
       for (const settlePeer of [false, true]) {
         await runOutcomeScenario({ ...cell, queued, settlePeer, a: 2, b: 3 })
       }
     }
   })
-  it.each([851203, undefined])(
-    `varies failed request and surviving peer histories, seed=%s`,
-    async (seed) => {
-      await fc.assert(
-        fc.asyncProperty(
-          fc.record({
-            existing: fc.boolean(),
-            optimistic: fc.boolean(),
-            failure: fc.constantFrom(`rollback` as const, `reject` as const),
-            queued: fc.boolean(),
-            settlePeer: fc.boolean(),
-            a: fc.integer({ min: 1, max: 20 }),
-            b: fc.integer({ min: 1, max: 20 }),
-          }),
-          runOutcomeScenario,
-        ),
-        seed === undefined
-          ? oraclePropertyOptions(100, `collection-state.optimistic-outcomes`)
-          : { seed, numRuns: oracleRuns(100) },
-      )
+  oracleProperty({
+    id: `collection-state.optimistic-outcomes`,
+    law: {
+      statement: `Each failed optimistic request exposes its exact outcome while independently modeled peer and source work survives.`,
+      authority: `The optimistic snapshot and request settlement laws in optimistic-history-oracle.ts`,
+      limits: `The existing bounded two-request grammar with controlled sync work; provider timing and arbitrary overlapping request histories remain outside this driver.`,
     },
-  )
+    owns: [`src/transactions.ts`],
+    histories: {
+      arbitrary: fc.record({
+        existing: fc.boolean(),
+        optimistic: fc.boolean(),
+        failure: fc.constantFrom(`rollback` as const, `reject` as const),
+        queued: fc.boolean(),
+        settlePeer: fc.boolean(),
+        a: fc.integer({ min: 1, max: 20 }),
+        b: fc.integer({ min: 1, max: 20 }),
+      }),
+      runs: 100,
+      fixedSeeds: [851203],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `collection-state.optimistic-outcomes`,
+        plan,
+        observe,
+        () => runOutcomeScenario(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 // A failed persisting edit cancels a pending same-key manual transaction when
@@ -129,6 +156,7 @@ const pendingPeerCases = [true, false].flatMap((sameKey) =>
 it.each(pendingPeerCases)(
   `settles a pending manual peer after failure, sameKey=$sameKey failure=$failure cascade=$cascade`,
   async ({ sameKey, failure, cascade }) => {
+    oracleRoute(`case`)
     const peerSurvives = !sameKey || (failure === `rollback` && !cascade)
     const counts = await runOptimisticHistory(
       [],
@@ -177,6 +205,7 @@ describe(`Outcome observer calibration`, () => {
   ] as const)(
     `rejects %s through the actual outcome checker`,
     async (fault) => {
+      oracleRoute(`calibration`)
       const value = { id: 1 }
       const error = new Error(`original`)
       let expected: HistoryOutcome<unknown>
@@ -220,32 +249,6 @@ describe(`Outcome observer calibration`, () => {
       )
     },
   )
-  it(`shrinks and replays a premature success counterexample`, () => {
-    const property = fc.property(fc.integer({ min: 1, max: 100 }), (value) => {
-      expectHistoryOutcome(
-        { status: `pending` },
-        { status: `pending` },
-        `valid`,
-      )
-      expectHistoryOutcome(
-        { status: `fulfilled`, value },
-        { status: `pending` },
-        `fault`,
-      )
-    })
-    const failed = fc.check(property, { seed: 851204 })
-    expect(failed.failed).toBe(true)
-    expect(failed.numShrinks).toBeGreaterThan(0)
-    expect(failed.errorInstance).toMatchObject({ name: `AssertionError` })
-    const replay = fc.check(property, {
-      seed: failed.seed,
-      path: failed.counterexamplePath!,
-      endOnFailure: true,
-    })
-    expect(replay.failed).toBe(true)
-    expect(replay.counterexample).toEqual(failed.counterexample)
-    expect(replay.errorInstance).toMatchObject({ name: `AssertionError` })
-  })
   it(`preserves successful results and single errors without wrappers`, async () => {
     const value = { id: 1 }
     expect(
@@ -317,11 +320,12 @@ describe(`external completion with peers and source work`, () => {
   it.each(completionHistories)(
     `preserves completion admission and independent work: %j`,
     async ({ state, peer, source, attempts }) => {
-      const reach = createOracleReach(
-        `external completion ${state}/${peer}/${source}/${attempts}`,
-        [`attempts-compared`, `later-source-compared`],
-      )
-      reach.beginHistory()
+      oracleRoute(`case`)
+      const reachStates = [
+        `attempts-compared`,
+        `later-source-compared`,
+      ] as const
+      const reached = new Set<(typeof reachStates)[number]>()
       const steps: Array<OptimisticStep> = [
         {
           type: `edit`,
@@ -387,9 +391,14 @@ describe(`external completion with peers and source work`, () => {
       expect(counts.completionRejections).toBe(
         attempts - (state === `pending` ? 1 : 0),
       )
-      reach.reach(`attempts-compared`)
-      reach.reach(`later-source-compared`)
-      reach.assertReached()
+      reached.add(`attempts-compared`)
+      reached.add(`later-source-compared`)
+      if (!oracleReplayRequested())
+        for (const reachedState of reachStates)
+          expect(
+            reached.has(reachedState),
+            `${reachedState} history minimum`,
+          ).toBe(true)
     },
   )
 })

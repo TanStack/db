@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/offline-transactions",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Offline-first transaction capabilities for TanStack DB",
   "author": "TanStack",
   "license": "MIT",
@@ -76,9 +76,9 @@
     "@react-native-community/netinfo": "11.4.1",
     "@tanstack/db": "workspace:*",
     "@types/node": "^25.2.2",
-    "eslint": "^9.39.2",
+    "eslint": "^9.39.5",
     "react-native": "0.79.6",
     "typescript": "^5.9.2",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   }
 }

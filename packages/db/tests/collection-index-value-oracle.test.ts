@@ -19,6 +19,7 @@ import { afterEach, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { IR, coalesce } from '../src'
 import { collections, createSource } from './collection-index-value-fixture.js'
+import { oracleRoute } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 
 afterEach(async () => {
@@ -43,9 +44,16 @@ function expectSignatureClasses(
   }
 }
 
-declareOracle({ check: [expectSignatureClasses] })
+// What this oracle owns: the gap report judges the index metadata and its
+// signatures in collection/indexes.ts by this file's tests. The signature
+// check compares every fixture pair's class with its signature.
+declareOracle({
+  owns: [`src/collection/indexes.ts`],
+  check: [expectSignatureClasses],
+})
 
 it(`distinguishes native literals from ordinary tags in index signatures`, () => {
+  oracleRoute(`case`)
   const instant = Temporal.Instant.from(`2026-01-02T00:00:00Z`)
   const date = Temporal.PlainDate.from(`2026-01-02`)
   const tag = { __type: `Temporal.Instant`, value: String(instant) }

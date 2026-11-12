@@ -3,10 +3,15 @@ export {
   describeValue,
   ConformanceViolation,
   eagerLiveSourceHistoryArb,
+  eagerLiveSourceConstructedHistories,
+  eagerLiveSourceDataHistoryArb,
+  eagerLiveSourceHistoryData,
+  resolveEagerLiveSourceHistory,
   eagerLiveSourceModel,
   eagerLiveSourceProperty,
   eagerLiveSourceReachStates,
   jsonValueKinds,
+  namesLaw,
   reachStatesFor,
 } from './eager-live-source-oracle'
 export type {
@@ -14,6 +19,7 @@ export type {
   ConformanceRow,
   ControlledProvider,
   EagerLiveSourceCapability,
+  EagerLiveSourceConstruction,
   EagerLiveSourceDriver,
   EagerLiveSourceFixture,
   EagerLiveSourceHistory,

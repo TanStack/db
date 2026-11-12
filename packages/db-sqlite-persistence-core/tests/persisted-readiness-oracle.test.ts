@@ -1,15 +1,13 @@
 import { createLiveQueryCollection } from '@tanstack/db'
-import {
-  afterAll,
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from 'vitest'
+import { afterAll, afterEach, beforeEach, expect, vi } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import {
   DISK_ROW,
   REMOTE_FAILURE,
@@ -20,7 +18,6 @@ import {
   networkFirst,
 } from './persisted-readiness-support.js'
 import type { Call, Restore } from './persisted-readiness-support.js'
-
 /**
  * # When does a persisted Collection open from restored rows?
  *
@@ -94,15 +91,23 @@ import type { Call, Restore } from './persisted-readiness-support.js'
  * that break the adapter contract, and the option and deadline examples, are
  * fixed examples in persisted-readiness.test.ts, not generated.
  */
-
 type Remote = `ready` | `ready-report` | `ready-fail` | `fail`
 type Effects = `quiet` | `throwing`
 type Event =
-  | { kind: `restore`; outcome: Restore }
-  | { kind: `remote`; outcome: Remote }
-  | { kind: `give-up` }
-  | { kind: `deadline` }
-
+  | {
+      kind: `restore`
+      outcome: Restore
+    }
+  | {
+      kind: `remote`
+      outcome: Remote
+    }
+  | {
+      kind: `give-up`
+    }
+  | {
+      kind: `deadline`
+    }
 const REMOTE_CALLS: Record<Remote, ReadonlyArray<Call>> = {
   ready: [`ready`],
   'ready-report': [`ready`, `report`],
@@ -110,14 +115,11 @@ const REMOTE_CALLS: Record<Remote, ReadonlyArray<Call>> = {
   fail: [`fail`],
 }
 const GIVE_UP_CALLS: ReadonlyArray<Call> = [`report`, `fail`]
-
 const READY_CALLBACK_FAILURE = `ready callback threw`
 const STATUS_LISTENER_FAILURE = `status listener threw`
-
 // ---------------------------------------------------------------------------
 // Independent model
 // ---------------------------------------------------------------------------
-
 type Expected = {
   status: `loading` | `ready` | `error` | `crashed`
   error: string | null
@@ -125,7 +127,6 @@ type Expected = {
   rows: Array<string>
   uncaught: Array<string>
 }
-
 function expected(
   events: ReadonlyArray<Event>,
   effects: Effects,
@@ -139,7 +140,6 @@ function expected(
   let failureReason: string | null = null
   const rows = new Set<string>()
   const uncaught: Array<string> = []
-
   // The status is `ready` before ready effects run, so a throwing effect
   // only adds an uncaught error.
   const becomeReady = () => {
@@ -181,7 +181,6 @@ function expected(
     if (restore === `pending`) waiting.push(...calls)
     else calls.forEach(apply)
   }
-
   return events.map((event) => {
     if (status !== `crashed`) {
       if (event.kind === `restore`) {
@@ -212,11 +211,9 @@ function expected(
     }
   })
 }
-
 // ---------------------------------------------------------------------------
 // History grammar
 // ---------------------------------------------------------------------------
-
 function permutations<T>(items: ReadonlyArray<T>): Array<Array<T>> {
   if (items.length <= 1) return [[...items]]
   return items.flatMap((item, index) =>
@@ -225,15 +222,16 @@ function permutations<T>(items: ReadonlyArray<T>): Array<Array<T>> {
     ),
   )
 }
-
 // Only a remote that answered ready and is still running can give up later.
 const giveUpFollows = (events: ReadonlyArray<Event>) => {
   const answer = events.findIndex((event) => event.kind === `remote`)
   const giveUp = events.findIndex((event) => event.kind === `give-up`)
   return giveUp === -1 || answer < giveUp
 }
-
-const histories: Array<{ events: Array<Event>; effects: Effects }> = []
+const histories: Array<{
+  events: Array<Event>
+  effects: Effects
+}> = []
 for (const effects of [`quiet`, `throwing`] as const) {
   for (const restore of [`rows`, `empty`, `failed`] as const) {
     for (const remote of [
@@ -257,7 +255,6 @@ for (const effects of [`quiet`, `throwing`] as const) {
     }
   }
 }
-
 // The states the ordering and ready-effect laws are about. The driver marks
 // them from the model's prediction, before production can disagree.
 const reachStates = [
@@ -267,14 +264,11 @@ const reachStates = [
   `throwing ready effects as the remote opens the Collection`,
   `throwing ready effects as restored rows open the Collection`,
 ] as const
-
 // ---------------------------------------------------------------------------
 // Production driver
 // ---------------------------------------------------------------------------
-
 // The controlled adapter and network-first Collection live in
 // persisted-readiness-support.ts, shared with the fixed examples.
-
 // Registers ready effects that throw: a first-ready callback and a status
 // listener. Both run after the status reads `ready`.
 function throwOnReady(
@@ -287,7 +281,6 @@ function throwOnReady(
     throw new Error(STATUS_LISTENER_FAILURE)
   })
 }
-
 // Core reports a subscriber error as uncaught by throwing it from a
 // microtask. This records each such error instead of letting it escape.
 function captureUncaught(): Array<string> {
@@ -304,7 +297,6 @@ function captureUncaught(): Array<string> {
   )
   return uncaught
 }
-
 function observe(
   collection: ReturnType<typeof networkFirst>[`collection`],
   uncaught: ReadonlyArray<string>,
@@ -320,75 +312,80 @@ function observe(
     uncaught: [...uncaught].sort(),
   }
 }
-
 beforeEach(() => {
   vi.useFakeTimers()
 })
 afterEach(() => {
   vi.useRealTimers()
 })
-
-describe(`persisted readiness oracle`, () => {
-  const reach = createOracleReach(`persisted-readiness.history`, reachStates)
-  let historiesRan = 0
-  afterAll(() => {
-    // A filtered run checks the histories it ran, not reach.
-    if (historiesRan === histories.length) reach.assertReached()
-  })
-
-  it.each(
-    histories.map(
-      ({ events, effects }) =>
-        [`${effects}: ${describe_(events)}`, events, effects] as const,
-    ),
-  )(`%s`, async (name, events, effects) => {
-    const source = networkFirst(`network-first-${name}`)
-    if (effects === `throwing`) throwOnReady(source.collection)
-    const live = createLiveQueryCollection((q) =>
-      q.from({ row: source.collection }),
-    )
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-    const uncaught = captureUncaught()
-    reach.beginHistory()
-    try {
-      void source.collection.preload().catch(() => undefined)
-      void live.preload().catch(() => undefined)
+const reachedStates = new Set<(typeof reachStates)[number]>()
+const reach = {
+  reach: (state: (typeof reachStates)[number]) => reachedStates.add(state),
+  assertReached: () => {
+    for (const state of reachStates)
+      if (!reachedStates.has(state))
+        throw new Error(`persisted-readiness.history missed ${state}`)
+  },
+}
+let historiesRan = 0
+afterAll(() => {
+  // A filtered run checks the histories it ran, not reach.
+  if (historiesRan === histories.length) reach.assertReached()
+})
+async function judgeHistory({ events, effects }: (typeof histories)[number]) {
+  const name = `${effects}: ${describe_(events)}`
+  const source = networkFirst(`network-first-${name}`)
+  if (effects === `throwing`) throwOnReady(source.collection)
+  const live = createLiveQueryCollection((q) =>
+    q.from({ row: source.collection }),
+  )
+  const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const uncaught = captureUncaught()
+  try {
+    void source.collection.preload().catch(() => undefined)
+    void live.preload().catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(0)
+    const model = expected(events, effects)
+    for (const [index, event] of events.entries()) {
+      markReach(reach, events, model, index, effects)
+      if (event.kind === `restore`) source.restore(event.outcome)
+      else if (event.kind === `deadline`)
+        await vi.advanceTimersByTimeAsync(TIMEOUT)
+      else
+        for (const call of event.kind === `give-up`
+          ? GIVE_UP_CALLS
+          : REMOTE_CALLS[event.outcome])
+          source.call(call)
       await vi.advanceTimersByTimeAsync(0)
-      const model = expected(events, effects)
-      for (const [index, event] of events.entries()) {
-        markReach(reach, events, model, index, effects)
-        if (event.kind === `restore`) source.restore(event.outcome)
-        else if (event.kind === `deadline`)
-          await vi.advanceTimersByTimeAsync(TIMEOUT)
-        else
-          for (const call of event.kind === `give-up`
-            ? GIVE_UP_CALLS
-            : REMOTE_CALLS[event.outcome])
-            source.call(call)
-        await vi.advanceTimersByTimeAsync(0)
-        const label = `after ${describe_(events.slice(0, index + 1))}`
+      const label = `after ${describe_(events.slice(0, index + 1))}`
+      oracleAssertion('existing comparison at 364', () =>
         expect(observe(source.collection, uncaught), label).toEqual(
           model[index],
+        ),
+      )
+      // A live query over the Collection shows the same status, by
+      // live-query readiness, until the Collection ends its first load.
+      if (model[index]!.status !== `crashed`)
+        oracleAssertion('existing comparison at 370', () =>
+          expect(live.status, `${label}: live query`).toBe(
+            model[index]!.status,
+          ),
         )
-        // A live query over the Collection shows the same status, by
-        // live-query readiness, until the Collection ends its first load.
-        if (model[index]!.status !== `crashed`)
-          expect(live.status, `${label}: live query`).toBe(model[index]!.status)
-      }
-      historiesRan++
-    } finally {
-      vi.mocked(globalThis.queueMicrotask).mockRestore()
-      consoleError.mockRestore()
-      await live.cleanup()
-      await source.collection.cleanup({ dependents: true })
     }
-  })
-})
-
+    historiesRan++
+  } finally {
+    vi.mocked(globalThis.queueMicrotask).mockRestore()
+    consoleError.mockRestore()
+    await live.cleanup()
+    await source.collection.cleanup({ dependents: true })
+  }
+}
 // Marks the declared states the history enters with its next event, as the
 // model predicts them.
 function markReach(
-  reach: ReturnType<typeof createOracleReach<(typeof reachStates)[number]>>,
+  reach: {
+    reach: (state: (typeof reachStates)[number]) => unknown
+  },
   events: ReadonlyArray<Event>,
   model: ReadonlyArray<Expected>,
   index: number,
@@ -413,7 +410,6 @@ function markReach(
         : `throwing ready effects as restored rows open the Collection`,
     )
 }
-
 function describe_(events: ReadonlyArray<Event>): string {
   return events
     .map((event) =>
@@ -423,5 +419,27 @@ function describe_(events: ReadonlyArray<Event>): string {
     )
     .join(` > `)
 }
-
-declareOracle({ model: [expected], grammar: [histories] })
+declareOracle({
+  model: [expected],
+  grammar: [histories],
+})
+// The existing helper retains its independent expected() model and every
+// observation-time assertion. Native registration transports its judgment.
+oracleProperty({
+  id: `persisted-readiness.history`,
+  law: {
+    statement: `Every retained persistence history agrees with its existing independent model at each named public checkpoint.`,
+    authority: `The existing contract and maintainer decisions stated above the independent model.`,
+    limits: `The existing finite histories and controlled in-memory persistence boundary; no new provider, schedule, or gap-closure claim.`,
+  },
+  owns: [`src/persisted.ts`],
+  histories,
+  label: (history) => `${history.effects}: ${describe_(history.events)}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`existing persistence model`, plan, observe, () =>
+      judgeHistory(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})

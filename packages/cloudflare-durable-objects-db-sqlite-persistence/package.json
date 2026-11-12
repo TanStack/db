@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/cloudflare-durable-objects-db-sqlite-persistence",
-  "version": "1.0.0-rc.1.4",
+  "version": "1.0.0-rc.1.5",
   "description": "Cloudflare Durable Object SQLite persisted collection adapter for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",
@@ -52,10 +52,15 @@
   "peerDependencies": {
     "typescript": ">=4.7"
   },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@vitest/coverage-istanbul": "^5.0.5",
-    "better-sqlite3": "^12.6.2",
-    "wrangler": "^4.64.0"
+    "@vitest/coverage-istanbul": "^5.1.0",
+    "better-sqlite3": "^12.11.1",
+    "wrangler": "^4.158.0"
   }
 }

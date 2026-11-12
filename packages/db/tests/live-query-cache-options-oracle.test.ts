@@ -12,7 +12,7 @@
  * returned Promise; request start and unresolved preload are checked explicitly.
  * Public admission, dehydration rows, observer delivery, and subscriber ownership
  * are the observation cuts. React supplies client/server receiving paths using
- * the same judgment. Failure/consumption retirement is a separate lifecycle lane.
+ * the same judgment. Failure/consumption retirement is a separate lifecycle grammar.
  */
 import { afterAll, expect, test, vi } from 'vitest'
 import {
@@ -23,8 +23,15 @@ import {
   getLiveQueryHash,
   resolveLiveQueryValue,
 } from '../src'
+import { oracleRoute } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
-import { createOracleReach } from './oracle-reach'
+import { oracleProperty } from './oracle-property'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter'
 import { withOracleCleanup } from './utils'
 import {
   cacheOptionDeclarations,
@@ -37,6 +44,7 @@ import {
   checkCacheOptionRows,
   conflictingCacheOptions,
 } from './live-query-cache-options-oracle'
+import type { Verdict } from './oracle-property'
 import type { CacheRow } from './live-query-cache-options-oracle'
 
 const claimants = [`preload`, `observer-preload`, `server-read`] as const
@@ -51,15 +59,17 @@ const reaches = Object.fromEntries(
   claimants.flatMap((claimant) =>
     paths.map((path) => [
       `${claimant}/${path}`,
-      createOracleReach(`cache options ${claimant}/${path}`, [
-        `first-registration`,
-        `admission`,
-        `retry`,
-        `original-reuse`,
-        `source-update`,
-        `held-delivery`,
-        ...cacheOptionReachStates,
-      ]),
+      new Map<string, number>(
+        [
+          `first-registration`,
+          `admission`,
+          `retry`,
+          `original-reuse`,
+          `source-update`,
+          `held-delivery`,
+          ...cacheOptionReachStates,
+        ].map((state) => [state, 0] as const),
+      ),
     ]),
   ),
 )
@@ -68,14 +78,17 @@ afterAll(() => {
   // A calibration-only selector runs no history grammar. Every selected route
   // still owes all of its declared states, including those it failed to reach.
   for (const [route, reach] of Object.entries(reaches))
-    if (executedRoutes.has(route)) reach.assertReached()
+    if (executedRoutes.has(route))
+      for (const [state, count] of reach)
+        if (count === 0)
+          throw new Error(`${route}: enumeration did not reach ${state}`)
   if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
     console.info(
       `cache option reach`,
       Object.fromEntries(
         Object.entries(reaches).map(([path, reach]) => [
           path,
-          Object.fromEntries(reach.counts()),
+          Object.fromEntries(reach),
         ]),
       ),
     )
@@ -91,19 +104,23 @@ declareOracle({
   grammar: [cacheOptionHistories],
 })
 
-test.each(
-  cacheOptionHistories.flatMap((history) =>
-    [false, true].flatMap((held) =>
-      claimants.flatMap((claimant) =>
-        paths.map((path) => ({ history, held, path, claimant })),
-      ),
+// This is the same exhaustive finite language. Native registration owns
+// execution and judgment transport; the existing per-route reach gate below
+// still counts actual entries across the complete enumeration.
+const cacheOptionsHistories = cacheOptionHistories.flatMap((history) =>
+  [false, true].flatMap((held) =>
+    claimants.flatMap((claimant) =>
+      paths.map((path) => ({ history, held, path, claimant })),
     ),
   ),
-)(`cache admission history %j`, async ({ history, held, path, claimant }) => {
-  const route = `${claimant}/${path}`
-  executedRoutes.add(route)
-  const reach = reaches[route]!
-  reach.beginHistory()
+)
+type CacheOptionsCase = (typeof cacheOptionsHistories)[number]
+async function runCacheOptionsHistory(
+  scenario: CacheOptionsCase,
+  reach: { reach: (state: string) => void },
+): Promise<void> {
+  const { history, held, path, claimant } = scenario
+
   const client = new DbClient()
   let starts = 0
   let delivered = false
@@ -174,10 +191,12 @@ test.each(
         (entry) => entry.queryHash === getLiveQueryHash(first, first.queryKey),
       )!
   await withOracleCleanup(async () => {
-    expect(
-      client.dehydrate().liveQueries ?? [],
-      `no prior query result`,
-    ).toEqual([])
+    oracleAssertion(`runCacheOptionsHistory:197`, () =>
+      expect(
+        client.dehydrate().liveQueries ?? [],
+        `no prior query result`,
+      ).toEqual([]),
+    )
     let settled = false
     let initial: Promise<void>
     if (claimant === `preload`) initial = track(client.preloadLiveQuery(first))
@@ -199,28 +218,39 @@ test.each(
       if (claimant === `server-read`) {
         vi.stubGlobal(`window`, undefined)
         const snapshot = firstObserver.getServerSnapshot()
-        checkCacheOptionRows(
-          Array.from(snapshot.state ?? [], ([key, value]) => ({ key, value })),
-          held ? [] : initialRows,
-          history.getKey[0],
+        oracleAssertion(`checkCacheOptionRows:222`, () =>
+          checkCacheOptionRows(
+            Array.from(snapshot.state ?? [], ([key, value]) => ({
+              key,
+              value,
+            })),
+            held ? [] : initialRows,
+            history.getKey[0],
+          ),
         )
         vi.unstubAllGlobals()
         initial = track(view.preload())
       } else initial = track(firstObserver.preload())
     }
-    expect(
-      stream(),
-      `first caller registered without borrowed transport`,
-    ).toBeDefined()
+    oracleAssertion(`runCacheOptionsHistory:231`, () =>
+      expect(
+        stream(),
+        `first caller registered without borrowed transport`,
+      ).toBeDefined(),
+    )
     reach.reach(`first-registration`)
     void initial.then(() => {
       settled = true
     })
-    expect(starts).toBe(1)
+    oracleAssertion(`runCacheOptionsHistory:239`, () => expect(starts).toBe(1))
     if (held) {
       await Promise.resolve()
-      expect(delivered).toBe(false)
-      expect(settled).toBe(false)
+      oracleAssertion(`runCacheOptionsHistory:242`, () =>
+        expect(delivered).toBe(false),
+      )
+      oracleAssertion(`runCacheOptionsHistory:243`, () =>
+        expect(settled).toBe(false),
+      )
       reach.reach(`held-delivery`)
     } else await initial
     if (path === `hydrate-preload`) {
@@ -229,7 +259,9 @@ test.each(
         collections: [],
         liveQueries: [{ ...prior, dehydratedAt: prior.dehydratedAt + 1 }],
       })
-      expect(stream().dehydratedAt).toBe(prior.dehydratedAt + 1)
+      oracleAssertion(`runCacheOptionsHistory:252`, () =>
+        expect(stream().dehydratedAt).toBe(prior.dehydratedAt + 1),
+      )
     }
     const subscriberCount = source.subscriberCount
     let observer: ReturnType<typeof createLiveQueryObserver> | undefined
@@ -251,38 +283,44 @@ test.each(
           !conflictingCacheOptions(history),
         )
         if (conflictingCacheOptions(history))
-          await checkCacheOptionPromise(result, history, { deliveryHeld: held })
+          await oracleAssertion(`checkCacheOptionPromise:274`, () =>
+            checkCacheOptionPromise(result, history, { deliveryHeld: held }),
+          )
       } else {
-        checkCacheOptionAdmission(() => {
-          if (path === `preload` || path === `hydrate-preload`)
-            track(client.preloadLiveQuery(second))
-          else if (path === `subscribe`)
-            subscriptions.push(
-              observer!.subscribe(() => {
-                if (conflictingCacheOptions(history)) rejectedCallbacks++
-              }),
-            )
-          else {
-            vi.stubGlobal(`window`, undefined)
-            const snapshot = observer!.getServerSnapshot()
-            // SSR captures its initial view. Held writes are absent at this
-            // read; later delivery must not rewrite the captured server view.
-            if (!conflictingCacheOptions(history))
-              checkCacheOptionRows(
-                Array.from(snapshot.state ?? [], ([key, value]) => ({
-                  key,
-                  value,
-                })),
-                held ? [] : initialRows,
-                history.getKey[1],
+        oracleAssertion(`checkCacheOptionAdmission:276`, () =>
+          checkCacheOptionAdmission(() => {
+            if (path === `preload` || path === `hydrate-preload`)
+              track(client.preloadLiveQuery(second))
+            else if (path === `subscribe`)
+              subscriptions.push(
+                observer!.subscribe(() => {
+                  if (conflictingCacheOptions(history)) rejectedCallbacks++
+                }),
               )
-          }
-        }, history)
+            else {
+              vi.stubGlobal(`window`, undefined)
+              const snapshot = observer!.getServerSnapshot()
+              // SSR captures its initial view. Held writes are absent at this
+              // read; later delivery must not rewrite the captured server view.
+              if (!conflictingCacheOptions(history))
+                checkCacheOptionRows(
+                  Array.from(snapshot.state ?? [], ([key, value]) => ({
+                    key,
+                    value,
+                  })),
+                  held ? [] : initialRows,
+                  history.getKey[1],
+                )
+            }
+          }, history),
+        )
       }
       reach.reach(attempt === 0 ? `admission` : `retry`)
     }
     if (conflictingCacheOptions(history))
-      expect(source.subscriberCount).toBe(subscriberCount)
+      oracleAssertion(`runCacheOptionsHistory:305`, () =>
+        expect(source.subscriberCount).toBe(subscriberCount),
+      )
     track(client.preloadLiveQuery(first))
     reach.reach(`original-reuse`)
     deliver()
@@ -296,13 +334,15 @@ test.each(
         // comparison is a live-handoff cut, so commit that receiving demand.
         subscriptions.push(observer.subscribe(() => {}))
         await Promise.resolve() // committed hydration handoff
-        checkCacheOptionRows(
-          Array.from(observer.getSnapshot().state!, ([key, value]) => ({
-            key,
-            value,
-          })),
-          initialRows,
-          history.getKey[1],
+        oracleAssertion(`checkCacheOptionRows:319`, () =>
+          checkCacheOptionRows(
+            Array.from(observer.getSnapshot().state!, ([key, value]) => ({
+              key,
+              value,
+            })),
+            initialRows,
+            history.getKey[1],
+          ),
         )
       } else {
         const result = client
@@ -311,10 +351,12 @@ test.each(
             (entry) =>
               entry.queryHash === getLiveQueryHash(second, second.queryKey),
           )!
-        checkCacheOptionRows(
-          result.snapshot!.rows,
-          initialRows,
-          history.getKey[1],
+        oracleAssertion(`checkCacheOptionRows:334`, () =>
+          checkCacheOptionRows(
+            result.snapshot!.rows,
+            initialRows,
+            history.getKey[1],
+          ),
         )
       }
     }
@@ -340,26 +382,35 @@ test.each(
       }),
     )
     await originalObserver.preload()
-    checkCacheOptionRows(
-      Array.from(originalObserver.getSnapshot().state!, ([key, value]) => ({
-        key,
-        value,
-      })),
-      initialRows,
-      history.getKey[0],
+    oracleAssertion(`checkCacheOptionRows:363`, () =>
+      checkCacheOptionRows(
+        Array.from(originalObserver.getSnapshot().state!, ([key, value]) => ({
+          key,
+          value,
+        })),
+        initialRows,
+        history.getKey[0],
+      ),
     )
     const updated = [{ id: `one`, label: `after` }, initialRows[1]!]
     deliveries.length = 0
     publish!(updated)
     const snapshot = originalObserver.getSnapshot()
-    checkCacheOptionRows(
-      Array.from(snapshot.state!, ([key, value]) => ({ key, value })),
-      updated,
-      history.getKey[0],
+    oracleAssertion(`checkCacheOptionRows:375`, () =>
+      checkCacheOptionRows(
+        Array.from(snapshot.state!, ([key, value]) => ({ key, value })),
+        updated,
+        history.getKey[0],
+      ),
     )
-    checkCacheOptionPublications(deliveries, updated, history.getKey[0])
-    expect(rejectedCallbacks, `refused listeners receive no publication`).toBe(
-      0,
+    oracleAssertion(`checkCacheOptionPublications:380`, () =>
+      checkCacheOptionPublications(deliveries, updated, history.getKey[0]),
+    )
+    oracleAssertion(`runCacheOptionsHistory:381`, () =>
+      expect(
+        rejectedCallbacks,
+        `refused listeners receive no publication`,
+      ).toBe(0),
     )
     reach.reach(`source-update`)
   }, [
@@ -376,6 +427,46 @@ test.each(
         () => client.cleanup(),
       ]),
   ])
+}
+oracleProperty<CacheOptionsCase, Verdict>({
+  id: `live-query.cache-option-admission`,
+  law: {
+    statement: `Independent callers must agree on reusable local getKey and schema declarations at every admission path, including retries and later original reuse.`,
+    authority: `The maintainer same-identity conflict decision and shared cache-option declaration model.`,
+    limits: `The unchanged finite reference/presence, key, held-delivery, claimant, and admission-path matrix; no schema transformation or arbitrary transport schedules.`,
+  },
+  // What this oracle owns: the gap report judges prepareLiveQueryValue and
+  // resolveLiveQueryValue by this file's admission histories.
+  owns: [
+    `src/live-query-options.ts#prepareLiveQueryValue`,
+    `src/live-query-options.ts#resolveLiveQueryValue`,
+  ],
+  histories: cacheOptionsHistories,
+  model: recordedAssertionJudgment,
+  driver: (scenario, observe) => {
+    const route = `${scenario.claimant}/${scenario.path}`
+    executedRoutes.add(route)
+    const counts = reaches[route]!
+    const entered = new Set<string>()
+    return recordAssertionJudgment(
+      `CacheOptions declarations`,
+      scenario,
+      observe,
+      () =>
+        runCacheOptionsHistory(scenario, {
+          reach: (state) => {
+            const count = counts.get(state)
+            if (count === undefined)
+              throw new Error(`undeclared ${route} reach ${state}`)
+            if (entered.has(state)) return
+            entered.add(state)
+            counts.set(state, count + 1)
+            observe(`reach`, state)
+          },
+        }),
+    )
+  },
+  check: forwardAssertionJudgment,
 })
 
 // Deliberately wrong observations use the same judgment as every driver. The
@@ -384,12 +475,14 @@ test.each(
 test.each(
   cacheOptionHistories.filter((history) => conflictingCacheOptions(history)),
 )(`cache admission rejects hostile acceptance %j`, (history) => {
+  oracleRoute(`calibration`)
   for (let attempt = 0; attempt < 2; attempt++)
     expect(() => checkCacheOptionAdmission(() => {}, history)).toThrow()
 })
 test.each([`first`, `other`] as const)(
   `cache rows reject hostile keys and leading publication for %s`,
   (key) => {
+    oracleRoute(`calibration`)
     const rows = [{ id: `one`, label: `authored` }]
     const correct = [{ key: `${key}-one`, value: rows[0] }]
     const wrong = [{ key: `borrowed`, value: rows[0] }]
@@ -406,6 +499,7 @@ test.each([`first`, `other`] as const)(
 test.each([`pending`, `fulfilled`, `unrelated-error`, `conflict`] as const)(
   `rejects wrong pre-delivery admission outcome: %s`,
   async (outcome) => {
+    oracleRoute(`calibration`)
     const history = cacheOptionHistories.find(conflictingCacheOptions)!
     const result =
       outcome === `pending`

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { oracleRoute } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { stripVirtualProps } from './utils.js'
 import {
@@ -72,12 +73,23 @@ function expectVisibleRow(
   expect(stripVirtualProps(collection.get(1))).toEqual(expectedRow)
 }
 
-declareOracle({ check: [expectVisibleRow], model: [expectedOwnedRow] })
+// What this oracle owns: the gap report judges the optimistic row overlay in
+// CollectionStateManager.recomputeOptimisticState and the transaction
+// mutate/rollback path by this file's one-key matrix.
+declareOracle({
+  owns: [
+    `src/collection/state.ts#CollectionStateManager.recomputeOptimisticState`,
+    `src/transactions.ts`,
+  ],
+  check: [expectVisibleRow],
+  model: [expectedOwnedRow],
+})
 
 describe(`optimistic snapshot ownership`, () => {
   it.each(cases)(
     `$order / $phase / rollback $removed / $fields`,
     async ({ order, phase, removed, fields }) => {
+      oracleRoute(`case`)
       const fixture = source()
       const pending = [
         pendingTransaction(),

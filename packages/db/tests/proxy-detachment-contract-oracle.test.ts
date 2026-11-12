@@ -19,7 +19,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { withChangeTracking } from '../src/proxy.js'
-import { oracleRuns } from './oracle-config.js'
+import { oracleProperty, oracleRoute } from './oracle-config.js'
 import {
   cycleContainer,
   cycleKinds,
@@ -31,41 +31,105 @@ import {
   storedDataRow,
   storedRow,
 } from './proxy-detachment-fixture.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import type { CycleRow } from './proxy-detachment-fixture.js'
+
+function runOrdinaryFieldCopies(count: number): void {
+  const row = Object.fromEntries(
+    Array.from({ length: count }, (_, i) => [`field${i}`, i]),
+  )
+  const define = vi.spyOn(Object, `defineProperty`)
+  let changes: Record<string | symbol, unknown>
+  let writes: number
+  try {
+    changes = withChangeTracking(row, (draft) => {
+      draft.field0 = 42
+    })
+    writes = define.mock.calls.filter(([, key]) =>
+      String(key).startsWith(`field`),
+    ).length
+  } finally {
+    define.mockRestore()
+  }
+  oracleAssertion('runOrdinaryFieldCopies', () =>
+    expect(changes).toEqual({ field0: 42 }),
+  )
+  oracleAssertion('runOrdinaryFieldCopies', () => expect(row.field0).toBe(0))
+  oracleAssertion('runOrdinaryFieldCopies', () => expect(writes).toBe(0))
+}
+
+type JsonDataKeyHistory = [
+  `__proto__` | `constructor` | `toString` | `ordinary`,
+  number,
+  boolean,
+]
+function runJsonDataKeyHistory([key, value, nested]: JsonDataKeyHistory): void {
+  const object = Object.fromEntries([[key, { value }]])
+  const payload = nested ? { nested: [object] } : object
+  const expected = structuredClone(payload)
+  const original = { payload: { before: true } as object }
+  const changes = withChangeTracking(original, (draft) => {
+    draft.payload = payload
+  })
+  // JSON data can own a non-function "constructor" field. Do not
+  // let the assertion library mistake that field for a class tag.
+  oracleAssertion(`detached JSON payload`, () =>
+    expectDetachedPayloadJson(changes.payload, expected),
+  )
+  const saved = nested
+    ? (changes.payload as { nested: Array<object> }).nested[0]!
+    : changes.payload!
+  oracleAssertion('runJsonDataKeyHistory', () =>
+    expect(Object.hasOwn(saved, key)).toBe(true),
+  )
+  oracleAssertion('runJsonDataKeyHistory', () =>
+    expect(Object.getPrototypeOf(saved)).toBe(Object.prototype),
+  )
+  object[key]!.value++
+  oracleAssertion(`detached JSON payload`, () =>
+    expectDetachedPayloadJson(changes.payload, expected),
+  )
+  oracleAssertion('runJsonDataKeyHistory', () =>
+    expect(original).toEqual({ payload: { before: true } }),
+  )
+}
 
 describe(`Mutation result detachment`, () => {
   // For any number of ordinary fields, one write changes only that field and
   // defines no property descriptors: a generated law over the field count.
-  it(`copies ordinary fields without descriptor writes`, () => {
-    fc.assert(
-      fc.property(fc.integer({ min: 1, max: 40 }), (count) => {
-        const row = Object.fromEntries(
-          Array.from({ length: count }, (_, i) => [`field${i}`, i]),
-        )
-        const define = vi.spyOn(Object, `defineProperty`)
-        let changes: Record<string | symbol, unknown>
-        let writes: number
-        try {
-          changes = withChangeTracking(row, (draft) => {
-            draft.field0 = 42
-          })
-          writes = define.mock.calls.filter(([, key]) =>
-            String(key).startsWith(`field`),
-          ).length
-        } finally {
-          define.mockRestore()
-        }
-        expect(changes).toEqual({ field0: 42 })
-        expect(row.field0).toBe(0)
-        expect(writes).toBe(0)
-      }),
-      { seed: 20260914, numRuns: 40 },
-    )
+  oracleProperty({
+    id: `proxy.ordinary-field-copies`,
+    law: {
+      statement: `Changing one ordinary field copies that field without changing the original row or defining descriptors for its ordinary fields.`,
+      authority: `src/proxy.ts draft-to-detached-row contract stated above`,
+      limits: `The existing generated count of 1 through 40 ordinary numeric fields and one field0 assignment.`,
+    },
+    // What this oracle owns: the gap report judges the draft-to-stored-row copy in
+    // proxy.ts by this file's tests. The fixture helpers declare the checks.
+    owns: [`src/proxy.ts`],
+    histories: {
+      arbitrary: fc.integer({ min: 1, max: 40 }),
+      runs: 40,
+      fixedSeeds: [20260914],
+    },
+    resolve: (count) => ({ count }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`ordinary field copies`, plan, observe, () =>
+        runOrdinaryFieldCopies(plan.count),
+      ),
+    check: forwardAssertionJudgment,
   })
 
   it.each([`value`, `__proto__`, `constructor`, `toString`])(
     `rejects missing or prototype-changing %s data properties`,
     (key) => {
+      oracleRoute(`calibration`)
       expectOwnDataProperty(Object.fromEntries([[key, 1]]), key, 1)
       expect(() => expectOwnDataProperty({}, key, 1)).toThrow()
       const wrong = Object.fromEntries([[key, 1]])
@@ -81,6 +145,7 @@ describe(`Mutation result detachment`, () => {
   )(
     `preserves native own-property histories for $key with schema=$identitySchema`,
     async ({ key, identitySchema }) => {
+      oracleRoute(`case`)
       // Assignment to an existing data property must not invoke an inherited
       // setter, even when extraction also includes an unrelated object edit.
       for (const sibling of [false, true]) {
@@ -172,43 +237,38 @@ describe(`Mutation result detachment`, () => {
   // Driver and checkpoint: compare the change patch after the callback and
   // the public Collection row after update() publishes and persists it.
 
-  it.each([20260914, undefined])(
-    `preserves JSON data keys on assignment seed=%s`,
-    (seed) => {
-      fc.assert(
-        fc.property(
-          fc.constantFrom(`__proto__`, `constructor`, `toString`, `ordinary`),
-          fc.integer(),
-          fc.boolean(),
-          (key, value, nested) => {
-            const object = Object.fromEntries([[key, { value }]])
-            const payload = nested ? { nested: [object] } : object
-            const expected = structuredClone(payload)
-            const original = { payload: { before: true } as object }
-            const changes = withChangeTracking(original, (draft) => {
-              draft.payload = payload
-            })
-            // JSON data can own a non-function "constructor" field. Do not
-            // let the assertion library mistake that field for a class tag.
-            expectDetachedPayloadJson(changes.payload, expected)
-            const saved = nested
-              ? (changes.payload as { nested: Array<object> }).nested[0]!
-              : changes.payload!
-            expect(Object.hasOwn(saved, key)).toBe(true)
-            expect(Object.getPrototypeOf(saved)).toBe(Object.prototype)
-            object[key]!.value++
-            expectDetachedPayloadJson(changes.payload, expected)
-            expect(original).toEqual({ payload: { before: true } })
-          },
-        ),
-        {
-          seed,
-          numRuns: oracleRuns(100),
-          examples: [[`__proto__`, 1, false]],
-        },
-      )
+  oracleProperty({
+    id: `proxy.json-data-keys`,
+    law: {
+      statement: `Assigned JSON data retains its authored own keys and prototype and detaches later caller changes.`,
+      authority: `src/proxy.ts draft-to-stored-row value boundary contract stated above`,
+      limits: `The existing four-key, integer-value and nested-or-direct JSON grammar; native cycles and binary containers remain fixed shared-check histories.`,
     },
-  )
+    owns: [`src/proxy.ts`],
+    histories: {
+      arbitrary: fc.tuple(
+        fc.constantFrom(`__proto__`, `constructor`, `toString`, `ordinary`),
+        fc.integer(),
+        fc.boolean(),
+      ),
+      runs: 100,
+      fixedSeeds: [20260914],
+      fixed: [
+        {
+          name: `own __proto__ assignment`,
+          history: [`__proto__`, 1, false] satisfies JsonDataKeyHistory,
+        },
+      ],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`JSON data key detachment`, plan, observe, () =>
+        runJsonDataKeyHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
   it.each(
     cycleKinds.flatMap((kind) =>
       [`before`, `after`].map((edit) => ({ kind, edit })),
@@ -216,6 +276,7 @@ describe(`Mutation result detachment`, () => {
   )(
     `detaches a $kind draft backedge with the scalar edit $edit assignment`,
     async ({ kind, edit }) => {
+      oracleRoute(`case`)
       const original: CycleRow = { id: 1, count: 0 }
       const collection = storedRow(original)
       let settled: Promise<unknown> | undefined
@@ -240,6 +301,7 @@ describe(`Mutation result detachment`, () => {
   )
 
   it.each(cycleKinds)(`accepts a native %s cyclic snapshot`, (kind) => {
+    oracleRoute(`case`)
     const row: CycleRow = { id: 1, count: 1 }
     row.link = cycleContainer(kind, row)
     expectCycleSnapshot(row, kind)
@@ -253,6 +315,7 @@ describe(`Mutation result detachment`, () => {
       })),
     ),
   )(`rejects $fault in a $kind cyclic snapshot`, ({ kind, fault }) => {
+    oracleRoute(`calibration`)
     const row: CycleRow = { id: 1, count: 1 }
     row.link = cycleContainer(kind, row)
     if (fault === `old-value`)
@@ -278,6 +341,7 @@ describe(`Mutation result detachment`, () => {
 // semantics; shared, resizable and detached buffers are outside this matrix.
 for (const kind of [`buffer`, `view`, `u8`, `i64`] as const) {
   it(`detaches assigned ${kind} without losing buffer bytes or view range`, () => {
+    oracleRoute(`case`)
     const bytes = Uint8Array.from({ length: 24 }, (_, index) => index)
     const value =
       kind === `buffer`

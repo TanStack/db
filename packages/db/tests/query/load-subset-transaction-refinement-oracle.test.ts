@@ -4,6 +4,7 @@ import { createDeferred } from '../../src/deferred.js'
 import { createTransaction } from '../../src/transactions.js'
 import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
 import { declareOracle } from '../oracle-declaration.js'
+import { oracleRoute } from '../oracle-config.js'
 
 /**
  * # When can an abort cancel a load?
@@ -59,7 +60,13 @@ function expectedOutcome(
   }
 }
 
-declareOracle({ model: [expectedOutcome] })
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/transactions.ts#createTransaction',
+  ],
+  model: [expectedOutcome],
+})
 
 describe(`loadSubset transaction refinement`, () => {
   // These three phases cover the contract:
@@ -74,6 +81,7 @@ describe(`loadSubset transaction refinement`, () => {
   ])(
     `matches the independent receipt and publication model when aborting %s`,
     async (abortPhase) => {
+      oracleRoute(`case`)
       const sourceId = `transaction-refinement-${abortPhase}`
       const remoteRow: Row = { id: `remote`, group: `requested` }
       const expected = expectedOutcome(abortPhase, remoteRow.id)

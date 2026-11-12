@@ -14,27 +14,26 @@
  */
 import { act } from '@testing-library/react'
 import { BTreeIndex, DbClient, Query, collectionOptions } from '@tanstack/db'
-import { fc } from '@fast-check/vitest'
 import { useLayoutEffect } from 'react'
 import { renderToString } from 'react-dom/server'
 import { hydrateRoot } from 'react-dom/client'
-import { describe, expect, it, vi } from 'vitest'
+import { vi } from 'vitest'
 import {
   expectedSsrRuntimeErrorViews,
   ssrRuntimeErrorExamples,
   ssrRuntimeErrorHistoryArbitrary,
 } from '../../db/tests/ssr-snapshot-admission-oracle'
 import {
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRuns,
+  differs,
+  oracleProperty,
+  pass,
+  violation,
 } from '../../db/tests/oracle-config'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveQuery } from '../src/useLiveQuery'
+import type { Observation, Verdict } from '../../db/tests/oracle-config'
 import type { SsrRuntimeErrorHistory } from '../../db/tests/ssr-snapshot-admission-oracle'
 import type { Root } from 'react-dom/client'
 
@@ -54,27 +53,23 @@ const runtimeProperties = {
   infinite: `react.ssr-runtime-infinite`,
 } as const
 
-function runtimeReach(hook: Hook) {
-  return createOracleReach(`react-ssr-runtime-${hook}`, [
-    `server-error-browser-cold`,
-    `server-ready-browser-failed-before-hydration`,
-    `server-error-browser-ready-before-hydration`,
-    `matching-ready`,
-    `matching-error`,
-    `undefined-cause`,
-    `defined-cause`,
-    `browser-commit`,
-    `explicit-preload-after-error-view`,
-  ])
-}
+const runtimeStates = [
+  `server-error-browser-cold`,
+  `server-ready-browser-failed-before-hydration`,
+  `server-error-browser-ready-before-hydration`,
+  `matching-ready`,
+  `matching-error`,
+  `undefined-cause`,
+  `defined-cause`,
+  `browser-commit`,
+  `explicit-preload-after-error-view`,
+] as const
 
-async function checkRuntimeHistory(
+async function recordRuntimeHistory(
   hook: Hook,
   history: SsrRuntimeErrorHistory,
-  reach: ReturnType<typeof runtimeReach>,
+  observe: (checkpoint: string, value: unknown) => void,
 ) {
-  reach.beginHistory()
-  const expected = expectedSsrRuntimeErrorViews(history)
   const server = new DbClient()
   const browser = new DbClient()
   server._setSsrServerCleanupEnabled(true)
@@ -148,13 +143,8 @@ async function checkRuntimeHistory(
     vi.stubGlobal(`window`, undefined)
     const html = renderToString(app(server))
     const serverView = reads[0]
-    expect(serverView, `authored server outcome remains readable`).toEqual(
-      expected.initial,
-    )
-    expect(
-      starts.server,
-      `server preparation starts exactly one sync run`,
-    ).toBe(1)
+    observe(`server view`, serverView)
+    observe(`server starts`, starts.server)
     vi.stubGlobal(`window`, originalWindow)
     const transported = JSON.parse(JSON.stringify(server.dehydrate()))
     if (history.serverOutcome === `error`) {
@@ -169,11 +159,8 @@ async function checkRuntimeHistory(
       } catch {
         preloadRejected = true
       }
-      expect(
-        preloadRejected,
-        `an error view cannot fulfill a data preload`,
-      ).toBe(true)
-      reach.reach(`explicit-preload-after-error-view`)
+      observe(`error view preload rejected`, preloadRejected)
+      observe(`reach`, `explicit-preload-after-error-view`)
     }
     browser.hydrate(transported)
     if (history.browserPreload) {
@@ -181,9 +168,7 @@ async function checkRuntimeHistory(
       if (hook === `infinite`) localSource.createIndex((row) => row.id)
       await localSource.preload().catch(() => {})
     }
-    expect(starts.browser, `pre-hydration startup is controlled`).toBe(
-      Number(history.browserPreload),
-    )
+    observe(`pre-hydration starts`, starts.browser)
     reads.length = 0
     commits.length = 0
     host.innerHTML = html
@@ -196,49 +181,36 @@ async function checkRuntimeHistory(
 
     // Reach records actual calls, not the chosen input alone. Both the first
     // hydration render and a later layout commit must have been observed.
-    expect(reads.length, `hydrateRoot reached the public hook`).toBeGreaterThan(
-      0,
-    )
-    expect(
-      commits.length,
-      `React committed the browser subscription`,
-    ).toBeGreaterThan(0)
-    expect(starts.browser, `committed demand starts browser sync`).toBe(1)
-    reach.reach(`browser-commit`)
-    reach.reach(history.definedError ? `defined-cause` : `undefined-cause`)
+    observe(`hydration rendered`, reads.length > 0)
+    observe(`browser committed`, commits.length > 0)
+    observe(`browser starts`, starts.browser)
+    observe(`reach`, `browser-commit`)
+    observe(`reach`, history.definedError ? `defined-cause` : `undefined-cause`)
     if (history.serverOutcome === `error` && !history.browserPreload)
-      reach.reach(`server-error-browser-cold`)
+      observe(`reach`, `server-error-browser-cold`)
     if (
       history.serverOutcome === `ready` &&
       history.browserOutcome === `error` &&
       history.browserPreload
     )
-      reach.reach(`server-ready-browser-failed-before-hydration`)
+      observe(`reach`, `server-ready-browser-failed-before-hydration`)
     if (
       history.serverOutcome === `error` &&
       history.browserOutcome === `ready` &&
       history.browserPreload
     )
-      reach.reach(`server-error-browser-ready-before-hydration`)
+      observe(`reach`, `server-error-browser-ready-before-hydration`)
     if (history.serverOutcome === history.browserOutcome)
-      reach.reach(
+      observe(
+        `reach`,
         history.serverOutcome === `ready` ? `matching-ready` : `matching-error`,
       )
 
     // Inspect the browser's own settled result before the initial comparison,
     // so RED still establishes the neighboring runtime-error surface reached.
-    expect(
-      commits.at(-1),
-      `committed browser outcome is not the server seed`,
-    ).toEqual(expected.committed)
-    expect(
-      reads[0],
-      `first hydration view reproduces actual server output`,
-    ).toEqual(serverView)
-    expect(
-      recoverableErrors,
-      `React did not recover mismatched markup`,
-    ).toEqual([])
+    observe(`committed browser view`, commits.at(-1))
+    observe(`first hydration view`, reads[0])
+    observe(`recoverable errors`, recoverableErrors)
     // React reports attribute-only hydration mismatches through console.error,
     // without invoking onRecoverableError. Preserve that independent signal.
     const hydrationDiagnostics = diagnostics.filter((args) =>
@@ -248,10 +220,7 @@ async function checkRuntimeHistory(
           /hydrated but|hydration mismatch|server rendered HTML/i.test(value),
       ),
     )
-    expect(
-      hydrationDiagnostics,
-      `React received equal status attributes`,
-    ).toEqual([])
+    observe(`hydration diagnostics`, hydrationDiagnostics)
   } catch (error) {
     failure = { error }
   } finally {
@@ -286,48 +255,180 @@ async function checkRuntimeHistory(
     )
 }
 
-// checkRuntimeHistory compares the server view, the browser's first hydration
-// view and its committed view with the shared runtime model's expected views.
-declareOracle({ check: [checkRuntimeHistory] })
-
-describe(`runtime errors across SSR hydration`, () => {
-  for (const hook of [`ordinary`, `infinite`] as const) {
-    for (const history of ssrRuntimeErrorExamples)
-      it.skipIf(oracleReplayRequested())(
-        `${hook} runtime ${history.serverOutcome}/${history.browserOutcome} preload=${history.browserPreload} cause=${history.definedError}`,
-        () => checkRuntimeHistory(hook, history, runtimeReach(hook)),
-      )
-    const runCampaign = async (campaign: `fixed` | `random`) => {
-      const reach = runtimeReach(hook)
-      try {
-        await fc.assert(
-          fc.asyncProperty(ssrRuntimeErrorHistoryArbitrary, (history) =>
-            checkRuntimeHistory(hook, history, reach),
-          ),
-          {
-            ...(campaign === `fixed`
-              ? { numRuns: oracleRuns(64), seed: 2229 }
-              : oraclePropertyOptions(64, runtimeProperties[hook])),
-            examples: ssrRuntimeErrorExamples.map((history) => [history]),
-          },
-        )
-        reach.assertReached()
-      } finally {
-        console.info(
-          `react-ssr-runtime ${hook} ${campaign}`,
-          Object.fromEntries(reach.counts()),
-        )
-      }
-    }
-    // The fixed campaign stands aside during every replay; the random campaign
-    // runs as this property's replay.
-    oracleReplayTest(it)(
-      `${hook} preserves runtime error hydration views (fixed)`,
-      () => runCampaign(`fixed`),
-    )
-    oracleReplayTest(it, runtimeProperties[hook])(
-      `${hook} preserves runtime error hydration views (random)`,
-      () => runCampaign(`random`),
-    )
+// Judge the same public facts in the original order. In particular, compare
+// the committed browser outcome before the first hydration view. The latter
+// must reproduce the recorded server view, whose independent judgment runs first.
+function checkRuntimeTrace(
+  history: SsrRuntimeErrorHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof expectedSsrRuntimeErrorViews>,
+): Verdict {
+  const server = trace.find(({ checkpoint }) => checkpoint === `server view`)
+  const targets: Record<string, unknown> = {
+    [`server view`]: expected.initial,
+    [`server starts`]: 1,
+    [`error view preload rejected`]: true,
+    [`pre-hydration starts`]: Number(history.browserPreload),
+    [`hydration rendered`]: true,
+    [`browser committed`]: true,
+    [`browser starts`]: 1,
+    [`committed browser view`]: expected.committed,
+    [`first hydration view`]: server?.value,
+    [`recoverable errors`]: [],
+    [`hydration diagnostics`]: [],
   }
+  for (const { checkpoint, value } of trace) {
+    if (checkpoint === `reach`) continue
+    const wrong = differs(
+      checkpoint,
+      `SSR runtime hydration`,
+      value,
+      targets[checkpoint],
+    )
+    if (wrong) return wrong
+  }
+  for (const checkpoint of Object.keys(targets)) {
+    if (
+      checkpoint === `error view preload rejected` &&
+      history.serverOutcome !== `error`
+    )
+      continue
+    if (trace.filter((entry) => entry.checkpoint === checkpoint).length !== 1)
+      return violation(
+        checkpoint,
+        `expected one observation`,
+        `SSR runtime hydration`,
+      )
+  }
+  return pass
+}
+
+declareOracle({
+  model: [expectedSsrRuntimeErrorViews],
+  check: [checkRuntimeTrace],
+  grammar: [ssrRuntimeErrorHistoryArbitrary],
 })
+
+for (const hook of [`ordinary`, `infinite`] as const) {
+  const law = {
+    statement: `An SSR runtime-error view remains readable and survives JSON transport into the first hydration view; the committed browser view follows its own source outcome.`,
+    authority: `docs/guides/ssr.md preparation/hydration promises and maintainer runtime-error decision; packages/db/tests/ssr-snapshot-admission-oracle.ts`,
+    limits: `Real renderToString, JSON transport and hydrateRoot with ordinary or infinite hooks and empty eager sources; no portable error-object identity or error row-retention claim.`,
+  }
+  const driver = (
+    history: SsrRuntimeErrorHistory,
+    observe: (checkpoint: string, value: unknown) => void,
+  ) => recordRuntimeHistory(hook, history, observe)
+  // Keep the former direct finite replays in addition to the campaign inputs.
+  oracleProperty({
+    id:
+      hook === `ordinary`
+        ? `react.ssr-runtime-ordinary.cases`
+        : `react.ssr-runtime-infinite.cases`,
+    law,
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+    ],
+    histories: ssrRuntimeErrorExamples,
+    model: expectedSsrRuntimeErrorViews,
+    driver,
+    check: checkRuntimeTrace,
+  })
+  oracleProperty({
+    id: runtimeProperties[hook],
+    law,
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+    ],
+    histories: {
+      arbitrary: ssrRuntimeErrorHistoryArbitrary,
+      runs: 64,
+      fixedSeeds: [2229],
+      states: runtimeStates,
+      constructed: [
+        {
+          name: `committed browser`,
+          enters: [`browser-commit`],
+          build: (history): SsrRuntimeErrorHistory => ({ ...history }),
+        },
+        {
+          name: `cold browser receives server error`,
+          enters: [
+            `server-error-browser-cold`,
+            `explicit-preload-after-error-view`,
+          ],
+          build: (history): SsrRuntimeErrorHistory => ({
+            ...history,
+            serverOutcome: `error`,
+            browserPreload: false,
+          }),
+        },
+        {
+          name: `failed browser receives ready server`,
+          enters: [`server-ready-browser-failed-before-hydration`],
+          build: (history): SsrRuntimeErrorHistory => ({
+            ...history,
+            serverOutcome: `ready`,
+            browserOutcome: `error`,
+            browserPreload: true,
+          }),
+        },
+        {
+          name: `ready browser receives server error`,
+          enters: [`server-error-browser-ready-before-hydration`],
+          build: (history): SsrRuntimeErrorHistory => ({
+            ...history,
+            serverOutcome: `error`,
+            browserOutcome: `ready`,
+            browserPreload: true,
+          }),
+        },
+        {
+          name: `matching ready`,
+          enters: [`matching-ready`],
+          build: (history): SsrRuntimeErrorHistory => ({
+            ...history,
+            serverOutcome: `ready`,
+            browserOutcome: `ready`,
+          }),
+        },
+        {
+          name: `matching error`,
+          enters: [`matching-error`],
+          build: (history): SsrRuntimeErrorHistory => ({
+            ...history,
+            serverOutcome: `error`,
+            browserOutcome: `error`,
+          }),
+        },
+        {
+          name: `undefined error cause`,
+          enters: [`undefined-cause`],
+          build: (history): SsrRuntimeErrorHistory => ({
+            ...history,
+            definedError: false,
+          }),
+        },
+        {
+          name: `defined error cause`,
+          enters: [`defined-cause`],
+          build: (history): SsrRuntimeErrorHistory => ({
+            ...history,
+            definedError: true,
+          }),
+        },
+      ],
+      fixed: ssrRuntimeErrorExamples.map((history, index) => ({
+        name: `runtime outcome ${index}`,
+        history,
+      })),
+    },
+    model: expectedSsrRuntimeErrorViews,
+    driver,
+    check: checkRuntimeTrace,
+  })
+}

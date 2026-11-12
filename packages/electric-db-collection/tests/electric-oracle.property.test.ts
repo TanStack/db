@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   IR,
@@ -16,17 +16,21 @@ import {
 import { queryCollectionOptions } from '../../query-db-collection/src/query'
 import { electricCollectionOptions } from '../src/electric'
 import {
-  oraclePropertyOptions,
+  oracleReplayRequested,
   oracleReplayTest,
-  oracleRuns,
+  oracleRoute,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   checkMutationConfirmation,
   mutationConfirmationHistories,
   mutationConfirmationInputs,
 } from '../../db/tests/mutation-confirmation-oracle'
+import {
+  checkExistingElectricComparison,
+  existingElectricComparison,
+} from './electric-property-oracle'
 import {
   atCheckpoint,
   startUnmetWaits,
@@ -90,7 +94,7 @@ import type {
 // pnpm exec vitest run tests/electric-oracle.property.test.ts -t '<law name> \(replay\)'
 const registeredHistoryProperties = new Set<string>()
 
-function electricHistoryProperty<T>(
+function electricHistoryOptions<T>(
   property: string,
   name: string,
   arbitrary: fc.Arbitrary<T>,
@@ -99,22 +103,31 @@ function electricHistoryProperty<T>(
   check: (value: T) => void | Promise<void>,
   timeout?: number,
   examples?: Array<[T]>,
-): void {
+) {
   if (registeredHistoryProperties.has(property)) {
     throw new Error(`duplicate Electric history property: ${property}`)
   }
   registeredHistoryProperties.add(property)
-  // A path replay of this property runs only the random campaign, from its
-  // path. The fixed campaign stands aside during every path replay.
-  oracleReplayTest(fcTest).prop([arbitrary], {
-    numRuns: oracleRuns(baseRuns),
-    seed: fixedSeed,
-    examples,
-  })(`${name} (fixed)`, check, timeout)
-  oracleReplayTest(fcTest, property).prop([arbitrary], {
-    ...oraclePropertyOptions(baseRuns, property),
-    examples,
-  })(`${name} (random)`, check, timeout)
+  return {
+    id: property,
+    law: {
+      statement: name,
+      authority: `The named independent Electric model/comparison passed to electricHistoryOptions and its adjacent contract prose.`,
+      limits: `The existing generated history domain and controlled SDK boundary; no new product or real-service claim.`,
+    },
+    histories: {
+      arbitrary,
+      runs: baseRuns,
+      fixedSeeds: [fixedSeed],
+      fixed: examples?.flatMap(([history], index) => [
+        { name: `retained fixed history ${index}`, history },
+        { name: `retained random history ${index}`, history },
+      ]),
+    },
+    ...existingElectricComparison(property, check),
+    check: checkExistingElectricComparison,
+    timeout,
+  }
 }
 
 vi.mock(`@electric-sql/client`, async () => {
@@ -138,26 +151,26 @@ vi.mock(`@electric-sql/client`, async () => {
  */
 describe(`mutation outcome and confirmation`, () => {
   const mutationHistories = mutationConfirmationHistories(`electric`)
-  const mutationReach = createOracleReach(
-    `electric.mutation-confirmation`,
-    mutationHistories.map(
-      (h) =>
-        `${h.operation}/${h.outcome}/${h.confirmation}/${h.returned}/peer:${h.peer}`,
-    ),
+  const mutationCases = new Map(
+    mutationHistories.map((h) => [
+      `${h.operation}/${h.outcome}/${h.confirmation}/${h.returned}/peer:${h.peer}`,
+      0,
+    ]),
   )
   afterAll(() => {
-    mutationReach.assertReached()
+    if (!oracleReplayRequested())
+      expect([...mutationCases].filter(([, count]) => count < 1)).toEqual([])
     console.info(
       `electric.mutation-confirmation reach`,
-      Object.fromEntries(mutationReach.counts()),
+      Object.fromEntries(mutationCases),
     )
   })
   it.each(mutationHistories)(
     `settles a handler independently of discarded values: %j`,
     async (history) => {
-      mutationReach.beginHistory()
+      oracleRoute(`case`)
       const { operation, confirmation, outcome, returned } = history
-      const localReach = createOracleReach(`electric.mutation-cuts`, [
+      const expectedCuts = [
         `entered`,
         `settled`,
         `settlement-waiter`,
@@ -168,8 +181,8 @@ describe(`mutation outcome and confirmation`, () => {
         ...(confirmation === `none` && outcome !== `reject-before-write`
           ? [`late-confirmed`]
           : []),
-      ])
-      localReach.beginHistory()
+      ]
+      const observedCuts = new Set<string>()
       resetElectricOracleMocks()
       let subscriber!: (messages: Array<Message<OracleRow>>) => void
       mockSubscribe.mockImplementationOnce((callback) => {
@@ -276,7 +289,7 @@ describe(`mutation outcome and confirmation`, () => {
         )
         await atCheckpoint(entered.promise, `Electric handler entry`)
         checkMutationConfirmation(history, `entered`, observe(), failure)
-        localReach.reach(`entered`)
+        observedCuts.add(`entered`)
         enterRelease.resolve()
         if (outcome !== `reject-before-write`) {
           await atCheckpoint(serverWritten.promise, `Electric server write`)
@@ -286,7 +299,7 @@ describe(`mutation outcome and confirmation`, () => {
             observe(),
             failure,
           )
-          localReach.reach(`server-written`)
+          observedCuts.add(`server-written`)
           confirmationRelease.resolve()
           if (confirmation === `txid`) {
             await atCheckpoint(
@@ -300,7 +313,7 @@ describe(`mutation outcome and confirmation`, () => {
               observe(),
               failure,
             )
-            localReach.reach(`confirmation-requested`)
+            observedCuts.add(`confirmation-requested`)
             subscriber([message, upToDate])
           }
           await atCheckpoint(
@@ -314,7 +327,7 @@ describe(`mutation outcome and confirmation`, () => {
               observe(),
               failure,
             )
-            localReach.reach(`confirmation-accepted`)
+            observedCuts.add(`confirmation-accepted`)
           }
           settleRelease.resolve()
         }
@@ -323,9 +336,9 @@ describe(`mutation outcome and confirmation`, () => {
           `Electric handler settlement`,
         )
         checkMutationConfirmation(history, `settled`, atWaiter, failure)
-        localReach.reach(`settlement-waiter`)
+        observedCuts.add(`settlement-waiter`)
         checkMutationConfirmation(history, `settled`, observe(), failure)
-        localReach.reach(`settled`)
+        observedCuts.add(`settled`)
         if (confirmation === `none` && outcome !== `reject-before-write`) {
           const ack = collection.utils.awaitTxId(55)
           subscriber([message, upToDate])
@@ -336,13 +349,15 @@ describe(`mutation outcome and confirmation`, () => {
             observe(),
             failure,
           )
-          localReach.reach(`late-confirmed`)
+          observedCuts.add(`late-confirmed`)
           checkMutationConfirmation(history, `settled`, atWaiter, failure)
         }
-        localReach.assertReached()
-        mutationReach.reach(
-          `${operation}/${outcome}/${confirmation}/${returned}/peer:${history.peer}`,
-        )
+        if (!oracleReplayRequested())
+          expect(expectedCuts.filter((cut) => !observedCuts.has(cut))).toEqual(
+            [],
+          )
+        const mutationCase = `${operation}/${outcome}/${confirmation}/${returned}/peer:${history.peer}`
+        mutationCases.set(mutationCase, mutationCases.get(mutationCase)! + 1)
       }, [
         () => {
           enterRelease.resolve()
@@ -412,27 +427,6 @@ function foldSourceLedgerThrough(
 const durablePrefixProperty = `electric.durable-prefix`
 const publicationBeforePersistenceProperty = `electric.publication-before-persistence`
 const adapterFailurePolicyProperty = `electric.adapter-failure-policy`
-
-function durablePrefixPropertyOptions(mode: `fixed` | `random`): {
-  numRuns: number
-  seed?: number
-  path?: string
-} {
-  if (mode === `fixed`) return { numRuns: oracleRuns(10), seed: 20260921 }
-  return oraclePropertyOptions(10, durablePrefixProperty)
-}
-
-function persistencePolicyPropertyOptions(
-  mode: `fixed` | `random`,
-  property: string,
-): {
-  numRuns: number
-  seed?: number
-  path?: string
-} {
-  if (mode === `fixed`) return { numRuns: oracleRuns(8), seed: 20260923 }
-  return oraclePropertyOptions(8, property)
-}
 
 async function runRejectedDurablePrefixWitness(
   id: string,
@@ -633,20 +627,6 @@ const queuedPresenceArbitraries: [
   fc.tuple(fc.string({ maxLength: 12 }), fc.string({ maxLength: 12 })),
 ]
 const persistenceInterleavingProperty = `electric.persistence-interleaving`
-
-function queuedPresencePropertyOptions(mode: `fixed` | `random`): {
-  numRuns: number
-  seed?: number
-  path?: string
-} {
-  if (mode === `fixed`) {
-    return {
-      numRuns: oracleRuns(queuedPresenceRuns),
-      seed: queuedPresenceFixedSeed,
-    }
-  }
-  return oraclePropertyOptions(queuedPresenceRuns, queuedPresenceProperty)
-}
 
 function reconstructQueuedPresenceCampaign(
   value: unknown,
@@ -2722,11 +2702,13 @@ describe(`Electric adapter laws`, () => {
     ),
   )(
     `preserves live updates after $removals initial tagged move-outs in $syncMode mode`,
-    ({ syncMode, removals }) =>
-      checkInitialMoveOut(syncMode, removals, 1, `updated`),
+    ({ syncMode, removals }) => {
+      oracleRoute(`case`)
+      return checkInitialMoveOut(syncMode, removals, 1, `updated`)
+    },
   )
 
-  electricHistoryProperty(
+  const electricHistoryRegistration1 = electricHistoryOptions(
     `electric.initial-tagged-move-outs`,
     `generated initial tagged move-outs preserve later live updates`,
     fc.tuple(
@@ -2742,8 +2724,19 @@ describe(`Electric adapter laws`, () => {
       }
     },
   )
+  oracleProperty({
+    ...electricHistoryRegistration1,
+    id: `electric.initial-tagged-move-outs`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration1.histories,
+      runs: 20,
+      fixedSeeds: [42_715],
+    },
+    check: checkExistingElectricComparison,
+  })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration2 = electricHistoryOptions(
     `electric.process-grammar`,
     `generated process grammar preserves lifecycle and concurrent-collection isolation`,
     fc.array(processCommandArb, { maxLength: 20 }),
@@ -2754,10 +2747,22 @@ describe(`Electric adapter laws`, () => {
       await runProcessGrammar(`process-grammar-${processGrammarRun}`, commands)
     },
   )
+  oracleProperty({
+    ...electricHistoryRegistration2,
+    id: `electric.process-grammar`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration2.histories,
+      runs: 20,
+      fixedSeeds: [42_716],
+    },
+    check: checkExistingElectricComparison,
+  })
 
   oracleReplayTest(it)(
     `delivers retired callbacks without advancing a failed lifecycle`,
     async () => {
+      oracleRoute(`fixed history`)
       const result = await runProcessGrammar(`process-grammar-terminal-error`, [
         {
           kind: `batch`,
@@ -2796,6 +2801,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it).each([`invalid-resume`, `cleanup`] as const)(
     `records an initial preload's %s rejection before continuing the grammar`,
     async (failure) => {
+      oracleRoute(`case`)
       const result = await runProcessGrammar(`preload-${failure}`, [
         { kind: `create`, slot: `a` },
         { kind: `import`, slot: `a`, txid: 4, resume: true },
@@ -2842,6 +2848,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `publishes an Electric source commit before its adapter persistence settles`,
     async () => {
+      oracleRoute(`case`)
       await runPublicationBeforePersistenceWitness(
         `publication-before-persistence-fixed`,
         { id: 41, name: `visible first`, stable: `stable-41` },
@@ -2853,6 +2860,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `reconstructs the queued-presence grammar and rejects ablated, out-of-range, and foreign campaigns`,
     () => {
+      oracleRoute(`fixed seed`)
       const campaigns = fc.sample(fc.tuple(...queuedPresenceArbitraries), {
         seed: queuedPresenceFixedSeed,
         numRuns: 20,
@@ -2866,6 +2874,7 @@ describe(`Electric adapter laws`, () => {
         )
       }
 
+      oracleRoute(`calibration`)
       const witness = {
         histories: [...queuedPresenceHistories],
         names: [``, `x`.repeat(12)] as [string, string],
@@ -2917,6 +2926,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `rejects named wrong answer: later callback publishes before durability`,
     () => {
+      oracleRoute(`calibration`)
       expect(() =>
         expectQueuedPresenceAtDurabilityHold(
           [
@@ -2930,13 +2940,25 @@ describe(`Electric adapter laws`, () => {
     },
   )
 
-  oracleReplayTest(fcTest).prop(
-    queuedPresenceArbitraries,
-    queuedPresencePropertyOptions(`fixed`),
-  )(
-    `generated queued Electric histories preserve staged presence and reset fences (fixed)`,
-    runQueuedPresenceCampaign,
+  const electricHistoryRegistration3 = electricHistoryOptions(
+    queuedPresenceProperty,
+    `generated queued Electric histories preserve staged presence and reset fences`,
+    fc.tuple(...queuedPresenceArbitraries),
+    queuedPresenceRuns,
+    queuedPresenceFixedSeed,
+    (args) => runQueuedPresenceCampaign(...args),
   )
+  oracleProperty({
+    ...electricHistoryRegistration3,
+    id: queuedPresenceProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration3.histories,
+      runs: queuedPresenceRuns,
+      fixedSeeds: [queuedPresenceFixedSeed],
+    },
+    check: checkExistingElectricComparison,
+  })
 
   const publicationPolicyArbitraries: [
     fc.Arbitrary<number>,
@@ -2950,30 +2972,30 @@ describe(`Electric adapter laws`, () => {
       800 + id,
     )
   }
-  oracleReplayTest(fcTest).prop(
-    publicationPolicyArbitraries,
-    persistencePolicyPropertyOptions(
-      `fixed`,
-      publicationBeforePersistenceProperty,
-    ),
-  )(
-    `generated Electric commits publish before adapter persistence settles (fixed)`,
-    checkPublicationPolicy,
+  const electricHistoryRegistration4 = electricHistoryOptions(
+    publicationBeforePersistenceProperty,
+    `generated Electric commits publish before adapter persistence settles`,
+    fc.tuple(...publicationPolicyArbitraries),
+    8,
+    20260923,
+    (args) => checkPublicationPolicy(...args),
   )
-  oracleReplayTest(fcTest, publicationBeforePersistenceProperty).prop(
-    publicationPolicyArbitraries,
-    persistencePolicyPropertyOptions(
-      `random`,
-      publicationBeforePersistenceProperty,
-    ),
-  )(
-    `generated Electric commits publish before adapter persistence settles (random)`,
-    checkPublicationPolicy,
-  )
+  oracleProperty({
+    ...electricHistoryRegistration4,
+    id: publicationBeforePersistenceProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration4.histories,
+      runs: 8,
+      fixedSeeds: [20260923],
+    },
+    check: checkExistingElectricComparison,
+  })
 
   oracleReplayTest(it)(
     `turns adapter rejection into a named terminal Electric persistence error`,
     async () => {
+      oracleRoute(`case`)
       await runPersistenceFailureCrashOnlyWitness(
         `terminal-persistence-error-fixed`,
         { id: 51, name: `published before failure`, stable: `stable-51` },
@@ -2997,22 +3019,27 @@ describe(`Electric adapter laws`, () => {
       { id: id + 100, name: names[1], stable: `stable-${id + 100}` },
     )
   }
-  oracleReplayTest(fcTest).prop(
-    failurePolicyArbitraries,
-    persistencePolicyPropertyOptions(`fixed`, adapterFailurePolicyProperty),
-  )(
-    `generated adapter failures reject publicly and admit no later Electric work (fixed)`,
-    checkFailurePolicy,
+  const electricHistoryRegistration5 = electricHistoryOptions(
+    adapterFailurePolicyProperty,
+    `generated adapter failures reject publicly and admit no later Electric work`,
+    fc.tuple(...failurePolicyArbitraries),
+    8,
+    20260923,
+    (args) => checkFailurePolicy(...args),
   )
-  oracleReplayTest(fcTest, adapterFailurePolicyProperty).prop(
-    failurePolicyArbitraries,
-    persistencePolicyPropertyOptions(`random`, adapterFailurePolicyProperty),
-  )(
-    `generated adapter failures reject publicly and admit no later Electric work (random)`,
-    checkFailurePolicy,
-  )
+  oracleProperty({
+    ...electricHistoryRegistration5,
+    id: adapterFailurePolicyProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration5.histories,
+      runs: 8,
+      fixedSeeds: [20260923],
+    },
+    check: checkExistingElectricComparison,
+  })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration6 = electricHistoryOptions(
     `electric.design-convergence`,
     `operational and denotational reference designs agree before checking production`,
     fc.tuple(
@@ -3048,10 +3075,22 @@ describe(`Electric adapter laws`, () => {
       }
     },
   )
+  oracleProperty({
+    ...electricHistoryRegistration6,
+    id: `electric.design-convergence`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration6.histories,
+      runs: 24,
+      fixedSeeds: [42_717],
+    },
+    check: checkExistingElectricComparison,
+  })
 
   oracleReplayTest(it)(
     `distinguishes plausible unseen-update and reset-visibility semantics`,
     async () => {
+      oracleRoute(`case`)
       const completeUnseenUpdate: ChangeMessage<OracleRow> = {
         key: `1`,
         value: { id: 1, name: `complete`, stable: `stable-1` },
@@ -3092,6 +3131,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `keeps SDK reset callbacks separate from every neighboring message kind`,
     () => {
+      oracleRoute(`case`)
       const neighbors: Array<Message<OracleRow>> = [
         change(`insert`, 1, `row`),
         change(`update`, 1, `row`),
@@ -3124,6 +3164,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `distinguishes callback-atomic and subset publication semantics`,
     async () => {
+      oracleRoute(`case`)
       const callbackHistory = [
         [
           change(`insert`, 1, `before-control`),
@@ -3174,6 +3215,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `settles every startup, hydration, snapshot availability, persistence-apply release, and cleanup permutation`,
     async () => {
+      oracleRoute(`case`)
       const events: Array<SchedulerEvent> = [
         `startup-promise`,
         `hydration`,
@@ -3207,7 +3249,7 @@ describe(`Electric adapter laws`, () => {
     30_000,
   )
 
-  electricHistoryProperty(
+  const electricHistoryRegistration7 = electricHistoryOptions(
     `electric.synthetic-batch-partition`,
     `synthetic batch partition is invariant across Electric modes and phases`,
     fc.tuple(
@@ -3376,8 +3418,19 @@ describe(`Electric adapter laws`, () => {
     },
     30_000,
   )
+  oracleProperty({
+    ...electricHistoryRegistration7,
+    id: `electric.synthetic-batch-partition`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration7.histories,
+      runs: 10,
+      fixedSeeds: [42_718],
+    },
+    check: checkExistingElectricComparison,
+  })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration8 = electricHistoryOptions(
     `electric.valid-batch-partition`,
     `generated valid histories are invariant under every batch partition`,
     fc.array(
@@ -3412,6 +3465,17 @@ describe(`Electric adapter laws`, () => {
       }
     },
   )
+  oracleProperty({
+    ...electricHistoryRegistration8,
+    id: `electric.valid-batch-partition`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration8.histories,
+      runs: 20,
+      fixedSeeds: [42_719],
+    },
+    check: checkExistingElectricComparison,
+  })
 
   const publicationEpochTokensArbitrary = fc.array(designTokenArb, {
     minLength: 1,
@@ -3443,34 +3507,41 @@ describe(`Electric adapter laws`, () => {
 
   oracleReplayTest(it).each(publicationEpochExamples)(
     `reconstructs the authored publication-epoch history`,
-    assertPublicationEpochHistory,
-    30_000,
-  )
-
-  oracleReplayTest(fcTest).prop(
-    [publicationEpochTokensArbitrary, publicationEpochPartitionArbitrary],
-    {
-      seed: 42714,
-      numRuns: oracleRuns(20),
+    (...args) => {
+      oracleRoute(`case`)
+      return assertPublicationEpochHistory(...args)
     },
-  )(
-    `Electric drivers converge with the denotational reference and model-fed Query projection across publication epochs (fixed)`,
-    assertPublicationEpochHistory,
     30_000,
   )
 
-  oracleReplayTest(fcTest, `electric.publication-epoch-convergence`).prop(
-    [publicationEpochTokensArbitrary, publicationEpochPartitionArbitrary],
-    oraclePropertyOptions(20, `electric.publication-epoch-convergence`),
-  )(
-    `Electric drivers converge with the denotational reference and model-fed Query projection across publication epochs (random or replayed)`,
-    assertPublicationEpochHistory,
+  const electricHistoryRegistration9 = electricHistoryOptions(
+    `electric.publication-epoch-convergence`,
+    `Electric drivers converge with the denotational reference and model-fed Query projection across publication epochs`,
+    fc.tuple(
+      publicationEpochTokensArbitrary,
+      publicationEpochPartitionArbitrary,
+    ),
+    20,
+    42714,
+    (args) => assertPublicationEpochHistory(...args),
     30_000,
   )
+  oracleProperty({
+    ...electricHistoryRegistration9,
+    id: `electric.publication-epoch-convergence`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration9.histories,
+      runs: 20,
+      fixedSeeds: [42714],
+    },
+    check: checkExistingElectricComparison,
+  })
 
   oracleReplayTest(it)(
     `checks an authored HTTP transcript and separate complete Query snapshots`,
     async () => {
+      oracleRoute(`fixed history`)
       const { ShapeStream: RealShapeStream } = await vi.importActual<{
         ShapeStream: typeof ShapeStream
       }>(`@electric-sql/client`)
@@ -3603,7 +3674,7 @@ describe(`Electric adapter laws`, () => {
     },
   )
 
-  electricHistoryProperty(
+  const electricHistoryRegistration10 = electricHistoryOptions(
     `electric.invalid-resume-partition`,
     `generated invalid resume transitions fail under every batch partition`,
     fc.tuple(
@@ -3661,6 +3732,17 @@ describe(`Electric adapter laws`, () => {
       }
     },
   )
+  oracleProperty({
+    ...electricHistoryRegistration10,
+    id: `electric.invalid-resume-partition`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration10.histories,
+      runs: 20,
+      fixedSeeds: [42_720],
+    },
+    check: checkExistingElectricComparison,
+  })
 
   const reentryHistory = fc.record({
     txid: fc.integer({ min: 1, max: 10000 }),
@@ -3763,20 +3845,25 @@ describe(`Electric adapter laws`, () => {
     }
   }
 
-  oracleReplayTest(fcTest).prop([reentryHistory], {
-    seed: 42713,
-    numRuns: oracleRuns(10),
-  })(
-    `replacement sync runs reject evidence from callback reentry histories (fixed)`,
+  const electricHistoryRegistration11 = electricHistoryOptions(
+    `electric.match-reentry`,
+    `replacement sync runs reject evidence from callback reentry histories`,
+    reentryHistory,
+    10,
+    42713,
     runReentryHistory,
   )
-  oracleReplayTest(fcTest, `electric.match-reentry`).prop(
-    [reentryHistory],
-    oraclePropertyOptions(10, `electric.match-reentry`),
-  )(
-    `replacement sync runs reject evidence from callback reentry histories (random)`,
-    runReentryHistory,
-  )
+  oracleProperty({
+    ...electricHistoryRegistration11,
+    id: `electric.match-reentry`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration11.histories,
+      runs: 10,
+      fixedSeeds: [42713],
+    },
+    check: checkExistingElectricComparison,
+  })
 
   /**
    * ## Does a source that still tries ever look failed?
@@ -3837,7 +3924,7 @@ describe(`Electric adapter laws`, () => {
    * client awaits the decision; and stream steps after a final failure or an
    * abort, because the stream has stopped. It also omits a second
    * up-to-date while the first snapshot's acceptance is pending. The
-   * installed-client lane cannot hold an acceptance, so this dimension runs
+   * installed-client receiving path cannot hold an acceptance, so this dimension runs
    * only here. A progressive history starts with
    * a must-refetch, so its demands wait on the established snapshot.
    *
@@ -3851,7 +3938,7 @@ describe(`Electric adapter laws`, () => {
    * defers the Collection's failure (EVID-2; maintainer decisions
    * 2026-10-30 and 2026-11-02). After cleanup a later run could supply the
    * evidence, so the late pair is not compared then. The model lives in `electric-retry-decision-model.ts`. An
-   * installed-client lane in `electric-sdk-delivery-oracle.property.test.ts`
+   * installed-client receiving path in `electric-sdk-delivery-oracle.property.test.ts`
    * drives the same model through the real Electric client and HTTP.
    */
   const retryDecisionArb = fc.constantFrom<RetryDecision>(
@@ -3910,31 +3997,55 @@ describe(`Electric adapter laws`, () => {
 
   // EVID-2: a wait started after the run stopped rejects. The states name
   // each way the model stops a run before cleanup.
-  const retryReach = createOracleReach(`electric.retry-decision`, [
+  // Retain the old per-history census alongside the unchanged retry model.
+  // These counts describe the existing fixed/random language; they do not
+  // claim the stronger constructed-history guarantees of a new reach design.
+  const retryStates = [
     `late-wait-after-loading-failure`,
     `late-wait-after-ready-give-up`,
     `late-wait-after-abort-after-ready`,
     `late-wait-during-deferred-abort`,
-  ])
+  ]
+  const retryHistoriesByState = new Map(
+    retryStates.map((state) => [state, new Set<number>()]),
+  )
   // Only the retry-decision campaigns owe this reach.
   afterAll(() => {
     if (retryHistoryRun === 0) return
-    retryReach.assertReached()
+    if (!oracleReplayRequested())
+      expect(
+        [...retryHistoriesByState].filter(
+          ([, histories]) => histories.size < 1,
+        ),
+      ).toEqual([])
     console.info(
       `electric.retry-decision reach`,
-      Object.fromEntries(retryReach.counts()),
+      Object.fromEntries(
+        [...retryHistoriesByState].map(([state, histories]) => [
+          state,
+          histories.size,
+        ]),
+      ),
     )
   })
   const reachLateWait = (model: RetryModel) => {
     if (model.cleanedUp) return
     if (model.failed !== undefined) {
-      retryReach.reach(`late-wait-after-loading-failure`)
+      retryHistoriesByState
+        .get(`late-wait-after-loading-failure`)!
+        .add(retryHistoryRun)
     } else if (model.aborted && !model.ready && model.committed) {
-      retryReach.reach(`late-wait-during-deferred-abort`)
+      retryHistoriesByState
+        .get(`late-wait-during-deferred-abort`)!
+        .add(retryHistoryRun)
     } else if (model.aborted && model.ready) {
-      retryReach.reach(`late-wait-after-abort-after-ready`)
+      retryHistoriesByState
+        .get(`late-wait-after-abort-after-ready`)!
+        .add(retryHistoryRun)
     } else if (model.gaveUpAfterReady) {
-      retryReach.reach(`late-wait-after-ready-give-up`)
+      retryHistoriesByState
+        .get(`late-wait-after-ready-give-up`)!
+        .add(retryHistoryRun)
     }
   }
 
@@ -4177,277 +4288,298 @@ describe(`Electric adapter laws`, () => {
   }
 
   let retryHistoryRun = 0
-  electricHistoryProperty(
+  const checkRetryHistory = async (history: RetryHistory) => {
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const consoleWarn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    try {
+      resetElectricOracleMocks()
+      await runRetryHistory(history, `retry-decision-${++retryHistoryRun}`)
+    } finally {
+      consoleError.mockRestore()
+      consoleWarn.mockRestore()
+    }
+  }
+  const retryExamples = [
+    // Named fixed histories: a retried provider error while a transaction holds the
+    // recovered snapshot, for each wait, with and without a hold (this
+    // replaces the former fixed "renews full recovery demand" case); a
+    // held snapshot whose stream aborts before the hold settles; an
+    // asynchronous retry decision with a waiting and a new demand; an
+    // asynchronous give-up; a retry, then a give-up; a throwing onError;
+    // an Electric client give-up; and an abort during a decision.
+    ...([`full-log`, `progressive`] as const).flatMap((wait) =>
+      [false, true].map((held): [RetryHistory] => [
+        {
+          wait,
+          hasOnError: true,
+          steps: [
+            ...(held ? [{ kind: `hold` as const }] : []),
+            { kind: `demand` },
+            { kind: `error`, decision: `sync-retry` },
+            { kind: `up-to-date` },
+            { kind: `demand` },
+            ...(held ? [{ kind: `release` as const }] : []),
+          ],
+        },
+      ]),
+    ),
+    [
+      {
+        wait: `full-log`,
+        hasOnError: false,
+        steps: [
+          { kind: `demand` },
+          { kind: `hold` },
+          { kind: `up-to-date` },
+          { kind: `abort` },
+          { kind: `release` },
+        ],
+      },
+    ],
+    [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `error`, decision: `async-retry` },
+          { kind: `demand` },
+          { kind: `decide` },
+          { kind: `up-to-date` },
+        ],
+      },
+    ],
+    [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `error`, decision: `async-give-up` },
+          { kind: `demand` },
+          { kind: `decide` },
+        ],
+      },
+    ],
+    [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `error`, decision: `sync-retry` },
+          { kind: `error`, decision: `sync-give-up` },
+        ],
+      },
+    ],
+    [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [{ kind: `demand` }, { kind: `error`, decision: `throw` }],
+      },
+    ],
+    [
+      {
+        wait: `progressive`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `error`, decision: `sync-retry` },
+          { kind: `client-give-up` },
+        ],
+      },
+    ],
+    [
+      {
+        wait: `progressive`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `error`, decision: `async-retry` },
+          { kind: `abort` },
+          { kind: `decide` },
+        ],
+      },
+    ],
+    // The external signal is already aborted when sync starts, for each
+    // wait; a status listener that cleans up inside a give-up and inside an
+    // external abort; and the eager and changes-only sources, which have no
+    // established-snapshot wait.
+    ...([`full-log`, `progressive`, `eager`, `changes-only`] as const).map(
+      (wait): [RetryHistory] => [
+        { wait, hasOnError: true, abortedAtStart: true, steps: [] },
+      ],
+    ),
+    [
+      {
+        wait: `full-log`,
+        hasOnError: false,
+        cleanupOnError: true,
+        steps: [{ kind: `demand` }, { kind: `error`, decision: `sync-retry` }],
+      },
+    ],
+    [
+      {
+        wait: `progressive`,
+        hasOnError: true,
+        cleanupOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `error`, decision: `async-retry` },
+          { kind: `abort` },
+        ],
+      },
+    ],
+    ...([`eager`, `changes-only`] as const).map((wait): [RetryHistory] => [
+      {
+        wait,
+        hasOnError: true,
+        steps: [
+          { kind: `hold` },
+          { kind: `error`, decision: `async-retry` },
+          { kind: `decide` },
+          { kind: `up-to-date` },
+          { kind: `release` },
+        ],
+      },
+    ]),
+    ...([`eager`, `changes-only`] as const).map((wait): [RetryHistory] => [
+      {
+        wait,
+        hasOnError: true,
+        steps: [
+          { kind: `error`, decision: `async-give-up` },
+          { kind: `decide` },
+        ],
+      },
+    ]),
+    // A final give-up after the first up-to-date is committed but before
+    // its acceptance settles is a post-ready failure: the Collection
+    // becomes ready when the snapshot is accepted, with its rows, and the
+    // demands it covers settle. One replay per give-up.
+    ...(
+      [
+        [false, { kind: `error`, decision: `sync-give-up` }],
+        [true, { kind: `error`, decision: `sync-give-up` }],
+        [true, { kind: `error`, decision: `throw` }],
+        [true, { kind: `client-give-up` }],
+        [true, { kind: `abort` }],
+      ] as Array<[boolean, RetryStep]>
+    ).map(([hasOnError, giveUp]): [RetryHistory] => [
+      {
+        wait: `full-log`,
+        hasOnError,
+        steps: [
+          { kind: `demand` },
+          { kind: `hold-acceptance` },
+          { kind: `up-to-date` },
+          giveUp,
+          { kind: `accept` },
+        ],
+      },
+    ]),
+    [
+      {
+        wait: `progressive`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `hold-acceptance` },
+          { kind: `up-to-date` },
+          { kind: `error`, decision: `async-give-up` },
+          { kind: `decide` },
+          { kind: `demand` },
+          { kind: `accept` },
+        ],
+      },
+    ],
+    // While the first snapshot's acceptance is pending: a retry, then the
+    // acceptance, then a final give-up; a retry, then a give-up, then the
+    // acceptance; and an acceptance that fails, with and without an earlier
+    // external abort.
+    [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `hold-acceptance` },
+          { kind: `up-to-date` },
+          { kind: `error`, decision: `sync-retry` },
+          { kind: `accept` },
+          { kind: `error`, decision: `sync-give-up` },
+        ],
+      },
+    ],
+    [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `hold-acceptance` },
+          { kind: `up-to-date` },
+          { kind: `error`, decision: `async-retry` },
+          { kind: `decide` },
+          { kind: `client-give-up` },
+          { kind: `accept` },
+        ],
+      },
+    ],
+    ...[false, true].map((aborted): [RetryHistory] => [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `hold-acceptance` },
+          { kind: `up-to-date` },
+          ...(aborted ? [{ kind: `abort` as const }] : []),
+          { kind: `accept-fails` },
+        ],
+      },
+    ]),
+  ] satisfies Array<[RetryHistory]> as Array<[RetryHistory]>
+  // The former fast-check examples include authored retry schedules outside
+  // the mapped arbitrary's shrink domain. Keep the same shared comparison and
+  // both former campaign executions without changing the random generator.
+  declareOracle({ check: [checkRetryHistory] })
+  oracleReplayTest(it).each(retryExamples)(
+    `electric.retry-decision: retained fixed history %#`,
+    checkRetryHistory,
+    60_000,
+  )
+  oracleReplayTest(it).each(retryExamples)(
+    `electric.retry-decision: retained random history %#`,
+    checkRetryHistory,
+    60_000,
+  )
+  const electricHistoryRegistration12 = electricHistoryOptions(
     `electric.retry-decision`,
     `a source that still tries stays loading, and only a give-up fails its waits`,
     retryHistoryArb,
     30,
     42_731,
-    async (history) => {
-      const consoleError = vi
-        .spyOn(console, `error`)
-        .mockImplementation(() => {})
-      const consoleWarn = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      try {
-        resetElectricOracleMocks()
-        retryReach.beginHistory()
-        await runRetryHistory(history, `retry-decision-${++retryHistoryRun}`)
-      } finally {
-        consoleError.mockRestore()
-        consoleWarn.mockRestore()
-      }
-    },
+    checkRetryHistory,
     60_000,
-    [
-      // Named replays: a retried provider error while a transaction holds the
-      // recovered snapshot, for each wait, with and without a hold (this
-      // replaces the former fixed "renews full recovery demand" case); a
-      // held snapshot whose stream aborts before the hold settles; an
-      // asynchronous retry decision with a waiting and a new demand; an
-      // asynchronous give-up; a retry, then a give-up; a throwing onError;
-      // an Electric client give-up; and an abort during a decision.
-      ...([`full-log`, `progressive`] as const).flatMap((wait) =>
-        [false, true].map((held): [RetryHistory] => [
-          {
-            wait,
-            hasOnError: true,
-            steps: [
-              ...(held ? [{ kind: `hold` as const }] : []),
-              { kind: `demand` },
-              { kind: `error`, decision: `sync-retry` },
-              { kind: `up-to-date` },
-              { kind: `demand` },
-              ...(held ? [{ kind: `release` as const }] : []),
-            ],
-          },
-        ]),
-      ),
-      [
-        {
-          wait: `full-log`,
-          hasOnError: false,
-          steps: [
-            { kind: `demand` },
-            { kind: `hold` },
-            { kind: `up-to-date` },
-            { kind: `abort` },
-            { kind: `release` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `async-retry` },
-            { kind: `demand` },
-            { kind: `decide` },
-            { kind: `up-to-date` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `async-give-up` },
-            { kind: `demand` },
-            { kind: `decide` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `sync-retry` },
-            { kind: `error`, decision: `sync-give-up` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [{ kind: `demand` }, { kind: `error`, decision: `throw` }],
-        },
-      ],
-      [
-        {
-          wait: `progressive`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `sync-retry` },
-            { kind: `client-give-up` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `progressive`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `async-retry` },
-            { kind: `abort` },
-            { kind: `decide` },
-          ],
-        },
-      ],
-      // The external signal is already aborted when sync starts, for each
-      // wait; a status listener that cleans up inside a give-up and inside an
-      // external abort; and the eager and changes-only sources, which have no
-      // established-snapshot wait.
-      ...([`full-log`, `progressive`, `eager`, `changes-only`] as const).map(
-        (wait): [RetryHistory] => [
-          { wait, hasOnError: true, abortedAtStart: true, steps: [] },
-        ],
-      ),
-      [
-        {
-          wait: `full-log`,
-          hasOnError: false,
-          cleanupOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `sync-retry` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `progressive`,
-          hasOnError: true,
-          cleanupOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `async-retry` },
-            { kind: `abort` },
-          ],
-        },
-      ],
-      ...([`eager`, `changes-only`] as const).map((wait): [RetryHistory] => [
-        {
-          wait,
-          hasOnError: true,
-          steps: [
-            { kind: `hold` },
-            { kind: `error`, decision: `async-retry` },
-            { kind: `decide` },
-            { kind: `up-to-date` },
-            { kind: `release` },
-          ],
-        },
-      ]),
-      ...([`eager`, `changes-only`] as const).map((wait): [RetryHistory] => [
-        {
-          wait,
-          hasOnError: true,
-          steps: [
-            { kind: `error`, decision: `async-give-up` },
-            { kind: `decide` },
-          ],
-        },
-      ]),
-      // A final give-up after the first up-to-date is committed but before
-      // its acceptance settles is a post-ready failure: the Collection
-      // becomes ready when the snapshot is accepted, with its rows, and the
-      // demands it covers settle. One replay per give-up.
-      ...(
-        [
-          [false, { kind: `error`, decision: `sync-give-up` }],
-          [true, { kind: `error`, decision: `sync-give-up` }],
-          [true, { kind: `error`, decision: `throw` }],
-          [true, { kind: `client-give-up` }],
-          [true, { kind: `abort` }],
-        ] as Array<[boolean, RetryStep]>
-      ).map(([hasOnError, giveUp]): [RetryHistory] => [
-        {
-          wait: `full-log`,
-          hasOnError,
-          steps: [
-            { kind: `demand` },
-            { kind: `hold-acceptance` },
-            { kind: `up-to-date` },
-            giveUp,
-            { kind: `accept` },
-          ],
-        },
-      ]),
-      [
-        {
-          wait: `progressive`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `hold-acceptance` },
-            { kind: `up-to-date` },
-            { kind: `error`, decision: `async-give-up` },
-            { kind: `decide` },
-            { kind: `demand` },
-            { kind: `accept` },
-          ],
-        },
-      ],
-      // While the first snapshot's acceptance is pending: a retry, then the
-      // acceptance, then a final give-up; a retry, then a give-up, then the
-      // acceptance; and an acceptance that fails, with and without an earlier
-      // external abort.
-      [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `hold-acceptance` },
-            { kind: `up-to-date` },
-            { kind: `error`, decision: `sync-retry` },
-            { kind: `accept` },
-            { kind: `error`, decision: `sync-give-up` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `hold-acceptance` },
-            { kind: `up-to-date` },
-            { kind: `error`, decision: `async-retry` },
-            { kind: `decide` },
-            { kind: `client-give-up` },
-            { kind: `accept` },
-          ],
-        },
-      ],
-      ...[false, true].map((aborted): [RetryHistory] => [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `hold-acceptance` },
-            { kind: `up-to-date` },
-            ...(aborted ? [{ kind: `abort` as const }] : []),
-            { kind: `accept-fails` },
-          ],
-        },
-      ]),
-    ] satisfies Array<[RetryHistory]> as Array<[RetryHistory]>,
   )
+  oracleProperty({
+    ...electricHistoryRegistration12,
+    id: `electric.retry-decision`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration12.histories,
+      runs: 30,
+      fixedSeeds: [42_731],
+    },
+    check: checkExistingElectricComparison,
+  })
 
   oracleReplayTest(it)(
     `does not advance durable Electric resume metadata past a rejected row commit`,
     async () => {
+      oracleRoute(`case`)
       await runRejectedDurablePrefixWitness(`durable-prefix-fixed`, [
         `first`,
         `second`,
@@ -4458,6 +4590,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `retains an accepted Electric source prefix when the next row commit rejects`,
     async () => {
+      oracleRoute(`case`)
       await runRejectedDurablePrefixWitness(
         `durable-prefix-after-success`,
         [`accepted`, `rejected`],
@@ -4476,56 +4609,73 @@ describe(`Electric adapter laws`, () => {
       names,
     )
   }
-  oracleReplayTest(fcTest).prop(
-    [durablePrefixArbitrary],
-    durablePrefixPropertyOptions(`fixed`),
-  )(
-    `a rejected initial Electric row commit creates no durable source prefix (fixed)`,
+  const electricHistoryRegistration13 = electricHistoryOptions(
+    durablePrefixProperty,
+    `a rejected initial Electric row commit creates no durable source prefix`,
+    durablePrefixArbitrary,
+    10,
+    20260921,
     checkDurablePrefix,
   )
-  // A shared seed reseeds this random lane; a path replay selects it by property.
-  oracleReplayTest(fcTest, durablePrefixProperty).prop(
-    [durablePrefixArbitrary],
-    durablePrefixPropertyOptions(`random`),
-  )(
-    `a rejected initial Electric row commit creates no durable source prefix (random)`,
-    checkDurablePrefix,
-  )
-
-  oracleReplayTest(fcTest).prop(
-    [
-      fc.uniqueArray(fc.integer({ min: 1, max: 20 }), {
-        minLength: 2,
-        maxLength: 6,
-      }),
-    ],
-    { numRuns: 20, seed: 20260922 },
-  )(`append-only resume judgment rejects a missing committed row`, (ids) => {
-    const events: Array<SourceLedgerEvent> = ids.map((id) => ({
-      type: `source-commit`,
-      offset: `${id}_0`,
-      mutations: [
-        {
-          type: `set`,
-          row: { id, name: `row-${id}`, stable: `stable-${id}` },
-        },
-      ],
-    }))
-    const expected = rowsFromMap(
-      foldSourceLedgerThrough(events, events.at(-1)!.offset),
-    )
-    // An intermediate durable checkpoint contains exactly its source prefix.
-    const prefix = rowsFromMap(
-      foldSourceLedgerThrough(events, events[0]!.offset),
-    )
-    expect(prefix).toEqual(expected.filter(([key]) => key === ids[0]))
-    // An offset outside the append-only ledger cannot justify resume state.
-    expect(() => foldSourceLedgerThrough(events, `absent_0`)).toThrow(
-      /absent from source ledger/,
-    )
+  oracleProperty({
+    ...electricHistoryRegistration13,
+    id: durablePrefixProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration13.histories,
+      runs: 10,
+      fixedSeeds: [20260921],
+    },
+    check: checkExistingElectricComparison,
   })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration14 = electricHistoryOptions(
+    `electric.source-ledger-calibration`,
+    `append-only source-ledger folds preserve prefixes and reject absent offsets`,
+    fc.uniqueArray(fc.integer({ min: 1, max: 20 }), {
+      minLength: 2,
+      maxLength: 6,
+    }),
+    20,
+    20260922,
+    (ids) => {
+      const events: Array<SourceLedgerEvent> = ids.map((id) => ({
+        type: `source-commit`,
+        offset: `${id}_0`,
+        mutations: [
+          {
+            type: `set`,
+            row: { id, name: `row-${id}`, stable: `stable-${id}` },
+          },
+        ],
+      }))
+      const expected = rowsFromMap(
+        foldSourceLedgerThrough(events, events.at(-1)!.offset),
+      )
+      // An intermediate durable checkpoint contains exactly its source prefix.
+      const prefix = rowsFromMap(
+        foldSourceLedgerThrough(events, events[0]!.offset),
+      )
+      expect(prefix).toEqual(expected.filter(([key]) => key === ids[0]))
+      // An offset outside the append-only ledger cannot justify resume state.
+      expect(() => foldSourceLedgerThrough(events, `absent_0`)).toThrow(
+        /absent from source ledger/,
+      )
+    },
+  )
+  oracleProperty({
+    ...electricHistoryRegistration14,
+    id: `electric.source-ledger-calibration`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration14.histories,
+      runs: 20,
+      fixedSeeds: [20260922],
+    },
+    check: checkExistingElectricComparison,
+  })
+
+  const electricHistoryRegistration15 = electricHistoryOptions(
     `electric.subset-request-row-validity`,
     `subset request invocation preserves row validity through generated stream histories without response delivery`,
     fc.array(
@@ -4615,8 +4765,19 @@ describe(`Electric adapter laws`, () => {
       ],
     ],
   )
+  oracleProperty({
+    ...electricHistoryRegistration15,
+    id: `electric.subset-request-row-validity`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration15.histories,
+      runs: 40,
+      fixedSeeds: [42_721],
+    },
+    check: checkExistingElectricComparison,
+  })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration16 = electricHistoryOptions(
     `electric.resume-metadata-merge`,
     `resume metadata merge is commutative and reset-safe on timestamp ties`,
     fc.tuple(
@@ -4705,8 +4866,19 @@ describe(`Electric adapter laws`, () => {
       }
     },
   )
+  oracleProperty({
+    ...electricHistoryRegistration16,
+    id: `electric.resume-metadata-merge`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration16.histories,
+      runs: 50,
+      fixedSeeds: [42_722],
+    },
+    check: checkExistingElectricComparison,
+  })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration17 = electricHistoryOptions(
     `electric.metadata-merge-complete-state`,
     `metadata merge preserves complete selected state and nonempty transaction evidence`,
     fc.tuple(
@@ -4852,6 +5024,17 @@ describe(`Electric adapter laws`, () => {
       [[[8], [1]]],
     ],
   )
+  oracleProperty({
+    ...electricHistoryRegistration17,
+    id: `electric.metadata-merge-complete-state`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration17.histories,
+      runs: 30,
+      fixedSeeds: [42_723],
+    },
+    check: checkExistingElectricComparison,
+  })
 
   oracleReplayTest(it)(
     `reconstructs persistence-interleaving campaigns and rejects ablated, out-of-range, and foreign histories`,
@@ -4861,9 +5044,11 @@ describe(`Electric adapter laws`, () => {
         numRuns: 20,
       })
       for (const campaign of campaigns) {
+        oracleRoute(`fixed seed`)
         expect(reconstructPersistenceInterleavingCampaign(campaign)).toEqual(
           campaign,
         )
+        oracleRoute(`calibration`)
         expect(() =>
           reconstructPersistenceInterleavingCampaign({
             names: campaign.names,
@@ -4893,6 +5078,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `rejects named wrong answers for persistence interleavings`,
     () => {
+      oracleRoute(`calibration`)
       const names: [string, string] = [`before`, `after`]
       expect(() =>
         expectPersistenceInterleavingObservation(
@@ -4927,46 +5113,26 @@ describe(`Electric adapter laws`, () => {
     },
   )
 
-  oracleReplayTest(fcTest).prop([persistenceInterleavingCampaignArbitrary], {
-    seed: 18_530_601,
-    numRuns: oracleRuns(4),
-  })(
-    `preserves persisted Electric interleavings (fixed)`,
+  const electricHistoryRegistration18 = electricHistoryOptions(
+    persistenceInterleavingProperty,
+    `preserves persisted Electric interleavings`,
+    persistenceInterleavingCampaignArbitrary,
+    4,
+    18_530_601,
     runPersistenceInterleavingCampaign,
   )
+  oracleProperty({
+    ...electricHistoryRegistration18,
+    id: persistenceInterleavingProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration18.histories,
+      runs: 4,
+      fixedSeeds: [18_530_601],
+    },
+    check: checkExistingElectricComparison,
+  })
 })
-
-// Each campaign's random lane has its own suite. An ordinary run runs it
-// beside the adapter laws. A path replay of its property runs only it.
-oracleReplayTest(describe, persistenceInterleavingProperty)(
-  `persisted Electric interleaving campaign`,
-  () => {
-    beforeEach(resetElectricOracleMocks)
-
-    fcTest.prop(
-      [persistenceInterleavingCampaignArbitrary],
-      oraclePropertyOptions(4, persistenceInterleavingProperty),
-    )(
-      `preserves persisted Electric interleavings (random)`,
-      runPersistenceInterleavingCampaign,
-    )
-  },
-)
-
-oracleReplayTest(describe, queuedPresenceProperty)(
-  `Electric queued-presence campaign`,
-  () => {
-    beforeEach(resetElectricOracleMocks)
-
-    fcTest.prop(
-      queuedPresenceArbitraries,
-      queuedPresencePropertyOptions(`random`),
-    )(
-      `generated queued Electric histories preserve staged presence and reset fences (random)`,
-      runQueuedPresenceCampaign,
-    )
-  },
-)
 
 // The checks run a history through production and compare each observation
 // with the model (or the authored snapshots they are given). The models are

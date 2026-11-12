@@ -3,6 +3,7 @@ import { DuplicateKeySyncError, createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../db/tests/oracle-config.js'
 import {
   checked,
   createAdapter,
@@ -16,35 +17,38 @@ import {
   write,
 } from './persisted-direct-write-support'
 import type { QueryCollectionUtils } from '../src/query'
+import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 import type { Op, Row, StorageKind } from './persisted-direct-write-support'
 /**
  * # Does a direct write see the commits that came before it?
  *
  * A persisted Query Collection puts each source commit behind the persistence
  * wrapper's apply lock. While another task holds that lock, a committed
- * refetch waits there, and core has not accepted it yet. Its result is already
- * in the Query cache. The contract: a direct write (`writeInsert`,
+ * refetch can wait there before core accepts it. Startup hydration can also
+ * hold the first result before its source commit. The Query cache alone does
+ * not distinguish those orders. The contract: a direct write (`writeInsert`,
  * `writeUpdate`, `writeDelete`, `writeUpsert`) that runs in that window is
  * validated against, and applies on top of, the rows of every commit that came
  * before it. Persistence must not change what the write does.
  *
  * The reference is the same Query Collection without persistence. It runs the
- * same operations, but no lock exists, so the earlier refetch has applied when
- * the write runs. The reference does not share the persistence wrapper, which
+ * same causal order: a preceding source commit applies before the write;
+ * otherwise, its first result waits until after the write. The reference does
+ * not share the persistence wrapper, which
  * is the code under judgment. It shares the Query Collection's direct-write
  * code, so it cannot find a fault in that code that both paths share. The
- * precedence rules for writes that interleave with refetches are pinned as
+ * precedence rules for writes that interleave with refetches are fixed as
  * unit tests in `persisted-direct-write.test.ts`; they are not an oracle.
  *
  * ## Contract and ownership table
  *
  * | Contract | History/domain | Production path | Observation and checkpoint | Owner and limits |
  * | --- | --- | --- | --- | --- |
- * | validation sees earlier commits | 4 write types x 2 lock holders x 2 key cases | utils.write* -> manual-sync -> persisted commit | outcome of the write: `ok` or the error name | this oracle |
+ * | validation respects source commit order | 4 write types x 3 lock holders x 2 key cases, including startup before the first source commit | utils.write* -> manual-sync -> persisted commit | outcome of the write: `ok` or the error name | this oracle |
  * | the write applies on top | the same | the same | visible rows after every promise settles | this oracle |
  * | the Query cache agrees | the same | updateCacheData | Query cache rows after settlement | this oracle |
  * | storage agrees | the same | persisted durable write | stored rows after settlement equal the visible rows | this oracle |
- * | real SQLite receives the same | a subset: each write type, `refetch-only`, `source-write`, and the ordering cases | the same, over the node SQLite adapter | the same observations | this oracle; the full matrix runs over an in-memory fake adapter |
+ * | real SQLite receives the same | a subset: each write type, `refetch-only`, all three holders, and the ordering cases | the same, over the node SQLite adapter | the same observations | this oracle; the full matrix runs over an in-memory fake adapter |
  * | rejected writes gain no precedence | 4 rejected writes during a held refetch, with and without persistence | utils.write* -> validation | rows and Query cache inside the refetch's fulfillment | unit tests in `persisted-direct-write.test.ts`; no oracle owner |
  * | a later accepted write keeps precedence | a second write after a deferred result arrives, same key and sibling key | deferred merge | rows, Query cache and stored rows after settlement | unit tests in `persisted-direct-write.test.ts`; no oracle owner |
  * | refetch settles after its rows apply | a deferred result, and one whose merged write is held | deferred merge -> result settlement | rows inside the refetch's fulfillment | unit tests in `persisted-direct-write.test.ts`; no oracle owner |
@@ -56,27 +60,42 @@ import type { Op, Row, StorageKind } from './persisted-direct-write-support'
  * - `source-write`: an earlier refetch's durable write is held after core
  *   applied it, so the lock stays busy.
  * - `startup`: persisted startup hydration is held, so the first fetch result
- *   waits for it.
+ *   waits for it. Cache availability does not prove the source committed.
+ * - `initial-result-write`: the first Query result has committed; its durable
+ *   write is held, so a later direct write waits for that earlier commit.
+ *
+ * The production driver records source commits before the direct write. That
+ * causal order selects the reference schedule, never its expected row values
+ * or write outcome. Commit invocation is an input event to this differential
+ * law. Cache success is not that event. Requiring a commit in `startup` would
+ * impose an ordering that the direct-write contract does not promise.
+ * With no earlier commit, the reference holds its first result until after the
+ * direct write. An early update/delete can then reject because no row is loaded
+ * (query-collection.md, "Individual Write Operations"). Both committed holders
+ * require positive commit reach; startup permits either legal commit order.
  *
  * A mutation confirmation does not take this lock for a Query Collection.
  * `persistAndConfirmCollectionMutations` runs only for sync-absent
  * collections, so that holder is outside this oracle.
  *
- * Key cases: `refetch-only` means only the waiting refetch holds key `k`.
- * `both` means the applied rows hold `k`, and the waiting refetch changes it.
+ * Key cases: `refetch-only` means only the waiting result holds key `k`.
+ * `both` means the baseline also holds `k`, and the waiting result changes it.
+ * The startup holder keeps that durable baseline from applying before the write.
  *
- * The domain is a finite matrix of 16 cases, not a generated history, so no
+ * The domain is a finite matrix of 24 cases, not a generated history, so no
  * random campaign is claimed. The matrix comparison ignores whether an error
  * is thrown at once or rejects later. The precedence rules and the
  * duplicate-insert witness check that validation errors reject the promise.
  *
- * The driver checks that it reached the window: when the write runs, storage
- * does not hold the waiting refetch's row for `k` yet. This check does not
- * depend on when core accepts the refetch, which a fix may change. Each failure message carries
- * both observations, so a failure keeps the case that broke the law.
+ * The driver checks that it reached the window: when the write runs, no
+ * durable apply carrying the waiting result's `k` has completed. It records
+ * adapter acknowledgments instead of querying SQLite inside a held transaction.
+ * This check does not depend on when core accepts the refetch, which a fix may
+ * change. Each failure message carries both observations, so a failure keeps
+ * the case that broke the law.
  */
 
-type Holder = `source-write` | `startup`
+type Holder = `source-write` | `startup` | `initial-result-write`
 type KeyCase = `refetch-only` | `both`
 
 type Observation = {
@@ -86,7 +105,11 @@ type Observation = {
 }
 
 const ops: Array<Op> = [`insert`, `update`, `delete`, `upsert`]
-const holders: Array<Holder> = [`source-write`, `startup`]
+const holders: Array<Holder> = [
+  `source-write`,
+  `startup`,
+  `initial-result-write`,
+]
 const keyCases: Array<KeyCase> = [`refetch-only`, `both`]
 
 /** The applied rows before the window, and the waiting refetch's rows. */
@@ -112,54 +135,101 @@ function scenario(keyCase: KeyCase): { base: Array<Row>; next: Array<Row> } {
 }
 
 /**
- * Reference: no persistence. The waiting refetch has applied when the write
- * runs, so its rows decide validation.
+ * Reference: no persistence. Replay the observed causal order of source commit
+ * and direct write. An earlier commit decides validation; before the first
+ * commit, the store is empty and the first fetch remains pending.
  */
-async function reference(op: Op, keyCase: KeyCase): Promise<Observation> {
+async function reference(
+  op: Op,
+  keyCase: KeyCase,
+  committedBeforeWrite = true,
+): Promise<Observation> {
   const { base, next } = scenario(keyCase)
-  let server = base
+  let server = committedBeforeWrite ? base : next
+  const releaseInitial = deferred()
   const queryClient = newQueryClient()
   const queryKey = [`reference`, op, keyCase]
   const collection = createCollection(
     queryCollectionOptions<Row>({
       id: `reference-${op}-${keyCase}`,
       queryKey,
-      queryFn: () => Promise.resolve(server.map((row) => ({ ...row }))),
+      queryFn: async () => {
+        if (!committedBeforeWrite) await releaseInitial.promise
+        return server.map((row) => ({ ...row }))
+      },
       queryClient,
       getKey: (row) => row.id,
       startSync: true,
     }),
   )
   return checked(async () => {
-    await collection.preload()
-    server = next
-    await collection.utils.refetch()
+    const ready = collection.preload()
+    if (committedBeforeWrite) {
+      await ready
+      server = next
+      await collection.utils.refetch()
+    }
     const { outcome } = await outcomeOf(() => write(collection.utils, op))
+    releaseInitial.resolve()
+    await ready
     await flush()
     return {
       outcome,
       visible: sortRows(collection.values()),
       cache: sortRows(queryClient.getQueryData(queryKey) ?? []),
     }
-  }, [() => collection.cleanup()])
+  }, [
+    () => releaseInitial.resolve(),
+    () => collection.cleanup(),
+    () => queryClient.clear(),
+  ])
 }
 
 /**
  * Production driver: the persisted Query Collection. The write runs while the
- * refetch that carries `next` waits on the apply lock.
+ * result carrying `next` waits for the held startup read or durable write.
  */
 async function persisted(
   op: Op,
   holder: Holder,
   keyCase: KeyCase,
   kind: StorageKind = `fake`,
+  dropFirstResult = false,
 ): Promise<
-  Observation & { stored: Array<Row>; timing: string; waited: boolean }
+  Observation & {
+    stored: Array<Row>
+    timing: string
+    waited: boolean
+    commitsBeforeWrite: number
+    discardedWrites: number
+    readySignals: number
+  }
 > {
   const { base, next } = scenario(keyCase)
   const id = `persisted-${kind}-${op}-${holder}-${keyCase}`
   const storage = createStorage(kind, base, id)
   const adapter = storage.adapter
+  if (kind === `sqlite` && holder === `startup`) {
+    // The real adapter starts empty. Establish the same durable baseline as
+    // the controlled adapter before asking the startup read to hold it.
+    const seed = createCollection(
+      persistedCollectionOptions<Row, string>({
+        id,
+        getKey: (row) => row.id,
+        persistence: storage.persistence,
+        sync: {
+          sync: ({ begin, write: syncWrite, commit, markReady }) => {
+            begin()
+            for (const row of base) syncWrite({ type: `insert`, value: row })
+            commit()
+            markReady()
+          },
+        },
+      }),
+    )
+    await seed.preload()
+    await seed.cleanup()
+  }
   const queryClient = newQueryClient()
   const queryKey = [`persisted`, kind, op, holder, keyCase]
   const release = deferred()
@@ -167,32 +237,109 @@ async function persisted(
   let server = base
   let hold = false
 
-  if (holder === `source-write`) {
-    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
-    adapter.applyCommittedTx = async (...args) => {
+  let nextDurablyApplied = false
+  const holdDurableWrite =
+    (
+      apply: PersistenceAdapter[`applyCommittedTx`],
+    ): PersistenceAdapter[`applyCommittedTx`] =>
+    async (...args) => {
       if (hold && args[1].mutations.length > 0) {
         hold = false
         entered.resolve()
         await release.promise
       }
-      return applyCommittedTx(...args)
+      const applied = await apply(...args)
+      if (
+        args[1].mutations.some(
+          (mutation) =>
+            mutation.type !== `delete` &&
+            mutation.key === `k` &&
+            (mutation.value as Row).value === 5,
+        )
+      )
+        nextDurablyApplied = true
+      return applied
     }
-  } else {
-    // Hold startup hydration: the row read after the metadata read. The
-    // source starts after the metadata read, and its first fetch returns
-    // `next`.
-    server = next
-    const loadResumeSnapshot = adapter.loadResumeSnapshot
-    adapter.loadResumeSnapshot = async (collectionId, options) => {
-      if (options?.includeRows !== false) {
+  const holdBaselineRead =
+    (
+      read: PersistenceAdapter[`loadResumeSnapshot`],
+    ): PersistenceAdapter[`loadResumeSnapshot`] =>
+    async (target, options) => {
+      if (holder === `startup` && options?.includeRows !== false) {
         entered.resolve()
         await release.promise
       }
-      return loadResumeSnapshot(collectionId, options)
+      return read(target, options)
     }
+  const persistenceAdapter: PersistenceAdapter = adapter
+  persistenceAdapter.applyCommittedTx = holdDurableWrite(
+    adapter.applyCommittedTx.bind(adapter),
+  )
+  persistenceAdapter.loadResumeSnapshot = holdBaselineRead(
+    adapter.loadResumeSnapshot.bind(adapter),
+  )
+  if (persistenceAdapter.runInHydrationScope) {
+    // SQLite startup reads and buffered source commits use this supplied
+    // adapter. Preserve the real scheduler turn and gate its methods too;
+    // wrapping only the outer adapter misses commits buffered during startup.
+    const runInHydrationScope =
+      persistenceAdapter.runInHydrationScope.bind(persistenceAdapter)
+    persistenceAdapter.runInHydrationScope = (task) =>
+      runInHydrationScope((scopedAdapter) =>
+        task({
+          ...scopedAdapter,
+          applyCommittedTx: holdDurableWrite(
+            scopedAdapter.applyCommittedTx.bind(scopedAdapter),
+          ),
+          loadResumeSnapshot: holdBaselineRead(
+            scopedAdapter.loadResumeSnapshot.bind(scopedAdapter),
+          ),
+        }),
+      )
+  }
+  if (holder === `initial-result-write`) {
+    server = next
+    hold = true
+  } else if (holder === `startup`) {
+    // Hold the baseline before it applies. Neither adapter path issues an
+    // observation read while the hold is live.
+    server = next
   }
 
   const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+  let sourceCommits = 0
+  let discard = dropFirstResult
+  let discardedWrites = 0
+  let readySignals = 0
+  const source = queryCollectionOptions<Row>({
+    id,
+    queryKey,
+    queryFn: () => Promise.resolve(server.map((row) => ({ ...row }))),
+    queryClient,
+    getKey: (row) => row.id,
+    startSync: true,
+  })
+  const sourceSync = source.sync.sync
+  source.sync = {
+    ...source.sync,
+    sync: (params) =>
+      sourceSync({
+        ...params,
+        write: (...args) => {
+          if (discard) discardedWrites++
+          else params.write(...args)
+        },
+        markReady: () => {
+          readySignals++
+          params.markReady()
+        },
+        commit: (...args) => {
+          sourceCommits++
+          discard = false
+          return params.commit(...args)
+        },
+      }),
+  }
   const collection = createCollection(
     persistedCollectionOptions<
       Row,
@@ -200,14 +347,7 @@ async function persisted(
       never,
       QueryCollectionUtils<Row>
     >({
-      ...queryCollectionOptions<Row>({
-        id,
-        queryKey,
-        queryFn: () => Promise.resolve(server.map((row) => ({ ...row }))),
-        queryClient,
-        getKey: (row) => row.id,
-        startSync: true,
-      }),
+      ...source,
       persistence: storage.persistence,
     }),
   )
@@ -227,16 +367,16 @@ async function persisted(
       pending.push(collection.preload())
       await entered.promise
     }
-    // The Query cache holds `next` once its result is committed.
+    // Cache availability is separate from the recorded source commit boundary.
     await vi.waitFor(() =>
       expect(sortRows(queryClient.getQueryData(queryKey) ?? [])).toEqual(
         sortRows(next),
       ),
     )
-    // The window: the refetch is committed, but its durable write has not
-    // finished, because another task holds the lock.
-    const waited =
-      (await storage.storedRows(id)).find((row) => row.id === `k`)?.value !== 5
+    // Durable storage has not received `next`. Record whether the source has
+    // committed, rather than inferring that fact from cache availability.
+    const waited = !nextDurablyApplied
+    const commitsBeforeWrite = sourceCommits
     const settled = outcomeOf(() => write(collection.utils, op))
     release.resolve()
     const { outcome, timing } = await settled
@@ -247,6 +387,9 @@ async function persisted(
       outcome,
       timing,
       waited,
+      commitsBeforeWrite,
+      discardedWrites,
+      readySignals,
       visible: sortRows(collection.values()),
       cache: sortRows(queryClient.getQueryData(queryKey) ?? []),
       stored: await storage.storedRows(id),
@@ -260,22 +403,37 @@ async function persisted(
 }
 
 /**
- * The matrix law: a direct write that runs while an earlier refetch waits for
- * the apply lock returns the outcome and rows of the no-persistence reference,
- * and storage then holds the visible rows. The reference is the model: it runs
- * the same operations after the waiting refetch has applied. The driver's
- * `waited` observation shows that the write ran inside the window.
+ * The matrix law: a direct write returns the outcome and rows of the
+ * no-persistence reference with the same source-commit order, and storage then
+ * holds the visible rows. The driver's `waited` observation shows that the
+ * write ran before the waiting result durably applied.
  */
 async function compareWriteWithReference(
   op: Op,
   holder: Holder,
   keyCase: KeyCase,
   kind: StorageKind = `fake`,
+  dropFirstResult = false,
 ): Promise<void> {
-  const expected = await reference(op, keyCase)
-  const actual = await persisted(op, holder, keyCase, kind)
+  const actual = await persisted(op, holder, keyCase, kind, dropFirstResult)
+  if (dropFirstResult) {
+    expect(
+      actual.discardedWrites,
+      `mutant must discard source rows`,
+    ).toBeGreaterThan(0)
+    expect(
+      actual.readySignals,
+      `mutant must report source readiness`,
+    ).toBeGreaterThan(0)
+  }
+  if (holder !== `startup`)
+    expect(
+      actual.commitsBeforeWrite,
+      `source committed before the write`,
+    ).toBeGreaterThan(0)
+  const expected = await reference(op, keyCase, actual.commitsBeforeWrite > 0)
   const label = kind === `sqlite` ? `sqlite` : `persisted`
-  // The driver reached the window: core had not accepted `next`.
+  // The driver reached the held durable boundary; source commit is separate.
   expect(actual.waited, `the refetch waited on the lock`).toBe(true)
   const observed = {
     outcome: actual.outcome,
@@ -292,6 +450,7 @@ async function compareWriteWithReference(
 }
 
 declareOracle({
+  owns: [`src/query.ts#queryCollectionOptions`],
   check: [
     compareWriteWithReference,
     compareLaterRefetchOrder,
@@ -299,11 +458,25 @@ declareOracle({
   ],
 })
 
+// A mutant that reports readiness but discards the first source transaction
+// commits its empty metadata transaction and must fail the same comparison.
+// Selecting its causal schedule
+// cannot excuse missing source rows at the final observation cut.
+for (const kind of [`fake`, `sqlite`] as const)
+  for (const op of ops)
+    it(`rejects a discarded first result for ${op} through ${kind}`, async () => {
+      oracleRoute(`calibration`)
+      await expect(
+        compareWriteWithReference(op, `startup`, `refetch-only`, kind, true),
+      ).rejects.toThrow(/reference/)
+    })
+
 describe(`persisted direct writes behind a waiting refetch`, () => {
   for (const holder of holders) {
     for (const keyCase of keyCases) {
       for (const op of ops) {
         it(`${op} with ${holder} holding the lock, key ${keyCase}`, async () => {
+          oracleRoute(`case`)
           await compareWriteWithReference(op, holder, keyCase)
         })
       }
@@ -513,6 +686,7 @@ describe(`a later refetch while a persisted direct write waits`, () => {
   for (const start of [`before`, `after`] as const) {
     for (const touch of [`same`, `different`] as const) {
       it(`R3 started ${start} the write, ${touch} key`, async () => {
+        oracleRoute(`case`)
         await compareLaterRefetchOrder(start, touch)
       })
     }
@@ -525,23 +699,22 @@ describe(`a later refetch while a persisted direct write waits`, () => {
  * The matrix above runs over an in-memory fake adapter, which supplies the
  * durable-write delay. This subset runs the same drivers over the node SQLite
  * adapter, gated the same way: each write type with the key that only the
- * waiting refetch holds and an earlier refetch's durable write holding the
- * lock, plus the four ordering cases.
+ * waiting refetch holds, at all three held boundaries, plus the four ordering
+ * cases. The same commit recorder determines the reference's causal order.
  */
 describe(`real SQLite: persisted direct writes behind a waiting refetch`, () => {
-  for (const op of ops) {
-    it(`${op} with source-write holding the lock, key refetch-only`, async () => {
-      await compareWriteWithReference(
-        op,
-        `source-write`,
-        `refetch-only`,
-        `sqlite`,
-      )
-    })
+  for (const holder of holders) {
+    for (const op of ops) {
+      it(`${op} with ${holder} holding the lock, key refetch-only`, async () => {
+        oracleRoute(`case`)
+        await compareWriteWithReference(op, holder, `refetch-only`, `sqlite`)
+      })
+    }
   }
   for (const start of [`before`, `after`] as const) {
     for (const touch of [`same`, `different`] as const) {
       it(`R3 started ${start} the write, ${touch} key`, async () => {
+        oracleRoute(`case`)
         await compareLaterRefetchOrder(start, touch, `sqlite`)
       })
     }
@@ -562,7 +735,7 @@ describe(`real SQLite: persisted direct writes behind a waiting refetch`, () => 
  */
 async function compareDuplicateInsert(): Promise<void> {
   const base: Array<Row> = [{ id: `k`, value: 1 }]
-  const reference = createCollection(
+  const referenceCollection = createCollection(
     queryCollectionOptions<Row>({
       id: `reference-duplicate-insert`,
       queryKey: [`reference-duplicate-insert`],
@@ -592,26 +765,27 @@ async function compareDuplicateInsert(): Promise<void> {
     }),
   )
   await checked(async () => {
-    await reference.preload()
+    await referenceCollection.preload()
     await persistedCollection.preload()
     // The returned promise rejects with DuplicateKeySyncError. A
     // synchronous throw fails here, because it escapes the call before
     // `expect` receives a promise.
-    for (const collection of [reference, persistedCollection]) {
+    for (const collection of [referenceCollection, persistedCollection]) {
       await expect(
         collection.utils.writeInsert({ id: `k`, value: 9 }),
       ).rejects.toBeInstanceOf(DuplicateKeySyncError)
     }
     await flush()
     expect(sortRows(persistedCollection.values())).toEqual(
-      sortRows(reference.values()),
+      sortRows(referenceCollection.values()),
     )
     expect(sortRows(adapter.rows.values())).toEqual([{ id: `k`, value: 1 }])
-  }, [() => reference.cleanup(), () => persistedCollection.cleanup()])
+  }, [() => referenceCollection.cleanup(), () => persistedCollection.cleanup()])
 }
 
 describe(`a persisted direct insert of an existing key`, () => {
   it(`rejects like the reference and keeps the row`, async () => {
+    oracleRoute(`fixed history`)
     await compareDuplicateInsert()
   })
 })

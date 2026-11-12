@@ -19,6 +19,7 @@
  */
 import { expect, it } from 'vitest'
 import { declareOracle } from '../oracle-declaration'
+import { oracleRoute } from '../oracle-config'
 import { initial } from './local-write-support'
 import {
   Channel,
@@ -68,13 +69,21 @@ function expectedRows(effects: Array<Effect>, mask: number, before = initial) {
 }
 // expectedRows is the model: the durable fold of the authored effects that the
 // mask accepts, in author order, from the rows that the peer action leaves.
-declareOracle({ model: [expectedRows] })
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+  ],
+  model: [expectedRows],
+})
 
 for (const [kind, effects] of Object.entries(grammars)) {
   for (const peerAction of ['none', 'update', 'delete', 'replace'] as const)
     for (const order of orders)
       for (let mask = 0; mask < 8; mask++) {
         it(`${kind} persists accepted effects after peer ${peerAction} in mutation order (${order.join(',')}; mask ${mask})`, async () => {
+          oracleRoute(`case`)
           await withHarness(async (h) => {
             await seed(h.db, 'items', initial)
             const gates = effects.map(() => deferred()),

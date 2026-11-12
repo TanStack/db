@@ -24,28 +24,71 @@
 import fc from 'fast-check'
 import { createCollection } from '@tanstack/db'
 import { expect, it } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexPaginatedCollectionOptions } from '../src/index'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { copyRows, keyedRows, provider, query } from './pagination-support'
 import type { Row } from './pagination-support'
 
-const snapshot = fc.shuffledSubarray([0, 1, 2, 3, 4, 5, 6, 7]).chain((ids) =>
-  fc
-    .array(fc.string({ maxLength: 8 }), {
-      minLength: ids.length,
-      maxLength: ids.length,
-    })
-    .map((texts) =>
-      ids.map((id, rank): Row => ({
-        id: String(id),
-        rank,
-        text: texts[rank]!,
-      })),
-    ),
-)
+type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
+type AssertionReach = {
+  beginHistory: () => void
+  reach: (state: string) => void
+}
+
+const snapshotBase = fc
+  .shuffledSubarray([0, 1, 2, 3, 4, 5, 6, 7])
+  .chain((ids) =>
+    fc
+      .array(fc.string({ maxLength: 8 }), {
+        minLength: ids.length,
+        maxLength: ids.length,
+      })
+      .map((texts) =>
+        ids.map((id, rank): Row => ({
+          id: String(id),
+          rank,
+          text: texts[rank]!,
+        })),
+      ),
+  )
+// Native constructed histories require context-free membership. The chained
+// generator and its shrinker remain unchanged; only recognition of its existing
+// finite keyed-row language is supplied here.
+const snapshot = new (class extends fc.Arbitrary<Array<Row>> {
+  generate(...args: Parameters<typeof snapshotBase.generate>) {
+    return snapshotBase.generate(...args)
+  }
+  canShrinkWithoutContext(value: unknown): value is Array<Row> {
+    return (
+      Array.isArray(value) &&
+      value.length <= 8 &&
+      value.every(
+        (row, rank) =>
+          row !== null &&
+          typeof row === `object` &&
+          Object.keys(row).length === 3 &&
+          typeof row.id === `string` &&
+          /^[0-7]$/.test(row.id) &&
+          row.rank === rank &&
+          typeof row.text === `string` &&
+          row.text.length <= 8 &&
+          value.findIndex((other) => other.id === row.id) === rank,
+      )
+    )
+  }
+  shrink(value: Array<Row>, context: unknown) {
+    return snapshotBase.shrink(value, context)
+  }
+})()
 // A three-row accepted snapshot followed by eight rows forces acquisition
 // while a nonempty prior snapshot is visible. Each generated history uses a
 // small page and a split-capable page with every split policy. This preserves
@@ -99,16 +142,21 @@ function expectRevisionTrace(
   for (const observation of observations) {
     if (sameRows(observation, current)) currentSeen = true
     else
-      expect(
-        observation,
-        `${boundary}: complete monotone source snapshots`,
-      ).toEqual(currentSeen ? current : prior)
+      oracleAssertion(`pagination-oracle.property.test.ts:104:toEqual`, () =>
+        expect(
+          observation,
+          `${boundary}: complete monotone source snapshots`,
+        ).toEqual(currentSeen ? current : prior),
+      )
   }
 }
 
 // The check below compares each observed snapshot with the model's prior and
 // current complete snapshots; the grammar draws the source histories.
-declareOracle({ check: [expectRevisionTrace], grammar: [history, snapshot] })
+declareOracle({
+  check: [expectRevisionTrace],
+  grammar: [history, snapshot],
+})
 
 // Calibrate both recorders' shared trace relation without imposing one callback
 // per revision. Repeated old/new snapshots are legal; prefixes and rollback
@@ -116,25 +164,32 @@ declareOracle({ check: [expectRevisionTrace], grammar: [history, snapshot] })
 it.each([`select`, `Collection publication`])(
   `calibrates complete monotone snapshots at %s`,
   (boundary) => {
+    oracleRoute(`calibration`)
     const current = Array.from({ length: 3 }, (_, rank) => ({
       id: String(rank),
       rank,
       text: String(rank),
     }))
-    expect(() =>
-      expectRevisionTrace(boundary, [[], [], current, current], [], current),
-    ).not.toThrow()
-    expect(() =>
-      expectRevisionTrace(
-        boundary,
-        [current.slice(0, 1), current],
-        [],
-        current,
-      ),
-    ).toThrow()
-    expect(() =>
-      expectRevisionTrace(boundary, [current, [], current], [], current),
-    ).toThrow()
+    oracleAssertion(`pagination-oracle.property.test.ts:131:toThrow`, () =>
+      expect(() =>
+        expectRevisionTrace(boundary, [[], [], current, current], [], current),
+      ).not.toThrow(),
+    )
+    oracleAssertion(`pagination-oracle.property.test.ts:134:toThrow`, () =>
+      expect(() =>
+        expectRevisionTrace(
+          boundary,
+          [current.slice(0, 1), current],
+          [],
+          current,
+        ),
+      ).toThrow(),
+    )
+    oracleAssertion(`pagination-oracle.property.test.ts:142:toThrow`, () =>
+      expect(() =>
+        expectRevisionTrace(boundary, [current, [], current], [], current),
+      ).toThrow(),
+    )
   },
 )
 
@@ -142,119 +197,163 @@ it.each([`select`, `Collection publication`])(
 // republishing the empty prior snapshot after the full result, fails the select
 // trace comparison at seed 20261022/path 0:0:0:0:0:0:0:0:0:0. The unchanged
 // implementation passes that direct replay; setup errors are not counted.
-it(`refines every published snapshot across reactive ranges and page splits`, async () => {
-  await runOracleCampaign(
-    `CONVEX_PAGINATION_ROWS`,
-    rowStates,
-    async (reach, parameters) => {
-      const property = fc.asyncProperty(
-        history,
-        async ({
-          snapshots,
-          initialTexts,
-          smallPageSize,
-          splitPageSize,
-          reverse,
-        }) => {
-          reach.beginHistory()
-          const initial = initialTexts.map((text, rank): Row => ({
-            id: String(rank),
-            rank,
-            text,
-          }))
-          const revisions = [initial.slice(0, 3), initial, ...snapshots, []]
-          for (const pageSize of [smallPageSize, splitPageSize]) {
-            for (const split of [`none`, `required`, `recommended`] as const) {
-              const source = provider(reverse, split)
-              let selected: ReadonlyArray<Row> = []
-              let accepted: ReadonlyArray<Row> = []
-              const selectTrace: Array<Array<Row>> = []
-              const publicTrace: Array<Array<Row>> = []
-              const collection = createCollection(
-                convexPaginatedCollectionOptions({
-                  client: source.client,
-                  query,
-                  queryArgs: {},
-                  pageSize,
-                  select: (rows) => {
-                    selected = copyRows(rows)
-                    selectTrace.push(copyRows(rows))
-                    return rows
-                  },
-                  getKey: (row) => row.id,
-                  gcTime: 0,
-                }),
+
+const convex_pagination_rowsHistory = history
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_pagination_rowsJudgment(
+  {
+    snapshots,
+    initialTexts,
+    smallPageSize,
+    splitPageSize,
+    reverse,
+  }: AssertionHistory<typeof convex_pagination_rowsHistory>,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  const initial = initialTexts.map((text, rank): Row => ({
+    id: String(rank),
+    rank,
+    text,
+  }))
+  const revisions = [initial.slice(0, 3), initial, ...snapshots, []]
+  for (const pageSize of [smallPageSize, splitPageSize]) {
+    for (const split of [`none`, `required`, `recommended`] as const) {
+      const source = provider(reverse, split)
+      let selected: ReadonlyArray<Row> = []
+      let accepted: ReadonlyArray<Row> = []
+      const selectTrace: Array<Array<Row>> = []
+      const publicTrace: Array<Array<Row>> = []
+      const collection = createCollection(
+        convexPaginatedCollectionOptions({
+          client: source.client,
+          query,
+          queryArgs: {},
+          pageSize,
+          select: (rows) => {
+            selected = copyRows(rows)
+            selectTrace.push(copyRows(rows))
+            return rows
+          },
+          getKey: (row) => row.id,
+          gcTime: 0,
+        }),
+      )
+      collection.startSyncImmediate()
+      const subscription = collection.subscribeChanges(() => {
+        publicTrace.push(keyedRows([...collection.values()]))
+      })
+      await withTestCleanup(
+        async () => {
+          for (const rows of revisions) {
+            // Copy the model before passing source objects to production.
+            const expected = copyRows(rows).sort((a, b) => a.rank - b.rank)
+            const selectStart = selectTrace.length
+            const publicStart = publicTrace.length
+            await source.publish(rows, () => {
+              if (accepted.length > 0)
+                reach.reach(`pending-range-with-prior-snapshot`)
+              // No new complete result is available at this cut.
+              oracleAssertion(
+                `pagination-oracle.property.test.ts:209:toEqual`,
+                () => expect(selected).toEqual(accepted),
               )
-              collection.startSyncImmediate()
-              const subscription = collection.subscribeChanges(() => {
-                publicTrace.push(keyedRows([...collection.values()]))
-              })
-              await withTestCleanup(
-                async () => {
-                  for (const rows of revisions) {
-                    // Copy the model before passing source objects to production.
-                    const expected = copyRows(rows).sort(
-                      (a, b) => a.rank - b.rank,
-                    )
-                    const selectStart = selectTrace.length
-                    const publicStart = publicTrace.length
-                    await source.publish(rows, () => {
-                      if (accepted.length > 0)
-                        reach.reach(`pending-range-with-prior-snapshot`)
-                      // No new complete result is available at this cut.
-                      expect(selected).toEqual(accepted)
-                      expect(keyedRows([...collection.values()])).toEqual(
-                        keyedRows(accepted),
-                      )
-                    })
-                    await collection.utils.awaitSync()
-                    expectRevisionTrace(
-                      `select`,
-                      selectTrace.slice(selectStart),
-                      accepted,
-                      expected,
-                    )
-                    expectRevisionTrace(
-                      `Collection publication`,
-                      publicTrace.slice(publicStart),
-                      keyedRows(accepted),
-                      keyedRows(expected),
-                    )
-                    expect(selected).toEqual(expected)
-                    expect(keyedRows([...collection.values()])).toEqual(
-                      keyedRows(expected),
-                    )
-                    expect(collection.status).toBe(`ready`)
-                    reach.reach(
-                      expected.length === 0
-                        ? `complete-empty-snapshot`
-                        : `complete-nonempty-snapshot`,
-                    )
-                    if (publicTrace.length > publicStart)
-                      reach.reach(`public-snapshot-publication`)
-                    for (const slot of source.slots) {
-                      if (slot.current?.pageStatus === `SplitRequired`)
-                        reach.reach(`required-split`)
-                      if (slot.current?.pageStatus === `SplitRecommended`)
-                        reach.reach(`recommended-split`)
-                    }
-                    accepted = expected
-                  }
-                },
-                () => subscription.unsubscribe(),
-                async () => {
-                  await collection.cleanup()
-                  expect(source.slots.every((slot) => !slot.active)).toBe(true)
-                },
+              oracleAssertion(
+                `pagination-oracle.property.test.ts:210:toEqual`,
+                () =>
+                  expect(keyedRows([...collection.values()])).toEqual(
+                    keyedRows(accepted),
+                  ),
               )
+            })
+            await collection.utils.awaitSync()
+            expectRevisionTrace(
+              `select`,
+              selectTrace.slice(selectStart),
+              accepted,
+              expected,
+            )
+            expectRevisionTrace(
+              `Collection publication`,
+              publicTrace.slice(publicStart),
+              keyedRows(accepted),
+              keyedRows(expected),
+            )
+            oracleAssertion(
+              `pagination-oracle.property.test.ts:227:toEqual`,
+              () => expect(selected).toEqual(expected),
+            )
+            oracleAssertion(
+              `pagination-oracle.property.test.ts:228:toEqual`,
+              () =>
+                expect(keyedRows([...collection.values()])).toEqual(
+                  keyedRows(expected),
+                ),
+            )
+            oracleAssertion(`pagination-oracle.property.test.ts:231:toBe`, () =>
+              expect(collection.status).toBe(`ready`),
+            )
+            reach.reach(
+              expected.length === 0
+                ? `complete-empty-snapshot`
+                : `complete-nonempty-snapshot`,
+            )
+            if (publicTrace.length > publicStart)
+              reach.reach(`public-snapshot-publication`)
+            for (const slot of source.slots) {
+              if (slot.current?.pageStatus === `SplitRequired`)
+                reach.reach(`required-split`)
+              if (slot.current?.pageStatus === `SplitRecommended`)
+                reach.reach(`recommended-split`)
             }
+            accepted = expected
           }
         },
+        () => subscription.unsubscribe(),
+        async () => {
+          await collection.cleanup()
+          oracleAssertion(`pagination-oracle.property.test.ts:251:toBe`, () =>
+            expect(source.slots.every((slot) => !slot.active)).toBe(true),
+          )
+        },
       )
-      await fc.assert(property, { numRuns: oracleRuns(60), ...parameters })
-    },
-    { fixedSeed: 20261022 },
-  )
+    }
+  }
+}
+
+oracleProperty({
+  id: `convex.pagination-rows`,
+  law: {
+    statement: `refines every published snapshot across reactive ranges and page splits`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+  },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+  histories: {
+    arbitrary: convex_pagination_rowsHistory,
+    runs: 60,
+    fixedSeeds: [20261022],
+    states: rowStates,
+    constructed: [
+      {
+        name: `existing constructive history`,
+        enters: rowStates,
+        build: (generated) => generated,
+      },
+    ],
+  },
+  resolve: (generated) => ({ history: generated }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  driver: async (plan, observe) =>
+    recordAssertionJudgment(`convex.pagination-rows`, plan, observe, () =>
+      convex_pagination_rowsJudgment(plan.history, {
+        beginHistory: () => {},
+        reach: (state) => observe(`reach`, state),
+      }),
+    ),
+  timeout: 120000,
 })
 
 // A finite initial load must materialize its rows only after all ranges are
@@ -267,59 +366,94 @@ it(`refines every published snapshot across reactive ranges and page splits`, as
 // Calibration: copying incomplete prefixes failed the row-visit comparison at
 // seed 20261022/path 0:0:0:0, three rows at pageSize 1 read four elements.
 // The same direct replay passes after deferring materialization until exhaustion.
-it(`materializes complete rows once during finite initial pagination`, async () => {
-  await runOracleCampaign(
-    `CONVEX_PAGINATION_WORK`,
-    [`initial-multi-range-exhaustion`] as const,
-    async (reach, parameters) => {
-      const initialWork = fc.asyncProperty(
-        fc.integer({ min: 3, max: 40 }),
-        fc.integer({ min: 1, max: 8 }),
-        fc.boolean(),
-        async (pageCount, pageSize, reverse) => {
-          reach.beginHistory()
-          const rows = Array.from(
-            { length: pageCount * pageSize },
-            (_, rank) => ({
-              id: String(rank),
-              rank,
-              text: String(rank),
-            }),
-          )
-          const source = provider(reverse, `none`)
-          const collection = createCollection(
-            convexPaginatedCollectionOptions({
-              client: source.client,
-              query,
-              queryArgs: {},
-              pageSize,
-              getKey: (row) => row.id,
-              gcTime: 0,
-            }),
-          )
-          collection.startSyncImmediate()
-          await withTestCleanup(
-            async () => {
-              await source.publish(rows)
-              // Check before awaitSync's explicit cache refreshes. At initial exhaustion
-              // there is exactly one useful materialization, the complete public result.
-              expect(collection.size).toBe(rows.length)
-              expect(source.rowVisits).toBe(rows.length)
-              expect(
-                source.slots.some((slot) => slot.options.cursor !== null),
-              ).toBe(true)
-              reach.reach(`initial-multi-range-exhaustion`)
-            },
-            async () => {
-              await collection.cleanup()
-            },
-          )
-        },
-      )
-      await fc.assert(initialWork, { numRuns: oracleRuns(60), ...parameters })
-    },
-    { fixedSeed: 20261022 },
+
+const convex_pagination_workHistory = fc.tuple(
+  fc.integer({ min: 3, max: 40 }),
+  fc.integer({ min: 1, max: 8 }),
+  fc.boolean(),
+)
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_pagination_workJudgment(
+  [pageCount, pageSize, reverse]: AssertionHistory<
+    typeof convex_pagination_workHistory
+  >,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  const rows = Array.from({ length: pageCount * pageSize }, (_, rank) => ({
+    id: String(rank),
+    rank,
+    text: String(rank),
+  }))
+  const source = provider(reverse, `none`)
+  const collection = createCollection(
+    convexPaginatedCollectionOptions({
+      client: source.client,
+      query,
+      queryArgs: {},
+      pageSize,
+      getKey: (row) => row.id,
+      gcTime: 0,
+    }),
   )
+  collection.startSyncImmediate()
+  await withTestCleanup(
+    async () => {
+      await source.publish(rows)
+      // Check before awaitSync's explicit cache refreshes. At initial exhaustion
+      // there is exactly one useful materialization, the complete public result.
+      oracleAssertion(`pagination-oracle.property.test.ts:310:toBe`, () =>
+        expect(collection.size).toBe(rows.length),
+      )
+      oracleAssertion(`pagination-oracle.property.test.ts:311:toBe`, () =>
+        expect(source.rowVisits).toBe(rows.length),
+      )
+      oracleAssertion(`pagination-oracle.property.test.ts:312:toBe`, () =>
+        expect(source.slots.some((slot) => slot.options.cursor !== null)).toBe(
+          true,
+        ),
+      )
+      reach.reach(`initial-multi-range-exhaustion`)
+    },
+    async () => {
+      await collection.cleanup()
+    },
+  )
+}
+
+oracleProperty({
+  id: `convex.pagination-work`,
+  law: {
+    statement: `materializes complete rows once during finite initial pagination`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+  },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+  histories: {
+    arbitrary: convex_pagination_workHistory,
+    runs: 60,
+    fixedSeeds: [20261022],
+    states: [`initial-multi-range-exhaustion`] as const,
+    constructed: [
+      {
+        name: `existing constructive history`,
+        enters: [`initial-multi-range-exhaustion`] as const,
+        build: (generated) => generated,
+      },
+    ],
+  },
+  resolve: (generated) => ({ history: generated }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  driver: async (plan, observe) =>
+    recordAssertionJudgment(`convex.pagination-work`, plan, observe, () =>
+      convex_pagination_workJudgment(plan.history, {
+        beginHistory: () => {},
+        reach: (state) => observe(`reach`, state),
+      }),
+    ),
+  timeout: 120000,
 })
 
 // A configured maxRows bounds the complete eager mirror's accepted row count.
@@ -329,92 +463,148 @@ it(`materializes complete rows once during finite initial pagination`, async () 
 // exhausted source must reject before opening any continuation beyond that cap.
 // Calibration: omitting the row cap fails at the public error observation,
 // seed 20261023/path 0:0, maxRows 1 followed by a two-row source snapshot.
-it(`rejects an oversized eager mirror before continuing and preserves accepted rows`, async () => {
-  await runOracleCampaign(
-    `CONVEX_PAGINATION_BOUND`,
-    [
+
+const convex_pagination_boundHistory = fc.tuple(
+  fc.integer({ min: 1, max: 20 }),
+  fc.integer({ min: 1, max: 6 }),
+  fc.integer({ min: 1, max: 6 }),
+)
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_pagination_boundJudgment(
+  [maxRows, pageSize, excess]: AssertionHistory<
+    typeof convex_pagination_boundHistory
+  >,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  const rows = Array.from({ length: maxRows + excess }, (_, rank) => ({
+    id: String(rank),
+    rank,
+    text: String(rank),
+  }))
+  const source = provider(false, `none`)
+  const collection = createCollection(
+    convexPaginatedCollectionOptions({
+      client: source.client,
+      query,
+      queryArgs: {},
+      pageSize,
+      maxRows,
+      getKey: (row) => row.id,
+      gcTime: 0,
+    }),
+  )
+  collection.startSyncImmediate()
+  await withTestCleanup(
+    async () => {
+      const accepted = rows.slice(0, maxRows)
+      await source.publish(accepted)
+      await collection.utils.awaitSync()
+      oracleAssertion(`pagination-oracle.property.test.ts:370:toEqual`, () =>
+        expect(
+          [...collection.values()]
+            .map(({ id, rank, text }) => ({
+              id,
+              rank,
+              text,
+            }))
+            .sort((a, b) => a.rank - b.rank),
+        ).toEqual(accepted),
+      )
+      reach.reach(`accepted-at-cap`)
+      await source.publish(rows)
+      oracleAssertion(
+        `pagination-oracle.property.test.ts:381:toBeInstanceOf`,
+        () =>
+          expect(collection.utils.getSyncError()).toBeInstanceOf(RangeError),
+      )
+      oracleAssertion(`pagination-oracle.property.test.ts:382:toEqual`, () =>
+        expect(
+          [...collection.values()]
+            .map(({ id, rank, text }) => ({
+              id,
+              rank,
+              text,
+            }))
+            .sort((a, b) => a.rank - b.rank),
+        ).toEqual(accepted),
+      )
+      reach.reach(`overflow-preserves-prior`)
+      // One continuation at the cap may be necessary to distinguish an empty
+      // remainder from an extra row. No cursor may advance past that first
+      // excess row once its response establishes that the mirror is too large.
+      for (const slot of source.slots) {
+        if (slot.options.cursor !== null)
+          oracleAssertion(
+            `pagination-oracle.property.test.ts:397:toBeLessThan`,
+            () => expect(Number(slot.options.cursor)).toBeLessThan(maxRows),
+          )
+      }
+      await oracleAssertion(
+        `pagination-oracle.property.test.ts:399:toBeInstanceOf`,
+        () =>
+          expect(collection.utils.awaitSync()).rejects.toBeInstanceOf(
+            RangeError,
+          ),
+      )
+      // The row cap is a valid source error, not a terminal run failure.
+      // Removing the excess rows permits this same subscription run to recover.
+      await source.publish(accepted)
+      await collection.utils.awaitSync()
+      oracleAssertion(
+        `pagination-oracle.property.test.ts:406:toBeUndefined`,
+        () => expect(collection.utils.getSyncError()).toBeUndefined(),
+      )
+      oracleAssertion(`pagination-oracle.property.test.ts:407:toBe`, () =>
+        expect(collection.size).toBe(maxRows),
+      )
+      reach.reach(`recovered-after-shrink`)
+    },
+    async () => {
+      await collection.cleanup()
+    },
+  )
+}
+
+oracleProperty({
+  id: `convex.pagination-bound`,
+  law: {
+    statement: `rejects an oversized eager mirror before continuing and preserves accepted rows`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+  },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+  histories: {
+    arbitrary: convex_pagination_boundHistory,
+    runs: 60,
+    fixedSeeds: [20261023],
+    states: [
       `accepted-at-cap`,
       `overflow-preserves-prior`,
       `recovered-after-shrink`,
     ] as const,
-    async (reach, parameters) => {
-      const rowBound = fc.asyncProperty(
-        fc.integer({ min: 1, max: 20 }),
-        fc.integer({ min: 1, max: 6 }),
-        fc.integer({ min: 1, max: 6 }),
-        async (maxRows, pageSize, excess) => {
-          reach.beginHistory()
-          const rows = Array.from({ length: maxRows + excess }, (_, rank) => ({
-            id: String(rank),
-            rank,
-            text: String(rank),
-          }))
-          const source = provider(false, `none`)
-          const collection = createCollection(
-            convexPaginatedCollectionOptions({
-              client: source.client,
-              query,
-              queryArgs: {},
-              pageSize,
-              maxRows,
-              getKey: (row) => row.id,
-              gcTime: 0,
-            }),
-          )
-          collection.startSyncImmediate()
-          await withTestCleanup(
-            async () => {
-              const accepted = rows.slice(0, maxRows)
-              await source.publish(accepted)
-              await collection.utils.awaitSync()
-              expect(
-                [...collection.values()]
-                  .map(({ id, rank, text }) => ({
-                    id,
-                    rank,
-                    text,
-                  }))
-                  .sort((a, b) => a.rank - b.rank),
-              ).toEqual(accepted)
-              reach.reach(`accepted-at-cap`)
-              await source.publish(rows)
-              expect(collection.utils.getSyncError()).toBeInstanceOf(RangeError)
-              expect(
-                [...collection.values()]
-                  .map(({ id, rank, text }) => ({
-                    id,
-                    rank,
-                    text,
-                  }))
-                  .sort((a, b) => a.rank - b.rank),
-              ).toEqual(accepted)
-              reach.reach(`overflow-preserves-prior`)
-              // One continuation at the cap may be necessary to distinguish an empty
-              // remainder from an extra row. No cursor may advance past that first
-              // excess row once its response establishes that the mirror is too large.
-              for (const slot of source.slots) {
-                if (slot.options.cursor !== null)
-                  expect(Number(slot.options.cursor)).toBeLessThan(maxRows)
-              }
-              await expect(collection.utils.awaitSync()).rejects.toBeInstanceOf(
-                RangeError,
-              )
-              // The row cap is a valid source error, not a terminal run failure.
-              // Removing the excess rows permits this same subscription run to recover.
-              await source.publish(accepted)
-              await collection.utils.awaitSync()
-              expect(collection.utils.getSyncError()).toBeUndefined()
-              expect(collection.size).toBe(maxRows)
-              reach.reach(`recovered-after-shrink`)
-            },
-            async () => {
-              await collection.cleanup()
-            },
-          )
-        },
-      )
-      await fc.assert(rowBound, { numRuns: oracleRuns(60), ...parameters })
-    },
-    { fixedSeed: 20261023 },
-  )
+    constructed: [
+      {
+        name: `existing constructive history`,
+        enters: [
+          `accepted-at-cap`,
+          `overflow-preserves-prior`,
+          `recovered-after-shrink`,
+        ] as const,
+        build: (generated) => generated,
+      },
+    ],
+  },
+  resolve: (generated) => ({ history: generated }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  driver: async (plan, observe) =>
+    recordAssertionJudgment(`convex.pagination-bound`, plan, observe, () =>
+      convex_pagination_boundJudgment(plan.history, {
+        beginHistory: () => {},
+        reach: (state) => observe(`reach`, state),
+      }),
+    ),
+  timeout: 120000,
 })

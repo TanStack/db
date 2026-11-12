@@ -1,7 +1,12 @@
 /**
  * Law (L5): every run budget that an oracle property uses is tracked by
  * scripts/check-oracle-run-counts.mjs, wherever it is written. A budget is the
- * numRuns of a fixed-seed campaign, or the run count of a registered property.
+ * numRuns of a fixed-seed campaign, or the run count of a registered property,
+ * whether the property passes it to `oraclePropertyOptions` or declares it as
+ * `oracleProperty({ id, histories: { runs } })`; a fixed seed in that
+ * definition's `fixedSeeds` runs `runs` histories. A fixed seed is written as
+ * an object, `{ seed, numRuns }`, or declared, `oracleFixedSeed(seed, {
+ * numRuns })`, and an edit may change one form into the other.
  * When the branch lowers a budget, or removes it from every tracked oracle
  * file, the script reports it, so the change is visible to the reviewer.
  *
@@ -26,7 +31,10 @@
  * key is unique to its budget, except that a fixed seed can be shared with an
  * unrelated campaign in the second oracle file. Then the removal law treats
  * the seed as still present, and the model follows it. Star re-exports are not
- * generated. A count may be wrapped in oracleRuns. The model judges the
+ * generated. A count may be wrapped in oracleRuns, except in `oracleProperty`,
+ * whose framework scales `runs` itself. An `oracleProperty` call is generated
+ * with inline `histories`; a `histories` object held in a constant, and an id
+ * built by a template with expressions, are not. The model judges the
  * reported budget, its base value, and its head value or removal; it does not
  * predict the wording of a line.
  *
@@ -41,8 +49,8 @@
  */
 import { execFile } from 'node:child_process'
 import {
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -53,19 +61,13 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import fc from 'fast-check'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { declareOracle } from '../packages/db/tests/oracle-declaration.js'
+import { afterAll, beforeAll, expect } from 'vitest'
 import {
-  oraclePropertyOptions,
-  oracleRuns,
+  differs,
+  oracleProperty,
+  oracleReplayRequested,
+  pass,
 } from '../packages/db/tests/oracle-config.js'
-import { createOracleReach } from '../packages/db/tests/oracle-reach.js'
-
-declareOracle({
-  model: [predictReport],
-  check: [compareReport],
-  grammar: [programArbitrary],
-})
 
 const PROPERTY = `scripts.run-budget`
 const FIXED_SEED = 2234
@@ -79,7 +81,12 @@ const LARGE_PADDING = 1_100_000
 
 // -- 1. Grammar ---------------------------------------------------------------
 //
-// A budget's count is written inline, in support module A, or in A and passed
+// A property budget is written through `oraclePropertyOptions` or as an
+// `oracleProperty` definition, and a property budget may migrate from the
+// first form at base to the second at head, as a port onto the framework does.
+// A fixed-seed campaign writes its seed in an object or declares it with
+// `oracleFixedSeed`, at base and at head independently, as the move onto
+// declared seeds does. A budget's count is written inline, in support module A, or in A and passed
 // on by support module B's re-export. Its key is inline or imported from A. A
 // change edits the count where it is defined, or writes a literal at the call.
 // The campaign itself is in the oracle file or in A at base (`callAt`). At
@@ -88,7 +95,8 @@ const LARGE_PADDING = 1_100_000
 // A are `.ts` or `.js`; an import names A with or without the `.js` suffix.
 
 const budgetSkeleton = fc.record({
-  form: fc.constantFrom(`property`, `seed`),
+  form: fc.constantFrom(`property`, `framework`, `seed`),
+  migrates: fc.boolean(),
   source: fc.constantFrom(`inline`, `imported`, `reexported`),
   keySource: fc.constantFrom(`inline`, `imported`),
   wrapped: fc.boolean(),
@@ -117,6 +125,9 @@ const budgetSkeleton = fc.record({
     { weight: 2, arbitrary: fc.constant(`other-oracle`) },
   ),
   sharedSeed: fc.boolean(),
+  // Whether a fixed seed is declared with oracleFixedSeed at base and at head.
+  declaredAtBase: fc.boolean(),
+  declaredAtHead: fc.boolean(),
 })
 
 const fileForms = fc.record({
@@ -198,9 +209,15 @@ function resolveBudget(skeleton, index, sources, files) {
   return {
     index,
     form: skeleton.form,
+    // A property budget written through `oraclePropertyOptions`, or a
+    // fixed-seed campaign, at base that is an `oracleProperty` definition at
+    // head: the property's `runs`, or a seed in its `fixedSeeds`.
+    migrates: skeleton.form !== `framework` && skeleton.migrates,
     source,
     keySource: skeleton.keySource,
-    wrapped: skeleton.wrapped,
+    wrapped: skeleton.form !== `framework` && skeleton.wrapped,
+    declaredAtBase: skeleton.form === `seed` && skeleton.declaredAtBase,
+    declaredAtHead: skeleton.form === `seed` && skeleton.declaredAtHead,
     before: skeleton.base,
     after: headValue,
     changed: headValue !== skeleton.base,
@@ -218,7 +235,7 @@ function resolveBudget(skeleton, index, sources, files) {
       skeleton.fate !== `other-oracle` &&
       !files.otherNew,
     key:
-      skeleton.form === `property`
+      skeleton.form !== `seed`
         ? `property budget.${skeleton.keySource === `imported` ? `q` : `p`}${index}`
         : `fixed seed ${1000 + index}`,
   }
@@ -328,9 +345,16 @@ function renderFiles(program, revision) {
     const count = isHead ? budget.after : budget.before
     const seed = 1000 + i
     // The definition of an imported key and count lives in support module A.
+    // The form a budget is written in at this revision.
+    const form =
+      isHead && budget.migrates
+        ? budget.form === `seed`
+          ? `framework-seed`
+          : `framework`
+        : budget.form
     if (budget.keySource === `imported`) {
       support.line(
-        budget.form === `property`
+        budget.form !== `seed`
           ? `export const PROP_${i} = 'budget.q${i}'`
           : `export const SEED_${i} = ${seed}`,
       )
@@ -369,20 +393,27 @@ function renderFiles(program, revision) {
       : budget.source === `reexported` && !inSupport
         ? use(`RUNS_${i}`, files.reexport)
         : use(`RUNS_${i}`, files.support)
-    const runs = budget.wrapped ? `oracleRuns(${countText})` : countText
+    // A migrated budget drops its oracleRuns wrapper, as the framework scales.
+    const runs =
+      budget.wrapped && !form.startsWith(`framework`)
+        ? `oracleRuns(${countText})`
+        : countText
     const keyText =
       budget.keySource === `imported`
-        ? use(
-            budget.form === `property` ? `PROP_${i}` : `SEED_${i}`,
-            files.support,
-          )
-        : budget.form === `property`
+        ? use(budget.form !== `seed` ? `PROP_${i}` : `SEED_${i}`, files.support)
+        : budget.form !== `seed`
           ? `'budget.p${i}'`
           : `${seed}`
     const call =
-      budget.form === `property`
+      form === `property`
         ? `export const opts${i} = oraclePropertyOptions(${runs}, ${keyText})`
-        : `export function campaign${i}() { fc.assert(fc.property(fc.integer(), () => undefined), { numRuns: ${runs}, seed: ${keyText} }) }`
+        : form === `framework`
+          ? `export const opts${i} = oracleProperty({ id: ${keyText}, law: {}, histories: { arbitrary: fc.integer(), runs: ${runs} } })`
+          : form === `framework-seed`
+            ? `export const opts${i} = oracleProperty({ id: 'seeded.${i}', law: {}, histories: { arbitrary: fc.integer(), runs: ${runs}, fixedSeeds: [${keyText}] } })`
+            : (isHead ? budget.declaredAtHead : budget.declaredAtBase)
+              ? `export function campaign${i}() { fc.assert(fc.property(fc.integer(), () => undefined), oracleFixedSeed(${keyText}, { numRuns: ${runs} })) }`
+              : `export function campaign${i}() { fc.assert(fc.property(fc.integer(), () => undefined), { numRuns: ${runs}, seed: ${keyText} }) }`
     hostText.line(call)
     // The oracle file uses a campaign in A by importing it.
     if (inSupport) {
@@ -390,7 +421,9 @@ function renderFiles(program, revision) {
         .get(files.oracle)
         .import(
           supportSpecifier,
-          budget.form === `property` ? `opts${i}` : `campaign${i}`,
+          budget.form !== `seed` || (isHead && budget.migrates)
+            ? `opts${i}`
+            : `campaign${i}`,
         )
     }
   }
@@ -411,6 +444,7 @@ function renderFiles(program, revision) {
 
 let work
 let scriptText
+let loadFailureText
 
 beforeAll(() => {
   // Each run has its own directory, so concurrent runs cannot remove each
@@ -420,6 +454,10 @@ beforeAll(() => {
   scriptText = readFileSync(
     process.env.RUN_BUDGET_SCRIPT ??
       join(repoRoot, `scripts`, `check-oracle-run-counts.mjs`),
+    `utf8`,
+  )
+  loadFailureText = readFileSync(
+    join(repoRoot, `scripts`, `lint-load-failure.mjs`),
     `utf8`,
   )
 })
@@ -496,6 +534,11 @@ async function reportOf(program) {
       join(directory, `scripts`, `check-oracle-run-counts.mjs`),
       scriptText,
     )
+    // The script imports the module that words its failure line.
+    writeFileSync(
+      join(directory, `scripts`, `lint-load-failure.mjs`),
+      loadFailureText,
+    )
     write(renderFiles(program, `base`))
     await git(`add`, `-A`)
     await git(`commit`, `-q`, `-m`, `base`)
@@ -523,7 +566,9 @@ async function reportOf(program) {
 
 /** The script's report equals the model's prediction, as sorted lists. */
 function compareReport(actual, expected) {
-  expect(actual).toEqual(expected)
+  return (
+    differs(`completed report`, `tracked budgets`, actual, expected) ?? pass
+  )
 }
 
 // -- 5. Reach -----------------------------------------------------------------
@@ -534,6 +579,9 @@ const STATES = [
   `imported-count`,
   `re-exported-count`,
   `imported-key`,
+  `framework-definition`,
+  `migrated-to-framework`,
+  `seed-migrated-to-framework`,
   `support-only-change`,
   `oracle-and-support-change`,
   `lowered-budget`,
@@ -544,22 +592,36 @@ const STATES = [
   `moved-to-oracle`,
   `moved-to-untracked-oracle`,
   `shared-seed-kept`,
+  `declared-seed`,
+  `seed-declared-at-head`,
   `large-base-file`,
   `js-oracle`,
   `js-support`,
 ]
-const reach = createOracleReach(PROPERTY, STATES, { minimum: 1 })
+const counts = new Map(STATES.map((state) => [state, 0]))
 
 /** Marks the states that the program enters. */
-function recordStates(program) {
-  reach.beginHistory()
+function recordStates(program, observe) {
   const states = new Set()
   const { files } = program
   for (const budget of program.budgets) {
     if (budget.source === `imported`) states.add(`imported-count`)
     if (budget.source === `reexported`) states.add(`re-exported-count`)
     if (budget.keySource === `imported`) states.add(`imported-key`)
+    if (budget.form === `framework`) states.add(`framework-definition`)
+    if (budget.migrates)
+      states.add(
+        budget.form === `seed`
+          ? `seed-migrated-to-framework`
+          : `migrated-to-framework`,
+      )
     if (budget.after < budget.before) states.add(`lowered-budget`)
+    if (budget.form === `seed` && !budget.migrates) {
+      if (budget.declaredAtBase && budget.declaredAtHead)
+        states.add(`declared-seed`)
+      if (!budget.declaredAtBase && budget.declaredAtHead)
+        states.add(`seed-declared-at-head`)
+    }
     if (budget.callAt === `support`) states.add(`campaign-in-support`)
     if (budget.callAt === `oracle` && budget.fate === `swap`) {
       states.add(`moved-into-support`)
@@ -589,49 +651,83 @@ function recordStates(program) {
   if (files.large) states.add(`large-base-file`)
   if (files.oracleExtension === `js`) states.add(`js-oracle`)
   if (files.supportExtension === `js`) states.add(`js-support`)
-  for (const state of states) reach.reach(state)
-}
-
-// Each campaign has its own fixed seed, so the four campaigns do not draw the
-// same programs. The fixed options are written where the campaign is named, so
-// the run-count script tracks each budget.
-function campaign(name, sources, fixed, supportOnly = false) {
-  const arbitrary = programArbitrary(sources, supportOnly)
-  const predicate = async (program) => {
-    recordStates(program)
-    compareReport(await reportOf(program), predictReport(program))
+  for (const state of states) {
+    observe(`reach`, state)
+    if (!expect.getState().currentTestName.endsWith(`determinism`))
+      counts.set(state, counts.get(state) + 1)
   }
-  it(`${name}: fixed-seed campaign`, async () => {
-    await fc.assert(fc.asyncProperty(arbitrary, predicate), fixed)
-  }, 900_000)
-  it(`${name}: random-seed campaign`, async () => {
-    await fc.assert(
-      fc.asyncProperty(arbitrary, predicate),
-      oraclePropertyOptions(BASE_RUNS, PROPERTY),
-    )
-  }, 900_000)
 }
 
-describe(`run budgets that the run-count script tracks`, () => {
-  campaign(`inline and imported counts`, [`inline`, `imported`], {
-    seed: FIXED_SEED,
-    numRuns: oracleRuns(BASE_RUNS),
-  })
-  campaign(`re-exported counts`, [`reexported`], {
-    seed: 2235,
-    numRuns: oracleRuns(BASE_RUNS),
-  })
-  campaign(`every source`, ALL, { seed: 2236, numRuns: oracleRuns(BASE_RUNS) })
-  campaign(
-    `support-only edits`,
-    [`imported`, `reexported`],
-    { seed: 2237, numRuns: oracleRuns(BASE_RUNS) },
-    true,
-  )
-  // Every declared state must be entered by the campaigns above.
-  afterAll(() => {
-    if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
-      console.log(`REACH`, JSON.stringify([...reach.counts()]))
-    reach.assertReached()
-  })
+// Each source keeps its own original fixed seed and full base budget. Explicit
+// ids make each source independently replayable under the native selector.
+const budgetOracle = {
+  law: {
+    statement: `Every lowered or removed tracked oracle run budget is reported with its exact before and after values.`,
+    authority: `AGENTS.md: Lint feedback while you work; oracle rubric ORC-007; maintainer removal decision 2026-10-27.`,
+    limits: `The unchanged bounded source grammar and report normalization described above.`,
+  },
+  model: predictReport,
+  driver: async (program, observe) => {
+    recordStates(program, observe)
+    observe(`completed report`, await reportOf(program))
+  },
+  check: (_program, trace, expected) => {
+    const completed = trace.find(
+      ({ checkpoint }) => checkpoint === `completed report`,
+    )
+    return compareReport(completed?.value, expected)
+  },
+  timeout: 900_000,
+}
+
+// Keep counts and seeds literal at registration so the run-budget report can
+// still track the same four original fixed campaigns.
+oracleProperty({
+  ...budgetOracle,
+  id: PROPERTY,
+  histories: {
+    arbitrary: programArbitrary([`inline`, `imported`]),
+    runs: BASE_RUNS,
+    fixedSeeds: [FIXED_SEED],
+    measured: STATES,
+  },
+})
+oracleProperty({
+  ...budgetOracle,
+  id: `scripts.run-budget-reexported`,
+  histories: {
+    arbitrary: programArbitrary([`reexported`]),
+    runs: BASE_RUNS,
+    fixedSeeds: [2235],
+    measured: STATES,
+  },
+})
+oracleProperty({
+  ...budgetOracle,
+  id: `scripts.run-budget-every-source`,
+  histories: {
+    arbitrary: programArbitrary(ALL),
+    runs: BASE_RUNS,
+    fixedSeeds: [2236],
+    measured: STATES,
+  },
+})
+oracleProperty({
+  ...budgetOracle,
+  id: `scripts.run-budget-support-only`,
+  histories: {
+    arbitrary: programArbitrary([`imported`, `reexported`], true),
+    runs: BASE_RUNS,
+    fixedSeeds: [2237],
+    measured: STATES,
+  },
+})
+
+// Native measured reach retains the original aggregate minimum across these
+// four campaigns. Determinism executions do not contribute to that minimum.
+afterAll(() => {
+  if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
+    console.log(`REACH`, JSON.stringify([...counts]))
+  if (!oracleReplayRequested())
+    expect([...counts].filter(([, count]) => count < 1)).toEqual([])
 })

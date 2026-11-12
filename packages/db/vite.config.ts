@@ -3,6 +3,7 @@ import { transform } from 'esbuild'
 import { defineConfig, mergeConfig } from 'vitest/config'
 import { tanstackViteConfig } from '@tanstack/vite-config'
 import { commonJsDeclarations } from '../../scripts/commonjs-declarations.mjs'
+import { publishableModuleOutput } from '../../scripts/publishable-module-output.mjs'
 import packageJson from './package.json'
 import type { Plugin } from 'vite'
 
@@ -37,6 +38,11 @@ function manglePrivateMembers(): Plugin {
 }
 
 const config = defineConfig({
+  build: {
+    rollupOptions: {
+      output: publishableModuleOutput,
+    },
+  },
   plugins: [manglePrivateMembers()],
   test: {
     name: packageJson.name,
@@ -49,6 +55,9 @@ const config = defineConfig({
     },
     typecheck: { enabled: true, tsconfig: `./tsconfig.test.json` },
     setupFiles: [`./tests/test-setup.ts`],
+    // The compatibility self-oracle resets modules to exercise each replay
+    // environment. Inline the framework so vi.resetModules resets it too.
+    server: { deps: { inline: [`@tanstack/oracles`] } },
   },
 })
 
@@ -57,6 +66,8 @@ export default mergeConfig(
   tanstackViteConfig({
     entry: [`./src/index.ts`],
     srcDir: `./src`,
+    // Keep the advertised CommonJS entrypoint independent of require(ESM).
+    bundledDeps: [/^@tanstack\/pacer-lite(?:\/|$)/],
     beforeWriteDeclarationFile: commonJsDeclarations,
   }),
 )

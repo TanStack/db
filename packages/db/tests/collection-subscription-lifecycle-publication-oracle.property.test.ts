@@ -1,5 +1,5 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
@@ -13,9 +13,19 @@ import {
   greenLifecycleHistoryArbitrary,
   reduceLifecycle,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
-import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
+import {
+  oracleFixedSeed,
+  oracleReplayRequested,
+  oracleRoute,
+  readOracleRunConfig,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
-import { createOracleReach } from './oracle-reach.js'
+import { oracleProperty } from './oracle-property.js'
+import { subscriptionComparison } from './collection-subscription-property-registration.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+} from './oracle-assertion-adapter.js'
 import { flushPromises } from './utils.js'
 import {
   assertTerminalPublication,
@@ -857,7 +867,9 @@ async function runRestartReceiver(
     for (const row of rows)
       operations.write({ type: `insert`, value: cloneRow(row) })
     const receipt = operations.commit()
-    expect(receipt).toBe(true)
+    oracleAssertion(`lifecycle publication comparison at 867`, () =>
+      expect(receipt).toBe(true),
+    )
   }
   const priorRows: Array<Row> = [
     ...(relation === `absent`
@@ -881,14 +893,20 @@ async function runRestartReceiver(
     write(priorRows)
     subscription.requestSnapshot()
     await flushPromises()
-    expect(shown).toEqual(selected(priorRows))
+    oracleAssertion(`lifecycle publication comparison at 891`, () =>
+      expect(shown).toEqual(selected(priorRows)),
+    )
     const prior = new Map(shown)
     await source.cleanup()
     restarting = true
     source.startSyncImmediate()
     await flushPromises()
-    expect(loads).toBe(2)
-    expect(subscription.status).toBe(`loadingSubset`)
+    oracleAssertion(`lifecycle publication comparison at 897`, () =>
+      expect(loads).toBe(2),
+    )
+    oracleAssertion(`lifecycle publication comparison at 898`, () =>
+      expect(subscription.status).toBe(`loadingSubset`),
+    )
     const start = batches.length
     // A snapshot must be able to supply replacement membership independently
     // of source callbacks. The held events still publish before settlement.
@@ -900,23 +918,37 @@ async function runRestartReceiver(
       )
     }
     held?.publish()
-    expect([...source.values()].map(cloneRow)).toEqual(nextRows)
-    expect(shown).toEqual(prior)
-    expect(batches.slice(start)).toEqual([])
+    oracleAssertion(`lifecycle publication comparison at 910`, () =>
+      expect([...source.values()].map(cloneRow)).toEqual(nextRows),
+    )
+    oracleAssertion(`lifecycle publication comparison at 911`, () =>
+      expect(shown).toEqual(prior),
+    )
+    oracleAssertion(`lifecycle publication comparison at 912`, () =>
+      expect(batches.slice(start)).toEqual([]),
+    )
     const observedRelation = observeRestartRow(
       prior.get(`a`),
       cloneRow(source.get(`a`)!),
     )
-    expect(observedRelation).toBe(relation)
+    oracleAssertion(`lifecycle publication comparison at 917`, () =>
+      expect(observedRelation).toBe(relation),
+    )
     reached = `${path}:${observedRelation}`
     gate.resolve()
     await flushPromises()
     const next = selected(nextRows)
-    expect(normalizePublicationOrder(batches.slice(start))).toEqual(
-      normalizePublicationOrder([publicationDiff(prior, next)]),
+    oracleAssertion(`lifecycle publication comparison at 922`, () =>
+      expect(normalizePublicationOrder(batches.slice(start))).toEqual(
+        normalizePublicationOrder([publicationDiff(prior, next)]),
+      ),
     )
-    expect(shown).toEqual(next)
-    expect(subscription.status).toBe(`ready`)
+    oracleAssertion(`lifecycle publication comparison at 925`, () =>
+      expect(shown).toEqual(next),
+    )
+    oracleAssertion(`lifecycle publication comparison at 926`, () =>
+      expect(subscription.status).toBe(`ready`),
+    )
   } catch (error) {
     failures.push(error)
   } finally {
@@ -1147,7 +1179,9 @@ async function runPublicationHistory(
       })
       return
     }
-    check(normalizedObserved, context).toEqual(expected)
+    oracleAssertion(`lifecycle publication comparison at 1157`, () =>
+      check(normalizedObserved, context).toEqual(expected),
+    )
   }
 
   const selectRuntimeAttempt = (
@@ -1235,21 +1269,29 @@ async function runPublicationHistory(
         const receipt = operations?.commit()
         if (receipt !== true) await receipt
       } else if (command.type === `request`) {
-        check(effect.ownerId).toBe(unsubscribed ? undefined : runtimeOwner?.id)
+        oracleAssertion(`lifecycle publication comparison at 1245`, () =>
+          check(effect.ownerId).toBe(
+            unsubscribed ? undefined : runtimeOwner?.id,
+          ),
+        )
         executed = runtimeOwner !== undefined && !unsubscribed
         subscription.requestSnapshot({
           where: where[command.demand],
           signal: runtimeOwner?.controller.signal,
         })
       } else if (command.type === `abort`) {
-        check(effect.ownerId).toBe(runtimeOwner?.id)
+        oracleAssertion(`lifecycle publication comparison at 1252`, () =>
+          check(effect.ownerId).toBe(runtimeOwner?.id),
+        )
         executed = runtimeOwner !== undefined
         if (runtimeOwner) {
           runtimeOwner.aborted = true
           runtimeOwner.controller.abort()
         }
       } else if (command.type === `release`) {
-        check(effect.ownerId).toBe(runtimeOwner?.id)
+        oracleAssertion(`lifecycle publication comparison at 1259`, () =>
+          check(effect.ownerId).toBe(runtimeOwner?.id),
+        )
         executed = runtimeOwner !== undefined
         if (runtimeOwner) {
           if (runtimeOwner.attemptId !== undefined) {
@@ -1259,7 +1301,9 @@ async function runPublicationHistory(
         }
         subscription.releaseSnapshot(where[command.demand])
       } else if (command.type === `settle`) {
-        check(effect.attemptId).toBe(runtimeAttempt?.id)
+        oracleAssertion(`lifecycle publication comparison at 1269`, () =>
+          check(effect.attemptId).toBe(runtimeAttempt?.id),
+        )
         executed = runtimeAttempt !== undefined
         if (runtimeAttempt) settlement = command.outcome
         if (effect.attemptId !== undefined && runtimeAttempt) {
@@ -1335,14 +1379,16 @@ async function runPublicationHistory(
       // The publication model stops tracking source commands after unsubscribe;
       // its callback-silence assertions below still cover that suffix.
       if (!lifecycle.unsubscribed)
-        check(
-          [...(active ? collection.values() : [])]
-            .map(cloneRow)
-            .sort((left, right) => left.id.localeCompare(right.id)),
-          `source state after command ${index}: ${JSON.stringify(command)}`,
-        ).toEqual(
-          [...publication.source.values()].sort((left, right) =>
-            left.id.localeCompare(right.id),
+        oracleAssertion(`lifecycle publication comparison at 1345`, () =>
+          check(
+            [...(active ? collection.values() : [])]
+              .map(cloneRow)
+              .sort((left, right) => left.id.localeCompare(right.id)),
+            `source state after command ${index}: ${JSON.stringify(command)}`,
+          ).toEqual(
+            [...publication.source.values()].sort((left, right) =>
+              left.id.localeCompare(right.id),
+            ),
           ),
         )
       assertPublications(
@@ -1351,14 +1397,16 @@ async function runPublicationHistory(
         expectedPublicationCount,
         observedPublicationCount,
       )
-      check(
-        [...visible.values()].sort((left, right) =>
-          left.id.localeCompare(right.id),
-        ),
-        `consumer state after command ${index}: ${JSON.stringify(command)}`,
-      ).toEqual(
-        [...publication.visible.values()].sort((left, right) =>
-          left.id.localeCompare(right.id),
+      oracleAssertion(`lifecycle publication comparison at 1361`, () =>
+        check(
+          [...visible.values()].sort((left, right) =>
+            left.id.localeCompare(right.id),
+          ),
+          `consumer state after command ${index}: ${JSON.stringify(command)}`,
+        ).toEqual(
+          [...publication.visible.values()].sort((left, right) =>
+            left.id.localeCompare(right.id),
+          ),
         ),
       )
       observations.push({
@@ -1383,15 +1431,23 @@ async function runPublicationHistory(
     if (runOptions.terminal) {
       const terminal = runOptions.terminal
       const pending = [...attempts.values()].filter(({ settled }) => !settled)
-      expect(pending).toHaveLength(terminal.expectedPending)
-      expect(pending.length).toBeGreaterThan(0)
+      oracleAssertion(`lifecycle publication comparison at 1393`, () =>
+        expect(pending).toHaveLength(terminal.expectedPending),
+      )
+      oracleAssertion(`lifecycle publication comparison at 1394`, () =>
+        expect(pending.length).toBeGreaterThan(0),
+      )
       if (terminal.order === `newest-first`) pending.reverse()
       subscription.unsubscribe()
       unsubscribed = true
       const retired = captureTerminal()
-      expect(retired.subscriberCount).toBe(0)
+      oracleAssertion(`lifecycle publication comparison at 1399`, () =>
+        expect(retired.subscriberCount).toBe(0),
+      )
       for (const attempt of pending) {
-        expect(outcomes.has(attempt.id)).toBe(false)
+        oracleAssertion(`lifecycle publication comparison at 1401`, () =>
+          expect(outcomes.has(attempt.id)).toBe(false),
+        )
         const failure = new Error(`retired publication transport ${attempt.id}`)
         attempt.settled = true
         if (terminal.outcome === `resolve`) {
@@ -1405,14 +1461,23 @@ async function runPublicationHistory(
         terminal.reached.push(attempt.id)
         const outcome = outcomes.get(attempt.id)
         if (terminal.outcome === `resolve`)
-          expect(outcome).toEqual({ state: `resolved` })
+          oracleAssertion(`lifecycle publication comparison at 1415`, () =>
+            expect(outcome).toEqual({ state: `resolved` }),
+          )
         else {
-          expect(outcome?.state).toBe(`rejected`)
-          if (outcome?.state === `rejected`) expect(outcome.error).toBe(failure)
+          oracleAssertion(`lifecycle publication comparison at 1417`, () =>
+            expect(outcome?.state).toBe(`rejected`),
+          )
+          if (outcome?.state === `rejected`)
+            oracleAssertion(`lifecycle publication comparison at 1418`, () =>
+              expect(outcome.error).toBe(failure),
+            )
         }
         assertTerminalPublication(captureTerminal(), retired)
       }
-      expect(terminal.reached).toEqual(pending.map(({ id }) => id))
+      oracleAssertion(`lifecycle publication comparison at 1422`, () =>
+        expect(terminal.reached).toEqual(pending.map(({ id }) => id)),
+      )
     }
   } catch (error) {
     failures.push(error)
@@ -1647,60 +1712,83 @@ async function runPublicationProduct(
       historyName: scenario.name,
       mismatches,
     })
-    expect(observations).toHaveLength(scenario.history.length)
-    expect(observations[scenario.focalSourceIndex]).toMatchObject({
-      command: `source`,
-      phaseBefore: scenario.phase,
-      executed: true,
-      sourceEffect: scenario.sourceEffect,
-    })
-    if (scenario.settlementIndex === undefined) {
-      expect(
-        observations[scenario.pendingProbeIndex]!.pendingAttemptsBefore,
-        scenario.name,
-      ).toBe(1)
-    } else {
-      expect(observations[scenario.settlementIndex]).toMatchObject({
-        command: `settle`,
+    oracleAssertion(`lifecycle publication comparison at 1657`, () =>
+      expect(observations).toHaveLength(scenario.history.length),
+    )
+    oracleAssertion(`lifecycle publication comparison at 1658`, () =>
+      expect(observations[scenario.focalSourceIndex]).toMatchObject({
+        command: `source`,
+        phaseBefore: scenario.phase,
         executed: true,
-        settlement: scenario.settlement,
-        publications:
-          scenario.settlement === `resolve` &&
-          scenario.phase !== `private-failed`
-            ? 1
-            : 0,
-      })
+        sourceEffect: scenario.sourceEffect,
+      }),
+    )
+    if (scenario.settlementIndex === undefined) {
+      oracleAssertion(`lifecycle publication comparison at 1665`, () =>
+        expect(
+          observations[scenario.pendingProbeIndex]!.pendingAttemptsBefore,
+          scenario.name,
+        ).toBe(1),
+      )
+    } else {
+      const settlementIndex = scenario.settlementIndex
+      oracleAssertion(`lifecycle publication comparison at 1670`, () =>
+        expect(observations[settlementIndex]).toMatchObject({
+          command: `settle`,
+          executed: true,
+          settlement: scenario.settlement,
+          publications:
+            scenario.settlement === `resolve` &&
+            scenario.phase !== `private-failed`
+              ? 1
+              : 0,
+        }),
+      )
     }
 
     const suffix = observations[scenario.suffixIndex]!
-    expect(suffix).toMatchObject({
-      command: scenario.suffix,
-      executed: true,
-    })
+    oracleAssertion(`lifecycle publication comparison at 1683`, () =>
+      expect(suffix).toMatchObject({
+        command: scenario.suffix,
+        executed: true,
+      }),
+    )
     if (scenario.suffix === `release`) {
-      expect(suffix.unloads, scenario.name).toBe(1)
+      oracleAssertion(`lifecycle publication comparison at 1688`, () =>
+        expect(suffix.unloads, scenario.name).toBe(1),
+      )
     } else if (scenario.suffix === `cleanup`) {
-      expect(suffix.collectionStatus, scenario.name).toBe(`cleaned-up`)
+      oracleAssertion(`lifecycle publication comparison at 1690`, () =>
+        expect(suffix.collectionStatus, scenario.name).toBe(`cleaned-up`),
+      )
     } else if (scenario.suffix === `restart`) {
-      expect(suffix.syncRuns, scenario.name).toBe(1)
+      oracleAssertion(`lifecycle publication comparison at 1692`, () =>
+        expect(suffix.syncRuns, scenario.name).toBe(1),
+      )
     } else {
       const ownerCount =
         scenario.phase === `private-settling` ||
         scenario.phase === `private-failed`
           ? 2
           : 1
-      expect(suffix.unloads, scenario.name).toBe(ownerCount)
+      oracleAssertion(`lifecycle publication comparison at 1699`, () =>
+        expect(suffix.unloads, scenario.name).toBe(ownerCount),
+      )
     }
 
-    expect(observations[scenario.postUnsubscribeProbeIndex]).toMatchObject({
-      command: `source`,
-      executed: true,
-      publications: 0,
-    })
+    oracleAssertion(`lifecycle publication comparison at 1702`, () =>
+      expect(observations[scenario.postUnsubscribeProbeIndex]).toMatchObject({
+        command: `source`,
+        executed: true,
+        publications: 0,
+      }),
+    )
     reached.add(scenario.name)
   }
 
-  expect(reached).toEqual(new Set(scenarios.map(({ name }) => name)))
+  oracleAssertion(`lifecycle publication comparison at 1710`, () =>
+    expect(reached).toEqual(new Set(scenarios.map(({ name }) => name))),
+  )
   return mismatches
 }
 
@@ -1716,10 +1804,12 @@ function expectNoPublicationMismatches(
       observed,
     }),
   )
-  expect(
-    summary,
-    `publication product mismatches: ${JSON.stringify(summary)}`,
-  ).toEqual([])
+  oracleAssertion(`lifecycle publication comparison at 1726`, () =>
+    expect(
+      summary,
+      `publication product mismatches: ${JSON.stringify(summary)}`,
+    ).toEqual([]),
+  )
 }
 
 let deferralHistoryId = 0
@@ -1762,9 +1852,13 @@ async function runDeferralCleanupHistory(
         if (!handle) throw new Error(`missing ${command.handle} handle`)
         handle[command.outcome]()
         if (command.handle === `current`) {
-          expect(batches).toEqual(expectedDeferralBatches(commands))
+          oracleAssertion(`lifecycle publication comparison at 1772`, () =>
+            expect(batches).toEqual(expectedDeferralBatches(commands)),
+          )
         } else if (command.handle === `outer` && subscription) {
-          expect(batches).toEqual([])
+          oracleAssertion(`lifecycle publication comparison at 1774`, () =>
+            expect(batches).toEqual([]),
+          )
         }
       } else if (command.type === `write`) {
         operations.begin()
@@ -1773,13 +1867,20 @@ async function runDeferralCleanupHistory(
           value: { id: command.key, value: command.key.charCodeAt(0) },
         })
         operations.commit()
-        if (subscription) expect(batches).toEqual([])
+        if (subscription)
+          oracleAssertion(`lifecycle publication comparison at 1783`, () =>
+            expect(batches).toEqual([]),
+          )
       } else if (command.type === `cleanup`) {
         await collection.cleanup()
-        expect(collection.status).toBe(`cleaned-up`)
+        oracleAssertion(`lifecycle publication comparison at 1786`, () =>
+          expect(collection.status).toBe(`cleaned-up`),
+        )
       } else if (command.type === `restart`) {
         collection.startSyncImmediate()
-        expect(collection.get(`a`)).toBeUndefined()
+        oracleAssertion(`lifecycle publication comparison at 1789`, () =>
+          expect(collection.get(`a`)).toBeUndefined(),
+        )
       } else {
         subscription = collection.subscribeChanges(
           (changes) =>
@@ -1795,7 +1896,9 @@ async function runDeferralCleanupHistory(
         )
       }
     }
-    expect(syncRuns).toBe(2)
+    oracleAssertion(`lifecycle publication comparison at 1805`, () =>
+      expect(syncRuns).toBe(2),
+    )
   } catch (error) {
     failures.push(error)
   } finally {
@@ -1854,6 +1957,9 @@ function expectedSelection(
 // The publication check compares each command's batches, visible rows, status,
 // and unloads with the model. The model predicts the publication step by
 // step, and the selection model predicts which keys local snapshots select.
+// What this oracle owns: the gap report judges which rows a subscription
+// publishes to subscribers, in subscription.ts and in the Collection state that
+// holds the rows, by this file's tests across replay, restart, and cleanup.
 declareOracle({
   check: [runPublicationHistory, runPublicationProduct, runRestartReceiver],
   model: [
@@ -1911,6 +2017,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   it.each(selectionCases)(
     `selects each local key once across $first then ordered, includeInitialState=$includeInitialState, reenter=$reenter`,
     async ({ includeInitialState, first, reenter }) => {
+      oracleRoute(`case`)
       // Local selections are modeled by expectedSelection; visible is the
       // independent callback consumer's row set.
       const { batches: expectedBatches, selected } = expectedSelection(
@@ -2000,16 +2107,26 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
         })
 
         // Snapshot enumeration order is not part of the key-selection law.
-        expect(observedBatches.map((batch) => [...batch].sort())).toEqual(
-          expectedBatches.map((batch) => [...batch].sort()),
+        oracleAssertion(`lifecycle publication comparison at 2015`, () =>
+          expect(observedBatches.map((batch) => [...batch].sort())).toEqual(
+            expectedBatches.map((batch) => [...batch].sort()),
+          ),
         )
-        expect(invalidChanges).toEqual([])
-        expect([...visible].sort()).toEqual([...selected].sort())
+        oracleAssertion(`lifecycle publication comparison at 2018`, () =>
+          expect(invalidChanges).toEqual([]),
+        )
+        oracleAssertion(`lifecycle publication comparison at 2019`, () =>
+          expect([...visible].sort()).toEqual([...selected].sort()),
+        )
         // Local selections do not certify a provider prefix. Without an
         // explicit offset, the adapter request begins at the source prefix
         // and carries no key-based cursor hint, including after a full read.
-        expect(loads.at(-1)).toMatchObject({ offset: 0 })
-        expect(loads.at(-1)?.cursor?.lastKey).toBeUndefined()
+        oracleAssertion(`lifecycle publication comparison at 2023`, () =>
+          expect(loads.at(-1)).toMatchObject({ offset: 0 }),
+        )
+        oracleAssertion(`lifecycle publication comparison at 2024`, () =>
+          expect(loads.at(-1)?.cursor?.lastKey).toBeUndefined(),
+        )
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()
@@ -2017,14 +2134,20 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     },
   )
   it(`reconstructs every bounded deferral cleanup history`, () => {
-    expect(deferralCleanupHistories).toHaveLength(32)
-    expect(new Set(deferralCleanupHistories.map(({ name }) => name)).size).toBe(
-      32,
+    oracleRoute(`case`)
+    oracleAssertion(`lifecycle publication comparison at 2033`, () =>
+      expect(deferralCleanupHistories).toHaveLength(32),
+    )
+    oracleAssertion(`lifecycle publication comparison at 2034`, () =>
+      expect(
+        new Set(deferralCleanupHistories.map(({ name }) => name)).size,
+      ).toBe(32),
     )
   })
   it.each(deferralCleanupHistories)(
     `publishes independent batches after deferral cleanup: $name`,
     async ({ commands }) => {
+      oracleRoute(`case`)
       await runDeferralCleanupHistory(commands)
     },
   )
@@ -2044,6 +2167,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   )(
     `observes retired transports without subscriber activity: %j`,
     async ({ phase, demandCount, outcome, order }) => {
+      oracleRoute(`case`)
       const history: Array<PublicationCommand> = [
         { type: `source`, key: `c`, action: `upsert`, value: 42 },
         { type: `request`, demand: `a` },
@@ -2065,12 +2189,15 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
           reached,
         },
       })
-      expect(new Set(reached).size).toBe(
-        demandCount * (phase === `initial` ? 1 : 2),
+      oracleAssertion(`lifecycle publication comparison at 2083`, () =>
+        expect(new Set(reached).size).toBe(
+          demandCount * (phase === `initial` ? 1 : 2),
+        ),
       )
     },
   )
   it(`keeps raw source updates after retiring the final replay owner`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `cleanup` },
       { type: `release`, demand: `b` },
@@ -2087,6 +2214,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`keeps raw truncate deletes after retiring the final replay owner`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       {
         type: `settle`,
@@ -2112,6 +2240,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`records requested snapshot rows before a canceled reset`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `request`, demand: `b` },
       { type: `truncate` },
@@ -2129,6 +2258,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`does not invent a publication for an unchanged private row`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `request`, demand: `a` },
       { type: `cleanup` },
@@ -2149,6 +2279,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   )(
     `distinguishes raw source resets from retained replacements: $baseline/$reset`,
     async ({ baseline, reset }) => {
+      oracleRoute(`case`)
       await runPublicationHistory([
         ...(baseline === `retained` || baseline === `refreshed`
           ? [{ type: `source`, key: `d`, action: `upsert`, value: 0 } as const]
@@ -2176,6 +2307,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     },
   )
   it(`reconciles a repeated reset after the last replay owner aborts`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 0 },
       { type: `request`, demand: `a` },
@@ -2193,6 +2325,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`keeps independent source rows when a replay settles after redundant restart calls`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 0 },
       { type: `request`, demand: `a` },
@@ -2227,42 +2360,61 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`defines all 288 unique row-publication lifecycle cells`, () => {
-    expect(publicationProductCases).toHaveLength(288)
-    expect(new Set(publicationProductCases.map(({ name }) => name)).size).toBe(
-      288,
+    oracleRoute(`case`)
+    oracleAssertion(`lifecycle publication comparison at 2253`, () =>
+      expect(publicationProductCases).toHaveLength(288),
     )
-    expect(successfulReplacementCases).toHaveLength(32)
-    expect(replacementOrderingCases).toHaveLength(6)
-    expect(replacementRetirementCases).toHaveLength(46)
-    expect(publicationControlCases).toHaveLength(204)
+    oracleAssertion(`lifecycle publication comparison at 2254`, () =>
+      expect(
+        new Set(publicationProductCases.map(({ name }) => name)).size,
+      ).toBe(288),
+    )
+    oracleAssertion(`lifecycle publication comparison at 2257`, () =>
+      expect(successfulReplacementCases).toHaveLength(32),
+    )
+    oracleAssertion(`lifecycle publication comparison at 2258`, () =>
+      expect(replacementOrderingCases).toHaveLength(6),
+    )
+    oracleAssertion(`lifecycle publication comparison at 2259`, () =>
+      expect(replacementRetirementCases).toHaveLength(46),
+    )
+    oracleAssertion(`lifecycle publication comparison at 2260`, () =>
+      expect(publicationControlCases).toHaveLength(204),
+    )
   })
   it.each(publicationControlSlices)(
     `matches row publications for lifecycle control cells $name`,
     async ({ scenarios }) => {
+      oracleRoute(`case`)
       expectNoPublicationMismatches(await runPublicationProduct(scenarios))
     },
   )
   it(`preserves independent source work when a successful replay publishes`, async () => {
+    oracleRoute(`fixed history`)
     expectNoPublicationMismatches(
       await runPublicationProduct(successfulReplacementCases),
     )
   })
   it(`publishes complete replacement batches regardless of independent key order`, async () => {
+    oracleRoute(`fixed history`)
     expectNoPublicationMismatches(
       await runPublicationProduct(replacementOrderingCases),
     )
   })
   it(`retires incomplete or failed replacement without changing independent public rows`, async () => {
+    oracleRoute(`fixed history`)
     expectNoPublicationMismatches(
       await runPublicationProduct(replacementRetirementCases),
     )
   })
   it(`maps every canonical green lifecycle history to public rows`, async () => {
+    oracleRoute(`case`)
     for (const history of greenLifecycleHistories) {
       await runPublicationHistory(history)
     }
   })
   it(`suppresses canceled source writes when a released acquisition settles`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `request`, demand: `a` },
@@ -2284,6 +2436,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`publishes an authoritative truncate after the final demand is released`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `request`, demand: `b` },
       {
@@ -2299,6 +2452,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`publishes independent source changes with a successful replay`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `request`, demand: `a` },
@@ -2327,6 +2481,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`does not republish a row already delivered by a live change`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `source`, key: `a`, action: `upsert`, value: 0 },
@@ -2343,6 +2498,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`suppresses canceled source writes when an aborted acquisition settles`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `request`, demand: `a` },
@@ -2363,6 +2519,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`keeps later source changes private after a failed replay`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `request`, demand: `a` },
       {
@@ -2504,12 +2661,14 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   ] as Array<[string, Array<PublicationCommand>]>)(
     `leaves no stale row after a retired replay: %s`,
     async (_, history) => {
+      oracleRoute(`case`)
       await runPublicationHistory(history)
     },
   )
   // Law 9: a failed replay stays private until an authoritative replay
   // succeeds, even after its failed owner is released and nothing remains.
   it(`keeps a failed replay private when its final owner releases`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 1 },
       { type: `request`, demand: `a` },
@@ -2533,6 +2692,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`retires failed private replacement rows when its final owner releases`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `source`, key: `b`, action: `upsert`, value: 7 },
@@ -2566,6 +2726,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   // later source write of 0 must reconcile as an update, since -0 and 0 are
   // distinct row values (maintainer decision, 2026-10-29).
   it(`reconciles a retained -0 row with a later source write of 0`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `source`, key: `b`, action: `upsert`, value: -0 },
@@ -2596,6 +2757,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`does not delete an independent public row when releasing a restarted demand`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `source`, key: `b`, action: `upsert`, value: 0 },
@@ -2610,6 +2772,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`keeps a restarted snapshot private while canceled replay work settles`, async () => {
+    oracleRoute(`fixed history`)
     // Seed 2018803696, path 65:10:2:10:13:12:12:0:0:0. A canceled-only
     // truncate does not discharge the earlier replay's publication wait.
     await runPublicationHistory(
@@ -2643,6 +2806,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`matches retained rows across an empty restart and canceled-only truncates`, async () => {
+    oracleRoute(`fixed history`)
     // Seed 2018803696, path 65:29:0:0:0 exposed the model's missing retained-row
     // deletion: an authoritative empty reset is not limited to resident rows.
     await runPublicationHistory(
@@ -2686,6 +2850,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   )(
     `publishes an authoritative empty reset: %j`,
     async ({ restart, canceledOwner }) => {
+      oracleRoute(`case`)
       await runPublicationHistory([
         { type: `source`, key: `a`, action: `upsert`, value: 0 },
         ...(restart
@@ -2726,6 +2891,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   )(
     `installs a retained-row replacement atomically: %j`,
     async ({ canceledOwner, replacement }) => {
+      oracleRoute(`case`)
       await runPublicationHistory([
         { type: `source`, key: `a`, action: `upsert`, value: 0 },
         { type: `cleanup` },
@@ -2751,6 +2917,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   ] satisfies Array<Row | undefined>)(
     `publishes eager restart before a later source reset: %j`,
     async (replacement) => {
+      oracleRoute(`case`)
       await runPublicationHistory(
         [
           { type: `source`, key: `a`, action: `upsert`, value: 0 },
@@ -2765,6 +2932,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     },
   )
   it(`resets retained rows after no-op cleanup and release commands`, async () => {
+    oracleRoute(`fixed history`)
     // Seed 1657005, path 164:18 after removing the visible-row request omission.
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 1 },
@@ -2788,6 +2956,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`resets retained rows after the last replay owner retires`, async () => {
+    oracleRoute(`fixed history`)
     // Seed 333468655, path 59:13:0:0:0.
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 0 },
@@ -2810,6 +2979,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`does not restore source rows when the final replay owner retires`, async () => {
+    oracleRoute(`fixed history`)
     // Seed 1337491191, path 591:20:1:8:8:8:7:7.
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 0 },
@@ -2825,6 +2995,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`keeps an equal row restored by the restarted acquisition`, async () => {
+    oracleRoute(`fixed history`)
     // Original generated failure: seed -1439698414, path 1:22.
     await runPublicationHistory([
       { type: `source`, key: `b`, action: `upsert`, value: 1 },
@@ -2857,161 +3028,180 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
 
-  const { multiplier, ...replay } = readOracleRunConfig()
+  const { multiplier } = readOracleRunConfig()
   const restartProperty = `subscription-lifecycle.restart-publication`
-  // Each generated input runs every structural lane. Reach never depends on
-  // the random seed choosing equality, a live owner, or ordinary source delivery.
-  // Both campaigns use the same budget, grammar, model, driver and comparisons.
-  for (const seed of replay.replaySeed === undefined
-    ? [2310, undefined]
-    : [undefined]) {
-    for (const delivery of restartDeliveries) {
-      it(`matches restarted row publication ${delivery} (${seed === undefined ? `random or replayed seed` : `fixed seed`})`, async () => {
-        const scenarios = restartScenarios.filter(
-          (item) => item.delivery === delivery,
-        )
-        const reach = createOracleReach(
-          restartProperty,
-          scenarios.map(({ state }) => state),
-          { minimum: 12 * multiplier },
-        )
-        await fc.assert(
-          fc.asyncProperty(restartPublicationInputArbitrary, async (input) => {
-            for (const scenario of scenarios) {
-              reach.beginHistory()
-              const {
-                history,
-                target,
-                cleanupIndex,
-                restartIndex,
-                focalIndex,
-              } = restartPublicationHistory(input, scenario)
-              const observations = await runPublicationHistory(history)
-              expect(observations[restartIndex]?.executed).toBe(true)
-              expect(observations[restartIndex]?.syncRuns).toBe(1)
-              const focal = observations[focalIndex]!
-              const prior = observations[cleanupIndex]!.visibleBefore.find(
-                ({ id }) => id === target,
-              )
-              const written = focal.writtenRows.find(({ id }) => id === target)
-              const current = observations.find((item) => {
-                const command = history[item.index]
-                return (
-                  item.index > restartIndex &&
-                  command?.type === `settle` &&
-                  command.scope === `current`
-                )
-              })!
-              const actualOwner = observeRestartOwner(
-                observations.slice(0, cleanupIndex),
-                history,
-                input.demand,
-              )
-              expect(actualOwner).toBe(scenario.owner)
-              const actualOutcome = current.settlement ?? `noop`
-              // Failed acquisitions write nothing. Observe the row relation on
-              // their authoritative retry, after proving the actual rejection.
-              const delivered =
-                written ??
-                (actualOutcome === `reject`
-                  ? observations
-                      .slice(focalIndex + 1)
-                      .flatMap((item) => item.writtenRows)
-                      .find(({ id }) => id === target)
-                  : undefined)
-              const actualRow = observeRestartRow(prior, delivered)
-              expect(actualOutcome).toBe(scenario.outcome)
-              expect(actualRow).toBe(scenario.row)
-              const live =
-                scenario.owner === `pending` ||
-                scenario.owner === `settled` ||
-                scenario.owner === `peer`
-              expect(observations[restartIndex]!.currentAttempts).toBe(
-                live ? (scenario.owner === `peer` ? 2 : 1) : 0,
-              )
-              reach.reach(
-                `${delivery}:${actualOwner}:${actualRow}:${actualOutcome}`,
-              )
-            }
-          }),
-          {
-            ...oracleRandomParameters(12 * multiplier, replay, restartProperty),
-            ...(seed === undefined ? {} : { seed }),
-          },
-        )
-        reach.assertReached()
-      }, 120_000)
-    }
-  }
-  for (const seed of replay.replaySeed === undefined
-    ? [2310, undefined]
-    : [undefined]) {
-    for (const path of restartReceiverPaths) {
-      it(`matches restarted row publication receiver ${path} (${seed === undefined ? `random or replayed seed` : `fixed seed`})`, async () => {
-        const reach = createOracleReach(
-          restartProperty,
-          restartRowStates.map((row) => `${path}:${row}`),
-          { minimum: 12 * multiplier },
-        )
-        await fc.assert(
-          fc.asyncProperty(restartPublicationInputArbitrary, async (input) => {
-            for (const row of restartRowStates) {
-              reach.beginHistory()
-              reach.reach(await runRestartReceiver(input, path, row))
-            }
-          }),
-          {
-            ...oracleRandomParameters(12 * multiplier, replay, restartProperty),
-            ...(seed === undefined ? {} : { seed }),
-          },
-        )
-        reach.assertReached()
-      }, 120_000)
-    }
-  }
-  const runs = 60 * multiplier
-  // Generated histories never write over a retained row (a failed replay's
-  // carried row): the random grammar inserts source writes into green
-  // lifecycle histories. The pinned zero-sign history below covers that path.
-  it(`reaches a zero-sign source write in the fixed campaign`, async () => {
-    const reach = createOracleReach(
-      `lifecycle-publication.zero-sign`,
-      [`zero-sign-write`],
-      { minimum: 5 },
+  const restartStates = [
+    ...restartScenarios.map(({ state }) => state),
+    ...restartReceiverPaths.flatMap((path) =>
+      restartRowStates.map((row) => `${path}:${row}`),
+    ),
+  ]
+  const restartCounts = new Map(restartStates.map((state) => [state, 0]))
+  let countingRestartCampaign = false
+  beforeEach(({ task }) => {
+    countingRestartCampaign =
+      task.suite?.name === restartProperty &&
+      (task.name === `random seed` || task.name.startsWith(`fixed seed `))
+    if (countingRestartCampaign)
+      for (const state of restartStates) restartCounts.set(state, 0)
+  })
+  afterEach(({ task }) => {
+    if (
+      !countingRestartCampaign ||
+      task.result?.errors?.length ||
+      oracleReplayRequested()
     )
-    for (const history of fc.sample(publicationCommandHistoryArbitrary, {
-      seed: 1_657_005,
-      numRuns: runs,
-    })) {
-      reach.beginHistory()
+      return
+    // Every original delivery and receiver cell still needs twelve histories
+    // per campaign. Only their registration is shared.
+    oracleAssertion(`lifecycle publication comparison at 2924`, () =>
+      expect(
+        [...restartCounts].filter(([, count]) => count < 12 * multiplier),
+      ).toEqual([]),
+    )
+    process.stdout.write(
+      `${restartProperty} ${task.name} census ${JSON.stringify(Object.fromEntries(restartCounts))}\n`,
+    )
+  })
+  const checkRestartPublication = async (
+    input: RestartPublicationInput,
+  ): Promise<void> => {
+    for (const delivery of restartDeliveries) {
+      for (const scenario of restartScenarios.filter(
+        (item) => item.delivery === delivery,
+      )) {
+        const { history, target, cleanupIndex, restartIndex, focalIndex } =
+          restartPublicationHistory(input, scenario)
+        const observations = await runPublicationHistory(history)
+        oracleAssertion(`lifecycle publication comparison at 2938`, () =>
+          expect(observations[restartIndex]?.executed).toBe(true),
+        )
+        oracleAssertion(`lifecycle publication comparison at 2939`, () =>
+          expect(observations[restartIndex]?.syncRuns).toBe(1),
+        )
+        const focal = observations[focalIndex]!
+        const prior = observations[cleanupIndex]!.visibleBefore.find(
+          ({ id }) => id === target,
+        )
+        const written = focal.writtenRows.find(({ id }) => id === target)
+        const current = observations.find((item) => {
+          const command = history[item.index]
+          return (
+            item.index > restartIndex &&
+            command?.type === `settle` &&
+            command.scope === `current`
+          )
+        })!
+        const actualOwner = observeRestartOwner(
+          observations.slice(0, cleanupIndex),
+          history,
+          input.demand,
+        )
+        oracleAssertion(`lifecycle publication comparison at 2958`, () =>
+          expect(actualOwner).toBe(scenario.owner),
+        )
+        const actualOutcome = current.settlement ?? `noop`
+        // Failed acquisitions write nothing. Observe the row relation on
+        // their authoritative retry, after proving the actual rejection.
+        const delivered =
+          written ??
+          (actualOutcome === `reject`
+            ? observations
+                .slice(focalIndex + 1)
+                .flatMap((item) => item.writtenRows)
+                .find(({ id }) => id === target)
+            : undefined)
+        const actualRow = observeRestartRow(prior, delivered)
+        oracleAssertion(`lifecycle publication comparison at 2971`, () =>
+          expect(actualOutcome).toBe(scenario.outcome),
+        )
+        oracleAssertion(`lifecycle publication comparison at 2972`, () =>
+          expect(actualRow).toBe(scenario.row),
+        )
+        const live =
+          scenario.owner === `pending` ||
+          scenario.owner === `settled` ||
+          scenario.owner === `peer`
+        oracleAssertion(`lifecycle publication comparison at 2977`, () =>
+          expect(observations[restartIndex]!.currentAttempts).toBe(
+            live ? (scenario.owner === `peer` ? 2 : 1) : 0,
+          ),
+        )
+        if (countingRestartCampaign) {
+          const state = `${delivery}:${actualOwner}:${actualRow}:${actualOutcome}`
+          restartCounts.set(state, restartCounts.get(state)! + 1)
+        }
+      }
+    }
+    for (const path of restartReceiverPaths) {
+      for (const row of restartRowStates) {
+        const state = await runRestartReceiver(input, path, row)
+        if (countingRestartCampaign)
+          restartCounts.set(state, restartCounts.get(state)! + 1)
+      }
+    }
+  }
+  oracleProperty({
+    id: `subscription-lifecycle.restart-publication`,
+    law: {
+      statement: `Restarted row publication follows prior row equality, logical owner state, and authoritative acquisition outcome at every existing receiving path.`,
+      authority: `The lifecycle/publication contract above and the existing independent restart observation relation.`,
+      limits: `The unchanged finite owner/row/outcome product, acquisition and source delivery, and the three controlled receiving paths.`,
+    },
+    owns: [`src/collection/subscription.ts`, `src/collection/state.ts`],
+    histories: {
+      arbitrary: restartPublicationInputArbitrary,
+      runs: 12,
+      fixedSeeds: [2310],
+    },
+    ...subscriptionComparison(restartProperty, checkRestartPublication),
+    check: forwardAssertionJudgment,
+    // Two delivery campaigns and four receiver campaigns previously each
+    // had a 120-second deadline; preserve their total allowance when grouped.
+    timeout: 720_000,
+  })
+  const runs = 60 * multiplier
+  // Preserve the original fixed campaign's zero-sign minimum and sample order.
+  it(`reaches a zero-sign source write in the fixed campaign`, async () => {
+    oracleRoute(`fixed seed`)
+    let reached = 0
+    for (const history of fc.sample(
+      publicationCommandHistoryArbitrary,
+      oracleFixedSeed(1_657_005, { numRuns: runs }),
+    )) {
       const before = zeroSignWrites
       await runPublicationHistory(history)
-      if (zeroSignWrites > before) reach.reach(`zero-sign-write`)
+      if (zeroSignWrites > before) reached++
     }
-    reach.assertReached()
+    if (!oracleReplayRequested()) {
+      oracleAssertion(`lifecycle publication comparison at 3018`, () =>
+        expect(reached).toBeGreaterThanOrEqual(5),
+      )
+      process.stdout.write(
+        `lifecycle-publication.zero-sign census ${reached} (minimum 5)\n`,
+      )
+    }
   }, 120_000)
-  fcTest.prop([publicationCommandHistoryArbitrary], {
-    numRuns: runs,
-    seed: 1_657_005,
-  })(
-    `matches row publications for a fixed seed`,
-    async (history) => {
-      await runPublicationHistory(history)
+  oracleProperty({
+    id: `subscription-lifecycle.publication-history`,
+    law: {
+      statement: `Each command publishes the exact coherent callback batches and public rows predicted by the independent publication model.`,
+      authority: `Collection.subscribeChanges, public Collection lifecycle, and the shared lifecycle grammar as stated above.`,
+      limits: `The unchanged controlled source-write/lifecycle command grammar; live-query includes and real-provider behavior remain outside this owner.`,
     },
-    120_000,
-  )
-  fcTest.prop(
-    [publicationCommandHistoryArbitrary],
-    oracleRandomParameters(
-      runs,
-      replay,
+    owns: [`src/collection/subscription.ts`, `src/collection/state.ts`],
+    histories: {
+      arbitrary: publicationCommandHistoryArbitrary,
+      runs: 60,
+      fixedSeeds: [1_657_005],
+    },
+    ...subscriptionComparison<Array<PublicationCommand>>(
       `subscription-lifecycle.publication-history`,
+      async (history) => {
+        await runPublicationHistory(history)
+      },
     ),
-  )(
-    `matches row publications for a random or replayed seed`,
-    async (history) => {
-      await runPublicationHistory(history)
-    },
-    120_000,
-  )
+    check: forwardAssertionJudgment,
+    timeout: 120_000,
+  })
 })

@@ -18,6 +18,8 @@ import {
   createIndexedDB,
   indexedDBCollectionOptions,
 } from '../../src'
+import { oracleRoute } from '../oracle-config'
+import { declareOracle } from '../oracle-declaration'
 import { Channel, deferred, readStore, withHarness } from './harness'
 import {
   createValue,
@@ -28,8 +30,17 @@ import {
 import { holdStore } from './idb-driver'
 import type { ValueRow } from './structured-clone-oracle'
 
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+  ],
+})
+
 for (const kind of valueKinds) {
   it(`preserves ${kind} through updates, peers, export/import and restore`, async () => {
+    oracleRoute(`case`)
     await withHarness(async (h) => {
       const descriptors = [h.db, await h.connect()]
       const make = (db: typeof h.db) => {
@@ -133,6 +144,7 @@ for (const kind of valueKinds) {
 // Calibrate the value observation independently of storage. These wrong answers
 // preserve superficial contents while losing exactly the type/offset/byte law.
 it('rejects flattened values, lost offsets, corrupt bytes and absent rows', async () => {
+  oracleRoute(`case`)
   const row = (value: unknown) => [
     { id: 1, name: 'initial', nested: { value } },
   ]
@@ -166,6 +178,7 @@ it('rejects flattened values, lost offsets, corrupt bytes and absent rows', asyn
 for (const kind of valueKinds.filter((value) => value !== 'blob')) {
   for (const entry of ['update', 'import'] as const) {
     it(`captures ${kind} before delayed ${entry} persistence`, async () => {
+      oracleRoute(`case`)
       await withHarness(async (h) => {
         const handler = deferred()
         h.disposers.push(() => handler.resolve())

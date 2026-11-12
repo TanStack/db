@@ -76,8 +76,8 @@ import { createCollection } from '../../src/collection/index.js'
 import { hasVirtualProps } from '../../src/virtual-props.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { declareOracle } from '../oracle-declaration.js'
-import { createOracleReach } from '../oracle-reach.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import { oracleReplayRequested, oracleRoute } from '../oracle-config.js'
 import {
   metadataCollisionCases,
   metadataCompositions,
@@ -146,6 +146,12 @@ function expectPublishedFieldClassification(
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/virtual-props.ts#hasVirtualProps',
+  ],
   check: [
     expectPublishedFieldClassification,
     checkRootMetadata,
@@ -243,33 +249,62 @@ function checkAttributedRows(
   expect(observed.sort(byId)).toEqual([...expected].sort(byId))
 }
 
-const metadataReach = createOracleReach(`root metadata`, [
-  `joined-pending-source`,
-  `single-pending-source`,
-  `colliding-projection`,
-  `functional-direct`,
-  `query-ref-pending`,
-  `union-pending`,
-  `null-later-spread`,
-  `multi-row`,
-  `independent-output-key`,
-  `non-first-row-deleted`,
-  `two-populated-union-branches`,
-  `typed-union-keys`,
-  `union-peer-reinserted`,
-  `output-rejects-authored-pending-true`,
-])
+// Each finite history has one numeric token. A state keeps that token once,
+// so repeated observations preserve the original per-history checkpoint count.
+const metadataHistoriesByState = new Map<string, Set<number>>(
+  [
+    `joined-pending-source`,
+    `single-pending-source`,
+    `colliding-projection`,
+    `functional-direct`,
+    `query-ref-pending`,
+    `union-pending`,
+    `null-later-spread`,
+    `multi-row`,
+    `independent-output-key`,
+    `non-first-row-deleted`,
+    `two-populated-union-branches`,
+    `typed-union-keys`,
+    `union-peer-reinserted`,
+    `output-rejects-authored-pending-true`,
+  ].map((state) => [state, new Set<number>()]),
+)
+let metadataHistory = 0
 afterAll(() => {
-  metadataReach.assertReached()
-  unionMetadataReach.assertReached()
+  expect(
+    oracleReplayRequested()
+      ? []
+      : [...metadataHistoriesByState].filter(
+          ([, histories]) => histories.size < 1,
+        ),
+    `root metadata`,
+  ).toEqual([])
+  expect(
+    oracleReplayRequested()
+      ? []
+      : [...unionMetadataHistoriesByState].filter(
+          ([, histories]) => histories.size < 1,
+        ),
+    `populated union metadata`,
+  ).toEqual([])
   if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
     console.info(
       `root metadata reach`,
-      Object.fromEntries(metadataReach.counts()),
+      Object.fromEntries(
+        [...metadataHistoriesByState].map(([state, histories]) => [
+          state,
+          histories.size,
+        ]),
+      ),
     )
     console.info(
       `populated union reach`,
-      Object.fromEntries(unionMetadataReach.counts()),
+      Object.fromEntries(
+        [...unionMetadataHistoriesByState].map(([state, histories]) => [
+          state,
+          histories.size,
+        ]),
+      ),
     )
   }
 })
@@ -485,8 +520,7 @@ const boundaryPublicationState = (
   cut: string,
 ) =>
   `${history.kind}/${history.inline}/${history.composition}/${history.pendingSource}/${cut}`
-const boundaryPublicationReach = createOracleReach(
-  `implicit and materialized-input publication`,
+const boundaryPublicationHistoriesByState = new Map<string, Set<number>>(
   [
     ...new Set(
       boundaryPublicationHistories.flatMap((history) =>
@@ -495,14 +529,27 @@ const boundaryPublicationReach = createOracleReach(
         ),
       ),
     ),
-  ],
+  ].map((state) => [state, new Set<number>()]),
 )
+let boundaryPublicationHistory = 0
 afterAll(() => {
-  boundaryPublicationReach.assertReached()
+  expect(
+    oracleReplayRequested()
+      ? []
+      : [...boundaryPublicationHistoriesByState].filter(
+          ([, histories]) => histories.size < 1,
+        ),
+    `implicit and materialized-input publication`,
+  ).toEqual([])
   if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
     console.info(
       `boundary publication reach`,
-      Object.fromEntries(boundaryPublicationReach.counts()),
+      Object.fromEntries(
+        [...boundaryPublicationHistoriesByState].map(([state, histories]) => [
+          state,
+          histories.size,
+        ]),
+      ),
     )
 })
 declareOracle({
@@ -513,7 +560,8 @@ declareOracle({
 test.each(boundaryPublicationHistories)(
   `publishes implicit and materialized-input metadata: %j`,
   async (history) => {
-    boundaryPublicationReach.beginHistory()
+    oracleRoute(`case`)
+    boundaryPublicationHistory++
     let parent: AttributionRow = {
       id: `parent`,
       parentId: `root`,
@@ -608,7 +656,9 @@ test.each(boundaryPublicationHistories)(
     const pending = new Set<AttributionKey>()
     const failures: Array<unknown> = []
     const check = (cut: (typeof boundaryPublicationCuts)[number]) => {
-      boundaryPublicationReach.reach(boundaryPublicationState(history, cut))
+      boundaryPublicationHistoriesByState
+        .get(boundaryPublicationState(history, cut))!
+        .add(boundaryPublicationHistory)
       try {
         checkBoundaryPublication(
           [...live.entries()],
@@ -705,6 +755,7 @@ test.each(
     ({ kind }) => kind === `grouped` || kind === `aggregate`,
   ),
 )(`rejects source metadata on a grouped output: %j`, (history) => {
+  oracleRoute(`calibration`)
   const parent = { id: `parent`, parentId: `root`, label: `parent` }
   const child = { id: `child`, parentId: `parent`, label: `held` }
   const expected = expectedBoundaryPublication(
@@ -770,7 +821,8 @@ test.each(
     composition,
     customKey,
   }) => {
-    metadataReach.beginHistory()
+    oracleRoute(`case`)
+    metadataHistory++
     const parents = createCollection(
       mockSyncCollectionOptions<{ id: string }>({
         id: `metadata-parent`,
@@ -895,9 +947,10 @@ test.each(
     const pendingKeys = new Set<string>()
     let finishMutation = async () => {}
     const check = () => {
-      // The custom-key lane has a completely independent key prediction. The
-      // default lane retains the old clean-sibling key comparison only as a
-      // differential check of undocumented compiler-generated key encoding.
+      // The custom-key histories have a completely independent key prediction.
+      // The default-key histories retain the old clean-sibling key comparison
+      // only as a differential check of undocumented compiler-generated key
+      // encoding.
       const outputKey = (id: AttributionKey) =>
         customKey
           ? `projected-${id}`
@@ -931,10 +984,14 @@ test.each(
         authoredPending &&
         (collision === `$hasPendingWrites` || collision === `all`)
       )
-        metadataReach.reach(`output-rejects-authored-pending-true`)
-      metadataReach.reach(`multi-row`)
+        metadataHistoriesByState
+          .get(`output-rejects-authored-pending-true`)!
+          .add(metadataHistory)
+      metadataHistoriesByState.get(`multi-row`)!.add(metadataHistory)
       if (customKey && !sourceOwned)
-        metadataReach.reach(`independent-output-key`)
+        metadataHistoriesByState
+          .get(`independent-output-key`)!
+          .add(metadataHistory)
       truth = truth.map((row) =>
         row.id === `child` ? { ...row, label: `pending` } : row,
       )
@@ -953,15 +1010,19 @@ test.each(
         }),
       )
       expect(rows.get(`child`)!.$hasPendingWrites).toBe(true)
-      metadataReach.reach(
-        joined ? `joined-pending-source` : `single-pending-source`,
-      )
-      if (collision !== `none`) metadataReach.reach(`colliding-projection`)
+      metadataHistoriesByState
+        .get(joined ? `joined-pending-source` : `single-pending-source`)!
+        .add(metadataHistory)
+      if (collision !== `none`)
+        metadataHistoriesByState
+          .get(`colliding-projection`)!
+          .add(metadataHistory)
       if (shape === `functional-direct`)
-        metadataReach.reach(`functional-direct`)
-      if (composition.startsWith(`union`)) metadataReach.reach(`union-pending`)
+        metadataHistoriesByState.get(`functional-direct`)!.add(metadataHistory)
+      if (composition.startsWith(`union`))
+        metadataHistoriesByState.get(`union-pending`)!.add(metadataHistory)
       if (composition.endsWith(`query-ref`))
-        metadataReach.reach(`query-ref-pending`)
+        metadataHistoriesByState.get(`query-ref-pending`)!.add(metadataHistory)
       check()
       await finishMutation()
       pendingKeys.clear()
@@ -977,7 +1038,9 @@ test.each(
       rows.utils.commit()
       truth = truth.filter((row) => row.id !== `peer`)
       check()
-      metadataReach.reach(`non-first-row-deleted`)
+      metadataHistoriesByState
+        .get(`non-first-row-deleted`)!
+        .add(metadataHistory)
     }, [
       () => finishMutation(),
       () => live.cleanup(),
@@ -990,6 +1053,7 @@ test.each(
 
 describe(`virtual row field runtime boundary`, () => {
   test(`matches the row and value classification after publication`, async () => {
+    oracleRoute(`fixed history`)
     const createdAt = new Date(`2026-09-20T12:34:56.000Z`)
     const rows = createCollection(
       mockSyncCollectionOptions<Row>({
@@ -1191,7 +1255,8 @@ test.each(
 )(
   `retains metadata from the last present spread: %j`,
   async ({ matched, reverse, pendingRight }) => {
-    metadataReach.beginHistory()
+    oracleRoute(`case`)
+    metadataHistory++
     const left = createCollection(
       mockSyncCollectionOptions<{ id: string; label: string }>({
         id: `spread-left`,
@@ -1247,7 +1312,8 @@ test.each(
             .$hasPendingWrites,
         ).toBe(true),
       )
-      if (!matched && !reverse) metadataReach.reach(`null-later-spread`)
+      if (!matched && !reverse)
+        metadataHistoriesByState.get(`null-later-spread`)!.add(metadataHistory)
       check()
       ;(pendingRight ? right : left).utils.resolveSync()
       await mutation.when(`settled`)
@@ -1263,7 +1329,7 @@ test.each(
  * A held write in either branch must not change the other's metadata. Removing
  * and reinserting that peer checks retractions and subsequent contributions.
  * Each checkpoint reuses the authored-facts model; no sibling query supplies
- * expected keys in this lane.
+ * expected keys in these histories.
  */
 const unionHistories = [false, true].flatMap((reverse) =>
   [false, true].flatMap((nested) =>
@@ -1295,18 +1361,20 @@ const unionHistories = [false, true].flatMap((reverse) =>
 // Each receiving form must reach held and post-retraction comparisons for
 // both metadata policies and both pending branches. Aggregate reach cannot
 // borrow a direct-output witness for a QueryRef consumer.
-const unionMetadataReach = createOracleReach(
-  `populated union metadata`,
-  [`direct`, `query-ref`].flatMap((path) =>
-    [`source`, `output`].flatMap((owner) =>
-      [`left`, `right`].flatMap((pending) =>
-        [`held`, `reinserted`, `settled`].map(
-          (cut) => `${path}/${owner}/${pending}/${cut}`,
+const unionMetadataHistoriesByState = new Map<string, Set<number>>(
+  [`direct`, `query-ref`]
+    .flatMap((path) =>
+      [`source`, `output`].flatMap((owner) =>
+        [`left`, `right`].flatMap((pending) =>
+          [`held`, `reinserted`, `settled`].map(
+            (cut) => `${path}/${owner}/${pending}/${cut}`,
+          ),
         ),
       ),
-    ),
-  ),
+    )
+    .map((state) => [state, new Set<number>()]),
 )
+let unionMetadataHistory = 0
 
 test.each(unionHistories)(
   `preserves each populated union branch: %j`,
@@ -1318,12 +1386,15 @@ test.each(unionHistories)(
     authoredPending,
     shape,
   }) => {
-    metadataReach.beginHistory()
-    unionMetadataReach.beginHistory()
+    oracleRoute(`case`)
+    metadataHistory++
+    unionMetadataHistory++
     const reach = (cut: string) =>
-      unionMetadataReach.reach(
-        `${nested ? `query-ref` : `direct`}/${sourceOwnsMetadata(shape) ? `source` : `output`}/${pendingRight ? `right` : `left`}/${cut}`,
-      )
+      unionMetadataHistoriesByState
+        .get(
+          `${nested ? `query-ref` : `direct`}/${sourceOwnsMetadata(shape) ? `source` : `output`}/${pendingRight ? `right` : `left`}/${cut}`,
+        )!
+        .add(unionMetadataHistory)
     const initialLeft: AttributionRow = {
       id: 1,
       parentId: `parent`,
@@ -1419,8 +1490,10 @@ test.each(unionHistories)(
     await checkWithCleanup(async () => {
       await live.preload()
       check()
-      metadataReach.reach(`two-populated-union-branches`)
-      metadataReach.reach(`typed-union-keys`)
+      metadataHistoriesByState
+        .get(`two-populated-union-branches`)!
+        .add(metadataHistory)
+      metadataHistoriesByState.get(`typed-union-keys`)!.add(metadataHistory)
       pendingKeys.add(pendingId)
       if (pendingRight) rightTruth = [{ ...initialRight, label: `pending` }]
       else leftTruth = [{ ...initialLeft, label: `pending` }]
@@ -1452,7 +1525,9 @@ test.each(unionHistories)(
       if (pendingRight) leftTruth = [{ ...initialLeft, label: `returned` }]
       else rightTruth = [{ ...initialRight, label: `returned` }]
       check()
-      metadataReach.reach(`union-peer-reinserted`)
+      metadataHistoriesByState
+        .get(`union-peer-reinserted`)!
+        .add(metadataHistory)
       reach(`reinserted`)
       await finishMutation()
       pendingKeys.clear()
@@ -1484,6 +1559,7 @@ test.each(
     ].map((fault) => ({ shape, fault })),
   ),
 )(`rejects a hostile complete metadata result: %j`, ({ shape, fault }) => {
+  oracleRoute(`case`)
   const keyOf = (id: AttributionKey) => `key-${typeof id}:${id}`
   const expected = [
     ...expectedAttributedRows(
@@ -1683,33 +1759,47 @@ const metadataTimelineHistories = metadataTimelineShapes.flatMap((shape) =>
     ),
   ),
 )
-const metadataTimelineReach = createOracleReach(
-  `metadata timeline`,
-  metadataTimelineShapes.flatMap((shape) =>
-    [`join-key`, `membership`].flatMap((topology) =>
-      [
-        `rematched-held`,
-        `two-pending`,
-        `first-settled`,
-        `both-settled`,
-        `remote-followup`,
-        `left-rejected`,
-        `right-rejected`,
-        `both-rejected`,
-        `left-first`,
-        `right-first`,
-        `root-callback-held`,
-        `downstream-callback-held`,
-      ].map((cut) => `${shape}/${topology}/${cut}`),
-    ),
-  ),
+const metadataTimelineHistoriesByState = new Map<string, Set<number>>(
+  metadataTimelineShapes
+    .flatMap((shape) =>
+      [`join-key`, `membership`].flatMap((topology) =>
+        [
+          `rematched-held`,
+          `two-pending`,
+          `first-settled`,
+          `both-settled`,
+          `remote-followup`,
+          `left-rejected`,
+          `right-rejected`,
+          `both-rejected`,
+          `left-first`,
+          `right-first`,
+          `root-callback-held`,
+          `downstream-callback-held`,
+        ].map((cut) => `${shape}/${topology}/${cut}`),
+      ),
+    )
+    .map((state) => [state, new Set<number>()]),
 )
+let metadataTimelineHistory = 0
 afterAll(() => {
-  metadataTimelineReach.assertReached()
+  expect(
+    oracleReplayRequested()
+      ? []
+      : [...metadataTimelineHistoriesByState].filter(
+          ([, histories]) => histories.size < 1,
+        ),
+    `metadata timeline`,
+  ).toEqual([])
   if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
     console.info(
       `metadata timeline reach`,
-      Object.fromEntries(metadataTimelineReach.counts()),
+      Object.fromEntries(
+        [...metadataTimelineHistoriesByState].map(([state, histories]) => [
+          state,
+          histories.size,
+        ]),
+      ),
     )
 })
 declareOracle({
@@ -1721,9 +1811,12 @@ declareOracle({
 test.each(metadataTimelineHistories)(
   `publishes metadata through join and write histories: %j`,
   async ({ shape, reverse, topology, reject, rightFirst }) => {
-    metadataTimelineReach.beginHistory()
+    oracleRoute(`case`)
+    metadataTimelineHistory++
     const reach = (cut: string) =>
-      metadataTimelineReach.reach(`${shape}/${topology}/${cut}`)
+      metadataTimelineHistoriesByState
+        .get(`${shape}/${topology}/${cut}`)!
+        .add(metadataTimelineHistory)
     let releaseLeft!: () => void
     let rejectLeft!: (reason: Error) => void
     let releaseRight!: () => void
@@ -2024,6 +2117,7 @@ test.each([
   `no-callback`,
   `early-wrong-later-correct`,
 ] as const)(`rejects a hostile metadata publication: %s`, (fault) => {
+  oracleRoute(`case`)
   const base: AttributionRow = { id: `a`, parentId: `parent`, label: `before` }
   const before = expectedAttributedRows(
     [base],
@@ -2145,30 +2239,45 @@ const facadeMetadataHistories = collisionCases.flatMap(
         ),
       ),
 )
-const facadeMetadataReach = createOracleReach(`facade metadata`, [
-  ...metadataTimelineShapes.flatMap((shape) =>
-    [
-      `shared-held`,
-      `last-route-retired`,
-      `reactivated-held`,
-      `settled`,
-      `later-source`,
-      `reshared`,
-      `active-empty-ready`,
-    ].map((cut) => `${shape}/${cut}`),
-  ),
-  ...metadataTimelineShapes.flatMap((shape) =>
-    [`facade`, `toArray`, `materialize`].flatMap((form) =>
-      [`held`, `reactivated`].map((cut) => `${shape}/${form}/${cut}`),
+const facadeMetadataHistoriesByState = new Map<string, Set<number>>(
+  [
+    ...metadataTimelineShapes.flatMap((shape) =>
+      [
+        `shared-held`,
+        `last-route-retired`,
+        `reactivated-held`,
+        `settled`,
+        `later-source`,
+        `reshared`,
+        `active-empty-ready`,
+      ].map((cut) => `${shape}/${cut}`),
     ),
-  ),
-])
+    ...metadataTimelineShapes.flatMap((shape) =>
+      [`facade`, `toArray`, `materialize`].flatMap((form) =>
+        [`held`, `reactivated`].map((cut) => `${shape}/${form}/${cut}`),
+      ),
+    ),
+  ].map((state) => [state, new Set<number>()]),
+)
+let facadeMetadataHistory = 0
 afterAll(() => {
-  facadeMetadataReach.assertReached()
+  expect(
+    oracleReplayRequested()
+      ? []
+      : [...facadeMetadataHistoriesByState].filter(
+          ([, histories]) => histories.size < 1,
+        ),
+    `facade metadata`,
+  ).toEqual([])
   if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
     console.info(
       `facade metadata reach`,
-      Object.fromEntries(facadeMetadataReach.counts()),
+      Object.fromEntries(
+        [...facadeMetadataHistoriesByState].map(([state, histories]) => [
+          state,
+          histories.size,
+        ]),
+      ),
     )
 })
 declareOracle({
@@ -2185,8 +2294,12 @@ test.each(facadeMetadataHistories)(
     destinationPopulated,
     reject,
   }) => {
-    facadeMetadataReach.beginHistory()
-    const reach = (cut: string) => facadeMetadataReach.reach(`${shape}/${cut}`)
+    oracleRoute(`case`)
+    facadeMetadataHistory++
+    const reach = (cut: string) =>
+      facadeMetadataHistoriesByState
+        .get(`${shape}/${cut}`)!
+        .add(facadeMetadataHistory)
     let release!: () => void
     let rejectWrite!: (error: Error) => void
     const gate = new Promise<void>((resolve, rejectGate) => {
@@ -2332,7 +2445,9 @@ test.each(facadeMetadataHistories)(
         checkInlineMetadataValues(actual.materialized, expectedInline)
         if (cut && expectedChildren.length) {
           for (const form of [`facade`, `toArray`, `materialize`])
-            facadeMetadataReach.reach(`${shape}/${form}/${cut}`)
+            facadeMetadataHistoriesByState
+              .get(`${shape}/${form}/${cut}`)!
+              .add(facadeMetadataHistory)
         }
       }
     }
@@ -2406,6 +2521,7 @@ test.each(facadeMetadataHistories)(
 test.each([`none`, `$key`, `$hasPendingWrites`, `all`] as const)(
   `rejects facade enrichment of an inline value: %s`,
   (collision) => {
+    oracleRoute(`calibration`)
     const overrides: Record<string, unknown> = {}
     for (const field of virtualFieldNames)
       if (collision === field || collision === `all`)
@@ -2490,11 +2606,20 @@ function checkNullableSelection(
 const nullableFacadeHistories = [false, true].map((initialMatch) => ({
   initialMatch,
 }))
-const nullableFacadeReach = createOracleReach(`nullable whole-row facade`, [
-  `matched`,
-  `unmatched`,
-])
-afterAll(() => nullableFacadeReach.assertReached())
+const nullableFacadeHistoriesByState = new Map<string, Set<number>>(
+  [`matched`, `unmatched`].map((state) => [state, new Set<number>()]),
+)
+let nullableFacadeHistory = 0
+afterAll(() =>
+  expect(
+    oracleReplayRequested()
+      ? []
+      : [...nullableFacadeHistoriesByState].filter(
+          ([, histories]) => histories.size < 1,
+        ),
+    `nullable whole-row facade`,
+  ).toEqual([]),
+)
 declareOracle({
   model: [expectedNullableSelection],
   check: [checkNullableSelection],
@@ -2503,7 +2628,8 @@ declareOracle({
 test.each(nullableFacadeHistories)(
   `publishes nullable whole rows through a facade: %j`,
   async ({ initialMatch }) => {
-    nullableFacadeReach.beginHistory()
+    oracleRoute(`case`)
+    nullableFacadeHistory++
     const children = createCollection(
       mockSyncCollectionOptions<{ id: string }>({
         id: `nullable-facade-children`,
@@ -2557,7 +2683,9 @@ test.each(nullableFacadeHistories)(
           keys[0]!,
         ),
       )
-      nullableFacadeReach.reach(match ? `matched` : `unmatched`)
+      nullableFacadeHistoriesByState
+        .get(match ? `matched` : `unmatched`)!
+        .add(nullableFacadeHistory)
     }
     await checkWithCleanup(async () => {
       await live.preload()
@@ -2587,6 +2715,7 @@ test.each([
   `empty-inline-enriched`,
   `matched-field-missing`,
 ] as const)(`rejects a hostile nullable whole-row observation: %s`, (fault) => {
+  oracleRoute(`calibration`)
   const expected = expectedNullableSelection(
     fault === `matched-field-missing`
       ? { id: `child`, label: `source` }

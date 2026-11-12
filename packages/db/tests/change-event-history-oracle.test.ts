@@ -1,4 +1,4 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -10,8 +10,14 @@ import {
 } from '../src/index'
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { PropRef } from '../src/query/ir'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { oracleProperty, oracleRoute } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter'
 import { captureCreatedTransactions } from './utils'
 import {
   cases,
@@ -49,7 +55,7 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  * through a local-only Collection, either in one same-turn batch or
  * sequentially. After all batched writes settle, or after each sequential
  * write settles, public rows and a change-message mirror must equal the
- * reference rows. An eager-index lane also builds an index before the history
+ * reference rows. An eager-index grammar also builds an index before the history
  * and compares both equality buckets after each settled prefix in sequential
  * histories. In batched histories it compares them after each synchronous
  * operation before settlement, then once after all writes settle. At the
@@ -246,22 +252,30 @@ function assertFinalAgreement(
   expected: ReadonlyMap<number, TestItem>,
 ): void {
   const expectedRows = mirrorRows(expected)
-  expect(publicRows(collection)).toEqual(expectedRows)
-  expect(mirrorRows(mirror)).toEqual(expectedRows)
+  oracleAssertion('assertFinalAgreement', () =>
+    expect(publicRows(collection)).toEqual(expectedRows),
+  )
+  oracleAssertion('assertFinalAgreement', () =>
+    expect(mirrorRows(mirror)).toEqual(expectedRows),
+  )
 }
 
 function assertIndexAgreement(
   index: BaseIndex<number>,
   expected: ReadonlyMap<number, TestItem>,
 ): void {
-  expect(index.keyCount).toBe(expected.size)
+  oracleAssertion('assertIndexAgreement', () =>
+    expect(index.keyCount).toBe(expected.size),
+  )
   for (const fileId of [`f1`, `f2`] as const) {
     const expectedKeys = new Set(
       [...expected]
         .filter(([, row]) => row.fileId === fileId)
         .map(([key]) => key),
     )
-    expect(index.lookup(`eq`, fileId)).toEqual(expectedKeys)
+    oracleAssertion('assertIndexAgreement', () =>
+      expect(index.lookup(`eq`, fileId)).toEqual(expectedKeys),
+    )
   }
 }
 
@@ -309,20 +323,24 @@ async function assertIndexedQueryAgreement(
       await runWithCleanup(
         async () => {
           await query.preload()
-          expect(
-            query.toArray
-              .map((row) => ({
-                id: row.id,
-                name: row.name,
-                fileId: row.fileId,
-              }))
-              .sort((left, right) => left.id - right.id),
-          ).toEqual(
-            [...expected.values()]
-              .filter((row) => row.fileId === fileId)
-              .sort((left, right) => left.id - right.id),
+          oracleAssertion('assertIndexedQueryAgreement', () =>
+            expect(
+              query.toArray
+                .map((row) => ({
+                  id: row.id,
+                  name: row.name,
+                  fileId: row.fileId,
+                }))
+                .sort((left, right) => left.id - right.id),
+            ).toEqual(
+              [...expected.values()]
+                .filter((row) => row.fileId === fileId)
+                .sort((left, right) => left.id - right.id),
+            ),
           )
-          expect(lookup).toHaveBeenCalledWith(`eq`, fileId)
+          oracleAssertion('assertIndexedQueryAgreement', () =>
+            expect(lookup).toHaveBeenCalledWith(`eq`, fileId),
+          )
         },
         () => query.cleanup(),
       )
@@ -374,7 +392,9 @@ async function runHistory(
   try {
     if (initialKeys.length > 0) {
       await collection.preload()
-      expect(publicRows(collection)).toEqual(mirrorRows(mirror))
+      oracleAssertion('runHistory', () =>
+        expect(publicRows(collection)).toEqual(mirrorRows(mirror)),
+      )
     }
     if (indexType) {
       const initialQuery = createLiveQueryCollection((q) =>
@@ -390,7 +410,9 @@ async function runHistory(
         (candidate) => candidate.name === `auto:fileId`,
       )
       if (!index) throw new Error(`eager fileId index was not built`)
-      expect(index).toBeInstanceOf(indexType)
+      oracleAssertion('runHistory', () =>
+        expect(index).toBeInstanceOf(indexType),
+      )
       assertIndexAgreement(index, expectedRowsAfter(initialKeys, []))
     }
     const onChanges = (changes: Array<ChangeMessage<TestItem, number>>) => {
@@ -441,12 +463,18 @@ async function runHistory(
       try {
         applyOp(collection, op)
       } catch (error) {
-        expect(error, `operation ${operationIndex} rethrows`).toBe(injected)
-        expect(created.length, `one transaction`).toBe(before + 1)
-        expect(
-          created[before]!.state,
-          `operation ${operationIndex} settles`,
-        ).toBe(`completed`)
+        oracleAssertion(`operation ${operationIndex} rethrows`, () =>
+          expect(error, `operation ${operationIndex} rethrows`).toBe(injected),
+        )
+        oracleAssertion(`one transaction`, () =>
+          expect(created.length, `one transaction`).toBe(before + 1),
+        )
+        oracleAssertion(`operation ${operationIndex} settles`, () =>
+          expect(
+            created[before]!.state,
+            `operation ${operationIndex} settles`,
+          ).toBe(`completed`),
+        )
         return created[before]!
       } finally {
         armed = false
@@ -462,7 +490,9 @@ async function runHistory(
             initialKeys,
             sequence.slice(0, operationIndex + 1),
           )
-          expect(publicRows(collection)).toEqual(mirrorRows(expected))
+          oracleAssertion('runHistory', () =>
+            expect(publicRows(collection)).toEqual(mirrorRows(expected)),
+          )
           assertIndexAgreement(index, expected)
         }
         return transaction
@@ -484,15 +514,25 @@ async function runHistory(
     if (reload) {
       const kept = mirrorRows(expectedRowsAfter(initialKeys, sequence))
       await collection.reload()
-      expect(collection.status, `status after reload`).toBe(`ready`)
-      expect(publicRows(collection), `a reload keeps the rows`).toEqual(kept)
-      expect(mirrorRows(mirror), `mirror after reload`).toEqual(kept)
+      oracleAssertion(`status after reload`, () =>
+        expect(collection.status, `status after reload`).toBe(`ready`),
+      )
+      oracleAssertion(`a reload keeps the rows`, () =>
+        expect(publicRows(collection), `a reload keeps the rows`).toEqual(kept),
+      )
+      oracleAssertion(`mirror after reload`, () =>
+        expect(mirrorRows(mirror), `mirror after reload`).toEqual(kept),
+      )
       // The histories use keys 1 to 4, so key 5 is absent.
       const later = { id: 5, name: `after-reload`, fileId: fileIdForKey(5) }
       await settle(collection.insert(later))
       const expected = [...kept, [5, later] as const]
-      expect(publicRows(collection), `write after reload`).toEqual(expected)
-      expect(mirrorRows(mirror), `mirror after write`).toEqual(expected)
+      oracleAssertion(`write after reload`, () =>
+        expect(publicRows(collection), `write after reload`).toEqual(expected),
+      )
+      oracleAssertion(`mirror after write`, () =>
+        expect(mirrorRows(mirror), `mirror after write`).toEqual(expected),
+      )
     }
     if (index) {
       await assertIndexedQueryAgreement(
@@ -502,11 +542,15 @@ async function runHistory(
       )
     }
     for (const publication of publications) {
-      expect(publication.mirrorRows).toEqual(publication.publicRows)
+      oracleAssertion('runHistory', () =>
+        expect(publication.mirrorRows).toEqual(publication.publicRows),
+      )
     }
     throwing?.unsubscribe()
     restoreCreate()
-    expect(protocolViolations, `change-message protocol`).toEqual([])
+    oracleAssertion(`change-message protocol`, () =>
+      expect(protocolViolations, `change-message protocol`).toEqual([]),
+    )
   } catch (error) {
     primaryFailure = error
     hasPrimaryFailure = true
@@ -604,6 +648,7 @@ describe(`change-event history oracle`, () => {
   // This witness covers ordinary same-realm Durations, not altered objects or
   // a requirement to suppress events for a separately allocated equal copy.
   it(`publishes a Duration field change to the Collection and change-message consumer`, async () => {
+    oracleRoute(`fixed history`)
     let sync!: Parameters<SyncConfig<DurationRow, number>[`sync`]>[0]
     const collection = createCollection<DurationRow, number>({
       id: `duration-field-change-history`,
@@ -669,6 +714,7 @@ describe(`change-event history oracle`, () => {
   })
 
   it(`preserves each key's causal messages within a deferred callback`, async () => {
+    oracleRoute(`fixed history`)
     const rounds: ReadonlyArray<ReadonlyArray<Op>> = [
       [
         { kind: `insert`, key: 1, step: 1 },
@@ -804,6 +850,7 @@ describe(`change-event history oracle`, () => {
     })
 
   it(`rejects a deferred message with the right name but wrong row fields`, () => {
+    oracleRoute(`calibration`)
     const sequence: Array<Op> = [
       { kind: `insert`, key: 1, step: 1 },
       { kind: `update`, key: 1, step: 2 },
@@ -827,6 +874,7 @@ describe(`change-event history oracle`, () => {
   })
 
   it(`rejects a missing live key in the index checker`, () => {
+    oracleRoute(`calibration`)
     expect(replacement.map(({ kind, key }) => [kind, key])).toEqual([
       [`delete`, 1],
       [`delete`, 2],
@@ -845,6 +893,7 @@ describe(`change-event history oracle`, () => {
     it.each([`batched`, `sequential`] as const)(
       `keeps ${name} and indexed queries aligned after %s replacement`,
       async (mode) => {
+        oracleRoute(`fixed history`)
         await runHistory(
           replacement,
           [1, 2],
@@ -872,21 +921,31 @@ describe(`change-event history oracle`, () => {
     }
   }
 
-  fcTest.prop([indexedHistory], { numRuns: oracleRuns(35), seed: 1_912 })(
-    `keeps eager indexes and indexed queries aligned across fixed-seed histories`,
-    verifyIndexedHistory,
-  )
-  fcTest.prop(
-    [indexedHistory],
-    oraclePropertyOptions(35, `collection-state.eager-index-history`),
-  )(
-    `keeps eager indexes and indexed queries aligned across random histories`,
-    verifyIndexedHistory,
-  )
+  oracleProperty({
+    id: `collection-state.eager-index-history`,
+    law: {
+      statement: `Eager index buckets and indexed query rows agree with the independent authored Map at every settled prefix and final query checkpoint.`,
+      authority: `Collection change-message and eager-index contracts stated above`,
+      limits: `BasicIndex and BTreeIndex with the existing bounded key/operation grammar and stable indexed fields across key reuse; no callback-time index agreement.`,
+    },
+    // What this oracle owns: the gap report judges the change-message publication
+    // in collection/changes.ts, and the direct writes of a local-only Collection in
+    // local-only.ts, by this file's tests.
+    owns: [`src/collection/changes.ts`, `src/local-only.ts`],
+    histories: { arbitrary: indexedHistory, runs: 35, fixedSeeds: [1912] },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`eager index history`, plan, observe, () =>
+        verifyIndexedHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   it.each(cases)(
     `$id: $label reconstructs every public row`,
     async ({ mode, sequence, initialKeys, id }) => {
+      oracleRoute(`case`)
       await runHistory(sequence, initialKeys, mode, `history-oracle-${id}`)
     },
   )
@@ -896,6 +955,7 @@ describe(`change-event history oracle`, () => {
   it.each(cases)(
     `$id: $label then reload reconstructs every public row`,
     async ({ mode, sequence, initialKeys, id }) => {
+      oracleRoute(`case`)
       await runHistory(
         sequence,
         initialKeys,
@@ -908,16 +968,21 @@ describe(`change-event history oracle`, () => {
     },
   )
 
-  fcTest.prop([generatedHistory], { numRuns: oracleRuns(100), seed: 1_902 })(
-    `keeps change messages and public rows aligned with a fixed seed`,
-    verifyGeneratedHistory,
-  )
-
-  fcTest.prop(
-    [generatedHistory],
-    oraclePropertyOptions(100, `collection-state.change-event-history`),
-  )(
-    `keeps change messages and public rows aligned with a random or replayed seed`,
-    verifyGeneratedHistory,
-  )
+  oracleProperty({
+    id: `collection-state.change-event-history`,
+    law: {
+      statement: `Each settled change-message history reconstructs the Collection's public rows through valid per-key messages, including throwing subscribers and reload suffixes.`,
+      authority: `Collection change-message contract and the maintainer reload and cross-key ordering decisions stated above`,
+      limits: `Existing local-only bounded grammar in batched and sequential modes; no failed persistence, cancellation, general batch shape or publications without messages.`,
+    },
+    owns: [`src/collection/changes.ts`, `src/local-only.ts`],
+    histories: { arbitrary: generatedHistory, runs: 100, fixedSeeds: [1902] },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`change-event history`, plan, observe, () =>
+        verifyGeneratedHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

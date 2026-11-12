@@ -1,11 +1,108 @@
-import { oracleReplayReporter } from './oracle-replay-witness.js'
+// TanStack DB's oracle configuration. The oracle framework lives in
+// @tanstack/oracles. This module supplies what is specific to TanStack DB: its
+// registry of property ids, the replay variables that earlier versions read
+// and that now fail, and the TANSTACK_DB_ORACLE prefix of its environment
+// variables. Importing this module configures the framework, so every shim
+// that re-exports the framework imports it first.
+import {
+  configureOracles,
+  validateOraclePropertyRegistry,
+} from '@tanstack/oracles'
 
-export { recordOracleReplay } from './oracle-replay-witness.js'
-
-type OracleEnvironment = Record<string, string | undefined>
+export * from '@tanstack/oracles'
 
 const staticOracleProperties = [
+  `persistence.crossed-leadership-index`,
+  `persisted-options.types.core-fixed`,
+  `persisted-options.types.browser-fixed`,
+  `sqlite.reserved-commit-hydration`,
+  `sqlite-persistence.boolean-arity-fixed`,
+
+  `opfs.page-lifecycle-fixed`,
+  `opfs.mixed-execute-fixed`,
+  `opfs.terminal-event-fixed`,
+  `opfs.close-fixed`,
+  `opfs.failure-cleanup-fixed`,
+  `opfs.request-order-fixed`,
+
+  `persisted-readiness.history`,
+  `persisted-sync-problem.history`,
+  `opfs-worker.diagnostics-fixed`,
+  `sqlite-reload.class-fixed`,
+  `sqlite-reload.class.electron-fixed`,
+  `persisted-reload-replacement.history`,
+  `sqlite-persistence.logical-scheduling`,
+  `sqlite-persistence.expression-index.large-number`,
+  `sqlite-persistence.expression-index.fixed-filter`,
+  `sqlite-persistence.expression-index.native-identity`,
+  `sqlite-persistence.expression-index.native-polarity`,
+  `sqlite-resume.retired-storage.cases`,
+  `sqlite-resume.managed-claim-read.cases`,
+  `sqlite-resume.startup-corpus`,
+  `sqlite-resume.baseline-lineage.external-metadata`,
+  `sqlite-resume.baseline-lineage.calibration`,
+  `sqlite-persistence.binding-capacity.corpus`,
+  `sqlite-persistence.binding-capacity.transaction`,
+  `sqlite-persistence.binding-capacity.root-limit`,
+  `sqlite-persistence.binding-capacity.scalar-stress`,
+  `solid.row-materialization`,
+  `solid.native-parent-materialization`,
+  `solid.descriptor-visibility`,
+  `solid.live-getters`,
+  `solid.shared-graph-calibration`,
+  `solid.shared-graphs`,
+  `solid.callable-fields`,
+  `solid.reserved-fields`,
+  `solid.array-methods`,
+  `svelte.ssr-handoff.cases`,
+  `svelte.ssr-receiving-reader.cases`,
+  `svelte.ssr-snapshot.cases`,
+  `svelte.ssr-runtime-errors.cases`,
+  `svelte.cache-options`,
+  `svelte.descriptor-start-release`,
+  `convex.backend.insert`,
+  `convex.backend.update`,
+  `convex.backend.delete`,
+  `convex.values`,
+  `convex.lazy-retention-calibration`,
+  `convex.lazy-app`,
+  `convex.boundary`,
+  `convex.backend-concurrency`,
+  `convex.abort-replay`,
+  `convex.lazy-failure-history`,
+  `convex.lazy-history`,
+  `convex.lazy-suffix`,
+  `convex.lazy-interleaving`,
+  `convex.load-outcome`,
+  `convex.lazy-native-receipt`,
+  `convex.lazy-values`,
+  `convex.lazy-work`,
+  `convex.lazy-publication`,
+  `convex.lazy-lifecycle`,
+  `convex.lazy-receipt`,
+  `convex.lazy-exact-receipt`,
+  `convex.revalidation`,
+  `convex.lazy-version`,
+  `convex.offline`,
+  `convex.offline-source`,
+  `convex.offline-acceptance`,
+  `convex.pagination-rows`,
+  `convex.pagination-work`,
+  `convex.pagination-bound`,
+  `convex.snapshot`,
+  `convex.ownership`,
+  `load-subset.joint-replay`,
+  `browser-coordinator.mutation-delivery`,
+  `browser-coordinator.adapter-routing`,
+  `browser-coordinator.disposal`,
+  `browser-coordinator.collection-release`,
+  `browser-coordinator.retry-retention`,
+  `browser-coordinator.remote-lease`,
+  `browser-coordinator.routing`,
+  `browser.shared-driver-fairness`,
+  `live-query.output-indexing`,
   `query.public-container-copy`,
+  `compiler.group-by.batch`,
   `pagination.limit-admission-replay-pending-negative`,
   `pagination.limit-admission-replay-pending-valid`,
   `pagination.limit-admission-builder-negative`,
@@ -25,9 +122,25 @@ const staticOracleProperties = [
   `framework.solid.result-shape`,
   `framework.angular.result-shape`,
   `framework.svelte.result-shape`,
+  `ivm.topk-batch-relations`,
+  `ivm.topk-batch-file-independent`,
+  `ivm.topk-batch-shared-subtrees`,
+  `ivm.topk-batch-unrelated-payloads`,
+  `ivm.topk-batch-long-cancellation`,
   `ivm.topk-negative-window-array`,
   `ivm.topk-negative-window-grouped`,
   `ivm.topk-negative-window-orderBy`,
+  `ivm.topk-fractional-keyed-array`,
+  `ivm.topk-fractional-keyed-grouped`,
+  `ivm.topk-cyclic-payloads-array`,
+  `ivm.topk-cyclic-payloads-grouped`,
+  `ivm.topk-outer-join-replacements-array`,
+  `ivm.topk-outer-join-replacements-grouped`,
+  `notification-laws.query-publications`,
+  `notification-laws.publication-histories`,
+  `notification-laws.corrupt-prior-values`,
+  `proxy.ordinary-field-copies`,
+  `proxy.json-data-keys`,
   `framework.react.window-history`,
   `framework.react.pending-window-history`,
   `framework.react.publication-window-history`,
@@ -79,7 +192,8 @@ const staticOracleProperties = [
   `react.suspense-preload-restart-history`,
   `svelte.client-window`,
   `svelte.client-window-recovery`,
-  `live-query-observer.hydration-subset-handoff`,
+  `live-query-observer.hydration-subset-handoff.granular`,
+  `live-query-observer.hydration-subset-handoff.wholesale`,
   `framework.react.keyed-admission`,
   `framework.react-dependency-list.keyed-admission`,
   `framework.preact.keyed-admission`,
@@ -94,11 +208,41 @@ const staticOracleProperties = [
   `framework.svelte-DbClient.immutable-key-history`,
   `react.window-render`,
   `react.window-retry-ownership`,
-  `preact.window-render`,
-  `lint.part-reach`,
-  `oracle.declared-reach`,
+  `preact.bound-options`,
+  `preact.bound-schema-options`,
+  `react.bound-schema-options.live`,
+  `react.bound-schema-options.suspense`,
+  `react.cache-options.client-render`,
+  `react.cache-options.suspense-render`,
+  `react.cache-options.server-render`,
+  `react.cache-first-registration`,
+  `react.source-id-inline-options`,
+  `react.source-id-deferred-release`,
+  `react.suspense-local-options`,
+  `react.suspense-indexing-config`,
+  `react.descriptor-start-release.live`,
+  `react.descriptor-start-release.infinite`,
+  `react.descriptor-start-release.suspense`,
+  `preact.window-render.eager-derived-offset`,
+  `preact.window-render.eager-derived-limit`,
+  `preact.window-render.eager-derived-both`,
+  `preact.window-render.eager-keyed-offset`,
+  `preact.window-render.eager-keyed-limit`,
+  `preact.window-render.eager-keyed-both`,
+  `preact.window-render.on-demand-derived-offset`,
+  `preact.window-render.on-demand-derived-limit`,
+  `preact.window-render.on-demand-derived-both`,
+  `preact.window-render.on-demand-keyed-offset`,
+  `preact.window-render.on-demand-keyed-limit`,
+  `preact.window-render.on-demand-keyed-both`,
   `scripts.lint-scope`,
   `scripts.run-budget`,
+  `scripts.run-budget-reexported`,
+  `scripts.run-budget-every-source`,
+  `scripts.run-budget-support-only`,
+  `scripts.strip-oracle-probes`,
+  `scripts.publish-command`,
+  `scripts.publish-http`,
   `scripts.release-version`,
   `scripts.release-seed-failure`,
   `react.ssr-effects-react18-ordinary-provider`,
@@ -113,12 +257,16 @@ const staticOracleProperties = [
   `react.ssr-effects-current-suspense-explicit`,
   `react.ssr-effects-current-standalone`,
   `react.ssr-effects-current-supplied`,
+  `react.ssr-effects-react18-disabled`,
+  `react.ssr-effects-current-disabled`,
   `react.ssr-ordinary`,
   `react.ssr-infinite`,
   `react.ssr-stream-cut`,
   `ssr.stream-record-lifetime`,
   `react.ssr-runtime-ordinary`,
   `react.ssr-runtime-infinite`,
+  `react.ssr-runtime-ordinary.cases`,
+  `react.ssr-runtime-infinite.cases`,
   `svelte.ssr-snapshot`,
   `svelte.ssr-handoff`,
   `svelte.ssr-receiving-reader`,
@@ -130,12 +278,17 @@ const staticOracleProperties = [
   `live-query-observer.partial-attach`,
   `live-query-observer.release-failure`,
   `live-query-observer.hydration-error-timing`,
+  `live-query-observer.snapshot-health`,
   `live-query-observer.row-container-sharing`,
   `live-query-observer.capture-paths`,
   `live-query-observer.record-shape`,
   `live-query-observer.sparse-array`,
   `subscription-lifecycle.notification-error`,
   `live-query.start-handoff`,
+  `live-query.deferred-sibling`,
+  `live-query.cache-claim-lifecycle`,
+  `live-query.cache-option-admission`,
+  `live-query.preload-indexing`,
   `react.descriptor-error-surface`,
   `react.descriptor-ownership`,
   `persisted-options.types.core`,
@@ -157,19 +310,29 @@ const staticOracleProperties = [
   `cursor-pagination.partition`,
   `cursor-pagination.reset`,
   `cursor-pagination.failure`,
+  `query.ordered-mutation-outcome`,
   `query-db.refetch-ordered-prefix`,
   `query-db.refetch-held-page-end`,
+  `query-db.refetch-held-report`,
+  `query-db.reload-housekeeping`,
+  `query-db.failing-queries`,
   `ordered-loader.request-authority`,
   `ordered-loader.unproven-report`,
   `ordered-loader.replay-continuation`,
   `ordered-loader.retirement-invalidation`,
   `ordered-loader.retirement-receiver`,
+  `replay.new-sibling-demand`,
+  `replay.sibling-settlement-order`,
+  `replay.subscription-error-order`,
+  `replay.subscription-success-scope`,
   `replay.ordered-window-faults`,
   `replay.ordered-failed-replay`,
   `replay.ordered-preload-recovery`,
   `replay.keyed-request-failures`,
   `replay.subscription-demand-origin`,
   `oracle-replay.calibration`,
+  `oracle-replay.enumerated-calibration`,
+  `oracle-replay.enumerated-calibration-neighbor`,
   `structural-identity.equal-representations`,
   `structural-identity.independent-values`,
   `opfs-worker.diagnostics`,
@@ -195,6 +358,8 @@ const staticOracleProperties = [
   `electric.invalid-resume-partition`,
   `electric.metadata-merge-complete-state`,
   `electric.process-grammar`,
+  `electric.source-ledger-calibration`,
+  `electric.sql-predicate-semantics`,
   `electric.publication-before-persistence`,
   `electric.queued-presence-order`,
   `electric.resume-metadata-merge`,
@@ -203,8 +368,21 @@ const staticOracleProperties = [
   `electric.synthetic-batch-partition`,
   `electric.valid-batch-partition`,
   `ivm.index-refinement`,
+  `ivm.murmur-stream`,
+  `ivm.reduce-fast-path`,
   `offline.key-scheduler-fifo-ledger`,
   `offline.interruption-settlement`,
+  `offline.disposal-handoff`,
+  `offline.disposal-issued-handoff`,
+  `offline.disposal-review-boundaries`,
+  `offline.disposal-handoff-resources`,
+  `offline.settled-id-window`,
+  `offline.executor-api`,
+  `offline.executor-controls`,
+  `offline.executor-coordination-lifecycle`,
+  `offline.executor-connectivity-barrier`,
+  `offline.executor-connectivity-query-db`,
+  `offline.executor-environment`,
   `offline.fifo-retry`,
   `offline.leadership.serial-work`,
   `offline.leadership.report`,
@@ -215,6 +393,8 @@ const staticOracleProperties = [
   `offline.serializer.mutation-wire`,
   `offline.serializer.date-marker`,
   `offline.serializer.version-two`,
+  `offline.serializer.malformed-object`,
+  `offline.serializer.mutation-codec`,
   `offline.settlement.transaction`,
   `offline.settlement.retry-record`,
   `offline.settlement.admission`,
@@ -254,14 +434,40 @@ const staticOracleProperties = [
   `sqlite-persistence.open-transaction-boundary`,
   `sqlite-persistence.request-local-failure-buffered-source`,
   `sqlite-persistence.optimistic-history`,
+  `sqlite-persistence.setup-reopen`,
+  `adapter.handler-types`,
   `adapter-conformance.eager-live-source.reference`,
+  `adapter-conformance.eager-live-source.reference.per-change`,
+  `adapter-conformance.eager-live-source.reference.outage`,
+  `adapter-conformance.eager-live-source.reference.ablation.snapshot.first-ready`,
+  `adapter-conformance.eager-live-source.reference.ablation.changes.change-batch`,
+  `adapter-conformance.eager-live-source.reference.ablation.fail.failure-after-ready`,
+  `adapter-conformance.eager-live-source.reference.ablation.restart.restart`,
+  `adapter-conformance.eager-live-source.reference.ablation.wait.wait-before-evidence-fulfilled`,
+  `adapter-conformance.eager-live-source.reference.ablation.disconnect.reconnect`,
+  `adapter-conformance.eager-live-source.reference.ablation.reconnect.reconnect`,
+  `adapter-conformance.eager-live-source.reference.ablation.renew.renewal`,
+  `adapter-conformance.eager-live-source.reference.ablation.transient-failure.transient-failure-reported`,
+  `adapter-conformance.eager-live-source.reference.ablation.changes.change-before-ready`,
+  `adapter-conformance.eager-live-source.reference.ablation.notes`,
+  `adapter-conformance.eager-live-source.reference.ablation.live-values`,
+  `adapter-conformance.eager-live-source.reference.ablation.read-point`,
   `adapter-conformance.eager-live-source.neon-realtime`,
   `adapter-conformance.eager-live-source.trailbase`,
   `adapter-conformance.eager-live-source.rxdb`,
   `adapter-conformance.eager-live-source.powersync`,
   `adapter-conformance.eager-live-source.powersync-direct`,
+  `adapter-conformance.persisted-baseline-lifecycle.rxdb.controlled`,
+  `adapter-conformance.persisted-baseline-lifecycle.rxdb.node-sqlite`,
+  `adapter-conformance.persisted-baseline-lifecycle.rxdb.chromium-opfs`,
+  `adapter-conformance.persisted-baseline-lifecycle.powersync.controlled`,
+  `adapter-conformance.persisted-baseline-lifecycle.powersync.node-sqlite`,
+  `adapter-conformance.persisted-baseline-lifecycle.powersync.chromium-opfs`,
   `adapter-conformance.eager-live-source.electric`,
+  `adapter-conformance.eager-live-source.electric.no-on-error`,
   `adapter-conformance.eager-live-source.convex`,
+  `adapter-conformance.eager-live-source.convex.react`,
+  `adapter-conformance.eager-live-source.convex.wrapped`,
   `trailbase.lifecycle`,
   `source-health.history`,
   `source-health.required-history`,
@@ -278,6 +484,34 @@ const staticOracleProperties = [
   `electric.sdk-dnf-membership`,
   `electric.sdk-source-release`,
   `electric.sdk-rotation-release`,
+  `electric.sdk-resume-checkpoint.false.cursor.false.hold`,
+  `electric.sdk-resume-checkpoint.false.cursor.true.hold`,
+  `electric.sdk-resume-checkpoint.true.cursor.false.hold`,
+  `electric.sdk-resume-checkpoint.true.cursor.true.hold`,
+  `electric.sdk-resume-checkpoint.false.direct.false.apply`,
+  `electric.sdk-resume-checkpoint.false.direct.false.hold`,
+  `electric.sdk-resume-checkpoint.false.direct.false.reject`,
+  `electric.sdk-resume-checkpoint.false.direct.true.apply`,
+  `electric.sdk-resume-checkpoint.false.direct.true.hold`,
+  `electric.sdk-resume-checkpoint.false.direct.true.reject`,
+  `electric.sdk-resume-checkpoint.false.live-query.false.apply`,
+  `electric.sdk-resume-checkpoint.false.live-query.false.hold`,
+  `electric.sdk-resume-checkpoint.false.live-query.false.reject`,
+  `electric.sdk-resume-checkpoint.false.live-query.true.apply`,
+  `electric.sdk-resume-checkpoint.false.live-query.true.hold`,
+  `electric.sdk-resume-checkpoint.false.live-query.true.reject`,
+  `electric.sdk-resume-checkpoint.true.direct.false.apply`,
+  `electric.sdk-resume-checkpoint.true.direct.false.hold`,
+  `electric.sdk-resume-checkpoint.true.direct.false.reject`,
+  `electric.sdk-resume-checkpoint.true.direct.true.apply`,
+  `electric.sdk-resume-checkpoint.true.direct.true.hold`,
+  `electric.sdk-resume-checkpoint.true.direct.true.reject`,
+  `electric.sdk-resume-checkpoint.true.live-query.false.apply`,
+  `electric.sdk-resume-checkpoint.true.live-query.false.hold`,
+  `electric.sdk-resume-checkpoint.true.live-query.false.reject`,
+  `electric.sdk-resume-checkpoint.true.live-query.true.apply`,
+  `electric.sdk-resume-checkpoint.true.live-query.true.hold`,
+  `electric.sdk-resume-checkpoint.true.live-query.true.reject`,
   `electric-recovery.publication-stream-convergence`,
   `sqlite-resume.startup-generation`,
   `sqlite-resume.source-progress`,
@@ -286,6 +520,63 @@ const staticOracleProperties = [
   `persisted-demand-coverage.history`,
   `persisted-demand-coverage.required`,
   `sqlite-reload.class`,
+  `query.startup-ownership`,
+  `query.persisted-write-precedence`,
+  `query.retained-scoped-hydration`,
+  `query.cached-peer-claim`,
+  `trailbase.lifecycle.boundaries`,
+  `trailbase.lifecycle.persisted-hydration.chromium-opfs`,
+  `adapter-conformance.eager-live-source.trailbase.chromium`,
+  `query.persisted-direct-ownership`,
+  `query.persisted-direct-ownership.chromium-opfs`,
+  `query.immediate-eager-materialization`,
+  `query.immediate-eager-materialization.chromium-opfs`,
+  `query.persisted-rejected-write-cutoff`,
+  `query.persisted-rejected-write-cutoff.chromium-opfs`,
+  `query.scope-omission-reacquisition`,
+  `query.scope-omission-reacquisition.chromium-opfs`,
+  `documented-mutations.query`,
+  `documented-mutations.electric`,
+  `query-db.ownership.reacquisition`,
+  `query-db.ownership.published-owners`,
+  `query-db.ownership.direct-lifetime`,
+  `query-db.ownership.direct-order`,
+  `query-db.ownership.overlap`,
+  `query-db.ownership.application-failure`,
+  `query-db.ownership.handler-failure`,
+  `query-db.ownership.empty-result`,
+  `query-db.ownership.reentrant-receipt`,
+  `query-db.ownership.invalid-result`,
+  `query-db.ownership.deferred-result`,
+  `query-db.ownership.deferred-cleanup`,
+  `query-db.ownership.recovered-result`,
+  `query-db.ownership.eager-recovery`,
+  `query-db.ownership.retained-invalid`,
+  `query-db.ownership.overlapping-deferral`,
+  `query-db.ownership.independent-result`,
+  `query-db.ownership.older-fetch-merge`,
+  `query-db.ownership.retained-empty-work`,
+  `query-db.ownership.cold-owner-work`,
+  `query-db.ownership.superseded-result`,
+  `query-db.ownership.explicit-refetch`,
+  `query-db.ownership.refresh-overlap`,
+  `query-db.ownership.handler-identity`,
+  `query-db.ownership.work`,
+  `query-db.ownership.mutation-confirmation`,
+  `query-db.ownership.post-handler`,
+  `adapter.rxdb.eager-reload`,
+  `adapter.powersync.eager-reload`,
+  `adapter.rxdb.capability.controlled`,
+  `adapter.rxdb.capability.node-sqlite`,
+  `adapter.powersync.capability.controlled`,
+  `adapter.powersync.capability.node-sqlite`,
+  `trailbase.lifecycle.persisted-hydration.controlled`,
+  `trailbase.lifecycle.persisted-hydration.node-sqlite`,
+  `adapter.convex.persisted-startup`,
+  `adapter.electric.persisted-startup`,
+  `adapter.trailbase.persisted-startup`,
+  `adapter.rxdb.persisted-startup`,
+  `adapter.powersync.persisted-startup`,
   `browser.multi-tab-reserved-history`,
   `browser.electric-source-prefix`,
   `sqlite-reload.class.electron`,
@@ -296,6 +587,7 @@ const staticOracleProperties = [
   `collection-sync.reentrant-drain`,
   `collection-lifecycle.gc-persisting-transaction`,
   `collection-lifecycle.gc-retention-boundaries`,
+  `collection-lifecycle.gc-retention-boundaries.electric-postgres`,
   `collection-lifecycle.gc-mutation-shapes`,
   `collection-state.retention`,
   `collection-state.accepted-snapshot.before-delete`,
@@ -320,16 +612,30 @@ const staticOracleProperties = [
   `index-update.nullish-membership`,
   `index-update.exact-identity`,
   `index-update.custom-comparator`,
+  `ir-identity.canonical-expressions`,
+  `ir-identity.reference-expressions`,
+  `ir-identity.membership-set`,
+  `ir-identity.lexical-aliases`,
+  `ir-identity.projected-results`,
+  `ir-identity.output-denotation`,
+  `ir-identity.union-output-aliases`,
+  `ir-identity.reference-queries`,
   `query-identity.compiled-output`,
   `query-identity.equality-partition`,
   `where-predicate.publication`,
   `join-result-key.pairs`,
   `join-result-key.whole-source`,
+  `join-result-key.whole-source-matrix`,
   `group-result-key.groups`,
   `pooled-live-query.publication`,
   `flat-change-tracking.equivalence`,
   `local-storage.value-fidelity`,
+  `local-storage.peers`,
+  `local-storage.write-order`,
+  `live-query-observer.hydration-terminal`,
+  `optimistic-history.core`,
   `derived-publication.membership-work`,
+  `derived-publication.membership-work-fixed`,
   `collection-publication.metadata-cancellation`,
   `collection-publication.metadata-only`,
   `sync-metadata-session.flat`,
@@ -379,6 +685,8 @@ const staticOracleProperties = [
   `live-query-observer.retained-snapshot`,
   `bucket-facade.rollback-history`,
   `aggregate.select-shapes`,
+  `aggregate.select-structural`,
+  `aggregate.select-required`,
   `evaluators.in`,
   `transaction-ownership.settlement-release`,
   `includes-collection.layout-swap`,
@@ -434,6 +742,7 @@ const staticOracleProperties = [
   `ordered-work.nullable-lifecycle`,
   `pagination.async-cursor`,
   `reverse-index.reads`,
+  `reverse-index.large-reads`,
   `pagination.multi-order`,
   `pagination.nullable-cursor`,
   `pagination.ordered-window`,
@@ -452,10 +761,13 @@ const staticOracleProperties = [
   `subscription-lifecycle.restart-publication`,
   `subscription-lifecycle.sync-history`,
   `subscription-lifecycle.async-history`,
+  `subscription-lifecycle.constructed-history`,
   `subscription-lifecycle.demand-change`,
   `subscription-lifecycle.async-restart`,
   `subscription-lifecycle.async-statistics`,
   `sorted-map.key`,
+  `sorted-map.regressions`,
+  `sorted-map.reach-calibration`,
   `cleanup-queue.history`,
   `sorted-map.ascending`,
   `sorted-map.descending`,
@@ -468,9 +780,12 @@ const staticOracleProperties = [
   `ivm.hash-value`,
   `ivm.incrementalization-law`,
   `ivm.distinct-collisions`,
+  `ivm.distinct-collisions-tuple`,
   `ivm.distinct-representatives`,
+  `ivm.distinct-representatives-unit-split`,
   `includes.bucket-collisions`,
   `query.distinct-collisions`,
+  `query.distinct-collisions-ordered`,
   `ivm.topk-support-window`,
   `ivm.topk-numeric-window`,
   `opfs.close`,
@@ -572,19 +887,6 @@ for (const depth of [1, 2, 3, 4]) {
   }
 }
 
-export function validateOraclePropertyRegistry(
-  properties: ReadonlyArray<string>,
-): ReadonlySet<string> {
-  const registry = new Set<string>()
-  for (const property of properties) {
-    if (registry.has(property)) {
-      throw new Error(`duplicate oracle property: ${property}`)
-    }
-    registry.add(property)
-  }
-  return registry
-}
-
 export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...staticOracleProperties,
   ...publicationProperties,
@@ -594,18 +896,6 @@ export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...includesMatrixProperties,
 ])
 
-function assertRegisteredOracleProperty(property: string): void {
-  if (!registeredOracleProperties.has(property)) {
-    throw new Error(`unknown oracle property: ${property}`)
-  }
-}
-
-export type OracleReplayConfig = {
-  replaySeed: number | undefined
-  replayPath: string | undefined
-  replayProperty: string | undefined
-}
-
 /**
  * Replay variables that oracles read before they moved to the shared
  * TANSTACK_DB_ORACLE_* variables. Nothing reads them now, so a command that
@@ -613,6 +903,66 @@ export type OracleReplayConfig = {
  * config rejects them instead.
  */
 const retiredReplayVariables = [
+  `CONVEX_ABORT_REPLAY_ORACLE_SEED`,
+  `CONVEX_ABORT_REPLAY_ORACLE_PATH`,
+  `CONVEX_BACKEND_CONCURRENCY_ORACLE_SEED`,
+  `CONVEX_BACKEND_CONCURRENCY_ORACLE_PATH`,
+  `CONVEX_BACKEND_DELETE_ORACLE_SEED`,
+  `CONVEX_BACKEND_DELETE_ORACLE_PATH`,
+  `CONVEX_BACKEND_INSERT_ORACLE_SEED`,
+  `CONVEX_BACKEND_INSERT_ORACLE_PATH`,
+  `CONVEX_BACKEND_UPDATE_ORACLE_SEED`,
+  `CONVEX_BACKEND_UPDATE_ORACLE_PATH`,
+  `CONVEX_BOUNDARY_ORACLE_SEED`,
+  `CONVEX_BOUNDARY_ORACLE_PATH`,
+  `CONVEX_LAZY_APP_ORACLE_SEED`,
+  `CONVEX_LAZY_APP_ORACLE_PATH`,
+  `CONVEX_LAZY_EXACT_RECEIPT_ORACLE_SEED`,
+  `CONVEX_LAZY_EXACT_RECEIPT_ORACLE_PATH`,
+  `CONVEX_LAZY_FAILURE_HISTORY_ORACLE_SEED`,
+  `CONVEX_LAZY_FAILURE_HISTORY_ORACLE_PATH`,
+  `CONVEX_LAZY_HISTORY_ORACLE_SEED`,
+  `CONVEX_LAZY_HISTORY_ORACLE_PATH`,
+  `CONVEX_LAZY_INTERLEAVING_ORACLE_SEED`,
+  `CONVEX_LAZY_INTERLEAVING_ORACLE_PATH`,
+  `CONVEX_LAZY_LIFECYCLE_ORACLE_SEED`,
+  `CONVEX_LAZY_LIFECYCLE_ORACLE_PATH`,
+  `CONVEX_LAZY_NATIVE_RECEIPT_ORACLE_SEED`,
+  `CONVEX_LAZY_NATIVE_RECEIPT_ORACLE_PATH`,
+  `CONVEX_LAZY_PUBLICATION_ORACLE_SEED`,
+  `CONVEX_LAZY_PUBLICATION_ORACLE_PATH`,
+  `CONVEX_LAZY_RECEIPT_ORACLE_SEED`,
+  `CONVEX_LAZY_RECEIPT_ORACLE_PATH`,
+  `CONVEX_LAZY_SUFFIX_ORACLE_SEED`,
+  `CONVEX_LAZY_SUFFIX_ORACLE_PATH`,
+  `CONVEX_LAZY_VALUES_ORACLE_SEED`,
+  `CONVEX_LAZY_VALUES_ORACLE_PATH`,
+  `CONVEX_LAZY_VERSION_ORACLE_SEED`,
+  `CONVEX_LAZY_VERSION_ORACLE_PATH`,
+  `CONVEX_LAZY_WORK_ORACLE_SEED`,
+  `CONVEX_LAZY_WORK_ORACLE_PATH`,
+  `CONVEX_LOAD_OUTCOME_ORACLE_SEED`,
+  `CONVEX_LOAD_OUTCOME_ORACLE_PATH`,
+  `CONVEX_OFFLINE_ACCEPTANCE_ORACLE_SEED`,
+  `CONVEX_OFFLINE_ACCEPTANCE_ORACLE_PATH`,
+  `CONVEX_OFFLINE_ORACLE_SEED`,
+  `CONVEX_OFFLINE_ORACLE_PATH`,
+  `CONVEX_OFFLINE_SOURCE_ORACLE_SEED`,
+  `CONVEX_OFFLINE_SOURCE_ORACLE_PATH`,
+  `CONVEX_PAGINATION_BOUND_SEED`,
+  `CONVEX_PAGINATION_BOUND_PATH`,
+  `CONVEX_PAGINATION_ROWS_SEED`,
+  `CONVEX_PAGINATION_ROWS_PATH`,
+  `CONVEX_PAGINATION_WORK_SEED`,
+  `CONVEX_PAGINATION_WORK_PATH`,
+  `CONVEX_REVALIDATION_ORACLE_SEED`,
+  `CONVEX_REVALIDATION_ORACLE_PATH`,
+  `CONVEX_SNAPSHOT_ORACLE_SEED`,
+  `CONVEX_SNAPSHOT_ORACLE_PATH`,
+  `CONVEX_VALUES_ORACLE_SEED`,
+  `CONVEX_VALUES_ORACLE_PATH`,
+  `JOINT_REPLAY_ORACLE_SEED`,
+  `JOINT_REPLAY_ORACLE_PATH`,
   `UTILS_ORACLE_PROPERTY`,
   `UTILS_ORACLE_SEED`,
   `UTILS_ORACLE_PATH`,
@@ -707,281 +1057,8 @@ const retiredReplayVariables = [
   `TANSTACK_DB_LIKE_ORACLE_RUNS`,
 ] as const
 
-export function readOracleRunConfig(
-  environment: OracleEnvironment = process.env,
-): OracleReplayConfig & { multiplier: number } {
-  const retired = retiredReplayVariables.filter(
-    (variable) => environment[variable] !== undefined,
-  )
-  if (retired.length > 0) {
-    throw new Error(
-      `Retired oracle replay variables are set: ${retired.join(`, `)}. ` +
-        `Use TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and ` +
-        `TANSTACK_DB_ORACLE_PROPERTY to select a replay, and ` +
-        `TANSTACK_DB_ORACLE_RUNS_MULTIPLIER to scale run counts.`,
-    )
-  }
-  const multiplierValue = environment.TANSTACK_DB_ORACLE_RUNS_MULTIPLIER ?? `1`
-  const multiplier = Number(multiplierValue)
-  if (
-    multiplierValue.trim() === `` ||
-    !Number.isSafeInteger(multiplier) ||
-    multiplier < 1
-  ) {
-    throw new Error(
-      `TANSTACK_DB_ORACLE_RUNS_MULTIPLIER must be a positive integer`,
-    )
-  }
-
-  const seedValue = environment.TANSTACK_DB_ORACLE_SEED
-  const replayPath = environment.TANSTACK_DB_ORACLE_PATH
-  const replayProperty = environment.TANSTACK_DB_ORACLE_PROPERTY
-  if (seedValue === undefined) {
-    if (replayPath !== undefined) {
-      throw new Error(
-        `TANSTACK_DB_ORACLE_PATH requires TANSTACK_DB_ORACLE_SEED`,
-      )
-    }
-    if (replayProperty !== undefined) {
-      throw new Error(
-        `TANSTACK_DB_ORACLE_PROPERTY requires TANSTACK_DB_ORACLE_PATH`,
-      )
-    }
-    return {
-      multiplier,
-      replaySeed: undefined,
-      replayPath: undefined,
-      replayProperty: undefined,
-    }
-  }
-
-  const replaySeed = Number(seedValue)
-  if (seedValue.trim() === `` || !Number.isSafeInteger(replaySeed)) {
-    throw new Error(`TANSTACK_DB_ORACLE_SEED must be an integer`)
-  }
-  if (replayPath === undefined) {
-    if (replayProperty !== undefined) {
-      throw new Error(
-        `TANSTACK_DB_ORACLE_PROPERTY requires TANSTACK_DB_ORACLE_PATH`,
-      )
-    }
-    return {
-      multiplier,
-      replaySeed,
-      replayPath: undefined,
-      replayProperty: undefined,
-    }
-  }
-  if (replayPath.trim() === ``) {
-    throw new Error(`TANSTACK_DB_ORACLE_PATH must be non-empty`)
-  }
-  if (!/^\d+(?::\d+)*$/.test(replayPath)) {
-    throw new Error(
-      `TANSTACK_DB_ORACLE_PATH must contain colon-separated nonnegative integers`,
-    )
-  }
-  if (replayProperty === undefined || replayProperty.trim() === ``) {
-    throw new Error(
-      `TANSTACK_DB_ORACLE_PATH requires TANSTACK_DB_ORACLE_PROPERTY`,
-    )
-  }
-  assertRegisteredOracleProperty(replayProperty)
-  return { multiplier, replaySeed, replayPath, replayProperty }
-}
-
-/**
- * Select a fresh campaign seed unless the caller supplied one. Report the
- * selection before fast-check runs: a later reach failure is outside its
- * reporter and must still be replayable. This line records selection, not
- * execution; guarded replay witnesses remain the execution evidence.
- */
-export function oracleCampaignSeed(
-  seed: number | undefined,
-  property: string | undefined,
-): number {
-  const selected = seed ?? Math.floor(Math.random() * 0x100000000) - 0x80000000
-  console.info(
-    `ORACLE_SEED ${JSON.stringify({ property: property ?? null, seed: selected })}`,
-  )
-  return selected
-}
-
-type OracleRunParameters = {
-  numRuns: number
-  seed?: number
-  path?: string
-} & ReturnType<typeof oracleReplayReporter>
-
-// fast-check infers a property's argument types from `examples` too, so only
-// a call with examples returns them. `ReturnType` reads the last overload,
-// the one without examples.
-export function oracleRandomParameters<TExample>(
-  numRuns: number,
-  replay: OracleReplayConfig | number | undefined,
-  property: string | undefined,
-  examples: ReadonlyArray<TExample>,
-): OracleRunParameters & { examples: Array<TExample> }
-export function oracleRandomParameters(
-  numRuns: number,
-  replay: OracleReplayConfig | number | undefined,
-  property?: string,
-): OracleRunParameters
-export function oracleRandomParameters<TExample>(
-  numRuns: number,
-  replay: OracleReplayConfig | number | undefined,
-  property?: string,
-  examples?: ReadonlyArray<TExample>,
-): OracleRunParameters & { examples?: Array<TExample> } {
-  return randomParameters(numRuns, replay, property, examples)
-}
-
-function randomParameters<TExample>(
-  numRuns: number,
-  replay: OracleReplayConfig | number | undefined,
-  property: string | undefined,
-  examples: ReadonlyArray<TExample> | undefined,
-): OracleRunParameters & { examples?: Array<TExample> } {
-  if (property !== undefined) assertRegisteredOracleProperty(property)
-  const { replaySeed, replayPath, replayProperty } =
-    typeof replay === `object`
-      ? replay
-      : {
-          replaySeed: replay,
-          replayPath: undefined,
-          replayProperty: undefined,
-        }
-  const selectedSeed = oracleCampaignSeed(replaySeed, property)
-  const parameters: OracleRunParameters =
-    replaySeed === undefined
-      ? { numRuns, seed: selectedSeed }
-      : {
-          numRuns,
-          seed: replaySeed,
-          // A path replays one recorded counterexample, so the replay runs
-          // once. From a path with one segment, fast-check would otherwise
-          // run `numRuns` histories that start at that index.
-          ...(property !== undefined &&
-          replayPath !== undefined &&
-          replayProperty === property
-            ? {
-                numRuns: 1,
-                path: replayPath,
-                ...oracleReplayReporter(property, replaySeed, replayPath),
-              }
-            : {}),
-        }
-  if (examples === undefined) return parameters
-  // fast-check runs the examples first and counts them in numRuns, so they
-  // come on top of the random runs: the examples never displace one. A path
-  // replay runs one recorded history, which can be an example.
-  return {
-    ...parameters,
-    examples: [...examples],
-    numRuns:
-      parameters.path === undefined
-        ? parameters.numRuns + examples.length
-        : parameters.numRuns,
-  }
-}
-
-const { multiplier, ...replay } = readOracleRunConfig()
-
-/**
- * Replay selection.
- *
- * A path replay runs one property's recorded history. Every other test
- * stands aside, so the replay reports only that history. A seed without a
- * path only reseeds the random campaigns, so every test still runs. These
- * helpers are the only replay conditions that the `oracle/no-disabled` lint
- * rule accepts. Each is false in an ordinary run, so no replay selection can
- * switch an oracle test off there.
- */
-
-/** Whether a path replay is selected. */
-export function oracleReplayRequested(): boolean {
-  return replay.replayPath !== undefined
-}
-
-/**
- * Whether a path replay of a property outside `properties` is selected. A
- * test that serves several properties' replays passes all of them.
- */
-export function oracleReplaySkips(
-  ...properties: ReadonlyArray<string>
-): boolean {
-  for (const property of properties) assertRegisteredOracleProperty(property)
-  return (
-    replay.replayPath !== undefined &&
-    (replay.replayProperty === undefined ||
-      !properties.includes(replay.replayProperty))
-  )
-}
-
-/**
- * The registration to use for a test that stands aside during another
- * test's replay: its `skip` form while that replay runs, and itself
- * otherwise. Without `properties`, the test stands aside during every path
- * replay. With them, it runs only when no path replay is selected or the
- * replay selects one of them.
- */
-export function oracleReplayTest<TRegistration extends { skip: unknown }>(
-  registration: TRegistration,
-  ...properties: ReadonlyArray<string>
-): TRegistration {
-  const standsAside =
-    properties.length === 0
-      ? oracleReplayRequested()
-      : oracleReplaySkips(...properties)
-  // `skip` registers through the same API, so it has the registration's type.
-  return standsAside ? (registration.skip as TRegistration) : registration
-}
-
-/**
- * The registration for a calibration witness. During a path replay of
- * `property`, TANSTACK_DB_ORACLE_CALIBRATION selects a hostile mutant that the
- * main property runs against, and the witness for that `fault` checks the
- * failure. The witness runs in ordinary runs and in that calibration replay.
- * It stands aside during every other path replay, where it has nothing to
- * check.
- */
-export function oracleCalibrationTest<TRegistration extends { skip: unknown }>(
-  registration: TRegistration,
-  property: string,
-  fault: string,
-): TRegistration {
-  const standsAside =
-    oracleReplaySkips(property) ||
-    (oracleReplayRequested() &&
-      process.env.TANSTACK_DB_ORACLE_CALIBRATION !== fault)
-  return standsAside ? (registration.skip as TRegistration) : registration
-}
-
-export { declareOracle } from './oracle-declaration.js'
-
-/** Keeps ordinary CI bounded while allowing long randomized oracle campaigns. */
-export function oracleRuns(baseRuns: number): number {
-  return baseRuns * multiplier
-}
-
-/**
- * Replays broad randomized properties when a campaign seed is supplied.
- * `examples` run first in every run, on top of the base runs. A site that
- * spreads these options and sets fast-check's `examples` itself runs them
- * inside the base runs instead, so they displace random histories.
- */
-export function oraclePropertyOptions<TExample>(
-  baseRuns: number,
-  property: string | undefined,
-  options: { examples: ReadonlyArray<TExample> },
-): OracleRunParameters & { examples: Array<TExample> }
-export function oraclePropertyOptions(
-  baseRuns: number,
-  property?: string,
-): OracleRunParameters
-export function oraclePropertyOptions<TExample>(
-  baseRuns: number,
-  property?: string,
-  { examples }: { examples?: ReadonlyArray<TExample> } = {},
-): OracleRunParameters & { examples?: Array<TExample> } {
-  return randomParameters(oracleRuns(baseRuns), replay, property, examples)
-}
+configureOracles({
+  envPrefix: `TANSTACK_DB_ORACLE`,
+  registry: registeredOracleProperties,
+  retiredVariables: retiredReplayVariables,
+})

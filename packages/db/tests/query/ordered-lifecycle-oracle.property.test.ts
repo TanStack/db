@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util'
 import { describe, expect, it } from 'vitest'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import {
   createLiveQueryCollection,
   eq,
@@ -14,10 +14,17 @@ import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
-  oracleRandomParameters,
+  oracleFixedSeed,
+  oracleProperty,
+  oracleRoute,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
+import {
+  compareAt,
+  observeComparison,
+  recordedComparison,
+} from './ordered-comparison-oracle.js'
 import {
   assertFullSourceRequest,
   finishOracleCleanup,
@@ -480,8 +487,12 @@ async function observeHistory(
   try {
     if (scenario.barrier === `replay`) {
       await preload.done
-      expect(preload.state).toEqual({ settled: true })
-      expect(read()).toEqual(referenceWindow(1))
+      compareAt(`ordered-lifecycle-oracle.property.test.ts:486`, () =>
+        expect(preload.state).toEqual({ settled: true }),
+      )
+      compareAt(`ordered-lifecycle-oracle.property.test.ts:487`, () =>
+        expect(read()).toEqual(referenceWindow(1)),
+      )
       baseline = read()
       publications.length = 0
       allowTarget = true
@@ -494,51 +505,78 @@ async function observeHistory(
       replayStarted = true
     }
     for (let turn = 0; turn < 8 && !target; turn++) await flushPromises()
-    expect(
-      target,
-      JSON.stringify({
-        scenario,
-        requests: requests.map(({ ids, options }) => ({
-          ids,
-          limit: options.limit,
-          ordered: options.orderBy !== undefined,
-          filtered: options.where !== undefined,
-        })),
-      }),
-    ).toBeDefined()
-    expect(target!.syncRunGeneration).toBe(1)
-    expect(target!.ids.length).toBeGreaterThan(0)
+    compareAt(`ordered-lifecycle-oracle.property.test.ts:500`, () =>
+      expect(
+        target,
+        JSON.stringify({
+          scenario,
+          requests: requests.map(({ ids, options }) => ({
+            ids,
+            limit: options.limit,
+            ordered: options.orderBy !== undefined,
+            filtered: options.where !== undefined,
+          })),
+        }),
+      ).toBeDefined(),
+    )
+    compareAt(`ordered-lifecycle-oracle.property.test.ts:512`, () =>
+      expect(target!.syncRunGeneration).toBe(1),
+    )
+    compareAt(`ordered-lifecycle-oracle.property.test.ts:513`, () =>
+      expect(target!.ids.length).toBeGreaterThan(0),
+    )
     await flushPromises()
     if (scenario.barrier === `initial`)
-      expect(preload.state.settled).toBe(false)
-    expect(read()).toEqual(baseline)
+      compareAt(`ordered-lifecycle-oracle.property.test.ts:516`, () =>
+        expect(preload.state.settled).toBe(false),
+      )
+    compareAt(`ordered-lifecycle-oracle.property.test.ts:517`, () =>
+      expect(read()).toEqual(baseline),
+    )
     check(`pending-window`, live.utils.getWindow(), { offset: 0, limit: 1 })
-    expect(publications).toEqual([])
-    expect(target!.applied).toBe(
-      scenario.delivery === `before-provider-response`,
+    compareAt(`ordered-lifecycle-oracle.property.test.ts:519`, () =>
+      expect(publications).toEqual([]),
+    )
+    compareAt(`ordered-lifecycle-oracle.property.test.ts:520`, () =>
+      expect(target!.applied).toBe(
+        scenario.delivery === `before-provider-response`,
+      ),
     )
     appliedBeforeResponse = target!.applied
     if (scenario.delivery === `before-provider-response`) {
       // A replay peer may have installed the same rows already. The provider
       // still completed this read; its whole selected subset must be present.
-      expect(target!.ids.every((id) => source.has(id))).toBe(true)
-    } else expect(targetWrites).toBe(0)
+      compareAt(`ordered-lifecycle-oracle.property.test.ts:527`, () =>
+        expect(target!.ids.every((id) => source.has(id))).toBe(true),
+      )
+    } else
+      compareAt(`ordered-lifecycle-oracle.property.test.ts:528`, () =>
+        expect(targetWrites).toBe(0),
+      )
     if (scenario.window === `widen`) {
       move = observe(live.utils.setWindow({ offset: 0, limit: 3 }))
       await flushPromises()
-      expect(move.state.settled).toBe(false)
+      compareAt(`ordered-lifecycle-oracle.property.test.ts:532`, () =>
+        expect(move!.state.settled).toBe(false),
+      )
       check(`pending-move-window`, live.utils.getWindow(), {
         offset: 0,
         limit: 1,
       })
-      expect(publications).toEqual([])
+      compareAt(`ordered-lifecycle-oracle.property.test.ts:537`, () =>
+        expect(publications).toEqual([]),
+      )
     }
     if (scenario.syncRun === `restart`) {
       allowTarget = false
       await live.cleanup()
       await source.cleanup()
-      expect(target!.options.signal?.aborted).toBe(true)
-      expect(sourceCleanups).toEqual([1])
+      compareAt(`ordered-lifecycle-oracle.property.test.ts:543`, () =>
+        expect(target!.options.signal?.aborted).toBe(true),
+      )
+      compareAt(`ordered-lifecycle-oracle.property.test.ts:544`, () =>
+        expect(sourceCleanups).toEqual([1]),
+      )
       await preload.done
       if (scenario.barrier === `initial`)
         check(
@@ -559,7 +597,9 @@ async function observeHistory(
         )
       }
       await live.preload()
-      expect(syncRunGeneration).toBe(2)
+      compareAt(`ordered-lifecycle-oracle.property.test.ts:565`, () =>
+        expect(syncRunGeneration).toBe(2),
+      )
       check(`restarted-window`, read(), referenceWindow(1))
       check(`restarted-window-options`, live.utils.getWindow(), {
         offset: 0,
@@ -573,12 +613,16 @@ async function observeHistory(
     if (scenario.outcome === `resolve`) providerResponse.resolve()
     else providerResponse.reject(failure)
     for (let turn = 0; turn < 8; turn++) await flushPromises()
-    expect(targetOutcome).toBe(scenario.outcome)
+    compareAt(`ordered-lifecycle-oracle.property.test.ts:579`, () =>
+      expect(targetOutcome).toBe(scenario.outcome),
+    )
     // Deferred application follows provider-response fulfillment in the current
     // sync run. A failed or obsolete response must not apply rows.
-    expect(target!.applied).toBe(
-      scenario.delivery === `before-provider-response` ||
-        (scenario.outcome === `resolve` && scenario.syncRun === `retain`),
+    compareAt(`ordered-lifecycle-oracle.property.test.ts:582`, () =>
+      expect(target!.applied).toBe(
+        scenario.delivery === `before-provider-response` ||
+          (scenario.outcome === `resolve` && scenario.syncRun === `retain`),
+      ),
     )
     if (scenario.syncRun === `restart`) {
       check(`obsolete-status`, live.status, priorStatus)
@@ -672,14 +716,26 @@ async function observeHistory(
         const beforeRetry = requests.length
         // A failed source replacement is not an ordered-request failure.
         // Window work cannot reopen it even when the source itself is ready.
-        await expect(
-          live.utils.setWindow({ offset: 0, limit: 3 }),
-        ).rejects.toBe(failure)
-        expect(requests).toHaveLength(beforeRetry)
-        expect(read()).toEqual(baseline)
-        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
-        expect(live.utils.lastSubsetError).toBe(failure)
-        expect(source.status).toBe(`ready`)
+        await compareAt(`ordered-lifecycle-oracle.property.test.ts:678`, () =>
+          expect(live.utils.setWindow({ offset: 0, limit: 3 })).rejects.toBe(
+            failure,
+          ),
+        )
+        compareAt(`ordered-lifecycle-oracle.property.test.ts:681`, () =>
+          expect(requests).toHaveLength(beforeRetry),
+        )
+        compareAt(`ordered-lifecycle-oracle.property.test.ts:682`, () =>
+          expect(read()).toEqual(baseline),
+        )
+        compareAt(`ordered-lifecycle-oracle.property.test.ts:683`, () =>
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 }),
+        )
+        compareAt(`ordered-lifecycle-oracle.property.test.ts:684`, () =>
+          expect(live.utils.lastSubsetError).toBe(failure),
+        )
+        compareAt(`ordered-lifecycle-oracle.property.test.ts:685`, () =>
+          expect(source.status).toBe(`ready`),
+        )
         activeInstalled.clear()
         activeSync.begin()
         activeSync.truncate()
@@ -712,7 +768,9 @@ async function observeHistory(
   if (mismatches.length > 0) {
     let mismatchError: unknown
     try {
-      expect(mismatches).toEqual([])
+      compareAt(`ordered-lifecycle-oracle.property.test.ts:718`, () =>
+        expect(mismatches).toEqual([]),
+      )
     } catch (error) {
       mismatchError = error
     }
@@ -739,11 +797,21 @@ async function observeHistory(
     ],
     `Ordered lifecycle oracle cleanup failed`,
   )
-  expect(new Set(released).size).toBe(released.length)
+  compareAt(`ordered-lifecycle-oracle.property.test.ts:745`, () =>
+    expect(new Set(released).size).toBe(released.length),
+  )
   for (const { options } of requests)
-    expect(released.filter((release) => release === options)).toHaveLength(1)
-  expect(sourceCleanups).toEqual(scenario.syncRun === `restart` ? [1, 2] : [1])
-  expect(requests.every(({ options }) => options.signal?.aborted)).toBe(true)
+    compareAt(`ordered-lifecycle-oracle.property.test.ts:747`, () =>
+      expect(released.filter((release) => release === options)).toHaveLength(1),
+    )
+  compareAt(`ordered-lifecycle-oracle.property.test.ts:748`, () =>
+    expect(sourceCleanups).toEqual(
+      scenario.syncRun === `restart` ? [1, 2] : [1],
+    ),
+  )
+  compareAt(`ordered-lifecycle-oracle.property.test.ts:749`, () =>
+    expect(requests.every(({ options }) => options.signal?.aborted)).toBe(true),
+  )
   const acquisitionPath =
     target!.options.orderBy !== undefined
       ? target!.indexed
@@ -792,12 +860,22 @@ async function assertHistory(
   fault?: `secondary-order` | `null-placement`,
 ) {
   const result = await observeHistory(scenario, fault)
-  expect(result.acquisitionPath).toBe(scenario.acquisitionPath)
-  expect(result.authority).toBe(
-    scenario.acquisitionPath === `full-source` ? `full` : `finite`,
+  compareAt(`ordered-lifecycle-oracle.property.test.ts:798`, () =>
+    expect(result.acquisitionPath).toBe(scenario.acquisitionPath),
   )
-  expect(result.syncRunGeneration).toBe(scenario.syncRun === `restart` ? 2 : 1)
-  expect(result.mismatches).toEqual([])
+  compareAt(`ordered-lifecycle-oracle.property.test.ts:799`, () =>
+    expect(result.authority).toBe(
+      scenario.acquisitionPath === `full-source` ? `full` : `finite`,
+    ),
+  )
+  compareAt(`ordered-lifecycle-oracle.property.test.ts:802`, () =>
+    expect(result.syncRunGeneration).toBe(
+      scenario.syncRun === `restart` ? 2 : 1,
+    ),
+  )
+  compareAt(`ordered-lifecycle-oracle.property.test.ts:803`, () =>
+    expect(result.mismatches).toEqual([]),
+  )
   return result
 }
 
@@ -956,6 +1034,7 @@ describe(`synchronous initial settlement refinement`, () => {
   declareOracle({ grammar: [cells] })
 
   it(`enumerates every initial path and settlement cell exactly once`, () => {
+    oracleRoute(`case`)
     expect(cells).toHaveLength(4)
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(4)
   })
@@ -963,6 +1042,7 @@ describe(`synchronous initial settlement refinement`, () => {
   it.each(cells)(
     `publishes the complete initial window at the $settlement checkpoint with $autoIndex indexing`,
     async ({ settlement, autoIndex }) => {
+      oracleRoute(`case`)
       const observed = await observeInitialSettlement(settlement, autoIndex)
       assertInitialSettlementObservation(observed.immediate, settlement)
       expect(observed.settled).toEqual({
@@ -981,6 +1061,7 @@ describe(`synchronous initial settlement refinement`, () => {
   )
 
   it(`rejects the old Promise-wrapped observation at the synchronous checkpoint`, () => {
+    oracleRoute(`calibration`)
     expect(() =>
       assertInitialSettlementObservation(
         expectedInitialSettlementObservation(`promise`),
@@ -1014,17 +1095,20 @@ describe(`ordered lifecycle product`, () => {
   declareOracle({ grammar: [cells] })
 
   it(`keeps all 192 declared histories distinct`, () => {
+    oracleRoute(`case`)
     expect(cells).toHaveLength(192)
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(192)
   })
   it.each(cells)(
     `$acquisitionPath / $delivery / $window / $outcome / $syncRun / $barrier`,
     async (scenario) => {
+      oracleRoute(`case`)
       const result = await assertHistory(scenario)
       observed.add(JSON.stringify(result.coordinates))
     },
   )
   it(`reaches all 192 histories through physical work and terminal cleanup`, () => {
+    oracleRoute(`case`)
     expect(observed.size).toBe(cells.length)
   })
   const arbitrary = fc.record({
@@ -1044,24 +1128,31 @@ describe(`ordered lifecycle product`, () => {
     rankOffset: fc.integer({ min: -1000, max: 1000 }),
     rankStep: fc.integer({ min: 1, max: 10 }),
   })
-  const { multiplier, ...replay } = readOracleRunConfig()
-  fcTest.prop([arbitrary], { numRuns: 20 * multiplier, seed: 93471 })(
-    `matches the ordered lifecycle for a fixed seed`,
-    async (scenario) => {
-      await assertHistory(scenario)
+  const { multiplier } = readOracleRunConfig()
+
+  oracleProperty({
+    id: `ordered-work.lifecycle`,
+    law: {
+      statement: `Ordered histories match the finite lifecycle reference`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
     },
-    Math.max(10000, multiplier * 1500),
-  )
-  fcTest.prop(
-    [arbitrary],
-    oracleRandomParameters(20 * multiplier, replay, `ordered-work.lifecycle`),
-  )(
-    `matches the ordered lifecycle for a random or replayed seed`,
-    async (scenario) => {
-      await assertHistory(scenario)
-    },
-    Math.max(10000, multiplier * 1500),
-  )
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: { arbitrary, runs: 20, fixedSeeds: [93471] },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const scenario = history
+
+        await assertHistory(scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+    timeout: Math.max(10000, multiplier * 1500),
+  })
 })
 
 /**
@@ -1275,6 +1366,7 @@ describe(`initial locale-string fallback oracle`, () => {
   declareOracle({ grammar: [cells] })
 
   it(`enumerates every index, settlement, and row-order cell exactly once`, () => {
+    oracleRoute(`case`)
     expect(cells).toHaveLength(8)
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(8)
   })
@@ -1282,6 +1374,7 @@ describe(`initial locale-string fallback oracle`, () => {
   it.each(cells)(
     `publishes the $autoIndex $order locale-string singleton at the $settlement checkpoint`,
     async ({ autoIndex, settlement, order }) => {
+      oracleRoute(`case`)
       const observed = await observeInitialFallback(
         autoIndex,
         settlement,
@@ -1299,7 +1392,10 @@ describe(`initial locale-string fallback oracle`, () => {
       expect(observed.requestsAtCut[1]?.where).toBeUndefined()
       expect(observed.requestsAtCut[1]?.cursor).toBeUndefined()
       expect(observed.requestsAtCut[1]?.offset).toBeUndefined()
-      expect(observed.atFallbackEntry).toEqual({ rows: [], status: `loading` })
+      expect(observed.atFallbackEntry).toEqual({
+        rows: [],
+        status: `loading`,
+      })
       expect(observed.immediate).toEqual(
         expectedInitialFallback(settlement, order),
       )
@@ -1313,6 +1409,7 @@ describe(`initial locale-string fallback oracle`, () => {
   it.each(cells)(
     `emits one completed $autoIndex $order initial window change with $settlement fallback`,
     async ({ autoIndex, order, settlement }) => {
+      oracleRoute(`case`)
       const observed = await observeInitialFallback(
         autoIndex,
         settlement,
@@ -1322,7 +1419,10 @@ describe(`initial locale-string fallback oracle`, () => {
       expect(observed.commitReturnedImmediately).toEqual([true, true])
       const id = order === `tied` ? 1 : 2
       expect(observed.requestsAtCut).toHaveLength(2)
-      expect(observed.atFallbackEntry).toEqual({ rows: [], status: `loading` })
+      expect(observed.atFallbackEntry).toEqual({
+        rows: [],
+        status: `loading`,
+      })
       expect(observed.immediate).toEqual(
         expectedInitialFallback(settlement, order),
       )
@@ -2178,6 +2278,7 @@ describe(`post-publication null fallback oracle`, () => {
   it.each(cases)(
     `keeps the public window and change events coherent after $mutation with $response and $childDemand child demand`,
     async ({ mutation, response, childDemand }) => {
+      oracleRoute(`case`)
       await observeLaterFallback(mutation, response, childDemand, (observed) =>
         assertLaterFallbackObservation(mutation, observed),
       )
@@ -2185,6 +2286,7 @@ describe(`post-publication null fallback oracle`, () => {
   )
 
   it(`rejects a stale window event after an overlapping held provider result`, async () => {
+    oracleRoute(`calibration`)
     await observeLaterFallback(
       `delete-marker`,
       `held-promise`,
@@ -2229,6 +2331,7 @@ describe(`post-publication null fallback oracle`, () => {
   it.each([`delete-marker`, `retarget-marker`] as const)(
     `reports the first lease's cleanup failure after the %s fallback publishes its replacement`,
     async (mutation) => {
+      oracleRoute(`case`)
       // The subscription reports the throwing release uncaught, once: it is
       // an adapter bug, not a load result.
       const uncaught = captureMicrotaskErrors()
@@ -2253,6 +2356,7 @@ describe(`post-publication null fallback oracle`, () => {
 
 describe(`nullable multi-term lifecycle product`, () => {
   it(`anchors the nullable reference and controlled provider to an independent order palette`, () => {
+    oracleRoute(`case`)
     for (const primaryNulls of [`first`, `last`] as const)
       for (const primaryDirection of [`asc`, `desc`] as const)
         for (const secondaryNulls of [`first`, `last`] as const)
@@ -2314,6 +2418,7 @@ describe(`nullable multi-term lifecycle product`, () => {
   declareOracle({ grammar: [cells, directionCells] })
 
   it(`enumerates every nullable lifecycle and direction-overlay cell exactly once`, () => {
+    oracleRoute(`case`)
     expect(cells).toHaveLength(22)
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(22)
     expect(
@@ -2332,6 +2437,7 @@ describe(`nullable multi-term lifecycle product`, () => {
   it.each(cells)(
     `observes nullable tie and lifecycle coordinates: %j`,
     async (scenario) => {
+      oracleRoute(`case`)
       const result = await assertHistory(scenario)
       expect(result.orderedRequests).toBeGreaterThan(0)
       expect(
@@ -2345,6 +2451,7 @@ describe(`nullable multi-term lifecycle product`, () => {
   it.each(directionCells)(
     `keeps primary $primaryDirection and secondary $secondaryDirection direction independent`,
     async ({ primaryDirection, secondaryDirection }) => {
+      oracleRoute(`case`)
       const representative = cells[0]!
       await assertHistory({
         ...representative,
@@ -2364,6 +2471,7 @@ describe(`nullable multi-term lifecycle product`, () => {
   it.each([`secondary-order`, `null-placement`] as const)(
     `rejects a wrong %s through live loader output`,
     async (fault) => {
+      oracleRoute(`calibration`)
       const scenario = cells[0]!
       await assertHistory(scenario)
       await expect(assertHistory(scenario, fault)).rejects.toMatchObject({
@@ -2405,7 +2513,11 @@ describe(`nullable multi-term lifecycle product`, () => {
   declareOracle({ grammar: [arbitrary] })
 
   it(`generates the nullable value and lifecycle dimensions`, () => {
-    const sample = fc.sample(arbitrary, { seed: 93472, numRuns: 100 })
+    oracleRoute(`fixed seed`)
+    const sample = fc.sample(
+      arbitrary,
+      oracleFixedSeed(93472, { numRuns: 100 }),
+    )
     expect(new Set(sample.map((scenario) => scenario.acquisitionPath))).toEqual(
       new Set([`prefix`, `boundary`, `full-source`]),
     )
@@ -2432,36 +2544,48 @@ describe(`nullable multi-term lifecycle product`, () => {
     expect(sample.some((scenario) => scenario.repair)).toBe(true)
     expect(sample.some((scenario) => scenario.syncRun === `restart`)).toBe(true)
   })
-  const { multiplier, ...replay } = readOracleRunConfig()
+  const { multiplier } = readOracleRunConfig()
   const assertNullableHistory = async (scenario: Scenario) => {
     const result = await assertHistory(scenario)
-    expect(result.orderedRequests).toBeGreaterThan(0)
-    expect(result.repaired).toBe(scenario.repair)
-    expect(
-      scenario.nullable!.primary.nulls === `first`
-        ? result.fullSourceRequests
-        : result.tieRequests,
-    ).toBeGreaterThan(0)
+    compareAt(`ordered-lifecycle-oracle.property.test.ts:2467`, () =>
+      expect(result.orderedRequests).toBeGreaterThan(0),
+    )
+    compareAt(`ordered-lifecycle-oracle.property.test.ts:2468`, () =>
+      expect(result.repaired).toBe(scenario.repair),
+    )
+    compareAt(`ordered-lifecycle-oracle.property.test.ts:2469`, () =>
+      expect(
+        scenario.nullable!.primary.nulls === `first`
+          ? result.fullSourceRequests
+          : result.tieRequests,
+      ).toBeGreaterThan(0),
+    )
   }
-  const nullableRunBudget = 20 * multiplier
   const nullableTimeout = Math.max(10000, multiplier * 1500)
-  fcTest.prop([arbitrary], { numRuns: nullableRunBudget, seed: 93472 })(
-    `matches nullable multi-term lifecycle histories for a fixed seed`,
-    assertNullableHistory,
-    nullableTimeout,
-  )
-  fcTest.prop(
-    [arbitrary],
-    oracleRandomParameters(
-      nullableRunBudget,
-      replay,
-      `ordered-work.nullable-lifecycle`,
-    ),
-  )(
-    `matches nullable multi-term lifecycle histories for a random or replayed seed`,
-    assertNullableHistory,
-    nullableTimeout,
-  )
+
+  oracleProperty({
+    id: `ordered-work.nullable-lifecycle`,
+    law: {
+      statement: `Nullable multi-term histories match the finite lifecycle reference`,
+      authority: `query/live/ARCHITECTURE.md: ordered requests, continuation, and atomic window publication.`,
+      limits: `The existing bounded history grammar and controlled-provider observations; this registration preserves the existing independent judgment.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: { arbitrary, runs: 20, fixedSeeds: [93472] },
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) =>
+      observeComparison(history, observe, async () => {
+        const scenario = history
+
+        await assertNullableHistory(scenario)
+      }),
+    check: (_history, _observations, verdict) => verdict,
+    timeout: nullableTimeout,
+  })
 })
 
 describe(`synchronous initial full-source settlement refinement`, () => {
@@ -2475,6 +2599,7 @@ describe(`synchronous initial full-source settlement refinement`, () => {
   declareOracle({ grammar: [cells] })
 
   it(`enumerates every full-source feature and settlement cell exactly once`, () => {
+    oracleRoute(`case`)
     expect(cells).toHaveLength(8)
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(8)
   })
@@ -2482,6 +2607,7 @@ describe(`synchronous initial full-source settlement refinement`, () => {
   it.each(cells)(
     `publishes the complete initial $feature window at the $settlement checkpoint`,
     async ({ feature, settlement }) => {
+      oracleRoute(`case`)
       const observed = await observeFullSourceSettlement(feature, settlement)
       assertFullSourceRequest(observed.requests[0])
       assertInitialSettlementObservation(observed.immediate, settlement)
@@ -2492,6 +2618,7 @@ describe(`synchronous initial full-source settlement refinement`, () => {
   it.each(fullSourceFeatures)(
     `publishes the complete initial %s window over an eager source at the synchronous checkpoint`,
     async (feature) => {
+      oracleRoute(`case`)
       // An eager source answers every local snapshot synchronously.
       assertInitialSettlementObservation(
         await observeEagerFullSourceSettlement(feature),
@@ -2504,7 +2631,7 @@ describe(`synchronous initial full-source settlement refinement`, () => {
 // The refinement checks compare production observations with the models they
 // name. observeHistory compares each history with its finite reference inside
 // the driver. compareNullable is the nullable-order model; the palette table is
-// its authority, and expectNullableOrderMatchesPalette pins the model to it.
+// its authority, and expectNullableOrderMatchesPalette anchors the model to it.
 declareOracle({
   check: [
     observeHistory,

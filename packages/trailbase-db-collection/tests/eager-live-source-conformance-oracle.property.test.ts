@@ -1,20 +1,16 @@
-import { fc } from '@fast-check/vitest'
-import { describe, it } from 'vitest'
-import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   checkEagerLiveSourceHistory,
   eagerLiveSourceHistoryArb,
   eagerLiveSourceModel,
-  eagerLiveSourceProperty,
-  reachStatesFor,
 } from '../../db-adapter-conformance/src'
 import { trailBaseConformanceDriver } from './conformance-driver'
+import {
+  constructTrailBaseEagerHistory,
+  observeTrailBaseEagerHistory,
+  trailBaseEagerVerdict,
+} from './eager-live-source-framework-oracle'
+import { registerTrailBaseEager } from './eager-live-source-oracle-suite'
 
 /**
  * # TrailBase on the shared eager live-source conformance oracle
@@ -38,42 +34,17 @@ import { trailBaseConformanceDriver } from './conformance-driver'
 const property = `adapter-conformance.eager-live-source.trailbase`
 const driver = trailBaseConformanceDriver()
 const historyArb = eagerLiveSourceHistoryArb(driver)
-// `field-removed` needs a held row with a note and a later upsert without
-// one. With value kinds, 400 histories reached it as few as 7 times across
-// eight seeds, so TrailBase runs 600.
-const runs = 600
-const campaignTimeoutMs = 120_000
 
-async function campaign(options: fc.Parameters<[unknown]>) {
-  const reach = createOracleReach(property, reachStatesFor(driver), {
-    minimum: 5,
-  })
-  await fc.assert(eagerLiveSourceProperty(driver, reach), options)
-  return reach
-}
-
-describe(`eager live-source conformance: TrailBase`, () => {
-  oracleReplayTest(it)(
-    `conforms on a fixed-seed campaign`,
-    async () => {
-      const reach = await campaign({ seed: 2118, numRuns: oracleRuns(runs) })
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-
-  oracleReplayTest(it, property)(
-    `conforms on a random campaign or a replayed seed`,
-    async () => {
-      const reach = await campaign(oraclePropertyOptions(runs, property))
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-})
+registerTrailBaseEager(
+  { property, defaultRuns: 600 },
+  driver,
+  (history, corruptValues) =>
+    observeTrailBaseEagerHistory(driver, history, corruptValues),
+)
 
 declareOracle({
-  check: [checkEagerLiveSourceHistory, eagerLiveSourceProperty],
+  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
+  check: [checkEagerLiveSourceHistory, trailBaseEagerVerdict],
   model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-  grammar: [historyArb],
+  grammar: [historyArb, constructTrailBaseEagerHistory],
 })

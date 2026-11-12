@@ -1,6 +1,6 @@
 import { setImmediate } from 'node:timers/promises'
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it as vitestIt } from 'vitest'
 import {
   consolidate,
   filter,
@@ -16,11 +16,17 @@ import { StreamBuilder } from '../src/d2.js'
 import { DifferenceStreamWriter, LinearUnaryOperator } from '../src/graph.js'
 import { MultiSet } from '../src/multiset.js'
 import {
-  oraclePropertyOptions,
+  oracleFixedSeed,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import {
+  differs,
+  oracleProperty,
+  pass,
+} from '../../db/tests/oracle-property.js'
 import {
   assertBinaryIncrementalization,
   assertUnaryIncrementalization,
@@ -29,7 +35,10 @@ import {
   weightedStateArbitrary,
   weightedTransitions,
 } from './incrementalization-law-oracle.js'
+import type { Observation, Verdict } from '../../db/tests/oracle-property.js'
+import type { Arbitrary } from 'fast-check'
 import type {
+  IncrementalizationComparisonRecorder,
   IncrementalizationReach,
   Weighted,
 } from './incrementalization-law-oracle.js'
@@ -184,24 +193,8 @@ type GroupedOutput = [
 ]
 
 const FIXED_SEED = 1741
-const LAW_PROPERTY = `ivm.incrementalization-law`
 const RUNS = oracleRuns(100)
-
-// The fixed campaign stands aside during a path replay. The random campaign is
-// a fresh seed, or the recorded seed and path of this property when replayed.
-const generatedCampaigns = [
-  {
-    name: `fixed`,
-    test: oracleReplayTest(it),
-    parameters: { numRuns: RUNS, seed: FIXED_SEED },
-  },
-  {
-    name: `random`,
-    test: oracleReplayTest(it, LAW_PROPERTY),
-    parameters: oraclePropertyOptions(100, LAW_PROPERTY),
-  },
-]
-
+const it = oracleReplayTest(vitestIt)
 /**
  * Reach of one generated campaign. The checker delivers every logical batch
  * twice: as one atomic batch, and as legal one-row steps. The split law says
@@ -214,6 +207,9 @@ const generatedCampaigns = [
  * sends each side on its own.
  */
 class CampaignReach {
+  constructor(
+    private readonly observeComparison?: IncrementalizationComparisonRecorder,
+  ) {}
   private atomicCheckpoints = 0
   private atomicDeliveries = 0
   private splitCheckpoints = 0
@@ -221,10 +217,22 @@ class CampaignReach {
   private unsplitDeliveries = 0
 
   unary: typeof assertUnaryIncrementalization = (law) =>
-    this.add(assertUnaryIncrementalization(law), 1)
+    this.add(
+      assertUnaryIncrementalization({
+        ...law,
+        observeComparison: this.observeComparison,
+      }),
+      1,
+    )
 
   binary: typeof assertBinaryIncrementalization = (law) =>
-    this.add(assertBinaryIncrementalization(law), 2)
+    this.add(
+      assertBinaryIncrementalization({
+        ...law,
+        observeComparison: this.observeComparison,
+      }),
+      2,
+    )
 
   expectBothDeliveries(): void {
     expect(this.atomicCheckpoints, `atomic checkpoints`).toBeGreaterThan(0)
@@ -543,7 +551,13 @@ const orderedHistory: fc.Arbitrary<Array<Weighted<Keyed>>> = fc
 
 // The grammar of legal ordered histories. Its calibration test checks that the
 // generated steps reach row promotions, which the ordered laws need.
-declareOracle({ grammar: [orderedHistory] })
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  grammar: [orderedHistory],
+  check: [checkIncrementalization],
+  model: [incrementalizationReferences],
+})
 
 function firstThree(input: Weighted<Keyed>): Weighted<Keyed> {
   return keyedIdentity(input)
@@ -569,271 +583,329 @@ function firstTwoPerParity(input: Weighted<Keyed>): Weighted<Keyed> {
   )
 }
 
+// The independent recomputations remain in the shared law checker. Native
+// registration records its actual/reference pairs and preserves its original
+// fail-fast error, including errors that are unrelated to a comparison.
+type Comparison = {
+  law: string
+  actual: Array<[string, number]>
+  expected: Array<[string, number]>
+}
+function incrementalizationReferences(
+  _history: unknown,
+  trace: ReadonlyArray<Observation>,
+) {
+  return trace.map(({ value }) => (value as Comparison).expected)
+}
+function checkIncrementalization(
+  _history: unknown,
+  trace: ReadonlyArray<Observation>,
+  expected: Array<Array<[string, number]>>,
+): Verdict {
+  for (const [at, { checkpoint, value }] of trace.entries()) {
+    const comparison = value as Comparison
+    // Preserve the shared checker's JSON-normalized relation comparison.
+    const mismatch = differs(
+      checkpoint,
+      comparison.law,
+      JSON.stringify(comparison.actual),
+      JSON.stringify(expected[at]),
+    )
+    if (mismatch) return mismatch
+  }
+  return pass
+}
+
+function registerIncrementalization<T>(
+  name: string,
+  arbitrary: Arbitrary<T>,
+  drive: (history: T, reach: CampaignReach) => Promise<void>,
+) {
+  describe(name, () => {
+    let reach: CampaignReach
+    let observeComparison: IncrementalizationComparisonRecorder | undefined
+    beforeEach(() => {
+      reach = new CampaignReach((checkpoint, value) =>
+        observeComparison?.(checkpoint, value),
+      )
+    })
+    // Preserve the original per-campaign aggregate delivery guard. The native
+    // determinism check samples histories separately and is not a campaign.
+    afterEach(({ task }) => {
+      if (
+        (task.name === `random seed` || task.name.startsWith(`fixed seed `)) &&
+        !task.result?.errors?.length
+      )
+        reach.expectBothDeliveries()
+    })
+    oracleProperty<T, Array<Array<[string, number]>>>({
+      id: `ivm.incrementalization-law`,
+      law: {
+        statement: name,
+        authority: `The existing DBSP accumulation/difference law and direct evaluators documented above.`,
+        limits: `The original bounded JSON relation, delivery and operator domains; message order and client publication remain outside this owner.`,
+      },
+      owns: [
+        `src/operators/map.ts#map`,
+        `src/operators/filter.ts#filter`,
+        `src/operators/consolidate.ts#consolidate`,
+        `src/operators/reduce.ts#reduce`,
+        `src/operators/groupBy.ts#groupBy`,
+        `src/operators/join.ts#join`,
+        `src/operators/orderBy.ts#orderByWithFractionalIndex`,
+        `src/operators/groupedOrderBy.ts#groupedOrderByWithFractionalIndex`,
+      ],
+      histories: { arbitrary, runs: 100, fixedSeeds: [1741] },
+      model: incrementalizationReferences,
+      driver: async (history, observe) => {
+        observeComparison = observe
+        try {
+          await drive(history, reach)
+        } finally {
+          observeComparison = undefined
+        }
+      },
+      check: checkIncrementalization,
+    })
+  })
+}
+
 describe(`DBSP incrementalization laws`, () => {
-  for (const campaign of generatedCampaigns)
-    campaign.test(
-      `checks consolidate, reduce, and groupBy against full recomputation (${campaign.name} campaign)`,
-      async () => {
-        const reach = new CampaignReach()
-        await fc.assert(
-          fc.asyncProperty(
-            fc.array(weightedWorld, { minLength: 2, maxLength: 7 }),
-            async (worlds) => {
-              // Yield between complete histories so stress runs can report progress.
-              // Graph delivery and every observation within a history stay synchronous.
-              await setImmediate()
-              const batches = transitions(worlds)
-              reach.unary({
-                name: `consolidate`,
-                initial: worlds[0]!,
-                batches,
-                inputPolicy: keyedPolicy,
-                outputPolicy: keyedPolicy,
-                build: (input) => input.pipe(consolidate()),
-                evaluate: keyedIdentity,
-              })
-              reach.unary({
-                name: `reduce`,
-                initial: worlds[0]!,
-                batches,
-                inputPolicy: keyedPolicy,
-                outputPolicy: keyedPolicy,
-                build: (input) =>
-                  input.pipe(
-                    reduce((values) => {
-                      if (values.length === 0) return []
-                      return [
-                        [
-                          values.reduce(
-                            (sum, [value, weight]) => sum + value * weight,
-                            0,
-                          ),
-                          1,
-                        ],
-                      ]
-                    }),
+  registerIncrementalization(
+    `checks consolidate, reduce, and groupBy against full recomputation`,
+    fc.array(weightedWorld, { minLength: 2, maxLength: 7 }),
+    async (worlds, reach) => {
+      // Yield between complete histories so stress runs can report progress.
+      // Graph delivery and every observation within a history stay synchronous.
+      await setImmediate()
+      const batches = transitions(worlds)
+      reach.unary({
+        name: `consolidate`,
+        initial: worlds[0]!,
+        batches,
+        inputPolicy: keyedPolicy,
+        outputPolicy: keyedPolicy,
+        build: (input) => input.pipe(consolidate()),
+        evaluate: keyedIdentity,
+      })
+      reach.unary({
+        name: `reduce`,
+        initial: worlds[0]!,
+        batches,
+        inputPolicy: keyedPolicy,
+        outputPolicy: keyedPolicy,
+        build: (input) =>
+          input.pipe(
+            reduce((values) => {
+              if (values.length === 0) return []
+              return [
+                [
+                  values.reduce(
+                    (sum, [value, weight]) => sum + value * weight,
+                    0,
                   ),
-                evaluate: summed,
-              })
-              reach.unary({
-                name: `groupBy reduction`,
-                initial: worlds[0]!,
-                batches,
-                inputPolicy: keyedPolicy,
-                outputPolicy: groupedPolicy,
-                build: (input) =>
-                  input.pipe(
-                    groupBy(([key]) => ({ bucket: key % 2 }), {
-                      total: groupByOperators.sum(([, value]) => value),
-                      minimum: groupByOperators.min(([, value]) => value),
-                      maximum: groupByOperators.max(([, value]) => value),
-                      mean: groupByOperators.avg(([, value]) => value),
-                    }),
-                  ),
-                evaluate: groupedAggregates,
-              })
-              reach.unary({
-                name: `groupBy mean alone`,
-                initial: worlds[0]!,
-                batches,
-                inputPolicy: keyedPolicy,
-                outputPolicy: groupedMeanPolicy,
-                build: (input) =>
-                  input.pipe(
-                    groupBy(([key]) => ({ bucket: key % 2 }), {
-                      mean: groupByOperators.avg(([, value]) => value),
-                    }),
-                  ),
-                evaluate: groupedMean,
-              })
-              reach.unary({
-                name: `groupBy string extrema`,
-                initial: worlds[0]!,
-                batches,
-                inputPolicy: keyedPolicy,
-                outputPolicy: groupedTextPolicy,
-                build: (input) =>
-                  input.pipe(
-                    groupBy(([key]) => ({ bucket: key % 2 }), {
-                      lowFirst: groupByOperators.min(
-                        ([, value]) => textPair(value)[0],
-                      ),
-                      highFirst: groupByOperators.max(
-                        ([, value]) => textPair(value)[0],
-                      ),
-                      lowSecond: groupByOperators.min(
-                        ([, value]) => textPair(value)[1],
-                      ),
-                      highSecond: groupByOperators.max(
-                        ([, value]) => textPair(value)[1],
-                      ),
-                    }),
-                  ),
-                evaluate: groupedTextExtrema,
-              })
-            },
-          ),
-          campaign.parameters,
-        )
-        reach.expectBothDeliveries()
-      },
-    )
-
-  for (const campaign of generatedCampaigns)
-    campaign.test(
-      `checks simultaneous binary join deltas and split delivery (${campaign.name} campaign)`,
-      async () => {
-        const reach = new CampaignReach()
-        await fc.assert(
-          fc.asyncProperty(
-            fc.array(fc.tuple(weightedWorld, weightedWorld), {
-              minLength: 2,
-              maxLength: 7,
+                  1,
+                ],
+              ]
             }),
-            async (generated) => {
-              await setImmediate()
-              const worlds = generated.map(([left, right]) => ({ left, right }))
-              const batches = worlds.slice(1).map((next, index) => ({
-                left: weightedDifference(
-                  worlds[index]!.left,
-                  next.left,
-                  keyedPolicy,
-                  CANCELLATION_ROW,
-                ),
-                right: weightedDifference(
-                  worlds[index]!.right,
-                  next.right,
-                  keyedPolicy,
-                  CANCELLATION_ROW,
-                ),
-              }))
-              reach.binary({
-                name: `inner join`,
-                initialLeft: worlds[0]!.left,
-                initialRight: worlds[0]!.right,
-                batches,
-                leftPolicy: keyedPolicy,
-                rightPolicy: keyedPolicy,
-                outputPolicy: joinPolicy,
-                build: (left, right) => left.pipe(innerJoined(right)),
-                evaluate: joined,
-              })
-              reach.binary({
-                name: `full outer join`,
-                initialLeft: worlds[0]!.left,
-                initialRight: worlds[0]!.right,
-                batches,
-                leftPolicy: keyedPolicy,
-                rightPolicy: keyedPolicy,
-                outputPolicy: outerJoinPolicy,
-                build: (left, right) => left.pipe(join(right, `full`)),
-                evaluate: fullJoined,
-              })
-              reach.binary({
-                name: `left outer join`,
-                initialLeft: worlds[0]!.left,
-                initialRight: worlds[0]!.right,
-                batches,
-                leftPolicy: keyedPolicy,
-                rightPolicy: keyedPolicy,
-                outputPolicy: outerJoinPolicy,
-                build: (left, right) => left.pipe(join(right, `left`)),
-                evaluate: leftJoined,
-              })
-              reach.binary({
-                name: `right outer join`,
-                initialLeft: worlds[0]!.left,
-                initialRight: worlds[0]!.right,
-                batches,
-                leftPolicy: keyedPolicy,
-                rightPolicy: keyedPolicy,
-                outputPolicy: outerJoinPolicy,
-                build: (left, right) => left.pipe(join(right, `right`)),
-                evaluate: rightJoined,
-              })
-              reach.binary({
-                name: `join then grouped reduction`,
-                initialLeft: worlds[0]!.left,
-                initialRight: worlds[0]!.right,
-                batches,
-                leftPolicy: keyedPolicy,
-                rightPolicy: keyedPolicy,
-                outputPolicy: keyedPolicy,
-                build: (left, right) =>
-                  left.pipe(
-                    innerJoined(right),
-                    map(([key, [leftValue, rightValue]]) => [
-                      key,
-                      leftValue * rightValue,
-                    ]),
-                    reduce((values) => {
-                      if (values.length === 0) return []
-                      return [
-                        [
-                          values.reduce(
-                            (sum, [value, weight]) => sum + value * weight,
-                            0,
-                          ),
-                          1,
-                        ],
-                      ]
-                    }),
-                  ),
-                evaluate: joinedSums,
-              })
-            },
           ),
-          campaign.parameters,
-        )
-        reach.expectBothDeliveries()
-      },
-    )
+        evaluate: summed,
+      })
+      reach.unary({
+        name: `groupBy reduction`,
+        initial: worlds[0]!,
+        batches,
+        inputPolicy: keyedPolicy,
+        outputPolicy: groupedPolicy,
+        build: (input) =>
+          input.pipe(
+            groupBy(([key]) => ({ bucket: key % 2 }), {
+              total: groupByOperators.sum(([, value]) => value),
+              minimum: groupByOperators.min(([, value]) => value),
+              maximum: groupByOperators.max(([, value]) => value),
+              mean: groupByOperators.avg(([, value]) => value),
+            }),
+          ),
+        evaluate: groupedAggregates,
+      })
+      reach.unary({
+        name: `groupBy mean alone`,
+        initial: worlds[0]!,
+        batches,
+        inputPolicy: keyedPolicy,
+        outputPolicy: groupedMeanPolicy,
+        build: (input) =>
+          input.pipe(
+            groupBy(([key]) => ({ bucket: key % 2 }), {
+              mean: groupByOperators.avg(([, value]) => value),
+            }),
+          ),
+        evaluate: groupedMean,
+      })
+      reach.unary({
+        name: `groupBy string extrema`,
+        initial: worlds[0]!,
+        batches,
+        inputPolicy: keyedPolicy,
+        outputPolicy: groupedTextPolicy,
+        build: (input) =>
+          input.pipe(
+            groupBy(([key]) => ({ bucket: key % 2 }), {
+              lowFirst: groupByOperators.min(([, value]) => textPair(value)[0]),
+              highFirst: groupByOperators.max(
+                ([, value]) => textPair(value)[0],
+              ),
+              lowSecond: groupByOperators.min(
+                ([, value]) => textPair(value)[1],
+              ),
+              highSecond: groupByOperators.max(
+                ([, value]) => textPair(value)[1],
+              ),
+            }),
+          ),
+        evaluate: groupedTextExtrema,
+      })
+    },
+  )
 
-  for (const campaign of generatedCampaigns)
-    campaign.test(
-      `checks global ordering and window membership (${campaign.name} campaign)`,
-      async () => {
-        const reach = new CampaignReach()
-        await fc.assert(
-          fc.asyncProperty(orderedHistory, async (worlds) => {
-            await setImmediate()
-            reach.unary({
-              name: `ordered window`,
-              initial: worlds[0]!,
-              batches: transitions(worlds),
-              inputPolicy: keyedPolicy,
-              outputPolicy: keyedPolicy,
-              splitDomain: uniqueRowSplitDomain,
-              build: (input) =>
-                input.pipe(
-                  orderByWithFractionalIndex((rank) => rank, { limit: 3 }),
-                  withoutIndex(),
-                ),
-              evaluate: firstThree,
-            })
-            reach.unary({
-              name: `grouped orderBy`,
-              initial: worlds[0]!,
-              batches: transitions(worlds),
-              inputPolicy: keyedPolicy,
-              outputPolicy: keyedPolicy,
-              splitDomain: uniqueRowSplitDomain,
-              build: (input) =>
-                input.pipe(
-                  groupedOrderByWithFractionalIndex((rank) => rank, {
-                    groupKeyFn: (key) => key % 2,
-                    limit: 2,
-                  }),
-                  map(([key, [rank]]) => [key, rank] as Keyed),
-                ),
-              evaluate: firstTwoPerParity,
-            })
-          }),
-          campaign.parameters,
-        )
-        reach.expectBothDeliveries()
-      },
-    )
+  registerIncrementalization(
+    `checks simultaneous binary join deltas and split delivery`,
+    fc.array(fc.tuple(weightedWorld, weightedWorld), {
+      minLength: 2,
+      maxLength: 7,
+    }),
+    async (generated, reach) => {
+      await setImmediate()
+      const worlds = generated.map(([left, right]) => ({ left, right }))
+      const batches = worlds.slice(1).map((next, index) => ({
+        left: weightedDifference(
+          worlds[index]!.left,
+          next.left,
+          keyedPolicy,
+          CANCELLATION_ROW,
+        ),
+        right: weightedDifference(
+          worlds[index]!.right,
+          next.right,
+          keyedPolicy,
+          CANCELLATION_ROW,
+        ),
+      }))
+      reach.binary({
+        name: `inner join`,
+        initialLeft: worlds[0]!.left,
+        initialRight: worlds[0]!.right,
+        batches,
+        leftPolicy: keyedPolicy,
+        rightPolicy: keyedPolicy,
+        outputPolicy: joinPolicy,
+        build: (left, right) => left.pipe(innerJoined(right)),
+        evaluate: joined,
+      })
+      reach.binary({
+        name: `full outer join`,
+        initialLeft: worlds[0]!.left,
+        initialRight: worlds[0]!.right,
+        batches,
+        leftPolicy: keyedPolicy,
+        rightPolicy: keyedPolicy,
+        outputPolicy: outerJoinPolicy,
+        build: (left, right) => left.pipe(join(right, `full`)),
+        evaluate: fullJoined,
+      })
+      reach.binary({
+        name: `left outer join`,
+        initialLeft: worlds[0]!.left,
+        initialRight: worlds[0]!.right,
+        batches,
+        leftPolicy: keyedPolicy,
+        rightPolicy: keyedPolicy,
+        outputPolicy: outerJoinPolicy,
+        build: (left, right) => left.pipe(join(right, `left`)),
+        evaluate: leftJoined,
+      })
+      reach.binary({
+        name: `right outer join`,
+        initialLeft: worlds[0]!.left,
+        initialRight: worlds[0]!.right,
+        batches,
+        leftPolicy: keyedPolicy,
+        rightPolicy: keyedPolicy,
+        outputPolicy: outerJoinPolicy,
+        build: (left, right) => left.pipe(join(right, `right`)),
+        evaluate: rightJoined,
+      })
+      reach.binary({
+        name: `join then grouped reduction`,
+        initialLeft: worlds[0]!.left,
+        initialRight: worlds[0]!.right,
+        batches,
+        leftPolicy: keyedPolicy,
+        rightPolicy: keyedPolicy,
+        outputPolicy: keyedPolicy,
+        build: (left, right) =>
+          left.pipe(
+            innerJoined(right),
+            map(([key, [leftValue, rightValue]]) => [
+              key,
+              leftValue * rightValue,
+            ]),
+            reduce((values) => {
+              if (values.length === 0) return []
+              return [
+                [
+                  values.reduce(
+                    (sum, [value, weight]) => sum + value * weight,
+                    0,
+                  ),
+                  1,
+                ],
+              ]
+            }),
+          ),
+        evaluate: joinedSums,
+      })
+    },
+  )
+
+  registerIncrementalization(
+    `checks global ordering and window membership`,
+    orderedHistory,
+    async (worlds, reach) => {
+      await setImmediate()
+      reach.unary({
+        name: `ordered window`,
+        initial: worlds[0]!,
+        batches: transitions(worlds),
+        inputPolicy: keyedPolicy,
+        outputPolicy: keyedPolicy,
+        splitDomain: uniqueRowSplitDomain,
+        build: (input) =>
+          input.pipe(
+            orderByWithFractionalIndex((rank) => rank, { limit: 3 }),
+            withoutIndex(),
+          ),
+        evaluate: firstThree,
+      })
+      reach.unary({
+        name: `grouped orderBy`,
+        initial: worlds[0]!,
+        batches: transitions(worlds),
+        inputPolicy: keyedPolicy,
+        outputPolicy: keyedPolicy,
+        splitDomain: uniqueRowSplitDomain,
+        build: (input) =>
+          input.pipe(
+            groupedOrderByWithFractionalIndex((rank) => rank, {
+              groupKeyFn: (key) => key % 2,
+              limit: 2,
+            }),
+            map(([key, [rank]]) => [key, rank] as Keyed),
+          ),
+        evaluate: firstTwoPerParity,
+      })
+    },
+  )
 
   // Reconstruction: the fixed ordered campaign reaches promotion. Sampling
   // its arbitrary with its seed and run count yields exactly the histories it
@@ -843,6 +915,7 @@ describe(`DBSP incrementalization laws`, () => {
   // can promote, so worlds too small to fill it would lose this law while
   // every comparison still passed.
   it(`generates ordered histories that promote retained rows`, () => {
+    oracleRoute(`fixed seed`)
     const promotions = { global: 0, perParity: 0 }
     const promoted = (
       window: (rows: Weighted<Keyed>) => Weighted<Keyed>,
@@ -855,10 +928,10 @@ describe(`DBSP incrementalization laws`, () => {
         ([row]) => held.has(String(row)) && !before.has(String(row)),
       )
     }
-    for (const [worlds] of fc.sample(fc.tuple(orderedHistory), {
-      seed: FIXED_SEED,
-      numRuns: RUNS,
-    })) {
+    for (const [worlds] of fc.sample(
+      fc.tuple(orderedHistory),
+      oracleFixedSeed(FIXED_SEED, { numRuns: RUNS }),
+    )) {
       for (const [index, next] of worlds.slice(1).entries()) {
         const previous = worlds[index]!
         if (promoted(firstThree, previous, next)) promotions.global++
@@ -872,6 +945,7 @@ describe(`DBSP incrementalization laws`, () => {
   })
 
   it(`replays empty, duplicate, replacement, cancellation, and presence-flip cells`, () => {
+    oracleRoute(`case`)
     const unaryReach = assertUnaryIncrementalization({
       name: `named unary cells`,
       initial: [],
@@ -1065,6 +1139,8 @@ describe(`DBSP incrementalization laws`, () => {
   })
 
   it(`rejects invalid negative and duplicate-key input states`, () => {
+    // A checker calibration: a failure here is the framework's, not a kill.
+    oracleRoute(`calibration`)
     expect(() =>
       assertUnaryIncrementalization({
         name: `negative input state excluded`,
@@ -1095,6 +1171,7 @@ describe(`DBSP incrementalization laws`, () => {
   })
 
   it(`rejects omitted, sign-flipped, wrong-member, wrong-window, wrong-limit, missing-promotion, and truthiness-filtered output`, () => {
+    oracleRoute(`calibration`)
     expect(() =>
       assertUnaryIncrementalization({
         name: `omitted output fault`,

@@ -13,6 +13,7 @@ import {
   origin,
   withCleanup,
 } from './paced-mutations-support'
+import { oracleRoute } from './oracle-config.js'
 import type { Start } from './paced-mutations-support'
 import type { Strategy } from '../src/strategies/types'
 import type { Transaction } from '../src/transactions'
@@ -320,7 +321,17 @@ function checkTimelineObservation(testCase: Case, actual: Observation): void {
   )
 }
 
+// What this oracle owns: the gap report judges the paced mutation queue and
+// the debounce, throttle, and queue strategies that pace it, by this file's
+// tests.
 declareOracle({
+  owns: [
+    `src/paced-mutations.ts`,
+    `src/strategies/debounceStrategy.ts`,
+    `src/strategies/throttleStrategy.ts`,
+    `src/strategies/queueStrategy.ts`,
+    `src/strategies/serial-pacer.ts`,
+  ],
   check: [checkTimelineObservation, checkHeldPacing],
   model: [
     queueStarts,
@@ -455,12 +466,14 @@ const cases: Array<Case> = [
 describe(`paced mutation timeline oracle`, () => {
   for (const testCase of cases) {
     it(testCase.name, async () => {
+      oracleRoute(`case`)
       await runProduction(testCase, (actual) =>
         checkTimelineObservation(testCase, actual),
       )
     })
   }
   it(`rejects front/back, trailing, and leading-edge mutants`, async () => {
+    oracleRoute(`calibration`)
     const wrongStrategies: Array<{
       caseName: string
       strategy: () => Strategy
@@ -496,6 +509,7 @@ describe(`paced mutation timeline oracle`, () => {
     }
   })
   it(`rejects capacity, overflow settlement, early throttle, and option mutation mutants`, async () => {
+    oracleRoute(`calibration`)
     const capacityChecker = async (strategy: Strategy) => {
       const collection = await createReadyCollection()
       const mutate = createPacedMutations<number, { id: number }>({
@@ -752,6 +766,7 @@ describe(`paced persistence hold/release oracle`, () => {
       for (const trailing of [true, undefined] as const)
         for (const releaseOffset of [-1, 0, 1, 10])
           it(`${kind} leading ${String(leading)} trailing ${String(trailing)} release offset ${releaseOffset} preserves serial persistence and settlement`, async () => {
+            oracleRoute(`case`)
             await checkHeldPacing({ kind, leading, trailing, releaseOffset })
           })
 })
@@ -782,6 +797,7 @@ describe(`paced settlement and pending ownership oracle`, () => {
       for (const sameKey of [true, false])
         for (const outcome of [`resolve`, `reject`, `cancel-pending`] as const)
           it(`${factory.name} leading ${leading} same key ${sameKey} with ${outcome} preserves transaction settlement`, async () => {
+            oracleRoute(`case`)
             const collection = await createReadyCollection([
               { id: 1, value: 0 },
               { id: 2, value: 0 },

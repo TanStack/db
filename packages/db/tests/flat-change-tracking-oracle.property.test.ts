@@ -62,17 +62,17 @@
  * the 2026-10-29 decision, in both trackers), one that skips deletions
  * loses removed fields, one that ignores whether the row owns a field drops
  * added `undefined` fields, and one that edits rows in place breaks the throw
- * and stored-draft histories; each fails a pinned history and the fixed
+ * and stored-draft histories; each fails a fixed history and the fixed
  * campaign. The proxy used to treat a field added with `undefined` as
  * reverted when another field went back to its original value, and dropped
- * the added field; the pinned history and both campaigns fail without the
+ * the added field; the fixed history and both campaigns fail without the
  * fix, because the grammar weights that run.
  *
  * Known omissions: nested objects, arrays, Dates, Maps, Sets, class
  * instances, and symbol keys are outside this owner; the proxy oracles and
  * contracts own them, and this file checks only that they fall back.
  */
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import {
   withArrayChangeTracking,
@@ -80,12 +80,17 @@ import {
   withFlatChangeTracking,
 } from '../src/proxy.js'
 import {
-  oraclePropertyOptions,
+  oracleProperty,
   oracleReplayRequested,
-  oracleReplayTest,
-  oracleRuns,
+  oracleRoute,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import {
   FRESH_OBJECT,
   MISSING,
@@ -374,7 +379,7 @@ const historyArbitrary: fc.Arbitrary<History> = fc
     }),
   )
 
-// Each witness pins a shape the trackers once disagreed on to the change
+// Each witness checks a shape the trackers once disagreed on to the change
 // set both must now report: defining a field acts as assigning it, and a
 // non-enumerable field is not row data unless the callback writes it.
 const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
@@ -567,38 +572,77 @@ function runHistory(history: History): void {
       }
       return undefined
     })
-    expect(errors[0], `flat rethrows`).toBeOneOf([CallbackError, TypeError])
-    expect(errors[1], `proxy throws the same error`).toBe(errors[0])
+    oracleAssertion(`flat rethrows`, () =>
+      expect(errors[0], `flat rethrows`).toBeOneOf([CallbackError, TypeError]),
+    )
+    oracleAssertion(`proxy throws the same error`, () =>
+      expect(errors[1], `proxy throws the same error`).toBe(errors[0]),
+    )
     for (const rows of [flatRows, proxyRows]) {
-      expect(rows.map(rowState), `rows unchanged`).toStrictEqual(
-        originals.map(rowState),
+      oracleAssertion(`rows unchanged`, () =>
+        expect(rows.map(rowState), `rows unchanged`).toStrictEqual(
+          originals.map(rowState),
+        ),
       )
     }
     return
   }
   const flat = track.flat()
-  expect(flat, `flat rows take the flat path`).toBeDefined()
+  oracleAssertion(`flat rows take the flat path`, () =>
+    expect(flat, `flat rows take the flat path`).toBeDefined(),
+  )
   const proxy = track.proxy()
-  expect(normalize(flat), `flat vs model`).toStrictEqual(normalize(model))
-  expect(normalize(proxy), `proxy vs model`).toStrictEqual(normalize(model))
+  oracleAssertion(`flat vs model`, () =>
+    expect(normalize(flat), `flat vs model`).toStrictEqual(normalize(model)),
+  )
+  oracleAssertion(`proxy vs model`, () =>
+    expect(normalize(proxy), `proxy vs model`).toStrictEqual(normalize(model)),
+  )
 }
 
-declareOracle({ check: [runHistory], model: [expectedChanges] })
+declareOracle({
+  check: [runHistory],
+  model: [expectedChanges],
+})
 
 describe(`flat change tracking oracle`, () => {
   if (!oracleReplayRequested()) {
     for (const { name, history } of pinnedHistories) {
-      it(`matches the draft proxy when ${name}`, () => runHistory(history))
+      it(`matches the draft proxy when ${name}`, () => {
+        oracleRoute(`fixed history`)
+        return runHistory(history)
+      })
     }
-
-    fcTest.prop([historyArbitrary], {
-      seed: 44_502_101,
-      numRuns: oracleRuns(200),
-    })(`matches the draft proxy (fixed)`, runHistory)
   }
-  // A path replay of this property runs its one recorded history here.
-  oracleReplayTest(fcTest, property).prop(
-    [historyArbitrary],
-    oraclePropertyOptions(200, property),
-  )(`matches the draft proxy (random)`, runHistory)
+
+  oracleProperty({
+    id: property,
+    law: {
+      statement: `Flat and proxy trackers agree with the independent authored field-difference model, including signed zero, deletion, reversion, descriptor effects, stored drafts and callback rejection.`,
+      authority: `src/proxy.ts draft/change-set contract and the 2026-10-29 signed-zero maintainer decision`,
+      limits: `The existing bounded flat-row grammar; nested rich containers, class instances and symbol keys belong to the other proxy owners.`,
+    },
+    // What this oracle owns: the gap report judges the flat and proxy change trackers
+    // (withFlatChangeTracking, withChangeTracking, withArrayChangeTracking) by this file's tests.
+    owns: [
+      `src/proxy.ts#withFlatChangeTracking`,
+      `src/proxy.ts#withChangeTracking`,
+      `src/proxy.ts#withArrayChangeTracking`,
+    ],
+    histories: {
+      arbitrary: historyArbitrary,
+      runs: 200,
+      fixedSeeds: [44502101],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `flat change tracking equivalence`,
+        plan,
+        observe,
+        () => runHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

@@ -58,13 +58,109 @@ Implement `EagerLiveSourceDriver`:
 - **`txidEvidence`:** `change` when txids travel on each row message, so a batch with no change carries none; default `batch`.
 - **`observedView`:** if your rows or keys differ from the conformance row, wrap the Collection with `observedView` and a one-to-one mapping. `conformanceKey` maps string keys; `toSqlRow` and `fromSqlRow` map an absent `note` to and from SQL `NULL`.
 
-Declare only the capabilities your adapter supports; the grammar generates
-only the steps they allow. Then run `eagerLiveSourceProperty(driver, reach)`
-with `fc.assert`. `reach` is a `ReachCounter` (`beginHistory`, `reach`);
-count the states `reachStatesFor(driver)` lists and fail the run when one
-was reached fewer than five times, so histories that miss a state the laws
-need do not pass silently. The in-repo campaigns use `createOracleReach`
-from `packages/db/tests/oracle-reach.ts`.
+Declare only the capabilities your adapter supports. All eager live-source
+receivers register their campaigns with `oracleProperty`. The shared
+`tests/eager-live-source-property-oracle.ts` registration retains the model and
+comparison for the upstream receivers. Each campaign keeps its original run budget and seed 2118 beside
+a random campaign. Five independently seeded constructed histories per recipe
+make every state in `reachStatesFor(driver)` required. The recipes vary rows,
+values, and generated suffixes inside the same capability-dependent grammar.
+The original arbitrary's random choices are unchanged.
+The shared comparison also checks every generated construction against its
+declared states; a missing entry fails even when the pinned framework loses
+the generated construction's association. The construction declares what is
+required, and the existing production path records what actually happened.
+
+Receivers using that registration encode Dates and `Float64Array` values as tagged data.
+`resolveEagerLiveSourceHistory` restores the native values before the provider,
+model, and comparison run, so the strict FID-1 judgments remain unchanged. The
+registration adapter records a `ConformanceViolation` under its original law
+and checkpoint; driver failures and secondary cleanup diagnostics retain their
+original error objects. Electric's default error-handler variant and Convex's
+React and wrapped-client variants have named fixed/fresh campaigns and direct
+replay routes. The vendored Neon receiver uses the same registration while its
+documented failure-channel baseline remains RED.
+RxDB and PowerSync retain the receiving constructions in
+`tests/eager-live-source-oracle-suite.ts`. TrailBase retains its shared Node and
+Chromium receiving suite. These registrations keep their existing laws, run
+budgets, and stronger generated-state comparisons. Both registration paths use
+the same independent model and checker.
+See the [conversion evidence](../../docs/contributing/oracle-reviews/2026-11-10-eager-source-primary-conversions.md).
+
+## Persisted startup conformance
+
+`tests/persisted-startup-oracle.ts` owns complete-result replacement across a
+persisted restore. It applies to both push adapters and client-cache adapters.
+The bare eager-source family does not generate persisted rows. Replacement
+uses the same READY-3/PUB-7 judgment, with scope-local ownership for sources
+such as Query and persistence's durable acceptance contract.
+
+`tests/persisted-startup-driver.ts` composes a real adapter with persistence.
+An adapter supplies its Collection, response delivery, refresh, and optional
+scoped ownership projection. `tests/persisted-startup-host.ts` supplies
+controlled storage and real Node SQLite. The shared suite enforces separate
+reach for each host and fixed/random 80-history campaign. It compares startup
+public/durable rows before refresh, public rows inside refresh fulfillment,
+durable rows after refresh, and a local-only reopen. It also shares the reload
+owner's one-row-read law. A scoped adapter checks exact source/peer ownership.
+
+Query receives the shared property with five cache/fetch origins, ownerless
+saved rows, peer ownership, and peer-only overlaps. Convex, Electric, TrailBase, RxDB and PowerSync also receive it through
+their installed SDK or controlled provider boundary. Chromium worker/OPFS runs
+116 Query histories, 104 PowerSync histories, 32 RxDB histories and 26 histories
+for each of Convex, Electric and TrailBase. The browser repeats
+these histories in one profile and removes fixture-owned OPFS files. It also
+runs 22 protocol-admission histories for each of RxDB and PowerSync. Every receiver
+crosses ordinary and network-first rendering, empty and nonempty baselines,
+and a persisting optimistic transaction. RxDB and PowerSync prove source
+commit invocation before releasing a held restore; gate release alone does
+not count as response delivery. Both Node hosts also judge the independent
+persistence capability protocol through the real RxDB/PowerSync sync boundary.
+The persistence-loss calibration wraps hydration-scoped adapters, requires an
+actual dropped write, and fails if its clean candidate fails.
+
+PowerSync's first persisted startup keeps source commits bounded by
+`syncBatchSize`; RxDB keeps its existing full-load source commit. After
+hydration, both delete only saved omissions in bounded commits. The work
+judgment rejects startup snapshot replacement and truncate, excess source
+writes and excess deletes. PowerSync also crosses provider IDs transformed
+by deserialization. Retained nonempty reloads keep atomic snapshots.
+See the [batching evidence](../../docs/contributing/oracle-reviews/2026-11-10-persisted-startup-batching.md).
+
+`tests/persisted-baseline-lifecycle-oracle.ts` separately judges cleanup,
+reload and terminal source failure while the hydration continuation is held.
+RxDB and PowerSync receive it on controlled persistence, Node SQLite and actual
+Chromium worker/OPFS, using the same model and comparison. See the
+[lifecycle evidence](../../docs/contributing/oracle-reviews/2026-11-10-persisted-baseline-lifecycle.md).
+
+Package-local RxDB/PowerSync registrations also invoke the shared capability
+suite, so package-scoped test discovery and mutation audits include the protocol
+owner. The 22-history grammar and judgment stay in this package.
+
+`tests/eager-reload-oracle.ts` reuses the complete-result judgment for unwrapped
+RxDB/PowerSync receivers. These histories cross fresh startup and empty/nonempty
+reload baselines with an optional persisting optimistic insert. Unwrapped sources
+are necessary: persistence's own snapshot choice can mask a broken retained-row
+predicate. After mutation settlement and applied receipts, source rows must equal
+the complete result. Readiness alone proves acceptance, so fulfillment during a
+persisting mutation can still expose the coherent retained baseline and overlay.
+Chromium's `eager-gap-conformance-oracle.opfs.spec.ts` receives the same 24
+histories per adapter, plus 104 eager Query precedence, 48 on-demand Query scope,
+two cached-peer claims, and 24 TrailBase lifecycle histories from their primary owners. These 226 histories enforce separate reach
+and share their owners' comparisons.
+
+```sh
+pnpm --filter @tanstack/query-db-collection exec vitest run --coverage.enabled=false --typecheck.enabled=false tests/persisted-startup-conformance-oracle.test.ts
+pnpm --filter @tanstack/convex-db-collection exec vitest run --coverage.enabled=false --typecheck.enabled=false tests/persisted-startup-conformance-oracle.property.test.ts
+pnpm --filter @tanstack/browser-db-sqlite-persistence exec playwright test --config playwright.opfs.config.ts persisted-startup-conformance-oracle.opfs.spec.ts
+```
+
+Restoring the original Query implementation fails startup at these receiving
+boundaries. Removing Convex's first-result truncate also fails here; it survived
+the bare eager grammar because restart starts with no rows. Current Convex
+passes. These witnesses establish the shared replacement law on the exercised
+paths, not every adapter or the rest of the persistence family. The coverage
+map and [migration log](MIGRATION.md) retain the remaining work.
 
 ## Drivers
 

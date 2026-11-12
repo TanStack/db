@@ -2,6 +2,7 @@
 import { Store } from '@tanstack/store'
 import {
   LoadSubsetOperationAbortedError,
+  validateSyncPersistenceCapability,
   withCollectionConfigFactory,
 } from '@tanstack/db'
 import {
@@ -186,6 +187,10 @@ export function trailBaseCollectionOptions<
   const sync = {
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady, fail, collection } = params
+      const persistence =
+        params.metadata === undefined
+          ? null
+          : validateSyncPersistenceCapability(params.metadata.persistence)
       let cancelled = false
       let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
       const cleanup = () => {
@@ -355,6 +360,12 @@ export function trailBaseCollectionOptions<
           // list and that no change event touched is gone.
           // Only the gone keys are collected, since a write during the walk
           // would change the entries it reads.
+          if (everyRow && persistence) {
+            // The complete list must also remove omitted rows whose persisted
+            // restore was still pending while its pages arrived.
+            await persistence.hydrateBaseline()
+            if (cancelled) return
+          }
           const gone: Array<TKey> = []
           if (everyRow)
             for (const [key] of collection._state.acceptedSyncedEntries())

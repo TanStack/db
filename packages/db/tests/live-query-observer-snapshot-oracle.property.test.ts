@@ -7,13 +7,15 @@ import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { Query, createLiveQueryCollection } from '../src/query/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
-import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRuns,
-} from './oracle-config.js'
+import { oracleRoute } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
-import { createOracleReach } from './oracle-reach.js'
+import { oracleProperty } from './oracle-property.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import { finishHistory } from './observer-history-cleanup.js'
 import {
   checkSparseArray,
@@ -22,6 +24,7 @@ import {
   sparseArrayCase,
   sparseArrayValues,
 } from './sparse-array-value-oracle.js'
+import type { Verdict } from './oracle-property.js'
 import type {
   SparseArrayCarrier,
   SparseArrayCase,
@@ -75,6 +78,35 @@ import type { LiveQuerySnapshot } from '../src/live-query-observer.js'
  * #1542 proposed, and requires the checker to reject it.
  */
 
+// Each mature helper retains its independent model and authored comparisons.
+// Registration transports that judgment without converting setup, production,
+// or cleanup errors. Reach is collected per history and the native campaign
+// checks each constructed history against the states it promises to enter.
+type SnapshotReach<TState extends string> = { reach: (state: TState) => void }
+function snapshotReach<TState extends string>(states: ReadonlyArray<TState>) {
+  const declared = new Set(states)
+  const entered = new Set<TState>()
+  return {
+    entered,
+    reach(state: TState): void {
+      if (!declared.has(state))
+        throw new Error(`undeclared snapshot reach state ${state}`)
+      entered.add(state)
+    },
+  }
+}
+async function recordSnapshotJudgment<TState extends string>(
+  law: string,
+  plan: object,
+  observe: (checkpoint: string, value: unknown) => void,
+  states: ReadonlyArray<TState>,
+  judge: (reach: SnapshotReach<TState>) => Promise<void>,
+): Promise<void> {
+  const reach = snapshotReach(states)
+  await recordAssertionJudgment(law, plan, observe, () => judge(reach))
+  for (const state of reach.entered) observe(`reach`, state)
+}
+
 type Row = { id: string; version: number }
 type Shape = `ordered` | `single`
 type Command =
@@ -99,7 +131,7 @@ const command: fc.Arbitrary<Command> = fc.oneof(
     version: fc.integer({ min: 0, max: 9 }),
   }),
   fc.record({ type: fc.constant(`delete` as const), id: key }),
-  fc.constant({ type: `capture` as const }),
+  fc.record({ type: fc.constant(`capture` as const) }),
 )
 
 function modelRows(model: Map<string, number>): Array<Row> {
@@ -201,26 +233,40 @@ function checkRead(
   // A single-result query keeps only its first row.
   const rows = shape === `single` ? entry.rows.slice(0, 1) : entry.rows
   const stateRows = [...(read.state?.values() ?? [])].map(plain)
-  expect(stateRows, `${label}: state rows`).toEqual(rows)
-  expect([...(read.state?.keys() ?? [])], `${label}: state keys`).toEqual(
-    rows.map((row) => row.id),
+  oracleAssertion(`checkRead:207`, () =>
+    expect(stateRows, `${label}: state rows`).toEqual(rows),
+  )
+  oracleAssertion(`checkRead:208`, () =>
+    expect([...(read.state?.keys() ?? [])], `${label}: state keys`).toEqual(
+      rows.map((row) => row.id),
+    ),
   )
   if (shape === `single`) {
-    expect(
-      read.data === undefined ? undefined : plain(read.data),
-      `${label}: single data`,
-    ).toEqual(rows[0])
+    oracleAssertion(`checkRead:212`, () =>
+      expect(
+        read.data === undefined ? undefined : plain(read.data),
+        `${label}: single data`,
+      ).toEqual(rows[0]),
+    )
   } else {
     const data = read.data as ReadonlyArray<Row>
-    expect(data.map(plain), `${label}: data rows`).toEqual(rows)
+    oracleAssertion(`checkRead:218`, () =>
+      expect(data.map(plain), `${label}: data rows`).toEqual(rows),
+    )
     // Both views expose the captured row values in the same order.
-    expect(data, `${label}: data agrees with state`).toEqual([
-      ...(read.state?.values() ?? []),
-    ])
+    oracleAssertion(`checkRead:220`, () =>
+      expect(data, `${label}: data agrees with state`).toEqual([
+        ...(read.state?.values() ?? []),
+      ]),
+    )
   }
   // A snapshot is one value: later reads return the same objects.
-  expect(entry.snapshot.state, `${label}: state identity`).toBe(read.state)
-  expect(entry.snapshot.data, `${label}: data identity`).toBe(read.data)
+  oracleAssertion(`checkRead:225`, () =>
+    expect(entry.snapshot.state, `${label}: state identity`).toBe(read.state),
+  )
+  oracleAssertion(`checkRead:226`, () =>
+    expect(entry.snapshot.data, `${label}: data identity`).toBe(read.data),
+  )
   return read
 }
 
@@ -229,9 +275,7 @@ async function checkHistory(
   attached: boolean,
   commands: ReadonlyArray<Command>,
   reads: ReadonlyArray<Read>,
-  reach?: ReturnType<
-    typeof createOracleReach<`server-getter` | `client-getter`>
-  >,
+  reach?: SnapshotReach<`server-getter` | `client-getter`>,
 ): Promise<void> {
   const { captured, observer, query, builder, cleanup } = run(
     shape,
@@ -245,29 +289,38 @@ async function checkHistory(
     // revision is unchanged, so both public getter paths retain its identity.
     const current = captured.at(-1)!.snapshot
     reach?.reach(`server-getter`)
-    expect(
-      observer.getServerSnapshot(),
-      `server getter preserves an unchanged revision`,
-    ).toBe(current)
-    expect(
-      observer.getSnapshot(),
-      `ordinary getter preserves the same revision`,
-    ).toBe(current)
+    oracleAssertion(`checkHistory:251`, () =>
+      expect(
+        observer.getServerSnapshot(),
+        `server getter preserves an unchanged revision`,
+      ).toBe(current),
+    )
+    oracleAssertion(`checkHistory:255`, () =>
+      expect(
+        observer.getSnapshot(),
+        `ordinary getter preserves the same revision`,
+      ).toBe(current),
+    )
     await client.preloadLiveQuery({ query: builder })
     clientObserver = createLiveQueryObserver(query, {
       client,
       queryHash: getLiveQueryHash({ query: builder }),
     })
-    const clientSnapshot = clientObserver.getSnapshot()
+    const preparedObserver = clientObserver
+    const clientSnapshot = preparedObserver.getSnapshot()
     reach?.reach(`client-getter`)
-    expect(
-      clientObserver.getServerSnapshot(),
-      `a prepared client server read keeps the shared revision`,
-    ).toBe(clientSnapshot)
-    expect(
-      clientObserver.getSnapshot(),
-      `a server read cannot invalidate the ordinary snapshot cache`,
-    ).toBe(clientSnapshot)
+    oracleAssertion(`checkHistory:266`, () =>
+      expect(
+        preparedObserver.getServerSnapshot(),
+        `a prepared client server read keeps the shared revision`,
+      ).toBe(clientSnapshot),
+    )
+    oracleAssertion(`checkHistory:270`, () =>
+      expect(
+        preparedObserver.getSnapshot(),
+        `a server read cannot invalidate the ordinary snapshot cache`,
+      ).toBe(clientSnapshot),
+    )
     const order =
       reads.length > 0
         ? reads
@@ -286,23 +339,33 @@ async function checkHistory(
     const keep = shape === `single` ? 1 : Infinity
     for (const [index, { data, state }] of seen) {
       // Every later read of a snapshot returns the objects its first read did.
-      expect(
-        captured[index]!.snapshot.state,
-        `snapshot ${index}: state identity after other reads`,
-      ).toBe(state)
-      expect(
-        captured[index]!.snapshot.data,
-        `snapshot ${index}: data identity after other reads`,
-      ).toBe(data)
+      oracleAssertion(`checkHistory:292`, () =>
+        expect(
+          captured[index]!.snapshot.state,
+          `snapshot ${index}: state identity after other reads`,
+        ).toBe(state),
+      )
+      oracleAssertion(`checkHistory:296`, () =>
+        expect(
+          captured[index]!.snapshot.data,
+          `snapshot ${index}: data identity after other reads`,
+        ).toBe(data),
+      )
       const rows = captured[index]!.rows.slice(0, keep)
-      expect(
-        [...(state?.values() ?? [])].map(plain),
-        `snapshot ${index}: saved state rows`,
-      ).toEqual(rows)
+      oracleAssertion(`checkHistory:301`, () =>
+        expect(
+          [...(state?.values() ?? [])].map(plain),
+          `snapshot ${index}: saved state rows`,
+        ).toEqual(rows),
+      )
       for (const [other, { state: otherState }] of seen) {
         const otherRows = captured[other]!.rows.slice(0, keep)
         if (JSON.stringify(otherRows) !== JSON.stringify(rows))
-          expect(otherState, `snapshots ${index} and ${other}`).not.toBe(state)
+          oracleAssertion(`checkHistory:308`, () =>
+            expect(otherState, `snapshots ${index} and ${other}`).not.toBe(
+              state,
+            ),
+          )
       }
     }
   } finally {
@@ -324,45 +387,80 @@ const reads = fc.array(
 )
 
 describe(`retained live-query snapshots are point-in-time`, () => {
-  it.each(
-    (
-      [
-        [`ordered`, true],
-        [`ordered`, false],
-        [`single`, true],
-        [`single`, false],
-      ] as const
-    ).flatMap(([shape, attached]) =>
-      ([`fixed`, `random`] as const).map(
-        (campaign) => [shape, attached, campaign] as const,
-      ),
-    ),
-  )(
-    `first reads match the capture-time rows (%s, attached=%s, %s)`,
-    async (shape, attached, campaign) => {
-      const reach = createOracleReach(
-        `snapshot-${shape}-${attached}-${campaign}`,
-        [`server-getter`, `client-getter`],
-      )
-      const property = fc.asyncProperty(history, reads, (commands, order) => {
-        reach.beginHistory()
-        return checkHistory(shape, attached, commands, order, reach)
-      })
-      await fc.assert(
-        property,
-        campaign === `fixed`
-          ? { numRuns: oracleRuns(40), seed: 2043 }
-          : oraclePropertyOptions(40, PROPERTY),
-      )
-      reach.assertReached()
-      console.info(
-        `snapshot-getter ${shape} ${attached} ${campaign}`,
-        Object.fromEntries(reach.counts()),
-      )
+  // The tuple preserves the old two-arbitrary input. Every generated input
+  // still runs all four shape/attachment cells at the original per-cell budget.
+  const retainedStates = [
+    `server-getter-ordered-attached`,
+    `client-getter-ordered-attached`,
+    `server-getter-ordered-detached`,
+    `client-getter-ordered-detached`,
+    `server-getter-single-attached`,
+    `client-getter-single-attached`,
+    `server-getter-single-detached`,
+    `client-getter-single-detached`,
+  ] as const
+  oracleProperty<[Array<Command>, Array<Read>], Verdict>({
+    id: PROPERTY,
+    law: {
+      statement: `First and later reads of a retained snapshot preserve capture-time rows and container identity across both shapes and attachment cuts.`,
+      authority: `The point-in-time snapshot contract and ownership table above.`,
+      limits: `Keys a..d, versions 0..9, local-only source and prepared client getter identity; transport and framework scheduling have separate owners.`,
     },
-  )
+    // What this oracle owns: the gap report judges every function in
+    // src/live-query-observer.ts by this file's snapshot histories, which read
+    // retained getSnapshot() objects and the health tree of the observer.
+    owns: [`src/live-query-observer.ts`],
+    histories: {
+      arbitrary: fc.tuple(history, reads),
+      runs: 40,
+      fixedSeeds: [2043],
+      states: retainedStates,
+      constructed: [
+        {
+          name: `both getters in every shape and attachment cell`,
+          enters: retainedStates,
+          build: (generated) => generated,
+        },
+      ],
+    },
+    model: recordedAssertionJudgment,
+    driver: (input, observe) =>
+      recordSnapshotJudgment(
+        `retained snapshot rows and identity`,
+        input,
+        observe,
+        retainedStates,
+        async (reach) => {
+          const results = await Promise.allSettled(
+            ([`ordered`, `single`] as const).flatMap((shape) =>
+              [true, false].map((attached) =>
+                checkHistory(shape, attached, input[0], input[1], {
+                  reach: (state) =>
+                    reach.reach(
+                      `${state}-${shape}-${attached ? `attached` : `detached`}`,
+                    ),
+                }),
+              ),
+            ),
+          )
+          const errors = results.flatMap((result) =>
+            result.status === `rejected` ? [result.reason] : [],
+          )
+          if (errors.length)
+            throw new AggregateError(
+              errors,
+              `retained snapshot receiving cells`,
+              {
+                cause: errors[0],
+              },
+            )
+        },
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   it(`reads a snapshot after several newer snapshots were built`, async () => {
+    oracleRoute(`fixed history`)
     const commands: Array<Command> = [
       { type: `upsert`, id: `a`, version: 1 },
       { type: `upsert`, id: `b`, version: 1 },
@@ -385,6 +483,7 @@ describe(`retained live-query snapshots are point-in-time`, () => {
   })
 
   it(`rejects a snapshot that reads the live Collection on first access`, async () => {
+    oracleRoute(`calibration`)
     // Calibration: the #1542 design. Its getters read the live query when
     // first accessed instead of the rows captured at snapshot time.
     const { observer, query, source } = setup(`ordered`)
@@ -471,8 +570,11 @@ type HealthReach =
   | `read-with-several-failures`
 
 const healthCommand: fc.Arbitrary<HealthCommand> = fc.oneof(
-  { weight: 3, arbitrary: fc.constant({ type: `report` as const }) },
-  { weight: 2, arbitrary: fc.constant({ type: `healthy` as const }) },
+  { weight: 3, arbitrary: fc.record({ type: fc.constant(`report` as const) }) },
+  {
+    weight: 2,
+    arbitrary: fc.record({ type: fc.constant(`healthy` as const) }),
+  },
   {
     weight: 1,
     arbitrary: fc.record({
@@ -480,9 +582,15 @@ const healthCommand: fc.Arbitrary<HealthCommand> = fc.oneof(
       version: fc.integer({ min: 0, max: 9 }),
     }),
   },
-  { weight: 2, arbitrary: fc.constant({ type: `subscribe` as const }) },
-  { weight: 2, arbitrary: fc.constant({ type: `unsubscribe` as const }) },
-  { weight: 4, arbitrary: fc.constant({ type: `read` as const }) },
+  {
+    weight: 2,
+    arbitrary: fc.record({ type: fc.constant(`subscribe` as const) }),
+  },
+  {
+    weight: 2,
+    arbitrary: fc.record({ type: fc.constant(`unsubscribe` as const) }),
+  },
+  { weight: 4, arbitrary: fc.record({ type: fc.constant(`read` as const) }) },
 )
 
 type SyncControls = {
@@ -520,7 +628,7 @@ function setupHealth() {
 /** Run one history; compare every `read` with the model. */
 async function checkHealthHistory(
   commands: ReadonlyArray<HealthCommand>,
-  reach?: ReturnType<typeof createOracleReach<HealthReach>>,
+  reach?: SnapshotReach<HealthReach>,
 ): Promise<void> {
   const { source, query, observer, controls } = setupHealth()
   await query.preload()
@@ -578,36 +686,54 @@ async function checkHealthHistory(
         const node = snapshot.health?.sources[0]
         const problem = failures.length > 0
         if (failures.length > 1) reach?.reach(`read-with-several-failures`)
-        expect(snapshot.status, `${label}: status`).toBe(`ready`)
-        expect(
-          {
-            message: node?.failureReason?.message ?? null,
-            errors:
-              node?.failureReason?.errors.map((failure) => failure.message) ??
-              [],
-          },
-          `${label}: failureReason`,
-        ).toEqual({
-          message: failures.at(-1)?.message ?? null,
-          errors: failures.map((failure) => failure.message),
-        })
-        expect(
-          node?.failureReason?.errors.every(
-            (failure, at) => failure.cause === failures[at],
-          ) ?? true,
-          `${label}: each listed failure is the reported value`,
-        ).toBe(true)
-        expect(snapshot.health?.hasErrors, `${label}: hasErrors`).toBe(problem)
-        expect(snapshot.isSyncError, `${label}: isSyncError`).toBe(problem)
+        oracleAssertion(`checkHealthHistory:590`, () =>
+          expect(snapshot.status, `${label}: status`).toBe(`ready`),
+        )
+        oracleAssertion(`checkHealthHistory:591`, () =>
+          expect(
+            {
+              message: node?.failureReason?.message ?? null,
+              errors:
+                node?.failureReason?.errors.map((failure) => failure.message) ??
+                [],
+            },
+            `${label}: failureReason`,
+          ).toEqual({
+            message: failures.at(-1)?.message ?? null,
+            errors: failures.map((failure) => failure.message),
+          }),
+        )
+        oracleAssertion(`checkHealthHistory:603`, () =>
+          expect(
+            node?.failureReason?.errors.every(
+              (failure, at) => failure.cause === failures[at],
+            ) ?? true,
+            `${label}: each listed failure is the reported value`,
+          ).toBe(true),
+        )
+        oracleAssertion(`checkHealthHistory:609`, () =>
+          expect(snapshot.health?.hasErrors, `${label}: hasErrors`).toBe(
+            problem,
+          ),
+        )
+        oracleAssertion(`checkHealthHistory:610`, () =>
+          expect(snapshot.isSyncError, `${label}: isSyncError`).toBe(problem),
+        )
         const messages = JSON.stringify(failures.map((f) => f.message))
-        if (last !== undefined) {
-          if (last.serial === serial)
-            expect(snapshot.health, `${label}: unchanged tree identity`).toBe(
-              last.tree,
+        const previousRead = last
+        if (previousRead !== undefined) {
+          if (previousRead.serial === serial)
+            oracleAssertion(`checkHealthHistory:614`, () =>
+              expect(snapshot.health, `${label}: unchanged tree identity`).toBe(
+                previousRead.tree,
+              ),
             )
-          else if (last.messages !== messages)
-            expect(snapshot.health, `${label}: changed tree identity`).not.toBe(
-              last.tree,
+          else if (previousRead.messages !== messages)
+            oracleAssertion(`checkHealthHistory:618`, () =>
+              expect(
+                snapshot.health,
+                `${label}: changed tree identity`,
+              ).not.toBe(previousRead.tree),
             )
         }
         last = { serial, messages, tree: snapshot.health }
@@ -623,32 +749,57 @@ async function checkHealthHistory(
 }
 
 describe(`a snapshot shows the current health tree`, () => {
-  it(`every read matches the model across attach cuts`, async () => {
-    const reach = createOracleReach<HealthReach>(
-      `live-query-observer.snapshot-health`,
-      [
-        `detached-read-after-health-change`,
-        `attached-read-after-health-change`,
-        `read-across-attach-after-health-change`,
-        `unchanged-tree-read`,
-        `read-with-several-failures`,
-      ],
-      { minimum: 5 },
-    )
-    const property = fc.asyncProperty(
-      fc.array(healthCommand, { minLength: 1, maxLength: 24 }),
-      async (commands) => {
-        reach.beginHistory()
-        await checkHealthHistory(commands, reach)
-      },
-    )
-    // Fixed campaign: a repeatable baseline. Seed 695 is arbitrary.
-    await fc.assert(property, { numRuns: oracleRuns(80), seed: 695 })
-    await fc.assert(property, oraclePropertyOptions(80))
-    reach.assertReached()
+  const healthStates: ReadonlyArray<HealthReach> = [
+    `detached-read-after-health-change`,
+    `attached-read-after-health-change`,
+    `read-across-attach-after-health-change`,
+    `unchanged-tree-read`,
+    `read-with-several-failures`,
+  ]
+  oracleProperty<Array<HealthCommand>, Verdict>({
+    id: `live-query-observer.snapshot-health`,
+    law: {
+      statement: `Every read shows the current failure frame and sync-error flag, retaining tree identity while its content is unchanged.`,
+      authority: `ARCHITECTURE.md law 17 and the glossary health-tree and sync-error contracts, as specified above.`,
+      limits: `One ready controlled source, failureReason only, no hydration seed or framework.`,
+    },
+    owns: [`src/live-query-observer.ts`],
+    histories: {
+      arbitrary: fc.array(healthCommand, { minLength: 1, maxLength: 24 }),
+      runs: 80,
+      fixedSeeds: [695],
+      states: healthStates,
+      // Five separately checked constructions preserve the old minimum of
+      // five reached histories per state, now in each campaign independently.
+      constructed: Array.from({ length: 5 }, (_, index) => ({
+        name: `health frame across attachment ${index}`,
+        enters: healthStates,
+        build: (generated: Array<HealthCommand>) => [
+          { type: `read` as const },
+          { type: `report` as const },
+          { type: `read` as const },
+          { type: `report` as const },
+          { type: `subscribe` as const },
+          { type: `read` as const },
+          { type: `read` as const },
+          ...generated.slice(0, 17),
+        ],
+      })),
+    },
+    model: recordedAssertionJudgment,
+    driver: (commands, observe) =>
+      recordSnapshotJudgment(
+        `snapshot health frame`,
+        commands,
+        observe,
+        healthStates,
+        (reach) => checkHealthHistory(commands, reach),
+      ),
+    check: forwardAssertionJudgment,
   })
 
   it(`shows a health-only change made between a detached read and attach`, async () => {
+    oracleRoute(`fixed history`)
     // Replay of the reported trace: a framework renders (detached read), a
     // source reports a problem before commit, the framework commits
     // (attach), then reads again.
@@ -726,7 +877,7 @@ type ContainerReach =
 
 async function checkContainerHistory(
   scenario: ContainerHistory,
-  reach: ReturnType<typeof createOracleReach<ContainerReach>>,
+  reach: SnapshotReach<ContainerReach>,
 ): Promise<void> {
   const model = new Map<string, number>(
     Array.from(
@@ -827,48 +978,75 @@ async function checkContainerHistory(
       )
       // The direct source is ready after the legal prefix. Attachment never
       // changes its status or failure frame; each read must show fresh metadata.
-      expect(after.status, `step ${index}: status`).toBe(`ready`)
-      expect(after.isSyncError, `step ${index}: sync error`).toBe(
-        failures.length > 0,
+      oracleAssertion(`checkContainerHistory:845`, () =>
+        expect(after.status, `step ${index}: status`).toBe(`ready`),
       )
-      expect(after.health?.hasErrors, `step ${index}: health`).toBe(
-        failures.length > 0,
+      oracleAssertion(`checkContainerHistory:846`, () =>
+        expect(after.isSyncError, `step ${index}: sync error`).toBe(
+          failures.length > 0,
+        ),
       )
-      expect(
-        after.health?.failureReason?.errors.map((error) => error.cause) ?? [],
-        `step ${index}: reported failures`,
-      ).toEqual(failures)
+      oracleAssertion(`checkContainerHistory:849`, () =>
+        expect(after.health?.hasErrors, `step ${index}: health`).toBe(
+          failures.length > 0,
+        ),
+      )
+      oracleAssertion(`checkContainerHistory:852`, () =>
+        expect(
+          after.health?.failureReason?.errors.map((error) => error.cause) ?? [],
+          `step ${index}: reported failures`,
+        ).toEqual(failures),
+      )
       reach.reach(stop ? `attached` : `detached`)
       if (step === `write`) {
-        expect(read.data, `value writes replace data`).not.toBe(beforeRead.data)
-        expect(read.state, `value writes replace state`).not.toBe(
-          beforeRead.state,
+        oracleAssertion(`checkContainerHistory:858`, () =>
+          expect(read.data, `value writes replace data`).not.toBe(
+            beforeRead.data,
+          ),
+        )
+        oracleAssertion(`checkContainerHistory:859`, () =>
+          expect(read.state, `value writes replace state`).not.toBe(
+            beforeRead.state,
+          ),
         )
         if (beforeRead.state?.has(`a`)) reach.reach(`value-only`)
       } else {
-        expect(read.data, `metadata keeps data`).toBe(beforeRead.data)
-        expect(read.state, `metadata keeps state`).toBe(beforeRead.state)
+        oracleAssertion(`checkContainerHistory:864`, () =>
+          expect(read.data, `metadata keeps data`).toBe(beforeRead.data),
+        )
+        oracleAssertion(`checkContainerHistory:865`, () =>
+          expect(read.state, `metadata keeps state`).toBe(beforeRead.state),
+        )
         if (after.status !== before.status) reach.reach(`status-only`)
         if (after.status === before.status && after.health !== before.health) {
           reach.reach(`health-only`)
           observedHealthOnly++
         }
         if (after.status !== before.status || after.health !== before.health)
-          expect(after).not.toBe(before)
+          oracleAssertion(`checkContainerHistory:872`, () =>
+            expect(after).not.toBe(before),
+          )
         else {
           // Ownership and repeated metadata actions change no public fact.
           // The full-snapshot contract therefore preserves identity too.
-          expect(after, `no-op keeps snapshot`).toBe(before)
+          oracleAssertion(`checkContainerHistory:876`, () =>
+            expect(after, `no-op keeps snapshot`).toBe(before),
+          )
           reach.reach(`noop-${scenario.mode}`)
         }
       }
       if (step !== `write` || hadRow)
-        expect(after.layoutRevision, `unchanged ordered keys`).toBe(
-          before.layoutRevision,
+        oracleAssertion(`checkContainerHistory:881`, () =>
+          expect(after.layoutRevision, `unchanged ordered keys`).toBe(
+            before.layoutRevision,
+          ),
         )
       else
-        expect(after.layoutRevision, `new key changes layout`).toBeGreaterThan(
-          before.layoutRevision,
+        oracleAssertion(`checkContainerHistory:885`, () =>
+          expect(
+            after.layoutRevision,
+            `new key changes layout`,
+          ).toBeGreaterThan(before.layoutRevision),
         )
       if (model.size > 0 && !wasAttached && stop) {
         reach.reach(`attach-${scenario.mode}`)
@@ -885,10 +1063,12 @@ async function checkContainerHistory(
       checkRead(`ordered`, captured, !scenario.dataFirst, `retained ${index}`)
     // Calibrate reach through the same model and driver, including histories
     // containing only readiness: loading -> ready is never health-only.
-    expect(
-      observedHealthOnly,
-      `health-only transitions exclude readiness`,
-    ).toBe(expectedHealthOnly)
+    oracleAssertion(`checkContainerHistory:903`, () =>
+      expect(
+        observedHealthOnly,
+        `health-only transitions exclude readiness`,
+      ).toBe(expectedHealthOnly),
+    )
   } catch (error) {
     failure = { error }
   }
@@ -938,59 +1118,96 @@ describe(`metadata snapshots share immutable row containers`, () => {
       ]),
     ),
   )
-  for (const campaign of [`fixed`, `random`] as const) {
-    oracleReplayTest(
-      it,
-      ...(campaign === `fixed`
-        ? []
-        : [`live-query-observer.row-container-sharing`]),
-    )(`reuses rows across metadata changes (${campaign})`, async () => {
-      const reach = createOracleReach<ContainerReach>(
-        `live-query-observer.row-container-sharing`,
-        [
-          `attached`,
-          `detached`,
-          `granular`,
-          `wholesale`,
-          `empty`,
-          `health-only`,
-          `status-only`,
-          `value-only`,
-          `attach-granular`,
-          `attach-wholesale`,
-          `detach-granular`,
-          `detach-wholesale`,
-          `reattach-granular`,
-          `reattach-wholesale`,
-          `noop-granular`,
-          `noop-wholesale`,
-          `equal-revision-reenrichment`,
-        ],
-        { fixedHistories: examples.length },
-      )
-      // fast-check 3 emits examples before generated histories. A failed
-      // campaign throws before aggregate reach; path replay disables it.
-      let histories = 0
-      await fc.assert(
-        fc.asyncProperty(containerHistory, async (scenario) => {
-          reach.beginHistory({ fixed: histories++ < examples.length })
-          await checkContainerHistory(scenario, reach)
-        }),
+  const containerStates: ReadonlyArray<ContainerReach> = [
+    `attached`,
+    `detached`,
+    `granular`,
+    `wholesale`,
+    `empty`,
+    `health-only`,
+    `status-only`,
+    `value-only`,
+    `attach-granular`,
+    `attach-wholesale`,
+    `detach-granular`,
+    `detach-wholesale`,
+    `reattach-granular`,
+    `reattach-wholesale`,
+    `noop-granular`,
+    `noop-wholesale`,
+    `equal-revision-reenrichment`,
+  ]
+  oracleProperty<ContainerHistory, Verdict>({
+    id: `live-query-observer.row-container-sharing`,
+    law: {
+      statement: `Metadata-only changes retain row containers; value changes replace them, and a no-op retains the whole snapshot.`,
+      authority: `Maintainer decision 2026-11-01 and the independent key/version model above.`,
+      limits: `Direct controlled Collection, both observer modes and attachment cuts, zero to three initial rows; query shapes and hydration belong to the next driver.`,
+    },
+    owns: [`src/live-query-observer.ts`],
+    histories: {
+      arbitrary: containerHistory,
+      runs: 40,
+      fixedSeeds: [1101],
+      states: containerStates,
+      fixed: examples.map(([fixedHistory], index) => ({
+        name: `row containers ${index}`,
+        history: fixedHistory,
+      })),
+      constructed: [
+        ...([`granular`, `wholesale`] as const).map((mode) => ({
+          name: `${mode} metadata, ownership, and value revisions`,
+          enters: [
+            `attached`,
+            `detached`,
+            mode,
+            `health-only`,
+            `status-only`,
+            `value-only`,
+            `attach-${mode}`,
+            `detach-${mode}`,
+            `reattach-${mode}`,
+            `noop-${mode}`,
+            `equal-revision-reenrichment`,
+          ],
+          build: (generated: ContainerHistory): ContainerHistory => ({
+            ...generated,
+            mode,
+            attached: true,
+            count: 1,
+            commands: [
+              `unsubscribe`,
+              `refresh`,
+              `subscribe`,
+              `unsubscribe`,
+              `subscribe`,
+              `report`,
+              `ready`,
+              `write`,
+              `healthy`,
+              `write`,
+              ...generated.commands.slice(0, 2),
+            ],
+          }),
+        })),
         {
-          ...oraclePropertyOptions(
-            40,
-            `live-query-observer.row-container-sharing`,
-            { examples },
-          ),
-          ...(campaign === `fixed` ? { seed: 1101 } : {}),
+          name: `empty row containers`,
+          enters: [`empty`],
+          build: (generated) => ({ ...generated, count: 0 }),
         },
-      )
-      reach.assertReached()
-      process.stdout.write(
-        `observer row-container sharing ${campaign}: ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-      )
-    })
-  }
+      ],
+    },
+    model: recordedAssertionJudgment,
+    driver: (scenario, observe) =>
+      recordSnapshotJudgment(
+        `row-container sharing`,
+        scenario,
+        observe,
+        containerStates,
+        (reach) => checkContainerHistory(scenario, reach),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -1067,7 +1284,7 @@ type CapturePathReach =
 
 async function checkCapturePathHistory(
   scenario: CapturePathHistory,
-  reach: ReturnType<typeof createOracleReach<CapturePathReach>>,
+  reach: SnapshotReach<CapturePathReach>,
 ): Promise<void> {
   type SourceRow = Row & { rank: number }
   const versions = new Map<string, number>()
@@ -1227,10 +1444,18 @@ async function checkCapturePathHistory(
       } else controls!.markReady()
       await settle()
       const after = observer.getSnapshot()
-      expect(after.status, `query is ready`).toBe(`ready`)
-      expect(after.isSyncError, `query health follows reports`).toBe(hasErrors)
-      expect(after.health?.hasErrors, `query health tree is fresh`).toBe(
-        hasErrors,
+      oracleAssertion(`checkCapturePathHistory:1247`, () =>
+        expect(after.status, `query is ready`).toBe(`ready`),
+      )
+      oracleAssertion(`checkCapturePathHistory:1248`, () =>
+        expect(after.isSyncError, `query health follows reports`).toBe(
+          hasErrors,
+        ),
+      )
+      oracleAssertion(`checkCapturePathHistory:1249`, () =>
+        expect(after.health?.hasErrors, `query health tree is fresh`).toBe(
+          hasErrors,
+        ),
       )
       const rows = expectedRows()
       const visible = (values: Array<Row>) =>
@@ -1248,37 +1473,53 @@ async function checkCapturePathHistory(
         `path step ${index}`,
       )
       if (rowChanged) {
-        expect(read.state, `changed query rows replace state`).not.toBe(
-          beforeRead.state,
+        oracleAssertion(`checkCapturePathHistory:1268`, () =>
+          expect(read.state, `changed query rows replace state`).not.toBe(
+            beforeRead.state,
+          ),
         )
-        expect(read.data, `changed query rows replace data`).not.toBe(
-          beforeRead.data,
+        oracleAssertion(`checkCapturePathHistory:1271`, () =>
+          expect(read.data, `changed query rows replace data`).not.toBe(
+            beforeRead.data,
+          ),
         )
       } else {
-        expect(read.state, `unchanged query rows keep state`).toBe(
-          beforeRead.state,
+        oracleAssertion(`checkCapturePathHistory:1275`, () =>
+          expect(read.state, `unchanged query rows keep state`).toBe(
+            beforeRead.state,
+          ),
         )
-        expect(read.data, `unchanged query rows keep data`).toBe(
-          beforeRead.data,
+        oracleAssertion(`checkCapturePathHistory:1278`, () =>
+          expect(read.data, `unchanged query rows keep data`).toBe(
+            beforeRead.data,
+          ),
         )
         if (after.health === before.health)
-          expect(after, `query no-op keeps snapshot`).toBe(before)
+          oracleAssertion(`checkCapturePathHistory:1282`, () =>
+            expect(after, `query no-op keeps snapshot`).toBe(before),
+          )
         else {
-          expect(after, `query metadata replaces snapshot`).not.toBe(before)
+          oracleAssertion(`checkCapturePathHistory:1284`, () =>
+            expect(after, `query metadata replaces snapshot`).not.toBe(before),
+          )
           reach.reach(`metadata-${scenario.shape}-${scenario.mode}`)
         }
       }
       if (keysChanged) {
-        expect(after.layoutRevision, `query layout advances`).toBeGreaterThan(
-          before.layoutRevision,
+        oracleAssertion(`checkCapturePathHistory:1289`, () =>
+          expect(after.layoutRevision, `query layout advances`).toBeGreaterThan(
+            before.layoutRevision,
+          ),
         )
         if (query._stateRevision === revision)
           reach.reach(
             `layout-only-${scenario.mode}-${stop ? `attached` : `detached`}`,
           )
       } else
-        expect(after.layoutRevision, `query layout stays`).toBe(
-          before.layoutRevision,
+        oracleAssertion(`checkCapturePathHistory:1297`, () =>
+          expect(after.layoutRevision, `query layout stays`).toBe(
+            before.layoutRevision,
+          ),
         )
       retained.push({ snapshot: after, rows })
       before = after
@@ -1317,17 +1558,14 @@ describe(`snapshot capture paths preserve row and layout laws`, () => {
   // failure cannot hide the distinct layout premise during RED verification.
   for (const action of [`discard-write`, `discard-move`] as const)
     it(`reads committed rows after ${action}`, async () => {
-      const reach = createOracleReach<CapturePathReach>(
-        `capture-discard-replay`,
-        [
-          `ordered-granular`,
-          `initial-detached-granular`,
-          `discarded-write-granular-detached`,
-          `discarded-move-granular-detached`,
-          `layout-only-granular-detached`,
-        ],
-      )
-      reach.beginHistory()
+      oracleRoute(`fixed history`)
+      const reach = snapshotReach<CapturePathReach>([
+        `ordered-granular`,
+        `initial-detached-granular`,
+        `discarded-write-granular-detached`,
+        `discarded-move-granular-detached`,
+        `layout-only-granular-detached`,
+      ])
       await checkCapturePathHistory(
         {
           shape: `ordered`,
@@ -1379,62 +1617,110 @@ describe(`snapshot capture paths preserve row and layout laws`, () => {
       ),
     ),
   )
-  for (const campaign of [`fixed`, `random`] as const)
-    oracleReplayTest(
-      it,
-      ...(campaign === `fixed` ? [] : [`live-query-observer.capture-paths`]),
-    )(`checks query capture boundaries (${campaign})`, async () => {
-      const reach = createOracleReach<CapturePathReach>(
-        `live-query-observer.capture-paths`,
-        [
-          `nested-discard`,
-          `ordered-granular`,
-          `ordered-wholesale`,
-          `single-granular`,
-          `single-wholesale`,
-          `initial-attached-granular`,
-          `initial-attached-wholesale`,
-          `initial-detached-granular`,
-          `initial-detached-wholesale`,
-          `hydrated-ordered`,
-          `hydrated-single`,
-          `layout-only-granular-attached`,
-          `layout-only-granular-detached`,
-          `layout-only-wholesale-attached`,
-          `layout-only-wholesale-detached`,
-          `metadata-ordered-granular`,
-          `metadata-ordered-wholesale`,
-          `metadata-single-granular`,
-          `metadata-single-wholesale`,
-          `discarded-write-granular-attached`,
-          `discarded-write-granular-detached`,
-          `discarded-write-wholesale-attached`,
-          `discarded-write-wholesale-detached`,
-          `discarded-move-granular-attached`,
-          `discarded-move-granular-detached`,
-          `discarded-move-wholesale-attached`,
-          `discarded-move-wholesale-detached`,
-        ],
-        { fixedHistories: examples.length },
-      )
-      let histories = 0
-      await fc.assert(
-        fc.asyncProperty(capturePathHistory, async (scenario) => {
-          reach.beginHistory({ fixed: histories++ < examples.length })
-          await checkCapturePathHistory(scenario, reach)
-        }),
-        {
-          ...oraclePropertyOptions(40, `live-query-observer.capture-paths`, {
-            examples,
-          }),
-          ...(campaign === `fixed` ? { seed: 2346 } : {}),
-        },
-      )
-      reach.assertReached()
-      process.stdout.write(
-        `observer capture paths ${campaign}: ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-      )
-    })
+  const captureStates: ReadonlyArray<CapturePathReach> = [
+    `nested-discard`,
+    `ordered-granular`,
+    `ordered-wholesale`,
+    `single-granular`,
+    `single-wholesale`,
+    `initial-attached-granular`,
+    `initial-attached-wholesale`,
+    `initial-detached-granular`,
+    `initial-detached-wholesale`,
+    `hydrated-ordered`,
+    `hydrated-single`,
+    `layout-only-granular-attached`,
+    `layout-only-granular-detached`,
+    `layout-only-wholesale-attached`,
+    `layout-only-wholesale-detached`,
+    `metadata-ordered-granular`,
+    `metadata-ordered-wholesale`,
+    `metadata-single-granular`,
+    `metadata-single-wholesale`,
+    `discarded-write-granular-attached`,
+    `discarded-write-granular-detached`,
+    `discarded-write-wholesale-attached`,
+    `discarded-write-wholesale-detached`,
+    `discarded-move-granular-attached`,
+    `discarded-move-granular-detached`,
+    `discarded-move-wholesale-attached`,
+    `discarded-move-wholesale-detached`,
+  ]
+  // These original 13-command regressions deliberately remain direct replays:
+  // the generated language still has its original maximum of 12 commands.
+  it.each(examples)(
+    `replays the retained capture-path history %#`,
+    async (scenario) => {
+      oracleRoute(`fixed history`)
+      await checkCapturePathHistory(scenario, snapshotReach(captureStates))
+    },
+  )
+  oracleProperty<CapturePathHistory, Verdict>({
+    id: `live-query-observer.capture-paths`,
+    law: {
+      statement: `Retained snapshots preserve committed row values and layout through projection, findOne, hydration, and discarded publication deferrals.`,
+      authority: `The retained-snapshot contract and Collection deferred-publication contract described above.`,
+      limits: `Two or three controlled rows, one or two nested deferrals, the existing 12-command generated language; no provider or framework scheduling claim.`,
+    },
+    owns: [`src/live-query-observer.ts`],
+    histories: {
+      arbitrary: capturePathHistory,
+      runs: 40,
+      fixedSeeds: [2346],
+      states: captureStates,
+      constructed: ([`ordered`, `single`] as const).flatMap((shape) =>
+        ([`granular`, `wholesale`] as const).flatMap((mode) =>
+          [false, true].map((attached) => ({
+            name: `${shape} ${mode} initially ${attached ? `attached` : `detached`}`,
+            enters: [
+              `nested-discard`,
+              `${shape}-${mode}`,
+              `initial-${attached ? `attached` : `detached`}-${mode}`,
+              `hydrated-${shape}`,
+              `metadata-${shape}-${mode}`,
+              `discarded-write-${mode}-${attached ? `attached` : `detached`}`,
+              `discarded-move-${mode}-${attached ? `attached` : `detached`}`,
+              ...(shape === `ordered`
+                ? [
+                    `layout-only-${mode}-attached`,
+                    `layout-only-${mode}-detached`,
+                  ]
+                : []),
+            ],
+            build: (generated: CapturePathHistory): CapturePathHistory => ({
+              ...generated,
+              shape,
+              mode,
+              attached,
+              hydrated: true,
+              deferralDepth: 2,
+              commands: [
+                `unsubscribe`,
+                `move`,
+                `subscribe`,
+                `move`,
+                `report`,
+                `healthy`,
+                `discard-write`,
+                `discard-move`,
+                ...generated.commands.slice(0, 4),
+              ],
+            }),
+          })),
+        ),
+      ),
+    },
+    model: recordedAssertionJudgment,
+    driver: (scenario, observe) =>
+      recordSnapshotJudgment(
+        `snapshot capture paths`,
+        scenario,
+        observe,
+        captureStates,
+        (reach) => checkCapturePathHistory(scenario, reach),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -1521,10 +1807,12 @@ function payloadObservation(
           ? (payload as Set<{ value: number }>).values().next().value!
           : (payload as { leaf: { value: number } }).leaf
   const prototype: unknown = Object.getPrototypeOf(leaf)
-  expect(
-    [Object.prototype, ShapePayload.prototype, null],
-    `authored prototype`,
-  ).toContain(prototype)
+  oracleAssertion(`payloadObservation:1544`, () =>
+    expect(
+      [Object.prototype, ShapePayload.prototype, null],
+      `authored prototype`,
+    ).toContain(prototype),
+  )
   return {
     kind:
       prototype === ShapePayload.prototype
@@ -1537,7 +1825,7 @@ function payloadObservation(
 }
 async function checkPayloadHistory(
   scenario: PayloadHistory & { query: boolean },
-  reach: ReturnType<typeof createOracleReach<PayloadReach>>,
+  reach: SnapshotReach<PayloadReach>,
 ): Promise<void> {
   type PayloadRow = Row & { payload: object }
   let model = scenario.initial
@@ -1605,14 +1893,18 @@ async function checkPayloadHistory(
       label,
     )
     const data = snapshot.data as ReadonlyArray<PayloadRow>
-    expect(
-      payloadObservation(data[0]!.payload, scenario.carrier),
-      `${label}: data shape and value`,
-    ).toEqual(spec)
-    expect(
-      payloadObservation(snapshot.state!.get(`a`)!.payload, scenario.carrier),
-      `${label}: state shape and value`,
-    ).toEqual(spec)
+    oracleAssertion(`checkPayloadHistory:1628`, () =>
+      expect(
+        payloadObservation(data[0]!.payload, scenario.carrier),
+        `${label}: data shape and value`,
+      ).toEqual(spec),
+    )
+    oracleAssertion(`checkPayloadHistory:1632`, () =>
+      expect(
+        payloadObservation(snapshot.state!.get(`a`)!.payload, scenario.carrier),
+        `${label}: state shape and value`,
+      ).toEqual(spec),
+    )
   }
   let failure: { error: unknown } | undefined
   try {
@@ -1660,22 +1952,34 @@ async function checkPayloadHistory(
         `${scenario.query ? `query` : `source`} payload ${index}`,
       )
       if (changed) {
-        expect(after.data, `shape/value changes replace data`).not.toBe(
-          before.data,
+        oracleAssertion(`checkPayloadHistory:1683`, () =>
+          expect(after.data, `shape/value changes replace data`).not.toBe(
+            before.data,
+          ),
         )
-        expect(after.state, `shape/value changes replace state`).not.toBe(
-          before.state,
+        oracleAssertion(`checkPayloadHistory:1686`, () =>
+          expect(after.state, `shape/value changes replace state`).not.toBe(
+            before.state,
+          ),
         )
       } else {
-        expect(after.data, `same rows keep data`).toBe(before.data)
-        expect(after.state, `same rows keep state`).toBe(before.state)
+        oracleAssertion(`checkPayloadHistory:1690`, () =>
+          expect(after.data, `same rows keep data`).toBe(before.data),
+        )
+        oracleAssertion(`checkPayloadHistory:1691`, () =>
+          expect(after.state, `same rows keep state`).toBe(before.state),
+        )
       }
       if (stop && scenario.mode === `granular`) {
-        expect([...granular.keys()], `granular membership`).toEqual([`a`])
-        expect(
-          payloadObservation(granular.get(`a`)!.payload, scenario.carrier),
-          `granular agrees with snapshot shape and value`,
-        ).toEqual(model)
+        oracleAssertion(`checkPayloadHistory:1694`, () =>
+          expect([...granular.keys()], `granular membership`).toEqual([`a`]),
+        )
+        oracleAssertion(`checkPayloadHistory:1695`, () =>
+          expect(
+            payloadObservation(granular.get(`a`)!.payload, scenario.carrier),
+            `granular agrees with snapshot shape and value`,
+          ).toEqual(model),
+        )
       }
       retained.push({ snapshot: after, spec: model })
       before = after
@@ -1723,30 +2027,70 @@ describe(`publications preserve nested record shape`, () => {
       ]),
     ),
   )
-  for (const campaign of [`fixed`, `random`] as const)
-    oracleReplayTest(
-      it,
-      ...(campaign === `fixed` ? [] : [`live-query-observer.record-shape`]),
-    )(`compares authored shape at every read (${campaign})`, async () => {
-      const reach = createOracleReach<PayloadReach>(
-        `live-query-observer.record-shape`,
-        [
-          `source-granular`,
-          `source-wholesale`,
-          `query-granular`,
-          `query-wholesale`,
-          `plain-class`,
-          `class-plain`,
-          `plain-null`,
-          `same-shape-copy`,
-          ...payloadCarriers,
-        ],
-        { fixedHistories: examples.length },
-      )
-      let histories = 0
-      await fc.assert(
-        fc.asyncProperty(payloadHistory, async (scenario) => {
-          reach.beginHistory({ fixed: histories++ < examples.length })
+  const payloadStates: ReadonlyArray<PayloadReach> = [
+    `source-granular`,
+    `source-wholesale`,
+    `query-granular`,
+    `query-wholesale`,
+    `plain-class`,
+    `class-plain`,
+    `plain-null`,
+    `same-shape-copy`,
+    ...payloadCarriers,
+  ]
+  oracleProperty<PayloadHistory, Verdict>({
+    id: `live-query-observer.record-shape`,
+    law: {
+      statement: `Publications preserve nested record prototype and value, replacing containers only when that modeled value changes.`,
+      authority: `Maintainer decision 2026-11-03 and the shape-name/value model above.`,
+      limits: `Plain, class, and null-prototype records through the four existing carriers, direct/projected Collections and both modes; no exotic subclasses or descriptors.`,
+    },
+    owns: [`src/live-query-observer.ts`],
+    histories: {
+      arbitrary: payloadHistory,
+      runs: 40,
+      fixedSeeds: [234602],
+      states: payloadStates,
+      fixed: examples.map(([fixedHistory], index) => ({
+        name: `record shape ${index}`,
+        history: fixedHistory,
+      })),
+      constructed: ([`granular`, `wholesale`] as const).flatMap((mode) =>
+        payloadCarriers.map((carrier) => ({
+          name: `${mode} ${carrier} shape transitions`,
+          enters: [
+            `source-${mode}`,
+            `query-${mode}`,
+            carrier,
+            `plain-class`,
+            `class-plain`,
+            `plain-null`,
+            `same-shape-copy`,
+          ],
+          build: (generated: PayloadHistory): PayloadHistory => ({
+            ...generated,
+            mode,
+            carrier,
+            initial: { kind: `plain`, value: generated.initial.value },
+            commands: [
+              { kind: `class`, value: generated.initial.value },
+              `refresh`,
+              { kind: `plain`, value: generated.initial.value },
+              { kind: `null`, value: generated.initial.value },
+              ...generated.commands.slice(0, 8),
+            ],
+          }),
+        })),
+      ),
+    },
+    model: recordedAssertionJudgment,
+    driver: (scenario, observe) =>
+      recordSnapshotJudgment(
+        `nested record shape`,
+        scenario,
+        observe,
+        payloadStates,
+        async (reach) => {
           // Both receiving paths run before reporting a mismatch, so an early
           // direct-Collection failure cannot hide the query's pre-edit result.
           const results = await Promise.allSettled(
@@ -1763,19 +2107,10 @@ describe(`publications preserve nested record shape`, () => {
               `source and query shape comparisons: ${errors.map(String).join(`; `)}`,
               { cause: errors[0] },
             )
-        }),
-        {
-          ...oraclePropertyOptions(40, `live-query-observer.record-shape`, {
-            examples,
-          }),
-          ...(campaign === `fixed` ? { seed: 234602 } : {}),
         },
-      )
-      reach.assertReached()
-      process.stdout.write(
-        `observer record shape ${campaign}: ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-      )
-    })
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -1808,9 +2143,7 @@ async function checkSparsePublication(
   mode: `granular` | `wholesale`,
   projected: boolean,
   attached: boolean,
-  reach: ReturnType<
-    typeof createOracleReach<(typeof sparseReceivingStates)[number]>
-  >,
+  reach: SnapshotReach<(typeof sparseReceivingStates)[number]>,
 ): Promise<void> {
   type SparseRow = { id: string; payload: object }
   let sync!: Parameters<SyncConfig<SparseRow, string>[`sync`]>[0]
@@ -1891,15 +2224,24 @@ async function checkSparsePublication(
       if (query) await new Promise<void>((resolve) => setTimeout(resolve, 0))
       const snapshot = observer.getSnapshot()
       // Check independently received values before proceeding to the next write.
-      expect([...source.keys()], `source membership`).toEqual([`a`])
-      expect([...mirror.keys()], `change-message membership`).toEqual([`a`])
-      expect(
-        rows(snapshot).map((value) => value.id),
-        `snapshot membership`,
-      ).toEqual([`a`])
-      expect([...snapshot.state!.keys()], `snapshot state membership`).toEqual([
-        `a`,
-      ])
+      oracleAssertion(`checkSparsePublication:1916`, () =>
+        expect([...source.keys()], `source membership`).toEqual([`a`]),
+      )
+      oracleAssertion(`checkSparsePublication:1917`, () =>
+        expect([...mirror.keys()], `change-message membership`).toEqual([`a`]),
+      )
+      oracleAssertion(`checkSparsePublication:1918`, () =>
+        expect(
+          rows(snapshot).map((value) => value.id),
+          `snapshot membership`,
+        ).toEqual([`a`]),
+      )
+      oracleAssertion(`checkSparsePublication:1922`, () =>
+        expect(
+          [...snapshot.state!.keys()],
+          `snapshot state membership`,
+        ).toEqual([`a`]),
+      )
       const observations = [
         source.get(`a`)!.payload,
         mirror.get(`a`)!.payload,
@@ -1909,7 +2251,9 @@ async function checkSparsePublication(
       const errors: Array<unknown> = []
       for (const actual of observations) {
         try {
-          checkSparseArray(actual, expected, carrier)
+          oracleAssertion(`sparse publication positions`, () =>
+            checkSparseArray(actual, expected, carrier),
+          )
         } catch (error) {
           errors.push(error)
         }
@@ -1921,16 +2265,22 @@ async function checkSparsePublication(
           { cause: errors[0] },
         )
       if (index === 0) {
-        expect(snapshot.data, `equivalent array values keep data`).toBe(
-          previous.data,
+        oracleAssertion(`checkSparsePublication:1946`, () =>
+          expect(snapshot.data, `equivalent array values keep data`).toBe(
+            previous.data,
+          ),
         )
-        expect(snapshot.state, `equivalent array values keep state`).toBe(
-          previous.state,
+        oracleAssertion(`checkSparsePublication:1949`, () =>
+          expect(snapshot.state, `equivalent array values keep state`).toBe(
+            previous.state,
+          ),
         )
         reach.reach(`hole-undefined`)
       } else {
-        expect(snapshot.data, `changed array value replaces data`).not.toBe(
-          previous.data,
+        oracleAssertion(`checkSparsePublication:1954`, () =>
+          expect(snapshot.data, `changed array value replaces data`).not.toBe(
+            previous.data,
+          ),
         )
         reach.reach(form === `hole` ? `defined-hole` : `hole-defined`)
       }
@@ -1938,8 +2288,12 @@ async function checkSparsePublication(
       previous = snapshot
     }
     for (const { snapshot, values } of retained) {
-      checkSparseArray(rows(snapshot)[0]!.payload, values, carrier)
-      checkSparseArray(snapshot.state!.get(`a`)!.payload, values, carrier)
+      oracleAssertion(`retained sparse data`, () =>
+        checkSparseArray(rows(snapshot)[0]!.payload, values, carrier),
+      )
+      oracleAssertion(`retained sparse state`, () =>
+        checkSparseArray(snapshot.state!.get(`a`)!.payload, values, carrier),
+      )
     }
   } catch (error) {
     failure = {
@@ -1962,57 +2316,64 @@ async function checkSparsePublication(
 }
 declareOracle({ check: [checkSparsePublication] })
 describe(`array value publication`, () => {
-  for (const campaign of [`fixed`, `random`] as const)
-    oracleReplayTest(
-      it,
-      ...(campaign === `fixed` ? [] : [`live-query-observer.sparse-array`]),
-    )(
-      `publishes changed array positions to every receiver (${campaign})`,
-      async () => {
-        const reach = createOracleReach(
-          `live-query-observer.sparse-array`,
-          sparseReceivingStates,
-        )
-        await fc.assert(
-          fc.asyncProperty(sparseArrayCase, async (spec) => {
-            reach.beginHistory()
-            const results = await Promise.allSettled(
-              sparseArrayCarriers.flatMap((carrier) =>
-                ([`granular`, `wholesale`] as const).flatMap((mode) =>
-                  [false, true].flatMap((projected) =>
-                    [false, true].map((attached) =>
-                      checkSparsePublication(
-                        spec,
-                        carrier,
-                        mode,
-                        projected,
-                        attached,
-                        reach,
-                      ),
+  oracleProperty<SparseArrayCase, Verdict>({
+    id: `live-query-observer.sparse-array`,
+    law: {
+      statement: `Hole/undefined neighbors retain row containers, while defined positional changes publish to every source and observer receiver without changing retained snapshots.`,
+      authority: `The shared sparse-array value law and positional model in sparse-array-value-oracle.ts.`,
+      limits: `The existing one-to-five-position grammar, three carriers, both modes and direct/projected attached/detached receivers; no provider or framework scheduling claim.`,
+    },
+    owns: [`src/live-query-observer.ts`],
+    histories: {
+      arbitrary: sparseArrayCase,
+      runs: 20,
+      fixedSeeds: [234603],
+      states: sparseReceivingStates,
+      constructed: [
+        {
+          name: `array value transitions in every receiving path`,
+          enters: sparseReceivingStates,
+          build: (generated) => generated,
+        },
+      ],
+    },
+    model: recordedAssertionJudgment,
+    driver: (spec, observe) =>
+      recordSnapshotJudgment(
+        `sparse-array publication`,
+        spec,
+        observe,
+        sparseReceivingStates,
+        async (reach) => {
+          const results = await Promise.allSettled(
+            sparseArrayCarriers.flatMap((carrier) =>
+              ([`granular`, `wholesale`] as const).flatMap((mode) =>
+                [false, true].flatMap((projected) =>
+                  [false, true].map((attached) =>
+                    checkSparsePublication(
+                      spec,
+                      carrier,
+                      mode,
+                      projected,
+                      attached,
+                      reach,
                     ),
                   ),
                 ),
               ),
+            ),
+          )
+          const errors = results.flatMap((result) =>
+            result.status === `rejected` ? [result.reason] : [],
+          )
+          if (errors.length)
+            throw new AggregateError(
+              errors,
+              `sparse receiving paths: ${errors.map(String).join(`; `)}`,
+              { cause: errors[0] },
             )
-            const errors = results.flatMap((result) =>
-              result.status === `rejected` ? [result.reason] : [],
-            )
-            if (errors.length)
-              throw new AggregateError(
-                errors,
-                `sparse receiving paths: ${errors.map(String).join(`; `)}`,
-                { cause: errors[0] },
-              )
-          }),
-          {
-            ...oraclePropertyOptions(20, `live-query-observer.sparse-array`),
-            ...(campaign === `fixed` ? { seed: 234603 } : {}),
-          },
-        )
-        reach.assertReached()
-        process.stdout.write(
-          `observer sparse array ${campaign}: ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-        )
-      },
-    )
+        },
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

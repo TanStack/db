@@ -16,7 +16,6 @@
  */
 import { expect } from 'vitest'
 import { declareOracle } from '../oracle-declaration'
-import { createOracleReach } from '../oracle-reach'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { selectedRow } from './result-laws'
 import type {
@@ -331,20 +330,25 @@ export async function runRowSnapshotHistories(
       ? [`source-reference-reuse`]
       : []),
   ]
-  const reach = createOracleReach(
-    `framework.${driver.name}.${input}.${writes}.row-snapshots`,
-    states,
+  // The complete finite grammar keeps exact per-history checkpoint counts.
+  const historiesByState = new Map(
+    states.map((state) => [state, new Set<(typeof cases)[number]>()] as const),
   )
   const failures: Array<Error> = []
   for (const history of cases) {
-    reach.beginHistory()
+    const enter = (state: string) => {
+      const enteredHistories = historiesByState.get(state)
+      if (!enteredHistories)
+        throw new Error(`Undeclared row-snapshot checkpoint: ${state}`)
+      enteredHistories.add(history)
+    }
     const resources = new ScenarioLifetime()
     try {
       await resources.run(async () => {
         const expected = new Map<string, Fact>()
         const check = (retained: ReadonlyArray<Retained>) => {
           expectSnapshots(handle!, source, expected, retained)
-          reach.reach(`current-source-row`)
+          enter(`current-source-row`)
         }
         const initial = sourceRow(driver, history.shape, 0)
         const rows = history.peers
@@ -365,7 +369,7 @@ export async function runRowSnapshotHistories(
               actual,
               expected: wanted,
             })
-            reach.reach(`retained-initial-row`)
+            enter(`retained-initial-row`)
           }
           // Register before the hook so the source facts are recorded before
           // framework materialization can mutate any borrowed container.
@@ -379,7 +383,7 @@ export async function runRowSnapshotHistories(
                     actual: change.previousValue,
                     expected: expected.get(id)!,
                   })
-                  reach.reach(`retained-previousValue`)
+                  enter(`retained-previousValue`)
                 }
                 if (change.type === `delete`) expected.delete(id)
                 else {
@@ -393,7 +397,7 @@ export async function runRowSnapshotHistories(
                     actual: change.value,
                     expected: wanted,
                   })
-                  reach.reach(`retained-change-value`)
+                  enter(`retained-change-value`)
                 }
               }
             },
@@ -414,8 +418,8 @@ export async function runRowSnapshotHistories(
           }
           resources.defer(() => handle?.unmount())
           await handle.flush()
-          reach.reach(input)
-          reach.reach(history.shape)
+          enter(input)
+          enter(history.shape)
           check(retained)
           if (history.peers && history.shape !== `introduced`) {
             const first = source.collection.get(`a`).config
@@ -423,7 +427,7 @@ export async function runRowSnapshotHistories(
             expect(first, `admitted shared container`).not.toBeNull()
             expect(typeof first, `admitted shared container`).toBe(`object`)
             expect(second, `admitted shared container identity`).toBe(first)
-            reach.reach(`cross-row-alias`)
+            enter(`cross-row-alias`)
           }
           for (let value = 1; value <= 3; value++)
             for (const { id } of rows) {
@@ -475,7 +479,7 @@ export async function runRowSnapshotHistories(
                   actual: tx.mutations[0]!.original as SnapshotRow,
                   expected: before,
                 })
-                reach.reach(`retained-original`)
+                enter(`retained-original`)
                 await handle.flush()
                 check(retained)
                 release()
@@ -495,7 +499,7 @@ export async function runRowSnapshotHistories(
                         actual: item.original,
                         expected: before,
                       })
-                    reach.reach(`retained-original`)
+                    enter(`retained-original`)
                   }
                 })
               }
@@ -510,12 +514,12 @@ export async function runRowSnapshotHistories(
                   (source.collection.get(id).config as { right: unknown })
                     .right,
                 ).toBe(previousConfig.right)
-                reach.reach(`source-reference-reuse`)
+                enter(`source-reference-reuse`)
               }
-              reach.reach(writes)
-              if (value >= 2) reach.reach(`later-object-admission`)
-              if (value === 3) reach.reach(`root-delete-representation`)
-              if (value === 1) reach.reach(`nested-own-undefined`)
+              enter(writes)
+              if (value >= 2) enter(`later-object-admission`)
+              if (value === 3) enter(`root-delete-representation`)
+              if (value === 1) enter(`nested-own-undefined`)
               // Only the controlled sync source promises this admission. The
               // local-only draft boundary owns its normalization policy; every
               // path still compares all user fields that it actually admits.
@@ -531,7 +535,7 @@ export async function runRowSnapshotHistories(
                   )?.enumerable,
                   `source admitted enumerable user symbol`,
                 ).toBe(true)
-                reach.reach(`enumerable-user-symbol`)
+                enter(`enumerable-user-symbol`)
               }
               check(retained)
             }
@@ -554,8 +558,14 @@ export async function runRowSnapshotHistories(
         .join(`\n`),
       { cause: failures[0] },
     )
-  reach.assertReached()
-  expect(Object.fromEntries(reach.counts())).toEqual({
+  expect(
+    Object.fromEntries(
+      [...historiesByState].map(([state, enteredHistories]) => [
+        state,
+        enteredHistories.size,
+      ]),
+    ),
+  ).toEqual({
     [input]: cases.length,
     [writes]: cases.length,
     ...Object.fromEntries(cases.map(({ shape }) => [shape, 2])),
@@ -577,6 +587,9 @@ export async function runRowSnapshotHistories(
   })
 }
 
+// Owns no production entry in packages/db: this module checks the public
+// observations that each framework driver passes it, so the framework packages
+// that run it own the entries it judges.
 declareOracle({
   model: [facts, rowFacts],
   grammar: [histories],

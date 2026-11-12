@@ -29,9 +29,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   describeHistory,
   expectOpenOutcome,
+  expectedOpenOutcome,
   openHistories,
   reachedOutcomes,
 } from '../tests/opfs-open-outcome-oracle'
+import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import {
   consumerVite,
   createPackagedConsumer,
@@ -407,6 +410,13 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
   }
 }
 
+declareOracle({
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  check: [expectOpenOutcome],
+  model: [expectedOpenOutcome],
+  grammar: [openHistories],
+})
+
 // One block per consumer Vite major. Each runs its histories against a dev
 // server of that major.
 function describeOpenOutcomes(
@@ -426,12 +436,14 @@ function describeOpenOutcomes(
     })
 
     it(`reaches every outcome that this driver controls`, () => {
+      oracleRoute(`case`)
       expect(reachedOutcomes(histories)).toEqual([...reached])
     })
 
     it.each(histories.map((history) => [describeHistory(history), history]))(
       `%s`,
       async (_name, history) => {
+        oracleRoute(`case`)
         expectOpenOutcome(history, await runOpenHistory(history))
       },
       120_000,

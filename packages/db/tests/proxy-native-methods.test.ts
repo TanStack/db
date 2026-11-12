@@ -1,5 +1,5 @@
 /**
- * Ordinary coverage pins for native array and typed-array method tests: every
+ * Ordinary fixed examples for native array and typed-array method tests: every
  * method has call arguments, and the fixed campaign reaches each generator
  * shape. The native-method law is owned by proxy-native-methods-oracle.property.test.ts.
  */

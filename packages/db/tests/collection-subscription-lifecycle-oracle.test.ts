@@ -1,10 +1,9 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
-import { createOracleReach } from './oracle-reach.js'
 import {
   captureMicrotaskErrors,
   createOnDemandCollection,
@@ -12,11 +11,17 @@ import {
 } from './utils.js'
 import {
   oraclePropertyOptions,
-  oracleRandomParameters,
-  oracleReplayTest,
-  readOracleRunConfig,
+  oracleReplayRequested,
+  oracleRoute,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty } from './oracle-property.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import {
   modelSubscriberResumeRetirement,
   modelSubscriberStartCleanup,
@@ -314,12 +319,14 @@ async function runAsyncRestartScenario(
       attempt.deferred.resolve()
     }
     await flushPromises()
-    expect(
-      [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
-    ).toEqual(
-      [...scenario.demands]
-        .sort((a, b) => a.localeCompare(b))
-        .map((id) => ({ id, version: 1 })),
+    oracleAssertion('existing comparison at 322', () =>
+      expect(
+        [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
+      ).toEqual(
+        [...scenario.demands]
+          .sort((a, b) => a.localeCompare(b))
+          .map((id) => ({ id, version: 1 })),
+      ),
     )
 
     for (
@@ -336,13 +343,17 @@ async function runAsyncRestartScenario(
         .sort((a, b) => a.localeCompare(b))
         .map((id) => ({ id, version: retainedVersion }))
       const assertRetainedPrefix = () => {
-        expect(
-          [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
-        ).toEqual(retainedRows)
+        oracleAssertion('existing comparison at 344', () =>
+          expect(
+            [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
+          ).toEqual(retainedRows),
+        )
         // Repeated coherent notifications are legal; each copied snapshot
         // must retain the last complete publication until replacement settles.
         for (const snapshot of publications.slice(prefixStart)) {
-          expect(snapshot).toEqual(retainedRows)
+          oracleAssertion('existing comparison at 350', () =>
+            expect(snapshot).toEqual(retainedRows),
+          )
         }
       }
       assertRetainedPrefix()
@@ -352,32 +363,36 @@ async function runAsyncRestartScenario(
         ({ syncRunGeneration: attemptSyncRunGeneration }) =>
           attemptSyncRunGeneration === discardedSyncRunGeneration,
       )) {
-        expect(attempt.options.signal?.aborted).toBe(true)
+        oracleAssertion('existing comparison at 360', () =>
+          expect(attempt.options.signal?.aborted).toBe(true),
+        )
       }
       collection.startSyncImmediate()
       assertRetainedPrefix()
       await flushPromises()
       assertRetainedPrefix()
       const expectedSyncRunGeneration = restartIndex + 1
-      expect(
-        attempts
-          .filter(
-            ({ syncRunGeneration: attemptSyncRunGeneration }) =>
-              attemptSyncRunGeneration <= expectedSyncRunGeneration,
-          )
-          .map(({ syncRunGeneration: attemptSyncRunGeneration, demand }) => ({
-            syncRunGeneration: attemptSyncRunGeneration,
-            demand,
-          })),
-      ).toEqual(
-        Array.from(
-          { length: expectedSyncRunGeneration + 1 },
-          (_, attemptSyncRunGeneration) =>
-            scenario.demands.map((demand) => ({
+      oracleAssertion('existing comparison at 367', () =>
+        expect(
+          attempts
+            .filter(
+              ({ syncRunGeneration: attemptSyncRunGeneration }) =>
+                attemptSyncRunGeneration <= expectedSyncRunGeneration,
+            )
+            .map(({ syncRunGeneration: attemptSyncRunGeneration, demand }) => ({
               syncRunGeneration: attemptSyncRunGeneration,
               demand,
             })),
-        ).flat(),
+        ).toEqual(
+          Array.from(
+            { length: expectedSyncRunGeneration + 1 },
+            (_, attemptSyncRunGeneration) =>
+              scenario.demands.map((demand) => ({
+                syncRunGeneration: attemptSyncRunGeneration,
+                demand,
+              })),
+          ).flat(),
+        ),
       )
 
       const publishesBeforeLaterRestart =
@@ -398,31 +413,37 @@ async function runAsyncRestartScenario(
         const expectedRows = [...scenario.demands]
           .sort((a, b) => a.localeCompare(b))
           .map((id) => ({ id, version: expectedSyncRunGeneration + 1 }))
-        expect(
-          [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
-        ).toEqual(expectedRows)
-        expect(publications.slice(publicationCount)).toEqual([expectedRows])
+        oracleAssertion('existing comparison at 406', () =>
+          expect(
+            [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
+          ).toEqual(expectedRows),
+        )
+        oracleAssertion('existing comparison at 409', () =>
+          expect(publications.slice(publicationCount)).toEqual([expectedRows]),
+        )
         publishedBeforeRetirement.add(expectedSyncRunGeneration)
       }
     }
 
     const currentSyncRunGeneration = scenario.syncRunOutcomes.length
-    expect(
-      attempts.map(
-        ({ syncRunGeneration: attemptSyncRunGeneration, demand }) => ({
-          syncRunGeneration: attemptSyncRunGeneration,
-          demand,
-        }),
-      ),
-    ).toEqual(
-      Array.from(
-        { length: currentSyncRunGeneration + 1 },
-        (_, attemptSyncRunGeneration) =>
-          scenario.demands.map((demand) => ({
+    oracleAssertion('existing comparison at 415', () =>
+      expect(
+        attempts.map(
+          ({ syncRunGeneration: attemptSyncRunGeneration, demand }) => ({
             syncRunGeneration: attemptSyncRunGeneration,
             demand,
-          })),
-      ).flat(),
+          }),
+        ),
+      ).toEqual(
+        Array.from(
+          { length: currentSyncRunGeneration + 1 },
+          (_, attemptSyncRunGeneration) =>
+            scenario.demands.map((demand) => ({
+              syncRunGeneration: attemptSyncRunGeneration,
+              demand,
+            })),
+        ).flat(),
+      ),
     )
     const obsolete = attempts.filter(
       (attempt) =>
@@ -465,31 +486,45 @@ async function runAsyncRestartScenario(
       const expectedRows = [...scenario.demands]
         .sort((a, b) => a.localeCompare(b))
         .map((id) => ({ id, version: visibleVersion }))
-      expect(
-        [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
-      ).toEqual(expectedRows)
+      oracleAssertion('existing comparison at 473', () =>
+        expect(
+          [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
+        ).toEqual(expectedRows),
+      )
       const expectedFailedAttempts = settledCurrent.filter(
         (attempt) => outcomeFor(attempt) === `reject`,
       )
-      expect(errors.map(({ demand }) => demand)).toEqual(
-        expectedFailedAttempts.map(({ demand }) => demand),
+      oracleAssertion('existing comparison at 479', () =>
+        expect(errors.map(({ demand }) => demand)).toEqual(
+          expectedFailedAttempts.map(({ demand }) => demand),
+        ),
       )
       for (const [index, { error }] of errors.entries()) {
-        expect(error).toBe(failureFor(expectedFailedAttempts[index]!))
+        oracleAssertion('existing comparison at 483', () =>
+          expect(error).toBe(failureFor(expectedFailedAttempts[index]!)),
+        )
       }
-      expect(subscription.lastError).toBe(
-        expectedFailedAttempts.length
-          ? failureFor(expectedFailedAttempts.at(-1)!)
-          : undefined,
+      oracleAssertion('existing comparison at 485', () =>
+        expect(subscription.lastError).toBe(
+          expectedFailedAttempts.length
+            ? failureFor(expectedFailedAttempts.at(-1)!)
+            : undefined,
+        ),
       )
-      expect(subscription.status).toBe(
-        currentComplete ? `ready` : `loadingSubset`,
+      oracleAssertion('existing comparison at 490', () =>
+        expect(subscription.status).toBe(
+          currentComplete ? `ready` : `loadingSubset`,
+        ),
       )
-      expect(publications.slice(publicationTraceStart)).toEqual(
-        currentComplete && currentSucceeded ? [expectedRows] : [],
+      oracleAssertion('existing comparison at 493', () =>
+        expect(publications.slice(publicationTraceStart)).toEqual(
+          currentComplete && currentSucceeded ? [expectedRows] : [],
+        ),
       )
-      expect(statuses.slice(statusTraceStart)).toEqual(
-        currentComplete ? [`ready`] : [],
+      oracleAssertion('existing comparison at 496', () =>
+        expect(statuses.slice(statusTraceStart)).toEqual(
+          currentComplete ? [`ready`] : [],
+        ),
       )
     }
 
@@ -506,33 +541,49 @@ async function runAsyncRestartScenario(
     const expectedVersion = currentSucceeded
       ? currentSyncRunGeneration + 1
       : retainedVersion
-    expect(
-      [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
-    ).toEqual(
-      [...scenario.demands]
-        .sort((a, b) => a.localeCompare(b))
-        .map((id) => ({ id, version: expectedVersion })),
+    oracleAssertion('existing comparison at 514', () =>
+      expect(
+        [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
+      ).toEqual(
+        [...scenario.demands]
+          .sort((a, b) => a.localeCompare(b))
+          .map((id) => ({ id, version: expectedVersion })),
+      ),
     )
     if (currentSucceeded) {
-      expect(errors).toEqual([])
-      expect(subscription.lastError).toBeUndefined()
+      oracleAssertion('existing comparison at 522', () =>
+        expect(errors).toEqual([]),
+      )
+      oracleAssertion('existing comparison at 523', () =>
+        expect(subscription.lastError).toBeUndefined(),
+      )
     } else {
       const expectedFailedAttempts = settledCurrent.filter(
         (attempt) => outcomeFor(attempt) === `reject`,
       )
-      expect(errors.map(({ demand }) => demand)).toEqual(
-        expectedFailedAttempts.map(({ demand }) => demand),
+      oracleAssertion('existing comparison at 528', () =>
+        expect(errors.map(({ demand }) => demand)).toEqual(
+          expectedFailedAttempts.map(({ demand }) => demand),
+        ),
       )
       for (const [index, { error }] of errors.entries()) {
-        expect(error).toBe(failureFor(expectedFailedAttempts[index]!))
+        oracleAssertion('existing comparison at 532', () =>
+          expect(error).toBe(failureFor(expectedFailedAttempts[index]!)),
+        )
       }
-      expect(subscription.lastError).toBe(
-        failureFor(expectedFailedAttempts.at(-1)!),
+      oracleAssertion('existing comparison at 534', () =>
+        expect(subscription.lastError).toBe(
+          failureFor(expectedFailedAttempts.at(-1)!),
+        ),
       )
     }
-    expect(subscription.status).toBe(`ready`)
+    oracleAssertion('existing comparison at 538', () =>
+      expect(subscription.status).toBe(`ready`),
+    )
     for (const attempt of current) {
-      expect(attempt.options.signal?.aborted).toBe(false)
+      oracleAssertion('existing comparison at 540', () =>
+        expect(attempt.options.signal?.aborted).toBe(false),
+      )
     }
 
     const finalScopes = settlements.map(
@@ -559,14 +610,18 @@ async function runAsyncRestartScenario(
           attemptSyncRunGeneration === currentSyncRunGeneration,
       )
       .map(({ outcome }) => outcome)
-    expect(new Set(settlements.map(({ attempt }) => attempt)).size).toBe(
-      settlements.length,
+    oracleAssertion('existing comparison at 567', () =>
+      expect(new Set(settlements.map(({ attempt }) => attempt)).size).toBe(
+        settlements.length,
+      ),
     )
-    expect(settlements).toHaveLength(
-      attempts.filter(
-        ({ syncRunGeneration: attemptSyncRunGeneration }) =>
-          attemptSyncRunGeneration > 0,
-      ).length,
+    oracleAssertion('existing comparison at 570', () =>
+      expect(settlements).toHaveLength(
+        attempts.filter(
+          ({ syncRunGeneration: attemptSyncRunGeneration }) =>
+            attemptSyncRunGeneration > 0,
+        ).length,
+      ),
     )
     const reach = new Set([
       `demands:${new Set(attempts.map(({ demand }) => demand)).size}`,
@@ -592,13 +647,17 @@ async function runAsyncRestartScenario(
 
     subscription.unsubscribe()
     for (const attempt of current) {
-      expect(attempt.options.signal?.aborted).toBe(true)
+      oracleAssertion('existing comparison at 600', () =>
+        expect(attempt.options.signal?.aborted).toBe(true),
+      )
     }
-    expect(unloads).toEqual(
-      scenario.demands.map((demand) => ({
-        syncRunGeneration: currentSyncRunGeneration,
-        demand,
-      })),
+    oracleAssertion('existing comparison at 602', () =>
+      expect(unloads).toEqual(
+        scenario.demands.map((demand) => ({
+          syncRunGeneration: currentSyncRunGeneration,
+          demand,
+        })),
+      ),
     )
     reached = reach
   } catch (error) {
@@ -782,9 +841,8 @@ declareOracle({
  * physical acquisition and its lease exist only if the callback returns.
  */
 describe(`CollectionSubscription demand lifecycle oracle`, () => {
-  const { multiplier, ...replay } = readOracleRunConfig()
-
   it(`executes every required async restart regime`, async () => {
+    oracleRoute(`case`)
     const reach = new Set<string>()
     for (const scenario of asyncRestartCoverageScenarios) {
       for (const label of await runAsyncRestartScenario(scenario)) {
@@ -806,44 +864,65 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       `order:interleaved`,
       `real-interleaving:true`,
     ]
-    expect(required.filter((label) => !reach.has(label))).toEqual([])
+    oracleAssertion('existing comparison at 818', () =>
+      expect(required.filter((label) => !reach.has(label))).toEqual([]),
+    )
   })
 
   it(`covers every finite start, failure-delivery, and release cell`, () => {
-    expect(
-      new Set(
-        startScenarios.map(({ outcome, reentry }) => `${outcome}:${reentry}`),
-      ),
-    ).toHaveLength(startOutcomes.length * startReentries.length)
-    expect(
-      new Set(
-        failureScenarios.map(({ outcome, reentry }) => `${outcome}:${reentry}`),
-      ),
-    ).toHaveLength(2 * startReentries.length)
-    expect(
-      new Set(
-        releaseScenarios.map(({ outcome, reentry }) => `${outcome}:${reentry}`),
-      ),
-    ).toHaveLength(2 * 4)
-    expect(
-      new Set(
-        restartScenarios.map(({ outcome, reentry }) => `${outcome}:${reentry}`),
-      ),
-    ).toHaveLength(4 * 5)
+    oracleRoute(`case`)
+    oracleAssertion('existing comparison at 823', () =>
+      expect(
+        new Set(
+          startScenarios.map(({ outcome, reentry }) => `${outcome}:${reentry}`),
+        ),
+      ).toHaveLength(startOutcomes.length * startReentries.length),
+    )
+    oracleAssertion('existing comparison at 828', () =>
+      expect(
+        new Set(
+          failureScenarios.map(
+            ({ outcome, reentry }) => `${outcome}:${reentry}`,
+          ),
+        ),
+      ).toHaveLength(2 * startReentries.length),
+    )
+    oracleAssertion('existing comparison at 833', () =>
+      expect(
+        new Set(
+          releaseScenarios.map(
+            ({ outcome, reentry }) => `${outcome}:${reentry}`,
+          ),
+        ),
+      ).toHaveLength(2 * 4),
+    )
+    oracleAssertion('existing comparison at 838', () =>
+      expect(
+        new Set(
+          restartScenarios.map(
+            ({ outcome, reentry }) => `${outcome}:${reentry}`,
+          ),
+        ),
+      ).toHaveLength(4 * 5),
+    )
   })
 
   it(`accounts for every acquisition phase and entry pair`, () => {
+    oracleRoute(`case`)
     const allCells = new Set<AcquisitionCell>(
       acquisitionPhases.flatMap((phase) =>
         acquisitionEntries.map((entry) => `${phase}:${entry}` as const),
       ),
     )
-    expect(
-      new Set([...legalAcquisitionCells, ...excludedAcquisitionCells.keys()]),
-    ).toEqual(allCells)
+    oracleAssertion('existing comparison at 852', () =>
+      expect(
+        new Set([...legalAcquisitionCells, ...excludedAcquisitionCells.keys()]),
+      ).toEqual(allCells),
+    )
   })
 
   it(`accounts for every acquisition lifecycle state and interaction cause`, () => {
+    oracleRoute(`case`)
     const allCells = new Set<AcquisitionInteractionCell>(
       acquisitionLifecycleStates.flatMap((state) =>
         acquisitionInteractionCauses.map(
@@ -851,8 +930,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         ),
       ),
     )
-    expect(new Set(Object.keys(acquisitionInteractionCellDefinitions))).toEqual(
-      allCells,
+    oracleAssertion('existing comparison at 866', () =>
+      expect(
+        new Set(Object.keys(acquisitionInteractionCellDefinitions)),
+      ).toEqual(allCells),
     )
   })
 
@@ -865,6 +946,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )(
     `retires startup at $entry with nested restart=$restart`,
     async ({ entry, restart }) => {
+      oracleRoute(`case`)
       const failure = new Error(`obsolete startup failed`)
       const cleanups: Array<number> = []
       const loads: Array<number> = []
@@ -921,7 +1003,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
               )
         retire = true
         if (entry === `adapter-throw` || entry === `ready-effect-throw`) {
-          expect(() => collection.startSyncImmediate()).toThrow(failure)
+          oracleAssertion('existing comparison at 937', () =>
+            expect(() => collection.startSyncImmediate()).toThrow(failure),
+          )
         } else {
           collection.startSyncImmediate()
         }
@@ -933,31 +1017,49 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           returnsObsoleteCleanup,
         } = startupRetirementModel(entry, restart)
         if (restart && cleanupStartedDuringSyncEntry) {
-          expect(nestedRestartError).toMatchObject({
-            name: `CollectionStateError`,
-            message: expect.stringContaining(`after cleanup() completes`),
-          })
+          oracleAssertion('existing comparison at 949', () =>
+            expect(nestedRestartError).toMatchObject({
+              name: `CollectionStateError`,
+              message: expect.stringContaining(`after cleanup() completes`),
+            }),
+          )
         } else {
-          expect(nestedRestartError).toBeUndefined()
+          oracleAssertion('existing comparison at 954', () =>
+            expect(nestedRestartError).toBeUndefined(),
+          )
         }
-        expect(collection.status).toBe(
-          restartSucceeded ? `ready` : `cleaned-up`,
+        oracleAssertion('existing comparison at 956', () =>
+          expect(collection.status).toBe(
+            restartSucceeded ? `ready` : `cleaned-up`,
+          ),
         )
-        expect(cleanups).toEqual(returnsObsoleteCleanup ? [0, 1] : [0])
-        expect(syncRunGeneration).toBe(
-          entry === `loading` ? (restart ? 1 : 0) : 1,
+        oracleAssertion('existing comparison at 959', () =>
+          expect(cleanups).toEqual(returnsObsoleteCleanup ? [0, 1] : [0]),
+        )
+        oracleAssertion('existing comparison at 960', () =>
+          expect(syncRunGeneration).toBe(
+            entry === `loading` ? (restart ? 1 : 0) : 1,
+          ),
         )
 
         if (restartSucceeded) {
           subscription.requestSnapshot({
             where: new Func(`eq`, [new PropRef([`id`]), new Value(`row`)]),
           })
-          expect(loads).toEqual([syncRunGeneration])
+          oracleAssertion('existing comparison at 968', () =>
+            expect(loads).toEqual([syncRunGeneration]),
+          )
           subscription.unsubscribe()
-          expect(unloads).toEqual([syncRunGeneration])
+          oracleAssertion('existing comparison at 970', () =>
+            expect(unloads).toEqual([syncRunGeneration]),
+          )
         } else {
-          expect(loads).toEqual([])
-          expect(unloads).toEqual([])
+          oracleAssertion('existing comparison at 972', () =>
+            expect(loads).toEqual([]),
+          )
+          oracleAssertion('existing comparison at 973', () =>
+            expect(unloads).toEqual([]),
+          )
         }
       } finally {
         removeListener()
@@ -1001,6 +1103,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )(
     `observes unavailable demand synchronously: $entry / $unavailable / $outcome / $phase`,
     async ({ outcome, phase, entry }) => {
+      oracleRoute(`case`)
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       const transport = createDeferred<void>()
       const failure = new Error(`recovery acquisition failed`)
@@ -1084,11 +1187,19 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           })
         }
         // Production callers copy the result as soon as requestSnapshot returns.
-        expect(callbacks).toBe(1)
-        expect(result).toBeInstanceOf(Promise)
+        oracleAssertion('existing comparison at 1101', () =>
+          expect(callbacks).toBe(1),
+        )
+        oracleAssertion('existing comparison at 1102', () =>
+          expect(result).toBeInstanceOf(Promise),
+        )
         await flushPromises()
-        expect(settlements).toEqual([])
-        expect(loads).toEqual([])
+        oracleAssertion('existing comparison at 1104', () =>
+          expect(settlements).toEqual([]),
+        )
+        oracleAssertion('existing comparison at 1105', () =>
+          expect(loads).toEqual([]),
+        )
         const recover = () => {
           collection.startSyncImmediate()
           operations.markReady()
@@ -1096,10 +1207,16 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         if (phase === `during`) {
           recover()
           await flushPromises()
-          expect(loads).toHaveLength(1)
+          oracleAssertion('existing comparison at 1113', () =>
+            expect(loads).toHaveLength(1),
+          )
           if (outcome !== `return` && outcome !== `throw`) {
-            expect(settlements).toEqual([])
-            expect([...rows.values()]).toEqual([])
+            oracleAssertion('existing comparison at 1115', () =>
+              expect(settlements).toEqual([]),
+            )
+            oracleAssertion('existing comparison at 1116', () =>
+              expect([...rows.values()]).toEqual([]),
+            )
           }
         }
         if (outcome === `release`) release!()
@@ -1110,40 +1227,66 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         else if (outcome === `resolve`) transport.resolve()
         await flushPromises()
         if (outcome === `return` || outcome === `resolve`) {
-          expect(settlements).toEqual([`success`])
-          expect(visibleOnSuccess).toEqual([[`row`]])
-          expect([...rows.values()].map(({ id }) => id)).toEqual([`row`])
+          oracleAssertion('existing comparison at 1127', () =>
+            expect(settlements).toEqual([`success`]),
+          )
+          oracleAssertion('existing comparison at 1128', () =>
+            expect(visibleOnSuccess).toEqual([[`row`]]),
+          )
+          oracleAssertion('existing comparison at 1129', () =>
+            expect([...rows.values()].map(({ id }) => id)).toEqual([`row`]),
+          )
         } else if (outcome === `throw` || outcome === `reject`) {
-          expect(settlements).toHaveLength(1)
-          expect(settlements[0]).toBe(failure)
-          expect([...rows.values()]).toEqual([])
+          oracleAssertion('existing comparison at 1131', () =>
+            expect(settlements).toHaveLength(1),
+          )
+          oracleAssertion('existing comparison at 1132', () =>
+            expect(settlements[0]).toBe(failure),
+          )
+          oracleAssertion('existing comparison at 1133', () =>
+            expect([...rows.values()]).toEqual([]),
+          )
         } else {
-          expect(settlements).toEqual([
-            expect.objectContaining({ name: `AbortError` }),
-          ])
-          expect(unloads).toEqual(
-            expectedUnloadsAfterUnavailableWait(phase, outcome, loads),
+          oracleAssertion('existing comparison at 1135', () =>
+            expect(settlements).toEqual([
+              expect.objectContaining({ name: `AbortError` }),
+            ]),
+          )
+          oracleAssertion('existing comparison at 1138', () =>
+            expect(unloads).toEqual(
+              expectedUnloadsAfterUnavailableWait(phase, outcome, loads),
+            ),
           )
           if (phase === `before` && outcome !== `cleanup`) {
             recover()
             await flushPromises()
-            expect(loads).toEqual([])
+            oracleAssertion('existing comparison at 1144', () =>
+              expect(loads).toEqual([]),
+            )
           }
           if (outcome === `cleanup`) {
             // Cleanup ends this wait, not the surviving subscription's demand.
             collection.startSyncImmediate()
             operations.markReady()
             await flushPromises()
-            expect(loads).toHaveLength(expectedLoadsAfterCleanupEndsWait(phase))
+            oracleAssertion('existing comparison at 1151', () =>
+              expect(loads).toHaveLength(
+                expectedLoadsAfterCleanupEndsWait(phase),
+              ),
+            )
           }
           // Non-cooperative late settlement cannot rewrite the observed outcome.
           transport.resolve()
           await flushPromises()
-          expect(settlements).toEqual([
-            expect.objectContaining({ name: `AbortError` }),
-          ])
+          oracleAssertion('existing comparison at 1156', () =>
+            expect(settlements).toEqual([
+              expect.objectContaining({ name: `AbortError` }),
+            ]),
+          )
         }
-        expect(callbacks).toBe(1)
+        oracleAssertion('existing comparison at 1160', () =>
+          expect(callbacks).toBe(1),
+        )
       } finally {
         transport.resolve()
         subscription.unsubscribe()
@@ -1162,6 +1305,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )(
     `cancels queued acquisition during $phase via $action`,
     async ({ phase, action }) => {
+      oracleRoute(`case`)
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
@@ -1183,7 +1327,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           },
         },
       })
-      expect(collection._deferSyncStart()).toBe(true)
+      oracleAssertion('existing comparison at 1201', () =>
+        expect(collection._deferSyncStart()).toBe(true),
+      )
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
         deferAcquisition: true,
@@ -1205,11 +1351,23 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         subscription.resumeDeferredAcquisition()
         await flushPromises()
 
-        expect(collection.status).toBe(expectedStatusAfterQueuedCancel(action))
-        expect(loads).toHaveLength(0)
-        expect(unloads).toHaveLength(0)
-        expect(observed).toHaveLength(1)
-        await expect(observed[0]).rejects.toMatchObject({ name: `AbortError` })
+        oracleAssertion('existing comparison at 1223', () =>
+          expect(collection.status).toBe(
+            expectedStatusAfterQueuedCancel(action),
+          ),
+        )
+        oracleAssertion('existing comparison at 1224', () =>
+          expect(loads).toHaveLength(0),
+        )
+        oracleAssertion('existing comparison at 1225', () =>
+          expect(unloads).toHaveLength(0),
+        )
+        oracleAssertion('existing comparison at 1226', () =>
+          expect(observed).toHaveLength(1),
+        )
+        await oracleAssertion('existing comparison at 1227', () =>
+          expect(observed[0]).rejects.toMatchObject({ name: `AbortError` }),
+        )
       } finally {
         removeReadyListener()
         subscription.unsubscribe()
@@ -1225,6 +1383,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )(
     `retires only the acquired lease for aborted replay with unload=$outcome, releaseSelf=$releaseSelf`,
     async ({ outcome, releaseSelf }) => {
+      oracleRoute(`case`)
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       const controller = new AbortController()
       const failure = new Error(`release failed`)
@@ -1272,26 +1431,51 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         if (receipt !== true) await receipt
         await flushPromises()
 
-        expect(loads).toHaveLength(1)
-        expect(unloads).toHaveLength(1)
-        expect(unloads[0]).toBe(loads[0])
-        expect(loads[0]!.signal!.aborted).toBe(true)
-        expect(subscription.status).toBe(`ready`)
+        oracleAssertion('existing comparison at 1291', () =>
+          expect(loads).toHaveLength(1),
+        )
+        oracleAssertion('existing comparison at 1292', () =>
+          expect(unloads).toHaveLength(1),
+        )
+        oracleAssertion('existing comparison at 1293', () =>
+          expect(unloads[0]).toBe(loads[0]),
+        )
+        oracleAssertion('existing comparison at 1294', () =>
+          expect(loads[0]!.signal!.aborted).toBe(true),
+        )
+        oracleAssertion('existing comparison at 1295', () =>
+          expect(subscription.status).toBe(`ready`),
+        )
         // The release error is reported uncaught, not as a load error.
-        expect(errors).toEqual([])
-        expect(uncaught.errors).toEqual(
-          expectedUncaughtReleaseErrors(outcome, failure),
+        oracleAssertion('existing comparison at 1297', () =>
+          expect(errors).toEqual([]),
+        )
+        oracleAssertion('existing comparison at 1298', () =>
+          expect(uncaught.errors).toEqual(
+            expectedUncaughtReleaseErrors(outcome, failure),
+          ),
         )
 
         releaseOwner()
-        expect(unloads).toHaveLength(1)
+        oracleAssertion('existing comparison at 1303', () =>
+          expect(unloads).toHaveLength(1),
+        )
         subscription.unsubscribe()
-        expect(unloads).toHaveLength(1)
-        for (const options of unloads) expect(options).toBe(loads[0])
-        expect(loads).toHaveLength(1)
+        oracleAssertion('existing comparison at 1305', () =>
+          expect(unloads).toHaveLength(1),
+        )
+        for (const options of unloads)
+          oracleAssertion('existing comparison at 1306', () =>
+            expect(options).toBe(loads[0]),
+          )
+        oracleAssertion('existing comparison at 1307', () =>
+          expect(loads).toHaveLength(1),
+        )
         await Promise.resolve()
-        expect(uncaught.errors).toEqual(
-          expectedUncaughtReleaseErrors(outcome, failure),
+        oracleAssertion('existing comparison at 1309', () =>
+          expect(uncaught.errors).toEqual(
+            expectedUncaughtReleaseErrors(outcome, failure),
+          ),
         )
       } finally {
         uncaught.restore()
@@ -1308,6 +1492,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )(
     `attempts release once across $reentry reentry with $failures configured failures`,
     async ({ reentry, failures }) => {
+      oracleRoute(`case`)
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       const failure = new Error(`physical release failed`)
       const loads: Array<LoadSubsetOptions> = []
@@ -1359,26 +1544,49 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         } catch (error) {
           releaseError = error
         }
-        expect(releaseError).toBe(undefined)
+        oracleAssertion('existing comparison at 1379', () =>
+          expect(releaseError).toBe(undefined),
+        )
         // Adapter reentry sees a retired acquisition, including after throw.
         // A release error reaches no error listener, so that listener cannot
         // reenter teardown.
-        expect(unloads).toHaveLength(1)
-        // Only the adapter path reentered and unsubscribed.
-        expect(collection.subscriberCount).toBe(
-          expectedSubscriberCountAfterRelease(reentry),
+        oracleAssertion('existing comparison at 1383', () =>
+          expect(unloads).toHaveLength(1),
         )
-        expect(errors).toEqual([])
-        expect(nestedFailures).toEqual([])
-        expect(() => subscription.unsubscribe()).not.toThrow()
-        expect(unloads).toHaveLength(1)
+        // Only the adapter path reentered and unsubscribed.
+        oracleAssertion('existing comparison at 1385', () =>
+          expect(collection.subscriberCount).toBe(
+            expectedSubscriberCountAfterRelease(reentry),
+          ),
+        )
+        oracleAssertion('existing comparison at 1388', () =>
+          expect(errors).toEqual([]),
+        )
+        oracleAssertion('existing comparison at 1389', () =>
+          expect(nestedFailures).toEqual([]),
+        )
+        oracleAssertion('existing comparison at 1390', () =>
+          expect(() => subscription.unsubscribe()).not.toThrow(),
+        )
+        oracleAssertion('existing comparison at 1391', () =>
+          expect(unloads).toHaveLength(1),
+        )
         subscription.unsubscribe()
-        expect(unloads).toHaveLength(1)
-        expect(loads).toHaveLength(1)
-        for (const options of unloads) expect(options).toBe(loads[0])
+        oracleAssertion('existing comparison at 1393', () =>
+          expect(unloads).toHaveLength(1),
+        )
+        oracleAssertion('existing comparison at 1394', () =>
+          expect(loads).toHaveLength(1),
+        )
+        for (const options of unloads)
+          oracleAssertion('existing comparison at 1395', () =>
+            expect(options).toBe(loads[0]),
+          )
         await Promise.resolve()
         // One attempt, one report, whatever the adapter would throw later.
-        expect(uncaught.errors).toEqual([failure])
+        oracleAssertion('existing comparison at 1398', () =>
+          expect(uncaught.errors).toEqual([failure]),
+        )
       } finally {
         uncaught.restore()
         await collection.cleanup()
@@ -1390,6 +1598,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   it.each(threeGenerationScenarios)(
     `fences three sync-run generations for $obsoleteOutcome/$currentOutcome settled $settlementOrder`,
     async ({ obsoleteOutcome, currentOutcome, settlementOrder }) => {
+      oracleRoute(`case`)
       type Row = { id: string; version: number }
       const obsolete = createDeferred<void>()
       const current = createDeferred<void>()
@@ -1462,7 +1671,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       )
       subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
       subscription.requestSnapshot()
-      expect([...visible.values()]).toEqual([{ id: `row`, version: 1 }])
+      oracleAssertion('existing comparison at 1483', () =>
+        expect([...visible.values()]).toEqual([{ id: `row`, version: 1 }]),
+      )
 
       await collection.cleanup()
       collection.startSyncImmediate()
@@ -1470,7 +1681,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       await collection.cleanup()
       collection.startSyncImmediate()
       await flushPromises()
-      expect(subscription.status).toBe(`loadingSubset`)
+      oracleAssertion('existing comparison at 1491', () =>
+        expect(subscription.status).toBe(`loadingSubset`),
+      )
 
       const settleObsolete = () =>
         obsoleteOutcome === `resolve`
@@ -1483,7 +1696,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       if (settlementOrder === `obsolete-first`) {
         settleObsolete()
         await flushPromises()
-        expect(subscription.status).toBe(`loadingSubset`)
+        oracleAssertion('existing comparison at 1504', () =>
+          expect(subscription.status).toBe(`loadingSubset`),
+        )
         settleCurrent()
       } else {
         settleCurrent()
@@ -1496,46 +1711,59 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         currentOutcome,
         currentFailure,
       )
-      expect([...visible.values()]).toEqual([
-        { id: `row`, version: settled.version },
-      ])
-      expect(errors).toEqual(settled.errors)
-      expect(subscription.lastError).toBe(settled.lastError)
-      expect(subscription.status).toBe(`ready`)
+      oracleAssertion('existing comparison at 1517', () =>
+        expect([...visible.values()]).toEqual([
+          { id: `row`, version: settled.version },
+        ]),
+      )
+      oracleAssertion('existing comparison at 1520', () =>
+        expect(errors).toEqual(settled.errors),
+      )
+      oracleAssertion('existing comparison at 1521', () =>
+        expect(subscription.lastError).toBe(settled.lastError),
+      )
+      oracleAssertion('existing comparison at 1522', () =>
+        expect(subscription.status).toBe(`ready`),
+      )
 
       subscription.unsubscribe()
-      expect(unloadSyncRunGenerations).toEqual([2])
+      oracleAssertion('existing comparison at 1525', () =>
+        expect(unloadSyncRunGenerations).toEqual([2]),
+      )
       await collection.cleanup()
     },
   )
 
-  const fixedCampaign = oracleReplayTest(fcTest)
-
-  fixedCampaign.prop([asyncRestartScenarioArbitrary], {
-    numRuns: 30 * multiplier,
-    seed: 1_657_002,
-  })(
-    `fences async demand settlements across sync-run generations for a fixed seed`,
-    async (scenario) => {
-      await runAsyncRestartScenario(scenario)
+  oracleProperty({
+    id: `subscription-lifecycle.async-restart`,
+    law: {
+      statement: `Demand settlements are fenced by the sync run that owns their physical acquisition.`,
+      authority: `Collection cleanup/restart and logical demand ownership in the glossary; the lifecycle grammar's existing model`,
+      limits: `The existing bounded async restart regimes, status, errors, rows, acquisition, and release checkpoints.`,
     },
-    120_000,
-  )
-
-  fcTest.prop(
-    [asyncRestartScenarioArbitrary],
-    oracleRandomParameters(
-      30 * multiplier,
-      replay,
-      `subscription-lifecycle.async-restart`,
-    ),
-  )(
-    `fences async demand settlements across sync-run generations for a random or replayed seed`,
-    async (scenario) => {
-      await runAsyncRestartScenario(scenario)
+    // What this oracle owns: the gap report judges the demand lifecycle of a
+    // subscription in subscription.ts, its startup, cleanup, restart, and
+    // release, by this file's tests.
+    owns: [`src/collection/subscription.ts`],
+    histories: {
+      arbitrary: asyncRestartScenarioArbitrary,
+      runs: 30,
+      fixedSeeds: [1_657_002],
     },
-    120_000,
-  )
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `sync-run demand settlement`,
+        plan,
+        observe,
+        async () => {
+          await runAsyncRestartScenario(plan.history)
+        },
+      ),
+    check: forwardAssertionJudgment,
+    timeout: 120_000,
+  })
 })
 
 /**
@@ -1554,116 +1782,175 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
  * not promise recovery from arbitrary programming errors or implicit restart.
  */
 describe(`resumption notification error and surviving demand`, () => {
-  for (const campaign of [`fixed`, `random`] as const) {
-    it(`acquires retained demand after replacement readiness (${campaign})`, async () => {
-      const reach = createOracleReach(`resume-notification-error`, [
-        `throwing-notification`,
-        `retained-owner`,
-        `held-cleanup`,
-        `replacement-ready`,
-      ])
-      await fc.assert(
-        fc.asyncProperty(
-          fc.record({
-            pending: fc.boolean(),
-            throws: fc.boolean(),
-            demands: fc.integer({ min: 1, max: 3 }),
-          }),
-          async (history) => {
-            reach.beginHistory()
-            const gate = createDeferred<void>()
-            const failure = new Error(`first-demand notification`)
-            let loads = 0
-            const source = createCollection<{ id: string }>({
-              getKey: (row) => row.id,
-              gcTime: 0,
-              syncMode: `on-demand`,
-              sync: {
-                sync: ({ markReady }) => {
-                  markReady()
-                  return {
-                    cleanup: () => (history.pending ? gate.promise : undefined),
-                    loadSubset: () => {
-                      loads++
-                      return true
-                    },
-                  }
-                },
-              },
-            })
-            source.startSyncImmediate()
-            const subscription = source.subscribeChanges(() => {}, {
-              deferAcquisition: true,
-            })
-            for (let i = 0; i < history.demands; i++)
-              subscription.requestSnapshot({
-                where: new Func(`eq`, [
-                  new PropRef([`id`]),
-                  new Value(String(i)),
-                ]),
-              })
-            // Drain the initial run's notifications while demand still defers.
-            await flushPromises()
-            expect(loads).toBe(0)
-            let cleanup: Promise<void> | undefined
-            let notifications = 0
-            const off = source._onFirstSubscriberOrPreload(() => {
-              notifications++
-              if (notifications === 1) {
-                cleanup = source.cleanup()
-                if (!history.pending) source.startSyncImmediate()
-              } else if (history.throws) throw failure
-            })
-            try {
-              let result: { threw: boolean; error?: unknown } = { threw: false }
-              try {
-                subscription.resumeDeferredAcquisition()
-              } catch (error) {
-                result = { threw: true, error }
-              }
-              expect(notifications).toBe(2)
-              expect(result.threw).toBe(history.throws)
-              if (history.throws) {
-                expect(result.error).toBe(failure)
-                reach.reach(`throwing-notification`)
-              }
-              expect(subscription.isDeferringAcquisition()).toBe(false)
-              expect(source.subscriberCount).toBe(1)
-              reach.reach(`retained-owner`)
-              if (history.pending) {
-                expect(source.status).toBe(`ready`)
-                reach.reach(`held-cleanup`)
-              }
-              gate.resolve()
-              await cleanup
-              if (history.pending) source.startSyncImmediate()
-              await flushPromises()
-              reach.reach(`replacement-ready`)
-              expect(source.status).toBe(`ready`)
-              expect(loads).toBe(history.demands)
-              expect(subscription.status).toBe(`ready`)
-            } finally {
-              off()
-              subscription.unsubscribe()
-              gate.resolve()
-              await source.cleanup()
-            }
-          },
-        ),
-        campaign === `fixed`
-          ? { ...oraclePropertyOptions(60), seed: 2229 }
-          : oraclePropertyOptions(
-              60,
-              `subscription-lifecycle.notification-error`,
-            ),
-      )
-      reach.assertReached()
+  const states = [
+    `throwing-notification`,
+    `retained-owner`,
+    `held-cleanup`,
+    `replacement-ready`,
+  ] as const
+  // Keep the original minimum of one per state in each full campaign. The
+  // framework also reports reach, while its determinism test is not a campaign.
+  type NotificationState = (typeof states)[number]
+  let notificationCounts = new Map<NotificationState, number>(
+    states.map((state) => [state, 0]),
+  )
+  let enteredThisHistory = new Set<NotificationState>()
+  beforeEach(() => {
+    notificationCounts = new Map(states.map((state) => [state, 0]))
+    enteredThisHistory = new Set()
+  })
+  afterEach(({ task }) => {
+    if (task.name === `fixed seed 2229` || task.name === `random seed`) {
+      if (!oracleReplayRequested()) {
+        const missing = states.filter(
+          (state) => notificationCounts.get(state)! < 1,
+        )
+        if (missing.length > 0)
+          throw new Error(
+            `resume-notification-error: fewer than one history entered ${missing.join(`, `)}`,
+          )
+      }
       console.info(
-        `resume-notification-error ${campaign}`,
-        Object.fromEntries(reach.counts()),
+        `resume-notification-error ${task.name}`,
+        Object.fromEntries(notificationCounts),
       )
+    }
+  })
+  const notificationHistoryArbitrary = fc.record({
+    pending: fc.boolean(),
+    throws: fc.boolean(),
+    demands: fc.integer({ min: 1, max: 3 }),
+  })
+  async function runNotificationErrorHistory(
+    history: { pending: boolean; throws: boolean; demands: number },
+    entered: (state: (typeof states)[number]) => void,
+  ): Promise<void> {
+    enteredThisHistory = new Set()
+    const gate = createDeferred<void>()
+    const failure = new Error(`first-demand notification`)
+    let loads = 0
+    const source = createCollection<{ id: string }>({
+      getKey: (row) => row.id,
+      gcTime: 0,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            cleanup: () => (history.pending ? gate.promise : undefined),
+            loadSubset: () => {
+              loads++
+              return true
+            },
+          }
+        },
+      },
     })
+    source.startSyncImmediate()
+    const subscription = source.subscribeChanges(() => {}, {
+      deferAcquisition: true,
+    })
+    for (let i = 0; i < history.demands; i++)
+      subscription.requestSnapshot({
+        where: new Func(`eq`, [new PropRef([`id`]), new Value(String(i))]),
+      })
+    // Drain the initial run's notifications while demand still defers.
+    await flushPromises()
+    oracleAssertion('existing comparison at 1617', () => expect(loads).toBe(0))
+    let cleanup: Promise<void> | undefined
+    let notifications = 0
+    const off = source._onFirstSubscriberOrPreload(() => {
+      notifications++
+      if (notifications === 1) {
+        cleanup = source.cleanup()
+        if (!history.pending) source.startSyncImmediate()
+      } else if (history.throws) throw failure
+    })
+    try {
+      let result: { threw: boolean; error?: unknown } = { threw: false }
+      try {
+        subscription.resumeDeferredAcquisition()
+      } catch (error) {
+        result = { threw: true, error }
+      }
+      oracleAssertion('existing comparison at 1634', () =>
+        expect(notifications).toBe(2),
+      )
+      oracleAssertion('existing comparison at 1635', () =>
+        expect(result.threw).toBe(history.throws),
+      )
+      if (history.throws) {
+        oracleAssertion('existing comparison at 1637', () =>
+          expect(result.error).toBe(failure),
+        )
+        entered(`throwing-notification`)
+      }
+      oracleAssertion('existing comparison at 1640', () =>
+        expect(subscription.isDeferringAcquisition()).toBe(false),
+      )
+      oracleAssertion('existing comparison at 1641', () =>
+        expect(source.subscriberCount).toBe(1),
+      )
+      entered(`retained-owner`)
+      if (history.pending) {
+        oracleAssertion('existing comparison at 1644', () =>
+          expect(source.status).toBe(`ready`),
+        )
+        entered(`held-cleanup`)
+      }
+      gate.resolve()
+      await cleanup
+      if (history.pending) source.startSyncImmediate()
+      await flushPromises()
+      entered(`replacement-ready`)
+      oracleAssertion('existing comparison at 1652', () =>
+        expect(source.status).toBe(`ready`),
+      )
+      oracleAssertion('existing comparison at 1653', () =>
+        expect(loads).toBe(history.demands),
+      )
+      oracleAssertion('existing comparison at 1654', () =>
+        expect(subscription.status).toBe(`ready`),
+      )
+    } finally {
+      off()
+      subscription.unsubscribe()
+      gate.resolve()
+      await source.cleanup()
+    }
   }
+  oracleProperty({
+    id: `subscription-lifecycle.notification-error`,
+    law: {
+      statement: `Resumption retains its logical demands when first-demand notification throws after ownership transfer; replacement readiness acquires them.`,
+      authority: `Collection cleanup/restart and logical demand ownership in the glossary, as stated above`,
+      limits: `The existing pending-cleanup, notification-failure, and one-to-three-demand grammar; no arbitrary programming-error recovery or implicit restart.`,
+    },
+    owns: [`src/collection/subscription.ts`],
+    histories: {
+      arbitrary: notificationHistoryArbitrary,
+      runs: 60,
+      fixedSeeds: [2229],
+      measured: states,
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `resumption notification ownership`,
+        plan,
+        observe,
+        () =>
+          runNotificationErrorHistory(plan.history, (state) => {
+            if (!enteredThisHistory.has(state)) {
+              enteredThisHistory.add(state)
+              notificationCounts.set(state, notificationCounts.get(state)! + 1)
+            }
+            observe(`reach`, state)
+          }),
+      ),
+    check: forwardAssertionJudgment,
+  })
   // The grammar's independent judgment treats cleanup as retiring this start,
   // not permission to retry it. This driver crosses no render gate, a held
   // gate with no request, and a held requested start with both source modes.
@@ -1682,6 +1969,7 @@ describe(`resumption notification error and surviving demand`, () => {
   )(
     `ordinary admission preserves $cleanupAt cleanup (pending=$cleanupPending, $gate start, $syncMode)`,
     async (history) => {
+      oracleRoute(`case`)
       const expected = modelSubscriberStartCleanup(history)
       const pendingCleanup = createDeferred<void>()
       let starts = 0
@@ -1711,7 +1999,9 @@ describe(`resumption notification error and surviving demand`, () => {
         },
       })
       if (history.gate !== `none`) {
-        expect(collection._deferSyncStart()).toBe(true)
+        oracleAssertion('existing comparison at 1727', () =>
+          expect(collection._deferSyncStart()).toBe(true),
+        )
         if (history.gate === `requested`) collection.startSyncImmediate()
       }
       const removeStatusListener = collection.on(
@@ -1731,29 +2021,47 @@ describe(`resumption notification error and surviving demand`, () => {
         subscription = collection.subscribeChanges(() => {}, {
           includeInitialState: false,
         })
-        expect(starts, `adapter entries at admission return`).toBe(
-          expected.starts,
+        oracleAssertion('existing comparison at 1747', () =>
+          expect(starts, `adapter entries at admission return`).toBe(
+            expected.starts,
+          ),
         )
-        expect(cleanups).toBe(expected.cleanups)
-        expect(collection.status).toBe(expected.statusOnReturn)
-        expect(statuses).toEqual(expected.statusesOnReturn)
+        oracleAssertion('existing comparison at 1750', () =>
+          expect(cleanups).toBe(expected.cleanups),
+        )
+        oracleAssertion('existing comparison at 1751', () =>
+          expect(collection.status).toBe(expected.statusOnReturn),
+        )
+        oracleAssertion('existing comparison at 1752', () =>
+          expect(statuses).toEqual(expected.statusesOnReturn),
+        )
 
         pendingCleanup.resolve()
         await cleanup
-        expect(starts, `cleanup settlement must not restart`).toBe(
-          expected.starts,
+        oracleAssertion('existing comparison at 1756', () =>
+          expect(starts, `cleanup settlement must not restart`).toBe(
+            expected.starts,
+          ),
         )
-        expect(collection.status).toBe(expected.statusAfterCleanup)
-        expect(statuses).toEqual(expected.statusesAfterCleanup)
+        oracleAssertion('existing comparison at 1759', () =>
+          expect(collection.status).toBe(expected.statusAfterCleanup),
+        )
+        oracleAssertion('existing comparison at 1760', () =>
+          expect(statuses).toEqual(expected.statusesAfterCleanup),
+        )
 
         removeStatusListener()
         peer = collection.subscribeChanges(() => {}, {
           includeInitialState: false,
         })
-        expect(starts, `later demand may restart a retired run`).toBe(
-          expected.starts + (history.cleanupAt === `none` ? 0 : 1),
+        oracleAssertion('existing comparison at 1766', () =>
+          expect(starts, `later demand may restart a retired run`).toBe(
+            expected.starts + (history.cleanupAt === `none` ? 0 : 1),
+          ),
         )
-        expect(collection.status).toBe(`ready`)
+        oracleAssertion('existing comparison at 1769', () =>
+          expect(collection.status).toBe(`ready`),
+        )
       } finally {
         removeStatusListener()
         pendingCleanup.resolve()
@@ -1781,6 +2089,7 @@ describe(`resumption notification error and surviving demand`, () => {
   )(
     `balances resume at $retireAt (cleanup=$cleanup, $syncMode, gate=$renderGate)`,
     async (history) => {
+      oracleRoute(`case`)
       const expected = modelSubscriberResumeRetirement(history)
       let starts = 0
       let loads = 0
@@ -1828,24 +2137,38 @@ describe(`resumption notification error and surviving demand`, () => {
       )
       try {
         subscription.resumeDeferredAcquisition()
-        expect(starts).toBe(expected.starts)
-        expect(collection.subscriberCount).toBe(expected.acquiring)
-        expect(counts).toEqual(expected.counts)
-        expect(collection._hasSubscriberOrPreload()).toBe(
-          expected.subscriberOrPreload,
+        oracleAssertion('existing comparison at 1845', () =>
+          expect(starts).toBe(expected.starts),
+        )
+        oracleAssertion('existing comparison at 1846', () =>
+          expect(collection.subscriberCount).toBe(expected.acquiring),
+        )
+        oracleAssertion('existing comparison at 1847', () =>
+          expect(counts).toEqual(expected.counts),
+        )
+        oracleAssertion('existing comparison at 1848', () =>
+          expect(collection._hasSubscriberOrPreload()).toBe(
+            expected.subscriberOrPreload,
+          ),
         )
         await cleanup
         await flushPromises()
-        expect(collection.subscriberCount).toBe(expected.acquiring)
-        expect(loads).toBe(
-          history.syncMode === `on-demand` && history.retireAt === `none`
-            ? 1
-            : 0,
+        oracleAssertion('existing comparison at 1853', () =>
+          expect(collection.subscriberCount).toBe(expected.acquiring),
+        )
+        oracleAssertion('existing comparison at 1854', () =>
+          expect(loads).toBe(
+            history.syncMode === `on-demand` && history.retireAt === `none`
+              ? 1
+              : 0,
+          ),
         )
         offStatus()
         offCounts()
         subscription.unsubscribe()
-        expect(collection.subscriberCount).toBe(0)
+        oracleAssertion('existing comparison at 1862', () =>
+          expect(collection.subscriberCount).toBe(0),
+        )
       } finally {
         offStatus()
         offCounts()

@@ -21,17 +21,31 @@ type Row = { id: number; value: string }
 type Entry<K> = [K, [Row, string]]
 type Expected<K> = Array<[K, number, string]>
 
+// Native owners can record the original comparisons before an assertion
+// throws. Other consumers retain the same checker and failure behavior.
+export type TopKComparisonRecorder = (
+  observation: string,
+  actual: unknown,
+  expected: unknown,
+  structural?: boolean,
+) => void
+
 // Identity includes every scalar field that can distinguish two modeled
 // entries. A zero weight removes an entry. Every other weight stays visible to
 // the checker, including negative and duplicate residue.
 export class TopKRelation<K extends string | number | null> {
+  constructor(private readonly record?: TopKComparisonRecorder) {}
   private entries = new Map<string, { entry: Entry<K>; weight: number }>()
 
   add(messages: Array<[Entry<K>, number]>) {
     for (const [[key, [row, index]], weight] of messages) {
+      this.record?.(`integer weight`, Number.isInteger(weight), true)
       expect(Number.isInteger(weight)).toBe(true)
       // JSON encodes NaN as null, so reject it outside the model's domain.
-      if (typeof key === `number`) expect(Number.isFinite(key)).toBe(true)
+      if (typeof key === `number`) {
+        this.record?.(`finite key`, Number.isFinite(key), true)
+        expect(Number.isFinite(key)).toBe(true)
+      }
       const identity = JSON.stringify([key, row.id, row.value, index])
       const next = (this.entries.get(identity)?.weight ?? 0) + weight
       if (next === 0) this.entries.delete(identity)
@@ -45,7 +59,10 @@ export class TopKRelation<K extends string | number | null> {
 
   expectRows(expected: Expected<K>) {
     const rows = [...this.entries.values()]
-    for (const row of rows) expect(row.weight).toBe(1)
+    for (const row of rows) {
+      this.record?.(`unit live weight`, row.weight, 1)
+      expect(row.weight).toBe(1)
+    }
     rows.sort((a, b) =>
       a.entry[1][1] < b.entry[1][1]
         ? -1
@@ -53,13 +70,24 @@ export class TopKRelation<K extends string | number | null> {
           ? 1
           : 0,
     )
+    this.record?.(
+      `selected rows`,
+      rows.map(({ entry: [key, [row]] }) => [key, row.id, row.value]),
+      expected,
+      true,
+    )
     expect(
       rows.map(({ entry: [key, [row]] }) => [key, row.id, row.value]),
     ).toEqual(expected)
     const indices = rows.map(({ entry }) => entry[1][1])
-    for (const index of indices) expect(typeof index).toBe(`string`)
-    for (let i = 1; i < indices.length; i++)
+    for (const index of indices) {
+      this.record?.(`string index`, typeof index, `string`)
+      expect(typeof index).toBe(`string`)
+    }
+    for (let i = 1; i < indices.length; i++) {
+      this.record?.(`strict index order`, indices[i - 1]! < indices[i]!, true)
       expect(indices[i - 1]! < indices[i]!).toBe(true)
+    }
   }
 }
 

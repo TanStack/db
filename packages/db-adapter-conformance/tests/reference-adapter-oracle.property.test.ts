@@ -1,21 +1,22 @@
-import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
-import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
+import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
 import {
-  ConformanceViolation,
   checkEagerLiveSourceHistory,
   eagerLiveSourceHistoryArb,
   eagerLiveSourceModel,
-  eagerLiveSourceProperty,
   reachStatesFor,
 } from '../src'
+import {
+  checkEagerLiveSourceObservations,
+  eagerLiveSourceHistories,
+  eagerLiveSourceOracle,
+  eagerLiveSourceOracleDriver,
+  eagerLiveSourceRequiredStates,
+} from './eager-live-source-property-oracle'
 import { referenceDriver } from './reference-adapter'
+import type { Observation } from '../../db/tests/oracle-property'
 import type {
   ConformanceRow,
   EagerLiveSourceHistory,
@@ -37,8 +38,9 @@ import type { ReferenceMutant } from './reference-adapter'
  *
  * - **Campaigns.** The same property, grammar, and run budget run with a
  *   fixed seed and without one (ORC-007). A path replay runs only the
- *   requested history. Each campaign fails when fewer than five histories
- *   reach a declared state (ORC-015).
+ *   requested history. Five constructed histories per recipe retain generated
+ *   rows and a generated suffix, preserving the minimum five witnesses per
+ *   declared state (ORC-015).
  * - **Calibration.** Hostile mutants of the reference adapter each break one
  *   law, and the fixed campaign must reject each with that law (ORC-006).
  * - **Grammar controls (ORC-004).** Known witnesses from the Neon and
@@ -51,522 +53,535 @@ import type { ReferenceMutant } from './reference-adapter'
  *   reachable on both sides.
  */
 
-const property = `adapter-conformance.eager-live-source.reference`
-const driver = referenceDriver()
-const historyArb = eagerLiveSourceHistoryArb(driver)
-// The reference adapter declares every capability, so its grammar spreads
-// over the most step kinds. Across 20 seeds, 600 histories reached every
-// declared state at least 15 times.
-const runs = 600
-// Timed waits sleep past their timeout, so a campaign takes several seconds.
-const campaignTimeoutMs = 120_000
+describe(`eager live-source oracle campaigns`, () => {
+  const property = `adapter-conformance.eager-live-source.reference`
+  const driver = referenceDriver()
+  const historyArb = eagerLiveSourceHistoryArb(driver)
+  const runs = 600
+  const campaignTimeoutMs = 120_000
 
-async function campaign(options: fc.Parameters<[unknown]>) {
-  const reach = createOracleReach(property, reachStatesFor(driver), {
-    minimum: 5,
-  })
-  await fc.assert(eagerLiveSourceProperty(driver, reach), options)
-  return reach
-}
-
-describe(`eager live-source conformance: reference adapter`, () => {
-  oracleReplayTest(it)(
-    `conforms on a fixed-seed campaign`,
-    async () => {
-      const reach = await campaign({ seed: 2118, numRuns: oracleRuns(runs) })
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-
-  oracleReplayTest(it, property)(
-    `conforms on a random campaign or a replayed seed`,
-    async () => {
-      const reach = await campaign(oraclePropertyOptions(runs, property))
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-
-  // Each mutant breaks one law; the check must report that law.
-  const mutants: Array<[ReferenceMutant, string | RegExp]> = [
-    [`ready-before-delivery`, `READY-2`],
-    [`wraps-loading-failure`, `READY-4`],
-    [`failure-clears-rows`, `HEALTH-1`],
-    [`transient-is-fatal`, `HEALTH-1`],
-    [`delivery-error-is-fatal`, `HEALTH-1`],
-    [`never-recovers`, `HEALTH-2`],
-    [`transient-fails-loading`, `RETRY-1`],
-    [`splits-batch`, `PUB-1`],
-    [`drops-deletes`, `PUB-3`],
-    // It merges a later delivery, so it also applies one that must be
-    // rejected for a duplicate key.
-    [`snapshot-merges`, /PUB-7|PUB-4/],
-    [`leaks-subscription`, `LIFE-2`],
-    [`restart-replays-rows`, `LIFE-5`],
-    [`swallows-prompt-failure`, `READY-4`],
-    [`ready-at-restart`, `LIFE-5`],
-    [`keeps-failed-source`, `LIFE-10`],
-    [`double-release`, `LIFE-10`],
-    [`detached-rejection`, `HEALTH-5`],
-    [`logs-failure`, `HEALTH-5`],
-    // Its early fulfillment also answers a wait for a retired run's txid
-    // before the new run is ready.
-    [`wait-off-by-one`, /EVID-1|EVID-2/],
-    [`retired-evidence-before-ready`, `EVID-2`],
-    [`forgets-retired-evidence`, `EVID-2`],
-    [`leaks-waits-after-fail`, `EVID-2`],
-    [`wait-ignores-timeout`, `EVID-3`],
-    [`disconnect-fails`, `RECON-1`],
-    [`renew-resubscribes`, `RENEW-1`],
-    [`drops-buffered`, `READY-10`],
-    // It applies buffered batches before the rows, also before a delivery
-    // that must write nothing.
-    [`buffer-before-rows`, /PUB-9|PUB-4/],
-    [`replays-per-batch`, `PUB-5`],
-    [`ready-before-buffer`, `READY-10 (rows when ready)`],
-    [`shows-buffered`, `READY-10/PUB-9`],
-    [`merges-updates`, `FID-1`],
-    [`dates-as-strings`, `FID-1 (values)`],
-    [`bigints-as-numbers`, `FID-1 (values)`],
-    [`drops-nulls`, `FID-1 (values)`],
-    [`loses-negative-zero`, `FID-1 (values)`],
-    [`typed-booleans-as-numbers`, `FID-1 (values)`],
-    [`commits-malformed-prefix`, `PUB-4`],
-    [`ignores-malformed`, `PUB-4`],
-    [`relabels-inserts`, `PUB-2`],
-  ]
-  oracleReplayTest(it).each(mutants)(
-    `rejects the %s mutant with %s`,
-    async (mutant, law) => {
-      const result = await fc.check(
-        eagerLiveSourceProperty(referenceDriver(mutant)),
+  describe(`eager live-source conformance: reference adapter`, () => {
+    const mutants: Array<[ReferenceMutant, string]> = [
+      [`ready-before-delivery`, `READY-2 (status)`],
+      [`wraps-loading-failure`, `READY-4 (health error cause)`],
+      [`failure-clears-rows`, `HEALTH-1 (rows)`],
+      [`transient-is-fatal`, `HEALTH-1 (health error)`],
+      [`delivery-error-is-fatal`, `HEALTH-1 (health error)`],
+      [`never-recovers`, `HEALTH-2 (health failureReason)`],
+      [`transient-fails-loading`, `RETRY-1 (status)`],
+      [`splits-batch`, `PUB-1 (publication)`],
+      [`drops-deletes`, `PUB-3/FID-4 (rows)`],
+      // It merges a later delivery, so it also applies one that must be
+      // rejected for a duplicate key.
+      [`snapshot-merges`, `PUB-7 (rows)`],
+      [`leaks-subscription`, `LIFE-2/LIFE-10 (releases per subscription)`],
+      [`restart-replays-rows`, `LIFE-2/LIFE-5 (rows)`],
+      [`swallows-prompt-failure`, `READY-4 (status)`],
+      [`ready-at-restart`, `LIFE-2/LIFE-5 (status)`],
+      [`keeps-failed-source`, `LIFE-10 (open provider subscriptions)`],
+      [`double-release`, `LIFE-10 (releases per subscription)`],
+      [`detached-rejection`, `HEALTH-5`],
+      [`logs-failure`, `HEALTH-5`],
+      // Its early fulfillment also answers a wait for a retired run's txid
+      // before the new run is ready.
+      [`wait-off-by-one`, `EVID-1 (awaitTxId 0)`],
+      [`retired-evidence-before-ready`, `EVID-2 (awaitTxId 0)`],
+      [`forgets-retired-evidence`, `EVID-2 (awaitTxId 0)`],
+      [`leaks-waits-after-fail`, `EVID-2 (awaitTxId 0)`],
+      [`wait-ignores-timeout`, `EVID-3 (awaitTxId 0)`],
+      [`disconnect-fails`, `RECON-1 (health error)`],
+      [`renew-resubscribes`, `RENEW-1 (open provider subscriptions)`],
+      [`drops-buffered`, `READY-10/PUB-9 (rows)`],
+      // It applies buffered batches before the rows, also before a delivery
+      // that must write nothing.
+      [`buffer-before-rows`, `READY-10/PUB-9 (rows)`],
+      [`replays-per-batch`, `PUB-5/PUB-9 (publication)`],
+      [`ready-before-buffer`, `READY-10 (rows when ready)`],
+      [`shows-buffered`, `READY-10/PUB-9 (rows)`],
+      [`merges-updates`, `FID-1 (fields)`],
+      [`dates-as-strings`, `FID-1 (values)`],
+      [`bigints-as-numbers`, `FID-1 (values)`],
+      [`drops-nulls`, `FID-1 (values)`],
+      [`loses-negative-zero`, `FID-1 (values)`],
+      [`typed-booleans-as-numbers`, `FID-1 (values)`],
+      [`commits-malformed-prefix`, `PUB-4 (rows)`],
+      [`ignores-malformed`, `PUB-4 (status)`],
+      [`relabels-inserts`, `PUB-2 (change events)`],
+    ]
+    oracleProperty({
+      id: property,
+      ...eagerLiveSourceOracle(driver),
+      check: checkEagerLiveSourceObservations,
+      histories: {
+        ...eagerLiveSourceHistories(driver),
+        runs,
+        fixedSeeds: [2118],
+      },
+      calibrations: [
+        ...mutants.map(([name, law]) => ({
+          name,
+          law,
+          driver: eagerLiveSourceOracleDriver(referenceDriver(name)),
+        })),
         {
-          seed: 2118,
-          numRuns: runs,
+          name: `a constructed history with missing reach observations`,
+          law: `constructed reach`,
+          corrupt: (observations, history) => {
+            const required = eagerLiveSourceRequiredStates(history)
+            if (required.length === 0) return undefined
+            return observations.filter(
+              ({ checkpoint, value }) =>
+                checkpoint !== `reach` ||
+                !required.includes(value as EagerLiveSourceReachState),
+            )
+          },
         },
-      )
-      expect(result.failed).toBe(true)
-      expect(result.errorInstance).toBeInstanceOf(ConformanceViolation)
-      expect((result.errorInstance as ConformanceViolation).law).toMatch(law)
-    },
-    campaignTimeoutMs,
-  )
-})
+      ],
+      timeout: campaignTimeoutMs,
+    })
+  })
 
-// The prompt restart's own cut (LIFE-5). A run that reports ready at its
-// start and then receives an empty delivery matches the model at the next
-// cut, so in this history only the synchronous check at the restart rejects
-// it; in a campaign a non-prompt restart rejects it too.
-describe(`eager live-source conformance: prompt restart cut`, () => {
-  oracleReplayTest(it)(
-    `rejects a run that is ready at its prompt restart`,
-    async () => {
-      await expect(
-        checkEagerLiveSourceHistory(referenceDriver(`ready-at-restart`), [
-          { kind: `fail` },
-          { kind: `restart`, prompt: true },
-          { kind: `snapshot`, rows: [] },
-        ]),
-      ).rejects.toMatchObject({ law: `LIFE-5 (prompt restart)` })
-    },
-  )
-})
+  // The prompt restart's own cut (LIFE-5). A run that reports ready at its
+  // start and then receives an empty delivery matches the model at the next
+  // cut, so in this history only the synchronous check at the restart rejects
+  // it; in a campaign a non-prompt restart rejects it too.
+  describe(`eager live-source conformance: prompt restart cut`, () => {
+    oracleReplayTest(it)(
+      `rejects a run that is ready at its prompt restart`,
+      async () => {
+        oracleRoute(`calibration`)
+        await expect(
+          checkEagerLiveSourceHistory(referenceDriver(`ready-at-restart`), [
+            { kind: `fail` },
+            { kind: `restart`, prompt: true },
+            { kind: `snapshot`, rows: [] },
+          ]),
+        ).rejects.toMatchObject({ law: `LIFE-5 (prompt restart)` })
+      },
+    )
+  })
 
-// PUB-1 has two commit granularities. The per-change reference adapter
-// commits each change of a batch alone; it must conform, and a variant that
-// commits them out of order must be rejected by the per-change comparison.
-describe(`eager live-source conformance: per-change commits`, () => {
-  oracleReplayTest(it)(
-    `the per-change reference adapter conforms`,
-    async () => {
-      const perChange = referenceDriver(undefined, { perChange: true })
-      await fc.assert(eagerLiveSourceProperty(perChange), {
-        seed: 2118,
-        numRuns: runs,
-      })
+  // Per-change commits use the same law and generated histories; reversing a
+  // batch's distinct keys must fail at its publication checkpoint.
+  const perChange = referenceDriver(undefined, { perChange: true })
+  oracleProperty({
+    id: `${property}.per-change`,
+    ...eagerLiveSourceOracle(perChange),
+    check: checkEagerLiveSourceObservations,
+    histories: {
+      ...eagerLiveSourceHistories(perChange),
+      runs,
+      fixedSeeds: [2118],
     },
-    campaignTimeoutMs,
-  )
+    calibrations: [
+      {
+        name: `reverses-batch`,
+        law: `PUB-1 (publication)`,
+        driver: eagerLiveSourceOracleDriver(
+          referenceDriver(`reverses-batch`, { perChange: true }),
+        ),
+      },
+    ],
+    timeout: campaignTimeoutMs,
+  })
 
-  oracleReplayTest(it)(
-    `rejects a batch committed out of order with PUB-1`,
-    async () => {
-      const reversed = referenceDriver(`reverses-batch`, { perChange: true })
-      const result = await fc.check(eagerLiveSourceProperty(reversed), {
-        seed: 2118,
-        numRuns: runs,
-      })
-      expect(result.failed).toBe(true)
-      expect((result.errorInstance as ConformanceViolation).law).toContain(
-        `PUB-1`,
-      )
-    },
-    campaignTimeoutMs,
-  )
-})
-
-// An outage threshold with client-created values (`retryReportAfter`,
-// `matchesFailure`), as Electric declares. The reference adapter with that
-// policy must conform, and each mutant of its outage reporting must be
-// rejected with its law.
-describe(`eager live-source conformance: outage threshold, client values`, () => {
+  // Outage thresholds and client-created failure values keep their own
+  // receiving variant and all former law-named hostile calibrations.
   const outage = { reportAfter: 3, clientValues: true, reportsRejected: true }
   const thresholdDriver = referenceDriver(undefined, { outage })
-
-  oracleReplayTest(it)(
-    `the reference adapter with an outage threshold conforms`,
-    async () => {
-      const reach = createOracleReach(
-        `${property}.outage`,
-        reachStatesFor(thresholdDriver),
-        { minimum: 5 },
-      )
-      await fc.assert(eagerLiveSourceProperty(thresholdDriver, reach), {
-        seed: 2118,
-        numRuns: runs,
-      })
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-
   const outageMutants: Array<[ReferenceMutant, string]> = [
-    [`stale-outage-value`, `HEALTH-`],
-    [`replaces-outage-value`, `RETRY-1`],
-    [`reports-outage-early`, `HEALTH-1`],
-    [`outage-count-survives-delivery`, `HEALTH-1`],
-    [`empty-response-keeps-count`, `HEALTH-1`],
-    [`empty-response-recovers`, `RETRY-1`],
-    [`rejected-delivery-fails`, `PUB-4`],
-    [`wraps-loading-failure`, `READY-4`],
+    [`stale-outage-value`, `HEALTH-1 (health failureReason)`],
+    [`replaces-outage-value`, `RETRY-1 (health failureReason)`],
+    [`reports-outage-early`, `HEALTH-1 (health failureReason)`],
+    [`outage-count-survives-delivery`, `HEALTH-1 (health failureReason)`],
+    [`empty-response-keeps-count`, `HEALTH-1 (health failureReason)`],
+    [`empty-response-recovers`, `RETRY-1 (health failureReason)`],
+    [`rejected-delivery-fails`, `PUB-4 (health error)`],
+    [`wraps-loading-failure`, `READY-4 (health error cause)`],
   ]
-  oracleReplayTest(it).each(outageMutants)(
-    `rejects the %s mutant with %s`,
-    async (mutant, law) => {
-      const result = await fc.check(
-        eagerLiveSourceProperty(referenceDriver(mutant, { outage })),
-        { seed: 2118, numRuns: runs },
-      )
-      expect(result.failed).toBe(true)
-      expect(result.errorInstance).toBeInstanceOf(ConformanceViolation)
-      expect((result.errorInstance as ConformanceViolation).law).toContain(law)
+  oracleProperty({
+    id: `${property}.outage`,
+    ...eagerLiveSourceOracle(thresholdDriver),
+    check: checkEagerLiveSourceObservations,
+    histories: {
+      ...eagerLiveSourceHistories(thresholdDriver),
+      runs,
+      fixedSeeds: [2118],
     },
-    campaignTimeoutMs,
-  )
-})
+    calibrations: outageMutants.map(([name, law]) => ({
+      name,
+      law,
+      driver: eagerLiveSourceOracleDriver(referenceDriver(name, { outage })),
+    })),
+    timeout: campaignTimeoutMs,
+  })
 
-// ---------------------------------------------------------------------------
-// Grammar controls (ORC-004)
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Grammar controls (ORC-004)
+  // ---------------------------------------------------------------------------
 
-/**
- * Reconstruction. Each known witness is a history from an existing adapter
- * suite, translated into this grammar's steps. The model must accept every
- * step, and the reference adapter must pass it. A witness cell the grammar
- * cannot express is named with what it lacks.
- */
-const witnesses: Array<[string, EagerLiveSourceHistory]> = [
-  [
-    // neon-pkgs realtime-tanstack collection-options.test.ts:119
-    `Neon: installs rows and changes as authoritative state`,
+  /**
+   * Reconstruction. Each known witness is a history from an existing adapter
+   * suite, translated into this grammar's steps. The model must accept every
+   * step, and the reference adapter must pass it. A witness cell the grammar
+   * cannot express is named with what it lacks.
+   */
+  const witnesses: Array<[string, EagerLiveSourceHistory]> = [
     [
-      {
-        kind: `snapshot`,
-        rows: [
-          { id: 1, title: `a` },
-          { id: 2, title: `b` },
-        ],
-      },
-      { kind: `wait`, ahead: 1 },
-      {
-        kind: `changes`,
-        changes: [
-          { type: `upsert`, row: { id: 1, title: `c` } },
-          { type: `delete`, id: 2 },
-          { type: `upsert`, row: { id: 3, title: `c` } },
-        ],
-      },
-    ],
-  ],
-  [
-    // collection-options.test.ts:164
-    `Neon: remembers a transaction that arrives before awaitTxId`,
-    [
-      { kind: `snapshot`, rows: [{ id: 1, title: `a` }] },
-      {
-        kind: `changes`,
-        changes: [{ type: `upsert`, row: { id: 1, title: `b` } }],
-      },
-      { kind: `wait`, ahead: 0 },
-    ],
-  ],
-  [
-    // collection-options.test.ts:227, the `connecting` cell
-    `Neon: stays ready while the transport reconnects`,
-    [
-      { kind: `snapshot`, rows: [{ id: 1, title: `a` }] },
-      { kind: `disconnect` },
-    ],
-  ],
-  [
-    // collection-options.test.ts:243
-    `Neon: a provider error before ready is a Collection error`,
-    [{ kind: `fail` }],
-  ],
-  [
-    // collection-options.test.ts:255
-    `Neon: renews an expiring capability`,
-    [{ kind: `renew` }],
-  ],
-  [
-    // collection-options.test.ts:364. Its timeout cell is outside the grammar
-    // (EVID-3 is not checked); its cleanup cell is the final retirement.
-    `Neon: cleanup rejects a pending wait`,
-    [{ kind: `wait`, ahead: 1 }],
-  ],
-  [
-    // trailbase-db-collection lifecycle-oracle.property.test.ts, stream end
-    `TrailBase: a stream failure after ready keeps rows and reports`,
-    [
-      { kind: `snapshot`, rows: [{ id: 1, title: `a` }] },
-      {
-        kind: `changes`,
-        changes: [{ type: `upsert`, row: { id: 2, title: `b` } }],
-      },
-      { kind: `fail` },
-    ],
-  ],
-  [
-    // A retried failure after ready, then a delivery that recovers.
-    `retry: a retried failure is reported, then cleared by a delivery`,
-    [
-      { kind: `snapshot`, rows: [{ id: 1, title: `a` }] },
-      { kind: `transient-failure` },
-      {
-        kind: `changes`,
-        changes: [{ type: `upsert`, row: { id: 1, title: `b` } }],
-      },
-    ],
-  ],
-  [
-    // rxdb-db-collection rxdb.test.ts, `marks initial sync ready only after
-    // its rows are applied`: a document inserted after the initial query read
-    // and then patched is buffered; the newer value wins over the older one.
-    `RxDB: buffered startup changes apply after the initial rows, in order`,
-    [
-      {
-        kind: `changes`,
-        changes: [{ type: `upsert`, row: { id: 2, title: `b` } }],
-      },
-      {
-        kind: `changes`,
-        changes: [{ type: `upsert`, row: { id: 2, title: `c` } }],
-      },
-      { kind: `snapshot`, rows: [{ id: 1, title: `a` }], seen: 0 },
-    ],
-  ],
-  [
-    // FID-1: an update without the optional field removes it.
-    `an update that omits a field removes it`,
-    [
-      { kind: `snapshot`, rows: [{ id: 1, title: `a`, note: `x` }] },
-      {
-        kind: `changes`,
-        changes: [{ type: `upsert`, row: { id: 1, title: `b` } }],
-      },
-    ],
-  ],
-  [
-    // lifecycle-oracle.property.test.ts, restart fencing
-    `TrailBase: a restart is a fresh sync run`,
-    [
-      { kind: `snapshot`, rows: [{ id: 1, title: `a` }] },
-      { kind: `restart` },
-      { kind: `snapshot`, rows: [{ id: 2, title: `b` }] },
-    ],
-  ],
-]
-
-/** Whether `history` lies in the generator's domain. */
-function withinGrammar(
-  history: EagerLiveSourceHistory,
-  domain: GrammarDomain,
-): boolean {
-  // With value kinds every row carries a value; without them none does.
-  const valued = (domain.valueKinds ?? []).length > 0
-  const typed = (domain.fieldKinds ?? []).length > 0
-  const row = (r: ConformanceRow) =>
-    r.id >= 1 &&
-    r.id <= 5 &&
-    [`a`, `b`, `c`].includes(r.title) &&
-    (!Object.hasOwn(r, `note`) || [`x`, `y`].includes(r.note!)) &&
-    Object.hasOwn(r, `value`) === valued &&
-    Object.hasOwn(r, `typed`) === typed
-  return (
-    history.length >= 1 &&
-    history.length <= 15 &&
-    history.every((step) => {
-      switch (step.kind) {
-        case `changes`:
-          return (
-            step.changes.length <= 3 &&
-            step.changes.every((change) =>
-              change.type === `upsert`
-                ? row(change.row)
-                : change.id >= 1 && change.id <= 5,
-            )
-          )
-        case `wait`:
-          return step.ahead >= 0 && step.ahead <= 2
-        case `snapshot`:
-          return (
-            step.rows.length <= 4 &&
-            step.rows.every(row) &&
-            (step.seen ?? 0) >= 0 &&
-            (step.seen ?? 0) <= 3
-          )
-        default:
-          return true
-      }
-    })
-  )
-}
-
-// The witnesses above carry no values, so they reconstruct in the grammar
-// of the same driver without value kinds. Value witnesses use the full one.
-const withoutValues = {
-  ...driver,
-  valueKinds: undefined,
-  fieldKinds: undefined,
-}
-// The value witnesses carry values but no typed fields.
-const withoutFields = { ...driver, fieldKinds: undefined }
-
-const valueWitnesses: Array<[string, EagerLiveSourceHistory]> = [
-  [
-    // A random campaign (seed 95028) found this: a synced update that only
-    // changes -0 to 0 published no change event, so the event fold kept -0
-    // while the Collection held 0. Maintainer decision (2026-10-29): -0 and
-    // 0 are distinct row values.
-    `FID-1, PUB-2: an update from -0 to 0 publishes a change`,
-    [
-      {
-        kind: `snapshot`,
-        rows: [{ id: 5, title: `a`, value: -0 }],
-        seen: 0,
-      },
-      {
-        kind: `changes`,
-        changes: [{ type: `upsert`, row: { id: 5, title: `a`, value: 0 } }],
-      },
-    ],
-  ],
-  [
-    // FID-1's named cases: a Date and a bigint beyond 2^53 on the initial
-    // load, then an explicit falsy value and a nested object in a change.
-    `FID-1: typed values on the load and in a change`,
-    [
-      {
-        kind: `snapshot`,
-        rows: [
-          { id: 1, title: `a`, value: new Date(Date.UTC(2026, 9, 29)) },
-          { id: 2, title: `a`, value: 9_007_199_254_740_993n },
-        ],
-        seen: 0,
-      },
-      {
-        kind: `changes`,
-        changes: [
-          { type: `upsert`, row: { id: 1, title: `a`, value: false } },
-          {
-            type: `upsert`,
-            row: { id: 3, title: `b`, value: { nested: { deep: [1] } } },
-          },
-        ],
-      },
-    ],
-  ],
-]
-
-describe(`eager live-source grammar controls`, () => {
-  oracleReplayTest(it).each(witnesses)(
-    `reconstructs %s`,
-    async (_name, history) => {
-      expect(withinGrammar(history, withoutValues)).toBe(true)
-      const { skipped } = await checkEagerLiveSourceHistory(
-        withoutValues,
-        history,
-      )
-      expect(skipped).toBe(0)
-    },
-  )
-
-  oracleReplayTest(it).each(valueWitnesses)(
-    `reconstructs %s`,
-    async (_name, history) => {
-      expect(withinGrammar(history, withoutFields)).toBe(true)
-      const { skipped } = await checkEagerLiveSourceHistory(
-        withoutFields,
-        history,
-      )
-      expect(skipped).toBe(0)
-    },
-  )
-
-  // Exclusion: each history ends with one step that is illegal where it
-  // stands. The check skips it and leaves the model where it was. A batch
-  // before the first ready is legal only with `listen-before-fetch`, so its
-  // case runs on a driver that does not declare it.
-  const lateListener = {
-    ...driver,
-    capabilities: new Set(
-      [...driver.capabilities].filter((c) => c !== `listen-before-fetch`),
-    ),
-  }
-  oracleReplayTest(it)(
-    `excludes a batch before the first ready without listen-before-fetch`,
-    async () => {
-      const history = [{ kind: `changes` as const, changes: [] }]
-      const { skipped } = await checkEagerLiveSourceHistory(
-        lateListener,
-        history,
-      )
-      expect(skipped).toBe(1)
-    },
-  )
-  const invalid: Array<[string, EagerLiveSourceHistory]> = [
-    [
-      `a second renewal in one sync run`,
-      [{ kind: `renew` }, { kind: `renew` }],
-    ],
-    [
-      `a reconnect without a disconnect`,
-      [{ kind: `snapshot`, rows: [] }, { kind: `reconnect` }],
-    ],
-    [
-      `a delivery after the provider failed`,
-      [{ kind: `fail` }, { kind: `snapshot`, rows: [] }],
-    ],
-    [
-      `a batch while disconnected`,
+      // neon-pkgs realtime-tanstack collection-options.test.ts:119
+      `Neon: installs rows and changes as authoritative state`,
       [
-        { kind: `snapshot`, rows: [] },
+        {
+          kind: `snapshot`,
+          rows: [
+            { id: 1, title: `a` },
+            { id: 2, title: `b` },
+          ],
+        },
+        { kind: `wait`, ahead: 1 },
+        {
+          kind: `changes`,
+          changes: [
+            { type: `upsert`, row: { id: 1, title: `c` } },
+            { type: `delete`, id: 2 },
+            { type: `upsert`, row: { id: 3, title: `c` } },
+          ],
+        },
+      ],
+    ],
+    [
+      // collection-options.test.ts:164
+      `Neon: remembers a transaction that arrives before awaitTxId`,
+      [
+        { kind: `snapshot`, rows: [{ id: 1, title: `a` }] },
+        {
+          kind: `changes`,
+          changes: [{ type: `upsert`, row: { id: 1, title: `b` } }],
+        },
+        { kind: `wait`, ahead: 0 },
+      ],
+    ],
+    [
+      // collection-options.test.ts:227, the `connecting` cell
+      `Neon: stays ready while the transport reconnects`,
+      [
+        { kind: `snapshot`, rows: [{ id: 1, title: `a` }] },
         { kind: `disconnect` },
-        { kind: `changes`, changes: [] },
+      ],
+    ],
+    [
+      // collection-options.test.ts:243
+      `Neon: a provider error before ready is a Collection error`,
+      [{ kind: `fail` }],
+    ],
+    [
+      // collection-options.test.ts:255
+      `Neon: renews an expiring capability`,
+      [{ kind: `renew` }],
+    ],
+    [
+      // collection-options.test.ts:364. Its timeout cell is outside the grammar
+      // (EVID-3 is not checked); its cleanup cell is the final retirement.
+      `Neon: cleanup rejects a pending wait`,
+      [{ kind: `wait`, ahead: 1 }],
+    ],
+    [
+      // trailbase-db-collection lifecycle-oracle.property.test.ts, stream end
+      `TrailBase: a stream failure after ready keeps rows and reports`,
+      [
+        { kind: `snapshot`, rows: [{ id: 1, title: `a` }] },
+        {
+          kind: `changes`,
+          changes: [{ type: `upsert`, row: { id: 2, title: `b` } }],
+        },
+        { kind: `fail` },
+      ],
+    ],
+    [
+      // A retried failure after ready, then a delivery that recovers.
+      `retry: a retried failure is reported, then cleared by a delivery`,
+      [
+        { kind: `snapshot`, rows: [{ id: 1, title: `a` }] },
+        { kind: `transient-failure` },
+        {
+          kind: `changes`,
+          changes: [{ type: `upsert`, row: { id: 1, title: `b` } }],
+        },
+      ],
+    ],
+    [
+      // rxdb-db-collection rxdb.test.ts, `marks initial sync ready only after
+      // its rows are applied`: a document inserted after the initial query read
+      // and then patched is buffered; the newer value wins over the older one.
+      `RxDB: buffered startup changes apply after the initial rows, in order`,
+      [
+        {
+          kind: `changes`,
+          changes: [{ type: `upsert`, row: { id: 2, title: `b` } }],
+        },
+        {
+          kind: `changes`,
+          changes: [{ type: `upsert`, row: { id: 2, title: `c` } }],
+        },
+        { kind: `snapshot`, rows: [{ id: 1, title: `a` }], seen: 0 },
+      ],
+    ],
+    [
+      // FID-1: an update without the optional field removes it.
+      `an update that omits a field removes it`,
+      [
+        { kind: `snapshot`, rows: [{ id: 1, title: `a`, note: `x` }] },
+        {
+          kind: `changes`,
+          changes: [{ type: `upsert`, row: { id: 1, title: `b` } }],
+        },
+      ],
+    ],
+    [
+      // lifecycle-oracle.property.test.ts, restart fencing
+      `TrailBase: a restart is a fresh sync run`,
+      [
+        { kind: `snapshot`, rows: [{ id: 1, title: `a` }] },
+        { kind: `restart` },
+        { kind: `snapshot`, rows: [{ id: 2, title: `b` }] },
       ],
     ],
   ]
-  oracleReplayTest(it).each(invalid)(`excludes %s`, async (_name, history) => {
-    const { skipped } = await checkEagerLiveSourceHistory(
-      withoutValues,
-      history,
+
+  /** Whether `history` lies in the generator's domain. */
+  function withinGrammar(
+    history: EagerLiveSourceHistory,
+    domain: GrammarDomain,
+  ): boolean {
+    // With value kinds every row carries a value; without them none does.
+    const valued = (domain.valueKinds ?? []).length > 0
+    const typed = (domain.fieldKinds ?? []).length > 0
+    const row = (r: ConformanceRow) =>
+      r.id >= 1 &&
+      r.id <= 5 &&
+      [`a`, `b`, `c`].includes(r.title) &&
+      (!Object.hasOwn(r, `note`) || [`x`, `y`].includes(r.note!)) &&
+      Object.hasOwn(r, `value`) === valued &&
+      Object.hasOwn(r, `typed`) === typed
+    return (
+      history.length >= 1 &&
+      history.length <= 15 &&
+      history.every((step) => {
+        switch (step.kind) {
+          case `changes`:
+            return (
+              step.changes.length <= 3 &&
+              step.changes.every((change) =>
+                change.type === `upsert`
+                  ? row(change.row)
+                  : change.id >= 1 && change.id <= 5,
+              )
+            )
+          case `wait`:
+            return step.ahead >= 0 && step.ahead <= 2
+          case `snapshot`:
+            return (
+              step.rows.length <= 4 &&
+              step.rows.every(row) &&
+              (step.seen ?? 0) >= 0 &&
+              (step.seen ?? 0) <= 3
+            )
+          default:
+            return true
+        }
+      })
     )
-    expect(skipped).toBe(1)
+  }
+
+  // The witnesses above carry no values, so they reconstruct in the grammar
+  // of the same driver without value kinds. Value witnesses use the full one.
+  const withoutValues = {
+    ...driver,
+    valueKinds: undefined,
+    fieldKinds: undefined,
+  }
+  // The value witnesses carry values but no typed fields.
+  const withoutFields = { ...driver, fieldKinds: undefined }
+
+  const valueWitnesses: Array<[string, EagerLiveSourceHistory]> = [
+    [
+      // A random campaign (seed 95028) found this: a synced update that only
+      // changes -0 to 0 published no change event, so the event fold kept -0
+      // while the Collection held 0. Maintainer decision (2026-10-29): -0 and
+      // 0 are distinct row values.
+      `FID-1, PUB-2: an update from -0 to 0 publishes a change`,
+      [
+        {
+          kind: `snapshot`,
+          rows: [{ id: 5, title: `a`, value: -0 }],
+          seen: 0,
+        },
+        {
+          kind: `changes`,
+          changes: [{ type: `upsert`, row: { id: 5, title: `a`, value: 0 } }],
+        },
+      ],
+    ],
+    [
+      // FID-1's named cases: a Date and a bigint beyond 2^53 on the initial
+      // load, then an explicit falsy value and a nested object in a change.
+      `FID-1: typed values on the load and in a change`,
+      [
+        {
+          kind: `snapshot`,
+          rows: [
+            { id: 1, title: `a`, value: new Date(Date.UTC(2026, 9, 29)) },
+            { id: 2, title: `a`, value: 9_007_199_254_740_993n },
+          ],
+          seen: 0,
+        },
+        {
+          kind: `changes`,
+          changes: [
+            { type: `upsert`, row: { id: 1, title: `a`, value: false } },
+            {
+              type: `upsert`,
+              row: { id: 3, title: `b`, value: { nested: { deep: [1] } } },
+            },
+          ],
+        },
+      ],
+    ],
+  ]
+
+  describe(`eager live-source grammar controls`, () => {
+    oracleReplayTest(it).each(witnesses)(
+      `reconstructs %s`,
+      async (_name, history) => {
+        oracleRoute(`fixed history`)
+        expect(withinGrammar(history, withoutValues)).toBe(true)
+        const { skipped } = await checkEagerLiveSourceHistory(
+          withoutValues,
+          history,
+        )
+        expect(skipped).toBe(0)
+      },
+    )
+
+    oracleReplayTest(it).each(valueWitnesses)(
+      `reconstructs %s`,
+      async (_name, history) => {
+        oracleRoute(`fixed history`)
+        expect(withinGrammar(history, withoutFields)).toBe(true)
+        const { skipped } = await checkEagerLiveSourceHistory(
+          withoutFields,
+          history,
+        )
+        expect(skipped).toBe(0)
+      },
+    )
+
+    // Exclusion: each history ends with one step that is illegal where it
+    // stands. The check skips it and leaves the model where it was. A batch
+    // before the first ready is legal only with `listen-before-fetch`, so its
+    // case runs on a driver that does not declare it.
+    const lateListener = {
+      ...driver,
+      capabilities: new Set(
+        [...driver.capabilities].filter((c) => c !== `listen-before-fetch`),
+      ),
+    }
+    oracleReplayTest(it)(
+      `excludes a batch before the first ready without listen-before-fetch`,
+      async () => {
+        oracleRoute(`fixed history`)
+        const history = [{ kind: `changes` as const, changes: [] }]
+        const { skipped } = await checkEagerLiveSourceHistory(
+          lateListener,
+          history,
+        )
+        expect(skipped).toBe(1)
+      },
+    )
+    const invalid: Array<[string, EagerLiveSourceHistory]> = [
+      [
+        `a second renewal in one sync run`,
+        [{ kind: `renew` }, { kind: `renew` }],
+      ],
+      [
+        `a reconnect without a disconnect`,
+        [{ kind: `snapshot`, rows: [] }, { kind: `reconnect` }],
+      ],
+      [
+        `a delivery after the provider failed`,
+        [{ kind: `fail` }, { kind: `snapshot`, rows: [] }],
+      ],
+      [
+        `a batch while disconnected`,
+        [
+          { kind: `snapshot`, rows: [] },
+          { kind: `disconnect` },
+          { kind: `changes`, changes: [] },
+        ],
+      ],
+    ]
+    oracleReplayTest(it).each(invalid)(
+      `excludes %s`,
+      async (_name, history) => {
+        oracleRoute(`fixed history`)
+        const { skipped } = await checkEagerLiveSourceHistory(
+          withoutValues,
+          history,
+        )
+        expect(skipped).toBe(1)
+      },
+    )
   })
 
-  // Ablation: removing a step kind loses the declared state that only it
-  // reaches, so every kind contributes to the laws the campaign enforces.
+  // Ablation judges the grammar rather than a new product law. The same
+  // comparison still rejects any product mismatch after the transformation.
+  // The lost state must never appear; live-value ablation also retains a
+  // constructed date load, so the positive control cannot silently disappear.
+  function registerAblation(
+    name: string,
+    lost: EagerLiveSourceReachState,
+    transform: (history: EagerLiveSourceHistory) => EagerLiveSourceHistory,
+    retained?: EagerLiveSourceReachState,
+  ): void {
+    const states = retained === undefined ? [] : [retained]
+    const source = eagerLiveSourceHistories(driver, states)
+    oracleProperty({
+      id: `${property}.ablation.${name}`,
+      ...eagerLiveSourceOracle(driver),
+      histories: {
+        arbitrary: source.arbitrary,
+        runs: 100,
+        fixedSeeds: [2118],
+        states,
+        measured: reachStatesFor(driver).filter((state) => state !== retained),
+        constructed: source.constructed,
+      },
+      driver: eagerLiveSourceOracleDriver(driver, transform),
+      check: (
+        history,
+        observations: ReadonlyArray<Observation>,
+        requiredStates,
+      ) => {
+        const judgment = checkEagerLiveSourceObservations(
+          history,
+          observations,
+          requiredStates,
+        )
+        if (judgment.kind === `violation`) return judgment
+        return observations.some(
+          ({ checkpoint, value }) => checkpoint === `reach` && value === lost,
+        )
+          ? violation(
+              `grammar ablation`,
+              `removing ${name} still reaches ${lost}`,
+              `grammar excludes ${lost}`,
+            )
+          : pass
+      },
+      timeout: campaignTimeoutMs,
+    })
+  }
+
   const ablations: Array<
     [EagerLiveSourceStep[`kind`], EagerLiveSourceReachState]
   > = [
@@ -581,157 +596,59 @@ describe(`eager live-source grammar controls`, () => {
     [`transient-failure`, `transient-failure-reported`],
     [`changes`, `change-before-ready`],
   ]
-  oracleReplayTest(it).each(ablations)(
-    `without %s steps, histories never reach %s`,
-    async (kind, lost) => {
-      const states = reachStatesFor(driver)
-      const reach = createOracleReach(`${property}.ablation`, states, {
-        replaying: false,
-      })
-      await fc.assert(
-        fc.asyncProperty(
-          historyArb.map((history) =>
-            history.filter((step) => step.kind !== kind),
-          ),
-          async (history) => {
-            reach.beginHistory()
-            await checkEagerLiveSourceHistory(driver, history, {
-              reach: reach.reach,
-            })
-          },
+  for (const [kind, lost] of ablations) {
+    registerAblation(`${kind}.${lost}`, lost, (history) =>
+      history.filter((step) => step.kind !== kind),
+    )
+  }
+  const plain = (row: { id: number; title: string }) => ({
+    id: row.id,
+    title: row.title,
+  })
+  registerAblation(`notes`, `field-removed`, (history) =>
+    history.map((step): EagerLiveSourceStep => {
+      if (step.kind === `snapshot`)
+        return { ...step, rows: step.rows.map(plain) }
+      if (step.kind !== `changes`) return step
+      return {
+        ...step,
+        changes: step.changes.map((change) =>
+          change.type === `upsert`
+            ? { ...change, row: plain(change.row) }
+            : change,
         ),
-        { seed: 2118, numRuns: 100 },
-      )
-      expect(reach.counts().get(lost)).toBe(0)
-    },
-    campaignTimeoutMs,
+      }
+    }),
   )
-
-  oracleReplayTest(it)(
-    `without notes, histories never reach field-removed`,
-    async () => {
-      const reach = createOracleReach(
-        `${property}.ablation`,
-        reachStatesFor(driver),
-        { replaying: false },
-      )
-      const plain = (row: { id: number; title: string }) => ({
-        id: row.id,
-        title: row.title,
-      })
-      await fc.assert(
-        fc.asyncProperty(
-          historyArb.map((history) =>
-            history.map((step): EagerLiveSourceStep => {
-              if (step.kind === `snapshot`) {
-                return { ...step, rows: step.rows.map(plain) }
-              }
-              if (step.kind !== `changes`) return step
-              return {
-                kind: `changes`,
-                changes: step.changes.map((change) =>
-                  change.type === `upsert`
-                    ? { type: `upsert`, row: plain(change.row) }
-                    : change,
-                ),
-              }
+  registerAblation(
+    `live-values`,
+    `value:date:change`,
+    (history) =>
+      history.map((step): EagerLiveSourceStep => {
+        if (step.kind !== `changes`) return step
+        return {
+          ...step,
+          changes: step.changes
+            .filter((change) => change.type !== `retouch`)
+            .map((change) => {
+              if (change.type !== `upsert`) return change
+              const { value: _value, ...row } = change.row
+              return { ...change, row }
             }),
-          ),
-          async (history) => {
-            reach.beginHistory()
-            await checkEagerLiveSourceHistory(driver, history, {
-              reach: reach.reach,
-            })
-          },
-        ),
-        { seed: 2118, numRuns: 100 },
-      )
-      expect(reach.counts().get(`field-removed`)).toBe(0)
-    },
-    campaignTimeoutMs,
+        }
+      }),
+    `value:date:load`,
+  )
+  registerAblation(`read-point`, `read-missed-change`, (history) =>
+    history.map((step) =>
+      step.kind === `snapshot` ? { kind: step.kind, rows: step.rows } : step,
+    ),
   )
 
-  // Path ablation: when live changes carry no value and no retouch, no
-  // history reaches a
-  // value kind on the change path, so the load and change states each need
-  // their own deliveries.
-  oracleReplayTest(it)(
-    `without values in live changes, histories never reach value:date:change`,
-    async () => {
-      const reach = createOracleReach(
-        `${property}.ablation`,
-        reachStatesFor(driver),
-        { replaying: false },
-      )
-      await fc.assert(
-        fc.asyncProperty(
-          historyArb.map((history) =>
-            history.map((step): EagerLiveSourceStep => {
-              if (step.kind !== `changes`) return step
-              return {
-                kind: `changes`,
-                // A retouch re-delivers a held value, so it goes too.
-                changes: step.changes
-                  .filter((change) => change.type !== `retouch`)
-                  .map((change) => {
-                    if (change.type !== `upsert`) return change
-                    const { value: _value, ...row } = change.row
-                    return { type: `upsert`, row }
-                  }),
-              }
-            }),
-          ),
-          async (history) => {
-            reach.beginHistory()
-            await checkEagerLiveSourceHistory(driver, history, {
-              reach: reach.reach,
-            })
-          },
-        ),
-        { seed: 2118, numRuns: 100 },
-      )
-      expect(reach.counts().get(`value:date:change`)).toBe(0)
-      expect(reach.counts().get(`value:date:load`)).toBeGreaterThan(0)
-    },
-    campaignTimeoutMs,
-  )
-
-  // Ablation of the read point: when every fetch reads after all buffered
-  // batches, no history reaches a cut whose result missed one.
-  oracleReplayTest(it)(
-    `with every read after all buffered batches, histories never reach read-missed-change`,
-    async () => {
-      const reach = createOracleReach(
-        `${property}.ablation`,
-        reachStatesFor(driver),
-        { replaying: false },
-      )
-      await fc.assert(
-        fc.asyncProperty(
-          historyArb.map((history) =>
-            history.map((step) =>
-              step.kind === `snapshot`
-                ? { kind: step.kind, rows: step.rows }
-                : step,
-            ),
-          ),
-          async (history) => {
-            reach.beginHistory()
-            await checkEagerLiveSourceHistory(driver, history, {
-              reach: reach.reach,
-            })
-          },
-        ),
-        { seed: 2118, numRuns: 100 },
-      )
-      expect(reach.counts().get(`read-missed-change`)).toBe(0)
-    },
-    campaignTimeoutMs,
-  )
-})
-
-declareOracle({
-  check: [checkEagerLiveSourceHistory, eagerLiveSourceProperty],
-  model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
-  grammar: [historyArb],
+  // Owns no production entry: the reference adapter is a test fixture.
+  declareOracle({
+    check: [checkEagerLiveSourceHistory, checkEagerLiveSourceObservations],
+    model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
+    grammar: [historyArb],
+  })
 })

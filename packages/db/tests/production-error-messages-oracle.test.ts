@@ -72,11 +72,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Errors from '../src/index'
 import { codedWarning } from '../src/error-message'
 import { declareOracle } from './oracle-declaration.js'
-import { createOracleReach } from './oracle-reach.js'
 import { errorSampleArguments } from './error-sample-arguments'
 import { exportedErrorClasses } from './production-error-messages-fixture'
 import { findErrorSites } from './error-sites-oracle'
 import { withErrorDocsFixture } from './generate-error-docs-fixture'
+import { oracleRoute } from './oracle-config.js'
 
 const testsDirectory = dirname(fileURLToPath(import.meta.url))
 const devMessages: Record<string, Array<string>> = JSON.parse(
@@ -378,7 +378,12 @@ function renderErrorDocs(): string {
   })
 }
 
+// What this oracle owns: the gap report judges the error classes and the
+// message builder that produce each error's development and production text,
+// by this file's tests. The error sites that throw library text outside
+// errors.ts are read from source by error-sites-oracle.ts.
 declareOracle({
+  owns: [`src/errors.ts`, `src/error-message.ts`],
   model: [catalogObservation],
   check: [
     expectEveryClassCoded,
@@ -396,26 +401,32 @@ describe(`production error messages`, () => {
   afterEach(() => vi.unstubAllEnvs())
 
   it(`codes every exported class except the caller-message bases`, () => {
+    oracleRoute(`case`)
     expectEveryClassCoded()
   })
 
   it(`keeps the full message in production for full-text classes`, () => {
+    oracleRoute(`case`)
     expectFullTextInProduction()
   })
 
   it(`keeps every development message unchanged`, () => {
+    oracleRoute(`case`)
     expectDevelopmentMessages()
   })
 
   it(`keeps class, name, instanceof, and fields in both modes`, () => {
+    oracleRoute(`case`)
     expectClassShapeInBothModes()
   })
 
   it(`writes a coded production line with the shown inputs`, () => {
+    oracleRoute(`case`)
     expectCodedProductionLines()
   })
 
   it(`writes one coded line for hostile inputs`, () => {
+    oracleRoute(`case`)
     expectHostileInputsCoded()
   })
 
@@ -440,12 +451,14 @@ describe(`production error messages`, () => {
     const developmentOnlyFiles = new Set([`collection/config-errors.ts`])
 
     it(`codes every site that throws library text`, () => {
+      oracleRoute(`case`)
       expect(
         sites.plain.filter(({ file }) => !developmentOnlyFiles.has(file)),
       ).toEqual([])
     })
 
     it(`keeps each site's development message and code`, () => {
+      oracleRoute(`case`)
       const current = Object.fromEntries(
         sites.coded.map(({ code, file, template, literals, kind }) => [
           code,
@@ -462,6 +475,7 @@ describe(`production error messages`, () => {
     })
 
     it(`passes every showable interpolated value to the code line`, () => {
+      oracleRoute(`case`)
       for (const site of sites.coded)
         for (const interpolation of site.interpolations.filter(
           ({ showable }) => showable,
@@ -481,6 +495,7 @@ describe(`production error messages`, () => {
 
     // Production lines never carry plain objects, such as rows.
     it(`passes only values that the code line can show`, () => {
+      oracleRoute(`case`)
       const hidden = sites.coded.flatMap(({ file, code, values }) =>
         values
           .filter(({ showable }) => !showable)
@@ -490,6 +505,7 @@ describe(`production error messages`, () => {
     })
 
     it(`registers the code of every error class outside errors.ts`, () => {
+      oracleRoute(`case`)
       const codes: Record<string, number> = JSON.parse(
         readFileSync(codesPath, `utf8`),
       )
@@ -503,14 +519,16 @@ describe(`production error messages`, () => {
     // 2026-10-08). Their text is frozen here, and the bundle check proves a
     // production bundle drops every frozen literal.
     it(`freezes every development-only literal`, () => {
+      oracleRoute(`case`)
       const frozenRegions: Array<{ file: string; literals: Array<string> }> =
         JSON.parse(readFileSync(developmentOnlyPath, `utf8`))
       expect(sites.developmentOnly).toEqual(frozenRegions)
     })
 
     // The census is the classifier these laws rest on, so its rules are
-    // pinned on hand-written cases: one per rule, in fixtures/census.
+    // fixed on hand-written cases: one per rule, in fixtures/census.
     it(`classifies guarded, unguarded, and coded census cases`, () => {
+      oracleRoute(`case`)
       const cases = findErrorSites(
         resolve(testsDirectory, `fixtures/census/src`),
       )
@@ -540,6 +558,7 @@ describe(`production error messages`, () => {
     // The warning and sink laws read where a message is used, so a coded
     // message is used where it is written, not stored first.
     it(`uses every coded message where it is written`, () => {
+      oracleRoute(`case`)
       expect(
         sites.coded
           .filter(({ stored }) => stored)
@@ -550,6 +569,7 @@ describe(`production error messages`, () => {
     // A warning says so (maintainer decision, 2026-10-08): a console.warn
     // message uses codedWarning, and nothing else does.
     it(`codes a console.warn message as a warning`, () => {
+      oracleRoute(`case`)
       const mismatched = sites.coded
         .filter(({ kind, inWarn }) => (kind === `warning`) !== inWarn)
         .map(({ file, code, kind }) => `${file} ${kind} ${code}`)
@@ -560,6 +580,7 @@ describe(`production error messages`, () => {
     })
 
     it(`never reuses a class code`, () => {
+      oracleRoute(`case`)
       const codes: Record<string, number> = JSON.parse(
         readFileSync(codesPath, `utf8`),
       )
@@ -572,12 +593,14 @@ describe(`production error messages`, () => {
   // a symbol or bigint shows as a quoted string, and `undefined`, `NaN`, and
   // the infinities show as themselves rather than as `null` or nothing.
   it(`shows values that JSON cannot encode in a shown position`, () => {
+    oracleRoute(`case`)
     expectUnencodableValuesShown()
   })
 
   it.each([`heading`, `class-anchor`, `site-anchor`] as const)(
     `rejects a missing generated %s`,
     (part) => {
+      oracleRoute(`calibration`)
       const docs = catalogObservation()
       expectCodesDocumented(docs)
       let wrong: string
@@ -609,6 +632,7 @@ describe(`production error messages`, () => {
   )
 
   it(`rejects class IDs inside canonical fenced message examples`, () => {
+    oracleRoute(`calibration`)
     const docs = catalogObservation()
     const codes: Record<string, number> = JSON.parse(
       readFileSync(codesPath, `utf8`),
@@ -621,23 +645,23 @@ describe(`production error messages`, () => {
   })
 
   it(`documents every code with its class`, () => {
-    const reach = createOracleReach(
-      `production-errors.generated-docs`,
-      [`cli-stdout-received`, `catalog-compared`],
-      { replaying: false },
-    )
-    reach.beginHistory()
+    oracleRoute(`case`)
+    const states = [`cli-stdout-received`, `catalog-compared`] as const
+    const reached = new Set<(typeof states)[number]>()
     try {
       const docs = renderErrorDocs()
-      reach.reach(`cli-stdout-received`)
+      reached.add(`cli-stdout-received`)
       expectCodesDocumented(docs)
-      reach.reach(`catalog-compared`)
-      reach.assertReached()
+      reached.add(`catalog-compared`)
+      for (const state of states)
+        expect(reached.has(state), `${state} history minimum`).toBe(true)
     } finally {
       if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
         console.info(
           `production-errors.generated-docs reach`,
-          Object.fromEntries(reach.counts()),
+          Object.fromEntries(
+            states.map((state) => [state, Number(reached.has(state))]),
+          ),
         )
     }
   })

@@ -29,14 +29,26 @@
  */
 import { createLiveQueryCollection } from '@tanstack/db'
 import fc from 'fast-check'
-import { expect, it } from 'vitest'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { expect } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
-import { lazyOracleRuns, receiveBothSdks } from './lazy-paging-campaign'
+import { lazyOracleBaseRuns, receiveBothSdks } from './lazy-paging-campaign'
 import { expectedLazyRows } from './lazy-paging-model-oracle'
 import { LazyVersionModel } from './lazy-paging-version-model-oracle'
 import type { LazyRow } from './lazy-paging-model-oracle'
+
+type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
+type AssertionReach = {
+  beginHistory: () => void
+  reach: (state: string) => void
+}
 
 const grammar = fc.record({
   size: fc.integer({ min: 12, max: 18 }),
@@ -105,33 +117,70 @@ async function receive(h: History, sdk: `javascript` | `react`) {
   }
   const checkpoint = () => {
     if (failures.length) throw failures[0]
-    expect(outcome, `aborted request outcome changed`).toBe(`AbortError`)
-    expect(
-      f.errors,
-      `obsolete error reached current sync: ${f.errors.map(String).join(`; `)}`,
-    ).toEqual([])
-    expect(f.source.utils.getSyncError()).toBeUndefined()
-    expect(f.remote.obsoleteReads, `retired watch read its old cache`).toBe(0)
+    oracleAssertion(
+      `lazy-paging-abort-replay-oracle.property.test.ts:115:toBe`,
+      () =>
+        expect(outcome, `aborted request outcome changed`).toBe(`AbortError`),
+    )
+    oracleAssertion(
+      `lazy-paging-abort-replay-oracle.property.test.ts:116:toEqual`,
+      () =>
+        expect(
+          f.errors,
+          `obsolete error reached current sync: ${f.errors.map(String).join(`; `)}`,
+        ).toEqual([]),
+    )
+    oracleAssertion(
+      `lazy-paging-abort-replay-oracle.property.test.ts:120:toBeUndefined`,
+      () => expect(f.source.utils.getSyncError()).toBeUndefined(),
+    )
+    oracleAssertion(
+      `lazy-paging-abort-replay-oracle.property.test.ts:121:toBe`,
+      () =>
+        expect(f.remote.obsoleteReads, `retired watch read its old cache`).toBe(
+          0,
+        ),
+    )
   }
   const scopeOwner = {}
   await withTestCleanup(
     async () => {
       await drain()
-      expect(f.remote.slots.some((slot) => slot.active && !slot.current)).toBe(
-        true,
+      oracleAssertion(
+        `lazy-paging-abort-replay-oracle.property.test.ts:127:toBe`,
+        () =>
+          expect(
+            f.remote.slots.some((slot) => slot.active && !slot.current),
+          ).toBe(true),
       )
       const before = f.batches.length
       controller.abort()
       await drain()
-      expect(outcome, `abort waited for absent provider delivery`).toBe(
-        `AbortError`,
+      oracleAssertion(
+        `lazy-paging-abort-replay-oracle.property.test.ts:133:toBe`,
+        () =>
+          expect(outcome, `abort waited for absent provider delivery`).toBe(
+            `AbortError`,
+          ),
       )
-      expect(f.batches).toHaveLength(before)
+      oracleAssertion(
+        `lazy-paging-abort-replay-oracle.property.test.ts:136:toHaveLength`,
+        () => expect(f.batches).toHaveLength(before),
+      )
       await cancellation
       reaches.add(`abort-before-response-without-acceptance`)
       await f.remote.pump(() => false, h.reverse)
-      expect(f.source.base.size, `canceled load installed late rows`).toBe(0)
-      expect(f.batches).toHaveLength(before)
+      oracleAssertion(
+        `lazy-paging-abort-replay-oracle.property.test.ts:140:toBe`,
+        () =>
+          expect(f.source.base.size, `canceled load installed late rows`).toBe(
+            0,
+          ),
+      )
+      oracleAssertion(
+        `lazy-paging-abort-replay-oracle.property.test.ts:141:toHaveLength`,
+        () => expect(f.batches).toHaveLength(before),
+      )
       reaches.add(`late-response-with-no-demand`)
       // Explicit window retry may lawfully request an authoritative full-source
       // repair. This receiver judges cancellation/publication, not bounded work.
@@ -160,18 +209,33 @@ async function receive(h: History, sdk: `javascript` | `react`) {
         void replay.catch(() => undefined)
         await f.remote.pump(() => false, h.reverse, checkpoint)
         await replay
-        expect(graph.status).toBe(`ready`)
-        expect(read(), `successful replay window`).toEqual(
-          expectedLazyRows(rows(revision), { limit: h.limit }),
+        oracleAssertion(
+          `lazy-paging-abort-replay-oracle.property.test.ts:170:toBe`,
+          () => expect(graph!.status).toBe(`ready`),
         )
-        expect(
-          [...f.source.base.keys()].every((key) =>
-            String(key).startsWith(`revision-${revision}-`),
-          ),
-        ).toBe(true)
-        expect(
-          f.remote.slots.filter((slot) => !slot.active).length,
-        ).toBeGreaterThan(0)
+        oracleAssertion(
+          `lazy-paging-abort-replay-oracle.property.test.ts:171:toEqual`,
+          () =>
+            expect(read(), `successful replay window`).toEqual(
+              expectedLazyRows(rows(revision), { limit: h.limit }),
+            ),
+        )
+        oracleAssertion(
+          `lazy-paging-abort-replay-oracle.property.test.ts:174:toBe`,
+          () =>
+            expect(
+              [...f.source.base.keys()].every((key) =>
+                String(key).startsWith(`revision-${revision}-`),
+              ),
+            ).toBe(true),
+        )
+        oracleAssertion(
+          `lazy-paging-abort-replay-oracle.property.test.ts:179:toBeGreaterThan`,
+          () =>
+            expect(
+              f.remote.slots.filter((slot) => !slot.active).length,
+            ).toBeGreaterThan(0),
+        )
         for (const late of h.errorFirst
           ? ([`error`, `success`] as const)
           : ([`success`, `error`] as const)) {
@@ -179,9 +243,16 @@ async function receive(h: History, sdk: `javascript` | `react`) {
           await drain()
           observe()
           checkpoint()
-          expect(graph.status).toBe(`ready`)
-          expect(read(), `late ${late} changed replay`).toEqual(
-            expectedLazyRows(rows(revision), { limit: h.limit }),
+          oracleAssertion(
+            `lazy-paging-abort-replay-oracle.property.test.ts:189:toBe`,
+            () => expect(graph!.status).toBe(`ready`),
+          )
+          oracleAssertion(
+            `lazy-paging-abort-replay-oracle.property.test.ts:190:toEqual`,
+            () =>
+              expect(read(), `late ${late} changed replay`).toEqual(
+                expectedLazyRows(rows(revision), { limit: h.limit }),
+              ),
           )
           reaches.add(`late-${late}-after-replay`)
         }
@@ -213,24 +284,53 @@ const states = [
   `javascript`,
   `react`,
 ] as const
-it(`fences aborted work from later successful same-run replay`, async () => {
-  await runOracleCampaign(
-    `CONVEX_ABORT_REPLAY_ORACLE`,
-    states,
-    (reach, parameters) =>
-      fc.assert(
-        fc.asyncProperty(grammar, async (h) => {
-          reach.beginHistory()
-          for (const [sdk, observed] of await receiveBothSdks((kind) =>
-            receive(h, kind),
-          )) {
-            for (const state of states)
-              if (observed.has(state)) reach.reach(state)
-            reach.reach(sdk)
-          }
-        }),
-        { numRuns: lazyOracleRuns(30), ...parameters },
-      ),
-    { fixedSeed: 20261030 },
-  )
+
+const convex_abort_replayHistory = grammar
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_abort_replayJudgment(
+  h: AssertionHistory<typeof convex_abort_replayHistory>,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  for (const [sdk, observed] of await receiveBothSdks((kind) =>
+    receive(h, kind),
+  )) {
+    for (const state of states) if (observed.has(state)) reach.reach(state)
+    reach.reach(sdk)
+  }
+}
+
+oracleProperty({
+  id: `convex.abort-replay`,
+  law: {
+    statement: `fences aborted work from later successful same-run replay`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+  },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+  histories: {
+    arbitrary: convex_abort_replayHistory,
+    runs: lazyOracleBaseRuns(30),
+    fixedSeeds: [20261030],
+    states: states,
+    constructed: [
+      {
+        name: `existing constructive history`,
+        enters: states,
+        build: (generated) => generated,
+      },
+    ],
+  },
+  resolve: (generated) => ({ history: generated }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  driver: async (plan, observe) =>
+    recordAssertionJudgment(`convex.abort-replay`, plan, observe, () =>
+      convex_abort_replayJudgment(plan.history, {
+        beginHistory: () => {},
+        reach: (state) => observe(`reach`, state),
+      }),
+    ),
+  timeout: 120000,
 })

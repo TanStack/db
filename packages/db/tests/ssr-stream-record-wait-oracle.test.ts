@@ -13,15 +13,22 @@
  * observer reads check terminal retries without starting adapter work.
  */
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { DbClient, Query, collectionOptions } from '../src/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { getLiveQueryHash } from '../src/live-query-options.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { expectedSsrStreamRecordOutcome } from './ssr-stream-view-oracle.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
-import { createOracleReach } from './oracle-reach.js'
+import { oracleProperty } from './oracle-property.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
+import { declareOracle } from './oracle-declaration.js'
 import { withOracleCleanup } from './utils.js'
+import type { Verdict } from './oracle-property.js'
 import type { DehydratedLiveQueryResult } from '../src/client.js'
 import type { SsrStreamRecordHistory } from './ssr-stream-view-oracle.js'
 
@@ -96,15 +103,24 @@ async function checkRecordHistory(history: SsrStreamRecordHistory) {
     const wait = () => client._waitForSsrLiveQuery(hash, true)
     if (!history.attemptAfterTerminal) {
       const waiting = wait()
-      if (history.record === `pending`) expect(waiting).toBeUndefined()
+      if (history.record === `pending`)
+        oracleAssertion(`checkRecordHistory:106`, () =>
+          expect(waiting).toBeUndefined(),
+        )
       else {
-        expect(waiting).toBeInstanceOf(Promise)
-        expect(wait()).toBe(waiting)
+        oracleAssertion(`checkRecordHistory:108`, () =>
+          expect(waiting).toBeInstanceOf(Promise),
+        )
+        oracleAssertion(`checkRecordHistory:109`, () =>
+          expect(wait()).toBe(waiting),
+        )
         client._setSsrStreamingEnabled(true)
-        expect(
-          wait(),
-          `enabling the current stream preserves its existing demand`,
-        ).toBe(waiting)
+        oracleAssertion(`checkRecordHistory:111`, () =>
+          expect(
+            wait(),
+            `enabling the current stream preserves its existing demand`,
+          ).toBe(waiting),
+        )
         pending = waiting
       }
     }
@@ -122,10 +138,12 @@ async function checkRecordHistory(history: SsrStreamRecordHistory) {
         liveQueries: [{ queryHash: `unrelated`, dehydratedAt: 1, snapshot }],
       })
       await Promise.resolve()
-      expect(
-        settled,
-        `a peer record cannot settle this query's demand`,
-      ).toBeUndefined()
+      oracleAssertion(`checkRecordHistory:132`, () =>
+        expect(
+          settled,
+          `a peer record cannot settle this query's demand`,
+        ).toBeUndefined(),
+      )
     }
     if (history.terminal === `arrival`) {
       client.hydrate({
@@ -141,20 +159,28 @@ async function checkRecordHistory(history: SsrStreamRecordHistory) {
     } else await client.cleanup()
     const expected = expectedSsrStreamRecordOutcome(history)
     if (expected === `snapshot` || expected === `pending`) {
-      expect(wait()).toBeUndefined()
+      oracleAssertion(`checkRecordHistory:151`, () =>
+        expect(wait()).toBeUndefined(),
+      )
       if (expected === `pending`) {
         await Promise.resolve()
-        expect(
-          settled,
-          `normal record-stream close retains the known result promise`,
-        ).toBeUndefined()
+        oracleAssertion(`checkRecordHistory:154`, () =>
+          expect(
+            settled,
+            `normal record-stream close retains the known result promise`,
+          ).toBeUndefined(),
+        )
         result.resolve(snapshot)
       }
       await pending
-      expect(client._getLiveQuery(hash, true)?.snapshot).toEqual(snapshot)
+      oracleAssertion(`checkRecordHistory:161`, () =>
+        expect(client._getLiveQuery(hash, true)?.snapshot).toEqual(snapshot),
+      )
     } else if (history.record === `pending`) {
       await pending?.catch(() => {})
-      expect(settled).toEqual({ status: `error`, cause })
+      oracleAssertion(`checkRecordHistory:164`, () =>
+        expect(settled).toEqual({ status: `error`, cause }),
+      )
     } else {
       const capture = (read: () => unknown) => {
         try {
@@ -165,21 +191,34 @@ async function checkRecordHistory(history: SsrStreamRecordHistory) {
         }
       }
       const first = capture(wait)
-      expect(
-        first.threw,
-        `missing terminal transport cannot become successful browser data`,
-      ).toBe(true)
-      if (expected === `transport-error`) expect(first.cause).toBe(cause)
+      oracleAssertion(`checkRecordHistory:175`, () =>
+        expect(
+          first.threw,
+          `missing terminal transport cannot become successful browser data`,
+        ).toBe(true),
+      )
+      if (expected === `transport-error`)
+        oracleAssertion(`checkRecordHistory:179`, () =>
+          expect(first.cause).toBe(cause),
+        )
       else
-        expect(first.cause).toMatchObject({
-          message: `The DB stream ended before the server-rendered query snapshot arrived.`,
-        })
-      expect(capture(() => observer.getSnapshot())).toEqual(first)
-      expect(capture(() => client._waitForSsrLiveQuery(hash))).toEqual(first)
+        oracleAssertion(`checkRecordHistory:181`, () =>
+          expect(first.cause).toMatchObject({
+            message: `The DB stream ended before the server-rendered query snapshot arrived.`,
+          }),
+        )
+      oracleAssertion(`checkRecordHistory:184`, () =>
+        expect(capture(() => observer.getSnapshot())).toEqual(first),
+      )
+      oracleAssertion(`checkRecordHistory:185`, () =>
+        expect(capture(() => client._waitForSsrLiveQuery(hash))).toEqual(first),
+      )
       await pending?.catch(() => {})
     }
-    expect(starts, `waiting and terminal retry never acquire a source`).toBe(
-      prefix,
+    oracleAssertion(`checkRecordHistory:188`, () =>
+      expect(starts, `waiting and terminal retry never acquire a source`).toBe(
+        prefix,
+      ),
     )
     if (history.restartAfterCleanup) {
       // DbClient cleanup releases its current scope, rather than destroying
@@ -187,26 +226,38 @@ async function checkRecordHistory(history: SsrStreamRecordHistory) {
       // lifetime. The prior rejected promise keeps its own terminal cause.
       const priorSettlement = settled
       await client.cleanup()
-      expect(client.collection(descriptor)).not.toBe(source)
+      oracleAssertion(`checkRecordHistory:197`, () =>
+        expect(client.collection(descriptor)).not.toBe(source),
+      )
       client._setSsrStreamingEnabled(true)
       client.hydrate({ collections: [] })
       let replacement: Promise<void> | undefined
-      expect(() => {
-        replacement = wait()
-      }, `a new stream cannot inherit the old terminal cause`).not.toThrow()
-      expect(
-        replacement,
-        `a fresh stream owns a fresh missing-record wait`,
-      ).toBeInstanceOf(Promise)
+      oracleAssertion(`checkRecordHistory:201`, () =>
+        expect(() => {
+          replacement = wait()
+        }, `a new stream cannot inherit the old terminal cause`).not.toThrow(),
+      )
+      oracleAssertion(`checkRecordHistory:204`, () =>
+        expect(
+          replacement,
+          `a fresh stream owns a fresh missing-record wait`,
+        ).toBeInstanceOf(Promise),
+      )
       client.hydrate({
         collections: [],
         liveQueries: [{ queryHash: hash, dehydratedAt: 3, snapshot }],
       })
       await replacement
-      expect(wait()).toBeUndefined()
-      expect(client._getLiveQuery(hash, true)?.snapshot).toEqual(snapshot)
-      expect(settled, `a new lifetime cannot revive the old result`).toEqual(
-        priorSettlement,
+      oracleAssertion(`checkRecordHistory:213`, () =>
+        expect(wait()).toBeUndefined(),
+      )
+      oracleAssertion(`checkRecordHistory:214`, () =>
+        expect(client._getLiveQuery(hash, true)?.snapshot).toEqual(snapshot),
+      )
+      oracleAssertion(`checkRecordHistory:215`, () =>
+        expect(settled, `a new lifetime cannot revive the old result`).toEqual(
+          priorSettlement,
+        ),
       )
     }
   }, [
@@ -216,10 +267,26 @@ async function checkRecordHistory(history: SsrStreamRecordHistory) {
   ])
 }
 
+// Native registration uses the same grammar and complete independent helper.
+// Four legal constructions replace seed-dependent reach without changing the
+// generated language, excluded pending+cleanup case, or comparison checkpoints.
 describe(`SSR stream record lifetime`, () => {
-  for (const campaign of [`fixed`, `random`] as const) {
-    it(`settles each record demand at its transport checkpoint (${campaign})`, async () => {
-      const reach = createOracleReach(`ssr-stream-record`, [
+  oracleProperty<SsrStreamRecordHistory, Verdict>({
+    id: `ssr.stream-record-lifetime`,
+    law: {
+      statement: `Each record demand settles at its transport checkpoint and terminal retries preserve its outcome without acquiring a source.`,
+      authority: `The stream-view owner's expectedSsrStreamRecordOutcome and the record lifetime contract above.`,
+      limits: `Missing, pending and local records under the existing transport grammar; pending+cleanup and timestamp policy after consumption remain excluded.`,
+    },
+    // What this oracle owns: the gap report judges the DbClient's SSR query waits
+    // and stream failure handling in client.ts by this file's tests. The record
+    // model is checkRecordHistory's expectation over the stream-view oracle.
+    owns: [`src/client.ts`],
+    histories: {
+      arbitrary: grammar,
+      runs: 100,
+      fixedSeeds: [2229],
+      states: [
         `missing`,
         `pending`,
         `local`,
@@ -231,27 +298,72 @@ describe(`SSR stream record lifetime`, () => {
         `peer-first`,
         `undefined-cause`,
         `restart-after-cleanup`,
-      ])
-      await fc.assert(
-        fc.asyncProperty(grammar, async (history) => {
-          reach.beginHistory()
+      ],
+      constructed: [
+        {
+          name: `missing record arrival after a peer`,
+          enters: [`missing`, `arrival`, `peer-first`, `undefined-cause`],
+          build: (generated) => ({
+            ...generated,
+            record: `missing` as const,
+            terminal: `arrival` as const,
+            peerFirst: true,
+            definedCause: false,
+          }),
+        },
+        {
+          name: `pending record closes`,
+          enters: [`pending`, `close`],
+          build: (generated) => ({
+            ...generated,
+            record: `pending` as const,
+            terminal: `close` as const,
+          }),
+        },
+        {
+          name: `local record attempts after transport error`,
+          enters: [`local`, `error`, `late-attempt`],
+          build: (generated) => ({
+            ...generated,
+            record: `local` as const,
+            terminal: `error` as const,
+            attemptAfterTerminal: true,
+          }),
+        },
+        {
+          name: `missing record starts a new stream after cleanup`,
+          enters: [`cleanup`, `restart-after-cleanup`],
+          build: (generated) => ({
+            ...generated,
+            record: `missing` as const,
+            terminal: `cleanup` as const,
+            restartAfterCleanup: true,
+          }),
+        },
+      ],
+    },
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(
+        `SSR stream record lifetime`,
+        history,
+        observe,
+        async () => {
           await checkRecordHistory(history)
-          reach.reach(history.record)
-          reach.reach(history.terminal)
-          if (history.attemptAfterTerminal) reach.reach(`late-attempt`)
-          if (history.peerFirst) reach.reach(`peer-first`)
-          if (!history.definedCause) reach.reach(`undefined-cause`)
-          if (history.restartAfterCleanup) reach.reach(`restart-after-cleanup`)
-        }),
-        campaign === `fixed`
-          ? { numRuns: oracleRuns(100), seed: 2229 }
-          : oraclePropertyOptions(100, `ssr.stream-record-lifetime`),
-      )
-      reach.assertReached()
-      console.info(
-        `ssr-stream-record ${campaign}`,
-        Object.fromEntries(reach.counts()),
-      )
-    })
-  }
+          observe(`reach`, history.record)
+          observe(`reach`, history.terminal)
+          if (history.attemptAfterTerminal) observe(`reach`, `late-attempt`)
+          if (history.peerFirst) observe(`reach`, `peer-first`)
+          if (!history.definedCause) observe(`reach`, `undefined-cause`)
+          if (history.restartAfterCleanup)
+            observe(`reach`, `restart-after-cleanup`)
+        },
+      ),
+    check: forwardAssertionJudgment,
+  })
+})
+
+declareOracle({
+  check: [checkRecordHistory],
+  grammar: [grammar],
 })

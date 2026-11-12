@@ -24,6 +24,7 @@ import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { eq } from '../src/query/builder/functions.js'
 import { PropRef } from '../src/query/ir.js'
 import { mockSyncCollectionOptions } from './utils.js'
+import { oracleRoute } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 
 const fields = [
@@ -103,7 +104,13 @@ function expectExactKeys(
   expect(actual, label).toEqual(expected)
 }
 
+// What this oracle owns: the exact-key lookups of BasicIndex and BTreeIndex,
+// which the public eq read reaches, by this file's Duration cases.
 declareOracle({
+  owns: [
+    `src/indexes/basic-index.ts#BasicIndex.lookup`,
+    `src/indexes/btree-index.ts#BTreeIndex.lookup`,
+  ],
   check: [expectExactKeys],
   model: [modelEqual, modelKeys],
 })
@@ -117,6 +124,7 @@ const indexTypes = [
 // equal copy does not. Three pairs kill text, absolute-value, and first-field
 // key mutants at the same exact-key-set comparison used below.
 it(`calibrates all ten fields and three plausible wrong keys`, () => {
+  oracleRoute(`calibration`)
   for (const [equal, changed] of Array.from({ length: 10 }, (_, index) =>
     cases.slice(index * 2, index * 2 + 2),
   )) {
@@ -149,6 +157,7 @@ it(`calibrates all ten fields and three plausible wrong keys`, () => {
 it.each(indexTypes)(
   `%s exact lookup follows Duration fields`,
   (_name, IndexType) => {
+    oracleRoute(`case`)
     for (const { name, stored, probe } of cases) {
       const index = new IndexType(1, new PropRef([`value`]))
       index.add(`row`, { value: stored })
@@ -164,6 +173,7 @@ it.each(indexTypes)(
 it.each(indexTypes)(
   `public eq agrees before and after %s indexing`,
   async (_name, IndexType) => {
+    oracleRoute(`case`)
     for (const { name, stored, probe } of cases) {
       const source = createCollection(
         mockSyncCollectionOptions({
@@ -199,6 +209,7 @@ it.each(indexTypes)(
 it.each(indexTypes)(
   `%s preserves equality indexing for multiple calendar Durations`,
   async (_name, IndexType) => {
+    oracleRoute(`case`)
     const rows = [
       { id: `one`, value: Temporal.Duration.from({ years: 1 }) },
       { id: `two`, value: Temporal.Duration.from({ years: 2 }) },

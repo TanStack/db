@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/electric-db-collection",
-  "version": "1.0.0-rc.1.4",
+  "version": "1.0.0-rc.1.5",
   "description": "ElectricSQL collection for TanStack DB",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -21,7 +21,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest run",
-    "test:oracles": "vitest run tests/pg-serializer-oracle.property.test.ts tests/electric-oracle.property.test.ts tests/electric-recovery-oracle.test.ts tests/electric-descriptor-isolation-oracle.test.ts tests/electric-sdk-framing.test.ts tests/electric-sdk-delivery-oracle.property.test.ts",
+    "test:oracles": "vitest run tests/pg-serializer-oracle.property.test.ts tests/electric-oracle.property.test.ts tests/electric-recovery-oracle.test.ts tests/electric-descriptor-isolation-oracle.test.ts tests/electric-sdk-framing.test.ts tests/electric-sdk-delivery-oracle.property.test.ts tests/persisted-startup-conformance-oracle.property.test.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "type": "module",
@@ -47,16 +47,16 @@
     "src"
   ],
   "dependencies": {
-    "@electric-sql/client": "^1.5.15",
+    "@electric-sql/client": "^1.5.28",
     "@standard-schema/spec": "^1.1.0",
     "@tanstack/db": "workspace:*",
     "debug": "^4.4.3"
   },
   "devDependencies": {
-    "@tanstack/query-core": "^5.90.20",
-    "@types/debug": "^4.1.12",
-    "@types/pg": "^8.16.0",
-    "@vitest/coverage-istanbul": "^5.0.5",
-    "pg": "^8.20.0"
+    "@tanstack/query-core": "^5.107.1",
+    "@types/debug": "^4.1.13",
+    "@types/pg": "^8.23.1",
+    "@vitest/coverage-istanbul": "^5.1.0",
+    "pg": "^8.23.1"
   }
 }

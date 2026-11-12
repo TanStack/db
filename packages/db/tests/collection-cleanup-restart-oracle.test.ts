@@ -9,8 +9,8 @@ import {
 import { createDeferred } from '../src/deferred'
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
+import { oracleReplayRequested, oracleRoute } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
-import { createOracleReach } from './oracle-reach.js'
 import { flushPromises } from './utils'
 import {
   cleanupError,
@@ -54,7 +54,7 @@ import type { Row } from './collection-cleanup-restart-support.js'
  * Errored eager and on-demand source histories clean up the dependent first,
  * then restart both Collections through live-query preload. They check the
  * same live-query object and subscriber after a later source update. These
- * pinned paths sit outside the three-cut model; they do not establish
+ * fixed histories sit outside the three-cut model; they do not establish
  * automatic recovery after source-only restart.
  * If adapter cleanup and local teardown both fail, the aggregate keeps the
  * adapter error primary and every local error as an ordered secondary
@@ -92,7 +92,7 @@ import type { Row } from './collection-cleanup-restart-support.js'
  * points. Refinement checks run before releasing the controlled adapter gate
  * and after the cleanup promise settles. Counts, exact errors, status, rows,
  * subscription and observer ownership, and settlement are observed. The alias
- * and late-registration cases are pinned refinements outside the three-cut
+ * and late-registration cases are fixed-history refinements outside the three-cut
  * model. This suite does not establish full demand/replay histories, transport
  * shutdown, persistence-wrapper behavior, or general row-publication laws.
  */
@@ -291,7 +291,17 @@ function expectedDependentCleanup(
 }
 
 // Declared after the dependents grammar, whose cells are a const.
+// What this oracle owns: the gap report judges public Collection cleanup and
+// the lifecycle manager behind it, the terminal error of a pooled live query
+// that depends on a cleaning Collection, and the disposal of an Effect at
+// cleanup start, by this file's tests.
 declareOracle({
+  owns: [
+    `src/collection/index.ts#CollectionImpl.cleanup`,
+    `src/collection/lifecycle.ts`,
+    `src/query/pooled-live-query.ts`,
+    `src/query/effect.ts#createEffect`,
+  ],
   model: [expectedCleanupBoundary, expectedDependentCleanup],
   grammar: [
     reentryScenarios,
@@ -308,13 +318,22 @@ const dependentCleanupReachStates = [
 ] as const
 
 describe(`Collection cleanup with failing dependents oracle`, () => {
-  const reach = createOracleReach(
-    `collection-cleanup.dependents`,
-    dependentCleanupReachStates,
+  // The fixed product retains its original one-history minimum for each
+  // state, with each cell counted only once however often it enters one.
+  const counts = new Map<(typeof dependentCleanupReachStates)[number], number>(
+    dependentCleanupReachStates.map((state) => [state, 0]),
   )
-  afterAll(() => reach.assertReached())
+  afterAll(() => {
+    if (!oracleReplayRequested())
+      for (const state of dependentCleanupReachStates)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(1)
+  })
 
   it(`declares each cell of the dependents product once`, () => {
+    oracleRoute(`case`)
     const ids = dependentCleanupCells.map(({ id }) => id)
     expect(new Set(ids).size).toBe(ids.length)
     // 6 x 6 pairs x 3 adapters, plus a second release order for the 20 pairs
@@ -325,7 +344,14 @@ describe(`Collection cleanup with failing dependents oracle`, () => {
   it.each(dependentCleanupCells)(
     `settles after every dependent and the source's own cleanup: $id`,
     async (cell) => {
-      reach.beginHistory()
+      oracleRoute(`case`)
+      const entered = new Set<(typeof dependentCleanupReachStates)[number]>()
+      const enter = (state: (typeof dependentCleanupReachStates)[number]) => {
+        if (!entered.has(state)) {
+          entered.add(state)
+          counts.set(state, counts.get(state)! + 1)
+        }
+      }
       const expected = expectedDependentCleanup(cell)
       const gates = new Map<Gate, ReturnType<typeof createDeferred<void>>>()
       // Teardown's own cleanup must not wait on a gate nobody releases.
@@ -389,7 +415,7 @@ describe(`Collection cleanup with failing dependents oracle`, () => {
       const teardown: Array<() => void> = []
       const markFailedWhileHeld = () => {
         if (holds(cell.adapter) && !adapterSettled) {
-          reach.reach(`dependent-failed-while-adapter-held`)
+          enter(`dependent-failed-while-adapter-held`)
         }
       }
       const register = (behavior: DependentEnd, index: 0 | 1) => {
@@ -412,7 +438,7 @@ describe(`Collection cleanup with failing dependents oracle`, () => {
               thrown = true
               started[index] = true
               settled[index] = true
-              reach.reach(`dependent-end-threw`)
+              enter(`dependent-end-threw`)
               markFailedWhileHeld()
               throw failure(name)
             }),
@@ -434,7 +460,7 @@ describe(`Collection cleanup with failing dependents oracle`, () => {
             }
             if (behavior === `throw`) {
               finish()
-              reach.reach(`dependent-end-threw`)
+              enter(`dependent-end-threw`)
               throw failure(name)
             }
             if (behavior === `reject`) {
@@ -498,14 +524,14 @@ describe(`Collection cleanup with failing dependents oracle`, () => {
         await checkpoint(`after the call`)
         for (const name of expected.releases) {
           if (name === `adapter` && unreleased.size > 1) {
-            reach.reach(`held-dependent-outlasted-adapter`)
+            enter(`held-dependent-outlasted-adapter`)
           }
           if (
             name === `adapter` &&
             cell.adapter === `held-reject` &&
             failures.size > 0
           ) {
-            reach.reach(`adapter-rejected-after-dependent-failure`)
+            enter(`adapter-rejected-after-dependent-failure`)
           }
           gates.get(name)!.resolve()
           unreleased.delete(name)
@@ -574,6 +600,7 @@ describe(`Collection cleanup admission oracle`, () => {
   it.each(subscriberAdmissionCases)(
     `closes $admission admission during $priorStatus $syncMode cleanup`,
     async ({ priorStatus, syncMode, admission }) => {
+      oracleRoute(`case`)
       const cleanupGate = createDeferred<void>()
       let starts = 0
       let acquisitions = 0
@@ -680,6 +707,7 @@ describe(`Collection cleanup admission oracle`, () => {
   )
 
   it(`calibrates every declared bounded-product cell exactly once`, () => {
+    oracleRoute(`case`)
     expectExactCaseIds(reentryScenarios, [
       `abort:plain:1`,
       `abort:plain:2`,
@@ -699,6 +727,7 @@ describe(`Collection cleanup admission oracle`, () => {
   })
 
   it(`waits for source cleanup before publishing the restart boundary`, async () => {
+    oracleRoute(`fixed history`)
     const cleanupGate = createDeferred<void>()
     let starts = 0
     let cleanups = 0
@@ -802,6 +831,7 @@ describe(`Collection cleanup admission oracle`, () => {
   })
 
   it(`retains loading status at cleanup start, then admits restart`, async () => {
+    oracleRoute(`fixed history`)
     const cleanupGate = createDeferred<void>()
     const statuses: Array<string> = []
     let starts = 0
@@ -863,6 +893,7 @@ describe(`Collection cleanup admission oracle`, () => {
   })
 
   it(`rejects dependent preload when cleanup starts before terminal settlement`, async () => {
+    oracleRoute(`fixed history`)
     const cleanupGate = createDeferred<void>()
     const loadGate = createDeferred<void>()
     const loadEntered = createDeferred<void>()
@@ -928,6 +959,7 @@ describe(`Collection cleanup admission oracle`, () => {
   })
 
   it(`disposes a dependent Effect when cleanup starts before terminal settlement`, async () => {
+    oracleRoute(`fixed history`)
     const cleanupGate = createDeferred<void>()
     const handlerGate = createDeferred<void>()
     const handlerEntered = createDeferred<void>()
@@ -1037,6 +1069,7 @@ describe(`Collection cleanup admission oracle`, () => {
   it.each(lateEffectCases)(
     `releases a late Effect during $priorStatus $syncMode cleanup of its $cleaningPosition source`,
     async ({ priorStatus, syncMode, cleaningPosition }) => {
+      oracleRoute(`case`)
       const cleanupGate = createDeferred<void>()
       let starts = 0
       const source = createCollection<Row, number>({

@@ -31,7 +31,7 @@
  */
 import { afterAll, expect, test } from 'vitest'
 import { declareOracle } from '../oracle-declaration.js'
-import { createOracleReach } from '../oracle-reach.js'
+import { oracleRoute } from '../oracle-config.js'
 import {
   expectedMetadataInput,
   expectedMetadataRecord,
@@ -90,18 +90,20 @@ const compilerObservations = [
   `derived-output`,
   `authored-output`,
 ] as const
-const compilerReach = createOracleReach(
-  `compiler cache metadata`,
-  metadataCompilerCacheHistories.flatMap((history) =>
-    compilerObservations.map(
-      (observation) =>
-        `${history.path}/${history.order}/${history.cache}/${key(history)}/${observation}`,
-    ),
-  ),
-  { replaying: false },
+// Each finite history has one numeric token. A state keeps that token once,
+// so repeated observations preserve the original per-history checkpoint count.
+const compilerHistoriesByState = new Map<string, Set<number>>(
+  metadataCompilerCacheHistories
+    .flatMap((history) =>
+      compilerObservations.map(
+        (observation) =>
+          `${history.path}/${history.order}/${history.cache}/${key(history)}/${observation}`,
+      ),
+    )
+    .map((state) => [state, new Set<number>()]),
 )
-const callbackReach = createOracleReach(
-  `functional metadata callback`,
+let compilerHistory = 0
+const callbackHistoriesByState = new Map<string, Set<number>>(
   [
     ...metadataCallbackReceiverHistories.flatMap((history) =>
       receiverCuts(history.receiver).map(
@@ -117,34 +119,53 @@ const callbackReach = createOracleReach(
           ),
       ),
     ),
-  ],
-  { replaying: false },
+  ].map((state) => [state, new Set<number>()]),
 )
-const inlineReach = createOracleReach(
-  `inline metadata callback`,
-  metadataInlineHistories.flatMap((history) =>
-    history.form === `collection`
-      ? [`${history.path}/${history.form}/${key(history)}/rejected`]
-      : cuts.map(
-          (cut) => `${history.path}/${history.form}/${key(history)}/${cut}`,
-        ),
-  ),
-  { replaying: false },
+let callbackHistory = 0
+const inlineHistoriesByState = new Map<string, Set<number>>(
+  metadataInlineHistories
+    .flatMap((history) =>
+      history.form === `collection`
+        ? [`${history.path}/${history.form}/${key(history)}/rejected`]
+        : cuts.map(
+            (cut) => `${history.path}/${history.form}/${key(history)}/${cut}`,
+          ),
+    )
+    .map((state) => [state, new Set<number>()]),
 )
+let inlineHistory = 0
 let callbackEntered = false
 let inlineEntered = false
 let compilerEntered = false
 afterAll(() => {
-  if (callbackEntered) callbackReach.assertReached()
-  if (inlineEntered) inlineReach.assertReached()
-  if (compilerEntered) compilerReach.assertReached()
+  if (callbackEntered)
+    expect(
+      [...callbackHistoriesByState].filter(
+        ([, histories]) => histories.size < 1,
+      ),
+      `functional metadata callback`,
+    ).toEqual([])
+  if (inlineEntered)
+    expect(
+      [...inlineHistoriesByState].filter(([, histories]) => histories.size < 1),
+      `inline metadata callback`,
+    ).toEqual([])
+  if (compilerEntered)
+    expect(
+      [...compilerHistoriesByState].filter(
+        ([, histories]) => histories.size < 1,
+      ),
+      `compiler cache metadata`,
+    ).toEqual([])
   if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
-    for (const [name, reach] of [
-      [`callback`, callbackReach],
-      [`inline`, inlineReach],
-      [`compiler`, compilerReach],
+    for (const [name, historiesByState] of [
+      [`callback`, callbackHistoriesByState],
+      [`inline`, inlineHistoriesByState],
+      [`compiler`, compilerHistoriesByState],
     ] as const) {
-      const counts = [...reach.counts().values()]
+      const counts = [...historiesByState.values()].map(
+        (histories) => histories.size,
+      )
       console.info(`${name} metadata reach`, {
         states: counts.length,
         reached: counts.filter(Boolean).length,
@@ -154,6 +175,12 @@ afterAll(() => {
   }
 })
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/compiler/index.ts#compileQuery',
+    'src/query/effect.ts#createEffect',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [metadataInputViolations, metadataOutputViolations],
   model: [expectedMetadataInput],
   grammar: [
@@ -168,15 +195,18 @@ declareOracle({
 test.each(callbackCases)(
   `receives callback metadata before deriving ordinary values: $label`,
   async (history) => {
+    oracleRoute(`case`)
     callbackEntered = true
-    callbackReach.beginHistory()
+    callbackHistory++
     const report = await runMetadataCallbackHistory(
       history,
       history.path,
       (cut) =>
-        callbackReach.reach(
-          `${history.kind}/${history.receiver}/${history.path}/${key(history)}/${cut}`,
-        ),
+        callbackHistoriesByState
+          .get(
+            `${history.kind}/${history.receiver}/${history.path}/${key(history)}/${cut}`,
+          )!
+          .add(callbackHistory),
       history.receiver,
       history.kind,
     )
@@ -195,8 +225,9 @@ test.each(
 )(
   `receives direct source metadata before deriving ordinary values: %j`,
   async ({ kind, receiver }) => {
+    oracleRoute(`case`)
     callbackEntered = true
-    callbackReach.beginHistory()
+    callbackHistory++
     const report = await runMetadataCallbackHistory(
       {
         shape: `functional-direct`,
@@ -204,7 +235,10 @@ test.each(
         authoredPending: false,
       },
       `direct-source`,
-      (cut) => callbackReach.reach(`${kind}/${receiver}/direct-source/${cut}`),
+      (cut) =>
+        callbackHistoriesByState
+          .get(`${kind}/${receiver}/direct-source/${cut}`)!
+          .add(callbackHistory),
       receiver,
       kind,
     )
@@ -214,15 +248,16 @@ test.each(
 test.each(inlineCases)(
   `receives inline authored metadata or rejects compiled Collection input: $label`,
   async (history) => {
+    oracleRoute(`case`)
     inlineEntered = true
-    inlineReach.beginHistory()
+    inlineHistory++
     const report = await runInlineMetadataCallbackHistory(
       history,
       history.form,
       (cut) =>
-        inlineReach.reach(
-          `${history.path}/${history.form}/${key(history)}/${cut}`,
-        ),
+        inlineHistoriesByState
+          .get(`${history.path}/${history.form}/${key(history)}/${cut}`)!
+          .add(inlineHistory),
       history.path,
     )
     expect(
@@ -239,17 +274,20 @@ test.each(inlineCases)(
 test.each(compilerCases)(
   `preserves metadata across compiler cache modes: $label`,
   async (history) => {
+    oracleRoute(`case`)
     compilerEntered = true
-    compilerReach.beginHistory()
+    compilerHistory++
     const report = await runMetadataCompilerCacheHistory(
       history,
       history.order,
       history.cache,
       history.path,
       (observation) =>
-        compilerReach.reach(
-          `${history.path}/${history.order}/${history.cache}/${key(history)}/${observation}`,
-        ),
+        compilerHistoriesByState
+          .get(
+            `${history.path}/${history.order}/${history.cache}/${key(history)}/${observation}`,
+          )!
+          .add(compilerHistory),
     )
     expect(
       report.violations,
@@ -275,6 +313,7 @@ test.each([
   `late-capture-rewrite`,
   `compiler-symbol`,
 ] as const)(`rejects a hostile callback-input observation: %s`, (fault) => {
+  oracleRoute(`case`)
   const description = {
     shape: `structured-spread`,
     collision: `all`,
@@ -324,6 +363,7 @@ test.each([
   `intermediate-sanitizer`,
   `missing-derived-field`,
 ] as const)(`rejects a hostile derived ordinary output: %s`, (fault) => {
+  oracleRoute(`calibration`)
   const description = {
     shape: `functional-projection`,
     collision: `$collectionId`,
@@ -352,6 +392,7 @@ test.each([
   expect(metadataOutputViolations(hostile, expected)).not.toStrictEqual([])
 })
 test(`copies callback input before later source objects change`, () => {
+  oracleRoute(`fixed history`)
   const description = {
     shape: `functional-direct`,
     collision: `none`,
@@ -370,6 +411,7 @@ test(`copies callback input before later source objects change`, () => {
   ).toStrictEqual([])
 })
 test(`accepts readable inherited source metadata at callback input`, () => {
+  oracleRoute(`fixed history`)
   const description = {
     shape: `functional-direct`,
     collision: `none`,
@@ -390,6 +432,7 @@ test(`accepts readable inherited source metadata at callback input`, () => {
   ).toStrictEqual([])
 })
 test(`copies nested callback values before later child objects change`, () => {
+  oracleRoute(`fixed history`)
   const child = {
     ...sourceFact.row,
     ...expectedSourceVirtualFields(sourceFact),
@@ -407,6 +450,7 @@ test(`copies nested callback values before later child objects change`, () => {
 test.each([`selected-virtual`, `own-undefined`] as const)(
   `rejects an inherited replacement for an authored inline field: %s`,
   (fault) => {
+    oracleRoute(`calibration`)
     const description = {
       shape: `functional-projection`,
       collision: `$collectionId`,
@@ -451,6 +495,7 @@ test.each([`selected-virtual`, `own-undefined`] as const)(
 test.each([`unexpected`, `$collectionId`] as const)(
   `rejects an extra own field on an inline array: %s`,
   (field) => {
+    oracleRoute(`calibration`)
     const child = expectedMetadataInput(sourceFact, {
       shape: `functional-projection`,
       collision: `none`,

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { fc } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
 import {
   areValuesEqual,
@@ -11,16 +11,41 @@ import {
 } from '../src/utils/comparison'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils'
 import {
-  oraclePropertyOptions,
+  oracleProperty,
   oracleReplayRequested,
-  oracleReplaySkips,
-  oracleRuns,
-  recordOracleReplay,
+  oracleRoute,
 } from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
 import { defaultOpts, lexicalOpts } from './comparison-options.js'
+import { declareOracle } from './oracle-declaration.js'
+import { nativeCampaignReceipt } from './native-campaign-receipt'
+import {
+  checkWithOriginalFailure,
+  failureCheckpoint,
+} from './comparison-failure-support'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from './oracle-assertion-adapter'
+import {
+  arbitraryChangedBytes,
+  arbitraryComparableArray,
+  arbitraryComparablePrimitive,
+  arbitraryDate,
+  arbitraryNonFiniteInput,
+  arbitrarySameTypeArray,
+  arbitrarySameTypePair,
+  arbitrarySameTypeTriple,
+  assertChangedBytes,
+  assertNonFiniteOrder,
+  assertTransitive,
+  assertValidComparison,
+  checkAntisymmetry,
+  sign,
+} from './comparison-laws-oracle'
 import type { CompareOptions } from '../src/query/builder/types'
-
+import type { ComparisonFailure } from './comparison-failure-support'
 /**
  * Comparison defines the order and equality domains used by queries and
  * indexes. The laws are reflexivity, deterministic sign, antisymmetry, and
@@ -75,86 +100,6 @@ const campaignRuns = 100
 // replay selects one with TANSTACK_DB_ORACLE_PROPERTY=comparison.<number>.
 let nextPropertyId = 0
 
-type ComparisonFailure = { checkpoint: string; error: unknown }
-
-function failureCheckpoint(error: unknown): string {
-  if (error instanceof Error) {
-    // The first frame in this file locates the failed assertion or the call
-    // into a throwing comparator. Unlike a matcher message, it is unchanged
-    // when fast-check shrinks the input values.
-    const site = error.stack?.match(
-      /comparison-oracle\.property\.test\.ts:(\d+):(\d+)/,
-    )
-    if (site) return `comparison-oracle.property.test.ts:${site[1]}:${site[2]}`
-    return `${error.name}: ${error.message.split(`\n`)[0]}`
-  }
-  return `non-Error throw: ${String(error)}`
-}
-
-function checkWithOriginalFailure<T>(
-  arbitrary: fc.Arbitrary<T>,
-  check: (value: T) => void,
-  options: Parameters<typeof fc.check>[1],
-  replayProperty?: string,
-) {
-  let original: ComparisonFailure | undefined
-  let reduced: ComparisonFailure | undefined
-  const property = fc.property(arbitrary, (value) => {
-    try {
-      check(value)
-    } catch (error) {
-      const failure = { checkpoint: failureCheckpoint(error), error }
-      original ??= failure
-      // A different assertion can fail on a smaller input. It is not a
-      // reproduction of the original violation, so do not shrink into it.
-      if (failure.checkpoint !== original.checkpoint) return
-      reduced = failure
-      throw error
-    }
-  })
-  const result = fc.check(property, options)
-  if (replayProperty !== undefined) recordOracleReplay(replayProperty, result)
-  return { result, original, reduced }
-}
-
-function assertComparisonProperty<T>(
-  label: string,
-  arbitrary: fc.Arbitrary<T>,
-  check: (value: T) => void,
-  options: Parameters<typeof fc.check>[1],
-  // The registered property, so a guarded replay can witness this run.
-  replayProperty?: string,
-): void {
-  const { result, original, reduced } = checkWithOriginalFailure(
-    arbitrary,
-    check,
-    options,
-    replayProperty,
-  )
-  if (!result.failed) return
-  if (!original || !reduced || result.counterexamplePath === null) {
-    throw new Error(`${label}: failing run lost its primary comparison failure`)
-  }
-  const replay = checkWithOriginalFailure(arbitrary, check, {
-    seed: result.seed,
-    path: result.counterexamplePath,
-    numRuns: 1,
-    endOnFailure: true,
-    examples: options?.examples,
-  })
-  const reproduced =
-    replay.result.failed &&
-    replay.original?.checkpoint === original.checkpoint &&
-    replay.reduced?.checkpoint === original.checkpoint
-  throw new Error(
-    `${label}: ${original.checkpoint} failed at the function-return checkpoint; ` +
-      `reduction ${reduced.checkpoint === original.checkpoint ? `kept` : `changed`} the original violation; ` +
-      `seed ${result.seed}, path ${result.counterexamplePath}; ` +
-      `direct replay ${reproduced ? `reproduced` : `did not reproduce`} that violation.\n${result.error}`,
-    { cause: original.error },
-  )
-}
-
 function comparisonProperty<
   Ts extends [unknown, ...Array<unknown>],
 >(arbitraries: { [K in keyof Ts]: fc.Arbitrary<Ts[K]> }): (
@@ -170,416 +115,79 @@ function comparisonProperty<
       check(...values)
     }
 
-    it.skipIf(oracleReplayRequested())(`${label} fixed`, () => {
-      assertComparisonProperty(label, arbitrary, checkValues, {
-        seed: fixedSeed,
-        numRuns: oracleRuns(campaignRuns),
+    describe(label, () => {
+      let originalFailure: ComparisonFailure | undefined
+      let reducedFailure: ComparisonFailure | undefined
+      let replayCalls = 0
+      beforeEach(() => {
+        originalFailure = undefined
+        reducedFailure = undefined
+        replayCalls = 0
       })
-    })
-    it.skipIf(oracleReplaySkips(property))(`${label} random`, () => {
-      assertComparisonProperty(
-        label,
-        arbitrary,
-        checkValues,
-        oraclePropertyOptions(campaignRuns, property),
-        property,
-      )
-    })
-  }
-}
-
-// Input grammar: finite numbers, strings, booleans, valid Dates, and bounded
-// arrays of those primitives; same-type pairs/triples isolate order laws.
-// Null placement, direction, and string mode are separate option axes. Removing
-// any one loses its paired opposite-order witness below. The fixed null,
-// locale/lexical, and custom-collation cases reconstruct those boundaries.
-// Array length 0/1 and binary length 0/1/128/129 are marginal cases. Plain
-// objects are outside this order model because their IDs depend on creation
-// order. Mixed-type order is outside this bounded grammar. A tagged grammar
-// below admits NaN and invalid Date inputs; an invalid comparator result is
-// rejected by the control below.
-const arbitraryComparablePrimitive = fc.oneof(
-  fc.string(),
-  fc.integer(),
-  fc.double({ noNaN: true, noDefaultInfinity: true }),
-  fc.boolean(),
-)
-
-const arbitraryDate = fc.date({ noInvalidDate: true })
-
-type NonFiniteFamily = `number` | `date`
-type NonFiniteInput = {
-  family: NonFiniteFamily
-  finiteDays: Array<number>
-  unorderedCount: number
-  includeNull: boolean
-}
-type TaggedOrderValue = {
-  id: string
-  value: number | Date | null
-  category: `null` | `finite` | `unordered`
-  order: number
-}
-
-// The generator's tags are reference facts: finite epoch days have ordinary
-// numeric order, null precedes them, and the family's non-finite values follow
-// them. Constructing expected signs from these tags avoids asking production
-// whether a Date or number is unorderable. Distinct IDs preserve duplicate
-// NaNs/invalid Dates in the sorted observation.
-function taggedOrderValues(input: NonFiniteInput): Array<TaggedOrderValue> {
-  const unordered = () =>
-    input.family === `number` ? Number.NaN : new Date(Number.NaN)
-  const finite = input.finiteDays.map((day, index) => ({
-    id: `finite:${index}`,
-    value: input.family === `number` ? day : new Date(day * 86_400_000),
-    category: `finite` as const,
-    order: day,
-  }))
-  const rows: Array<TaggedOrderValue> = [
-    finite[0]!,
-    { id: `unordered:0`, value: unordered(), category: `unordered`, order: 0 },
-    ...finite.slice(1),
-    ...Array.from({ length: input.unorderedCount - 1 }, (_, index) => ({
-      id: `unordered:${index + 1}`,
-      value: unordered(),
-      category: `unordered` as const,
-      order: 0,
-    })),
-  ]
-  if (input.includeNull) {
-    rows.splice(2, 0, { id: `null`, value: null, category: `null`, order: 0 })
-  }
-  return rows
-}
-
-function taggedOrderSign(a: TaggedOrderValue, b: TaggedOrderValue): -1 | 0 | 1 {
-  const rank = { null: 0, finite: 1, unordered: 2 }
-  const difference = rank[a.category] - rank[b.category]
-  const valueDifference =
-    difference || (a.category === `finite` ? a.order - b.order : 0)
-  return valueDifference < 0 ? -1 : valueDifference > 0 ? 1 : 0
-}
-
-// Production observes direct comparator returns and the order of a stable
-// JavaScript sort using the exported default comparator. The comparison runs
-// immediately after each call, so it detects wrong signs and lost or reordered
-// duplicate non-finite rows at the exact sort checkpoint.
-function assertNonFiniteOrder(
-  input: NonFiniteInput,
-  compare: (a: number | Date | null, b: number | Date | null) => number = (
-    a,
-    b,
-  ) => ascComparator(a, b, DEFAULT_COMPARE_OPTIONS),
-  sortCompare: (
-    a: number | Date | null,
-    b: number | Date | null,
-  ) => number = defaultComparator,
-): void {
-  const rows = taggedOrderValues(input)
-  for (const a of rows) {
-    for (const b of rows) {
-      const result = compare(a.value, b.value)
-      expect(sign(result)).toBe(taggedOrderSign(a, b))
-      // Preserve the legacy exact-zero assertion for NaN/NaN, including its
-      // distinction between positive and negative zero in Vitest.
-      if (a.category === `unordered` && b.category === `unordered`) {
-        expect(result).toBe(0)
-      }
-    }
-  }
-  const actual = [...rows].sort((a, b) => sortCompare(a.value, b.value))
-  const expected = [...rows].sort(taggedOrderSign)
-  expect(actual.map((row) => row.id)).toEqual(expected.map((row) => row.id))
-}
-
-// Legal inputs contain 1..5 distinct finite numbers or valid epoch-day Dates,
-// one or two NaNs/invalid Dates, and optional null. A singleton finite value,
-// duplicate non-finite values, negative days, and null presence are margins.
-// Removing the family axis misses invalid Dates; removing the duplicate count
-// misses equal non-finite rows; removing null misses its default placement.
-// Mixed families, Temporal values, symbols, and invalid option objects are not
-// generated. The fixed examples below reconstruct the legacy sort histories.
-const arbitraryNonFiniteInput: fc.Arbitrary<NonFiniteInput> = fc.record({
-  family: fc.constantFrom(`number` as const, `date` as const),
-  finiteDays: fc.uniqueArray(fc.integer({ min: -20_000, max: 20_000 }), {
-    minLength: 1,
-    maxLength: 5,
-  }),
-  unorderedCount: fc.integer({ min: 1, max: 2 }),
-  includeNull: fc.boolean(),
-})
-
-const arbitraryComparableArray = fc.array(arbitraryComparablePrimitive, {
-  maxLength: 5,
-})
-
-function assertValidComparison(result: unknown): asserts result is number {
-  expect(
-    typeof result === `number` && !Number.isNaN(result),
-    `comparator result must be a number other than NaN`,
-  ).toBe(true)
-}
-
-// Validate before reducing: NaN and non-number results must not appear equal.
-const sign = (n: unknown): -1 | 0 | 1 => {
-  assertValidComparison(n)
-  if (n < 0) return -1
-  if (n > 0) return 1
-  return 0
-}
-
-/**
- * Check antisymmetry property: sign(compare(a, b)) === -sign(compare(b, a))
- * This handles the +0/-0 JavaScript edge case where -0 !== 0 in Object.is
- */
-const checkAntisymmetry = (ab: unknown, ba: unknown): boolean => {
-  const signAB = sign(ab)
-  const signBA = sign(ba)
-  // Both zero, or opposite signs
-  return (signAB === 0 && signBA === 0) || signAB === -signBA
-}
-
-// Same-type arbitraries for comparator tests (cross-type comparison is not guaranteed to be total ordering)
-const arbitrarySameTypeString = fc.tuple(fc.string(), fc.string())
-const arbitrarySameTypeInt = fc.tuple(fc.integer(), fc.integer())
-const arbitrarySameTypeDouble = fc.tuple(
-  fc.double({ noNaN: true, noDefaultInfinity: true }),
-  fc.double({ noNaN: true, noDefaultInfinity: true }),
-)
-const arbitrarySameTypeBool = fc.tuple(fc.boolean(), fc.boolean())
-const arbitrarySameTypeDate = fc.tuple(
-  fc.date({ noInvalidDate: true }),
-  fc.date({ noInvalidDate: true }),
-)
-const arbitrarySameTypeArray = fc.tuple(
-  fc.array(fc.integer(), { maxLength: 5 }),
-  fc.array(fc.integer(), { maxLength: 5 }),
-)
-
-// Pair of same-type comparable values
-const arbitrarySameTypePair = fc.oneof(
-  arbitrarySameTypeString,
-  arbitrarySameTypeInt,
-  arbitrarySameTypeDouble,
-  arbitrarySameTypeBool,
-  arbitrarySameTypeDate,
-  arbitrarySameTypeArray,
-)
-
-// Triple of same-type values for transitivity
-const arbitrarySameTypeTriple = fc.oneof(
-  fc.tuple(fc.integer(), fc.integer(), fc.integer()),
-  fc.tuple(fc.string(), fc.string(), fc.string()),
-  fc.tuple(
-    fc.double({ noNaN: true, noDefaultInfinity: true }),
-    fc.double({ noNaN: true, noDefaultInfinity: true }),
-    fc.double({ noNaN: true, noDefaultInfinity: true }),
-  ),
-)
-
-const arbitraryChangedBytes = fc
-  .tuple(
-    fc.uint8Array({ minLength: 1, maxLength: 50 }),
-    fc.integer({ min: 0, max: 49 }),
-    fc.integer({ min: 1, max: 255 }),
-  )
-  .map(([bytes, indexHint, delta]) => {
-    const index = indexHint % bytes.length
-    const changed = new Uint8Array(bytes)
-    changed[index] = (bytes[index]! + delta) % 256
-    return { bytes, changed, index }
-  })
-
-function assertChangedBytes(
-  {
-    bytes,
-    changed,
-    index,
-  }: { bytes: Uint8Array; changed: Uint8Array; index: number },
-  equal: (a: Uint8Array, b: Uint8Array) => boolean,
-): void {
-  expect(index).toBeLessThan(bytes.length)
-  expect(changed).toHaveLength(bytes.length)
-  expect(changed[index]).not.toBe(bytes[index])
-  expect(equal(bytes, new Uint8Array(bytes)), `byte copy must be equal`).toBe(
-    true,
-  )
-  expect(equal(bytes, changed), `changed byte must be unequal`).toBe(false)
-  expect(equal(changed, bytes), `changed byte must be unequal`).toBe(false)
-}
-
-function assertTransitive(ab: number, bc: number, ac: number): void {
-  for (const result of [ab, bc, ac]) assertValidComparison(result)
-  if (ab <= 0 && bc <= 0) expect(ac).toBeLessThanOrEqual(0)
-}
-
-declareOracle({
-  check: [
-    assertComparisonProperty,
-    checkAntisymmetry,
-    assertNonFiniteOrder,
-    assertChangedBytes,
-    assertTransitive,
-    assertPlainDateOrder,
-    assertZonedDateTimeOrder,
-  ],
-  model: [modelPlainDateSign, modelNanosecondSign],
-})
-
-describe(`comparison law controls`, () => {
-  fcTest(
-    `shrinking retains the first violated law and replays its checkpoint`,
-    () => {
-      let reachedOtherLaw = false
-      const arbitrary = fc.integer({ min: 0, max: 10 })
-      const check = (value: number) => {
-        if (value > 0) expect(value, `positive-value law`).toBe(0)
-        reachedOtherLaw = true
-        expect(value, `zero-value law`).toBe(1)
-      }
-      const originalRun = checkWithOriginalFailure(arbitrary, check, {
-        seed: 20260911,
-        numRuns: 1,
-        examples: [[5]],
-      })
-      expect(originalRun.result.failed).toBe(true)
-      expect(reachedOtherLaw).toBe(true)
-      expect(originalRun.result.counterexample).toEqual([1])
-      expect(originalRun.original?.checkpoint).toBe(
-        originalRun.reduced?.checkpoint,
-      )
-      if (originalRun.result.counterexamplePath === null) {
-        throw new Error(`stable failure did not produce a replay path`)
-      }
-      const replay = checkWithOriginalFailure(arbitrary, check, {
-        seed: originalRun.result.seed,
-        path: originalRun.result.counterexamplePath,
-        numRuns: 1,
-        endOnFailure: true,
-        examples: [[5]],
-      })
-      expect(replay.result.failed).toBe(true)
-      expect(replay.original?.checkpoint).toBe(originalRun.original?.checkpoint)
-      expect(replay.result.counterexample).toEqual(
-        originalRun.result.counterexample,
-      )
-
-      let reported: unknown
-      try {
-        assertComparisonProperty(
-          `synthetic two-law control`,
-          arbitrary,
-          check,
-          {
-            seed: 20260911,
-            numRuns: 1,
-            examples: [[5]],
-          },
+      nativeCampaignReceipt<Ts>((result) => {
+        if (!result.failed) return
+        if (
+          !originalFailure ||
+          !reducedFailure ||
+          result.counterexamplePath === null
         )
-      } catch (error) {
-        reported = error
-      }
-      expect(reported).toBeInstanceOf(Error)
-      expect((reported as Error).message).toContain(
-        `direct replay reproduced that violation`,
-      )
-      expect((reported as Error).message).toContain(
-        originalRun.original?.checkpoint,
-      )
-      expect((reported as Error).cause).toBeInstanceOf(Error)
-      expect(failureCheckpoint((reported as Error).cause)).toBe(
-        originalRun.original?.checkpoint,
-      )
-    },
-  )
-
-  fcTest(`rejects invalid results and accepts signed infinity`, () => {
-    for (const invalid of [NaN, `invalid`, undefined]) {
-      expect(() => checkAntisymmetry(invalid, 0)).toThrow(
-        `comparator result must be a number other than NaN`,
-      )
-    }
-    // An earlier finite-only check rejected this legal custom comparator sign.
-    expect(checkAntisymmetry(-Infinity, Infinity)).toBe(true)
-    expect(checkAntisymmetry(Infinity, -Infinity)).toBe(true)
-    expect(checkAntisymmetry(0, -0)).toBe(true)
-    expect(checkAntisymmetry(-12, 12)).toBe(true)
-    expect(checkAntisymmetry(-12, -12)).toBe(false)
-  })
-
-  fcTest(
-    `rejects and replays a comparator returning NaN only for unequal pairs`,
-    () => {
-      const mutant = (a: number, b: number): number => (a === b ? 0 : NaN)
-      const property = fc.property(fc.integer({ min: -100, max: 100 }), (a) => {
-        expect(mutant(a, a)).toBe(0)
-        expect(checkAntisymmetry(mutant(a, a + 1), mutant(a + 1, a))).toBe(true)
+          throw new Error(
+            `${label}: failing run lost its primary comparison failure`,
+          )
+        const replay = checkWithOriginalFailure(arbitrary, checkValues, {
+          seed: result.seed,
+          path: result.counterexamplePath,
+          numRuns: 1,
+          endOnFailure: true,
+          examples: result.runConfiguration.examples,
+        })
+        const reproduced =
+          replay.result.failed &&
+          replay.original?.checkpoint === originalFailure.checkpoint &&
+          replay.reduced?.checkpoint === originalFailure.checkpoint
+        throw new Error(
+          `${label}: ${originalFailure.checkpoint} failed at the function-return checkpoint; ` +
+            `reduction ${reducedFailure.checkpoint === originalFailure.checkpoint ? 'kept' : 'changed'} the original violation; ` +
+            `seed ${result.seed}, path ${result.counterexamplePath}; ` +
+            `direct replay ${reproduced ? 'reproduced' : 'did not reproduce'} that violation.\n${String(result.errorInstance)}`,
+          { cause: originalFailure.error },
+        )
       })
-      const failure = fc.check(property, { seed: 20260911, numRuns: 20 })
-      expect(failure.failed).toBe(true)
-      expect(failure.error).toContain(
-        `comparator result must be a number other than NaN`,
-      )
-      expect(failure.counterexample).toEqual([0])
-      if (failure.counterexamplePath === null) {
-        throw new Error(`mutant did not produce a replay path`)
-      }
-      const replay = fc.check(property, {
-        seed: failure.seed,
-        path: failure.counterexamplePath,
-        numRuns: 1,
-        endOnFailure: true,
+      oracleProperty({
+        id: property,
+        law: {
+          statement: name,
+          authority:
+            'OrderByOptions, CompareOptions and the comparison, binary normalization and non-finite ordering contracts stated by the named comparison-laws-oracle companion',
+          limits:
+            'The unchanged bounded same-type and normalization grammars; unrelated object identity order, mixed-type order and query/index receiving paths remain outside this owner.',
+        },
+        histories: { arbitrary, runs: campaignRuns, fixedSeeds: [fixedSeed] },
+        resolve: (history) => ({ history }),
+        model: recordedAssertionJudgment,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(property, plan, observe, () => {
+            if (oracleReplayRequested() && replayCalls++ > 0) return
+            try {
+              checkValues(plan.history)
+            } catch (error) {
+              const failure = { checkpoint: failureCheckpoint(error), error }
+              originalFailure ??= failure
+              if (failure.checkpoint !== originalFailure.checkpoint) return
+              reducedFailure = failure
+              rejectAt(
+                failure.checkpoint,
+                error instanceof Error
+                  ? error
+                  : new Error(String(error), { cause: error }),
+              )
+            }
+          }),
+        check: forwardAssertionJudgment,
       })
-      expect(replay.failed).toBe(true)
-      expect(replay.error).toContain(
-        `comparator result must be a number other than NaN`,
-      )
-      expect(replay.counterexample).toEqual(failure.counterexample)
-    },
-  )
-
-  fcTest(
-    `changed-byte law rejects length-only equality and accepts indexed equality`,
-    () => {
-      const sample = {
-        bytes: new Uint8Array([255]),
-        changed: new Uint8Array([0]),
-        index: 0,
-      }
-      expect(() =>
-        assertChangedBytes(sample, (a, b) => a.length === b.length),
-      ).toThrow(`changed byte must be unequal`)
-      assertChangedBytes(
-        sample,
-        (a, b) =>
-          a.length === b.length && a.every((byte, index) => byte === b[index]),
-      )
-    },
-  )
-
-  fcTest(`fixed campaign reaches a changed byte in every case`, () => {
-    const result = fc.check(
-      fc.property(arbitraryChangedBytes, (sample) => {
-        assertChangedBytes(sample, areValuesEqual)
-      }),
-      { seed: 20260911, numRuns: 100 },
-    )
-    expect(result).toMatchObject({ failed: false, numRuns: 100, numSkips: 0 })
-  })
-
-  it(`transitivity reaches a strict chain and rejects a cyclic order`, () => {
-    const [a, b, c] = [0, 1, 2]
-    const ab = ascComparator(a, b, defaultOpts)
-    const bc = ascComparator(b, c, defaultOpts)
-    const ac = ascComparator(a, c, defaultOpts)
-    expect(ab).toBeLessThan(0)
-    expect(bc).toBeLessThan(0)
-    assertTransitive(ab, bc, ac)
-
-    // The wrong rule preserves adjacent order but reverses the 0-to-2 edge.
-    expect(() => assertTransitive(-1, -1, 1)).toThrow()
-  })
-})
+    })
+  }
+}
 
 describe(`ascComparator property-based tests`, () => {
   describe(`comparator laws`, () => {
@@ -741,16 +349,19 @@ describe(`ascComparator property-based tests`, () => {
     )
 
     comparisonProperty([
-      // Use bounded dates to avoid overflow when adding offset
-      fc.date({ min: new Date(0), max: new Date(`2100-01-01`) }),
+      // Bounded valid dates keep every later date valid after the offset, so
+      // each generated pair checks the order. fast-check 4 draws Invalid Dates
+      // unless noInvalidDate is set, and such a draw would check nothing.
+      fc.date({
+        noInvalidDate: true,
+        min: new Date(0),
+        max: new Date(`2100-01-01`),
+      }),
       fc.integer({ min: 1, max: 1000000 }),
     ])(`earlier date comes before later date`, (date, offset) => {
       const later = new Date(date.getTime() + offset)
-      // Only test if the later date is valid
-      if (!isNaN(later.getTime())) {
-        expect(ascComparator(date, later, defaultOpts)).toBeLessThan(0)
-        expect(ascComparator(later, date, defaultOpts)).toBeGreaterThan(0)
-      }
+      expect(ascComparator(date, later, defaultOpts)).toBeLessThan(0)
+      expect(ascComparator(later, date, defaultOpts)).toBeGreaterThan(0)
     })
   })
 
@@ -784,6 +395,7 @@ describe(`ascComparator property-based tests`, () => {
 
 describe(`NaN and invalid Date default-order refinement`, () => {
   it(`reconstructs the finite, duplicate NaN, null, and invalid Date witnesses`, () => {
+    oracleRoute(`case`)
     assertNonFiniteOrder({
       family: `number`,
       finiteDays: [3, 1, 5],
@@ -810,6 +422,7 @@ describe(`NaN and invalid Date default-order refinement`, () => {
   )
 
   it(`rejects a wrong comparison that ties non-finite and finite values`, () => {
+    oracleRoute(`calibration`)
     for (const family of [`number`, `date`] as const) {
       let reachedFault = false
       const faultyComparator = (
@@ -848,6 +461,7 @@ describe(`NaN and invalid Date default-order refinement`, () => {
   })
 
   it(`rejects a default sort that ties NaN to finite values`, () => {
+    oracleRoute(`calibration`)
     let reachedFault = false
     const faultySort = (a: number | Date | null, b: number | Date | null) => {
       if (typeof a === `number` && Number.isNaN(a)) {
@@ -913,8 +527,8 @@ describe(`makeComparator property-based tests`, () => {
     `makeComparator produces valid comparator for any options (same types)`,
     ([a, b], direction, nulls) => {
       const opts: CompareOptions = {
-        direction: direction as `asc` | `desc`,
-        nulls: nulls as `first` | `last`,
+        direction: direction,
+        nulls: nulls,
         stringSort: `locale`,
       }
       const comparator = makeComparator(opts)
@@ -930,6 +544,7 @@ describe(`makeComparator property-based tests`, () => {
   )
 
   it(`preserves signed infinity from a valid custom string comparator`, () => {
+    oracleRoute(`case`)
     const comparator = makeComparator({
       ...defaultOpts,
       stringSort: `custom`,
@@ -1036,7 +651,7 @@ describe(`areValuesEqual property-based tests`, () => {
  * Equal-value branches construct separate objects, and the zoned branch forces
  * different zones at the same instant. The production path is the exported
  * `ascComparator` under default options; each return is the observation
- * checkpoint. This lane makes no indexed or public-query claim.
+ * checkpoint. This production path makes no indexed or public-query claim.
  */
 type IsoDateFields = { year: number; month: number; day: number }
 type PlainDateOrderInput = { left: IsoDateFields; right: IsoDateFields }
@@ -1183,6 +798,7 @@ const arbitraryZonedDateTimeOrderInput: fc.Arbitrary<ZonedDateTimeOrderInput> =
 
 describe(`Temporal default-order refinement`, () => {
   it(`reconstructs the three PlainDate and one ZonedDateTime assertions`, () => {
+    oracleRoute(`case`)
     const jan = { year: 2024, month: 1, day: 1 }
     const june = { year: 2024, month: 6, day: 1 }
     assertPlainDateOrder({
@@ -1220,6 +836,7 @@ describe(`Temporal default-order refinement`, () => {
   )
 
   it(`rejects text order for one instant shown in two zones`, () => {
+    oracleRoute(`calibration`)
     const sample: ZonedDateTimeOrderInput = {
       leftNanoOffset: 0,
       rightNanoOffset: 0,
@@ -1232,6 +849,7 @@ describe(`Temporal default-order refinement`, () => {
   })
 
   it(`rejects millisecond truncation across adjacent instants`, () => {
+    oracleRoute(`calibration`)
     const sample: ZonedDateTimeOrderInput = {
       leftNanoOffset: 0,
       rightNanoOffset: 1,
@@ -1246,4 +864,10 @@ describe(`Temporal default-order refinement`, () => {
     }
     expect(() => assertZonedDateTimeOrder(sample, truncated)).toThrow()
   })
+})
+
+// Temporal models remain beside their public comparator observation cuts.
+declareOracle({
+  check: [assertPlainDateOrder, assertZonedDateTimeOrder],
+  model: [modelPlainDateSign, modelNanosecondSign],
 })

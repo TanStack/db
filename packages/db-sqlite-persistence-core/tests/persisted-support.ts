@@ -7,6 +7,7 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import { oracleReplayTest } from '../../db/tests/oracle-config.js'
+import { oracleAssertion } from '../../db/tests/oracle-assertion-adapter'
 import { cleanupTestActions } from './test-cleanup'
 import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
 import type {
@@ -74,10 +75,15 @@ export function expectExactSnapshot(
   actual: ReadonlyMap<string, Todo>,
   expected: ReadonlyMap<string, Todo>,
 ): void {
-  expect(Array.from(actual.keys()).sort()).toEqual(
-    Array.from(expected.keys()).sort(),
+  oracleAssertion('existing comparison at 78', () =>
+    expect(Array.from(actual.keys()).sort()).toEqual(
+      Array.from(expected.keys()).sort(),
+    ),
   )
-  for (const [key, row] of expected) expect(actual.get(key)).toStrictEqual(row)
+  for (const [key, row] of expected)
+    oracleAssertion('existing comparison at 81', () =>
+      expect(actual.get(key)).toStrictEqual(row),
+    )
 }
 
 export type RecordingAdapter = PersistenceAdapter & {
@@ -498,10 +504,12 @@ export function observeSettlement(promise: Promise<void>): {
 export function expectHydrationReceiptsPending(
   receipts: Array<ReturnType<typeof observeSettlement>>,
 ) {
-  expect(
-    receipts.map((receipt) => receipt.read()),
-    `each receipt must wait for its own durable/visible boundary`,
-  ).toEqual(receipts.map(() => ({ status: `pending` })))
+  oracleAssertion('existing comparison at 502', () =>
+    expect(
+      receipts.map((receipt) => receipt.read()),
+      `each receipt must wait for its own durable/visible boundary`,
+    ).toEqual(receipts.map(() => ({ status: `pending` }))),
+  )
 }
 
 export function createNoopAdapter(): PersistenceAdapter {
@@ -583,7 +591,9 @@ export async function createTerminalFailureHarness(
       deletedKeys: [],
     })
     await vi.waitFor(() =>
-      expect(collection._lifecycle.getSyncError()).toBe(hydrationError),
+      oracleAssertion('existing comparison at 587', () =>
+        expect(collection._lifecycle.getSyncError()).toBe(hydrationError),
+      ),
     )
     terminalError = hydrationError
   } else {
@@ -614,16 +624,26 @@ export async function createTerminalFailureHarness(
       ),
       `${id} durability failure settled`,
     )
-    expect(outcome.status).toBe(`rejected`)
+    oracleAssertion('existing comparison at 618', () =>
+      expect(outcome.status).toBe(`rejected`),
+    )
     terminalError = outcome.status === `rejected` ? outcome.reason : undefined
-    expect(terminalError).toBeInstanceOf(PersistedCollectionDurabilityError)
-    expect(
-      terminalError instanceof Error ? terminalError.cause : undefined,
-    ).toBe(adapterError)
+    oracleAssertion('existing comparison at 620', () =>
+      expect(terminalError).toBeInstanceOf(PersistedCollectionDurabilityError),
+    )
+    oracleAssertion('existing comparison at 621', () =>
+      expect(
+        terminalError instanceof Error ? terminalError.cause : undefined,
+      ).toBe(adapterError),
+    )
   }
 
-  expect(collection.status).toBe(`crashed`)
-  expect(collection._lifecycle.getSyncError()).toBe(terminalError)
+  oracleAssertion('existing comparison at 626', () =>
+    expect(collection.status).toBe(`crashed`),
+  )
+  oracleAssertion('existing comparison at 627', () =>
+    expect(collection._lifecycle.getSyncError()).toBe(terminalError),
+  )
 
   return {
     adapter,
@@ -649,10 +669,12 @@ export function expectPendingKeyMembershipWork(
   pendingOwners: number,
   partialWrites: number,
 ): void {
-  expect(
-    actual,
-    `one key-membership lookup per pending owner and partial write`,
-  ).toBe(pendingOwners * partialWrites)
+  oracleAssertion('existing comparison at 653', () =>
+    expect(
+      actual,
+      `one key-membership lookup per pending owner and partial write`,
+    ).toBe(pendingOwners * partialWrites),
+  )
 }
 
 export async function runRejectedHydrationBufferWitness(
@@ -711,16 +733,24 @@ export async function runRejectedHydrationBufferWitness(
       hydrationEntered.promise,
       `${id} hydration entered`,
     )
-    expect(remoteBegin).toBeTypeOf(`function`)
-    expect(remoteWrite).toBeTypeOf(`function`)
-    expect(remoteCommit).toBeTypeOf(`function`)
+    oracleAssertion('existing comparison at 715', () =>
+      expect(remoteBegin).toBeTypeOf(`function`),
+    )
+    oracleAssertion('existing comparison at 716', () =>
+      expect(remoteWrite).toBeTypeOf(`function`),
+    )
+    oracleAssertion('existing comparison at 717', () =>
+      expect(remoteCommit).toBeTypeOf(`function`),
+    )
 
     const committers = rows.map((row) => {
       remoteBegin!()
       remoteWrite!({ type: `insert`, value: row })
       return () => {
         const receipt = remoteCommit!()
-        expect(receipt).toBeInstanceOf(Promise)
+        oracleAssertion('existing comparison at 724', () =>
+          expect(receipt).toBeInstanceOf(Promise),
+        )
         return observeSettlement(Promise.resolve(receipt).then(() => undefined))
       }
     })
@@ -749,30 +779,35 @@ export async function runRejectedHydrationBufferWitness(
           }
         : outcome
     })
-    expect({
-      status: collection.status,
-      exactPublicError: collection._lifecycle.getSyncError() === hydrationError,
-      receiptOutcomes,
-      visibleRows: rows.filter((row) => collection.has(row.id)),
-      durableRows: rows.filter((row) => adapter.rows.has(row.id)),
-      durabilityCalls: adapter.applyCommittedTxCalls.length,
-    }).toEqual({
-      status: `crashed`,
-      exactPublicError: true,
-      receiptOutcomes: rows.map(() => ({
-        status: `rejected`,
-        exactReason: true,
-      })),
-      visibleRows: [],
-      durableRows: [],
-      durabilityCalls: 0,
-    })
+    oracleAssertion('existing comparison at 753', () =>
+      expect({
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === hydrationError,
+        receiptOutcomes,
+        visibleRows: rows.filter((row) => collection.has(row.id)),
+        durableRows: rows.filter((row) => adapter.rows.has(row.id)),
+        durabilityCalls: adapter.applyCommittedTxCalls.length,
+      }).toEqual({
+        status: `crashed`,
+        exactPublicError: true,
+        receiptOutcomes: rows.map(() => ({
+          status: `rejected`,
+          exactReason: true,
+        })),
+        visibleRows: [],
+        durableRows: [],
+        durabilityCalls: 0,
+      }),
+    )
 
     await atPersistedOracleCheckpoint(
       collection.cleanup(),
       `${id} failed collection cleanup`,
     )
-    expect(routing?.violations() ?? []).toEqual([])
+    oracleAssertion('existing comparison at 776', () =>
+      expect(routing?.violations() ?? []).toEqual([]),
+    )
     initialCollectionCleaned = true
     restoreBaselineRows()
 
@@ -790,19 +825,21 @@ export async function runRejectedHydrationBufferWitness(
     )
     await flushAsyncWork()
 
-    expect({
-      visibleRows: rows.filter((row) => reopened.has(row.id)),
-      durableRows: rows.filter((row) => adapter.rows.has(row.id)),
-      rowMetadata: Array.from(adapter.rowMetadata.entries()),
-      collectionMetadata: Array.from(adapter.collectionMetadata.entries()),
-      durabilityCalls: adapter.applyCommittedTxCalls.length,
-    }).toEqual({
-      visibleRows: [],
-      durableRows: [],
-      rowMetadata: [],
-      collectionMetadata: [],
-      durabilityCalls: 0,
-    })
+    oracleAssertion('existing comparison at 794', () =>
+      expect({
+        visibleRows: rows.filter((row) => reopened.has(row.id)),
+        durableRows: rows.filter((row) => adapter.rows.has(row.id)),
+        rowMetadata: Array.from(adapter.rowMetadata.entries()),
+        collectionMetadata: Array.from(adapter.collectionMetadata.entries()),
+        durabilityCalls: adapter.applyCommittedTxCalls.length,
+      }).toEqual({
+        visibleRows: [],
+        durableRows: [],
+        rowMetadata: [],
+        collectionMetadata: [],
+        durabilityCalls: 0,
+      }),
+    )
 
     const freshRow = { id: `${id}:fresh`, title: `post-restart control` }
     const freshTransaction = reopened.insert(freshRow)
@@ -814,25 +851,27 @@ export async function runRejectedHydrationBufferWitness(
     )
     await flushAsyncWork()
 
-    expect({
-      visibleFreshRow: stripVirtualProps(reopened.get(freshRow.id)),
-      durableFreshRow: adapter.rows.get(freshRow.id),
-      staleVisibleRows: rows.filter((row) => reopened.has(row.id)),
-      staleDurableRows: rows.filter((row) => adapter.rows.has(row.id)),
-      rowMetadata: Array.from(adapter.rowMetadata.entries()),
-      collectionMetadata: Array.from(adapter.collectionMetadata.entries()),
-      appliedKeys: adapter.applyCommittedTxCalls.flatMap(({ tx }) =>
-        tx.mutations.map((mutation) => mutation.key),
-      ),
-    }).toEqual({
-      visibleFreshRow: freshRow,
-      durableFreshRow: freshRow,
-      staleVisibleRows: [],
-      staleDurableRows: [],
-      rowMetadata: [],
-      collectionMetadata: [],
-      appliedKeys: [freshRow.id],
-    })
+    oracleAssertion('existing comparison at 818', () =>
+      expect({
+        visibleFreshRow: stripVirtualProps(reopened.get(freshRow.id)),
+        durableFreshRow: adapter.rows.get(freshRow.id),
+        staleVisibleRows: rows.filter((row) => reopened.has(row.id)),
+        staleDurableRows: rows.filter((row) => adapter.rows.has(row.id)),
+        rowMetadata: Array.from(adapter.rowMetadata.entries()),
+        collectionMetadata: Array.from(adapter.collectionMetadata.entries()),
+        appliedKeys: adapter.applyCommittedTxCalls.flatMap(({ tx }) =>
+          tx.mutations.map((mutation) => mutation.key),
+        ),
+      }).toEqual({
+        visibleFreshRow: freshRow,
+        durableFreshRow: freshRow,
+        staleVisibleRows: [],
+        staleDurableRows: [],
+        rowMetadata: [],
+        collectionMetadata: [],
+        appliedKeys: [freshRow.id],
+      }),
+    )
   } catch (error) {
     hasPrimaryFailure = true
     throw error
@@ -1123,7 +1162,9 @@ export const assertGenerationNoticeHistory = async ({
     collection.startSyncImmediate()
     await collection.stateWhenReady()
     await source.metadata!.persistence!.hydrateBaseline()
-    expect(collection.get(`retired`)?.title).toBe(`Retired cache row`)
+    oracleAssertion('existing comparison at 1127', () =>
+      expect(collection.get(`retired`)?.title).toBe(`Retired cache row`),
+    )
 
     const persistence = source.metadata?.persistence
     if (!persistence?.startScopedRecovery) {
@@ -1165,12 +1206,20 @@ export const assertGenerationNoticeHistory = async ({
     // settlement is the checkpoint at which that notice can no longer
     // change the new generation's row-version observation.
     await persistence.scanPersistedRows()
-    expect(wrongGenerationReads).toBe(0)
-    expect(collection.status).toBe(`ready`)
-    expect(collection.get(`retired`)).toBeUndefined()
+    oracleAssertion('existing comparison at 1169', () =>
+      expect(wrongGenerationReads).toBe(0),
+    )
+    oracleAssertion('existing comparison at 1170', () =>
+      expect(collection.status).toBe(`ready`),
+    )
+    oracleAssertion('existing comparison at 1171', () =>
+      expect(collection.get(`retired`)).toBeUndefined(),
+    )
     // Rotation reacquires this active subset once. The queued old notice
     // must not add another source request against the replacement cache.
-    expect(remoteEnsures).toEqual([newStorageId])
+    oracleAssertion('existing comparison at 1174', () =>
+      expect(remoteEnsures).toEqual([newStorageId]),
+    )
 
     if (newNotice) {
       const pendingDemand = Promise.resolve(
@@ -1182,12 +1231,18 @@ export const assertGenerationNoticeHistory = async ({
         demandEnsureEntered.promise,
         `constrained demand entered source coordinator`,
       )
-      expect(
-        remoteEnsureOptions.filter(({ options }) => options === demandOptions),
-      ).toEqual([{ id: newStorageId, options: demandOptions }])
+      oracleAssertion('existing comparison at 1186', () =>
+        expect(
+          remoteEnsureOptions.filter(
+            ({ options }) => options === demandOptions,
+          ),
+        ).toEqual([{ id: newStorageId, options: demandOptions }]),
+      )
       const demandSettlement = observeSettlement(pendingDemand)
       await flushAsyncWork()
-      expect(demandSettlement.read()).toEqual({ status: `pending` })
+      oracleAssertion('existing comparison at 1191', () =>
+        expect(demandSettlement.read()).toEqual({ status: `pending` }),
+      )
       const ensuresBeforeNotice = remoteEnsures.length
       mutation = collection.insert({ id: `local`, title: `Pending` })
       await atPersistedOracleCheckpoint(
@@ -1216,72 +1271,110 @@ export const assertGenerationNoticeHistory = async ({
       )
       await atPersistedOracleCheckpoint(
         vi.waitFor(() =>
-          expect(remoteEnsures.length).toBeGreaterThan(ensuresBeforeNotice),
+          oracleAssertion('existing comparison at 1220', () =>
+            expect(remoteEnsures.length).toBeGreaterThan(ensuresBeforeNotice),
+          ),
         ),
         `new-generation source reacquisition after an old notice`,
       )
-      expect(remoteEnsures.at(-1)).toBe(newStorageId)
+      oracleAssertion('existing comparison at 1224', () =>
+        expect(remoteEnsures.at(-1)).toBe(newStorageId),
+      )
       await atPersistedOracleCheckpoint(
         sourceCommitReturned.promise,
         `new-generation source receipt returned`,
       )
-      expect(remoteEnsureOptions).toContainEqual({
-        id: newStorageId,
-        options: { ...demandOptions, refetch: true },
-      })
+      oracleAssertion('existing comparison at 1229', () =>
+        expect(remoteEnsureOptions).toContainEqual({
+          id: newStorageId,
+          options: { ...demandOptions, refetch: true },
+        }),
+      )
       const applied = observeSettlement(refreshReceipt!)
       await flushAsyncWork()
-      expect(freshRequestOptions).toBeDefined()
-      expect(applied.read()).toEqual({ status: `pending` })
-      expect(demandSettlement.read()).toEqual({ status: `pending` })
-      expect(refreshApplied).toBe(false)
-      expect(
-        releaseCalls.filter(({ options }) => options === freshRequestOptions),
-      ).toEqual([])
-      expect(collection.get(`retired`)).toBeUndefined()
-      expect(collection.get(`fresh`)).toBeUndefined()
-      expect(publishedFreshTitles).toEqual([])
+      oracleAssertion('existing comparison at 1235', () =>
+        expect(freshRequestOptions).toBeDefined(),
+      )
+      oracleAssertion('existing comparison at 1236', () =>
+        expect(applied.read()).toEqual({ status: `pending` }),
+      )
+      oracleAssertion('existing comparison at 1237', () =>
+        expect(demandSettlement.read()).toEqual({ status: `pending` }),
+      )
+      oracleAssertion('existing comparison at 1238', () =>
+        expect(refreshApplied).toBe(false),
+      )
+      oracleAssertion('existing comparison at 1239', () =>
+        expect(
+          releaseCalls.filter(({ options }) => options === freshRequestOptions),
+        ).toEqual([]),
+      )
+      oracleAssertion('existing comparison at 1242', () =>
+        expect(collection.get(`retired`)).toBeUndefined(),
+      )
+      oracleAssertion('existing comparison at 1243', () =>
+        expect(collection.get(`fresh`)).toBeUndefined(),
+      )
+      oracleAssertion('existing comparison at 1244', () =>
+        expect(publishedFreshTitles).toEqual([]),
+      )
       releaseMutation.resolve()
       await atPersistedOracleCheckpoint<unknown>(
         mutation.when('settled'),
         `optimistic publication released`,
       )
       await atPersistedOracleCheckpoint(
-        vi.waitFor(() => expect(refreshApplied).toBe(true)),
+        vi.waitFor(() =>
+          oracleAssertion('existing comparison at 1251', () =>
+            expect(refreshApplied).toBe(true),
+          ),
+        ),
         `fresh source snapshot applied`,
       )
       await atPersistedOracleCheckpoint(
         vi.waitFor(() =>
-          expect(
-            releaseCalls.filter(
-              ({ options }) => options === freshRequestOptions,
-            ),
-          ).toHaveLength(1),
+          oracleAssertion('existing comparison at 1256', () =>
+            expect(
+              releaseCalls.filter(
+                ({ options }) => options === freshRequestOptions,
+              ),
+            ).toHaveLength(1),
+          ),
         ),
         `refresh acquisition released after application`,
       )
-      expect(
-        releaseCalls.filter(({ options }) => options === freshRequestOptions),
-      ).toEqual([
-        {
-          id: newStorageId,
-          options: freshRequestOptions,
-          appliedAtRelease: true,
-        },
-      ])
-      expect(collection.get(`fresh`)).toMatchObject({
-        id: `fresh`,
-        title: `Fresh source row`,
-      })
+      oracleAssertion('existing comparison at 1264', () =>
+        expect(
+          releaseCalls.filter(({ options }) => options === freshRequestOptions),
+        ).toEqual([
+          {
+            id: newStorageId,
+            options: freshRequestOptions,
+            appliedAtRelease: true,
+          },
+        ]),
+      )
+      oracleAssertion('existing comparison at 1273', () =>
+        expect(collection.get(`fresh`)).toMatchObject({
+          id: `fresh`,
+          title: `Fresh source row`,
+        }),
+      )
       await atPersistedOracleCheckpoint(
         pendingDemand,
         `constrained demand settled`,
       )
-      expect(demandSettlement.read()).toEqual({ status: `fulfilled` })
-      expect(publishedFreshTitles).toEqual([`Fresh source row`])
+      oracleAssertion('existing comparison at 1281', () =>
+        expect(demandSettlement.read()).toEqual({ status: `fulfilled` }),
+      )
+      oracleAssertion('existing comparison at 1282', () =>
+        expect(publishedFreshTitles).toEqual([`Fresh source row`]),
+      )
     } else {
       await persistence.scanPersistedRows()
-      expect(remoteEnsures).toEqual([newStorageId])
+      oracleAssertion('existing comparison at 1285', () =>
+        expect(remoteEnsures).toEqual([newStorageId]),
+      )
     }
   } catch (error) {
     hasPrimaryFailure = true
@@ -1345,11 +1438,11 @@ export const assertGenerationNoticeHistory = async ({
  * loss: the load rejects as after a failed ensure, and the demand stays
  * active and retries instead of releasing the owner's acquisition.
  *
- * Known gap (#2139): a rotated follower never ends scoped recovery, so the
+ * Known limit (#2139): a rotated follower never ends scoped recovery, so the
  * owner's row never becomes visible in the rotated placement. Its cells are
- * pinned as failing, and the generated histories omit that placement. A
+ * fixed histories that fail, and the generated histories omit that placement. A
  * rotation that starts while a load waits for the owner's commits is also
- * outside this lane and tracked there.
+ * outside this history grammar and tracked there.
  */
 export type FollowerRemoteDemandHistory = {
   placement: `direct` | `queued` | `rotated` | `expired`
@@ -1598,6 +1691,7 @@ export const within = (promise: Promise<unknown>, ms = 200) =>
 export const describeUnlessOracleReplay = oracleReplayTest(
   describe,
   `persistence.retained-demand`,
+  `persistence.crossed-leadership-index`,
   `persistence.generation-notice`,
   `persistence.follower-remote-demand`,
 )

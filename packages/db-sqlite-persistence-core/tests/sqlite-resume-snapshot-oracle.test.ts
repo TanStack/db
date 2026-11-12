@@ -1,15 +1,15 @@
 import { DatabaseSync } from 'node:sqlite'
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
+import { describe, expect } from 'vitest'
 import { createCollection } from '@tanstack/db'
+import { oracleProperty } from '../../db/tests/oracle-config'
 import {
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,
@@ -180,30 +180,42 @@ describe(`SQLite resume snapshots`, () => {
       if (history.oldClaim === `release`) {
         await adapter.releaseCacheGenerationClaim(oldPeer.claimId)
       } else if (history.oldClaim === `renew`) {
-        expect(
-          await adapter.renewCacheGenerationClaim(
-            oldPeer.storageCollectionId,
-            oldPeer.claimId,
-          ),
-        ).toBe(1_210)
+        await oracleAssertion(
+          `expect( await adapter.renewCacheGenerationClaim( oldPeer.storageCollectionId, oldPeer.claimId, ), ).`,
+          async () =>
+            expect(
+              await adapter.renewCacheGenerationClaim(
+                oldPeer.storageCollectionId,
+                oldPeer.claimId,
+              ),
+            ).toBe(1_210),
+        )
       }
       now = 1_130
       if (history.middleClaim === `release`) {
         await adapter.releaseCacheGenerationClaim(middlePeer.claimId)
       } else if (history.middleClaim === `renew`) {
-        expect(
-          await adapter.renewCacheGenerationClaim(
-            middlePeer.storageCollectionId,
-            middlePeer.claimId,
-          ),
-        ).toBe(1_230)
+        await oracleAssertion(
+          `expect( await adapter.renewCacheGenerationClaim( middlePeer.storageCollectionId, middlePeer.claimId,`,
+          async () =>
+            expect(
+              await adapter.renewCacheGenerationClaim(
+                middlePeer.storageCollectionId,
+                middlePeer.claimId,
+              ),
+            ).toBe(1_230),
+        )
       }
       now = history.checkAtMs
       // Any collection operation may sweep. The new claim also proves that
       // collection of retired storage cannot displace the current head.
       const checkpointClaim = await adapter.claimCacheGeneration(logicalId)
-      expect(checkpointClaim.storageCollectionId).toBe(
-        current.storageCollectionId,
+      oracleAssertion(
+        `expect(checkpointClaim.storageCollectionId).toBe( current.storageCollectionId, )`,
+        () =>
+          expect(checkpointClaim.storageCollectionId).toBe(
+            current.storageCollectionId,
+          ),
       )
       const retained = new Set(expectedRetainedGenerations(history))
       const expectedClaims = [
@@ -242,7 +254,9 @@ describe(`SQLite resume snapshots`, () => {
            FROM cache_generation_claim WHERE logical_id = ? ORDER BY claim_id`,
         )
         .all(logicalId)
-      expect(actualClaims).toEqual(expectedClaims)
+      oracleAssertion(`expect(actualClaims).toEqual(expectedClaims)`, () =>
+        expect(actualClaims).toEqual(expectedClaims),
+      )
       const scopedCatalogs = [
         `cache_generation`,
         `collection_registry`,
@@ -266,12 +280,14 @@ describe(`SQLite resume snapshots`, () => {
           `${tombstoneTable}_row_version_idx`,
           indexes[generation]!,
         ]) {
-          expect(
-            database
-              .prepare(`SELECT name FROM sqlite_master WHERE name = ?`)
-              .get(name),
-            `generation ${generation}: physical ${name}`,
-          ).toEqual(shouldExist ? { name } : undefined)
+          oracleAssertion(`generation ${generation}: physical ${name}`, () =>
+            expect(
+              database
+                .prepare(`SELECT name FROM sqlite_master WHERE name = ?`)
+                .get(name),
+              `generation ${generation}: physical ${name}`,
+            ).toEqual(shouldExist ? { name } : undefined),
+          )
         }
         for (const catalog of scopedCatalogs) {
           const column =
@@ -281,17 +297,23 @@ describe(`SQLite resume snapshots`, () => {
               `SELECT COUNT(*) AS count FROM ${catalog} WHERE ${column} = ?`,
             )
             .get(physicalId) as { count: number }
-          expect(count.count, `generation ${generation}: ${catalog}`).toBe(
-            shouldExist
-              ? catalog === `collection_expected_keys`
-                ? history.rowCount
-                : 1
-              : 0,
+          oracleAssertion(`generation ${generation}: ${catalog}`, () =>
+            expect(count.count, `generation ${generation}: ${catalog}`).toBe(
+              shouldExist
+                ? catalog === `collection_expected_keys`
+                  ? history.rowCount
+                  : 1
+                : 0,
+            ),
           )
         }
         if (shouldExist) {
-          expect(captureContents(physicalId)).toEqual(
-            seededContents[generation],
+          oracleAssertion(
+            `expect(captureContents(physicalId)).toEqual( seededContents[generation], )`,
+            () =>
+              expect(captureContents(physicalId)).toEqual(
+                seededContents[generation],
+              ),
           )
         }
       }
@@ -303,34 +325,78 @@ describe(`SQLite resume snapshots`, () => {
       closeDatabasePreservingPrimary(database, primaryFailure)
     }
   }
-  it.each([
-    { oldClaim: `renew`, middleClaim: `renew`, rowCount: 2, checkAtMs: 1_170 },
-    {
-      oldClaim: `release`,
-      middleClaim: `renew`,
-      rowCount: 0,
-      checkAtMs: 1_170,
+  oracleProperty({
+    id: `sqlite-resume.retired-storage.cases`,
+    law: {
+      statement: `Retired storage remains exactly while a live cache claim or current head makes it reachable.`,
+      authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
+      limits: `The unchanged finite histories and SQLite observation cuts.`,
     },
-    {
-      oldClaim: `renew`,
-      middleClaim: `release`,
-      rowCount: 2,
-      checkAtMs: 1_190,
-    },
-    {
-      oldClaim: `expire`,
-      middleClaim: `expire`,
-      rowCount: 0,
-      checkAtMs: 1_190,
-    },
-    { oldClaim: `renew`, middleClaim: `renew`, rowCount: 2, checkAtMs: 1_209 },
-    { oldClaim: `renew`, middleClaim: `renew`, rowCount: 2, checkAtMs: 1_210 },
-    { oldClaim: `renew`, middleClaim: `renew`, rowCount: 2, checkAtMs: 1_229 },
-    { oldClaim: `renew`, middleClaim: `renew`, rowCount: 2, checkAtMs: 1_230 },
-  ] as const)(
-    `collects only unclaimed retired storage after $oldClaim and $middleClaim`,
-    assertRetiredStorageHistory,
-  )
+    owns: [`src/sqlite-core-adapter.ts`],
+    histories: [
+      {
+        oldClaim: `renew`,
+        middleClaim: `renew`,
+        rowCount: 2,
+        checkAtMs: 1_170,
+      },
+      {
+        oldClaim: `release`,
+        middleClaim: `renew`,
+        rowCount: 0,
+        checkAtMs: 1_170,
+      },
+      {
+        oldClaim: `renew`,
+        middleClaim: `release`,
+        rowCount: 2,
+        checkAtMs: 1_190,
+      },
+      {
+        oldClaim: `expire`,
+        middleClaim: `expire`,
+        rowCount: 0,
+        checkAtMs: 1_190,
+      },
+      {
+        oldClaim: `renew`,
+        middleClaim: `renew`,
+        rowCount: 2,
+        checkAtMs: 1_209,
+      },
+      {
+        oldClaim: `renew`,
+        middleClaim: `renew`,
+        rowCount: 2,
+        checkAtMs: 1_210,
+      },
+      {
+        oldClaim: `renew`,
+        middleClaim: `renew`,
+        rowCount: 2,
+        checkAtMs: 1_229,
+      },
+      {
+        oldClaim: `renew`,
+        middleClaim: `renew`,
+        rowCount: 2,
+        checkAtMs: 1_230,
+      },
+    ] as const,
+    driver: (history: RetiredStorageHistory, observe) =>
+      recordAssertionJudgment(
+        `sqlite-resume.retired-storage.cases`,
+        history,
+        observe,
+        () =>
+          ((...args: Parameters<typeof assertRetiredStorageHistory>) => {
+            return assertRetiredStorageHistory(...args)
+          })(history),
+      ),
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+    timeout: 30000,
+  })
   const retiredStorageHistory = fc.record({
     oldClaim: fc.constantFrom<RetiredStorageHistory[`oldClaim`]>(
       `release`,
@@ -352,17 +418,30 @@ describe(`SQLite resume snapshots`, () => {
       1_230,
     ),
   })
-  fcTest.prop([retiredStorageHistory], {
-    seed: 2069,
-    numRuns: oracleRuns(24),
-  })(`checks retired storage reachability (fixed)`, assertRetiredStorageHistory)
-  fcTest.prop(
-    [retiredStorageHistory],
-    oraclePropertyOptions(24, `sqlite-resume.retired-storage`),
-  )(
-    `checks retired storage reachability (random or replayed)`,
-    assertRetiredStorageHistory,
-  )
+  oracleProperty({
+    id: `sqlite-resume.retired-storage`,
+    law: {
+      statement: `Retired generations remain exactly while a live cache claim or current head makes them reachable.`,
+      authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
+      limits: `The unchanged three-generation grammar, retained contents and half-open clock cuts.`,
+    },
+    owns: [`src/sqlite-core-adapter.ts`],
+    histories: {
+      arbitrary: retiredStorageHistory,
+      runs: 24,
+      fixedSeeds: [2069],
+    },
+    driver: (history: RetiredStorageHistory, observe) =>
+      recordAssertionJudgment(
+        `sqlite-resume.retired-storage`,
+        history,
+        observe,
+        () => assertRetiredStorageHistory(history),
+      ),
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+    timeout: 30000,
+  })
 
   // A resume snapshot may pass its preliminary claim check and then wait to
   // enter SQLite's read transaction. The independent claim rule compares the
@@ -400,9 +479,17 @@ describe(`SQLite resume snapshots`, () => {
     const peerExpiresAtMs = peerClaimsAtMs + claimTtlMs
     const readAtMs = firstExpiresAtMs + elapsedMs
     const firstClaimCanRead = readAtMs < firstExpiresAtMs
-    expect(peerClaimsAtMs).toBeLessThan(firstExpiresAtMs)
-    expect(readAtMs).toBeGreaterThanOrEqual(peerClaimsAtMs)
-    expect(readAtMs).toBeLessThan(peerExpiresAtMs)
+    oracleAssertion(
+      `expect(peerClaimsAtMs).toBeLessThan(firstExpiresAtMs)`,
+      () => expect(peerClaimsAtMs).toBeLessThan(firstExpiresAtMs),
+    )
+    oracleAssertion(
+      `expect(readAtMs).toBeGreaterThanOrEqual(peerClaimsAtMs)`,
+      () => expect(readAtMs).toBeGreaterThanOrEqual(peerClaimsAtMs),
+    )
+    oracleAssertion(`expect(readAtMs).toBeLessThan(peerExpiresAtMs)`, () =>
+      expect(readAtMs).toBeLessThan(peerExpiresAtMs),
+    )
     const rows = Array.from({ length: rowCount }, (_, index) => ({
       id: `retained-${index}`,
       title: `Warm peer row ${index}`,
@@ -471,7 +558,9 @@ describe(`SQLite resume snapshots`, () => {
       observedStorageId = storageId
       // The model does not use the adapter's returned expiry to decide whether
       // this read is legal.
-      expect(first.expiresAtMs).toBe(firstExpiresAtMs)
+      oracleAssertion(`expect(first.expiresAtMs).toBe(firstExpiresAtMs)`, () =>
+        expect(first.expiresAtMs).toBe(firstExpiresAtMs),
+      )
       rowTable = createPersistedTableName(storageId, `c`)
       const resume = { offset: `warm-peer-offset` }
       await adapter.applyCommittedTx(
@@ -498,9 +587,15 @@ describe(`SQLite resume snapshots`, () => {
       )
       now = peerClaimsAtMs
       const warm = await adapter.claimCacheGeneration(logicalId)
-      expect(warm.storageCollectionId).toBe(storageId)
-      expect(warm.claimId).not.toBe(first.claimId)
-      expect(warm.expiresAtMs).toBe(peerExpiresAtMs)
+      oracleAssertion(`expect(warm.storageCollectionId).toBe(storageId)`, () =>
+        expect(warm.storageCollectionId).toBe(storageId),
+      )
+      oracleAssertion(`expect(warm.claimId).not.toBe(first.claimId)`, () =>
+        expect(warm.claimId).not.toBe(first.claimId),
+      )
+      oracleAssertion(`expect(warm.expiresAtMs).toBe(peerExpiresAtMs)`, () =>
+        expect(warm.expiresAtMs).toBe(peerExpiresAtMs),
+      )
 
       holdTransaction = true
       observeHeldRead = true
@@ -530,33 +625,73 @@ describe(`SQLite resume snapshots`, () => {
             params?.includes(observedStorageId),
         )
       if (!firstClaimCanRead) {
-        await expect(read).rejects.toThrow(
-          `Persisted cache claim is no longer active`,
+        await oracleAssertion(
+          `expect(read).rejects.toThrow( 'Persisted cache claim is no longer active', )`,
+          () =>
+            expect(read).rejects.toThrow(
+              `Persisted cache claim is no longer active`,
+            ),
         )
-        expect(generationStatements()).toHaveLength(1)
-        expect(generationStatements()[0]).toMatchObject({ type: `query` })
-        expect(generationStatements()[0]?.sql).toContain(
-          `cache_generation_claim`,
+        oracleAssertion(`expect(generationStatements()).toHaveLength(1)`, () =>
+          expect(generationStatements()).toHaveLength(1),
         )
-        expect(metadataReads).toBe(0)
-        expect(rowReads).toBe(0)
+        oracleAssertion(
+          `expect(generationStatements()[0]).toMatchObject({ type: 'query' })`,
+          () =>
+            expect(generationStatements()[0]).toMatchObject({ type: `query` }),
+        )
+        oracleAssertion(
+          `expect(generationStatements()[0]?.sql).toContain( 'cache_generation_claim', )`,
+          () =>
+            expect(generationStatements()[0]?.sql).toContain(
+              `cache_generation_claim`,
+            ),
+        )
+        oracleAssertion(`expect(metadataReads).toBe(0)`, () =>
+          expect(metadataReads).toBe(0),
+        )
+        oracleAssertion(`expect(rowReads).toBe(0)`, () =>
+          expect(rowReads).toBe(0),
+        )
       } else {
         const snapshot = await read
-        expect(generationStatements()[0]).toMatchObject({ type: `query` })
-        expect(generationStatements()[0]?.sql).toContain(
-          `cache_generation_claim`,
+        oracleAssertion(
+          `expect(generationStatements()[0]).toMatchObject({ type: 'query' })`,
+          () =>
+            expect(generationStatements()[0]).toMatchObject({ type: `query` }),
         )
-        expect(snapshot.rows.map(({ value }) => value)).toEqual(
-          expectedFirstRows,
+        oracleAssertion(
+          `expect(generationStatements()[0]?.sql).toContain( 'cache_generation_claim', )`,
+          () =>
+            expect(generationStatements()[0]?.sql).toContain(
+              `cache_generation_claim`,
+            ),
         )
-        expect(snapshot.collectionMetadata).toEqual([
-          { key: `resume`, value: resume },
-        ])
-        expect(metadataReads).toBeGreaterThan(0)
+        oracleAssertion(
+          `expect(snapshot.rows.map(({ value }) => value)).toEqual( expectedFirstRows, )`,
+          () =>
+            expect(snapshot.rows.map(({ value }) => value)).toEqual(
+              expectedFirstRows,
+            ),
+        )
+        oracleAssertion(
+          `expect(snapshot.collectionMetadata).toEqual([ { key: 'resume', value: resume }, ])`,
+          () =>
+            expect(snapshot.collectionMetadata).toEqual([
+              { key: `resume`, value: resume },
+            ]),
+        )
+        oracleAssertion(`expect(metadataReads).toBeGreaterThan(0)`, () =>
+          expect(metadataReads).toBeGreaterThan(0),
+        )
         if (includeRows) {
-          expect(rowReads).toBeGreaterThan(0)
+          oracleAssertion(`expect(rowReads).toBeGreaterThan(0)`, () =>
+            expect(rowReads).toBeGreaterThan(0),
+          )
         } else {
-          expect(rowReads).toBe(0)
+          oracleAssertion(`expect(rowReads).toBe(0)`, () =>
+            expect(rowReads).toBe(0),
+          )
         }
       }
       observeHeldRead = false
@@ -570,10 +705,17 @@ describe(`SQLite resume snapshots`, () => {
           cacheGenerationClaimId: warm.claimId,
         },
       )
-      expect(peerSnapshot.rows.map(({ value }) => value)).toEqual(rows)
-      expect(peerSnapshot.collectionMetadata).toEqual([
-        { key: `resume`, value: resume },
-      ])
+      oracleAssertion(
+        `expect(peerSnapshot.rows.map(({ value }) => value)).toEqual(rows)`,
+        () => expect(peerSnapshot.rows.map(({ value }) => value)).toEqual(rows),
+      )
+      oracleAssertion(
+        `expect(peerSnapshot.collectionMetadata).toEqual([ { key: 'resume', value: resume }, ])`,
+        () =>
+          expect(peerSnapshot.collectionMetadata).toEqual([
+            { key: `resume`, value: resume },
+          ]),
+      )
     } catch (error) {
       primaryFailure = error
       throw error
@@ -584,23 +726,44 @@ describe(`SQLite resume snapshots`, () => {
     }
   }
 
-  it.each([
-    { clockCut: `before expiry`, elapsedMs: -1, includeRows: false },
-    { clockCut: `before expiry`, elapsedMs: -1, includeRows: true },
-    { clockCut: `at expiry`, elapsedMs: 0, includeRows: false },
-    { clockCut: `at expiry`, elapsedMs: 0, includeRows: true },
-    { clockCut: `after expiry`, elapsedMs: 1, includeRows: false },
-    { clockCut: `after expiry`, elapsedMs: 1, includeRows: true },
-  ])(
-    `checks a cache claim $clockCut inside a resume transaction with includeRows=$includeRows`,
-    ({ elapsedMs, includeRows }) =>
-      assertManagedClaimReadHistory({
-        elapsedMs,
-        includeRows,
-        peerDelayMs: 50,
-        rowCount: 1,
-      }),
-  )
+  oracleProperty({
+    id: `sqlite-resume.managed-claim-read.cases`,
+    law: {
+      statement: `Managed resume reads use their in-transaction claim expiry and leave a later live peer intact.`,
+      authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
+      limits: `The unchanged finite histories and SQLite observation cuts.`,
+    },
+    owns: [`src/sqlite-core-adapter.ts`],
+    histories: [
+      { clockCut: `before expiry`, elapsedMs: -1, includeRows: false },
+      { clockCut: `before expiry`, elapsedMs: -1, includeRows: true },
+      { clockCut: `at expiry`, elapsedMs: 0, includeRows: false },
+      { clockCut: `at expiry`, elapsedMs: 0, includeRows: true },
+      { clockCut: `after expiry`, elapsedMs: 1, includeRows: false },
+      { clockCut: `after expiry`, elapsedMs: 1, includeRows: true },
+    ],
+    driver: (
+      history: { clockCut: string; elapsedMs: number; includeRows: boolean },
+      observe,
+    ) =>
+      recordAssertionJudgment(
+        `sqlite-resume.managed-claim-read.cases`,
+        history,
+        observe,
+        () =>
+          (({ elapsedMs, includeRows }) => {
+            return assertManagedClaimReadHistory({
+              elapsedMs,
+              includeRows,
+              peerDelayMs: 50,
+              rowCount: 1,
+            })
+          })(history),
+      ),
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+    timeout: 30000,
+  })
 
   const managedClaimReadHistory = fc.record({
     elapsedMs: fc.constantFrom(-9, -1, 0, 1, 9),
@@ -608,20 +771,30 @@ describe(`SQLite resume snapshots`, () => {
     peerDelayMs: fc.integer({ min: 10, max: 80 }),
     rowCount: fc.integer({ min: 0, max: 3 }),
   })
-  fcTest.prop([managedClaimReadHistory], {
-    seed: 2056,
-    numRuns: oracleRuns(30),
-  })(
-    `checks generated managed-claim read histories (fixed)`,
-    assertManagedClaimReadHistory,
-  )
-  fcTest.prop(
-    [managedClaimReadHistory],
-    oraclePropertyOptions(30, `sqlite-resume.managed-claim-read`),
-  )(
-    `checks generated managed-claim read histories (random or replayed)`,
-    assertManagedClaimReadHistory,
-  )
+  oracleProperty({
+    id: `sqlite-resume.managed-claim-read`,
+    law: {
+      statement: `Managed resume reads use their in-transaction claim expiry and leave a later live peer intact.`,
+      authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
+      limits: `The unchanged bounded rows, inclusion and expiry grammar at the held SQLite transaction cut.`,
+    },
+    owns: [`src/sqlite-core-adapter.ts`],
+    histories: {
+      arbitrary: managedClaimReadHistory,
+      runs: 30,
+      fixedSeeds: [2056],
+    },
+    driver: (history: ManagedClaimReadHistory, observe) =>
+      recordAssertionJudgment(
+        `sqlite-resume.managed-claim-read`,
+        history,
+        observe,
+        () => assertManagedClaimReadHistory(history),
+      ),
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+    timeout: 30000,
+  })
 
   const startupHistoryArbitrary = fc.record({
     baselineSize: fc.integer({ min: 1, max: 3 }),
@@ -726,7 +899,9 @@ describe(`SQLite resume snapshots`, () => {
         for (let attempt = 0; attempt < 20; attempt++) {
           await Promise.resolve()
         }
-        expect(managedPersistenceSettled).toBe(false)
+        oracleAssertion(`expect(managedPersistenceSettled).toBe(false)`, () =>
+          expect(managedPersistenceSettled).toBe(false),
+        )
       } else if (history.transition === `raw-delete`) {
         const tableName = createPersistedTableName(collectionId, `c`)
         await driver.run(`DELETE FROM "${tableName}" WHERE key = ?`, [
@@ -753,7 +928,9 @@ describe(`SQLite resume snapshots`, () => {
               ...(history.transition === `managed-insert` ? [managedRow] : []),
             ].sort((left, right) => left.id.localeCompare(right.id))
 
-      expectStartupRows(visibleRows, expectedRows)
+      oracleAssertion(`startup rows`, () =>
+        expectStartupRows(visibleRows, expectedRows),
+      )
       if (history.transition === `managed-insert`) {
         const durableRows = (
           await loadResumeSnapshot({
@@ -765,19 +942,25 @@ describe(`SQLite resume snapshots`, () => {
           .sort((left, right) =>
             String(left.id).localeCompare(String(right.id)),
           )
-        expect(durableRows).toEqual(expectedRows)
+        oracleAssertion(`expect(durableRows).toEqual(expectedRows)`, () =>
+          expect(durableRows).toEqual(expectedRows),
+        )
       }
       if (history.transition === `raw-delete`) {
-        expect(
-          (
-            await loadResumeSnapshot({
-              kind: `eager`,
-              collectionId: collectionId,
-            })
-          ).keySet,
-        ).toEqual({
-          status: `incompatible`,
-        })
+        await oracleAssertion(
+          `expect( ( await loadResumeSnapshot({ kind: 'eager', collectionId: collectionId, }) ).keySet, ).toEqu`,
+          async () =>
+            expect(
+              (
+                await loadResumeSnapshot({
+                  kind: `eager`,
+                  collectionId: collectionId,
+                })
+              ).keySet,
+            ).toEqual({
+              status: `incompatible`,
+            }),
+        )
       }
     } catch (error) {
       primaryFailure = error
@@ -792,17 +975,45 @@ describe(`SQLite resume snapshots`, () => {
     }
   }
 
-  it(`fixed startup corpus reaches every baseline size and transition`, () => {
-    const histories = fc.sample(startupHistoryArbitrary, {
-      seed: 1659,
-      numRuns: 12,
-    })
-    expect(new Set(histories.map(({ baselineSize }) => baselineSize))).toEqual(
-      new Set([1, 2, 3]),
-    )
-    expect(new Set(histories.map(({ transition }) => transition))).toEqual(
-      new Set([`none`, `managed-insert`, `raw-delete`]),
-    )
+  oracleProperty({
+    id: `sqlite-resume.startup-corpus`,
+    law: {
+      statement: `The existing fixed startup corpus reaches each baseline size and transition.`,
+      authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
+      limits: `The unchanged seed1659 twelve-history generator calibration.`,
+    },
+    owns: [`src/sqlite-core-adapter.ts`],
+    histories: [{ name: `startup corpus` }],
+    driver: (history: { name: string }, observe) =>
+      recordAssertionJudgment(
+        `sqlite-resume.startup-corpus`,
+        history,
+        observe,
+        () =>
+          (() => {
+            const histories = fc.sample(startupHistoryArbitrary, {
+              seed: 1659,
+              numRuns: 12,
+            })
+            oracleAssertion(
+              `expect(new Set(histories.map(({ baselineSize }) => baselineSize))).toEqual( new Set([1, 2, 3]), )`,
+              () =>
+                expect(
+                  new Set(histories.map(({ baselineSize }) => baselineSize)),
+                ).toEqual(new Set([1, 2, 3])),
+            )
+            oracleAssertion(
+              `expect(new Set(histories.map(({ transition }) => transition))).toEqual( new Set(['none', 'managed-in`,
+              () =>
+                expect(
+                  new Set(histories.map(({ transition }) => transition)),
+                ).toEqual(new Set([`none`, `managed-insert`, `raw-delete`])),
+            )
+          })(),
+      ),
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+    timeout: 30000,
   })
 
   // A resume token may continue only the baseline that established its
@@ -832,143 +1043,179 @@ describe(`SQLite resume snapshots`, () => {
     legacySchema: fc.boolean(),
     steps: progressSteps,
   })
-  const runProgressCampaign = async (
-    parameters: ReturnType<typeof oraclePropertyOptions>,
-  ) => {
-    const reach = createOracleReach(`sqlite-resume.source-progress`, [
-      `discontinuous commit`,
-      `matching commit after discontinuity`,
-      `replacement after discontinuity`,
-      `duplicate source position`,
-      `legacy source progress column added`,
-    ])
-    await fc.assert(
-      fc.asyncProperty(
-        progressHistory,
-        async ({ legacySchema, steps: history }) => {
-          reach.beginHistory()
-          const database = new DatabaseSync(`:memory:`)
-          let primary: unknown
-          try {
-            let adapter = new SQLiteCorePersistenceAdapter({
-              driver: createDriver(database),
-            })
-            const target = {
-              kind: `eager` as const,
-              collectionId: `source-progress`,
-            }
-            if (legacySchema) {
-              await adapter.loadResumeSnapshot(target)
-              database.exec(
-                `ALTER TABLE collection_version DROP COLUMN source_progress_incompatible`,
-              )
-              adapter = new SQLiteCorePersistenceAdapter({
-                driver: createDriver(database),
-              })
-              await adapter.loadResumeSnapshot(target)
-              reach.reach(`legacy source progress column added`)
-            }
-            const tokens = [`initial`]
-            let current = `initial`
-            // Model-only path: each edge must begin where its predecessor ended.
-            let edges: Array<{ from: string; to: string }> = []
-            const coherent = () =>
-              edges.every(
-                (edge, index) =>
-                  index === 0 || edge.from === edges[index - 1]!.to,
-              )
-            const steps: Array<ProgressStep> = [
-              { kind: `snapshot`, pick: 0 },
-              ...history,
-            ]
-            for (const [index, step] of steps.entries()) {
-              const wasCoherent = coherent()
-              const previous =
-                step.kind === `stale` || step.kind === `duplicate`
-                  ? tokens[step.pick % tokens.length]!
-                  : current
-              const next =
-                step.kind === `empty` || step.kind === `duplicate`
-                  ? current
-                  : `position-${index}`
-              if (step.kind === `duplicate`)
-                reach.reach(`duplicate source position`)
-              if (step.kind === `snapshot`) {
-                if (!wasCoherent) reach.reach(`replacement after discontinuity`)
-                edges = [{ from: previous, to: next }]
-              } else {
-                if (previous !== current && next !== current)
-                  reach.reach(`discontinuous commit`)
-                if (!wasCoherent && previous === current)
-                  reach.reach(`matching commit after discontinuity`)
-                // Re-delivering the same source position is idempotent; it
-                // contributes no new edge and cannot repair an earlier gap.
-                if (next !== current) edges.push({ from: previous, to: next })
-              }
-              // The baseline adapter ignores this proposed optional field. Keeping
-              // it on a structurally assignable transaction lets the pre-edit RED
-              // reach the semantic comparison instead of failing type/setup.
-              const tx = {
-                txId: `progress-${index}`,
-                term: 1,
-                seq: index + 1,
-                rowVersion: index + 1,
-                truncate: step.kind === `snapshot`,
-                sourceProgress: { key: `source-progress`, previous },
-                mutations:
-                  step.kind === `empty`
-                    ? []
-                    : [
-                        {
-                          type: `insert` as const,
-                          key: `row`,
-                          value: { id: `row`, label: next },
-                        },
-                      ],
-                collectionMetadataMutations: [
-                  { type: `set` as const, key: `source-progress`, value: next },
+  type ProgressHistory = { legacySchema: boolean; steps: Array<ProgressStep> }
+  async function runProgressHistory(
+    { legacySchema, steps: history }: ProgressHistory,
+    observe: (checkpoint: string, value: unknown) => void,
+  ) {
+    const database = new DatabaseSync(`:memory:`)
+    let primary: unknown
+    try {
+      let adapter = new SQLiteCorePersistenceAdapter({
+        driver: createDriver(database),
+      })
+      const target = {
+        kind: `eager` as const,
+        collectionId: `source-progress`,
+      }
+      if (legacySchema) {
+        await adapter.loadResumeSnapshot(target)
+        database.exec(
+          `ALTER TABLE collection_version DROP COLUMN source_progress_incompatible`,
+        )
+        adapter = new SQLiteCorePersistenceAdapter({
+          driver: createDriver(database),
+        })
+        await adapter.loadResumeSnapshot(target)
+        observe(`reach`, `legacy source progress column added`)
+      }
+      const tokens = [`initial`]
+      let current = `initial`
+      // Model-only path: each edge must begin where its predecessor ended.
+      let edges: Array<{ from: string; to: string }> = []
+      const coherent = () =>
+        edges.every(
+          (edge, index) => index === 0 || edge.from === edges[index - 1]!.to,
+        )
+      const steps: Array<ProgressStep> = [
+        { kind: `snapshot`, pick: 0 },
+        ...history,
+      ]
+      for (const [index, step] of steps.entries()) {
+        const wasCoherent = coherent()
+        const previous =
+          step.kind === `stale` || step.kind === `duplicate`
+            ? tokens[step.pick % tokens.length]!
+            : current
+        const next =
+          step.kind === `empty` || step.kind === `duplicate`
+            ? current
+            : `position-${index}`
+        if (step.kind === `duplicate`)
+          observe(`reach`, `duplicate source position`)
+        if (step.kind === `snapshot`) {
+          if (!wasCoherent) observe(`reach`, `replacement after discontinuity`)
+          edges = [{ from: previous, to: next }]
+        } else {
+          if (previous !== current && next !== current)
+            observe(`reach`, `discontinuous commit`)
+          if (!wasCoherent && previous === current)
+            observe(`reach`, `matching commit after discontinuity`)
+          // Re-delivering the same source position is idempotent; it
+          // contributes no new edge and cannot repair an earlier gap.
+          if (next !== current) edges.push({ from: previous, to: next })
+        }
+        // The baseline adapter ignores this proposed optional field. Keeping
+        // it on a structurally assignable transaction lets the pre-edit RED
+        // reach the semantic comparison instead of failing type/setup.
+        const tx = {
+          txId: `progress-${index}`,
+          term: 1,
+          seq: index + 1,
+          rowVersion: index + 1,
+          truncate: step.kind === `snapshot`,
+          sourceProgress: { key: `source-progress`, previous },
+          mutations:
+            step.kind === `empty`
+              ? []
+              : [
+                  {
+                    type: `insert` as const,
+                    key: `row`,
+                    value: { id: `row`, label: next },
+                  },
                 ],
-              }
-              await adapter.applyCommittedTx(target, tx)
-              const observation = await adapter.loadResumeSnapshot(target)
-              expect(
-                observation.sourceProgressCompatible,
-                `source progress at step ${index}: ${JSON.stringify(steps.slice(0, index + 1))}`,
-              ).toBe(coherent())
-              // Physical key integrity and source continuity are separate laws.
-              // A broken source path must not quarantine an intact cached set.
-              expect(observation.keySet).toEqual({ status: `consistent` })
-              expect(
-                observation.collectionMetadata.find(
-                  ({ key }) => key === `source-progress`,
-                )?.value,
-              ).toBe(next)
-              current = next
-              tokens.push(next)
-            }
-          } catch (error) {
-            primary = error
-          } finally {
-            closeDatabasePreservingPrimary(database, primary)
-          }
-        },
-      ),
-      parameters,
-    )
-    console.info(`source progress reach`, Object.fromEntries(reach.counts()))
-    reach.assertReached()
+          collectionMetadataMutations: [
+            { type: `set` as const, key: `source-progress`, value: next },
+          ],
+        }
+        await adapter.applyCommittedTx(target, tx)
+        const observation = await adapter.loadResumeSnapshot(target)
+        oracleAssertion(
+          `source progress at step ${index}: ${JSON.stringify(steps.slice(0, index + 1))}`,
+          () =>
+            expect(
+              observation.sourceProgressCompatible,
+              `source progress at step ${index}: ${JSON.stringify(steps.slice(0, index + 1))}`,
+            ).toBe(coherent()),
+        )
+        // Physical key integrity and source continuity are separate laws.
+        // A broken source path must not quarantine an intact cached set.
+        oracleAssertion(
+          `expect(observation.keySet).toEqual({ status: 'consistent' })`,
+          () => expect(observation.keySet).toEqual({ status: `consistent` }),
+        )
+        oracleAssertion(
+          `expect( observation.collectionMetadata.find( ({ key }) => key === 'source-progress', )?.value, ).toB`,
+          () =>
+            expect(
+              observation.collectionMetadata.find(
+                ({ key }) => key === `source-progress`,
+              )?.value,
+            ).toBe(next),
+        )
+        current = next
+        tokens.push(next)
+      }
+    } catch (error) {
+      primary = error
+    } finally {
+      closeDatabasePreservingPrimary(database, primary)
+    }
   }
-  it.skipIf(oracleReplayRequested())(
-    `preserves source progress evidence (fixed seed)`,
-    () => runProgressCampaign({ numRuns: oracleRuns(80), seed: 2281 }),
-  )
-  oracleReplayTest(it, `sqlite-resume.source-progress`)(
-    `preserves source progress evidence (random or replayed)`,
-    () =>
-      runProgressCampaign(
-        oraclePropertyOptions(80, `sqlite-resume.source-progress`),
+  oracleProperty({
+    id: `sqlite-resume.source-progress`,
+    law: {
+      statement: `A resume token follows a coherent baseline lineage until an authoritative replacement restores a discontinuity.`,
+      authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
+      limits: `The unchanged bounded step grammar, legacy schema receiving path and original five reach obligations.`,
+    },
+    owns: [`src/sqlite-core-adapter.ts`],
+    histories: {
+      arbitrary: progressHistory,
+      runs: 80,
+      fixedSeeds: [2281],
+      states: [
+        `discontinuous commit`,
+        `matching commit after discontinuity`,
+        `replacement after discontinuity`,
+        `duplicate source position`,
+        `legacy source progress column added`,
+      ],
+      constructed: [
+        {
+          name: `existing source-progress reach sequence`,
+          enters: [
+            `discontinuous commit`,
+            `matching commit after discontinuity`,
+            `replacement after discontinuity`,
+            `duplicate source position`,
+            `legacy source progress column added`,
+          ],
+          build: (history: ProgressHistory) => ({
+            legacySchema: true,
+            steps: [
+              { kind: `stale` as const, pick: 0 },
+              { kind: `advance` as const, pick: 0 },
+              { kind: `snapshot` as const, pick: 0 },
+              { kind: `duplicate` as const, pick: 0 },
+              ...history.steps,
+            ].slice(0, 16),
+          }),
+        },
+      ],
+    },
+    driver: (history: ProgressHistory, observe) =>
+      recordAssertionJudgment(
+        `sqlite-resume.source-progress`,
+        history,
+        observe,
+        () => runProgressHistory(history, observe),
       ),
-  )
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+    timeout: 30000,
+  })
 
   // The retired-storage and managed-claim checks compare production with independent
   // models of retained generations and claim intervals. The fixed and generated
@@ -978,27 +1225,36 @@ describe(`SQLite resume snapshots`, () => {
     check: [
       assertRetiredStorageHistory,
       assertManagedClaimReadHistory,
-      runProgressCampaign,
+      runProgressHistory,
     ],
     model: [expectedRetainedGenerations],
     grammar: [startupHistoryArbitrary, progressHistory],
   })
 
-  fcTest.prop([startupHistoryArbitrary], {
-    seed: 1659,
-    numRuns: oracleRuns(12),
-  })(
-    `preserves local-only startup histories across managed generation advancement (fixed)`,
-    assertStartupHistory,
-  )
-
-  fcTest.prop(
-    [startupHistoryArbitrary],
-    oraclePropertyOptions(12, `sqlite-resume.startup-generation`),
-  )(
-    `preserves local-only startup histories across managed generation advancement (random or replayed)`,
-    assertStartupHistory,
-  )
+  oracleProperty({
+    id: `sqlite-resume.startup-generation`,
+    law: {
+      statement: `Local-only startup preserves its managed persisted baseline through the existing startup transitions.`,
+      authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
+      limits: `The unchanged one-to-three-row startup grammar at held metadata and hydration snapshot cuts.`,
+    },
+    owns: [`src/sqlite-core-adapter.ts`],
+    histories: {
+      arbitrary: startupHistoryArbitrary,
+      runs: 12,
+      fixedSeeds: [1659],
+    },
+    driver: (history: Parameters<typeof assertStartupHistory>[0], observe) =>
+      recordAssertionJudgment(
+        `sqlite-resume.startup-generation`,
+        history,
+        observe,
+        () => assertStartupHistory(history),
+      ),
+    model: recordedAssertionJudgment,
+    check: forwardAssertionJudgment,
+    timeout: 30000,
+  })
 })
 
 // The ordinary committed-transaction work law extends this SQLite owner.

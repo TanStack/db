@@ -1,6 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, test } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
+import { oracleAssertion } from '../oracle-assertion-adapter.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
 import {
@@ -16,14 +17,17 @@ import {
 } from '../../src/query/index.js'
 import {
   oracleCalibrationTest,
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
-  oracleReplayTest,
+  oracleRoute,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { flushPromises } from '../utils.js'
+import { runIncludesCalibration } from './includes-calibration.js'
+import { registerIncludesProperty } from './includes-registration-oracle.js'
 import {
   assertArrayKeys,
   assertGroupedRouteCounts,
@@ -153,12 +157,16 @@ function assertFormulationResults(
   },
   context: string,
 ): void {
-  expect(observed, `cross-formulation checkpoint ${context}`).toEqual({
-    nested: expected,
-    flat: expected,
-    standalone: expected,
-    tlp: expected,
-  })
+  oracleAssertion(
+    'includes cross-formulation-oracle.property comparison 160',
+    () =>
+      expect(observed, `cross-formulation checkpoint ${context}`).toEqual({
+        nested: expected,
+        flat: expected,
+        standalone: expected,
+        tlp: expected,
+      }),
+  )
 }
 
 function assertWindowedResult(
@@ -166,7 +174,13 @@ function assertWindowedResult(
   observed: ReadonlyArray<NormalizedParent>,
   context: string,
 ): void {
-  expect(observed, `ordered-window checkpoint ${context}`).toEqual(expected)
+  oracleAssertion(
+    'includes cross-formulation-oracle.property comparison 173',
+    () =>
+      expect(observed, `ordered-window checkpoint ${context}`).toEqual(
+        expected,
+      ),
+  )
 }
 
 // The next three builders are production formulations. They share source rows
@@ -298,7 +312,10 @@ async function queryChildren(
         position: child.position,
       }))
   })
-  assertArrayKeys(rows, `${context} ${partition} rows`)
+  oracleAssertion(
+    'includes cross-formulation-oracle.property comparison 305',
+    () => assertArrayKeys(rows, `${context} ${partition} rows`),
+  )
   return rows.map((row) =>
     normalizeChild(row, `${context} ${partition} child ${row.id}`),
   )
@@ -311,7 +328,13 @@ function assertTlpPartitions(
   context: string,
 ): void {
   const partitions = [`predicate`, `complement`, `unknown`] as const
-  expect(results, `${context} partition count`).toHaveLength(partitions.length)
+  oracleAssertion(
+    'includes cross-formulation-oracle.property comparison 318',
+    () =>
+      expect(results, `${context} partition count`).toHaveLength(
+        partitions.length,
+      ),
+  )
   for (const [index, partition] of partitions.entries()) {
     // This is a direct finite relation over source values, independent of the
     // query evaluator. A union could be complete with rows in wrong branches.
@@ -321,8 +344,12 @@ function assertTlpPartitions(
         return partition === (child.score < pivot ? `predicate` : `complement`)
       })
       .sort(compareChildren)
-    expect(results[index], `${context} ${partition} partition`).toEqual(
-      expected,
+    oracleAssertion(
+      'includes cross-formulation-oracle.property comparison 328',
+      () =>
+        expect(results[index], `${context} ${partition} partition`).toEqual(
+          expected,
+        ),
     )
   }
 }
@@ -369,7 +396,12 @@ async function queryPerParent(
   )
   // TLP concatenates three independently ordered partitions. Their union has
   // no shared order. The standalone query still promises child order.
-  return useTlp ? normalizeNested(rows) : captureOrderedNested(rows, context)
+  return useTlp
+    ? normalizeNested(rows)
+    : oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 376',
+        () => captureOrderedNested(rows, context),
+      )
 }
 
 function applyAction(
@@ -438,9 +470,9 @@ async function expectFormulationsEquivalent(
       action: scenario.actions[checkpoint - 1],
     })
     const expected = recomputeNestedModel(parents, children)
-    const nestedResult = captureOrderedNested(
-      nested.toArray,
-      `${context} nested`,
+    const nestedResult = oracleAssertion(
+      'includes cross-formulation-oracle.property comparison 445',
+      () => captureOrderedNested(nested.toArray, `${context} nested`),
     )
     const flatResult = normalizeFlat(flat.toArray, `${context} flat`)
     // Fresh child queries do not determine parent order. The model chooses
@@ -524,7 +556,10 @@ async function expectWindowedIncludeMatches(
       limit,
     })
     const expected = recomputeWindowedModel(parents, children, offset, limit)
-    const nestedResult = captureOrderedNested(nested.toArray, context)
+    const nestedResult = oracleAssertion(
+      'includes cross-formulation-oracle.property comparison 531',
+      () => captureOrderedNested(nested.toArray, context),
+    )
     assertWindowedResult(
       expected,
       alterNestedObservation?.(nestedResult) ?? nestedResult,
@@ -555,8 +590,14 @@ function expectNestedCountsMatchStandalone(
   nested: Array<{ id: number; summaries: Array<{ count: number }> }>,
   standalone: Array<{ count: number }>,
 ): Array<{ count: number }> | undefined {
-  const nestedCounts = captureGroupedRows(nested)[0]?.summaries
-  expect(nestedCounts).toEqual(captureCounts(standalone))
+  const nestedCounts = oracleAssertion(
+    'includes cross-formulation-oracle.property comparison 562',
+    () => captureGroupedRows(nested),
+  )[0]?.summaries
+  oracleAssertion(
+    'includes cross-formulation-oracle.property comparison 563',
+    () => expect(nestedCounts).toEqual(captureCounts(standalone)),
+  )
   return nestedCounts
 }
 
@@ -594,7 +635,7 @@ const actionArbitrary: fc.Arbitrary<CrossFormulationAction> = fc.oneof(
   }),
 )
 
-// The three pinned examples below reconstruct the named in-range witnesses
+// The three fixed histories below reconstruct the named in-range witnesses
 // in both generated campaigns. Each coordinate has positive probability in
 // the finite record grammar; examples keep them stable if sampling changes.
 // Group controls shared vs split/moved/unmatched routes; position controls
@@ -707,6 +748,12 @@ const windowedExamples: Array<
 // each partition with a direct relation over source rows. The grouped check
 // compares a nested route's counts with the standalone grouped query.
 declareOracle({
+  owns: [
+    'src/collection/change-events.ts#createFilterFunctionFromExpression',
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/query-once.ts#queryOnce',
+  ],
   check: [
     expectFormulationsEquivalent,
     expectWindowedIncludeMatches,
@@ -731,6 +778,7 @@ describe(`includes cross-formulation oracle`, () => {
   })
 
   test(`bounded grammar axes distinguish routes, order, partitions, and windows`, () => {
+    oracleRoute(`fixed history`)
     const parents = new Map(
       partitionAndRouteScenario.parents.map((row) => [row.id, row]),
     )
@@ -821,6 +869,7 @@ describe(`includes cross-formulation oracle`, () => {
   })
 
   test(`TLP checker rejects a wrong branch even when the union is complete`, () => {
+    oracleRoute(`calibration`)
     const rows: Array<ChildRow> = [
       { id: 10, parentGroup: 0, score: null, position: 0 },
       { id: 11, parentGroup: 0, score: -1, position: 1 },
@@ -848,22 +897,17 @@ describe(`includes cross-formulation oracle`, () => {
   // The literal wrong-result and captured replay controls above distinguish
   // merged reference routes and symbol groups at their public checkpoints.
 
-  oracleReplayTest(fcTest).prop([fc.integer()], {
-    numRuns: oracleRuns(4),
-    seed: 1_658_001,
-  })(
+  registerIncludesProperty(
+    [fc.integer()],
+    {
+      property: `includes-cross-formulation.reference-context`,
+      runs: 4,
+      fixedSeed: 1658001,
+    },
     `parent-context routing preserves reference-sensitive predicate values across transitions for a fixed seed`,
     async (code) => {
       await checkReferenceContextRouting(code)
     },
-  )
-
-  oracleReplayTest(fcTest, `includes-cross-formulation.reference-context`).prop(
-    [fc.integer()],
-    oraclePropertyOptions(4, `includes-cross-formulation.reference-context`),
-  )(
-    `parent-context routing preserves reference-sensitive predicate values across transitions for a random or replayed seed`,
-    checkReferenceContextRouting,
   )
 
   async function checkReferenceContextRouting(code: number): Promise<void> {
@@ -940,29 +984,49 @@ describe(`includes cross-formulation oracle`, () => {
 
     await withCleanup(async () => {
       await Promise.all([fullyLoaded.preload(), lazy.preload()])
-      expect(captureReferenceRows(lazy.toArray)).toEqual([
-        { id: 1, children: [10] },
-        { id: 2, children: [20] },
-      ])
-      expect(captureReferenceRows(lazy.toArray)).toEqual(
-        captureReferenceRows(fullyLoaded.toArray),
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 950',
+        () =>
+          expect(captureReferenceRows(lazy.toArray)).toEqual([
+            { id: 1, children: [10] },
+            { id: 2, children: [20] },
+          ]),
+      )
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 954',
+        () =>
+          expect(captureReferenceRows(lazy.toArray)).toEqual(
+            captureReferenceRows(fullyLoaded.toArray),
+          ),
       )
 
       parents.write(`delete`, parentRows[0]!)
       await flushPromises()
-      expect(captureReferenceRows(lazy.toArray)).toEqual([
-        { id: 2, children: [20] },
-      ])
-      expect(captureReferenceRows(lazy.toArray)).toEqual(
-        captureReferenceRows(fullyLoaded.toArray),
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 960',
+        () =>
+          expect(captureReferenceRows(lazy.toArray)).toEqual([
+            { id: 2, children: [20] },
+          ]),
+      )
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 963',
+        () =>
+          expect(captureReferenceRows(lazy.toArray)).toEqual(
+            captureReferenceRows(fullyLoaded.toArray),
+          ),
       )
 
       parents.write(`insert`, parentRows[0]!)
       await flushPromises()
-      expect(captureReferenceRows(lazy.toArray)).toEqual([
-        { id: 1, children: [10] },
-        { id: 2, children: [20] },
-      ])
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 969',
+        () =>
+          expect(captureReferenceRows(lazy.toArray)).toEqual([
+            { id: 1, children: [10] },
+            { id: 2, children: [20] },
+          ]),
+      )
       // A changed scalar establishes source publication. Pure equal-shaped
       // reference replacement is a source no-op and need not reach the graph.
       const publications: Array<ReferenceContextParent> = []
@@ -984,17 +1048,35 @@ describe(`includes cross-formulation oracle`, () => {
         ]) {
           const priorPublications = publications.length
           parents.write(`update`, row)
-          expect(publications.length).toBeGreaterThan(priorPublications)
-          expect(publications.at(-1)?.expected).toBe(row.expected)
-          expect(publications.at(-1)?.revision).toBe(row.revision)
+          oracleAssertion(
+            'includes cross-formulation-oracle.property comparison 994',
+            () =>
+              expect(publications.length).toBeGreaterThan(priorPublications),
+          )
+          oracleAssertion(
+            'includes cross-formulation-oracle.property comparison 995',
+            () => expect(publications.at(-1)?.expected).toBe(row.expected),
+          )
+          oracleAssertion(
+            'includes cross-formulation-oracle.property comparison 996',
+            () => expect(publications.at(-1)?.revision).toBe(row.revision),
+          )
           await flushPromises()
           const expectedRows = [
             { id: 1, children: [childIds[0]] },
             { id: 2, children: [childIds[1]] },
           ]
-          expect(captureReferenceRows(lazy.toArray)).toEqual(expectedRows)
-          expect(captureReferenceRows(fullyLoaded.toArray)).toEqual(
-            expectedRows,
+          oracleAssertion(
+            'includes cross-formulation-oracle.property comparison 1002',
+            () =>
+              expect(captureReferenceRows(lazy.toArray)).toEqual(expectedRows),
+          )
+          oracleAssertion(
+            'includes cross-formulation-oracle.property comparison 1003',
+            () =>
+              expect(captureReferenceRows(fullyLoaded.toArray)).toEqual(
+                expectedRows,
+              ),
           )
         }
       } finally {
@@ -1032,6 +1114,7 @@ describe(`includes cross-formulation oracle`, () => {
   ])(
     `grouped includes use query equality for %s routes`,
     async (_name, createValues) => {
+      oracleRoute(`case`)
       const [parentGroup, equivalentChildGroup, unequalChildGroup] =
         createValues()
       const parents = createControlledCollection(`equality-route-parents`, [
@@ -1101,20 +1184,17 @@ describe(`includes cross-formulation oracle`, () => {
     },
   )
 
-  oracleReplayTest(fcTest).prop([fc.integer()], {
-    numRuns: oracleRuns(4),
-    seed: 1_658_002,
-  })(
-    `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys for a fixed seed`,
-    checkReferenceKeyRouting,
-  )
-
-  oracleReplayTest(fcTest, `includes-cross-formulation.reference-key`).prop(
+  registerIncludesProperty(
     [fc.integer()],
-    oraclePropertyOptions(4, `includes-cross-formulation.reference-key`),
-  )(
-    `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys for a random or replayed seed`,
-    checkReferenceKeyRouting,
+    {
+      property: `includes-cross-formulation.reference-key`,
+      runs: 4,
+      fixedSeed: 1658002,
+    },
+    `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys for a fixed seed`,
+    (...args: Parameters<typeof checkReferenceKeyRouting>) => {
+      return checkReferenceKeyRouting(...args)
+    },
   )
 
   async function checkReferenceKeyRouting(code: number): Promise<void> {
@@ -1206,7 +1286,10 @@ describe(`includes cross-formulation oracle`, () => {
     const groupedRows = (
       query: typeof fullyLoadedGrouped,
     ): Array<{ id: number; summaries: Array<{ count: number }> }> =>
-      captureGroupedRows(query.toArray)
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 1214',
+        () => captureGroupedRows(query.toArray),
+      )
 
     await withCleanup(async () => {
       await Promise.all([
@@ -1215,42 +1298,91 @@ describe(`includes cross-formulation oracle`, () => {
         fullyLoadedGrouped.preload(),
         lazyGrouped.preload(),
       ])
-      const fullyLoadedRows = captureReferenceRows(fullyLoaded.toArray)
-      const lazyRows = captureReferenceRows(lazy.toArray)
-      expect(lazyRows).toEqual(fullyLoadedRows)
-      expect(lazyRows).toEqual([
-        { id: 1, children: [10] },
-        { id: 2, children: [20] },
-      ])
-      expect(groupedRows(lazyGrouped)).toEqual(groupedRows(fullyLoadedGrouped))
-      expect(groupedRows(lazyGrouped)).toEqual([
-        { id: 1, summaries: [{ count: 1 }] },
-        { id: 2, summaries: [{ count: 1 }] },
-      ])
+      const fullyLoadedRows = oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 1223',
+        () => captureReferenceRows(fullyLoaded.toArray),
+      )
+      const lazyRows = oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 1224',
+        () => captureReferenceRows(lazy.toArray),
+      )
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 1225',
+        () => expect(lazyRows).toEqual(fullyLoadedRows),
+      )
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 1226',
+        () =>
+          expect(lazyRows).toEqual([
+            { id: 1, children: [10] },
+            { id: 2, children: [20] },
+          ]),
+      )
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 1230',
+        () =>
+          expect(groupedRows(lazyGrouped)).toEqual(
+            groupedRows(fullyLoadedGrouped),
+          ),
+      )
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 1231',
+        () =>
+          expect(groupedRows(lazyGrouped)).toEqual([
+            { id: 1, summaries: [{ count: 1 }] },
+            { id: 2, summaries: [{ count: 1 }] },
+          ]),
+      )
 
       parents.write(`delete`, parentRows[0]!)
       await flushPromises()
-      expect(captureReferenceRows(lazy.toArray)).toEqual([
-        { id: 2, children: [20] },
-      ])
-      expect(captureReferenceRows(lazy.toArray)).toEqual(
-        captureReferenceRows(fullyLoaded.toArray),
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 1238',
+        () =>
+          expect(captureReferenceRows(lazy.toArray)).toEqual([
+            { id: 2, children: [20] },
+          ]),
       )
-      expect(groupedRows(lazyGrouped)).toEqual([
-        { id: 2, summaries: [{ count: 1 }] },
-      ])
-      expect(groupedRows(lazyGrouped)).toEqual(groupedRows(fullyLoadedGrouped))
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 1241',
+        () =>
+          expect(captureReferenceRows(lazy.toArray)).toEqual(
+            captureReferenceRows(fullyLoaded.toArray),
+          ),
+      )
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 1244',
+        () =>
+          expect(groupedRows(lazyGrouped)).toEqual([
+            { id: 2, summaries: [{ count: 1 }] },
+          ]),
+      )
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 1247',
+        () =>
+          expect(groupedRows(lazyGrouped)).toEqual(
+            groupedRows(fullyLoadedGrouped),
+          ),
+      )
 
       parents.write(`insert`, parentRows[0]!)
       await flushPromises()
-      expect(captureReferenceRows(lazy.toArray)).toEqual([
-        { id: 1, children: [10] },
-        { id: 2, children: [20] },
-      ])
-      expect(groupedRows(lazyGrouped)).toEqual([
-        { id: 1, summaries: [{ count: 1 }] },
-        { id: 2, summaries: [{ count: 1 }] },
-      ])
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 1251',
+        () =>
+          expect(captureReferenceRows(lazy.toArray)).toEqual([
+            { id: 1, children: [10] },
+            { id: 2, children: [20] },
+          ]),
+      )
+      oracleAssertion(
+        'includes cross-formulation-oracle.property comparison 1255',
+        () =>
+          expect(groupedRows(lazyGrouped)).toEqual([
+            { id: 1, summaries: [{ count: 1 }] },
+            { id: 2, summaries: [{ count: 1 }] },
+          ]),
+      )
     }, [
       () => fullyLoaded.cleanup(),
       () => lazy.cleanup(),
@@ -1262,23 +1394,17 @@ describe(`includes cross-formulation oracle`, () => {
     ])
   }
 
-  oracleReplayTest(fcTest).prop([fc.integer()], {
-    numRuns: oracleRuns(4),
-    seed: 1_658_003,
-  })(
-    `grouped includes agree with standalone groups for symbol routes for a fixed seed`,
-    checkSymbolGroupRouting,
-  )
-
-  oracleReplayTest(
-    fcTest,
-    `includes-cross-formulation.symbol-group-route`,
-  ).prop(
+  registerIncludesProperty(
     [fc.integer()],
-    oraclePropertyOptions(4, `includes-cross-formulation.symbol-group-route`),
-  )(
-    `grouped includes agree with standalone groups for symbol routes for a random or replayed seed`,
-    checkSymbolGroupRouting,
+    {
+      property: `includes-cross-formulation.symbol-group-route`,
+      runs: 4,
+      fixedSeed: 1658003,
+    },
+    `grouped includes agree with standalone groups for symbol routes for a fixed seed`,
+    (...args: Parameters<typeof checkSymbolGroupRouting>) => {
+      return checkSymbolGroupRouting(...args)
+    },
   )
 
   async function checkSymbolGroupRouting(code: number): Promise<void> {
@@ -1323,14 +1449,24 @@ describe(`includes cross-formulation oracle`, () => {
       )
 
       const assertCounts = (counts: ReadonlyArray<number>) => {
-        const nestedRows = captureGroupedRows(nested.toArray)
-        expect(nestedRows).toEqual(
-          standalone.map((query, index) => ({
-            id: index + 1,
-            summaries: captureCounts(query.toArray),
-          })),
+        const nestedRows = oracleAssertion(
+          'includes cross-formulation-oracle.property comparison 1325',
+          () => captureGroupedRows(nested.toArray),
         )
-        assertGroupedRouteCounts(nestedRows, counts)
+        oracleAssertion(
+          'includes cross-formulation-oracle.property comparison 1326',
+          () =>
+            expect(nestedRows).toEqual(
+              standalone.map((query, index) => ({
+                id: index + 1,
+                summaries: captureCounts(query.toArray),
+              })),
+            ),
+        )
+        oracleAssertion(
+          'includes cross-formulation-oracle.property comparison 1332',
+          () => assertGroupedRouteCounts(nestedRows, counts),
+        )
       }
       await withCleanup(async () => {
         await Promise.all([
@@ -1359,12 +1495,14 @@ describe(`includes cross-formulation oracle`, () => {
     }
   }
 
-  fcTest(`shared-route child deletion agrees across formulations`, () =>
-    expectFormulationsEquivalent(sharedRouteDeletionScenario),
-  )
+  fcTest(`shared-route child deletion agrees across formulations`, () => {
+    oracleRoute(`fixed history`)
+    return expectFormulationsEquivalent(sharedRouteDeletionScenario)
+  })
 
-  test(`split, merge and reactivated routes preserve all predicate partitions`, () =>
-    expectFormulationsEquivalent({
+  test(`split, merge and reactivated routes preserve all predicate partitions`, () => {
+    oracleRoute(`fixed history`)
+    return expectFormulationsEquivalent({
       parents: [
         { id: 0, group: 0, position: 1 },
         { id: 1, group: 0, position: 0 },
@@ -1391,7 +1529,8 @@ describe(`includes cross-formulation oracle`, () => {
           row: { id: 12, parentGroup: 1, score: 1, position: 0 },
         },
       ],
-    }))
+    })
+  })
 
   test.each([
     { name: `zero limit`, offset: 0, limit: 0 },
@@ -1403,8 +1542,9 @@ describe(`includes cross-formulation oracle`, () => {
     { name: `empty tail`, offset: 3, limit: 2 },
   ])(
     `preserves ordered window $name through root and child moves`,
-    ({ offset, limit }) =>
-      expectWindowedIncludeMatches(
+    ({ offset, limit }) => {
+      oracleRoute(`case`)
+      return expectWindowedIncludeMatches(
         {
           parents: [
             { id: 0, group: 0, position: 1 },
@@ -1435,17 +1575,18 @@ describe(`includes cross-formulation oracle`, () => {
         },
         offset,
         limit,
-      ),
+      )
+    },
   )
 
   // Checked direct replay witness:
   // TANSTACK_DB_ORACLE_SEED=1658004
-  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0
+  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
   // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.equivalence
   // TANSTACK_DB_ORACLE_CALIBRATION=missing-parent
   // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
   // tests/query/includes-cross-formulation-oracle.property.test.ts
-  // -t 'agrees across nested includes'
+  // -t 'includes-cross-formulation\\.equivalence > random seed'
   // Expected: one main-property failure at cross-formulation checkpoint 0.
   oracleCalibrationTest(
     test,
@@ -1454,6 +1595,7 @@ describe(`includes cross-formulation oracle`, () => {
   )(
     `generated equivalence rejects a missing production parent and replays its checkpoint`,
     async () => {
+      oracleRoute(`calibration`)
       // The hostile observation is injected after the real nested query is
       // captured. The same generated driver and refinement comparison execute
       // during shrinking and direct seed/path replay.
@@ -1462,45 +1604,53 @@ describe(`includes cross-formulation oracle`, () => {
       })
       const propertyId = `includes-cross-formulation.equivalence`
       const directReplay = oracleReplayRequested()
-      const failure = await fc.check(
+      const failure = await runIncludesCalibration(
         property,
         directReplay
           ? { ...oraclePropertyOptions(8, propertyId), endOnFailure: true }
-          : { seed: 1_658_004, numRuns: oracleRuns(8) },
+          : oracleFixedSeed(1_658_004, { numRuns: oracleRuns(8) }),
       )
       expect(failure.failed).toBe(true)
-      expect(failure.error).toContain(`cross-formulation checkpoint`)
-      expect(failure.error).toContain(`checkpoint":0`)
+      expect(String(failure.errorInstance)).toContain(
+        `cross-formulation checkpoint`,
+      )
+      expect(String(failure.errorInstance)).toContain(`checkpoint":0`)
       if (directReplay) {
-        expect(failure.seed).toBe(replay.replaySeed)
-        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
+        expect(failure.seed).toBe(replay.campaignSeed)
+        expect(replay.replayPath).toBe(
+          `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
+        )
         return
       }
       expect(failure.numShrinks).toBeGreaterThan(0)
       if (failure.counterexamplePath === null)
         throw new Error(`missing-parent mutant did not produce a replay path`)
-      expect(failure.counterexamplePath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
-      const replayResult = await fc.check(property, {
+      expect(failure.counterexamplePath).toBe(
+        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
+      )
+      const replayResult = await runIncludesCalibration(property, {
         seed: failure.seed,
         path: failure.counterexamplePath,
         numRuns: 1,
         endOnFailure: true,
       })
       expect(replayResult.failed).toBe(true)
-      expect(replayResult.error).toContain(`cross-formulation checkpoint`)
-      expect(replayResult.error).toContain(`checkpoint":0`)
+      expect(String(replayResult.errorInstance)).toContain(
+        `cross-formulation checkpoint`,
+      )
+      expect(String(replayResult.errorInstance)).toContain(`checkpoint":0`)
       expect(replayResult.counterexample).toEqual(failure.counterexample)
     },
   )
 
   // Checked direct replay witness:
   // TANSTACK_DB_ORACLE_SEED=1658005
-  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
+  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
   // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.ordered-window
   // TANSTACK_DB_ORACLE_CALIBRATION=extra-child
   // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
   // tests/query/includes-cross-formulation-oracle.property.test.ts
-  // -t 'matches recomputation for ordered offset and limit child windows for a random'
+  // -t 'includes-cross-formulation\\.ordered-window > random seed'
   // Expected: one main-property failure at ordered-window checkpoint 0.
   oracleCalibrationTest(
     test,
@@ -1509,6 +1659,7 @@ describe(`includes cross-formulation oracle`, () => {
   )(
     `generated window rejects an extra production child and replays its checkpoint`,
     async () => {
+      oracleRoute(`calibration`)
       const property = fc.asyncProperty(
         windowedScenarioArbitrary,
         async (sample) => {
@@ -1527,35 +1678,39 @@ describe(`includes cross-formulation oracle`, () => {
       )
       const propertyId = `includes-cross-formulation.ordered-window`
       const directReplay = oracleReplayRequested()
-      const failure = await fc.check(
+      const failure = await runIncludesCalibration(
         property,
         directReplay
           ? { ...oraclePropertyOptions(12, propertyId), endOnFailure: true }
-          : { seed: 1_658_005, numRuns: oracleRuns(12) },
+          : oracleFixedSeed(1_658_005, { numRuns: oracleRuns(12) }),
       )
       expect(failure.failed).toBe(true)
-      expect(failure.error).toContain(`ordered-window checkpoint`)
-      expect(failure.error).toContain(`checkpoint":0`)
+      expect(String(failure.errorInstance)).toContain(
+        `ordered-window checkpoint`,
+      )
+      expect(String(failure.errorInstance)).toContain(`checkpoint":0`)
       if (directReplay) {
-        expect(failure.seed).toBe(replay.replaySeed)
-        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
+        expect(failure.seed).toBe(replay.campaignSeed)
+        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
         return
       }
       expect(failure.numShrinks).toBeGreaterThan(0)
       if (failure.counterexamplePath === null)
         throw new Error(`extra-child mutant did not produce a replay path`)
       expect(failure.counterexamplePath).toBe(
-        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
+        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
       )
-      const replayResult = await fc.check(property, {
+      const replayResult = await runIncludesCalibration(property, {
         seed: failure.seed,
         path: failure.counterexamplePath,
         numRuns: 1,
         endOnFailure: true,
       })
       expect(replayResult.failed).toBe(true)
-      expect(replayResult.error).toContain(`ordered-window checkpoint`)
-      expect(replayResult.error).toContain(`checkpoint":0`)
+      expect(String(replayResult.errorInstance)).toContain(
+        `ordered-window checkpoint`,
+      )
+      expect(String(replayResult.errorInstance)).toContain(`checkpoint":0`)
       expect(replayResult.counterexample).toEqual(failure.counterexample)
     },
   )
@@ -1570,24 +1725,18 @@ describe(`includes cross-formulation oracle`, () => {
         : undefined,
     )
 
-  oracleReplayTest(fcTest).prop([scenarioArbitrary], {
-    numRuns: oracleRuns(8),
-    seed: 1_658_004,
-    examples: scenarioExamples,
-  })(
-    `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a fixed seed`,
-    checkEquivalenceScenario,
-  )
-
-  oracleReplayTest(fcTest, `includes-cross-formulation.equivalence`).prop(
+  registerIncludesProperty(
     [scenarioArbitrary],
     {
-      ...oraclePropertyOptions(8, `includes-cross-formulation.equivalence`),
-      examples: oracleReplayRequested() ? [] : scenarioExamples,
+      property: `includes-cross-formulation.equivalence`,
+      runs: 8,
+      fixedSeed: 1658004,
+      examples: scenarioExamples,
     },
-  )(
-    `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a random or replayed seed`,
-    checkEquivalenceScenario,
+    `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a fixed seed`,
+    (...args: Parameters<typeof checkEquivalenceScenario>) => {
+      return checkEquivalenceScenario(...args)
+    },
   )
 
   const checkWindowedScenario = ({
@@ -1618,23 +1767,17 @@ describe(`includes cross-formulation oracle`, () => {
         : undefined,
     )
 
-  oracleReplayTest(fcTest).prop([windowedScenarioArbitrary], {
-    numRuns: oracleRuns(12),
-    seed: 1_658_005,
-    examples: windowedExamples,
-  })(
-    `matches recomputation for ordered offset and limit child windows for a fixed seed`,
-    checkWindowedScenario,
-  )
-
-  oracleReplayTest(fcTest, `includes-cross-formulation.ordered-window`).prop(
+  registerIncludesProperty(
     [windowedScenarioArbitrary],
     {
-      ...oraclePropertyOptions(12, `includes-cross-formulation.ordered-window`),
-      examples: oracleReplayRequested() ? [] : windowedExamples,
+      property: `includes-cross-formulation.ordered-window`,
+      runs: 12,
+      fixedSeed: 1658005,
+      examples: windowedExamples,
     },
-  )(
-    `matches recomputation for ordered offset and limit child windows for a random or replayed seed`,
-    checkWindowedScenario,
+    `matches recomputation for ordered offset and limit child windows for a fixed seed`,
+    (...args: Parameters<typeof checkWindowedScenario>) => {
+      return checkWindowedScenario(...args)
+    },
   )
 })

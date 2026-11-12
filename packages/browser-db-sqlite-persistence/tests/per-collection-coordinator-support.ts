@@ -758,7 +758,7 @@ export function routingGrammarPlan(
 }
 
 // Node's own BroadcastChannel and Web Locks, captured before any test installs
-// the controlled seams. This lane swaps them in for its body only.
+// the controlled seams. This test swaps them in for its body only.
 export const nativeBroadcastChannel = globalThis.BroadcastChannel
 
 export const nativeNavigator = globalThis.navigator

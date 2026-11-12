@@ -46,6 +46,7 @@ import { IR } from '@tanstack/db'
 import { Temporal } from 'temporal-polyfill'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import {
   temporalFamilies,
   temporalQueryCases,
@@ -151,12 +152,18 @@ const cases = kinds.flatMap((kind) =>
   ),
 )
 
-declareOracle({ grammar: [cases], model: [expectedValue, expectedRows] })
+declareOracle({
+  owns: [`src/sqlite-value.ts`, `src/sqlite-core-adapter.ts`],
+  grammar: [cases],
+  model: [expectedValue, expectedRows],
+})
 
 describe(`SQLite typed-value preservation after reopen`, () => {
+  oracleRoute(`fixed history`)
   it.each(cases)(
     `$kind / $history / indexed=$indexed`,
     async ({ kind, history, indexed }) => {
+      oracleRoute(`case`)
       const harness = scope.create()
       const { adapter } = harness.open()
       await adapter.applyCommittedTx(
@@ -327,7 +334,9 @@ describe(`SQLite typed-value preservation after reopen`, () => {
 })
 
 describe(`typed-value oracle calibration`, () => {
+  oracleRoute(`calibration`)
   it.each(kinds)(`distinguishes type and value for $0`, (kind) => {
+    oracleRoute(`calibration`)
     check(inputValue(kind, 0), expectedValue(kind, 0), `valid value`)
     expect(() => check({}, expectedValue(kind, 0), `empty object`)).toThrow()
     expect(() =>
@@ -341,6 +350,7 @@ describe(`typed-value oracle calibration`, () => {
   })
 
   it(`rejects missing, duplicate, and reversed query results`, () => {
+    oracleRoute(`calibration`)
     const expected = [`z-early`, `a-late`]
     check(expected, expected, `valid keys`)
     for (const actual of [
@@ -365,6 +375,7 @@ describe(`typed-value oracle calibration`, () => {
 // and text come from the independent companion model; SQL never supplies truth.
 describe(`native Temporal query refinement`, () => {
   it.each(temporalFamilies)(`$kind / $name`, async (family) => {
+    oracleRoute(`case`)
     const harness = scope.create()
     const { adapter } = harness.open()
     await adapter.applyCommittedTx(
