@@ -12,6 +12,7 @@ import {
 export * from '@tanstack/oracles'
 
 const staticOracleProperties = [
+  `query.join-demand-loading`,
   `persistence.crossed-leadership-index`,
   `persisted-options.types.core-fixed`,
   `persisted-options.types.browser-fixed`,
