@@ -851,11 +851,20 @@ host.getSourceFile = (
   return source
 }
 let previous: ts.Program | undefined
+// A consumer's diagnostics are a function of its source alone: the public
+// declarations and compiler options do not change during a run. The
+// framework's determinism test replays histories in the same process, so a
+// replayed source reuses its diagnostics instead of type-checking it again
+// (each check takes seconds). Its runtime construction still runs again.
+const diagnosticsBySource = new Map<string, ReadonlyArray<ts.Diagnostic>>()
 function compileConsumer(source: string): ReadonlyArray<ts.Diagnostic> {
+  const known = diagnosticsBySource.get(source)
+  if (known !== undefined) return known
   generated = source
   const program = ts.createProgram([filename], options, host, previous)
   previous = program
   const diagnostics = [...parsed.errors, ...ts.getPreEmitDiagnostics(program)]
+  diagnosticsBySource.set(source, diagnostics)
   return diagnostics
 }
 /**
