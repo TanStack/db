@@ -3565,7 +3565,9 @@ describe(`ordered source work oracle`, () => {
  *   twice per change on `main` too, so the scan law does not cover it.
  * - **Move scan:** an indexed window move over one order term scans no more
  *   source rows than the work bound for its new window, including the reads
- *   that count its continuation's offset. Scans here also count the rows that
+ *   that count its continuation's offset, and its snapshot reads return at
+ *   most three times that bound: they may revisit the prefix, not the
+ *   source. Scans here also count the rows that
  *   iterating the source's applied (synced) state yields outside a snapshot
  *   read. The `ordered-work.eager-window-move` campaign fixes that premise
  *   and must reach moves that continue past a settled boundary. A tie
@@ -5727,6 +5729,17 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
             `rows scanned by window move at step ${step}`,
           ).toBeLessThanOrEqual(moveBound),
         )
+        // The move's indexed snapshot reads may revisit its prefix, to count
+        // the continuation's offset as well as to find its boundary, but not
+        // the source: the rows they return stay within a constant multiple of
+        // the new window's work bound (ARCHITECTURE.md, explicit window
+        // moves: counting a long prefix can revisit its rows).
+        compareAt(`ordered-work-oracle.property.test.ts:move-read`, () =>
+          expect(
+            read,
+            `rows read by window move at step ${step}`,
+          ).toBeLessThanOrEqual(3 * moveBound),
+        )
         if (continuationRequests > continuationsBefore) boundedContinuations++
       }
     }
@@ -7879,9 +7892,9 @@ describe(`eager indexed ordered windows`, () => {
     oracleProperty({
       id: `ordered-work.eager-window-move`,
       law: {
-        statement: `An indexed window move over one order term scans no more source rows than the work bound for its new window, including the reads that count its continuation's offset.`,
+        statement: `An indexed window move over one order term scans no more source rows than the work bound for its new window, including the reads that count its continuation's offset, and its snapshot reads return at most three times that bound.`,
         authority: `query/live/ARCHITECTURE.md: explicit window moves acquire only the missing portion; law 12 (Work: irrelevant rows do not cause unrelated scans).`,
-        limits: `Source filters over an index on one order term, a forwarding provider that answers at once, no peer; scans are rows that the Collection's entries() and its applied-row iteration yield outside a snapshot read. A tie request's filtered snapshot still visits every source row on main and is not counted.`,
+        limits: `Source filters over an index on one order term, a forwarding provider that answers at once, no peer; scans are rows that the Collection's entries() and its applied-row iteration yield outside a snapshot read, and reads are rows that snapshot reads return. A tie request's filtered snapshot still visits every source row on main and is not counted, because snapshot-internal iteration is excluded. With two order terms each doubling step of the offset count sorts the whole source; no move law covers two terms.`,
       },
       owns: [
         'src/collection/index.ts#createCollection',
