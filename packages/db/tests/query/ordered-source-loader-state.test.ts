@@ -14,6 +14,7 @@ import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
   createDeferred,
   createOrderByInfo,
+  countSnapshotRows,
 } from './ordered-source-loader-support.js'
 import { fakeSubscription } from './ordered-source-loader-state-support.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
@@ -56,6 +57,9 @@ describe(`Ordered source request ownership`, () => {
     const subscription = {
       readOrderedSnapshot: () => [{ value: { id: 1, rank: 1 } }],
       setOrderByIndex: () => {},
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: request,
       requestSnapshot: request,
     } as unknown as CollectionSubscription
@@ -160,6 +164,9 @@ describe(`Ordered source request ownership`, () => {
         },
       ],
       setOrderByIndex: () => {},
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: (options: RequestOptions) =>
         request(`limited`, options),
       requestSnapshot: (options: RequestOptions) =>
@@ -413,6 +420,9 @@ describe(`Ordered source request ownership`, () => {
       hasPendingTruncateReplacement: false,
       readOrderedSnapshot: () => [{ value: { id: 1, rank: 1 } }],
       setOrderByIndex: () => {},
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: request,
       requestSnapshot: request,
     } as unknown as CollectionSubscription

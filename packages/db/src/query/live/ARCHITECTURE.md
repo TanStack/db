@@ -1049,6 +1049,11 @@ must leave room for those rows, including during ordered repair. An optimistic
 insert or rank move may fill a visible window, but it does not establish a
 provider offset or cursor boundary. The loader therefore counts source-derived
 rows for continuation even when optimistic rows make the visible window full.
+A continuation's offset counts every applied source row that passes the
+subscription's filter and sorts at or before the boundary, past the window's
+end too, because an offset-only provider skips that many rows. A row that an
+optimistic delete or update hides or overlays still counts at its applied
+position; an optimistic insert does not.
 The extra provider limit used for optimistic headroom does not enlarge the
 local count from which a settled boundary is inferred; a held mutation may
 become authoritative before that request settles. Starting that

@@ -22,6 +22,22 @@ export type RequestOptions = LoadSubsetOptions & {
   ) => void
 }
 
+// A fake subscription has no optimistic writes, so its applied source rows
+// are its snapshot rows. The loader counts them for an offset continuation.
+export function countSnapshotRows(
+  subscription: object,
+  included: (row: Record<string, unknown>) => boolean,
+): number {
+  const { readOrderedSnapshot } = subscription as {
+    readOrderedSnapshot: (
+      options: LoadSubsetOptions,
+    ) => ReadonlyArray<{ value: unknown }>
+  }
+  return readOrderedSnapshot
+    .call(subscription, {})
+    .filter(({ value }) => included(value as Record<string, unknown>)).length
+}
+
 export function createDeferred() {
   let resolve!: () => void
   let reject!: (error: unknown) => void

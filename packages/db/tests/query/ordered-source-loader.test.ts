@@ -11,6 +11,7 @@ import {
   createDeferred,
   createOrderByInfo,
   pendingPromise,
+  countSnapshotRows,
 } from './ordered-source-loader-support.js'
 import type { RequestOptions } from './ordered-source-loader-support.js'
 import type {
@@ -30,6 +31,9 @@ describe(`OrderedSourceLoader`, () => {
     const subscription = {
       setOrderByIndex: () => {},
       readOrderedSnapshot: () => [{ value: { rank: 1, id: 2 } }],
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: (options: RequestOptions) =>
         request(`limited`, options),
       requestSnapshot: (options: RequestOptions) =>
@@ -256,6 +260,9 @@ describe(`OrderedSourceLoader`, () => {
     const subscription = {
       setOrderByIndex: () => {},
       readOrderedSnapshot: () => [{ value: { rank: 1 } }],
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: (options: RequestOptions) => {
         const acquisition: LoadSubsetOptions = {
           orderBy: options.orderBy,
@@ -313,6 +320,9 @@ describe(`OrderedSourceLoader`, () => {
     const subscription = {
       setOrderByIndex: () => {},
       readOrderedSnapshot: () => [{ value: { rank: boundary } }],
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: (options: RequestOptions) => {
         methods.push(`page`)
         pageCount++
@@ -354,6 +364,9 @@ describe(`OrderedSourceLoader`, () => {
     const subscription = {
       setOrderByIndex: () => {},
       readOrderedSnapshot: () => [{ value: { rank: 1 } }],
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: (options: RequestOptions) => {
         const acquisition: LoadSubsetOptions = {
           orderBy: options.orderBy,
@@ -423,6 +436,9 @@ describe(`OrderedSourceLoader`, () => {
     const subscription = {
       setOrderByIndex: () => {},
       readOrderedSnapshot: () => [{ value: { rank: 2 } }],
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: (options: RequestOptions) =>
         request(`limited`, options),
       requestSnapshot: (options: RequestOptions) =>
@@ -515,6 +531,9 @@ describe(`OrderedSourceLoader`, () => {
           boundaryReads++
           return [{ value: { rank: 1 } }]
         },
+        countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+          return countSnapshotRows(this, included)
+        },
         requestLimitedSnapshot: (options: RequestOptions) =>
           request(`limited`, options),
         requestSnapshot: (options: RequestOptions) =>
@@ -588,6 +607,9 @@ describe(`OrderedSourceLoader`, () => {
       const subscription = {
         setOrderByIndex: () => {},
         readOrderedSnapshot: () => [{ value: { rank: 1 } }],
+        countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+          return countSnapshotRows(this, included)
+        },
         requestLimitedSnapshot: (options: RequestOptions) =>
           request(`limited`, options),
         requestSnapshot: (options: RequestOptions) =>
@@ -656,6 +678,9 @@ describe(`OrderedSourceLoader`, () => {
       const subscription = {
         setOrderByIndex: () => {},
         readOrderedSnapshot: () => [{ value: { rank: 1 } }],
+        countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+          return countSnapshotRows(this, included)
+        },
         requestLimitedSnapshot: (options: RequestOptions) =>
           request(`limited`, options),
         requestSnapshot: (options: RequestOptions) =>
@@ -716,6 +741,9 @@ describe(`OrderedSourceLoader`, () => {
       setOrderByIndex: () => {},
       readOrderedSnapshot: () => {
         throw failure
+      },
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
       },
       requestLimitedSnapshot: (options: RequestOptions) =>
         request(`limited`, options),
@@ -787,6 +815,9 @@ describe(`OrderedSourceLoader`, () => {
         readOrderedSnapshot: () =>
           route === `boundary` ? [{ value: { rank: 1 } }] : [],
         setOrderByIndex: () => {},
+        countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+          return countSnapshotRows(this, included)
+        },
         requestLimitedSnapshot: (options: RequestOptions) =>
           request(`limited`, options),
         requestSnapshot: (options: RequestOptions) =>
@@ -891,6 +922,9 @@ describe(`OrderedSourceLoader`, () => {
       const subscription = {
         setOrderByIndex: () => {},
         readOrderedSnapshot: () => [],
+        countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+          return countSnapshotRows(this, included)
+        },
         requestLimitedSnapshot: (options: RequestOptions) =>
           request(`page`, options),
         requestSnapshot: (options: RequestOptions) =>
@@ -977,6 +1011,9 @@ describe(`OrderedSourceLoader`, () => {
       const subscription = {
         setOrderByIndex: () => {},
         readOrderedSnapshot: () => [{ value: { rank: value } }],
+        countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+          return countSnapshotRows(this, included)
+        },
         requestLimitedSnapshot: (options: RequestOptions) =>
           request(`page`, options),
         requestSnapshot: (options: RequestOptions) => {
@@ -1027,6 +1064,9 @@ describe(`OrderedSourceLoader`, () => {
     const subscription = {
       readOrderedSnapshot: () => (biggest ? [{ value: biggest }] : []),
       setOrderByIndex: () => {},
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: request,
       requestSnapshot: request,
     }
@@ -1414,6 +1454,9 @@ describe(`OrderedSourceLoader`, () => {
       readOrderedSnapshot: () => [{ value: { rank: 1 } }],
       setOrderByIndex: () => {},
       releaseLoadSubset: (_options: LoadSubsetOptions) => {},
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: (options: RequestOptions) => {
         methods.push(`limited`)
         options.onLoadSubsetResult?.(

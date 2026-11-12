@@ -24,6 +24,7 @@ import type {
   LoadSubsetRequestResult,
   SyncConfig,
 } from '../../src/types.js'
+import { countSnapshotRows } from './ordered-source-loader-support.js'
 
 type Row = { id: number; rank: number }
 export type OrderedCompilerCacheHistory = {
@@ -197,6 +198,9 @@ export async function receiveOrderedCompilerCacheHistory(
           )
           .slice(0, options.limit ?? source.size)
           .map((value) => ({ key: value.id, value })),
+      countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+        return countSnapshotRows(this, included)
+      },
       requestLimitedSnapshot: (options: Request) => request(options, false),
       // All ranks are unique. A tie request adds no row beyond the installed
       // boundary; it still settles its real loader continuation.

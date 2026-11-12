@@ -3,7 +3,10 @@
 // records each request. The deferred promise and the order-by info come from
 // ordered-source-loader-support.ts. The request-authority laws are owned by
 // ordered-source-loader-state-oracle.test.ts.
-import { createDeferred } from './ordered-source-loader-support.js'
+import {
+  createDeferred,
+  countSnapshotRows,
+} from './ordered-source-loader-support.js'
 import type {
   CollectionSubscription,
   ReleaseLoadSubset,
@@ -50,6 +53,9 @@ export function fakeSubscription(
   return {
     readOrderedSnapshot: () => [],
     setOrderByIndex: () => {},
+    countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+      return countSnapshotRows(this, included)
+    },
     requestLimitedSnapshot: (options: RequestOptions) =>
       request(`limited`, options),
     requestSnapshot: (options: RequestOptions) => request(`snapshot`, options),

@@ -1575,6 +1575,24 @@ export class CollectionSubscription
     this.options.truncateReplayPublication?.succeed()
   }
 
+  /**
+   * Count the applied source rows that pass this subscription's filter and
+   * that `included` accepts. Rows an optimistic write hides still count: they
+   * are in the source, which a provider's offset counts. An optimistic insert
+   * is not in the source and does not count.
+   */
+  countAppliedRows(included: (row: Record<string, unknown>) => boolean): number {
+    const filter = this.options.whereExpression
+      ? createFilterFunctionFromExpression(this.options.whereExpression)
+      : undefined
+    let count = 0
+    for (const row of this.collection._state.syncedData.values()) {
+      const value = row as Record<string, unknown>
+      if ((filter?.(value) ?? true) && included(value)) count++
+    }
+    return count
+  }
+
   /** Read source-derived ordered rows without starting demand. */
   readOrderedSnapshot(
     options: LoadSubsetOptions,

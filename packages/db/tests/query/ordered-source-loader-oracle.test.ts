@@ -10,6 +10,7 @@ import { declareOracle } from '../oracle-declaration.js'
 import {
   createDeferred,
   createOrderByInfo,
+  countSnapshotRows,
 } from './ordered-source-loader-support.js'
 import type { RequestOptions } from './ordered-source-loader-support.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
@@ -84,6 +85,9 @@ describe(`OrderedSourceLoader`, () => {
         setOrderByIndex: () => {},
         readOrderedSnapshot: () =>
           boundary === `present` ? [{ value: { rank: 1 } }] : [],
+        countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+          return countSnapshotRows(this, included)
+        },
         requestLimitedSnapshot: (options: RequestOptions) =>
           request(`page`, options),
         requestSnapshot: (options: RequestOptions) =>

@@ -871,7 +871,16 @@ export class OrderedSourceLoader {
           minValues,
           // Local rows seen before the first provider request prove neither
           // a cursor nor a remote offset. Start the first acquisition at zero.
-          offset: startsFromSourcePrefix ? 0 : this.countAcquiredRows(),
+          // Later, the offset counts every applied source row through the
+          // boundary, past the window's end too: an offset-only provider
+          // skips that many rows, and rows an optimistic write hides are still
+          // in the source.
+          offset: startsFromSourcePrefix
+            ? 0
+            : this.subscription.countAppliedRows(
+                (value) =>
+                  this.info.comparator(value, this.settledSourceBoundary) <= 0,
+              ),
         }),
       `ordered`,
       windowOperationGeneration,

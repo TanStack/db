@@ -27,6 +27,7 @@ import {
 import {
   createDeferred,
   createOrderByInfo,
+  countSnapshotRows,
 } from './ordered-source-loader-support.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
@@ -1524,6 +1525,9 @@ async function checkAuthorityCase(
     hasHeldSyncTransaction: false,
     get hasPendingTruncateReplacement() {
       return truncatePending
+    },
+    countAppliedRows(included: (row: Record<string, unknown>) => boolean) {
+      return countSnapshotRows(this, included)
     },
     requestLimitedSnapshot: (options: RequestOptions) =>
       record(`limited`, options),

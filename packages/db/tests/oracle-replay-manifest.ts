@@ -953,7 +953,7 @@ const ownerGroups: ReadonlyArray<
   [
     `query-db-collection/tests/refetch-ordered-prefix-oracle.test.ts`,
     `query-db`,
-    `refetch-ordered-prefix refetch-held-page-end refetch-held-report`,
+    `refetch-ordered-prefix refetch-held-page-end refetch-held-report refetch-offset-hold`,
   ],
   [
     `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
@@ -1718,6 +1718,10 @@ const replayTestNames = new Map([
   [
     `query-db.refetch-held-report`,
     `query-db\\.refetch-held-report > random seed`,
+  ],
+  [
+    `query-db.refetch-offset-hold`,
+    `query-db\\.refetch-offset-hold > random seed`,
   ],
   [`svelte.client-window`, `svelte\\.client-window > random seed`],
   [
