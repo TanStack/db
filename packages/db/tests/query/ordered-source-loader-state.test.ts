@@ -12,9 +12,9 @@ import { PropRef } from '../../src/query/ir.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
+  countSnapshotRows,
   createDeferred,
   createOrderByInfo,
-  countSnapshotRows,
 } from './ordered-source-loader-support.js'
 import { fakeSubscription } from './ordered-source-loader-state-support.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'

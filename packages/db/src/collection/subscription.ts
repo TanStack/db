@@ -1594,12 +1594,12 @@ export class CollectionSubscription
     const where = this.options.whereExpression
     let rows: Array<ChangeMessage<Record<string, unknown>, string | number>>
     for (let size = Math.max(limit, 1); ; size *= 2) {
-      rows =
-        this.collection.currentStateAsChanges({
-          orderBy,
-          limit: size,
-          where,
-        }) ?? []
+      const snapshot = this.collection.currentStateAsChanges({
+        orderBy,
+        limit: size,
+        where,
+      })
+      rows = Array.isArray(snapshot) ? snapshot : []
       const last = rows.at(-1)
       if (rows.length < size || last === undefined || !through(last.value))
         break

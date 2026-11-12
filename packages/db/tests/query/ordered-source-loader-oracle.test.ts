@@ -8,9 +8,9 @@ import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.
 import { oracleRoute } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
+  countSnapshotRows,
   createDeferred,
   createOrderByInfo,
-  countSnapshotRows,
 } from './ordered-source-loader-support.js'
 import type { RequestOptions } from './ordered-source-loader-support.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'

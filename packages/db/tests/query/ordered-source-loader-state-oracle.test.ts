@@ -25,9 +25,9 @@ import {
   rejectAt,
 } from './ordered-comparison-oracle.js'
 import {
+  countSnapshotRows,
   createDeferred,
   createOrderByInfo,
-  countSnapshotRows,
 } from './ordered-source-loader-support.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'

@@ -12,6 +12,7 @@ import { getQueryIR } from '../../src/query/builder/index.js'
 import { QueryRef, UnionAll } from '../../src/query/ir.js'
 import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.js'
 import { withOracleCleanup } from '../utils.js'
+import { countSnapshotRows } from './ordered-source-loader-support.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { OrderByOptimizationInfo } from '../../src/query/compiler/order-by.js'
 import type {
@@ -24,7 +25,6 @@ import type {
   LoadSubsetRequestResult,
   SyncConfig,
 } from '../../src/types.js'
-import { countSnapshotRows } from './ordered-source-loader-support.js'
 
 type Row = { id: number; rank: number }
 export type OrderedCompilerCacheHistory = {

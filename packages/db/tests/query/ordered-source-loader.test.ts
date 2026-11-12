@@ -8,10 +8,10 @@ import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
+  countSnapshotRows,
   createDeferred,
   createOrderByInfo,
   pendingPromise,
-  countSnapshotRows,
 } from './ordered-source-loader-support.js'
 import type { RequestOptions } from './ordered-source-loader-support.js'
 import type {

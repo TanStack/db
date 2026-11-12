@@ -4,8 +4,8 @@
 // ordered-source-loader-support.ts. The request-authority laws are owned by
 // ordered-source-loader-state-oracle.test.ts.
 import {
-  createDeferred,
   countSnapshotRows,
+  createDeferred,
 } from './ordered-source-loader-support.js'
 import type {
   CollectionSubscription,
