@@ -1,10 +1,18 @@
-.github/ @TanStack/tanstack-core
-.nx/ @TanStack/tanstack-core
-nx.json @TanStack/tanstack-core
-.changeset/config.json @TanStack/tanstack-core
-scripts/ @TanStack/tanstack-core
-.npmrc @TanStack/tanstack-core
-docs/contributing/oracle-coverage.md @TanStack/tanstack-core
-scripts/oracle-lint-settings.mjs @TanStack/tanstack-core
-scripts/ci-tests.mjs @TanStack/tanstack-core
-.github/workflows/ @TanStack/tanstack-core
+# Extra review for security-sensitive changes only. Everything else gets normal review.
+
+# Code that runs with secrets or publish rights
+.github/workflows/                 @TanStack/tanstack-core
+.github/CODEOWNERS                 @TanStack/tanstack-core
+
+# Release and package publishing
+.changeset/config.json             @TanStack/tanstack-core
+.npmrc                             @TanStack/tanstack-core
+
+# Scripts the release job runs (it has id-token: write for npm publishing)
+scripts/check-dist-probes.mjs      @TanStack/tanstack-core
+scripts/generate-docs.ts           @TanStack/tanstack-core
+scripts/comment-on-release.ts      @TanStack/tanstack-core
+
+# Dependency automation and install-time scripts
+.github/renovate.json              @TanStack/tanstack-core
+pnpm-workspace.yaml                @TanStack/tanstack-core
