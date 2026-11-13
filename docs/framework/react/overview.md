@@ -237,3 +237,76 @@ When a changed query plan creates a new live-query Collection,
 `useLiveSuspenseQuery` shows your Suspense fallback until its initial result
 is ready. Finite outer-window moves retain the Collection and follow its
 window publication policy.
+
+### Animating live query results with View Transitions
+
+Use React `<ViewTransition>` to animate rows entering, leaving, or moving in a
+live query list. Pass the query's `data` to `useDeferredValue` and wrap each
+rendered row in a `<ViewTransition>` with a stable, unique key. Use the result
+row's `$key`, which also identifies individual rows in a join. If result keys
+mix strings and numbers, include the type in the React key. For example,
+`` `${typeof row.$key}:${row.$key}` `` keeps `1` and `'1'` distinct.
+[Live query virtual properties](../../guides/live-queries.md#virtual-properties)
+
+`<ViewTransition>` is stable in React 19.3 and uses the browser's View Transition API.
+[React View Transitions documentation](https://react.dev/reference/react/ViewTransition)
+
+`useLiveQuery` and `useLiveSuspenseQuery` subscribe through `useSyncExternalStore`.
+React handles store updates synchronously, even when you call a collection
+mutation inside `startTransition`. `useDeferredValue` lets React keep showing
+the previous results and render the latest results in the background. React
+can animate the change when that render commits. The same pattern works for
+changes from local writes or incoming sync data.
+[React external store caveats](https://react.dev/reference/react/useSyncExternalStore#caveats) · [React useDeferredValue documentation](https://react.dev/reference/react/useDeferredValue)
+
+```tsx
+import {
+  collectionOptions,
+  localOnlyCollectionOptions,
+  useLiveQuery,
+} from '@tanstack/react-db'
+import { useDeferredValue, ViewTransition } from 'react'
+
+const todoCollection = collectionOptions(
+  localOnlyCollectionOptions({
+    id: 'todos',
+    getKey: (todo) => todo.id,
+    initialData: [
+      { id: 1, text: 'Write a note' },
+      { id: 2, text: 'Water the plants' },
+    ],
+  }),
+)
+
+export function TodoList() {
+  const { data, isLoading } = useLiveQuery({
+    query: (q) =>
+      q.from({ todo: todoCollection }).orderBy(({ todo }) => todo.text),
+  })
+  const visibleTodos = useDeferredValue(data)
+
+  if (isLoading) return <p>Loading…</p>
+
+  return (
+    <ul>
+      {visibleTodos.map((todo) => (
+        <ViewTransition key={todo.$key}>
+          <li>{todo.text}</li>
+        </ViewTransition>
+      ))}
+    </ul>
+  )
+}
+```
+
+Respect the user's `prefers-reduced-motion` setting. To disable the row
+animations, pass `default={prefersReducedMotion ? 'none' : 'auto'}` to each
+`<ViewTransition>`, where `prefersReducedMotion` is your app's current value
+for that media query.
+[React View Transition props](https://react.dev/reference/react/ViewTransition#view-transition-class)
+
+A deferred list can briefly show a row after deletion. If a row has a Delete
+button, use the target collection's key for the record you want to delete.
+Check `collection.has(key)` before calling `collection.delete(key)`. For a
+joined result, `$key` identifies the result row for rendering. Read the record
+key from the source you intend to delete from.
