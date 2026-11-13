@@ -336,13 +336,13 @@ See meta-framework/SKILL.md for full preloading patterns.
 To animate rows entering, leaving, or moving, render `useDeferredValue(data)`
 from `useLiveQuery` or `useLiveSuspenseQuery`. Wrap each rendered row in a
 `<ViewTransition>` (stable in React 19.3) with a stable, unique result key such
-as `row.$key`. Joined results use composite keys by default. `startTransition` around
-a collection mutation leaves the `useSyncExternalStore` update synchronous.
+as `row.$key`. Joined results use composite keys by default. Wrapping a collection
+mutation in `startTransition` leaves the `useSyncExternalStore` update synchronous.
 Deferring the rendered results lets React animate changes from local writes
 and incoming sync data. Use `prefers-reduced-motion` to reduce or disable
-the animations. If the list has a Delete button, check
-`collection.has(row.id)` before deleting because a removed row can stay
-visible briefly.
+the animations. A deleted row can stay visible briefly. If it has a Delete
+button, check `collection.has(key)` before deleting. Use the target
+collection's record key for both calls.
 See the [React adapter example](https://tanstack.com/db/latest/docs/framework/react/overview#animating-live-query-results-with-view-transitions).
 
 ## Common Mistakes

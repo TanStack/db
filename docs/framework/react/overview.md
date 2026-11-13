@@ -289,6 +289,8 @@ animations, pass `default={prefersReducedMotion ? 'none' : 'auto'}` to each
 for that media query.
 [React View Transition props](https://react.dev/reference/react/ViewTransition#view-transition-class)
 
-A deferred list can briefly show a row that the collection has already
-removed. If a row has a Delete button, check `collection.has(id)` before
-calling `collection.delete(id)` so a second click can safely do nothing.
+A deferred list can briefly show a row after deletion. If a row has a Delete
+button, use the target collection's key for the record you want to delete.
+Check `collection.has(key)` before calling `collection.delete(key)`. For a
+joined result, `$key` identifies the result row for rendering. Read the record
+key from the source you intend to delete from.
