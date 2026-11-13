@@ -331,6 +331,17 @@ const { data } = useLiveQuery({
 
 See meta-framework/SKILL.md for full preloading patterns.
 
+### Animating row deletion with View Transitions
+
+To animate a live query row leaving with React `<ViewTransition>` (stable in
+React 19.3), render `useDeferredValue(data)` and wrap each rendered row in
+`<ViewTransition key={row.id}>`. Call `collection.delete(row.id)` directly.
+Wrapping the delete in `startTransition` leaves the `useSyncExternalStore`
+update synchronous. Deferring the rendered rows lets React animate the removal.
+Check `collection.has(row.id)` before deleting from a deferred list because a
+row can stay visible briefly after deletion.
+See the [React adapter example](https://tanstack.com/db/latest/docs/framework/react/overview#animating-row-deletion-with-view-transitions).
+
 ## Common Mistakes
 
 ### CRITICAL Using === instead of eq() in .where()

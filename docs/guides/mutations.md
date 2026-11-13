@@ -445,6 +445,8 @@ todoCollection.delete(todo.id, { optimistic: false })
 
 **Returns**: A `Transaction` object that you can use to track the mutation's lifecycle.
 
+For an exit animation in React, see [Animating row deletion with View Transitions](../framework/react/overview.md#animating-row-deletion-with-view-transitions).
+
 ## Operation Handlers
 
 Operation handlers are functions you provide when creating a collection that handle persisting mutations to your backend. Each collection can define three optional handlers: `onInsert`, `onUpdate`, and `onDelete`.
