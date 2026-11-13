@@ -47,7 +47,7 @@
     "src"
   ],
   "dependencies": {
-    "@tanstack/db": "workspace:*",
-    "@powersync/standalone-client": "^0.1.1"
+    "@powersync/standalone-client": "^0.1.1",
+    "@tanstack/db": "workspace:*"
   }
 }

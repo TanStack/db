@@ -30,7 +30,7 @@ export function createSubsetHandlers(
   errors: SubsetErrors,
 ): SyncConfigRes & { cleanup: CleanupFn } {
   type Acquisition = {
-    lease: StreamLease
+    streamLease: StreamLease
     abort: AbortController
     loaded: boolean
     loading?: Promise<void>
@@ -45,8 +45,8 @@ export function createSubsetHandlers(
     acquisitions.delete(options)
     acquisition.removeListener()
     acquisition.abort.abort()
-    acquisition.lease.release()
-    errors.onRelease(acquisition.lease)
+    acquisition.streamLease.release()
+    errors.onRelease(acquisition.streamLease)
   }
   const unloadSubset = (options: LoadSubsetOptions) =>
     release(options, acquisitions.get(options))
@@ -59,16 +59,16 @@ export function createSubsetHandlers(
     if (current) return current.catch(() => loadSubset(options))
     // Mapping failures occur before taking ownership of resources.
     const streams = getSubscriptions(options)
-    const lease = client.acquireStreams(streams, {
+    const streamLease = client.acquireStreams(streams, {
       // A failing load rejects loadSubset instead.
       onError: (error) => {
-        if (acquisition.loaded) errors.onError(lease, error)
+        if (acquisition.loaded) errors.onError(streamLease, error)
       },
     })
     const abort = new AbortController()
     const onAbort = () => release(options, acquisition)
     const acquisition: Acquisition = {
-      lease,
+      streamLease,
       abort,
       loaded: false,
       removeListener: () =>
@@ -76,7 +76,7 @@ export function createSubsetHandlers(
     }
     acquisitions.set(options, acquisition)
     options.signal?.addEventListener('abort', onAbort, { once: true })
-    const queued = lease.waitForSync(abort.signal)
+    const queued = streamLease.waitForSync(abort.signal)
     return (acquisition.loading = (async () => {
       try {
         await queued
