@@ -189,15 +189,6 @@ const MUTANTS = [
     rationale: 'deadline anchored at coverage-check time instead of load start',
   },
   {
-    id: 'P21',
-    file: 'packages/db-sqlite-persistence-core/src/persisted.ts',
-    find: 'Math.max(0, deadlineAt - Date.now())',
-    replace: 'deadlineAt - Date.now()',
-    rationale:
-      'timer delay without Math.max (EQUIVALENT: negative delay fires at once)',
-    equivalent: 'setTimeout treats a negative delay as zero',
-  },
-  {
     id: 'P22',
     file: 'packages/db-sqlite-persistence-core/src/persisted.ts',
     find: '      options.signal?.addEventListener(`abort`, settle, { once: true })\n      void upstream.catch(() => undefined).then(settle)',
