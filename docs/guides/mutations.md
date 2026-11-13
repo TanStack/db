@@ -445,7 +445,7 @@ todoCollection.delete(todo.id, { optimistic: false })
 
 **Returns**: A `Transaction` object that you can use to track the mutation's lifecycle.
 
-For an exit animation in React, see [Animating row deletion with View Transitions](../framework/react/overview.md#animating-row-deletion-with-view-transitions).
+For an exit animation in React, see [Animating live query results with View Transitions](../framework/react/overview.md#animating-live-query-results-with-view-transitions).
 
 ## Operation Handlers
 

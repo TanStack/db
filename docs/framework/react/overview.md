@@ -238,63 +238,41 @@ When a changed query plan creates a new live-query Collection,
 is ready. Finite outer-window moves retain the Collection and follow its
 window publication policy.
 
-### Animating row deletion with View Transitions
+### Animating live query results with View Transitions
 
-To animate a row leaving a live query list, pass the query's `data` to
-`useDeferredValue` and render the deferred rows in keyed `<ViewTransition>`
-boundaries. `<ViewTransition>` is stable in React 19.3 and uses the browser's
-View Transition API. [React View Transitions documentation](https://react.dev/reference/react/ViewTransition)
+Use React `<ViewTransition>` to animate rows entering, leaving, or moving in a
+live query list. Pass the query's `data` to `useDeferredValue` and wrap each
+rendered row in a `<ViewTransition>` with a stable key. `<ViewTransition>` is
+stable in React 19.3 and uses the browser's View Transition API.
+[React View Transitions documentation](https://react.dev/reference/react/ViewTransition)
 
 `useLiveQuery` and `useLiveSuspenseQuery` subscribe through `useSyncExternalStore`.
-React processes these updates synchronously, so wrapping `collection.delete()`
-in `startTransition` doesn't trigger an exit animation. Call `delete()` directly.
-React keeps the previous list visible until the deferred render removes the row
-and can animate its exit. [React external store caveats](https://react.dev/reference/react/useSyncExternalStore#caveats)
+React handles store updates synchronously, even when you call a collection
+mutation inside `startTransition`. `useDeferredValue` lets React keep showing
+the previous results and render the latest results in the background. React
+can animate the change when that render commits. The same pattern works for
+changes from local writes or incoming sync data.
+[React external store caveats](https://react.dev/reference/react/useSyncExternalStore#caveats) · [React useDeferredValue documentation](https://react.dev/reference/react/useDeferredValue)
 
 ```tsx
-import {
-  collectionOptions,
-  localOnlyCollectionOptions,
-  useDbClient,
-  useLiveSuspenseQuery,
-} from '@tanstack/react-db'
+import { useLiveQuery } from '@tanstack/react-db'
 import { useDeferredValue, ViewTransition } from 'react'
-
-const todoCollection = collectionOptions(
-  localOnlyCollectionOptions({
-    id: 'todos',
-    getKey: (todo) => todo.id,
-    initialData: [
-      { id: 1, text: 'Write a note' },
-      { id: 2, text: 'Water the plants' },
-    ],
-  }),
-)
+import { todoCollection } from './collections'
 
 export function TodoList() {
-  const todos = useDbClient().collection(todoCollection)
-  const { data } = useLiveSuspenseQuery({
-    query: (q) => q.from({ todo: todoCollection }),
+  const { data, isLoading } = useLiveQuery({
+    query: (q) =>
+      q.from({ todo: todoCollection }).orderBy(({ todo }) => todo.text),
   })
   const visibleTodos = useDeferredValue(data)
+
+  if (isLoading) return <p>Loading…</p>
 
   return (
     <ul>
       {visibleTodos.map((todo) => (
         <ViewTransition key={todo.id}>
-          <li>
-            {todo.text}{' '}
-            <button
-              type="button"
-              onClick={() => {
-                if (todos.has(todo.id)) {
-                  todos.delete(todo.id)
-                }
-              }}
-            >
-              Delete
-            </button>
-          </li>
+          <li>{todo.text}</li>
         </ViewTransition>
       ))}
     </ul>
@@ -302,8 +280,6 @@ export function TodoList() {
 }
 ```
 
-Render `TodoList` inside your `DbProvider` and a `Suspense` boundary. The
-deferred list can briefly show a row after the collection has deleted it.
-Checking `todos.has(todo.id)` lets the handler ignore a second click during
-that window. Other changes to the query results, such as inserts, can also
-animate through these boundaries.
+A deferred list can briefly show a row that the collection has already
+removed. If a row has a Delete button, check `collection.has(id)` before
+calling `collection.delete(id)` so a second click can safely do nothing.
