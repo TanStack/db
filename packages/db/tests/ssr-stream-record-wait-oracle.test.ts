@@ -11,6 +11,8 @@
  * the missing-record lifetime law. No timestamp policy after consumption is
  * asserted. Internal wait observations isolate settlement and identity; public
  * observer reads check terminal retries without starting adapter work.
+ * A disabled peer reader rendered no query on the server, so it is owed no
+ * record: its hydration read stays disabled at every checkpoint.
  */
 import { fc } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
@@ -79,6 +81,17 @@ async function checkRecordHistory(history: SsrStreamRecordHistory) {
     queryHash: hash,
     mode: `wholesale`,
   })
+  // Framework adapters still give a disabled reader a portable hash.
+  const disabled = createLiveQueryObserver(null, {
+    client,
+    queryHash: `disabled-reader`,
+    mode: `wholesale`,
+  })
+  const expectDisabledView = (checkpoint: string) =>
+    expect(
+      disabled.getServerSnapshot().status,
+      `a disabled reader owes no record ${checkpoint}`,
+    ).toBe(`disabled`)
   const result = createDeferred<DehydratedLiveQueryResult>()
   const snapshot: DehydratedLiveQueryResult = {
     rows: [{ key: `a`, value: { id: `a`, version: 0 } }],
@@ -100,6 +113,7 @@ async function checkRecordHistory(history: SsrStreamRecordHistory) {
       await client.preloadLiveQuery({ query })
     const prefix = starts
     const wait = () => client._waitForSsrLiveQuery(hash, true)
+    expectDisabledView(`while transport is open`)
     if (!history.attemptAfterTerminal) {
       const waiting = wait()
       if (history.record === `pending`)
@@ -156,6 +170,7 @@ async function checkRecordHistory(history: SsrStreamRecordHistory) {
       client._failPendingLiveQueries(cause)
       client._setSsrStreamingEnabled(false)
     } else await client.cleanup()
+    expectDisabledView(`after transport ${history.terminal}`)
     const expected = expectedSsrStreamRecordOutcome(history)
     if (expected === `snapshot` || expected === `pending`) {
       oracleAssertion(`checkRecordHistory:151`, () =>
@@ -246,6 +261,7 @@ async function checkRecordHistory(history: SsrStreamRecordHistory) {
         collections: [],
         liveQueries: [{ queryHash: hash, dehydratedAt: 3, snapshot }],
       })
+      expectDisabledView(`on a fresh stream`)
       await replacement
       oracleAssertion(`checkRecordHistory:213`, () =>
         expect(wait()).toBeUndefined(),
@@ -262,6 +278,7 @@ async function checkRecordHistory(history: SsrStreamRecordHistory) {
   }, [
     () => result.resolve(snapshot),
     () => observer.dispose(),
+    () => disabled.dispose(),
     () => client.cleanup(),
   ])
 }
