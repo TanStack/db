@@ -92,8 +92,12 @@
           "to": "collections/rxdb-collection"
         },
         {
-          "label": "PowerSync Collection",
+          "label": "PowerSync SQLite Collection",
           "to": "collections/powersync-collection"
+        },
+        {
+          "label": "PowerSync In-Memory Collection",
+          "to": "collections/powersync-direct-collection"
         },
         {
           "label": "IndexedDB Collection",
@@ -203,7 +207,7 @@
           "to": "reference/rxdb-db-collection/functions/rxdbCollectionOptions"
         },
         {
-          "label": "PowerSync Collection",
+          "label": "PowerSync SQLite Collection",
           "to": "reference/powersync-db-collection/index"
         },
         {

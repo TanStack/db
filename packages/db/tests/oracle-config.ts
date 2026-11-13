@@ -501,6 +501,7 @@ const staticOracleProperties = [
   `adapter-conformance.persisted-baseline-lifecycle.powersync.controlled`,
   `adapter-conformance.persisted-baseline-lifecycle.powersync.node-sqlite`,
   `adapter-conformance.persisted-baseline-lifecycle.powersync.chromium-opfs`,
+  `adapter-conformance.eager-live-source.powersync-direct`,
   `adapter-conformance.eager-live-source.electric`,
   `adapter-conformance.eager-live-source.electric.no-on-error`,
   `adapter-conformance.eager-live-source.convex`,

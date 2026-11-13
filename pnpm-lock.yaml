@@ -1586,7 +1586,7 @@ importers:
         version: 0.21.0(@powersync/common@2.5.0)(better-sqlite3@12.11.1)
       '@powersync/web':
         specifier: 2.6.0
-        version: 2.6.0(@powersync/common@2.5.0)(@powersync/shared-internals@1.5.0(@powersync/common@2.5.0))
+        version: 2.6.0(@powersync/common@2.5.0)(@powersync/shared-internals@1.6.0(@powersync/common@2.5.0))
       '@types/debug':
         specifier: ^4.1.13
         version: 4.1.13
@@ -1596,6 +1596,15 @@ importers:
       better-sqlite3:
         specifier: ^12.11.1
         version: 12.11.1
+
+  packages/powersync-direct-collection:
+    dependencies:
+      '@powersync/standalone-client':
+        specifier: ^0.1.1
+        version: 0.1.1(@powersync/common@2.5.0)(react@19.3.1)
+      '@tanstack/db':
+        specifier: workspace:*
+        version: link:../db
 
   packages/preact-db:
     dependencies:
@@ -5384,10 +5393,21 @@ packages:
     peerDependencies:
       '@powersync/common': 2.0.0
 
-  '@powersync/shared-internals@1.5.0':
-    resolution: {integrity: sha512-dIaMenW6gJNyKzD93d4X4CiBtJxyJ63pvK2CYGjqBtVqubGBt9d+jg6V6JTKw4VLPjFCZh7/zrXMV34wl7kzGw==}
+  '@powersync/shared-internals@1.6.0':
+    resolution: {integrity: sha512-UduDSVv9qfonIezOklBUR6c3KNlwOQ8/XCsTDwrBUXnVv4wmAZuIDO7C2hX2KKcQGKn+rU0Z5R9uPtgl1uK7Vg==}
     peerDependencies:
       '@powersync/common': ^2.5.0
+    peerDependenciesMeta:
+      '@powersync/common':
+        optional: true
+
+  '@powersync/standalone-client@0.1.1':
+    resolution: {integrity: sha512-SSCFzNJ7GvqOyK4edl7Ymot53mheEYCNJcefxoEOAu3qV+8YeRkvGME8GVlm2Ye2A7bJXRuDdAupzenFhWCFjQ==}
+    peerDependencies:
+      react: '*'
+    peerDependenciesMeta:
+      react:
+        optional: true
 
   '@powersync/web@2.6.0':
     resolution: {integrity: sha512-/B8u/sPHyNiPH1bj+vOfN/9sHlbp9lwQGtS6BHJJjqWlhBaUxzh4xQMydyQcS6puHaDXzddpOlkZIvTLOTLMnw==}
@@ -6324,7 +6344,7 @@ packages:
       eslint: ^8.0.0 || ^9.0.0
 
   '@tanstack/eslint-plugin-oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@e2af13a':
-    resolution: {tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@e2af13a}
+    resolution: {integrity: sha512-b1lPMkgVheTAOUGo6ekpqK9kMCc5SBK0pNeBJIADKKKNmm8e01844MwSW3A+yBOkYLWkmMNM3m3NXQjiqTXQVw==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@e2af13a}
     version: 0.0.0
     engines: {node: '>=20'}
     peerDependencies:
@@ -6335,7 +6355,7 @@ packages:
     engines: {node: '>=20.19'}
 
   '@tanstack/oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@e2af13a':
-    resolution: {tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@e2af13a}
+    resolution: {integrity: sha512-xndUeHuet6K8+uPC4U8vxlF0T3NHeyBnDoHUImZwBpbVW1tk9vr4doUzYGiXWCqRj8SYBZIbkn81L6qwcgzngA==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@e2af13a}
     version: 0.0.0
     engines: {node: '>=20'}
     hasBin: true
@@ -17486,15 +17506,23 @@ snapshots:
     dependencies:
       '@powersync/common': 2.5.0
 
-  '@powersync/shared-internals@1.5.0(@powersync/common@2.5.0)':
-    dependencies:
+  '@powersync/shared-internals@1.6.0(@powersync/common@2.5.0)':
+    optionalDependencies:
       '@powersync/common': 2.5.0
 
-  '@powersync/web@2.6.0(@powersync/common@2.5.0)(@powersync/shared-internals@1.5.0(@powersync/common@2.5.0))':
+  '@powersync/standalone-client@0.1.1(@powersync/common@2.5.0)(react@19.3.1)':
+    dependencies:
+      '@powersync/shared-internals': 1.6.0(@powersync/common@2.5.0)
+    optionalDependencies:
+      react: 19.3.1
+    transitivePeerDependencies:
+      - '@powersync/common'
+
+  '@powersync/web@2.6.0(@powersync/common@2.5.0)(@powersync/shared-internals@1.6.0(@powersync/common@2.5.0))':
     dependencies:
       '@journeyapps/wa-sqlite': 2.0.10
       '@powersync/common': 2.5.0
-      '@powersync/shared-internals': 1.5.0(@powersync/common@2.5.0)
+      '@powersync/shared-internals': 1.6.0(@powersync/common@2.5.0)
       comlink: 4.4.2
       commander: 12.1.0
 
