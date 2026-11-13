@@ -260,9 +260,23 @@ changes from local writes or incoming sync data.
 [React external store caveats](https://react.dev/reference/react/useSyncExternalStore#caveats) · [React useDeferredValue documentation](https://react.dev/reference/react/useDeferredValue)
 
 ```tsx
-import { useLiveQuery } from '@tanstack/react-db'
+import {
+  collectionOptions,
+  localOnlyCollectionOptions,
+  useLiveQuery,
+} from '@tanstack/react-db'
 import { useDeferredValue, ViewTransition } from 'react'
-import { todoCollection } from './collections'
+
+const todoCollection = collectionOptions(
+  localOnlyCollectionOptions({
+    id: 'todos',
+    getKey: (todo) => todo.id,
+    initialData: [
+      { id: 1, text: 'Write a note' },
+      { id: 2, text: 'Water the plants' },
+    ],
+  }),
+)
 
 export function TodoList() {
   const { data, isLoading } = useLiveQuery({
