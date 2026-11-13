@@ -21,7 +21,8 @@ export type DirectDiffTriggerOptions = {
   source: string
   /**
    * The tracking table the triggers write diff records into. Created here as
-   * a TEMP table and dropped on removal.
+   * a TEMP table (or as a main-schema table when the adapter requires
+   * cross-connection tracking) and dropped on removal.
    */
   destination: string
   /**
@@ -32,6 +33,14 @@ export type DirectDiffTriggerOptions = {
   columns: Array<string>
   setupContext?: LockContext
   when: Partial<Record<DiffTriggerOperation, string>>
+  /**
+   * An extra WHEN clause for updates that leave the tracked boundary: it must
+   * fire when the OLD row matched the boundary and the NEW row does not. Such
+   * updates record a `DELETE` diff, so the flush removes a row that left the
+   * boundary instead of retaining its departed value. When omitted, `when`'s
+   * UPDATE clause sees both entering and departing updates.
+   */
+  whenUpdateDeparting?: string
   hooks?: {
     /**
      * Executed inside a write lock before the tracking table is created.
@@ -55,19 +64,48 @@ const TRACKING_TABLE_COLUMNS = `
 `
 
 /**
+ * Columns batched per `json_object` call. SQLite caps a function's argument
+ * count (`SQLITE_MAX_FUNCTION_ARG`; 100 on default builds, higher on custom
+ * builds), so a wide table must be split across several objects that are then
+ * combined. 40 columns keeps every generated call (two arguments per column)
+ * below the default cap.
+ */
+const JSON_OBJECT_COLUMN_BATCH_SIZE = 40
+
+/**
  * Builds the JSON payload fragment for a trigger from the real columns of a
  * managed table. This replaces the SDK's `NEW.data` / `json_extract(NEW.data,
  * '$.<column>')` fragments, which assume the single JSON `data` column of a
  * managed view.
+ *
+ * Columns are split into batches (see {@link JSON_OBJECT_COLUMN_BATCH_SIZE})
+ * and the batch objects are combined with `json_insert`, which keeps keys
+ * whose value is null. (`json_patch` would drop them.)
  */
 const jsonFragment = (columns: Array<string>, source: `NEW` | `OLD`) => {
   if (columns.length == 0) {
     // Don't track any columns except for the id
     return `'{}'`
   }
-  return `json_object(${columns
-    .map((column) => `'${column}', ${source}."${column}"`)
-    .join(', ')})`
+  const keyValuePairs = (batch: Array<string>) =>
+    batch.map((column) => `'${column}', ${source}."${column}"`).join(', ')
+  // json_insert addresses each column by JSON path rather than by key
+  const pathValuePairs = (batch: Array<string>) =>
+    batch.map((column) => `'$.${column}', ${source}."${column}"`).join(', ')
+  const batches: Array<Array<string>> = []
+  for (
+    let index = 0;
+    index < columns.length;
+    index += JSON_OBJECT_COLUMN_BATCH_SIZE
+  ) {
+    batches.push(columns.slice(index, index + JSON_OBJECT_COLUMN_BATCH_SIZE))
+  }
+  const [firstBatch, ...remainingBatches] = batches
+  // A non-empty column list always yields at least one batch
+  return remainingBatches.reduce(
+    (fragment, batch) => `json_insert(${fragment}, ${pathValuePairs(batch)})`,
+    `json_object(${keyValuePairs(firstBatch!)})`,
+  )
 }
 
 /**
@@ -76,11 +114,39 @@ const jsonFragment = (columns: Array<string>, source: `NEW` | `OLD`) => {
  * SDK-created ones.
  */
 const generateTriggerName = (
-  operation: DiffTriggerOperation,
+  operation: DiffTriggerOperation | `UPDATE_DEPARTING`,
   destinationTable: string,
   triggerId: string,
+  persistent: boolean,
 ) =>
-  `__ps_temp_trigger_${operation.toLowerCase()}__${destinationTable}__${triggerId}`
+  persistent
+    ? // Persistent names must not match the SDK trigger manager's GC pattern
+      // (`__ps_temp_trigger_%` in `sqlite_master`), which drops persisted
+      // triggers nobody holds a claim for. The remove callback owns cleanup.
+      `__ps_direct_trigger_${operation.toLowerCase()}__${destinationTable}__${triggerId}`
+    : `__ps_temp_trigger_${operation.toLowerCase()}__${destinationTable}__${triggerId}`
+
+/**
+ * Configuration that web adapters expose when the database file is shared
+ * across connections (for example multiple browser tabs on OPFS storage).
+ * The web SDK reads the same flag to enable persisted triggers for its own
+ * trigger manager.
+ */
+type AdapterConfiguration = {
+  requiresPersistentTriggers?: boolean
+}
+
+/**
+ * TEMP triggers only fire for writes on the connection that created them.
+ * Adapters whose connections can observe each other's writes therefore need
+ * the triggers (and the tracking table) in the main schema instead.
+ */
+const requiresPersistentTriggers = (database: CommonPowerSyncDatabase) => {
+  const adapter = database.database as {
+    getConfiguration?: () => AdapterConfiguration
+  }
+  return adapter.getConfiguration?.()?.requiresPersistentTriggers == true
+}
 
 /**
  * Resolves the unique id used in trigger names, preferring the setup
@@ -101,15 +167,20 @@ async function getUUID(context: LockContext | CommonPowerSyncDatabase) {
  * payloads read `NEW.data` / `json_extract(NEW.data, '$.<column>')`, and it
  * triggers on `ps_data__<name>`, which does not exist for a managed table
  * (the real columns live on the table itself). Until the SDK gains support,
- * the adapter creates equivalent TEMP triggers itself:
- * - payloads are built with `json_object('column', NEW."column", ...)` over
- *   the real columns (`OLD` for the previous value),
+ * the adapter creates equivalent triggers itself:
+ * - payloads are built with `json_object('column', NEW."column", ...)`
+ *   batches over the real columns (`OLD` for the previous value),
  * - the tracking table shape, trigger naming, `when` clauses, `beforeCreate`
  *   hook timing and cleanup contract (drop triggers + tracking table) match
  *   `TriggerManagerImpl.createDiffTrigger`,
- * - triggers are always TEMP. The SDK's storage-backed (persisted) mode and
- *   its claim-based cleanup never apply here, because the adapter never
- *   passes `useStorage` to the SDK either.
+ * - tracking resources are TEMP unless the database's adapter requires
+ *   cross-connection tracking (`requiresPersistentTriggers`, e.g. OPFS
+ *   multi-tab web adapters): writes from another connection cannot fire a
+ *   TEMP trigger, so such connections get main-schema (persistent) triggers
+ *   and tracking table instead. The SDK's claim-based GC for persisted
+ *   triggers is not reachable through the public trigger manager API, so
+ *   persistent trigger names avoid its unclaimed-trigger pattern and only
+ *   the remove callback cleans them up.
  *
  * @returns A callback to remove the trigger and drop the tracking table.
  */
@@ -118,7 +189,7 @@ export async function createDirectDiffTrigger(
   options: DirectDiffTriggerOptions,
 ): Promise<TriggerRemoveCallback> {
   await database.waitForReady()
-  const { source, destination, columns, when, hooks, setupContext } = options
+  const { source, destination, columns, when, whenUpdateDeparting, hooks, setupContext } = options
   const operations = Object.keys(when) as Array<DiffTriggerOperation>
   if (operations.length == 0) {
     throw new Error(
@@ -126,9 +197,11 @@ export async function createDirectDiffTrigger(
     )
   }
 
-  // The adapter's tracking resources are TEMP: each connection (tab) owns its
-  // own tracking table and triggers, and they disappear with the connection.
-  const tableTriggerTypeClause = `TEMP`
+  // TEMP resources belong to this connection alone; persistent resources live
+  // in the main schema for connections that track each other's writes.
+  // Cleanup drops both by name through the remove callback.
+  const persistent = requiresPersistentTriggers(database)
+  const tableTriggerTypeClause = persistent ? `` : `TEMP`
 
   const whenClauses = Object.fromEntries(
     Object.entries(when).map(([operation, filter]) => [
@@ -186,6 +259,7 @@ export async function createDirectDiffTrigger(
         DiffTriggerOperation.INSERT,
         destination,
         id,
+        persistent,
       )
       triggerIds.push(insertTriggerId)
 
@@ -212,6 +286,7 @@ export async function createDirectDiffTrigger(
         DiffTriggerOperation.UPDATE,
         destination,
         id,
+        persistent,
       )
       triggerIds.push(updateTriggerId)
 
@@ -233,11 +308,40 @@ export async function createDirectDiffTrigger(
       `)
     }
 
+    if (whenUpdateDeparting && operations.includes(DiffTriggerOperation.UPDATE)) {
+      const departingTriggerId = generateTriggerName(
+        `UPDATE_DEPARTING`,
+        destination,
+        id,
+        persistent,
+      )
+      triggerIds.push(departingTriggerId)
+
+      // An update that leaves the tracked boundary removes the row: record a
+      // DELETE diff carrying the departed row so the flush drops it.
+      await tx.execute(`
+        CREATE ${tableTriggerTypeClause} TRIGGER ${departingTriggerId} AFTER
+        UPDATE ON ${source} WHEN ${whenUpdateDeparting} BEGIN
+        INSERT INTO
+          ${destination} (id, operation, timestamp, value)
+        VALUES
+          (
+            NEW.id,
+            'DELETE',
+            strftime ('%Y-%m-%dT%H:%M:%fZ', 'now'),
+            ${jsonFragment(columns, 'OLD')}
+          );
+
+        END;
+      `)
+    }
+
     if (operations.includes(DiffTriggerOperation.DELETE)) {
       const deleteTriggerId = generateTriggerName(
         DiffTriggerOperation.DELETE,
         destination,
         id,
+        persistent,
       )
       triggerIds.push(deleteTriggerId)
 

@@ -477,6 +477,13 @@ function createPowerSyncCollectionConfig<
           afterRead?: () => Promise<void>
           onInitialRow?: (value: OutputType) => void
           when: Record<DiffTriggerOperation, string>
+          /**
+           * Split UPDATE tracking for managed tables: updates keeping the row
+           * inside the tracked boundary stay `when`'s UPDATE clause, while
+           * updates removing it fire the departing clause, which records a
+           * DELETE diff so the row leaves the collection.
+           */
+          whenUpdateDeparting?: string
           writeType: (rowId: string) => OperationType
           batchQuery: (
             lockContext: LockContext,
@@ -492,6 +499,7 @@ function createPowerSyncCollectionConfig<
           afterRead,
           onInitialRow,
           when,
+          whenUpdateDeparting,
           writeType,
           batchQuery,
         } = options
@@ -548,6 +556,7 @@ function createPowerSyncCollectionConfig<
             columns: table.columns.map((column) => column.name),
             setupContext,
             when,
+            whenUpdateDeparting,
             hooks: { beforeCreate },
           })
         }
@@ -949,9 +958,22 @@ function createPowerSyncCollectionConfig<
                     setupContext: ctx,
                     when: {
                       [DiffTriggerOperation.INSERT]: newDataWhenClause,
-                      [DiffTriggerOperation.UPDATE]: `(${newDataWhenClause}) OR (${oldDataWhenClause})`,
+                      // Managed tables split UPDATE tracking: the main
+                      // trigger keeps rows entering or staying inside the
+                      // boundary and the departing trigger (below) removes
+                      // rows leaving it, so exactly one fires per update
+                      // regardless of trigger firing order. The SDK trigger
+                      // manager used for managed views cannot carry the extra
+                      // trigger, so it keeps the combined clause and relies
+                      // on reconciliation for departures.
+                      [DiffTriggerOperation.UPDATE]: isManagedTable
+                        ? newDataWhenClause
+                        : `(${newDataWhenClause}) OR (${oldDataWhenClause})`,
                       [DiffTriggerOperation.DELETE]: oldDataWhenClause,
                     },
+                    ...(isManagedTable && {
+                      whenUpdateDeparting: `(${oldDataWhenClause}) AND NOT (${newDataWhenClause})`,
+                    }),
                     writeType: (rowId: string) =>
                       collection.has(rowId) ? `update` : `insert`,
                     batchQuery: (

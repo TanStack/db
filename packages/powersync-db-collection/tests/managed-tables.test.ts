@@ -391,6 +391,34 @@ describePowerSync(`Managed Tables (direct)`, () => {
           },
           { timeout: 1000 },
         )
+
+        // Crossing the filter boundary in both directions: an excluded row
+        // that starts matching must appear, and a tracked row that stops
+        // matching must disappear.
+        await db.execute(
+          `UPDATE products SET price = 150 WHERE name = 'Cheap A'`,
+        )
+        await vi.waitFor(
+          () => {
+            expect(
+              collection.toArray.find((row) => row.name === `Cheap A`)?.price,
+            ).toBe(150)
+            expect(
+              live.toArray.find((row) => row.name === `Cheap A`)?.price,
+            ).toBe(150)
+          },
+          { timeout: 1000 },
+        )
+
+        await db.execute(
+          `UPDATE products SET price = 50 WHERE name = 'Expensive B'`,
+        )
+        await vi.waitFor(
+          () => {
+            expect(live.toArray.map((row) => row.name)).toEqual([`Cheap A`])
+          },
+          { timeout: 1000 },
+        )
       } finally {
         await live.cleanup()
       }
@@ -450,6 +478,118 @@ describePowerSync(`Managed Tables (direct)`, () => {
           table: MANAGED_METADATA_SCHEMA.props.documents,
         }),
       ).toThrowError(/trackMetadata/)
+    })
+  })
+
+  describe(`Wide tables`, () => {
+    it(`should batch json_object payloads beyond the function argument limit`, async () => {
+      // A single json_object over every column exceeds SQLite's function
+      // argument limit (observed failing at 1200 arguments in a trigger body
+      // on this backend; default SQLite builds cap at 100), so the payload
+      // must be split into batched objects and combined.
+      const columnCount = 600
+      const columnNames = Array.from(
+        { length: columnCount },
+        (_, index) => `col_${index}`,
+      )
+      const wideTable = new Table(
+        Object.fromEntries(
+          columnNames.map((name) => [name, column.text]),
+        ),
+        { direct: true },
+      )
+      const wideSchema = new Schema({ wide: wideTable })
+      const db = await createDatabase(wideSchema)
+
+      // The last column stays null: combining the batches must keep
+      // null-valued columns (json_patch would drop them).
+      await db.execute(
+        `INSERT INTO wide (id, ${columnNames.join(`, `)}) VALUES (uuid(), ${columnNames
+          .map((_, index) =>
+            index == columnCount - 1 ? `NULL` : `'value_${index}'`,
+          )
+          .join(`, `)})`,
+      )
+
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: wideSchema.props.wide,
+        }),
+      )
+      onTestFinished(() => collection.cleanup({ dependents: true }))
+      await collection.stateWhenReady()
+
+      const row = collection.toArray[0]! as Record<string, unknown>
+      expect(row[`col_0`]).toBe(`value_0`)
+      expect(row[`col_${columnCount - 1}`]).toBe(null)
+
+      // Writes through the triggers produce the same batched payloads
+      await db.execute(
+        `UPDATE wide SET col_1 = 'changed', col_${columnCount - 1} = 'filled' WHERE col_0 = 'value_0'`,
+      )
+      await vi.waitFor(
+        () => {
+          const updated = collection.toArray[0]! as Record<string, unknown>
+          expect(updated[`col_1`]).toBe(`changed`)
+          expect(updated[`col_${columnCount - 1}`]).toBe(`filled`)
+        },
+        { timeout: 1000 },
+      )
+    })
+  })
+
+  describe(`Persistent triggers`, () => {
+    it(`should track shared-storage connections with main-schema resources`, async () => {
+      const db = await createDatabase(MANAGED_SCHEMA)
+      // Web adapters expose this configuration when connections share the
+      // database file (OPFS multi-tab); TEMP triggers never fire for writes
+      // from another connection.
+      const adapter = db.database as {
+        getConfiguration?: () => unknown
+      }
+      adapter.getConfiguration = () => ({ requiresPersistentTriggers: true })
+
+      const collectionOptions = powerSyncCollectionOptions({
+        database: db,
+        table: MANAGED_SCHEMA.props.documents,
+      })
+      const meta = collectionOptions.utils.getMeta()
+      const collection = createCollection(collectionOptions)
+      await collection.stateWhenReady()
+
+      // Triggers and tracking table live in the main schema, under names
+      // outside the SDK trigger manager's unclaimed-trigger GC pattern.
+      const persistedResources = () =>
+        db.getAll<{ name: string; type: string }>(
+          `SELECT name, type FROM sqlite_master WHERE name LIKE '__ps_direct_trigger_%' OR name = ?`,
+          [meta.trackedTableName],
+        )
+      const active = await persistedResources()
+      expect(active.filter((item) => item.type == `trigger`)).toHaveLength(3)
+      expect(active.some((item) => item.type == `table`)).toBe(true)
+
+      // Writes still flow through the persistent triggers
+      await db.execute(
+        `INSERT INTO documents (id, name, author) VALUES (uuid(), 'persistent-doc', 'a')`,
+      )
+      await vi.waitFor(
+        () => {
+          expect(
+            collection.toArray.find((row) => row.name == `persistent-doc`),
+          ).toBeDefined()
+        },
+        { timeout: 1000 },
+      )
+
+      // The remove callback drops the persistent resources again
+      await collection.cleanup({ dependents: true })
+      await vi.waitFor(
+        async () => {
+          expect(await persistedResources()).toEqual([])
+        },
+        { timeout: 1000 },
+      )
     })
   })
 
