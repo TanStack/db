@@ -2,9 +2,10 @@
 // Reports slow PR CI jobs. It never fails: hard timeouts in pr.yml catch hangs,
 // and this report measures cost against the budget (10 minutes per job, 15 for
 // the workflow). Over-budget jobs and workflows get a ::warning:: annotation.
-// With a writable token on a pull request, the report also updates one comment
+// With a writable token on a pull request, the report also keeps one comment
 // per PR on the tracking issue "Slow CI triage" (label `slow-ci`), which an
-// agent triages into cost-cut PRs.
+// agent triages into cost-cut PRs. A run within budget updates an existing
+// comment to say so, so the comment never reports an older run.
 //
 // Environment: GITHUB_REPOSITORY, GITHUB_RUN_ID, GH_TOKEN (for gh), and
 // optionally PR_NUMBER, ISSUE_WRITABLE ('true' only for same-repo pull
@@ -15,7 +16,8 @@
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 export const JOB_BUDGET_MINUTES = 10
 export const WORKFLOW_BUDGET_MINUTES = 15
@@ -33,7 +35,8 @@ export function measure(jobs) {
       job.name !== REPORT_JOB &&
       job.started_at &&
       job.completed_at &&
-      job.conclusion !== `skipped`,
+      job.conclusion !== `skipped` &&
+      job.conclusion !== `cancelled`,
   )
   const jobRows = measured
     .map((job) => ({
@@ -111,12 +114,24 @@ export function commentBody(result, { runUrl, prNumber }) {
     `Over budget in this run:`,
     rows + workflow,
     ``,
+    `The 15-minute workflow figure covers only the jobs that the budget job waits on, not preview, size, build or the E2E workflow.`,
     `The budget is reported, not enforced. Timeouts in pr.yml catch hangs only.`,
   ].join(`\n`)
 }
 
-// The issue step only talks to GitHub through gh. A failure in it becomes a
-// warning, so the workflow stays green.
+export function withinBudgetBody({ runUrl, prNumber }) {
+  return [
+    commentMarker(prNumber),
+    `PR #${prNumber}, latest run: ${runUrl}`,
+    ``,
+    `Within budget in this run: no job over ${JOB_BUDGET_MINUTES} minutes, and the workflow under ${WORKFLOW_BUDGET_MINUTES}.`,
+    ``,
+    `The budget is reported, not enforced. Timeouts in pr.yml catch hangs only.`,
+  ].join(`\n`)
+}
+
+// The issue step only talks to GitHub through gh. Any failure in it, or in
+// reading the jobs, becomes a warning, so the workflow never goes red.
 function gh(args, input) {
   return execFileSync(`gh`, args, {
     encoding: `utf8`,
@@ -125,7 +140,7 @@ function gh(args, input) {
   })
 }
 
-function findOrCreateIssue(repo) {
+function findIssue(repo) {
   const issues = JSON.parse(
     gh([
       `issue`,
@@ -142,8 +157,10 @@ function findOrCreateIssue(repo) {
       `number,title`,
     ]),
   )
-  const existing = issues.find((issue) => issue.title === ISSUE_TITLE)
-  if (existing) return existing.number
+  return issues.find((issue) => issue.title === ISSUE_TITLE)?.number ?? null
+}
+
+function createIssue(repo) {
   gh([
     `label`,
     `create`,
@@ -171,7 +188,9 @@ function findOrCreateIssue(repo) {
   return Number(url.split(`/`).pop())
 }
 
-function upsertComment(repo, issueNumber, prNumber, body) {
+// Updates the PR's comment, or creates it when `create` is set. Returns the
+// action taken, or `absent` when there is no comment and none is created.
+function upsertComment(repo, issueNumber, prNumber, body, { create }) {
   const file = join(tmpdir(), `ci-budget-comment-${prNumber}.md`)
   writeFileSync(file, body)
   const marker = commentMarker(prNumber)
@@ -194,6 +213,7 @@ function upsertComment(repo, issueNumber, prNumber, body) {
     ])
     return `updated`
   }
+  if (!create) return `absent`
   gh([
     `api`,
     `-X`,
@@ -227,8 +247,22 @@ function loadJobs(args) {
     .map((line) => JSON.parse(line))
 }
 
+function firstLine(error) {
+  return String(error?.message ?? error)
+    .split(`\n`)[0]
+    .slice(0, 300)
+}
+
 function main(args) {
-  const result = measure(loadJobs(args))
+  let result
+  try {
+    result = measure(loadJobs(args))
+  } catch (error) {
+    console.log(
+      `::warning title=Slow CI budget::could not read job durations: ${firstLine(error)}`,
+    )
+    return
+  }
   for (const line of annotations(result)) console.log(line)
   const runUrl =
     process.env.RUN_URL ??
@@ -239,25 +273,44 @@ function main(args) {
       process.env.GITHUB_STEP_SUMMARY,
       summaryMarkdown(result, { runUrl, prNumber }),
     )
+  if (!prNumber || process.env.ISSUE_WRITABLE !== `true`) return
   const offending = result.over.length > 0 || result.workflowOver
-  if (!offending || !prNumber || process.env.ISSUE_WRITABLE !== `true`) return
   try {
     const repo = process.env.GITHUB_REPOSITORY
-    const issue = findOrCreateIssue(repo)
+    const issue = offending
+      ? (findIssue(repo) ?? createIssue(repo))
+      : findIssue(repo)
+    if (issue === null) return
     const action = upsertComment(
       repo,
       issue,
       prNumber,
-      commentBody(result, { runUrl, prNumber }),
+      offending
+        ? commentBody(result, { runUrl, prNumber })
+        : withinBudgetBody({ runUrl, prNumber }),
+      { create: offending },
     )
     console.log(
       `Slow CI triage issue #${issue}: ${action} the comment for PR #${prNumber}`,
     )
   } catch (error) {
     console.log(
-      `::warning title=Slow CI triage::could not update the issue: ${String(error.message).split(`\n`)[0]}`,
+      `::warning title=Slow CI triage::could not update the issue: ${firstLine(error)}`,
     )
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main(process.argv.slice(2))
+// Only the workflow and the local check run main: a module import does not.
+// pathToFileURL keeps the check correct for paths that need URL encoding.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+) {
+  try {
+    main(process.argv.slice(2))
+  } catch (error) {
+    console.log(
+      `::warning title=Slow CI budget::report failed: ${firstLine(error)}`,
+    )
+  }
+}

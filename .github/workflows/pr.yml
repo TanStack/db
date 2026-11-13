@@ -44,6 +44,7 @@ jobs:
   minified-db:
     name: Minified DB public API
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -178,6 +179,7 @@ jobs:
   preview:
     name: Preview
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       pull-requests: write
@@ -199,6 +201,7 @@ jobs:
     name: Compressed size
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       pull-requests: write
@@ -223,6 +226,7 @@ jobs:
   build-example:
     name: Build Example Site
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -246,6 +250,7 @@ jobs:
   build-starter:
     name: Build Example Site
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -261,15 +266,19 @@ jobs:
           cp .env.example .env
           pnpm build
   budget:
-    # Reports cost against the budget and never fails the workflow. Timeouts
-    # above catch hangs only. The issue step runs for same-repo pull requests,
-    # where the token is writable; forks keep the annotations.
+    # Reports cost against the budget and never fails the workflow, even when
+    # its own step errors. Timeouts above catch hangs only. The workflow figure
+    # covers only the jobs listed in `needs`, not preview, size, build or the E2E
+    # workflow. The issue step runs for same-repo pull requests, where the token
+    # is writable; forks keep the annotations.
     name: Slow CI budget
     if: always()
+    continue-on-error: true
     needs: [lint, minified-db, test-db, test-packages, test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      actions: read
       contents: read
       issues: write
     steps:
