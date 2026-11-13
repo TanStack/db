@@ -2178,6 +2178,17 @@ an ordinary unindexed on-demand prefix against its bounded request, virtual
 field advice, and direction-free comparison guidance. It observes first
 acquisitions and warning text, not later window moves or real-provider cost.
 
+The comparison oracle's `comparison.locale-option-history` property checks
+locale string collation over generated histories of up to twelve comparisons.
+Each comparison picks one of seven option sets (default locale, `en-US` plain,
+numeric, base sensitivity and upper case first, `sv`, `de`), receives either the
+shared option object of its set or a fresh copy, and must order its two strings
+as a new `Intl.Collator(locale, localeOptions)` does. Constructed histories put
+the numeric `en-US` set after the plain one on `item2`/`item10`. A collator kept
+for every option set, and one kept per locale, fail it. It does not cover
+option objects changed after use, or collation through Collection and query
+paths, which the rows above own.
+
 ## Unit-test retirement transfers in PR #2116
 
 The

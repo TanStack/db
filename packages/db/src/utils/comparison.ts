@@ -19,6 +19,23 @@ export function isUnorderable(value: any): boolean {
   )
 }
 
+type LocaleCompareOptions = Extract<CompareOptions, { stringSort?: `locale` }>
+
+// `localeCompare(b, locale, options)` compares as a new
+// `Intl.Collator(locale, options)` would. Some engines build that collator on
+// every call (Hermes on Android builds a Java object each time), which costs
+// far more than the comparison. Each option set keeps the collator it built.
+const localeCollators = new WeakMap<LocaleCompareOptions, Intl.Collator>()
+
+function localeCollator(opts: LocaleCompareOptions): Intl.Collator {
+  let collator = localeCollators.get(opts)
+  if (collator === undefined) {
+    collator = new Intl.Collator(opts.locale, opts.localeOptions)
+    localeCollators.set(opts, collator)
+  }
+  return collator
+}
+
 /**
  * Universal comparison function for all data types
  * Handles null/undefined, strings, arrays, dates, objects, and primitives
@@ -48,7 +65,7 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
       return opts.compare(a, b)
     }
     if (opts.stringSort === `locale`) {
-      return a.localeCompare(b, opts.locale, opts.localeOptions)
+      return localeCollator(opts).compare(a, b)
     }
     // For lexical sort we rely on direct comparison for primitive values
   }
