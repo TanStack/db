@@ -38,6 +38,11 @@ function mutantPlugin(): Plugin {
 export default mergeConfig(baseConfig, {
   plugins: [mutantPlugin()],
   test: {
+    // The mutant changes the transform output, but Vitest's on-disk module
+    // cache keys entries by file and config, not by the mutant environment
+    // variable. A run would reuse a transform from an earlier mutant or from an
+    // unmutated run, and the mutant would never apply. Disable the cache here.
+    fsModuleCache: false,
     coverage: { enabled: false },
     typecheck: { enabled: false },
   },
