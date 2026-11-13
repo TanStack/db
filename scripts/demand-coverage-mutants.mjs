@@ -410,7 +410,9 @@ const only = process.argv
 const selected = MUTANTS.filter((mutant) => !only || only.includes(mutant.id))
 if (process.argv.includes(`--list`)) {
   for (const m of selected)
-    console.log(`${m.id} ${m.openGap ? `(open gap ${m.openGap}) ` : ``}${m.rationale}`)
+    console.log(
+      `${m.id} ${m.openGap ? `(open gap ${m.openGap}) ` : ``}${m.rationale}`,
+    )
   process.exit(0)
 }
 
@@ -448,10 +450,14 @@ for (const mutant of selected) {
   // A killed mutant passes unless it is still listed as a gap, which is stale.
   // A survivor passes only as a listed open gap.
   const ok =
-    outcome === `killed` ? !mutant.openGap : outcome === `survived` && mutant.openGap !== undefined
+    outcome === `killed`
+      ? !mutant.openGap
+      : outcome === `survived` && mutant.openGap !== undefined
   const seconds = Math.round((Date.now() - started) / 1000)
   const label =
-    outcome === `survived` && mutant.openGap ? `open gap ${mutant.openGap}` : outcome
+    outcome === `survived` && mutant.openGap
+      ? `open gap ${mutant.openGap}`
+      : outcome
   console.log(
     `${ok ? `ok ` : `BAD`} ${mutant.id} ${label} (${seconds}s) ${mutant.rationale}${detail && outcome === `killed` ? ` | ${detail}` : ``}`,
   )
