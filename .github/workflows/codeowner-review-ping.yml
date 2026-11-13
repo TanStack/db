@@ -1,0 +1,118 @@
+# Posts pull requests that need a code-owner review to a Discord channel, so a
+# blocked PR is seen without anyone watching GitHub.
+#
+# - When a non-draft PR opens, reopens, or becomes ready for review, and it
+#   changes a path listed in .github/CODEOWNERS, the job posts one message.
+# - On weekday mornings (and on manual dispatch), the job posts a digest of
+#   every open, non-draft, unapproved PR that changes such a path.
+#
+# Setup: create a webhook in the Discord channel (Channel settings >
+# Integrations > Webhooks) and save its URL as the repository secret
+# DISCORD_CODEOWNER_WEBHOOK. Without the secret, the job does nothing.
+#
+# Security: the job runs on pull_request, not pull_request_target, so it never
+# runs with secrets for code from a fork. A fork PR has no secret, so it is
+# skipped there and appears in the next digest instead. The job never checks
+# out code. It reads only the GitHub API, and it passes PR fields through env,
+# not ${{ }} in the script.
+name: Code-owner review ping
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  schedule:
+    - cron: '0 15 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  ping:
+    name: Post to Discord
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    timeout-minutes: 5
+    steps:
+      - name: Post PRs that need a code-owner review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WEBHOOK: ${{ secrets.DISCORD_CODEOWNER_WEBHOOK }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WEBHOOK:-}" ]; then
+            echo "::notice::DISCORD_CODEOWNER_WEBHOOK is not set; nothing to post."
+            exit 0
+          fi
+
+          # Owned patterns from the default branch's CODEOWNERS.
+          patterns=$(gh api "repos/$REPO/contents/.github/CODEOWNERS" --jq .content \
+            | base64 -d | sed 's/#.*//' | awk 'NF { print $1 }')
+
+          # Prints the paths on stdin that a CODEOWNERS pattern covers: a
+          # pattern ending in / covers a directory, one with a / names a file,
+          # and one without a / names a file anywhere.
+          owned() {
+            while IFS= read -r path; do
+              for pattern in $patterns; do
+                pattern=${pattern#/}
+                case "$pattern" in
+                  */) [[ "$path" == "$pattern"* ]] && { echo "$path"; break; } ;;
+                  */*) [[ "$path" == "$pattern" ]] && { echo "$path"; break; } ;;
+                  *) [[ "${path##*/}" == "$pattern" ]] && { echo "$path"; break; } ;;
+                esac
+              done
+            done
+            # A non-matching last test must not fail the pipeline under pipefail.
+            return 0
+          }
+
+          owned_paths() {
+            # gh reads stdin, so give it /dev/null, or it eats the digest loop's input.
+            gh api --paginate "repos/$REPO/pulls/$1/files" --jq '.[].filename' < /dev/null | owned
+          }
+
+          post() {
+            local content=${1:0:1900}
+            curl -fsS -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg c "$content" '{content: $c, allowed_mentions: {parse: []}}')" \
+              "$WEBHOOK" > /dev/null
+          }
+
+          if [ "$EVENT" = "pull_request" ]; then
+            paths=$(owned_paths "$PR_NUMBER")
+            [ -z "$paths" ] && exit 0
+            listed=$(echo "$paths" | head -5 | sed 's/^/`/; s/$/`/' | paste -sd, - | sed 's/,/, /g')
+            post "Code-owner review needed: **#$PR_NUMBER** $PR_TITLE (by $PR_AUTHOR)
+          $PR_URL
+          Owned paths: $listed"
+            exit 0
+          fi
+
+          # Digest of every open, non-draft, unapproved PR that touches an owned path.
+          lines=""
+          while IFS=$'\t' read -r number author title url; do
+            paths=$(owned_paths "$number")
+            [ -z "$paths" ] && continue
+            lines+="- **#$number** $title (by $author) <$url>"$'\n'
+          done < <(gh pr list --repo "$REPO" --state open --limit 100 \
+            --json number,title,author,url,isDraft,reviewDecision \
+            --jq '.[] | select(.isDraft | not) | select(.reviewDecision != "APPROVED") | [.number, .author.login, .title, .url] | @tsv')
+          [ -z "$lines" ] && exit 0
+          # Discord caps a message at 2000 characters, so split the digest.
+          chunk="PRs waiting on a code-owner review:"$'\n'
+          while IFS= read -r line; do
+            if [ $(( ${#chunk} + ${#line} )) -gt 1900 ]; then
+              post "$chunk"
+              chunk=""
+            fi
+            chunk+="$line"$'\n'
+          done <<< "$lines"
+          if [ -n "$chunk" ]; then post "$chunk"; fi
