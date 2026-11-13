@@ -455,9 +455,13 @@ for (const mutant of selected) {
       : outcome === `survived` && mutant.openGap !== undefined
   const seconds = Math.round((Date.now() - started) / 1000)
   const label =
-    outcome === `survived` && mutant.openGap
-      ? `open gap ${mutant.openGap}`
-      : outcome
+    outcome === `killed` && mutant.openGap
+      ? `gap whose mutant is now killed: delete ${mutant.openGap}`
+      : outcome === `survived` && !mutant.openGap
+        ? `survivor with no gap: add an openGap or kill it`
+        : outcome === `survived`
+          ? `open gap ${mutant.openGap}`
+          : outcome
   console.log(
     `${ok ? `ok ` : `BAD`} ${mutant.id} ${label} (${seconds}s) ${mutant.rationale}${detail && outcome === `killed` ? ` | ${detail}` : ``}`,
   )
