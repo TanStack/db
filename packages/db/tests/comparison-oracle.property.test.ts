@@ -10,7 +10,13 @@ import {
   normalizeValue,
 } from '../src/utils/comparison'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils'
-import { oracleProperty, oracleReplayRequested } from './oracle-config.js'
+import {
+  differs,
+  oracleProperty,
+  oracleReplayRequested,
+  pass,
+  violation,
+} from './oracle-config.js'
 import { defaultOpts, lexicalOpts } from './comparison-options.js'
 import { rejection } from './calibration-rejection.js'
 import { nativeCampaignReceipt } from './native-campaign-receipt'
@@ -1004,4 +1010,270 @@ describe(`Temporal default-order refinement`, () => {
     `ZonedDateTime order refines supplied instants across offset zones`,
     assertZonedDateTimeOrder,
   )
+})
+
+// The locale option sets and strings of the collation history. Each set that
+// shares a locale with another differs from it on at least one string pair
+// below, so an answer kept from an earlier set can be seen.
+const collationSets: ReadonlyArray<{
+  locale?: string
+  localeOptions?: Intl.CollatorOptions
+}> = [
+  {},
+  { locale: `en-US` },
+  { locale: `en-US`, localeOptions: { numeric: true } },
+  { locale: `en-US`, localeOptions: { sensitivity: `base` } },
+  { locale: `en-US`, localeOptions: { caseFirst: `upper` } },
+  { locale: `sv` },
+  { locale: `de` },
+]
+const collationStrings = [
+  `item2`,
+  `item10`,
+  `a`,
+  `A`,
+  `ä`,
+  `z`,
+  `resume`,
+  `résumé`,
+] as const
+
+/** One comparison: an option set, whether it arrives as a fresh copy, and two strings. */
+type CollationStep = {
+  set: number
+  copy: boolean
+  left: number
+  right: number
+}
+type CollationHistory = ReadonlyArray<CollationStep>
+
+const arbitraryCollationStep: fc.Arbitrary<CollationStep> = fc.record({
+  set: fc.nat({ max: collationSets.length - 1 }),
+  copy: fc.boolean(),
+  left: fc.nat({ max: collationStrings.length - 1 }),
+  right: fc.nat({ max: collationStrings.length - 1 }),
+})
+
+// The model builds a new collator for every comparison, which is the
+// definition of String.prototype.localeCompare(that, locales, options).
+function collationSign(set: number, left: number, right: number): number {
+  const { locale, localeOptions } = collationSets[set]!
+  return Math.sign(
+    new Intl.Collator(locale, localeOptions).compare(
+      collationStrings[left]!,
+      collationStrings[right]!,
+    ),
+  )
+}
+
+const OTHER_SET_DIFFERS = `an earlier option set orders the pair differently`
+const SAME_LOCALE_DIFFERS = `an earlier option set with the same locale orders the pair differently`
+
+function collationReach(history: CollationHistory): Array<string> {
+  const reached = new Set<string>()
+  history.forEach((step, index) => {
+    const owed = collationSign(step.set, step.left, step.right)
+    for (const earlier of history.slice(0, index)) {
+      if (earlier.set === step.set) continue
+      if (collationSign(earlier.set, step.left, step.right) === owed) continue
+      reached.add(OTHER_SET_DIFFERS)
+      if (
+        collationSets[earlier.set]!.locale === collationSets[step.set]!.locale
+      )
+        reached.add(SAME_LOCALE_DIFFERS)
+    }
+  })
+  return [...reached]
+}
+
+function localeCompareOptions(set: number): CompareOptions {
+  const { locale, localeOptions } = collationSets[set]!
+  return {
+    direction: `asc`,
+    nulls: `first`,
+    stringSort: `locale`,
+    ...(locale !== undefined && { locale }),
+    ...(localeOptions !== undefined && { localeOptions: { ...localeOptions } }),
+  }
+}
+
+// Production receives one option object per set for the whole history, or a
+// structurally equal copy at the steps marked `copy`.
+function driveCollationHistory(
+  history: CollationHistory,
+  observe: (checkpoint: string, value: unknown) => void,
+  compare: (a: string, b: string, opts: CompareOptions) => number,
+): void {
+  const shared = collationSets.map((_, set) => localeCompareOptions(set))
+  history.forEach((step, index) => {
+    const opts = step.copy ? localeCompareOptions(step.set) : shared[step.set]!
+    observe(
+      `step ${index}`,
+      Math.sign(
+        compare(
+          collationStrings[step.left]!,
+          collationStrings[step.right]!,
+          opts,
+        ),
+      ),
+    )
+  })
+  for (const state of collationReach(history)) observe(`reach`, state)
+}
+
+// Construction requirements are test-only provenance. The pinned framework
+// checks only seeded construction identities, so every generated and shrunk
+// construction carries its obligation too, and the check enforces it.
+const collationRequirements = new WeakMap<
+  CollationHistory,
+  ReadonlyArray<string>
+>()
+
+const NUMERIC_AFTER_PLAIN = `numeric option after the plain set of its locale`
+const GENERATED_STEPS = 10
+
+function numericAfterPlain(generated: CollationHistory): CollationHistory {
+  const built = [
+    { set: 1, copy: false, left: 0, right: 1 },
+    ...generated.slice(0, GENERATED_STEPS),
+    { set: 2, copy: false, left: 0, right: 1 },
+  ]
+  collationRequirements.set(built, [OTHER_SET_DIFFERS, SAME_LOCALE_DIFFERS])
+  return built
+}
+
+function collationModel(history: CollationHistory) {
+  return {
+    signs: history.map((step) =>
+      collationSign(step.set, step.left, step.right),
+    ),
+    requiredStates: collationRequirements.get(history) ?? [],
+  }
+}
+
+function checkCollation(
+  history: CollationHistory,
+  observations: ReadonlyArray<{ checkpoint: string; value: unknown }>,
+  owed: ReturnType<typeof collationModel>,
+) {
+  const steps = observations.filter((entry) => entry.checkpoint !== `reach`)
+  for (const [index, observation] of steps.entries()) {
+    const verdict = differs(
+      observation.checkpoint,
+      `comparison.locale-option-history`,
+      observation.value,
+      owed.signs[index],
+      `step ${index} compared under option set ${history[index]!.set}`,
+    )
+    if (verdict) return verdict
+  }
+  const reached = new Set(
+    observations
+      .filter((entry) => entry.checkpoint === `reach`)
+      .map((entry) => entry.value),
+  )
+  const missing = owed.requiredStates.filter((state) => !reached.has(state))
+  return missing.length === 0
+    ? pass
+    : violation(
+        `constructed states`,
+        `constructed history did not enter ${missing.join(`, `)}`,
+        `constructed reach`,
+      )
+}
+
+// A wrong comparison that keeps the collator of the first option set it sees
+// for a key, as a cache with a missing key part would.
+function collatorKeptBy(
+  key: (opts: CompareOptions) => string,
+): (a: string, b: string, opts: CompareOptions) => number {
+  const collators = new Map<string, Intl.Collator>()
+  return (a, b, opts) => {
+    const localeOpts = opts as CompareOptions & {
+      locale?: string
+      localeOptions?: Intl.CollatorOptions
+    }
+    let collator = collators.get(key(opts))
+    if (collator === undefined) {
+      collator = new Intl.Collator(localeOpts.locale, localeOpts.localeOptions)
+      collators.set(key(opts), collator)
+    }
+    return collator.compare(a, b)
+  }
+}
+
+describe(`locale collation over a history of option sets`, () => {
+  oracleProperty({
+    id: `comparison.locale-option-history`,
+    law: {
+      statement: `Under locale string collation, every comparison orders two strings as a new Intl.Collator(locale, localeOptions) of its own option set does, whichever option sets earlier comparisons used and whether the option object is shared or a copy.`,
+      authority: `${comparisonAuthority}; ECMA-402 defines String.prototype.localeCompare(that, locales, options) as comparison by a new Intl.Collator(locales, options).`,
+      limits: `Ascending comparisons of eight fixed strings under seven option sets (the default locale, en-US with no options, numeric, base sensitivity and upper case first, sv and de) through ascComparator. Option objects are not changed after use. Direction, null placement and non-string values belong to the other comparison laws.`,
+    },
+    owns: [`src/utils/comparison.ts`],
+    histories: {
+      arbitrary: fc.array(arbitraryCollationStep, {
+        minLength: 1,
+        maxLength: GENERATED_STEPS + 2,
+      }),
+      states: [OTHER_SET_DIFFERS, SAME_LOCALE_DIFFERS],
+      constructed: [
+        {
+          name: NUMERIC_AFTER_PLAIN,
+          enters: [OTHER_SET_DIFFERS, SAME_LOCALE_DIFFERS],
+          build: numericAfterPlain,
+        },
+      ],
+      runs: campaignRuns,
+      fixedSeeds: [fixedSeed],
+    },
+    model: collationModel,
+    driver: (history, observe) =>
+      driveCollationHistory(history, observe, ascComparator),
+    check: checkCollation,
+    calibrations: [
+      {
+        name: `rejects a construction that omits a required state`,
+        law: `constructed reach`,
+        history: { constructed: NUMERIC_AFTER_PLAIN },
+        corrupt: (trace, history) => {
+          const state = collationModel(history).requiredStates[0]
+          return state === undefined
+            ? undefined
+            : trace.filter(
+                (entry) =>
+                  entry.checkpoint !== `reach` || entry.value !== state,
+              )
+        },
+      },
+      {
+        name: `rejects one collator kept for every option set`,
+        law: `comparison.locale-option-history`,
+        history: {
+          constructed: NUMERIC_AFTER_PLAIN,
+        },
+        driver: (history, observe) =>
+          driveCollationHistory(
+            history,
+            observe,
+            collatorKeptBy(() => `all`),
+          ),
+      },
+      {
+        name: `rejects a collator kept per locale that ignores its options`,
+        law: `comparison.locale-option-history`,
+        history: {
+          constructed: NUMERIC_AFTER_PLAIN,
+        },
+        driver: (history, observe) =>
+          driveCollationHistory(
+            history,
+            observe,
+            collatorKeptBy(
+              (opts) => (opts as { locale?: string }).locale ?? `default`,
+            ),
+          ),
+      },
+    ],
+  })
 })

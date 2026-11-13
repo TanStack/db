@@ -35,6 +35,7 @@ export const properties: ReadonlyArray<string> = [
   `btree-map.infinite-comparator`,
   `btree-map.long-campaign`,
   `btree-map.dense-cuts`,
+  `comparison.locale-option-history`,
   `comparison.non-finite-witnesses`,
   `comparison.signed-infinity-custom`,
   `comparison.temporal-witnesses`,
@@ -145,7 +146,7 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
     `db/tests/comparison-oracle.property.test.ts`,
     `comparison`,
-    `non-finite-witnesses signed-infinity-custom temporal-witnesses`,
+    `locale-option-history non-finite-witnesses signed-infinity-custom temporal-witnesses`,
   ],
   [
     `db/tests/index-update-oracle.property.test.ts`,
