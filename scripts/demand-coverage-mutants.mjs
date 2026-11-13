@@ -3,10 +3,14 @@
 // Each mutant replaces one exact piece of production code with a plausible
 // wrong design. The harness applies it in memory through
 // `packages/db-sqlite-persistence-core/vitest.mutants.config.ts`, runs the
-// owner oracles, and expects every mutant to fail a named test unless the
-// mutant is marked `equivalent` with the reason no observation can tell it
-// apart. A mutant whose target no longer matches, or that never reached a
-// transformed module, is an error: the list has drifted from the code.
+// owner oracles, and expects every mutant to fail a named test. A mutant that
+// survives is allowed only as an open gap: `openGap` names its entry in
+// `docs/contributing/oracle-coverage.md`, which states the owning oracle and
+// the missing law, history, or counter. The open-gap list only shrinks. A gap
+// whose mutant is now killed is an error, so its entry must be deleted with
+// the oracle change that killed it. A mutant whose target no longer matches,
+// or that never reached a transformed module, is an error: the list has
+// drifted from the code.
 //
 // Usage: node scripts/demand-coverage-mutants.mjs [--only=P01,P02] [--list]
 // The review record `docs/contributing/oracle-reviews/
@@ -69,8 +73,7 @@ const MUTANTS = [
     find: 'resetSequence === this.resetSequence &&',
     replace: 'true &&',
     rationale: 'captureResetEpoch ignores resetSequence',
-    equivalent:
-      'in the single-process scope only scoped recovery bumps resetSequence while a load or record exists (startup reclaim precedes loads; a peer reset is multi-tab), and during scoped recovery the coverage read proves nothing',
+    openGap: `pdc-gap-P05`,
   },
   {
     id: 'P06',
@@ -78,8 +81,7 @@ const MUTANTS = [
     find: '      lifecycleGeneration === this.lifecycleGeneration &&\n      resetSequence === this.resetSequence &&',
     replace: '      resetSequence === this.resetSequence &&',
     rationale: 'captureResetEpoch ignores lifecycle generation',
-    equivalent:
-      'a replaced lifecycle has no live sync callbacks, so a late coverage record is a no-op',
+    openGap: `pdc-gap-P06`,
   },
   {
     id: 'P07',
@@ -95,9 +97,8 @@ const MUTANTS = [
     find: 'if (!current()) return\n        const record = await runtime.nextCoverageRecord(demand)',
     replace: 'const record = await runtime.nextCoverageRecord(demand)',
     rationale:
-      'recordCoverage: early isCurrent check removed (should be EQUIVALENT: second check still guards)',
-    equivalent:
-      'the isCurrent check after the coverage read still guards the record',
+      'recordCoverage: early isCurrent check removed (the second check still guards; the SQLite read count is the observable)',
+    openGap: `pdc-gap-P08`,
   },
   {
     id: 'P09',
@@ -105,8 +106,8 @@ const MUTANTS = [
     find: 'if (current?.rows === rows.length && current.keys === keys) return undefined',
     replace: 'if (false) return undefined',
     rationale:
-      'nextCoverageRecord: always rewrites record even when unchanged (should be EQUIVALENT)',
-    equivalent: 'rewriting an unchanged record changes no observation',
+      'nextCoverageRecord: always rewrites record even when unchanged (the metadata commit and peer publication are the observable)',
+    openGap: `pdc-gap-P09`,
   },
   {
     id: 'P10',
@@ -115,8 +116,7 @@ const MUTANTS = [
     replace: 'record !== undefined &&',
     rationale:
       'currentCoverageRecord ignores storage generation: stale-generation record counts',
-    equivalent:
-      'a stale-generation record can stay in memory only after an in-run rotation, and every in-run rotation (scoped recovery, claim recovery through startScopedRecovery) leaves the coverage read proving nothing',
+    openGap: `pdc-gap-P10`,
   },
   {
     id: 'P11',
@@ -169,9 +169,8 @@ const MUTANTS = [
     find: '!this.persistedReadiness?.onDemand ||\n      options.refetch',
     replace: 'options.refetch',
     rationale:
-      'settleCoveredDemand: onDemand check removed (EQUIVALENT if records only exist for onDemand)',
-    equivalent:
-      'persisted readiness exists only for an on-demand opt-in here, so the check is redundant',
+      'settleCoveredDemand: onDemand check removed (an eager Collection would settle a covered demand)',
+    openGap: `pdc-gap-P18`,
   },
   {
     id: 'P19',
@@ -226,8 +225,7 @@ const MUTANTS = [
     replace:
       '          await upstreamLoadSubset(options)\n        } catch (error) {',
     rationale: 'loadSubset: upstream failure not noted',
-    equivalent:
-      'observable only through the Query DB receiving witness, outside this harness',
+    openGap: `pdc-gap-P26`,
   },
   {
     id: 'P27',
@@ -237,8 +235,7 @@ const MUTANTS = [
       '      true &&\n      this.activeSubsets.get(subsetKey) === options\n    ) {\n      this.hydratedDemands.add',
     rationale:
       'loadSubset marks demand hydrated even when a truncate intervened',
-    equivalent:
-      'the hydrated mark after a truncate belongs to the hydration path; the truncate already ends coverage',
+    openGap: `pdc-gap-P27`,
   },
   {
     id: 'P28',
@@ -247,7 +244,7 @@ const MUTANTS = [
     replace: '      !this.startupSettled ||',
     rationale:
       'loadHydratedSubset: settles from coverage under an expired cache claim',
-    equivalent: 'a coverage read under an expired claim already proves nothing',
+    openGap: `pdc-gap-P28`,
   },
   {
     id: 'P29',
@@ -256,7 +253,7 @@ const MUTANTS = [
     replace:
       '      this.isHydratingNow() ||\n      this.canRouteRemoteDemandThroughCoordinator() ||',
     rationale: 'loadHydratedSubset: refetch check removed',
-    equivalent: 'settleCoveredDemand repeats the refetch guard',
+    openGap: `pdc-gap-P29`,
   },
   {
     id: 'P30',
@@ -295,8 +292,7 @@ const MUTANTS = [
     replace: 'false\n            ) {\n              return true',
     rationale:
       'forwardUpstream: released acquisition still starts upstream lease',
-    equivalent:
-      'hydration checks the abort signal at each step before it forwards a load',
+    openGap: `pdc-gap-P34`,
   },
   {
     id: 'P35',
@@ -414,8 +410,24 @@ const only = process.argv
 const selected = MUTANTS.filter((mutant) => !only || only.includes(mutant.id))
 if (process.argv.includes(`--list`)) {
   for (const m of selected)
-    console.log(`${m.id} ${m.equivalent ? `(equivalent) ` : ``}${m.rationale}`)
+    console.log(`${m.id} ${m.openGap ? `(open gap ${m.openGap}) ` : ``}${m.rationale}`)
   process.exit(0)
+}
+
+// Every open gap must name an entry in the coverage map, so a gap cannot be
+// recorded without its owner and missing witness.
+const coverageMap = readFileSync(
+  join(ROOT, `docs/contributing/oracle-coverage.md`),
+  `utf8`,
+)
+const unlisted = selected.filter(
+  (m) => m.openGap && !coverageMap.includes(`\`${m.openGap}\``),
+)
+if (unlisted.length > 0) {
+  console.error(
+    `open gaps missing a coverage-map entry: ${unlisted.map((m) => `${m.id}=${m.openGap}`).join(`, `)}`,
+  )
+  process.exit(1)
 }
 
 // Validate every target before running anything.
@@ -433,11 +445,15 @@ const failures = []
 for (const mutant of selected) {
   const started = Date.now()
   const { outcome, detail } = await run(mutant)
-  const expected = mutant.equivalent ? `survived` : `killed`
-  const ok = outcome === expected || (mutant.equivalent && outcome === `killed`)
+  // A killed mutant passes unless it is still listed as a gap, which is stale.
+  // A survivor passes only as a listed open gap.
+  const ok =
+    outcome === `killed` ? !mutant.openGap : outcome === `survived` && mutant.openGap !== undefined
   const seconds = Math.round((Date.now() - started) / 1000)
+  const label =
+    outcome === `survived` && mutant.openGap ? `open gap ${mutant.openGap}` : outcome
   console.log(
-    `${ok ? `ok ` : `BAD`} ${mutant.id} ${outcome} (${seconds}s) ${mutant.rationale}${detail && outcome === `killed` ? ` | ${detail}` : ``}`,
+    `${ok ? `ok ` : `BAD`} ${mutant.id} ${label} (${seconds}s) ${mutant.rationale}${detail && outcome === `killed` ? ` | ${detail}` : ``}`,
   )
   if (!ok) failures.push({ mutant, outcome, detail })
 }
