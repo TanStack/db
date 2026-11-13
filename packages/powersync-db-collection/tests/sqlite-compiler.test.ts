@@ -326,4 +326,26 @@ describe(`SQLite Compiler`, () => {
       expect(result.params).toEqual([])
     })
   })
+
+  describe(`managed table row aliases`, () => {
+    it(`should prefix column references with the row alias`, () => {
+      const result = compileSQLite(
+        { where: func(`eq`, [ref([`name`]), val(`test`)]) },
+        { rowPrefix: 'NEW' },
+      )
+
+      expect(result.where).toBe(`NEW."name" = ?`)
+      expect(result.params).toEqual([`test`])
+    })
+
+    it(`should prefix the id column like any other real column`, () => {
+      const result = compileSQLite(
+        { where: func(`eq`, [ref([`id`]), val(`abc`)]) },
+        { rowPrefix: 'OLD' },
+      )
+
+      expect(result.where).toBe(`OLD."id" = ?`)
+      expect(result.params).toEqual([`abc`])
+    })
+  })
 })
