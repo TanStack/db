@@ -336,8 +336,10 @@ See meta-framework/SKILL.md for full preloading patterns.
 To animate rows entering, leaving, or moving, render `useDeferredValue(data)`
 from `useLiveQuery` or `useLiveSuspenseQuery`. Wrap each rendered row in a
 `<ViewTransition>` (stable in React 19.3) with a stable, unique result key such
-as `row.$key`. Joined results use composite keys by default. Wrapping a collection
-mutation in `startTransition` leaves the `useSyncExternalStore` update synchronous.
+as `row.$key`. Joined results use composite keys by default. When result keys
+mix numbers and strings, use `` `${typeof row.$key}:${row.$key}` `` as the React
+key. Wrapping a collection mutation in `startTransition` leaves the
+`useSyncExternalStore` update synchronous.
 Deferring the rendered results lets React animate changes from local writes
 and incoming sync data. Use `prefers-reduced-motion` to reduce or disable
 the animations. A deleted row can stay visible briefly. If it has a Delete

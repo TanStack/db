@@ -243,7 +243,9 @@ window publication policy.
 Use React `<ViewTransition>` to animate rows entering, leaving, or moving in a
 live query list. Pass the query's `data` to `useDeferredValue` and wrap each
 rendered row in a `<ViewTransition>` with a stable, unique key. Use the result
-row's `$key`, which also identifies individual rows in a join.
+row's `$key`, which also identifies individual rows in a join. If result keys
+mix strings and numbers, include the type in the React key. For example,
+`` `${typeof row.$key}:${row.$key}` `` keeps `1` and `'1'` distinct.
 [Live query virtual properties](../../guides/live-queries.md#virtual-properties)
 
 `<ViewTransition>` is stable in React 19.3 and uses the browser's View Transition API.
