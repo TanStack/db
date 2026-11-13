@@ -184,6 +184,20 @@ export function recordPublicationError(error: unknown): void {
  * Runs one synchronous Collection publication inside a scheduler context.
  * Nested publications share the outer context, so downstream live queries run
  * only after every subscriber to the original committed batch has observed it.
+ *
+ * A sync source that commits sync transactions to several Collections for one
+ * source state, such as one server checkpoint, can commit them inside one call.
+ * Every live query that observes those Collections then runs after `publish`
+ * returns, with every commit applied, and publishes one batch. Committed one by
+ * one, a live query that joins them runs and publishes after each commit, over
+ * Collections that only some of the commits have reached.
+ *
+ * Each Collection still applies its sync transaction and notifies its own
+ * change subscribers when it commits, so this is not an atomic publication
+ * across the Collections. A failure that a change subscriber reports is thrown
+ * from this call after the graphs ran. When `publish` itself throws, the queued
+ * graph work is discarded, so live queries miss the commits that `publish`
+ * already made: catch each commit's own failure inside `publish`.
  */
 export function withPublicationContext<T>(publish: () => T): T {
   if (activePublicationContext !== undefined) return publish()

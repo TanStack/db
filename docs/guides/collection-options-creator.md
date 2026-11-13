@@ -178,6 +178,28 @@ The sync process follows this lifecycle:
 6. **reportError(error)** - After the Collection is ready, report a sync problem while you keep trying. It sets the node's `failureReason` without changing its status or rows
 7. **reportHealthy()** - After the Collection is ready, report that sync works again. It clears the `failureReason`, and does nothing when nothing is wrong
 
+### Committing several Collections together
+
+A source that syncs several Collections over one connection often receives one source state for all of them, such as one server checkpoint. Committed one by one, every live query that joins those Collections runs after each commit and publishes a result over Collections that only some of the commits have reached. Commit them inside one `withPublicationContext` call instead:
+
+```typescript
+import { withPublicationContext } from '@tanstack/db'
+
+withPublicationContext(() => {
+  for (const { sync, changes } of collectionsInCheckpoint) {
+    try {
+      sync.begin()
+      for (const change of changes) sync.write(change)
+      sync.commit()
+    } catch (error) {
+      sync.fail(error)
+    }
+  }
+})
+```
+
+Live queries then run after the last commit and publish one batch. Each Collection still notifies its own change subscribers when it commits, so this is not an atomic publication across the Collections. Catch each commit's failure inside the callback: if the callback throws, the live-query work of the commits it already made is discarded, and those live queries miss them until their sources change again.
+
 ### Reporting failures
 
 Users see two separate signals: whether data can be shown, and whether it is

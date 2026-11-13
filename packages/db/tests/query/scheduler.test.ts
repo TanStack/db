@@ -19,7 +19,11 @@ import {
 import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
 import { getCollectionBuilder } from '../../src/query/live/collection-registry.js'
 import { CollectionSubscriber } from '../../src/query/live/collection-subscriber.js'
-import { Query, createEffect } from '../../src/index.js'
+import {
+  Query,
+  createEffect,
+  withPublicationContext as publicWithPublicationContext,
+} from '../../src/index.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,
@@ -339,6 +343,139 @@ describe(`Collection publication scheduler context`, () => {
       expect(discarded).not.toHaveBeenCalled()
     },
   )
+})
+
+describe(`sync transactions of several Collections in one publication`, () => {
+  type SyncOperations<T extends object> = Parameters<SyncConfig<T>[`sync`]>[0]
+
+  // A left join shows a row for a user whose tasks have not arrived, so a live
+  // query that runs between the two commits publishes that intermediate row
+  async function setupJoinedSources(id: string) {
+    let usersSync!: SyncOperations<User>
+    let tasksSync!: SyncOperations<Task>
+    const users = createCollection<User>({
+      id: `${id}-users`,
+      getKey: (user) => user.id,
+      startSync: true,
+      sync: {
+        sync: (operations) => {
+          usersSync = operations
+          operations.markReady()
+        },
+      },
+    })
+    const tasks = createCollection<Task>({
+      id: `${id}-tasks`,
+      getKey: (task) => task.id,
+      startSync: true,
+      sync: {
+        sync: (operations) => {
+          tasksSync = operations
+          operations.markReady()
+        },
+      },
+    })
+    const assignments = createLiveQueryCollection({
+      id: `${id}-assignments`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: users })
+          .join(
+            { task: tasks },
+            ({ user, task }) => eq(user.id, task.userId),
+            `left`,
+          )
+          .select(({ user, task }) => ({
+            name: user.name,
+            title: task.title,
+          })),
+    })
+    await assignments.preload()
+    const commitUser = (user: User) => {
+      usersSync.begin()
+      usersSync.write({ type: `insert`, value: user })
+      usersSync.commit()
+    }
+    const commitTask = (task: Task) => {
+      tasksSync.begin()
+      tasksSync.write({ type: `insert`, value: task })
+      tasksSync.commit()
+    }
+    const rows = () => assignments.toArray.map((row) => stripVirtualProps(row))
+    return { users, tasks, assignments, commitUser, commitTask, rows }
+  }
+
+  it(`publishes a joining live query once, after every commit applied`, async () => {
+    const { users, tasks, assignments, commitUser, commitTask, rows } =
+      await setupJoinedSources(`publication-batch`)
+    const order: Array<string> = []
+    const subscriptions = [
+      users.subscribeChanges(() => order.push(`users`)),
+      tasks.subscribeChanges(() => order.push(`tasks`)),
+      assignments.subscribeChanges((changes) =>
+        order.push(
+          `assignments ${JSON.stringify(changes.map(({ type }) => type))}`,
+        ),
+      ),
+    ]
+
+    publicWithPublicationContext(() => {
+      commitUser({ id: 1, name: `Ada` })
+      commitTask({ id: 1, userId: 1, title: `Review` })
+      expect(rows()).toEqual([])
+    })
+
+    expect(rows()).toEqual([{ name: `Ada`, title: `Review` }])
+    // Not an atomic publication: each Collection notifies its own subscribers
+    // when it commits
+    expect(order).toEqual([`users`, `tasks`, `assignments ["insert"]`])
+    for (const subscription of subscriptions) subscription.unsubscribe()
+  })
+
+  it(`publishes the intermediate join of each commit without one`, async () => {
+    const { assignments, commitUser, commitTask, rows } =
+      await setupJoinedSources(`publication-per-commit`)
+    const published: Array<unknown> = []
+    const subscription = assignments.subscribeChanges((changes) =>
+      published.push(
+        changes.map(({ type, value }) => ({
+          type,
+          ...stripVirtualProps(value),
+        })),
+      ),
+    )
+
+    commitUser({ id: 1, name: `Ada` })
+    commitTask({ id: 1, userId: 1, title: `Review` })
+
+    expect(published).toEqual([
+      [{ type: `insert`, name: `Ada`, title: undefined }],
+      [
+        { type: `insert`, name: `Ada`, title: `Review` },
+        { type: `delete`, name: `Ada`, title: undefined },
+      ],
+    ])
+    expect(rows()).toEqual([{ name: `Ada`, title: `Review` }])
+    subscription.unsubscribe()
+  })
+
+  it(`discards the live-query work of earlier commits when publish throws`, async () => {
+    const { users, commitUser, commitTask, rows } =
+      await setupJoinedSources(`publication-throws`)
+    const failure = new Error(`source failed after a commit`)
+
+    expect(() =>
+      publicWithPublicationContext(() => {
+        commitUser({ id: 1, name: `Ada` })
+        commitTask({ id: 1, userId: 1, title: `Review` })
+        throw failure
+      }),
+    ).toThrow(failure)
+
+    expect(users.size).toBe(1)
+    expect(rows()).toEqual([])
+  })
 })
 
 describe(`live query scheduler`, () => {
