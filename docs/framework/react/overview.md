@@ -242,8 +242,11 @@ window publication policy.
 
 Use React `<ViewTransition>` to animate rows entering, leaving, or moving in a
 live query list. Pass the query's `data` to `useDeferredValue` and wrap each
-rendered row in a `<ViewTransition>` with a stable key. `<ViewTransition>` is
-stable in React 19.3 and uses the browser's View Transition API.
+rendered row in a `<ViewTransition>` with a stable, unique key. Use the result
+row's `$key`, which also identifies individual rows in a join.
+[Live query virtual properties](../../guides/live-queries.md#virtual-properties)
+
+`<ViewTransition>` is stable in React 19.3 and uses the browser's View Transition API.
 [React View Transitions documentation](https://react.dev/reference/react/ViewTransition)
 
 `useLiveQuery` and `useLiveSuspenseQuery` subscribe through `useSyncExternalStore`.
@@ -271,7 +274,7 @@ export function TodoList() {
   return (
     <ul>
       {visibleTodos.map((todo) => (
-        <ViewTransition key={todo.id}>
+        <ViewTransition key={todo.$key}>
           <li>{todo.text}</li>
         </ViewTransition>
       ))}
@@ -279,6 +282,12 @@ export function TodoList() {
   )
 }
 ```
+
+Respect the user's `prefers-reduced-motion` setting. To disable the row
+animations, pass `default={prefersReducedMotion ? 'none' : 'auto'}` to each
+`<ViewTransition>`, where `prefersReducedMotion` is your app's current value
+for that media query.
+[React View Transition props](https://react.dev/reference/react/ViewTransition#view-transition-class)
 
 A deferred list can briefly show a row that the collection has already
 removed. If a row has a Delete button, check `collection.has(id)` before
