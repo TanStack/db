@@ -13,11 +13,11 @@
     "rebuild:electron": "node scripts/rebuild-electron.mjs"
   },
   "dependencies": {
-    "@tanstack/electron-db-sqlite-persistence": "^1.0.0-rc.1.5",
-    "@tanstack/node-db-sqlite-persistence": "^1.0.0-rc.1.5",
+    "@tanstack/electron-db-sqlite-persistence": "^1.0.0-rc.1.6",
+    "@tanstack/node-db-sqlite-persistence": "^1.0.0-rc.1.6",
     "@tanstack/offline-transactions": "^1.2.1",
-    "@tanstack/query-db-collection": "^1.5.2",
-    "@tanstack/react-db": "^1.0.0-rc.1.5",
+    "@tanstack/query-db-collection": "^1.5.3",
+    "@tanstack/react-db": "^1.0.0-rc.1.6",
     "@tanstack/react-query": "^5.107.1",
     "better-sqlite3": "^12.11.1",
     "react": "^19.3.1",

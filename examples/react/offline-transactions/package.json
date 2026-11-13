@@ -8,11 +8,11 @@
     "build": "vite build && tsc --noEmit"
   },
   "dependencies": {
-    "@tanstack/browser-db-sqlite-persistence": "^1.0.0-rc.1.5",
-    "@tanstack/db": "^1.0.0-rc.1.5",
+    "@tanstack/browser-db-sqlite-persistence": "^1.0.0-rc.1.6",
+    "@tanstack/db": "^1.0.0-rc.1.6",
     "@tanstack/offline-transactions": "^1.2.1",
-    "@tanstack/query-db-collection": "^1.5.2",
-    "@tanstack/react-db": "^1.0.0-rc.1.5",
+    "@tanstack/query-db-collection": "^1.5.3",
+    "@tanstack/react-db": "^1.0.0-rc.1.6",
     "@tanstack/react-query": "^5.107.1",
     "@tanstack/react-router": "^1.170.46",
     "@tanstack/react-router-devtools": "^1.167.3",
