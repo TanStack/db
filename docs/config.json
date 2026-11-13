@@ -72,16 +72,20 @@
       "label": "Collections",
       "children": [
         {
-          "label": "Convex Collection",
-          "to": "collections/convex-collection"
-        },
-        {
           "label": "Query Collection",
           "to": "collections/query-collection"
         },
         {
+          "label": "Neon Realtime Collection",
+          "to": "collections/neon-realtime-collection"
+        },
+        {
           "label": "Electric Collection",
           "to": "collections/electric-collection"
+        },
+        {
+          "label": "Convex Collection",
+          "to": "collections/convex-collection"
         },
         {
           "label": "TrailBase Collection",
