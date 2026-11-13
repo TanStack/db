@@ -3183,7 +3183,7 @@ class PersistedCollectionRuntime<
     if (options.signal?.aborted) return
     const deadlineAt = startedAt + this.persistedReadiness.networkTimeoutMs
     return new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, Math.max(0, deadlineAt - Date.now()))
+      const timer = setTimeout(resolve, deadlineAt - Date.now())
       const settle = () => {
         clearTimeout(timer)
         resolve()
