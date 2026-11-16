@@ -82,7 +82,7 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * limit or a zero offset over at least two matching rows. Four constructed
  * histories then break the premise in one way each: one premise-breaking
  * order value, two tied rows with high keys, one inexact leaf (a range, a
- * fraction, the constant `true`, or a membership whose two kinds both match
+ * fraction, a constant leaf, or a membership whose two kinds both match
  * stored values), or an order on `due` or the constant, or under a locale or
  * custom sort. Each builder records the states its history must enter, and
  * the check rejects a history that missed one, so generated and shrunk
