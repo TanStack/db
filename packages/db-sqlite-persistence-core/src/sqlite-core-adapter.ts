@@ -949,6 +949,159 @@ function numberEqualityCandidates(
     : [value]
 }
 
+type ExactLiteralKind = `string` | `boolean` | `bigint` | `number`
+
+function exactLiteralKind(value: unknown): ExactLiteralKind | undefined {
+  // SQLite may decode a stored lone surrogate as U+FFFD, and a driver may
+  // bind text only up to a NUL; neither may decide an exact match.
+  if (typeof value === `string`)
+    return value.includes(`\u0000`) ||
+      value.includes(`\uFFFD`) ||
+      hasUnpairedSurrogate(value)
+      ? undefined
+      : `string`
+  if (typeof value === `boolean`) return `boolean`
+  if (typeof value === `bigint`) return `bigint`
+  return numberEqualityCandidates(value) ? `number` : undefined
+}
+
+/**
+ * The stored values whose SQL projection equals a literal of each kind exactly
+ * when the row evaluator's equality holds. Restricted to them, an equality
+ * candidate keeps the rows that JavaScript keeps and no others.
+ */
+const exactLiteralGuards: Record<
+  ExactLiteralKind,
+  (jsonPath: string) => string
+> = {
+  string: (jsonPath) =>
+    `(json_type(value, ${toSqliteLiteral(jsonPath)}) = 'text' OR json_extract(value, ${toSqliteLiteral(`${jsonPath}.${PERSISTED_TYPE_TAG}`)}) = 'string')`,
+  boolean: (jsonPath) =>
+    `json_type(value, ${toSqliteLiteral(jsonPath)}) IN ('true', 'false')`,
+  bigint: (jsonPath) =>
+    `json_extract(value, ${toSqliteLiteral(`${jsonPath}.${PERSISTED_TYPE_TAG}`)}) = 'bigint'`,
+  number: (jsonPath) =>
+    `(json_type(value, ${toSqliteLiteral(jsonPath)}) = 'integer' OR json_extract(value, ${toSqliteLiteral(`${jsonPath}.${PERSISTED_TYPE_TAG}`)}) = 'date')`,
+}
+
+/** The JSON path of a field ref whose segments are all identifiers. */
+function plainFieldPath(expression: IR.BasicExpression): string | undefined {
+  if (expression.type !== `ref`) return undefined
+  const path = IR.getPropRefPropertyPath(expression).map(String)
+  return path.every((segment) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(segment))
+    ? (createJsonPath(path) ?? undefined)
+    : undefined
+}
+
+/**
+ * SQL that keeps exactly the rows the row evaluator keeps: a conjunction of
+ * equality and membership tests of plain fields against literals of one kind.
+ * Any other predicate returns undefined.
+ */
+function compileExactSqlFilter(
+  expression: IR.BasicExpression,
+): CompiledSqlFragment | undefined {
+  if (expression.type !== `func`) return undefined
+  if (expression.name === `and`) {
+    const children = expression.args.map(compileExactSqlFilter)
+    if (
+      children.length === 0 ||
+      !children.every(
+        (child): child is CompiledSqlFragment => child !== undefined,
+      )
+    )
+      return undefined
+    return {
+      supported: true,
+      sql: children.map(({ sql }) => `(${sql})`).join(` AND `),
+      params: children.flatMap(({ params }) => params),
+    }
+  }
+  const [left, right] = expression.args
+  const field =
+    left?.type === `ref`
+      ? left
+      : expression.name === `eq` && right?.type === `ref`
+        ? right
+        : undefined
+  const literal = field === left ? right : left
+  if (expression.args.length !== 2 || !field || literal?.type !== `val`)
+    return undefined
+  const literals =
+    expression.name === `eq`
+      ? [literal.value]
+      : expression.name === `in` && Array.isArray(literal.value)
+        ? literal.value
+        : []
+  const kind = exactLiteralKind(literals[0])
+  const jsonPath = plainFieldPath(field)
+  const candidate = compileSafeSqlPrefilter(expression)
+  if (
+    !kind ||
+    !jsonPath ||
+    !candidate ||
+    literals.some((value) => exactLiteralKind(value) !== kind)
+  )
+    return undefined
+  return {
+    ...candidate,
+    sql: `(${candidate.sql} AND ${exactLiteralGuards[kind](jsonPath)})`,
+  }
+}
+
+const IRREGULAR_ROWS_INDEX_SUFFIX = `_irregular`
+const HIGH_CODE_POINT_GLOB = `'*[\uE000-\u{10FFFF}]*'`
+
+/**
+ * Text that SQLite may order differently from JavaScript: a code point at
+ * U+E000 or above (SQLite reads a lone surrogate as U+FFFD), or a NUL, past
+ * which GLOB cannot see. Only text with a non-ASCII character or a NUL has
+ * fewer characters than bytes, so ASCII text skips the GLOB.
+ */
+function irregularTextSql(text: string): string {
+  return `(length(${text}) <> length(CAST(${text} AS BLOB)) AND (instr(${text}, char(0)) > 0 OR ${text} GLOB ${HIGH_CODE_POINT_GLOB}))`
+}
+
+/**
+ * The rows whose value at `jsonPath`, or whose key, SQLite may order
+ * differently from the in-memory sort: objects and arrays (tagged values
+ * included), reals and integers that SQLite parses as reals, and irregular
+ * text.
+ */
+function irregularOrderRowsSql(jsonPath: string): string {
+  const pathSql = toSqliteLiteral(jsonPath)
+  const extracted = `json_extract(value, ${pathSql})`
+  return `(CASE json_type(value, ${pathSql}) WHEN 'text' THEN ${irregularTextSql(extracted)} WHEN 'integer' THEN typeof(${extracted}) = 'real' WHEN 'real' THEN 1 WHEN 'object' THEN 1 WHEN 'array' THEN 1 ELSE 0 END OR ${irregularTextSql(`key`)})`
+}
+
+/** The field path of an index whose only expression is a plain field ref. */
+function indexedFieldPath(spec: PersistedIndexSpec): string | undefined {
+  if (spec.whereSql || spec.expressionSql.length !== 1) return undefined
+  let expression: unknown
+  try {
+    expression = JSON.parse(spec.expressionSql[0]!)
+  } catch {
+    return undefined
+  }
+  return isExpressionLikeShape(expression)
+    ? plainFieldPath(expression)
+    : undefined
+}
+
+function isPageBound(value: number | undefined): value is number {
+  return Number.isSafeInteger(value) && value! >= 0
+}
+
+async function dropPersistedIndex(
+  driver: SQLiteDriver,
+  indexName: string,
+): Promise<void> {
+  await driver.exec(`DROP INDEX IF EXISTS ${quoteIdentifier(indexName)}`)
+  await driver.exec(
+    `DROP INDEX IF EXISTS ${quoteIdentifier(`${indexName}${IRREGULAR_ROWS_INDEX_SUFFIX}`)}`,
+  )
+}
+
 /** One JSON binding keeps a large membership within the host parameter limit. */
 function compileFieldMembership(
   field: IR.PropRef,
@@ -1557,8 +1710,11 @@ function compileOrderByClauses(
 
     const direction =
       clause.compareOptions.direction === `desc` ? `DESC` : `ASC`
+    // The in-memory sort negates whole comparisons for `desc`, nulls included.
     const nulls =
-      clause.compareOptions.nulls === `first` ? `NULLS FIRST` : `NULLS LAST`
+      (clause.compareOptions.nulls === `first`) === (direction === `ASC`)
+        ? `NULLS FIRST`
+        : `NULLS LAST`
     parts.push(`${compiledExpression.sql} ${direction} ${nulls}`)
   }
 
@@ -3185,9 +3341,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         // A compiler upgrade can change normalized SQL without changing the
         // logical index signature. Rebuild only that stale physical index so
         // the registry and SQLite planner describe the same expression.
-        await transactionDriver.exec(
-          `DROP INDEX IF EXISTS ${quoteIdentifier(existing.index_name)}`,
-        )
+        await dropPersistedIndex(transactionDriver, existing.index_name)
       }
       await transactionDriver.run(
         `INSERT INTO persisted_index_registry (
@@ -3228,6 +3382,25 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         : `CREATE INDEX IF NOT EXISTS ${indexNameSql}
            ON ${collectionTableSql} (${expressionSql})`
       await transactionDriver.exec(createIndexSql)
+      const fieldPath = indexedFieldPath(spec)
+      if (fieldPath) {
+        const irregularName = `${indexName}${IRREGULAR_ROWS_INDEX_SUFFIX}`
+        const irregularSql = irregularOrderRowsSql(fieldPath)
+        const [stored] = await transactionDriver.query<{ sql: string }>(
+          `SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`,
+          [irregularName],
+        )
+        // A release that changes the predicate rebuilds the index.
+        if (stored && !stored.sql.includes(irregularSql))
+          await transactionDriver.exec(
+            `DROP INDEX ${quoteIdentifier(irregularName)}`,
+          )
+        await transactionDriver.exec(
+          `CREATE INDEX IF NOT EXISTS ${quoteIdentifier(irregularName)}
+           ON ${collectionTableSql} (key)
+           WHERE ${irregularSql}`,
+        )
+      }
     })
   }
 
@@ -3289,11 +3462,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         [collectionId, signature],
       )
 
-      if (indexName) {
-        await transactionDriver.exec(
-          `DROP INDEX IF EXISTS ${quoteIdentifier(indexName)}`,
-        )
-      }
+      if (indexName) await dropPersistedIndex(transactionDriver, indexName)
     })
   }
 
@@ -3688,18 +3857,44 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       ? compileSafeSqlPrefilter(options.where, whereCompiled)
       : undefined
     const orderByCompiled = compileOrderByClauses(options.orderBy)
+    // SQL applies the limit only when it keeps exactly the rows the evaluator
+    // keeps and orders them exactly as the in-memory sort does.
+    // LIMIT and OFFSET match Array.slice only for non-negative integers.
+    const pageable =
+      isPageBound(options.limit) &&
+      (options.offset === undefined || isPageBound(options.offset)) &&
+      options.orderBy !== undefined &&
+      options.orderBy.length > 0
+    const exactFilter =
+      pageable && options.where
+        ? compileExactSqlFilter(options.where)
+        : undefined
+    let pageInSql =
+      pageable &&
+      (!options.where || exactFilter !== undefined) &&
+      (await this.sortsAsInMemory(
+        tableMapping.tableName,
+        options.orderBy!,
+        driver,
+      ))
+    const filter = pageInSql ? exactFilter : safePrefilter
 
     const queryParams: Array<SqliteSupportedValue> = []
     let sql = `SELECT key, value, metadata, row_version FROM ${collectionTableSql}`
 
-    if (safePrefilter) {
-      sql = `${sql} WHERE ${safePrefilter.sql}`
-      queryParams.push(...safePrefilter.params)
+    if (filter) {
+      sql = `${sql} WHERE ${filter.sql}`
+      queryParams.push(...filter.params)
     }
 
     if (options.orderBy && orderByCompiled.supported) {
       sql = `${sql} ORDER BY ${orderByCompiled.sql}, key ASC`
       queryParams.push(...orderByCompiled.params)
+    }
+
+    if (pageInSql) {
+      sql = `${sql} LIMIT ? OFFSET ?`
+      queryParams.push(options.limit!, options.offset ?? 0)
     }
 
     if (
@@ -3708,6 +3903,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     ) {
       sql = `SELECT key, value, metadata, row_version FROM ${collectionTableSql}`
       queryParams.length = 0
+      pageInSql = false
     }
 
     const storedRows = await driver.query<StoredSqliteRow>(sql, queryParams)
@@ -3715,11 +3911,70 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
 
     const filteredRows = this.applyInMemoryWhere(parsedRows, options.where)
     const orderedRows = this.applyInMemoryOrderBy(filteredRows, options.orderBy)
-    return this.applyInMemoryPagination(
-      orderedRows,
-      options.limit,
-      options.offset,
-    )
+    return pageInSql
+      ? orderedRows
+      : this.applyInMemoryPagination(orderedRows, options.limit, options.offset)
+  }
+
+  /**
+   * Whether SQLite orders every stored row by these clauses exactly as the
+   * in-memory sort does. Each field needs an expression index from
+   * `ensureIndex` with its current index of irregular rows, which must be
+   * empty. The ends of the expression index rule out a field mixing numbers
+   * and text, and text needs lexical sort. SQLite answers these checks from
+   * the two indexes, not the table.
+   */
+  private async sortsAsInMemory(
+    tableName: string,
+    orderBy: IR.OrderBy,
+    driver: SQLiteDriver,
+  ): Promise<boolean> {
+    const tableSql = quoteIdentifier(tableName)
+    for (const clause of orderBy) {
+      const jsonPath = plainFieldPath(clause.expression)
+      if (!jsonPath) return false
+      const fieldSql = compileSqlExpression(
+        clause.expression,
+        `index-expression`,
+      ).sql
+      const irregularSql = irregularOrderRowsSql(jsonPath)
+      // An index built by a release with another predicate does not count.
+      const [indexes] = await driver.query<{ found: number }>(
+        `SELECT 1 AS found
+         FROM persisted_index_registry AS registry
+         JOIN sqlite_master AS field
+           ON field.type = 'index' AND field.tbl_name = ? AND field.name = registry.index_name
+         JOIN sqlite_master AS irregular
+           ON irregular.type = 'index' AND irregular.tbl_name = ?
+           AND irregular.name = registry.index_name || '${IRREGULAR_ROWS_INDEX_SUFFIX}'
+           AND instr(irregular.sql, ?) > 0
+         WHERE registry.removed = 0 AND registry.expression_sql = ?
+         LIMIT 1`,
+        [tableName, tableName, irregularSql, JSON.stringify([fieldSql])],
+      )
+      if (!indexes) return false
+      const [values] = await driver.query<{
+        irregular: number
+        low: string
+        high: string
+      }>(
+        `SELECT
+           EXISTS (SELECT 1 FROM ${tableSql} WHERE ${irregularSql}) AS irregular,
+           typeof((SELECT min(${fieldSql}) FROM ${tableSql})) AS low,
+           typeof((SELECT max(${fieldSql}) FROM ${tableSql})) AS high`,
+      )
+      const lexical =
+        clause.compareOptions.stringSort !== `locale` &&
+        clause.compareOptions.stringSort !== `custom`
+      if (
+        !values ||
+        values.irregular ||
+        (values.low !== `null` && values.low !== values.high) ||
+        (values.high === `text` && !lexical)
+      )
+        return false
+    }
+    return true
   }
 
   private applyInMemoryWhere(
@@ -4213,11 +4468,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
          WHERE collection_id = ?`,
         [collectionId],
       )
-      for (const row of persistedIndexes) {
-        await transactionDriver.exec(
-          `DROP INDEX IF EXISTS ${quoteIdentifier(row.index_name)}`,
-        )
-      }
+      for (const row of persistedIndexes)
+        await dropPersistedIndex(transactionDriver, row.index_name)
 
       await transactionDriver.run(
         `DELETE FROM collection_expected_keys

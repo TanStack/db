@@ -474,6 +474,7 @@ const staticOracleProperties = [
   `sqlite-persistence.request-local-failure-buffered-source`,
   `sqlite-persistence.optimistic-history`,
   `sqlite-persistence.setup-reopen`,
+  `sqlite-persistence.ordered-page`,
   `adapter.handler-types`,
   `adapter-conformance.eager-live-source.reference`,
   `adapter-conformance.eager-live-source.reference.per-change`,

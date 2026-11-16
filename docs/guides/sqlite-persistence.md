@@ -142,6 +142,8 @@ await reopenedDatabase.close?.()
 
 SQLite persistence reads stored rows with SQL, then applies the query in JavaScript, which decides the result. A `where` clause narrows the SQL read when SQLite can keep every row that JavaScript keeps. Equality with a string, boolean, BigInt or safe-integer number narrows it, and so does membership in a list of strings, BigInts or safe-integer numbers. A number also matches a stored `Date` at that epoch millisecond, as it does in JavaScript. An index from `createIndex` on the field lets SQLite find those rows without scanning the table.
 
+An ordered query with `limit` reads only its page when SQLite can order rows exactly as JavaScript does. Its `where` must be absent or combine such equality and membership tests with `and`, and every `orderBy` field needs an index from `createIndex`. That field must hold only integers and booleans, or only text sorted with `stringSort: 'lexical'` that has no character at U+E000 or above, and the Collection keys must follow the same text rule. Nulls and missing values are fine. Otherwise the query reads every matching row and pages in JavaScript.
+
 ## Temporal values
 
 SQLite persistence preserves `Temporal.Instant` and `Temporal.PlainDate` as
