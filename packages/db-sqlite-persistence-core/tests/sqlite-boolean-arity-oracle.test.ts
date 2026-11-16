@@ -926,7 +926,7 @@ oracleProperty({
   law: {
     statement: `The retained independent SQLite model judges the existing legal histories at every original observation checkpoint.`,
     authority: `The existing contract and authority stated beside this oracle's model.`,
-    limits: `The existing bounded SQLite histories, production paths, and observations; no expanded coverage claim.`,
+    limits: `The existing bounded SQLite histories, production paths, and observations, with declared reach only for the number equality atoms.`,
   },
   owns: [`src/sqlite-core-adapter.ts`],
   histories: {

@@ -55,16 +55,21 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * order fields `rank` and `title` mostly hold integers, booleans, plain text,
  * null or nothing, and sometimes a value that breaks the work law's premise:
  * a Date, BigInt, NaN, fraction, object or text in `rank`; U+E000, an astral
- * character, a lone surrogate, U+FFFD or NUL in `title`. The filter field `status`
- * stores every kind of value that SQLite compares with the number 1: 1, a
- * Date of epoch 1, `1n`, `true`, `'1'` and the epoch's ISO text, and a Date at
- * the latest valid epoch, 8.64e15, which a literal of that epoch and of the
- * next integer test from both sides. A key is
- * `k`, an optional U+E000 or astral character, and the row's index, so two
- * high keys differ first at that character. The request draws zero to two
- * `eq` (either operand order), `in` (zero to three literals) or range leaves
- * over five fields, one or two order terms over `rank`, `title` and the
- * unindexed `due`, each direction, null placement and string sort (default,
+ * character, a lone surrogate, U+FFFD or NUL in `title`. The filter field
+ * `status` stores every kind of value that SQLite compares with the number 1:
+ * 1, a Date of epoch 1, `1n`, `true`, `'1'` and the epoch's ISO text, and a
+ * Date at the latest valid epoch, 8.64e15, which a literal of that epoch and
+ * of the next integer test from both sides. A key is `k`, an optional U+E000
+ * or astral character, and the row's index, so two high keys differ first at
+ * that character.
+ *
+ * The request draws zero to two leaves over five fields: `eq` in either
+ * operand order, `in` with zero to three literals, a range, or the constant
+ * `true`. They form the `where` without an `and` (no `where` for no leaf),
+ * always under one `and` (`and()` for no leaf), or with the first leaf in a
+ * nested `and`; the law reads an empty conjunction as an absent `where`. It
+ * draws one or two order terms over `rank`, `title`, the unindexed `due` or
+ * the constant 1, each direction, null placement and string sort (default,
  * lexical, locale, or a custom reverse comparator), a limit of 0..8 or one
  * million, and no offset or one of 0..8.
  *
@@ -72,18 +77,19 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * memory` otherwise. Four constructed histories splice the premise into a
  * generated history: they move the order onto `rank` or `title`, replace
  * premise-breaking values and keys with plain ones, and make each leaf exact,
- * keeping the generated rows, ties, nulls, directions, limit and offset; the
- * third also adds an exact leaf, and the fourth sets a zero limit or a zero
- * offset over at least two matching rows. Four constructed histories then
- * break the premise in one way each: one premise-breaking order value, two
- * tied rows with high keys, one inexact leaf (a range, a fraction, or a
- * membership whose two kinds both match stored values), or an order on `due`
- * or under a locale or custom sort. Each builder records the states its history must enter, and
+ * keeping the generated rows, ties, nulls, directions, `where` shape, limit
+ * and offset; the third also adds an exact leaf, and the fourth sets a zero
+ * limit or a zero offset over at least two matching rows. Four constructed
+ * histories then break the premise in one way each: one premise-breaking
+ * order value, two tied rows with high keys, one inexact leaf (a range, a
+ * fraction, the constant `true`, or a membership whose two kinds both match
+ * stored values), or an order on `due` or the constant, or under a locale or
+ * custom sort. Each builder records the states its history must enter, and
  * the check rejects a history that missed one, so generated and shrunk
- * constructions are judged as well as each campaign's seeded one.
- * Fixed histories keep the datasets that once rejected production mutants.
- * Excluded: cursors, joins, expression order fields, and stored values that
- * another library wrote.
+ * constructions are judged as well as each campaign's seeded one. Fixed
+ * histories keep the datasets that once rejected production mutants.
+ * Excluded: cursors, joins, orders on a computed field such as
+ * `lower(title)`, and stored values that another library wrote.
  *
  * Driver and checkpoint: the real adapter runs against `node:sqlite` with a
  * counting driver, which records the rows each Collection SELECT returns. It
@@ -95,8 +101,9 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * declared state the history entered.
  *
  * Calibration: trace mutants drop a Date match, ignore the offset, read every
- * match for a page, and omit the state of each constructed history. A driver mutant pages
- * the unpaged request's SQL read, candidates and SQL order included. The page
+ * match for a page, and omit the state of each constructed history. A driver
+ * mutant pages the unpaged request's SQL read, candidates and SQL order
+ * included. The page
  * law rejects it on an order field that mixes numbers and text, and on a
  * `where` whose candidates include BigInt, boolean and ISO-text values that
  * JavaScript removes.
@@ -1151,7 +1158,7 @@ oracleProperty({
   law: {
     statement: `At loadSubset return, an ordered page holds exactly the unpaged request's rows at its offset, in order; the unpaged request keeps exactly the rows whose fields equal the literals (a Date equals its epoch milliseconds); and when the where is a conjunction of exact equality or membership leaves and every order field is indexed and holds only integers and booleans, or only text below U+D800 sorted lexically, with keys of that text, SQLite returns no more stored rows than the page holds.`,
     authority: `The SQLite adapter's contract that the JavaScript evaluator and in-memory sort decide loadSubset results with SQL as a candidate read (PR #1997); the accepted goal that a paged live query reads its page, not every matching row.`,
-    limits: `Up to twelve rows and one request per history on node:sqlite in one process; no cursors, joins, expression order fields, native hosts or OPFS. The comparator is not modeled: order comes from the unpaged request.`,
+    limits: `Up to twelve rows and one request per history on node:sqlite in one process; no cursors, joins, orders on a computed field, native hosts or OPFS. The comparator is not modeled: order comes from the unpaged request.`,
   },
   owns: [`src/sqlite-core-adapter.ts`],
   histories: {
