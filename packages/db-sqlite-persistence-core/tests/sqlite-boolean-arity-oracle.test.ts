@@ -31,7 +31,7 @@ import type { Read } from './sqlite-boolean-arity-support'
  * SQLite compiler. `canPush` describes this oracle's deliberately small
  * known-boolean domain, not production's support classifier.
  *
- * Grammar: AND/OR roots have 0..3 children; a child is one of twenty-one atoms or
+ * Grammar: AND/OR roots have 0..3 children; a child is one of twenty-five atoms or
  * a nested AND/OR of 0..3 atoms. The bounded matrix exhausts all atom pairs
  * for root arity 0..2 and samples triples and nested forms. Removing operator
  * choice loses empty true/false; removing arity 0 loses both identities;
@@ -39,8 +39,15 @@ import type { Read } from './sqlite-boolean-arity-support'
  * loses SQL under-selection; removing unsupported atoms loses fallback; and
  * removing nesting loses inner empty-OR work. Unicode LIKE/ILIKE, tagged
  * NaN ordering, lone-surrogate equality, and null-vs-missing under NOT
- * challenge SQL equivalence. Fixed mixed AND cases cover child order,
- * nesting, an unsafe OR sibling, and final rejection of an indexed candidate.
+ * challenge SQL equivalence. Number equality and membership atoms read a
+ * field that stores Dates beside numbers: the evaluator equates a Date with
+ * its epoch milliseconds, while SQLite holds the Date as ISO text. Their
+ * coerced twins read a field that also stores 1n, true, '1', the epoch's ISO
+ * text, NaN, 1.5 and null, which SQLite may admit and JavaScript must reject.
+ * Removing the Dates loses the Date-as-text candidate; removing the coerced
+ * field loses the extra candidates JavaScript must reject. Fixed mixed AND
+ * cases cover child order, nesting, an unsafe OR sibling, and final rejection
+ * of an indexed candidate.
  * A fixed 50,582-string-ID OR scope checks that both indexed branches retain
  * SQL candidate filtering with two bindings. Lone-surrogate, NUL, and paired
  * surrogate IDs challenge the JSON boundary used by that large scope.
@@ -66,9 +73,11 @@ import type { Read } from './sqlite-boolean-arity-support'
  * This work observation does not assert a latency or total-allocation bound.
  *
  * Limits: simple rows, one SQLite process, ordinary loads and one cursor
- * composition. No native host, OPFS worker, multi-process WAL, ordering
- * comparator, typed bigint/date expression, index-expression, arbitrary
- * depth beyond the fixed 80-level work witness, or unbounded arity claim.
+ * composition. Number atoms use safe integers; fractional and unsafe numbers
+ * keep a full read and are not exercised here. No native host, OPFS worker,
+ * multi-process WAL, ordering comparator, typed bigint/date expression
+ * beyond number equality, index-expression, arbitrary depth beyond the fixed
+ * 80-level work witness, or unbounded arity claim.
  * Raw-row work and the one named-index plan are not elapsed-time assertions.
  */
 
@@ -94,6 +103,10 @@ type Atom =
   | 'not-is-undefined'
   | 'not-is-null'
   | 'like-emoji-two'
+  | 'eq-number'
+  | 'in-number'
+  | 'eq-number-coerced'
+  | 'in-number-coerced'
 type Model =
   | { kind: 'atom'; atom: Atom }
   | {
@@ -106,6 +119,8 @@ type Row = {
   name: string
   n: number
   x?: null
+  at: number | Date
+  coerced?: unknown
 }
 type Failure = {
   law: 'public' | 'work' | 'compile' | 'candidate'
@@ -116,12 +131,30 @@ type Failure = {
   read: Read
 }
 
+// Stored values that SQLite compares with the number 1 in some way: equal
+// numbers and Dates, coerced BigInt and boolean, the epoch's ISO text, NaN,
+// a fraction, and null.
+const coercedValues: Array<unknown> = [
+  1,
+  new Date(1),
+  1n,
+  true,
+  '1',
+  new Date(1).toISOString(),
+  Number.NaN,
+  1.5,
+  null,
+  new Date(2),
+  2,
+]
 const fixture: Array<Row> = Array.from({ length: 20 }, (_, index) => ({
   id: `row-${index + 1}`,
   'meta-field': index === 0 ? 'yes' : 'no',
   name: ['Ä', 'Äland', 'Alpha', '😀', '\uD800'][index] ?? 'other',
   n: index === 0 ? Number.NaN : index - 1,
   ...(index === 0 ? { x: null } : {}),
+  at: [new Date(7), 7, 8, new Date(8), 70][index] ?? index * 100,
+  ...(index < coercedValues.length ? { coerced: coercedValues[index] } : {}),
 }))
 const atoms: Array<Atom> = [
   'first',
@@ -145,12 +178,22 @@ const atoms: Array<Atom> = [
   'not-is-undefined',
   'not-is-null',
   'like-emoji-two',
+  'eq-number',
+  'in-number',
+  'eq-number-coerced',
+  'in-number-coerced',
 ]
 const atom = (name: Atom): Model => ({ kind: 'atom', atom: name })
 const op = (kind: 'and' | 'or', ...children: Array<Model>): Model => ({
   kind,
   children,
 })
+
+// The evaluator compares a Date by its epoch milliseconds and every other
+// value by strict equality, so 1n, true and '1' never equal the number 1.
+function equalsNumber(value: unknown, target: number): boolean {
+  return value instanceof Date ? value.getTime() === target : value === target
+}
 
 function valueOf(model: Model, row: Row): unknown {
   if (model.kind === 'atom') {
@@ -194,6 +237,16 @@ function valueOf(model: Model, row: Row): unknown {
         return row.x !== null
       case 'like-emoji-two':
         return row.id === 'row-4'
+      case 'eq-number':
+        return equalsNumber(row.at, 7)
+      case 'in-number':
+        return equalsNumber(row.at, 8) || equalsNumber(row.at, 70)
+      case 'eq-number-coerced':
+        return row.coerced == null ? null : equalsNumber(row.coerced, 1)
+      case 'in-number-coerced':
+        return row.coerced == null
+          ? null
+          : equalsNumber(row.coerced, 1) || equalsNumber(row.coerced, 2)
     }
   }
   const values = model.children.map((child) => valueOf(child, row))
@@ -229,6 +282,8 @@ function canPush(model: Model): boolean {
       'not-is-undefined',
       'not-is-null',
       'like-emoji-two',
+      'eq-number-coerced',
+      'in-number-coerced',
     ].includes(model.atom)
   }
   return model.children.every(canPush)
@@ -312,6 +367,20 @@ function toIR(model: Model): IR.BasicExpression {
         return new IR.Func('like', [
           new IR.PropRef(['name']),
           new IR.Value('__'),
+        ])
+      case 'eq-number':
+        return new IR.Func('eq', [new IR.PropRef(['at']), new IR.Value(7)])
+      case 'in-number':
+        return new IR.Func('in', [
+          new IR.PropRef(['at']),
+          new IR.Value([8, 70]),
+        ])
+      case 'eq-number-coerced':
+        return new IR.Func('eq', [new IR.Value(1), new IR.PropRef(['coerced'])])
+      case 'in-number-coerced':
+        return new IR.Func('in', [
+          new IR.PropRef(['coerced']),
+          new IR.Value([1, 2]),
         ])
     }
   }
@@ -540,6 +609,10 @@ async function judgeBooleanHistory(history: Model | undefined) {
       'not-is-undefined',
       'not-is-null',
       'like-emoji-two',
+      'eq-number',
+      'in-number',
+      'eq-number-coerced',
+      'in-number-coerced',
     ] as const) {
       directFailures.push(...(await check(atom(name))))
     }

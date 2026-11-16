@@ -3920,9 +3920,17 @@ the original issue ledger.
 is the primary executable owner for bounded `and`/`or` predicate arity at
 `SQLiteCorePersistenceAdapter.loadSubset` return. Its independent three-valued
 model compares public keys while a `node:sqlite` driver records SQL and raw row
-work. The 960-case matrix and paired fixed and unseeded campaigns cover root
+work. The 1,336-case matrix and paired fixed and unseeded campaigns cover root
 arity 0–3, one nested operator, boolean and nonboolean operands, safe selective
-predicates, and sound candidate supersets for unsafe predicates. Eight direct cases challenge Unicode `ilike`
+predicates, and sound candidate supersets for unsafe predicates. Number
+equality and membership atoms read a field that stores Dates beside numbers.
+Safe-integer equality now emits a candidate that admits both the number and the
+Date's ISO text, so these atoms were RED for row work on the prior compiler
+(20 raw rows and no `WHERE` in 62 matrix cases and both direct cases) and are
+GREEN with exact candidates. Coerced twins add stored `1n`, `true`, `'1'`, the
+epoch's ISO text, `NaN`, `1.5`, and null. SQL admits some of them and
+JavaScript rejects them; their public rows matched before and after the change.
+Fractional and unsafe numbers keep a full read. Eight direct cases challenge Unicode `ilike`
 and `like` patterns, tagged `NaN` comparison, lone-surrogate equality, and
 null-vs-missing under `not`. Paired- and lone-surrogate equality controls
 retain SQL row-work reduction.
@@ -3957,10 +3965,13 @@ other SQLite hosts, and elapsed-time gains remain outside this witness.
 The Node expression-index oracle checks the receiving SQLite query, raw
 candidate keys, public keys, and named-index plan. Its generated indexed
 grammar uses string equality, BigInt membership, numeric range, and string
-conjunction. Focused Date-epoch witnesses keep numeric equality and numeric
-membership on the JavaScript fallback path: a stored `Date(1)` matches numeric
-`1` in the row evaluator but is ISO text in the SQLite expression index. Fixed
-lower-wrapped BigInt membership and lone-surrogate coalesce witnesses also
+conjunction. Its fixed-filter property adds safe-integer equality on a
+top-level and a nested field. Both were RED on the prior compiler, which sent
+no number predicate to SQLite, and are GREEN with exact candidates, the bound
+number, and the named index. A stored `Date(1)` matches numeric `1` in the row
+evaluator and is ISO text in the SQLite expression index, so the number
+candidate admits both encodings. Fractional numbers keep the JavaScript
+fallback path. Fixed lower-wrapped BigInt membership and lone-surrogate coalesce witnesses also
 retain fallback: SQLite converts the former to text and encodes the latter's
 inline fallback differently from a JSON-extracted binding. Integer-bound
 range cases include adjacent fractional values and tagged or mixed scalars;

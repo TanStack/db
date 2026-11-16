@@ -138,6 +138,10 @@ await reopenedTodos.cleanup()
 await reopenedDatabase.close?.()
 ```
 
+## Query reads
+
+SQLite persistence reads stored rows with SQL, then applies the query in JavaScript, which decides the result. A `where` clause narrows the SQL read when SQLite can keep every row that JavaScript keeps. Equality with a string, boolean, BigInt or safe-integer number narrows it, and so does membership in a list of strings, BigInts or safe-integer numbers. A number also matches a stored `Date` at that epoch millisecond, as it does in JavaScript. An index from `createIndex` on the field lets SQLite find those rows without scanning the table.
+
 ## Temporal values
 
 SQLite persistence preserves `Temporal.Instant` and `Temporal.PlainDate` as

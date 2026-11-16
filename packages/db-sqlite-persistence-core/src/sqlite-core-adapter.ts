@@ -931,6 +931,36 @@ function isSafeEqualityLiteral(value: unknown): boolean {
   )
 }
 
+const MAX_DATE_EPOCH_MS = 8.64e15
+
+/**
+ * The SQLite values that a stored match of a safe-integer equality can take.
+ * The row evaluator equates a Date with its epoch milliseconds, and the adapter
+ * stores a Date as its ISO string. Other numbers return undefined and keep the
+ * full read, because their match would depend on how SQLite rounds JSON reals.
+ */
+function numberEqualityCandidates(
+  value: unknown,
+): Array<number | string> | undefined {
+  if (typeof value !== `number` || !Number.isSafeInteger(value))
+    return undefined
+  return Math.abs(value) <= MAX_DATE_EPOCH_MS
+    ? [value, new Date(value).toISOString()]
+    : [value]
+}
+
+/** One JSON binding keeps a large membership within the host parameter limit. */
+function compileFieldMembership(
+  field: IR.PropRef,
+  values: ReadonlyArray<number | string>,
+): CompiledSqlFragment {
+  return {
+    supported: true,
+    sql: `(${compileSqlExpression(field, `index-expression`).sql} IN (SELECT value FROM json_each(?)))`,
+    params: [JSON.stringify(values)],
+  }
+}
+
 function isSafeCoalesceOperand(
   expression: IR.BasicExpression | undefined,
 ): boolean {
@@ -1422,6 +1452,19 @@ function compileSafeSqlPrefilter(
       ) {
         return compiled
       }
+      const numberField =
+        left?.type === `ref` ? left : right?.type === `ref` ? right : undefined
+      const numberLiteral = numberField === left ? right : left
+      const numberValues =
+        numberLiteral?.type === `val`
+          ? numberEqualityCandidates(numberLiteral.value)
+          : undefined
+      if (numberField && numberValues)
+        return {
+          supported: true,
+          sql: `(${compileSqlExpression(numberField, `index-expression`).sql} IN (${numberValues.map(() => `?`).join(`, `)}))`,
+          params: numberValues,
+        }
       const lower =
         left?.type === `func` && left.name === `lower`
           ? left
@@ -1456,15 +1499,16 @@ function compileSafeSqlPrefilter(
     if (left?.type === `ref`) {
       if (right.value.every((value) => typeof value === `bigint`))
         return compiled
-      if (right.value.every((value) => typeof value === `string`)) {
-        // Both sides pass through SQLite's JSON decoder; one binding keeps
-        // large string scopes within the host parameter limit, even in OR.
-        return {
-          supported: true,
-          sql: `(${compileSqlExpression(left, `index-expression`).sql} IN (SELECT value FROM json_each(?)))`,
-          params: [JSON.stringify(right.value)],
-        }
-      }
+      // Both sides pass through SQLite's JSON decoder.
+      if (right.value.every((value) => typeof value === `string`))
+        return compileFieldMembership(left, right.value)
+      const numberValues = right.value.map(numberEqualityCandidates)
+      if (
+        numberValues.every(
+          (values): values is Array<number | string> => values !== undefined,
+        )
+      )
+        return compileFieldMembership(left, numberValues.flat())
     }
   }
   if (

@@ -13,10 +13,12 @@
  * targets are -10_000..10_000; generated BigInts use the same bounds plus a
  * 900-member suffix. Fixed cases cover constant-bearing coalesce indexes,
  * BigInt ranges/IN within SQLite's signed-integer domain, and indexed numeric
- * comparisons with tagged values, null, missing, and text controls. Numeric
- * equality/IN, lower-wrapped BigInt IN, lone-surrogate coalesce, Date ranges,
- * strftime, and add keep full reads where SQLite could exclude a JavaScript
- * match. Integer threshold checks include adjacent fractional values.
+ * comparisons with tagged values, null, missing, and text controls. Fixed
+ * filters include safe-integer equality on a top-level and a nested field,
+ * whose candidate also admits a Date's ISO text. Fractional equality,
+ * lower-wrapped BigInt IN, lone-surrogate coalesce, Date ranges, strftime,
+ * and add keep full reads where SQLite could exclude a JavaScript match.
+ * Integer threshold checks include adjacent fractional values.
  * Fixed candidate-superset cases cover large Number versus BigInt bounds,
  * numeric object keys and array indexes through three digit segments, and
  * Unicode lowercase matches around NUL. The numeric-path cases also check
@@ -873,6 +875,16 @@ describe(`SQLite expression-index oracle`, () => {
         path: [`threadId`],
         target: `thread-'1`,
         distractors: [`thread-2`, `thread-3`],
+      } satisfies OracleCase,
+      {
+        path: [`priority`],
+        target: 7,
+        distractors: [8, 70],
+      } satisfies OracleCase,
+      {
+        path: [`meta`, `order`],
+        target: -3,
+        distractors: [0, 3],
       } satisfies OracleCase,
     ],
 
