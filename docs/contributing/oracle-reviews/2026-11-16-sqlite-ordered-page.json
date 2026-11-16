@@ -1,0 +1,1924 @@
+{
+ "head": "33fb6658",
+ "seed": 1997,
+ "command": "pnpm gap-report --package packages/db-sqlite-persistence-core --source src/sqlite-core-adapter.ts --seed 1997 --only <mutants of the changed functions>",
+ "open": [
+  {
+   "key": "src/sqlite-core-adapter.ts#numberEqualityCandidates:if-false:if ( ! Number . isSafeInteger ( value ) ) return undefined",
+   "line": 945,
+   "function": "numberEqualityCandidates",
+   "operator": "if-false",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#exactLiteralKind:binary-swap:return value . includes ( `\\u0000` ) || value . includes ( `\\uFFFD` ) || hasUnpairedSurrogate ( value ) ? undefined : `string`",
+   "line": 959,
+   "function": "exactLiteralKind",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#exactLiteralKind:binary-swap:return value . includes ( `\\u0000` ) || value . includes ( `\\uFFFD` ) || hasUnpairedSurrogate ( value ) ? undefined : `string`~2",
+   "line": 958,
+   "function": "exactLiteralKind",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#exactLiteralKind:value-undefined:return value . includes ( `\\u0000` ) || value . includes ( `\\uFFFD` ) || hasUnpairedSurrogate ( value ) ? undefined : `string`",
+   "line": 958,
+   "function": "exactLiteralKind",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#exactLiteralKind:value-undefined:return value . includes ( `\\u0000` ) || value . includes ( `\\uFFFD` ) || hasUnpairedSurrogate ( value ) ? undefined : `string`~2",
+   "line": 959,
+   "function": "exactLiteralKind",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#exactLiteralKind:value-undefined:return value . includes ( `\\u0000` ) || value . includes ( `\\uFFFD` ) || hasUnpairedSurrogate ( value ) ? undefined : `string`~3",
+   "line": 960,
+   "function": "exactLiteralKind",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#exactGuards:value-undefined:if ( ! kind || ! jsonPath || ! compileSafeSqlPrefilter ( expression ) || literals . some ( ( value ) => exactLiteralKind ( value ) !== kind ) ) return undefined~2",
+   "line": 1045,
+   "function": "exactGuards",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#indexedFieldPath:if-false:if ( spec . whereSql || spec . expressionSql . length !== 1 ) return undefined",
+   "line": 1081,
+   "function": "indexedFieldPath",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "branch-never-taken",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#indexedFieldPath:binary-swap:if ( spec . whereSql || spec . expressionSql . length !== 1 ) return undefined",
+   "line": 1081,
+   "function": "indexedFieldPath",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#isPageBound:binary-swap:return Number . isSafeInteger ( value ) && value ! >= 0",
+   "line": 1094,
+   "function": "isPageBound",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#dropPersistedIndex:value-undefined:await driver . exec ( `DROP INDEX IF EXISTS ${ quoteIdentifier ( indexName ) } `)",
+   "line": 1101,
+   "function": "dropPersistedIndex",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#dropPersistedIndex:value-undefined:await driver . exec ( `DROP INDEX IF EXISTS ${ quoteIdentifier ( indexName ) } `)~2",
+   "line": 1101,
+   "function": "dropPersistedIndex",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#dropPersistedIndex:value-undefined:await driver . exec ( `DROP INDEX IF EXISTS ${ quoteIdentifier ( `${ indexName } $ { IRREGULAR_ROWS_INDEX_SUFFIX } `)}` , )",
+   "line": 1102,
+   "function": "dropPersistedIndex",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#dropPersistedIndex:value-undefined:await driver . exec ( `DROP INDEX IF EXISTS ${ quoteIdentifier ( `${ indexName } $ { IRREGULAR_ROWS_INDEX_SUFFIX } `)}` , )~2",
+   "line": 1103,
+   "function": "dropPersistedIndex",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileFieldMembership:field-drop:return { supported : true , sql : `(${ compileSqlExpression ( field , `index-expression` ) . sql } IN ( SELECT value FROM json_each ( ? ) ) ) `, params: [JSON.stringify(values)], }",
+   "line": 1113,
+   "function": "compileFieldMembership",
+   "operator": "field-drop",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileFieldMembership:bool-flip:return { supported : true , sql : `(${ compileSqlExpression ( field , `index-expression` ) . sql } IN ( SELECT value FROM json_each ( ? ) ) ) `, params: [JSON.stringify(values)], }",
+   "line": 1113,
+   "function": "compileFieldMembership",
+   "operator": "bool-flip",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-false:if ( expression . type === `ref` ) return undefined",
+   "line": 1501,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:field-drop:return { supported : true , sql : selected . map ( ( { sql } ) => `(${ sql } ) `) .join(expression.name === ` and ` ? ` AND ` : ` OR `), params: selected.flatMap(({ params }) => params), }",
+   "line": 1515,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "field-drop",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:bool-flip:return { supported : true , sql : selected . map ( ( { sql } ) => `(${ sql } ) `) .join(expression.name === ` and ` ? ` AND ` : ` OR `), params: selected.flatMap(({ params }) => params), }",
+   "line": 1515,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "bool-flip",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-false:if ( hasDeepNumericPath ( expression ) ) return undefined",
+   "line": 1525,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "branch-never-taken",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:if ( hasDeepNumericPath ( expression ) ) return undefined",
+   "line": 1525,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-false:if ( expression . name === `not` && expression . args . length === 1 && left && nativeComparisonRef ( left ) ) { return { ... compiled , sql : `COALESCE(${ compiled . sql } , 1 ) ` } }",
+   "line": 1530,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( expression . name === `not` && expression . args . length === 1 && left && nativeComparisonRef ( left ) ) { return { ... compiled , sql : `COALESCE(${ compiled . sql } , 1 ) ` } }~2",
+   "line": 1531,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( expression . name === `not` && expression . args . length === 1 && left && nativeComparisonRef ( left ) ) { return { ... compiled , sql : `COALESCE(${ compiled . sql } , 1 ) ` } }~3",
+   "line": 1530,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( expression . name === `not` && expression . args . length === 1 && left && nativeComparisonRef ( left ) ) { return { ... compiled , sql : `COALESCE(${ compiled . sql } , 1 ) ` } }~4",
+   "line": 1530,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( expression . name === `not` && expression . args . length === 1 && left && nativeComparisonRef ( left ) ) { return { ... compiled , sql : `COALESCE(${ compiled . sql } , 1 ) ` } }~5",
+   "line": 1531,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:if ( expression . name === `not` && expression . args . length === 1 && left && nativeComparisonRef ( left ) ) { return { ... compiled , sql : `COALESCE(${ compiled . sql } , 1 ) ` } }",
+   "line": 1533,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:return-undefined:return { ... compiled , sql : `COALESCE(${ compiled . sql } , 1 ) ` }",
+   "line": 1537,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "return-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:field-drop:return { ... compiled , sql : `COALESCE(${ compiled . sql } , 1 ) ` }",
+   "line": 1537,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "field-drop",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:const nativeRef = nativeComparisonRef ( expression )",
+   "line": 1540,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-false:if ( nativeRef ) { if ( expression . name === `eq` || expression . name === `in` ) return compiled const fieldSql = compileSqlExpression ( nativeRef , `index-expression` ) . sql return { ... compiled , sql : `(${ compiled . sql } OR $ { fieldSql } IS NULL ) ` } }",
+   "line": 1541,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-true:if ( expression . name === `eq` || expression . name === `in` ) return compiled",
+   "line": 1542,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-true",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-false:if ( expression . name === `eq` || expression . name === `in` ) return compiled",
+   "line": 1542,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( expression . name === `eq` || expression . name === `in` ) return compiled",
+   "line": 1542,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( expression . name === `eq` || expression . name === `in` ) return compiled~2",
+   "line": 1542,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( expression . name === `eq` || expression . name === `in` ) return compiled~3",
+   "line": 1542,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:return-undefined:return compiled",
+   "line": 1542,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "return-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:return-undefined:return { ... compiled , sql : `(${ compiled . sql } OR $ { fieldSql } IS NULL ) ` }",
+   "line": 1546,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "return-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:field-drop:return { ... compiled , sql : `(${ compiled . sql } OR $ { fieldSql } IS NULL ) ` }",
+   "line": 1546,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "field-drop",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-false:if ( expression . name === `eq` && left ?. type === `ref` && right ?. type === `ref` ) { return { ... compiled , sql : `(CASE WHEN ${ compileNativeRefGuard ( left ) } AND $ { compileNativeRefGuard ( right ) } THEN $ { compiled . sql } ELSE 1 END ) `, } }",
+   "line": 1549,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( expression . name === `eq` && left ?. type === `ref` && right ?. type === `ref` ) { return { ... compiled , sql : `(CASE WHEN ${ compileNativeRefGuard ( left ) } AND $ { compileNativeRefGuard ( right ) } THEN $ { compiled . sql } ELSE 1 END ) `, } }~3",
+   "line": 1549,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:if ( expression . name === `eq` && left ?. type === `ref` && right ?. type === `ref` ) { return { ... compiled , sql : `(CASE WHEN ${ compileNativeRefGuard ( left ) } AND $ { compileNativeRefGuard ( right ) } THEN $ { compiled . sql } ELSE 1 END ) `, } }",
+   "line": 1550,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:if ( expression . name === `eq` && left ?. type === `ref` && right ?. type === `ref` ) { return { ... compiled , sql : `(CASE WHEN ${ compileNativeRefGuard ( left ) } AND $ { compileNativeRefGuard ( right ) } THEN $ { compiled . sql } ELSE 1 END ) `, } }~2",
+   "line": 1551,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:return-undefined:return { ... compiled , sql : `(CASE WHEN ${ compileNativeRefGuard ( left ) } AND $ { compileNativeRefGuard ( right ) } THEN $ { compiled . sql } ELSE 1 END ) `, }",
+   "line": 1555,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "return-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:field-drop:return { ... compiled , sql : `(CASE WHEN ${ compileNativeRefGuard ( left ) } AND $ { compileNativeRefGuard ( right ) } THEN $ { compiled . sql } ELSE 1 END ) `, }",
+   "line": 1557,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "field-drop",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:return { ... compiled , sql : `(CASE WHEN ${ compileNativeRefGuard ( left ) } AND $ { compileNativeRefGuard ( right ) } THEN $ { compiled . sql } ELSE 1 END ) `, }",
+   "line": 1557,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:return { ... compiled , sql : `(CASE WHEN ${ compileNativeRefGuard ( left ) } AND $ { compileNativeRefGuard ( right ) } THEN $ { compiled . sql } ELSE 1 END ) `, }~2",
+   "line": 1557,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-false:if ( [ `gt` , `gte` , `lt` , `lte` ] . includes ( expression . name ) && operands ) { const { field , literal } = operands if ( Number . isSafeInteger ( literal . value ) || typeof literal . value === `bigint` ) { const fieldSql = compileSqlExpression ( field , `index-expression` ) . sql const literalSql = compileSqlExpression ( literal , typeof literal . value === `bigint` ? `index-expression` : `predicate` , ) const greaterSide = ( field === left && [ `gt` , `gte` ] . includes ( expression . name ) ) || ( field === right && [ `lt` , `lte` ] . includes ( expression . name ) ) const unsafeBigInt = typeof literal . value === `bigint` && ! Number . isSafeInteger ( Number ( literal . value ) ) const roundedNumberCandidates = unsafeBigInt ? literal . value > 0n ? ` OR ${ fieldSql } >= $ { Number . MAX_SAFE_INTEGER } ` : ` OR $ { fieldSql } <= - $ { Number . MAX_SAFE_INTEGER } ` : ` ` return { supported: true, sql: greaterSide ? ` ( $ { fieldSql } >= $ { literalSql . sql } OR $ { fieldSql } IS NULL$ { roundedNumberCandidates } ) ` : ` ( $ { fieldSql } <= $ { literalSql . sql } OR $ { fieldSql } IS NULL OR $ { fieldSql } >= '' $ { roundedNumberCandidates } ) `, params: literalSql.params, } } }",
+   "line": 1561,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:if ( [ `gt` , `gte` , `lt` , `lte` ] . includes ( expression . name ) && operands ) { const { field , literal } = operands if ( Number . isSafeInteger ( literal . value ) || typeof literal . value === `bigint` ) { const fieldSql = compileSqlExpression ( field , `index-expression` ) . sql const literalSql = compileSqlExpression ( literal , typeof literal . value === `bigint` ? `index-expression` : `predicate` , ) const greaterSide = ( field === left && [ `gt` , `gte` ] . includes ( expression . name ) ) || ( field === right && [ `lt` , `lte` ] . includes ( expression . name ) ) const unsafeBigInt = typeof literal . value === `bigint` && ! Number . isSafeInteger ( Number ( literal . value ) ) const roundedNumberCandidates = unsafeBigInt ? literal . value > 0n ? ` OR ${ fieldSql } >= $ { Number . MAX_SAFE_INTEGER } ` : ` OR $ { fieldSql } <= - $ { Number . MAX_SAFE_INTEGER } ` : ` ` return { supported: true, sql: greaterSide ? ` ( $ { fieldSql } >= $ { literalSql . sql } OR $ { fieldSql } IS NULL$ { roundedNumberCandidates } ) ` : ` ( $ { fieldSql } <= $ { literalSql . sql } OR $ { fieldSql } IS NULL OR $ { fieldSql } >= '' $ { roundedNumberCandidates } ) `, params: literalSql.params, } } }",
+   "line": 1561,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-true:if ( Number . isSafeInteger ( literal . value ) || typeof literal . value === `bigint` ) { const fieldSql = compileSqlExpression ( field , `index-expression` ) . sql const literalSql = compileSqlExpression ( literal , typeof literal . value === `bigint` ? `index-expression` : `predicate` , ) const greaterSide = ( field === left && [ `gt` , `gte` ] . includes ( expression . name ) ) || ( field === right && [ `lt` , `lte` ] . includes ( expression . name ) ) const unsafeBigInt = typeof literal . value === `bigint` && ! Number . isSafeInteger ( Number ( literal . value ) ) const roundedNumberCandidates = unsafeBigInt ? literal . value > 0n ? ` OR ${ fieldSql } >= $ { Number . MAX_SAFE_INTEGER } ` : ` OR $ { fieldSql } <= - $ { Number . MAX_SAFE_INTEGER } ` : ` ` return { supported: true, sql: greaterSide ? ` ( $ { fieldSql } >= $ { literalSql . sql } OR $ { fieldSql } IS NULL$ { roundedNumberCandidates } ) ` : ` ( $ { fieldSql } <= $ { literalSql . sql } OR $ { fieldSql } IS NULL OR $ { fieldSql } >= '' $ { roundedNumberCandidates } ) `, params: literalSql.params, } }",
+   "line": 1564,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-true",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-false:if ( Number . isSafeInteger ( literal . value ) || typeof literal . value === `bigint` ) { const fieldSql = compileSqlExpression ( field , `index-expression` ) . sql const literalSql = compileSqlExpression ( literal , typeof literal . value === `bigint` ? `index-expression` : `predicate` , ) const greaterSide = ( field === left && [ `gt` , `gte` ] . includes ( expression . name ) ) || ( field === right && [ `lt` , `lte` ] . includes ( expression . name ) ) const unsafeBigInt = typeof literal . value === `bigint` && ! Number . isSafeInteger ( Number ( literal . value ) ) const roundedNumberCandidates = unsafeBigInt ? literal . value > 0n ? ` OR ${ fieldSql } >= $ { Number . MAX_SAFE_INTEGER } ` : ` OR $ { fieldSql } <= - $ { Number . MAX_SAFE_INTEGER } ` : ` ` return { supported: true, sql: greaterSide ? ` ( $ { fieldSql } >= $ { literalSql . sql } OR $ { fieldSql } IS NULL$ { roundedNumberCandidates } ) ` : ` ( $ { fieldSql } <= $ { literalSql . sql } OR $ { fieldSql } IS NULL OR $ { fieldSql } >= '' $ { roundedNumberCandidates } ) `, params: literalSql.params, } }",
+   "line": 1564,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( Number . isSafeInteger ( literal . value ) || typeof literal . value === `bigint` ) { const fieldSql = compileSqlExpression ( field , `index-expression` ) . sql const literalSql = compileSqlExpression ( literal , typeof literal . value === `bigint` ? `index-expression` : `predicate` , ) const greaterSide = ( field === left && [ `gt` , `gte` ] . includes ( expression . name ) ) || ( field === right && [ `lt` , `lte` ] . includes ( expression . name ) ) const unsafeBigInt = typeof literal . value === `bigint` && ! Number . isSafeInteger ( Number ( literal . value ) ) const roundedNumberCandidates = unsafeBigInt ? literal . value > 0n ? ` OR ${ fieldSql } >= $ { Number . MAX_SAFE_INTEGER } ` : ` OR $ { fieldSql } <= - $ { Number . MAX_SAFE_INTEGER } ` : ` ` return { supported: true, sql: greaterSide ? ` ( $ { fieldSql } >= $ { literalSql . sql } OR $ { fieldSql } IS NULL$ { roundedNumberCandidates } ) ` : ` ( $ { fieldSql } <= $ { literalSql . sql } OR $ { fieldSql } IS NULL OR $ { fieldSql } >= '' $ { roundedNumberCandidates } ) `, params: literalSql.params, } }",
+   "line": 1564,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:if ( Number . isSafeInteger ( literal . value ) || typeof literal . value === `bigint` ) { const fieldSql = compileSqlExpression ( field , `index-expression` ) . sql const literalSql = compileSqlExpression ( literal , typeof literal . value === `bigint` ? `index-expression` : `predicate` , ) const greaterSide = ( field === left && [ `gt` , `gte` ] . includes ( expression . name ) ) || ( field === right && [ `lt` , `lte` ] . includes ( expression . name ) ) const unsafeBigInt = typeof literal . value === `bigint` && ! Number . isSafeInteger ( Number ( literal . value ) ) const roundedNumberCandidates = unsafeBigInt ? literal . value > 0n ? ` OR ${ fieldSql } >= $ { Number . MAX_SAFE_INTEGER } ` : ` OR $ { fieldSql } <= - $ { Number . MAX_SAFE_INTEGER } ` : ` ` return { supported: true, sql: greaterSide ? ` ( $ { fieldSql } >= $ { literalSql . sql } OR $ { fieldSql } IS NULL$ { roundedNumberCandidates } ) ` : ` ( $ { fieldSql } <= $ { literalSql . sql } OR $ { fieldSql } IS NULL OR $ { fieldSql } >= '' $ { roundedNumberCandidates } ) `, params: literalSql.params, } }",
+   "line": 1564,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( Number . isSafeInteger ( literal . value ) || typeof literal . value === `bigint` ) { const fieldSql = compileSqlExpression ( field , `index-expression` ) . sql const literalSql = compileSqlExpression ( literal , typeof literal . value === `bigint` ? `index-expression` : `predicate` , ) const greaterSide = ( field === left && [ `gt` , `gte` ] . includes ( expression . name ) ) || ( field === right && [ `lt` , `lte` ] . includes ( expression . name ) ) const unsafeBigInt = typeof literal . value === `bigint` && ! Number . isSafeInteger ( Number ( literal . value ) ) const roundedNumberCandidates = unsafeBigInt ? literal . value > 0n ? ` OR ${ fieldSql } >= $ { Number . MAX_SAFE_INTEGER } ` : ` OR $ { fieldSql } <= - $ { Number . MAX_SAFE_INTEGER } ` : ` ` return { supported: true, sql: greaterSide ? ` ( $ { fieldSql } >= $ { literalSql . sql } OR $ { fieldSql } IS NULL$ { roundedNumberCandidates } ) ` : ` ( $ { fieldSql } <= $ { literalSql . sql } OR $ { fieldSql } IS NULL OR $ { fieldSql } >= '' $ { roundedNumberCandidates } ) `, params: literalSql.params, } }~2",
+   "line": 1565,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const literalSql = compileSqlExpression ( literal , typeof literal . value === `bigint` ? `index-expression` : `predicate` , )",
+   "line": 1570,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const greaterSide = ( field === left && [ `gt` , `gte` ] . includes ( expression . name ) ) || ( field === right && [ `lt` , `lte` ] . includes ( expression . name ) )~2",
+   "line": 1573,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const greaterSide = ( field === left && [ `gt` , `gte` ] . includes ( expression . name ) ) || ( field === right && [ `lt` , `lte` ] . includes ( expression . name ) )~4",
+   "line": 1574,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const greaterSide = ( field === left && [ `gt` , `gte` ] . includes ( expression . name ) ) || ( field === right && [ `lt` , `lte` ] . includes ( expression . name ) )~5",
+   "line": 1574,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:const greaterSide = ( field === left && [ `gt` , `gte` ] . includes ( expression . name ) ) || ( field === right && [ `lt` , `lte` ] . includes ( expression . name ) )~2",
+   "line": 1574,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const unsafeBigInt = typeof literal . value === `bigint` && ! Number . isSafeInteger ( Number ( literal . value ) )",
+   "line": 1576,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const unsafeBigInt = typeof literal . value === `bigint` && ! Number . isSafeInteger ( Number ( literal . value ) )~2",
+   "line": 1576,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:drop-not:const unsafeBigInt = typeof literal . value === `bigint` && ! Number . isSafeInteger ( Number ( literal . value ) )",
+   "line": 1577,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "drop-not",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:const unsafeBigInt = typeof literal . value === `bigint` && ! Number . isSafeInteger ( Number ( literal . value ) )",
+   "line": 1577,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:const unsafeBigInt = typeof literal . value === `bigint` && ! Number . isSafeInteger ( Number ( literal . value ) )~2",
+   "line": 1577,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const roundedNumberCandidates = unsafeBigInt ? literal . value > 0n ? ` OR ${ fieldSql } >= $ { Number . MAX_SAFE_INTEGER } ` : ` OR $ { fieldSql } <= - $ { Number . MAX_SAFE_INTEGER } ` : ` `",
+   "line": 1579,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:return-undefined:return { supported : true , sql : greaterSide ? `(${ fieldSql } >= $ { literalSql . sql } OR $ { fieldSql } IS NULL$ { roundedNumberCandidates } ) ` : ` ( $ { fieldSql } <= $ { literalSql . sql } OR $ { fieldSql } IS NULL OR $ { fieldSql } >= '' $ { roundedNumberCandidates } ) `, params: literalSql.params, }",
+   "line": 1583,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "return-undefined",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:field-drop:return { supported : true , sql : greaterSide ? `(${ fieldSql } >= $ { literalSql . sql } OR $ { fieldSql } IS NULL$ { roundedNumberCandidates } ) ` : ` ( $ { fieldSql } <= $ { literalSql . sql } OR $ { fieldSql } IS NULL OR $ { fieldSql } >= '' $ { roundedNumberCandidates } ) `, params: literalSql.params, }",
+   "line": 1584,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "field-drop",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:bool-flip:return { supported : true , sql : greaterSide ? `(${ fieldSql } >= $ { literalSql . sql } OR $ { fieldSql } IS NULL$ { roundedNumberCandidates } ) ` : ` ( $ { fieldSql } <= $ { literalSql . sql } OR $ { fieldSql } IS NULL OR $ { fieldSql } >= '' $ { roundedNumberCandidates } ) `, params: literalSql.params, }",
+   "line": 1584,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "bool-flip",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( ( ( left ?. type === `ref` || isSafeCoalesceOperand ( left ) ) && right ?. type === `val` && isSafeEqualityLiteral ( right . value ) ) || ( ( right ?. type === `ref` || isSafeCoalesceOperand ( right ) ) && left ?. type === `val` && isSafeEqualityLiteral ( left . value ) ) ) { return compiled }~3",
+   "line": 1594,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:if ( ( ( left ?. type === `ref` || isSafeCoalesceOperand ( left ) ) && right ?. type === `val` && isSafeEqualityLiteral ( right . value ) ) || ( ( right ?. type === `ref` || isSafeCoalesceOperand ( right ) ) && left ?. type === `val` && isSafeEqualityLiteral ( left . value ) ) ) { return compiled }",
+   "line": 1594,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:if ( ( ( left ?. type === `ref` || isSafeCoalesceOperand ( left ) ) && right ?. type === `val` && isSafeEqualityLiteral ( right . value ) ) || ( ( right ?. type === `ref` || isSafeCoalesceOperand ( right ) ) && left ?. type === `val` && isSafeEqualityLiteral ( left . value ) ) ) { return compiled }",
+   "line": 1594,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:if ( ( ( left ?. type === `ref` || isSafeCoalesceOperand ( left ) ) && right ?. type === `val` && isSafeEqualityLiteral ( right . value ) ) || ( ( right ?. type === `ref` || isSafeCoalesceOperand ( right ) ) && left ?. type === `val` && isSafeEqualityLiteral ( left . value ) ) ) { return compiled }~2",
+   "line": 1595,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( ( ( left ?. type === `ref` || isSafeCoalesceOperand ( left ) ) && right ?. type === `val` && isSafeEqualityLiteral ( right . value ) ) || ( ( right ?. type === `ref` || isSafeCoalesceOperand ( right ) ) && left ?. type === `val` && isSafeEqualityLiteral ( left . value ) ) ) { return compiled }~8",
+   "line": 1597,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:if ( ( ( left ?. type === `ref` || isSafeCoalesceOperand ( left ) ) && right ?. type === `val` && isSafeEqualityLiteral ( right . value ) ) || ( ( right ?. type === `ref` || isSafeCoalesceOperand ( right ) ) && left ?. type === `val` && isSafeEqualityLiteral ( left . value ) ) ) { return compiled }~3",
+   "line": 1597,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:if ( ( ( left ?. type === `ref` || isSafeCoalesceOperand ( left ) ) && right ?. type === `val` && isSafeEqualityLiteral ( right . value ) ) || ( ( right ?. type === `ref` || isSafeCoalesceOperand ( right ) ) && left ?. type === `val` && isSafeEqualityLiteral ( left . value ) ) ) { return compiled }~3",
+   "line": 1597,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:if ( ( ( left ?. type === `ref` || isSafeCoalesceOperand ( left ) ) && right ?. type === `val` && isSafeEqualityLiteral ( right . value ) ) || ( ( right ?. type === `ref` || isSafeCoalesceOperand ( right ) ) && left ?. type === `val` && isSafeEqualityLiteral ( left . value ) ) ) { return compiled }~4",
+   "line": 1598,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:field-drop:return { supported : true , sql : `(${ compileSqlExpression ( operands . field , `index-expression` ) . sql } IN ( $ { numberValues . map ( ( ) => `?` ) . join ( `, ` ) } ) ) `, params: numberValues, }",
+   "line": 1607,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "field-drop",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:bool-flip:return { supported : true , sql : `(${ compileSqlExpression ( operands . field , `index-expression` ) . sql } IN ( $ { numberValues . map ( ( ) => `?` ) . join ( `, ` ) } ) ) `, params: numberValues, }",
+   "line": 1607,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "bool-flip",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const lower = left ?. type === `func` && left . name === `lower` ? left : right ?. type === `func` && right . name === `lower` ? right : undefined",
+   "line": 1612,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const lower = left ?. type === `func` && left . name === `lower` ? left : right ?. type === `func` && right . name === `lower` ? right : undefined~2",
+   "line": 1612,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:const lower = left ?. type === `func` && left . name === `lower` ? left : right ?. type === `func` && right . name === `lower` ? right : undefined",
+   "line": 1612,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const lower = left ?. type === `func` && left . name === `lower` ? left : right ?. type === `func` && right . name === `lower` ? right : undefined~3",
+   "line": 1612,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const lower = left ?. type === `func` && left . name === `lower` ? left : right ?. type === `func` && right . name === `lower` ? right : undefined~4",
+   "line": 1614,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const lower = left ?. type === `func` && left . name === `lower` ? left : right ?. type === `func` && right . name === `lower` ? right : undefined~5",
+   "line": 1614,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:const lower = left ?. type === `func` && left . name === `lower` ? left : right ?. type === `func` && right . name === `lower` ? right : undefined~2",
+   "line": 1614,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const lower = left ?. type === `func` && left . name === `lower` ? left : right ?. type === `func` && right . name === `lower` ? right : undefined~6",
+   "line": 1614,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:const literal = lower === left ? right : left",
+   "line": 1617,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-false:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }",
+   "line": 1619,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "branch-never-taken",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }~3",
+   "line": 1621,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }~4",
+   "line": 1620,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }",
+   "line": 1619,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }~7",
+   "line": 1620,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }~2",
+   "line": 1620,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }~8",
+   "line": 1621,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }~3",
+   "line": 1621,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }~9",
+   "line": 1622,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }",
+   "line": 1623,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }~10",
+   "line": 1623,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }~2",
+   "line": 1623,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:drop-not:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }",
+   "line": 1624,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "drop-not",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:if ( lower ?. args . length === 1 && lower . args [ 0 ] ?. type === `ref` && literal ?. type === `val` && typeof literal . value === `string` && [ ... literal . value ] . every ( ( char ) => char . charCodeAt ( 0 ) <= 0x7f ) && ! literal . value . includes ( `\\u0000` ) ) { const lowerSql = compileSqlExpression ( lower , `index-expression` ) . sql return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], } }~3",
+   "line": 1624,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:return-undefined:return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], }",
+   "line": 1627,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "return-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:field-drop:return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], }",
+   "line": 1628,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "field-drop",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:bool-flip:return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], }",
+   "line": 1628,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "bool-flip",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:field-drop:return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], }~2",
+   "line": 1629,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "field-drop",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:field-drop:return { supported : true , sql : `(${ compiled . sql } OR ( $ { lowerSql } >= ? AND $ { lowerSql } GLOB '*[^ -~]*' ) ) `, params: [...compiled.params, literal.value], }~3",
+   "line": 1630,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "field-drop",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( expression . name === `in` && expression . args . length === 2 && right ?. type === `val` && Array . isArray ( right . value ) ) { if ( right . value . length === 0 ) return compiled if ( left ?. type === `ref` ) { if ( right . value . every ( ( value ) => typeof value === `bigint` ) ) return compiled if ( right . value . every ( ( value ) => typeof value === `string` ) ) return compileFieldMembership ( left , right . value ) const numberValues = right . value . map ( numberEqualityCandidates ) if ( numberValues . every ( ( values ) : values is Array < number | string > => values !== undefined , ) ) return compileFieldMembership ( left , numberValues . flat ( ) ) } }~2",
+   "line": 1637,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( expression . name === `in` && expression . args . length === 2 && right ?. type === `val` && Array . isArray ( right . value ) ) { if ( right . value . length === 0 ) return compiled if ( left ?. type === `ref` ) { if ( right . value . every ( ( value ) => typeof value === `bigint` ) ) return compiled if ( right . value . every ( ( value ) => typeof value === `string` ) ) return compileFieldMembership ( left , right . value ) const numberValues = right . value . map ( numberEqualityCandidates ) if ( numberValues . every ( ( values ) : values is Array < number | string > => values !== undefined , ) ) return compileFieldMembership ( left , numberValues . flat ( ) ) } }~3",
+   "line": 1636,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:if ( expression . name === `in` && expression . args . length === 2 && right ?. type === `val` && Array . isArray ( right . value ) ) { if ( right . value . length === 0 ) return compiled if ( left ?. type === `ref` ) { if ( right . value . every ( ( value ) => typeof value === `bigint` ) ) return compiled if ( right . value . every ( ( value ) => typeof value === `string` ) ) return compileFieldMembership ( left , right . value ) const numberValues = right . value . map ( numberEqualityCandidates ) if ( numberValues . every ( ( values ) : values is Array < number | string > => values !== undefined , ) ) return compileFieldMembership ( left , numberValues . flat ( ) ) } }",
+   "line": 1638,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-false:if ( right . value . length === 0 ) return compiled",
+   "line": 1641,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-true:if ( left ?. type === `ref` ) { if ( right . value . every ( ( value ) => typeof value === `bigint` ) ) return compiled if ( right . value . every ( ( value ) => typeof value === `string` ) ) return compileFieldMembership ( left , right . value ) const numberValues = right . value . map ( numberEqualityCandidates ) if ( numberValues . every ( ( values ) : values is Array < number | string > => values !== undefined , ) ) return compileFieldMembership ( left , numberValues . flat ( ) ) }",
+   "line": 1642,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-true",
+   "outcome": "survived",
+   "class": "branch-never-taken",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:if ( left ?. type === `ref` ) { if ( right . value . every ( ( value ) => typeof value === `bigint` ) ) return compiled if ( right . value . every ( ( value ) => typeof value === `string` ) ) return compileFieldMembership ( left , right . value ) const numberValues = right . value . map ( numberEqualityCandidates ) if ( numberValues . every ( ( values ) : values is Array < number | string > => values !== undefined , ) ) return compileFieldMembership ( left , numberValues . flat ( ) ) }",
+   "line": 1642,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:if-false:if ( right . value . every ( ( value ) => typeof value === `bigint` ) ) return compiled",
+   "line": 1643,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "branch-never-taken",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:if ( right . value . every ( ( value ) => typeof value === `bigint` ) ) return compiled",
+   "line": 1643,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:return-undefined:return compiled~4",
+   "line": 1644,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "return-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( expression . name === `like` && expression . args . length === 2 && left ?. type === `ref` && right ?. type === `val` && typeof right . value === `string` && / ^ [ \\ x20 - \\ x7e ] * % $ / . test ( right . value ) && ! right . value . slice ( 0 , - 1 ) . includes ( `%` ) && ! right . value . includes ( `_` ) ) { return compiled }~5",
+   "line": 1660,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( expression . name === `like` && expression . args . length === 2 && left ?. type === `ref` && right ?. type === `val` && typeof right . value === `string` && / ^ [ \\ x20 - \\ x7e ] * % $ / . test ( right . value ) && ! right . value . slice ( 0 , - 1 ) . includes ( `%` ) && ! right . value . includes ( `_` ) ) { return compiled }~6",
+   "line": 1659,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:binary-swap:if ( expression . name === `like` && expression . args . length === 2 && left ?. type === `ref` && right ?. type === `val` && typeof right . value === `string` && / ^ [ \\ x20 - \\ x7e ] * % $ / . test ( right . value ) && ! right . value . slice ( 0 , - 1 ) . includes ( `%` ) && ! right . value . includes ( `_` ) ) { return compiled }~7",
+   "line": 1658,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:if ( expression . name === `like` && expression . args . length === 2 && left ?. type === `ref` && right ?. type === `val` && typeof right . value === `string` && / ^ [ \\ x20 - \\ x7e ] * % $ / . test ( right . value ) && ! right . value . slice ( 0 , - 1 ) . includes ( `%` ) && ! right . value . includes ( `_` ) ) { return compiled }",
+   "line": 1660,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:optional-chain:if ( expression . name === `like` && expression . args . length === 2 && left ?. type === `ref` && right ?. type === `val` && typeof right . value === `string` && / ^ [ \\ x20 - \\ x7e ] * % $ / . test ( right . value ) && ! right . value . slice ( 0 , - 1 ) . includes ( `%` ) && ! right . value . includes ( `_` ) ) { return compiled }~2",
+   "line": 1661,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:if ( expression . name === `like` && expression . args . length === 2 && left ?. type === `ref` && right ?. type === `val` && typeof right . value === `string` && / ^ [ \\ x20 - \\ x7e ] * % $ / . test ( right . value ) && ! right . value . slice ( 0 , - 1 ) . includes ( `%` ) && ! right . value . includes ( `_` ) ) { return compiled }~2",
+   "line": 1664,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileSafeSqlPrefilter:value-undefined:if ( expression . name === `like` && expression . args . length === 2 && left ?. type === `ref` && right ?. type === `val` && typeof right . value === `string` && / ^ [ \\ x20 - \\ x7e ] * % $ / . test ( right . value ) && ! right . value . slice ( 0 , - 1 ) . includes ( `%` ) && ! right . value . includes ( `_` ) ) { return compiled }~3",
+   "line": 1665,
+   "function": "compileSafeSqlPrefilter",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:return-undefined:return { supported : true , sql : `` , params : [ ] , }",
+   "line": 1676,
+   "function": "compileOrderByClauses",
+   "operator": "return-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:field-drop:return { supported : true , sql : `` , params : [ ] , }",
+   "line": 1677,
+   "function": "compileOrderByClauses",
+   "operator": "field-drop",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:bool-flip:return { supported : true , sql : `` , params : [ ] , }",
+   "line": 1677,
+   "function": "compileOrderByClauses",
+   "operator": "bool-flip",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:field-drop:return { supported : true , sql : `` , params : [ ] , }~2",
+   "line": 1678,
+   "function": "compileOrderByClauses",
+   "operator": "field-drop",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:field-drop:return { supported : true , sql : `` , params : [ ] , }~3",
+   "line": 1679,
+   "function": "compileOrderByClauses",
+   "operator": "field-drop",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:if-false:if ( ! compiledExpression . supported ) { return { supported : false , sql : `` , params : [ ] , } }",
+   "line": 1691,
+   "function": "compileOrderByClauses",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "branch-never-taken",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:return-undefined:return { supported : false , sql : `` , params : [ ] , }",
+   "line": 1692,
+   "function": "compileOrderByClauses",
+   "operator": "return-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:field-drop:return { supported : false , sql : `` , params : [ ] , }",
+   "line": 1693,
+   "function": "compileOrderByClauses",
+   "operator": "field-drop",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:bool-flip:return { supported : false , sql : `` , params : [ ] , }",
+   "line": 1693,
+   "function": "compileOrderByClauses",
+   "operator": "bool-flip",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:field-drop:return { supported : false , sql : `` , params : [ ] , }~2",
+   "line": 1694,
+   "function": "compileOrderByClauses",
+   "operator": "field-drop",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:field-drop:return { supported : false , sql : `` , params : [ ] , }~3",
+   "line": 1695,
+   "function": "compileOrderByClauses",
+   "operator": "field-drop",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:delete-call:params . push ( ... compiledExpression . params )",
+   "line": 1699,
+   "function": "compileOrderByClauses",
+   "operator": "delete-call",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:field-drop:ctx = access . claimId ? { ... ctx , cacheGenerationClaimId : access . claimId } : ctx",
+   "line": 3277,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "field-drop",
+   "outcome": "survived",
+   "class": "indeterminate",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:value-undefined:await this . assertCacheGenerationReadClaim ( this . driver , collectionId , ctx ?. cacheGenerationClaimId , )",
+   "line": 3279,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:value-undefined:const whereSql = spec . whereSql ? normalizeIndexSqlFragment ( spec . whereSql ) : undefined",
+   "line": 3297,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:binary-swap:const persistedWhereSql = whereSql ?? null",
+   "line": 3299,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:value-undefined:await this . assertCacheGenerationReadClaim ( transactionDriver , collectionId , ctx ?. cacheGenerationClaimId , )",
+   "line": 3302,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:value-undefined:await this . assertCurrentSchemaVersion ( collectionId , transactionDriver , `create a persisted index` , )",
+   "line": 3307,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:if-false:if ( existing && ( existing . index_name !== indexName || existing . expression_sql !== persistedExpressionSql || existing . where_sql !== persistedWhereSql ) ) { await dropPersistedIndex ( transactionDriver , existing . index_name ) }",
+   "line": 3326,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "branch-never-taken",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:binary-swap:if ( existing && ( existing . index_name !== indexName || existing . expression_sql !== persistedExpressionSql || existing . where_sql !== persistedWhereSql ) ) { await dropPersistedIndex ( transactionDriver , existing . index_name ) }~2",
+   "line": 3328,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:binary-swap:if ( existing && ( existing . index_name !== indexName || existing . expression_sql !== persistedExpressionSql || existing . where_sql !== persistedWhereSql ) ) { await dropPersistedIndex ( transactionDriver , existing . index_name ) }~3",
+   "line": 3327,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:binary-swap:if ( existing && ( existing . index_name !== indexName || existing . expression_sql !== persistedExpressionSql || existing . where_sql !== persistedWhereSql ) ) { await dropPersistedIndex ( transactionDriver , existing . index_name ) }~4",
+   "line": 3327,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:binary-swap:if ( existing && ( existing . index_name !== indexName || existing . expression_sql !== persistedExpressionSql || existing . where_sql !== persistedWhereSql ) ) { await dropPersistedIndex ( transactionDriver , existing . index_name ) }~5",
+   "line": 3328,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:binary-swap:if ( existing && ( existing . index_name !== indexName || existing . expression_sql !== persistedExpressionSql || existing . where_sql !== persistedWhereSql ) ) { await dropPersistedIndex ( transactionDriver , existing . index_name ) }~6",
+   "line": 3329,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:value-undefined:await dropPersistedIndex ( transactionDriver , existing . index_name )",
+   "line": 3334,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:if-true:if ( fieldPath ) { const irregularName = `${ indexName } $ { IRREGULAR_ROWS_INDEX_SUFFIX } ` const irregularSql = irregularOrderRowsSql(fieldPath) const [stored] = await transactionDriver.query<{ sql: string }>( ` SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ? `, [irregularName], ) // A release that changes the predicate rebuilds the index. if (stored && !stored.sql.includes(irregularSql)) await transactionDriver.exec( ` DROP INDEX $ { quoteIdentifier ( irregularName ) } `, ) await transactionDriver.exec( ` CREATE INDEX IF NOT EXISTS $ { quoteIdentifier ( irregularName ) } ON $ { collectionTableSql } ( key ) WHERE $ { irregularSql } `, ) }",
+   "line": 3376,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "if-true",
+   "outcome": "survived",
+   "class": "branch-never-taken",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:if-false:if ( stored && ! stored . sql . includes ( irregularSql ) ) await transactionDriver . exec ( `DROP INDEX ${ quoteIdentifier ( irregularName ) } `, )",
+   "line": 3384,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "branch-never-taken",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:drop-not:if ( stored && ! stored . sql . includes ( irregularSql ) ) await transactionDriver . exec ( `DROP INDEX ${ quoteIdentifier ( irregularName ) } `, )",
+   "line": 3384,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "drop-not",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:value-undefined:if ( stored && ! stored . sql . includes ( irregularSql ) ) await transactionDriver . exec ( `DROP INDEX ${ quoteIdentifier ( irregularName ) } `, )",
+   "line": 3384,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:value-undefined:await transactionDriver . exec ( `DROP INDEX ${ quoteIdentifier ( irregularName ) } `, )",
+   "line": 3385,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.ensureIndexUnscheduled:value-undefined:await transactionDriver . exec ( `DROP INDEX ${ quoteIdentifier ( irregularName ) } `, )~2",
+   "line": 3386,
+   "function": "SQLiteCorePersistenceAdapter.ensureIndexUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:value-undefined:const access = resolvePersistedStorageTarget ( target , ctx ?. cacheGenerationClaimId , )",
+   "line": 3412,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:optional-chain:const access = resolvePersistedStorageTarget ( target , ctx ?. cacheGenerationClaimId , )",
+   "line": 3414,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "optional-chain",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:field-drop:ctx = access . claimId ? { ... ctx , cacheGenerationClaimId : access . claimId } : ctx",
+   "line": 3418,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "field-drop",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:value-undefined:await this . assertCacheGenerationReadClaim ( this . driver , collectionId , ctx ?. cacheGenerationClaimId , )",
+   "line": 3420,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:optional-chain:await this . assertCacheGenerationReadClaim ( this . driver , collectionId , ctx ?. cacheGenerationClaimId , )",
+   "line": 3423,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "optional-chain",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:value-undefined:await this . ensureCollectionReady ( collectionId , ctx ?. cacheGenerationClaimId )",
+   "line": 3425,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:optional-chain:await this . ensureCollectionReady ( collectionId , ctx ?. cacheGenerationClaimId )",
+   "line": 3425,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "optional-chain",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:value-undefined:await this . runInTransaction ( async ( transactionDriver ) => { await this . assertCacheGenerationReadClaim ( transactionDriver , collectionId , ctx ?. cacheGenerationClaimId , ) await this . assertCurrentSchemaVersion ( collectionId , transactionDriver , `remove a persisted index` , ) const rows = await transactionDriver . query < { index_name : string } > ( `SELECT index_name FROM persisted_index_registry WHERE collection_id = ? AND signature = ? LIMIT 1` , [ collectionId , signature ] , ) const indexName = rows [ 0 ] ?. index_name await transactionDriver . run ( `UPDATE persisted_index_registry SET removed = 1, updated_at = CAST(strftime('%s', 'now') AS INTEGER), last_used_at = CAST(strftime('%s', 'now') AS INTEGER) WHERE collection_id = ? AND signature = ?` , [ collectionId , signature ] , ) if ( indexName ) await dropPersistedIndex ( transactionDriver , indexName ) } )",
+   "line": 3426,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:value-undefined:await this . assertCacheGenerationReadClaim ( transactionDriver , collectionId , ctx ?. cacheGenerationClaimId , )",
+   "line": 3427,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:optional-chain:await this . assertCacheGenerationReadClaim ( transactionDriver , collectionId , ctx ?. cacheGenerationClaimId , )",
+   "line": 3430,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "optional-chain",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:value-undefined:await this . assertCurrentSchemaVersion ( collectionId , transactionDriver , `remove a persisted index` , )",
+   "line": 3432,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:value-undefined:const rows = await transactionDriver . query < { index_name : string } > ( `SELECT index_name FROM persisted_index_registry WHERE collection_id = ? AND signature = ? LIMIT 1` , [ collectionId , signature ] , )",
+   "line": 3437,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:optional-chain:const indexName = rows [ 0 ] ?. index_name",
+   "line": 3444,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "optional-chain",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:value-undefined:await transactionDriver . run ( `UPDATE persisted_index_registry SET removed = 1, updated_at = CAST(strftime('%s', 'now') AS INTEGER), last_used_at = CAST(strftime('%s', 'now') AS INTEGER) WHERE collection_id = ? AND signature = ?` , [ collectionId , signature ] , )",
+   "line": 3446,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:if-true:if ( indexName ) await dropPersistedIndex ( transactionDriver , indexName )",
+   "line": 3455,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "if-true",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:if-false:if ( indexName ) await dropPersistedIndex ( transactionDriver , indexName )",
+   "line": 3455,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "if-false",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled:value-undefined:await dropPersistedIndex ( transactionDriver , indexName )",
+   "line": 3455,
+   "function": "SQLiteCorePersistenceAdapter.markIndexRemovedUnscheduled",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:value-undefined:const whereCompiled = options . where ? compileSqlExpression ( options . where ) : { supported : false , sql : `` , params : [ ] as Array < SqliteSupportedValue > }",
+   "line": 3844,
+   "function": "SQLiteCorePersistenceAdapter.loadSubsetInternal",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:field-drop:const whereCompiled = options . where ? compileSqlExpression ( options . where ) : { supported : false , sql : `` , params : [ ] as Array < SqliteSupportedValue > }",
+   "line": 3845,
+   "function": "SQLiteCorePersistenceAdapter.loadSubsetInternal",
+   "operator": "field-drop",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:bool-flip:const whereCompiled = options . where ? compileSqlExpression ( options . where ) : { supported : false , sql : `` , params : [ ] as Array < SqliteSupportedValue > }",
+   "line": 3845,
+   "function": "SQLiteCorePersistenceAdapter.loadSubsetInternal",
+   "operator": "bool-flip",
+   "outcome": "survived",
+   "class": "not-observed",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:field-drop:const whereCompiled = options . where ? compileSqlExpression ( options . where ) : { supported : false , sql : `` , params : [ ] as Array < SqliteSupportedValue > }~2",
+   "line": 3845,
+   "function": "SQLiteCorePersistenceAdapter.loadSubsetInternal",
+   "operator": "field-drop",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:field-drop:const whereCompiled = options . where ? compileSqlExpression ( options . where ) : { supported : false , sql : `` , params : [ ] as Array < SqliteSupportedValue > }~3",
+   "line": 3845,
+   "function": "SQLiteCorePersistenceAdapter.loadSubsetInternal",
+   "operator": "field-drop",
+   "outcome": "timeout",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:binary-swap:const pageable = isPageBound ( options . limit ) && ( options . offset === undefined || isPageBound ( options . offset ) ) && options . orderBy !== undefined && options . orderBy . length > 0~7",
+   "line": 3857,
+   "function": "SQLiteCorePersistenceAdapter.loadSubsetInternal",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-infected",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:optional-chain:const filter = pageInSql && guards ?. length ? { ... safePrefilter ! , sql : `(${ safePrefilter ! . sql } ) AND $ { guards . join ( ` AND ` ) } `, } : safePrefilter",
+   "line": 3871,
+   "function": "SQLiteCorePersistenceAdapter.loadSubsetInternal",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:delete-call:queryParams . push ( ... orderByCompiled . params )",
+   "line": 3888,
+   "function": "SQLiteCorePersistenceAdapter.loadSubsetInternal",
+   "operator": "delete-call",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:if-false:if ( queryParams . length > ( driver . maxBoundParameters ?? this . driver . maxBoundParameters ?? 999 ) ) { sql = `SELECT key, value, metadata, row_version FROM ${ collectionTableSql } ` queryParams.length = 0 pageInSql = false }",
+   "line": 3897,
+   "function": "SQLiteCorePersistenceAdapter.loadSubsetInternal",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "branch-never-taken",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:binary-swap:if ( queryParams . length > ( driver . maxBoundParameters ?? this . driver . maxBoundParameters ?? 999 ) ) { sql = `SELECT key, value, metadata, row_version FROM ${ collectionTableSql } ` queryParams.length = 0 pageInSql = false }",
+   "line": 3897,
+   "function": "SQLiteCorePersistenceAdapter.loadSubsetInternal",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-infected",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:binary-swap:if ( queryParams . length > ( driver . maxBoundParameters ?? this . driver . maxBoundParameters ?? 999 ) ) { sql = `SELECT key, value, metadata, row_version FROM ${ collectionTableSql } ` queryParams.length = 0 pageInSql = false }~2",
+   "line": 3898,
+   "function": "SQLiteCorePersistenceAdapter.loadSubsetInternal",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:binary-swap:if ( queryParams . length > ( driver . maxBoundParameters ?? this . driver . maxBoundParameters ?? 999 ) ) { sql = `SELECT key, value, metadata, row_version FROM ${ collectionTableSql } ` queryParams.length = 0 pageInSql = false }~3",
+   "line": 3898,
+   "function": "SQLiteCorePersistenceAdapter.loadSubsetInternal",
+   "operator": "binary-swap",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:bool-flip:pageInSql = false",
+   "line": 3902,
+   "function": "SQLiteCorePersistenceAdapter.loadSubsetInternal",
+   "operator": "bool-flip",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.sortsAsInMemory:return-undefined:return false",
+   "line": 3931,
+   "function": "SQLiteCorePersistenceAdapter.sortsAsInMemory",
+   "operator": "return-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.sortsAsInMemory:if-false:if ( ! indexed ) return false",
+   "line": 3944,
+   "function": "SQLiteCorePersistenceAdapter.sortsAsInMemory",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.sortsAsInMemory:return-undefined:return false~2",
+   "line": 3944,
+   "function": "SQLiteCorePersistenceAdapter.sortsAsInMemory",
+   "operator": "return-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.sortsAsInMemory:return-undefined:return false~3",
+   "line": 3964,
+   "function": "SQLiteCorePersistenceAdapter.sortsAsInMemory",
+   "operator": "return-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:if-true:if ( this . schemaMismatchPolicy === `sync-absent-error` ) { throw new InvalidPersistedCollectionConfigError ( `Schema version mismatch for collection \"${ collectionId } \": found ${previousSchemaVersion}, expected ${nextSchemaVersion}. ` + `Set schemaMismatchPolicy to \"sync-present-reset\" or \"reset\" to allow automatic reset.` , ) }",
+   "line": 4415,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "if-true",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:if-false:if ( this . schemaMismatchPolicy === `sync-absent-error` ) { throw new InvalidPersistedCollectionConfigError ( `Schema version mismatch for collection \"${ collectionId } \": found ${previousSchemaVersion}, expected ${nextSchemaVersion}. ` + `Set schemaMismatchPolicy to \"sync-present-reset\" or \"reset\" to allow automatic reset.` , ) }",
+   "line": 4415,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "branch-never-taken",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:binary-swap:if ( this . schemaMismatchPolicy === `sync-absent-error` ) { throw new InvalidPersistedCollectionConfigError ( `Schema version mismatch for collection \"${ collectionId } \": found ${previousSchemaVersion}, expected ${nextSchemaVersion}. ` + `Set schemaMismatchPolicy to \"sync-present-reset\" or \"reset\" to allow automatic reset.` , ) }",
+   "line": 4415,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "binary-swap",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:const collectionTableSql = quoteIdentifier ( tableName )",
+   "line": 4422,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:const tombstoneTableSql = quoteIdentifier ( tombstoneTableName )",
+   "line": 4423,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await this . runInTransaction ( async ( transactionDriver ) => { await this . assertCacheGenerationReadClaim ( transactionDriver , collectionId , cacheGenerationClaimId , ) const currentSchemaRows = await transactionDriver . query < { schema_version : number } > ( `SELECT schema_version FROM collection_registry WHERE collection_id = ? LIMIT 1` , [ collectionId ] , ) const currentSchemaVersion = currentSchemaRows [ 0 ] ?. schema_version if ( currentSchemaVersion === nextSchemaVersion ) { return } if ( currentSchemaVersion !== previousSchemaVersion ) { throw new InvalidPersistedCollectionConfigError ( `Schema version changed concurrently for collection \"${ collectionId } \": ` + `found ${ currentSchemaVersion ?? `no registry entry` } after observing $ { previousSchemaVersion } ; ` + ` refusing to reset it to $ { nextSchemaVersion } . `, ) } const persistedIndexes = await transactionDriver.query<{ index_name: string }>( ` SELECT index_name FROM persisted_index_registry WHERE collection_id = ? `, [collectionId], ) for (const row of persistedIndexes) await dropPersistedIndex(transactionDriver, row.index_name) await transactionDriver.run( ` DELETE FROM collection_expected_keys WHERE collection_id = ? `, [collectionId], ) await transactionDriver.run(` DELETE FROM $ { collectionTableSql } `) await transactionDriver.run(` DELETE FROM $ { tombstoneTableSql } `) await transactionDriver.run( ` DELETE FROM applied_tx WHERE collection_id = ? `, [collectionId], ) await transactionDriver.run( ` DELETE FROM persisted_index_registry WHERE collection_id = ? `, [collectionId], ) await transactionDriver.run( ` DELETE FROM collection_metadata WHERE collection_id = ? `, [collectionId], ) await transactionDriver.run( ` UPDATE collection_registry SET schema_version = ? , updated_at = CAST ( strftime ( '%s' , 'now' ) AS INTEGER ) WHERE collection_id = ? `, [nextSchemaVersion, collectionId], ) await transactionDriver.run( ` INSERT INTO collection_version ( collection_id , latest_row_version , key_set_evidence_available , key_set_evidence_incompatible ) VALUES ( ? , 0 , 1 , 0 ) ON CONFLICT ( collection_id ) DO UPDATE SET latest_row_version = 0 , key_set_evidence_available = 1 , key_set_evidence_incompatible = 0 , source_progress_incompatible = 0 `, [collectionId], ) await transactionDriver.run( ` INSERT INTO collection_reset_epoch ( collection_id , reset_epoch , updated_at ) VALUES ( ? , 1 , CAST ( strftime ( '%s' , 'now' ) AS INTEGER ) ) ON CONFLICT ( collection_id ) DO UPDATE SET reset_epoch = collection_reset_epoch . reset_epoch + 1 , updated_at = CAST ( strftime ( '%s' , 'now' ) AS INTEGER ) `, [collectionId], ) })",
+   "line": 4425,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await this . assertCacheGenerationReadClaim ( transactionDriver , collectionId , cacheGenerationClaimId , )",
+   "line": 4426,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:const currentSchemaRows = await transactionDriver . query < { schema_version : number } > ( `SELECT schema_version FROM collection_registry WHERE collection_id = ? LIMIT 1` , [ collectionId ] , )",
+   "line": 4431,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:optional-chain:const currentSchemaVersion = currentSchemaRows [ 0 ] ?. schema_version",
+   "line": 4440,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "optional-chain",
+   "outcome": "survived",
+   "class": "not-distinguished",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:if-true:if ( currentSchemaVersion === nextSchemaVersion ) { return }",
+   "line": 4441,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "if-true",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:if-false:if ( currentSchemaVersion === nextSchemaVersion ) { return }",
+   "line": 4441,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "branch-never-taken",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:binary-swap:if ( currentSchemaVersion === nextSchemaVersion ) { return }",
+   "line": 4441,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "binary-swap",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:if-true:if ( currentSchemaVersion !== previousSchemaVersion ) { throw new InvalidPersistedCollectionConfigError ( `Schema version changed concurrently for collection \"${ collectionId } \": ` + `found ${ currentSchemaVersion ?? `no registry entry` } after observing $ { previousSchemaVersion } ; ` + ` refusing to reset it to $ { nextSchemaVersion } . `, ) }",
+   "line": 4444,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "if-true",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:if-false:if ( currentSchemaVersion !== previousSchemaVersion ) { throw new InvalidPersistedCollectionConfigError ( `Schema version changed concurrently for collection \"${ collectionId } \": ` + `found ${ currentSchemaVersion ?? `no registry entry` } after observing $ { previousSchemaVersion } ; ` + ` refusing to reset it to $ { nextSchemaVersion } . `, ) }",
+   "line": 4444,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "if-false",
+   "outcome": "survived",
+   "class": "branch-never-taken",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:binary-swap:if ( currentSchemaVersion !== previousSchemaVersion ) { throw new InvalidPersistedCollectionConfigError ( `Schema version changed concurrently for collection \"${ collectionId } \": ` + `found ${ currentSchemaVersion ?? `no registry entry` } after observing $ { previousSchemaVersion } ; ` + ` refusing to reset it to $ { nextSchemaVersion } . `, ) }",
+   "line": 4444,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "binary-swap",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:binary-swap:throw new InvalidPersistedCollectionConfigError ( `Schema version changed concurrently for collection \"${ collectionId } \": ` + `found ${ currentSchemaVersion ?? `no registry entry` } after observing $ { previousSchemaVersion } ; ` + ` refusing to reset it to $ { nextSchemaVersion } . `, )",
+   "line": 4447,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "binary-swap",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:const persistedIndexes = await transactionDriver . query < { index_name : string } > ( `SELECT index_name FROM persisted_index_registry WHERE collection_id = ?` , [ collectionId ] , )",
+   "line": 4452,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await dropPersistedIndex ( transactionDriver , row . index_name )",
+   "line": 4461,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "unreached",
+   "class": null,
+   "changedLine": true
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `DELETE FROM collection_expected_keys WHERE collection_id = ?` , [ collectionId ] , )",
+   "line": 4463,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `DELETE FROM ${ tombstoneTableSql } `)",
+   "line": 4469,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `DELETE FROM applied_tx WHERE collection_id = ?` , [ collectionId ] , )",
+   "line": 4470,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `DELETE FROM persisted_index_registry WHERE collection_id = ?` , [ collectionId ] , )",
+   "line": 4475,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `DELETE FROM collection_metadata WHERE collection_id = ?` , [ collectionId ] , )",
+   "line": 4480,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `UPDATE collection_registry SET schema_version = ?, updated_at = CAST(strftime('%s', 'now') AS INTEGER) WHERE collection_id = ?` , [ nextSchemaVersion , collectionId ] , )",
+   "line": 4485,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `INSERT INTO collection_version ( collection_id, latest_row_version, key_set_evidence_available, key_set_evidence_incompatible ) VALUES (?, 0, 1, 0) ON CONFLICT(collection_id) DO UPDATE SET latest_row_version = 0, key_set_evidence_available = 1, key_set_evidence_incompatible = 0, source_progress_incompatible = 0` , [ collectionId ] , )",
+   "line": 4492,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": false
+  },
+  {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `INSERT INTO collection_reset_epoch (collection_id, reset_epoch, updated_at) VALUES (?, 1, CAST(strftime('%s', 'now') AS INTEGER)) ON CONFLICT(collection_id) DO UPDATE SET reset_epoch = collection_reset_epoch.reset_epoch + 1, updated_at = CAST(strftime('%s', 'now') AS INTEGER)` , [ collectionId ] , )",
+   "line": 4507,
+   "function": "SQLiteCorePersistenceAdapter.handleSchemaMismatch",
+   "operator": "value-undefined",
+   "outcome": "survived",
+   "class": "not-judged",
+   "changedLine": false
+  }
+ ]
+}
