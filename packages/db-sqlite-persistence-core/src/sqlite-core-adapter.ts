@@ -981,15 +981,21 @@ const exactLiteralStorage: Record<
   number: [`'integer'`, `'date'`],
 }
 
-/** The ref and the literal of a comparison, in either operand order. */
+/**
+ * The ref and the literal of a comparison of two operands, in either order.
+ * Callers pass only two-operand comparisons.
+ */
 function refAndLiteral(
   expression: IR.Func,
 ): { field: IR.PropRef; literal: IR.Value } | undefined {
-  const [left, right] = expression.args
+  const [left, right] = expression.args as [
+    IR.BasicExpression,
+    IR.BasicExpression,
+  ]
   const field =
-    left?.type === `ref` ? left : right?.type === `ref` ? right : undefined
+    left.type === `ref` ? left : right.type === `ref` ? right : undefined
   const literal = field === left ? right : left
-  return field && literal?.type === `val` ? { field, literal } : undefined
+  return field && literal.type === `val` ? { field, literal } : undefined
 }
 
 /** The JSON path of a field ref whose segments are all identifiers. */
@@ -1022,12 +1028,13 @@ function exactGuards(
     expression.args.length === 2 ? refAndLiteral(expression) : undefined
   if (!operands) return undefined
   const { field, literal } = operands
-  // A membership with the list first has no candidate, so it fails below.
-  const literals =
+  // A membership with the list first, or without a list, has no candidate,
+  // so the prefilter check below rejects it.
+  const literals: Array<unknown> =
     expression.name === `eq`
       ? [literal.value]
-      : expression.name === `in` && Array.isArray(literal.value)
-        ? literal.value
+      : expression.name === `in`
+        ? [literal.value].flat()
         : []
   const kind = exactLiteralKind(literals[0])
   const jsonPath = plainFieldPath(field)
