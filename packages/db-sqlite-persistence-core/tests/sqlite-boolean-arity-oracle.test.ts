@@ -560,14 +560,33 @@ async function judgeBooleanHistory(history: Model | undefined) {
 
   async function check(model: Model): Promise<Array<Failure>> {
     driver.reads = []
-    const result = await adapter.loadSubset(
-      { kind: `eager`, collectionId: 'boolean-arity' },
-      {
-        where: toIR(model),
-      },
-    )
-    const actual = result.map((row) => String(row.key)).sort()
     const expected = expectedKeys(model)
+    let result
+    try {
+      result = await adapter.loadSubset(
+        { kind: `eager`, collectionId: 'boolean-arity' },
+        {
+          where: toIR(model),
+        },
+      )
+    } catch (error) {
+      // A legal predicate owes its rows, so a rejection fails the public law.
+      return [
+        {
+          law: 'public',
+          checkpoint: 'loadSubset-return',
+          model,
+          expected,
+          actual: [],
+          read: {
+            sql: `rejected: ${error instanceof Error ? error.message : String(error)}`,
+            rawRows: 0,
+            parameters: 0,
+          },
+        },
+      ]
+    }
+    const actual = result.map((row) => String(row.key)).sort()
     const read = driver.reads[0]
     if (driver.reads.length !== 1 || !read) {
       throw new Error(
@@ -952,13 +971,15 @@ oracleProperty({
         )
       : pass
   },
-  calibrations: numberStateNames.map((state) => ({
-    name: `a construction omits ${state}`,
+  // One missing-state control per builder.
+  calibrations: constructions.map(({ name, enters }) => ({
+    name: `${name} omits its state`,
     law: `constructed reach`,
-    history: { constructed: `${state}, spliced at the root` },
+    history: { constructed: name },
     corrupt: (trace: ReadonlyArray<Observation>) =>
       trace.filter(
-        ({ checkpoint, value }) => checkpoint !== `reach` || value !== state,
+        ({ checkpoint, value }) =>
+          checkpoint !== `reach` || !enters.includes(value as NumberState),
       ),
   })),
 })

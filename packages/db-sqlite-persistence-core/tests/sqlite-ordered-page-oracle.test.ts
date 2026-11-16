@@ -57,7 +57,9 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * a Date, BigInt, NaN, fraction, object or text in `rank`; U+E000, an astral
  * character, a lone surrogate, U+FFFD or NUL in `title`. The filter field `status`
  * stores every kind of value that SQLite compares with the number 1: 1, a
- * Date of epoch 1, `1n`, `true`, `'1'` and the epoch's ISO text. A key is
+ * Date of epoch 1, `1n`, `true`, `'1'` and the epoch's ISO text, and a Date at
+ * the latest valid epoch, 8.64e15, which a literal of that epoch and of the
+ * next integer test from both sides. A key is
  * `k`, an optional U+E000 or astral character, and the row's index, so two
  * high keys differ first at that character. The request draws zero to two
  * `eq` (either operand order), `in` (zero to three literals) or range leaves
@@ -87,11 +89,13 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * counting driver, which records the rows each Collection SELECT returns. It
  * stores the rows, ensures an expression index on `rank`, `title` and
  * `status`, then loads the request without `limit` and the page, and
- * observes each result's keys and raw rows at `loadSubset` return. It then
- * records the declared state the history entered.
+ * observes each result's keys and raw rows at `loadSubset` return. A legal
+ * request owes rows, so a load that rejects is observed as such and breaks
+ * the filter law (unpaged) or the page law. The driver then records the
+ * declared state the history entered.
  *
  * Calibration: trace mutants drop a Date match, ignore the offset, read every
- * match for a page, and omit each constructed state. A driver mutant pages
+ * match for a page, and omit the state of each constructed history. A driver mutant pages
  * the unpaged request's SQL read, candidates and SQL order included. The page
  * law rejects it on an order field that mixes numbers and text, and on a
  * `where` whose candidates include BigInt, boolean and ISO-text values that
@@ -105,7 +109,8 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  */
 
 type Field = `rank` | `title` | `status` | `flag` | `n` | `due`
-type OrderField = `rank` | `title` | `due`
+// `constant` orders by the literal 1, an expression that is not a field.
+type OrderField = `rank` | `title` | `due` | `constant`
 type FilterField = `rank` | `title` | `status` | `flag` | `n`
 type KeyKind = `plain` | `private use` | `astral`
 // An integer stands for itself; a string names a stored value (`storedValue`).
@@ -120,10 +125,16 @@ type Row = {
   n: number
   due: Token
 }
+// `true` is the constant leaf `true`, which keeps every row.
 type Leaf =
   | { op: `eq`; field: FilterField; value: Token; reversed: boolean }
   | { op: `in`; field: FilterField; values: Array<Token> }
   | { op: `gt`; field: `n`; value: number }
+  | { op: `true` }
+// How the leaves form the `where`: `flat` passes no `where` for no leaf, the
+// leaf itself for one, and their `and` for more; `and` always wraps them,
+// `and()` included; `nested` wraps the first leaf in an inner `and`.
+type WhereShape = `flat` | `and` | `nested`
 type Order = {
   field: OrderField
   direction: `asc` | `desc`
@@ -133,6 +144,7 @@ type Order = {
 type History = {
   rows: Array<Row>
   where: Array<Leaf>
+  whereShape: WhereShape
   orderBy: Array<Order>
   limit: number
   offset: number | `none`
@@ -169,6 +181,12 @@ function storedValue(token: Token): unknown {
       return `1`
     case `text 4`:
       return `4`
+    case `date max`:
+      return new Date(8.64e15)
+    case `max epoch`:
+      return 8.64e15
+    case `past max epoch`:
+      return 8.64e15 + 1
     case `iso 1`:
       return new Date(1).toISOString()
     default:
@@ -205,6 +223,7 @@ const statusTokens = [
   `true`,
   `text 1`,
   `iso 1`,
+  `date max`,
   `null`,
   `missing`,
 ]
@@ -257,6 +276,8 @@ const literalArbitrary: fc.Arbitrary<Token> = fc.oneof(
     `bigint 1`,
     `fraction`,
     `text 1`,
+    `max epoch`,
+    `past max epoch`,
   ),
 )
 const leafArbitrary: fc.Arbitrary<Leaf> = fc.oneof(
@@ -276,9 +297,10 @@ const leafArbitrary: fc.Arbitrary<Leaf> = fc.oneof(
     field: fc.constant(`n` as const),
     value: fc.integer({ min: 0, max: 9 }),
   }),
+  fc.record({ op: fc.constant(`true` as const) }),
 )
 const orderArbitrary: fc.Arbitrary<Order> = fc.record({
-  field: fc.constantFrom<OrderField>(`rank`, `title`, `due`),
+  field: fc.constantFrom<OrderField>(`rank`, `title`, `due`, `constant`),
   direction: fc.constantFrom(`asc` as const, `desc` as const),
   nulls: fc.constantFrom(`first` as const, `last` as const),
   stringSort: fc.constantFrom(
@@ -293,6 +315,7 @@ const maxLeaves = 2
 const historyArbitrary: fc.Arbitrary<History> = fc.record({
   rows: fc.array(rowArbitrary, { maxLength: maxRows }),
   where: fc.array(leafArbitrary, { maxLength: maxLeaves }),
+  whereShape: fc.constantFrom<WhereShape>(`flat`, `and`, `nested`),
   orderBy: fc.uniqueArray(orderArbitrary, {
     minLength: 1,
     maxLength: 2,
@@ -310,8 +333,10 @@ type ResolvedLeaf =
   | { op: `eq`; field: FilterField; value: unknown; reversed: boolean }
   | { op: `in`; field: FilterField; values: Array<unknown> }
   | { op: `gt`; field: `n`; value: number }
+  | { op: `true` }
 type Request = {
   where: Array<ResolvedLeaf>
+  whereShape: WhereShape
   orderBy: Array<Order>
   limit: number
   offset?: number
@@ -344,6 +369,7 @@ function resolveLeaf(leaf: Leaf): ResolvedLeaf {
     case `in`:
       return { ...leaf, values: leaf.values.map(storedValue) }
     case `gt`:
+    case `true`:
       return leaf
   }
 }
@@ -361,6 +387,7 @@ function resolve(history: History): Plan {
     }),
     request: {
       where: history.where.map(resolveLeaf),
+      whereShape: history.whereShape,
       orderBy: history.orderBy,
       limit: history.limit,
       ...(history.offset === `none` ? {} : { offset: history.offset }),
@@ -378,6 +405,7 @@ function equalsLiteral(value: unknown, literal: unknown): boolean {
 }
 
 function keepsRow(row: StoredRow, leaf: ResolvedLeaf): boolean {
+  if (leaf.op === `true`) return true
   const value = row.value[leaf.field]
   switch (leaf.op) {
     case `eq`:
@@ -403,7 +431,7 @@ const plainText = (text: string) =>
   })
 
 function exactLeaf(leaf: ResolvedLeaf): boolean {
-  if (leaf.op === `gt`) return false
+  if (leaf.op === `gt` || leaf.op === `true`) return false
   const literals = leaf.op === `eq` ? [leaf.value] : leaf.values
   const kinds = new Set(
     literals.map((literal) =>
@@ -424,9 +452,10 @@ function exactLeaf(leaf: ResolvedLeaf): boolean {
 const indexedFields: ReadonlyArray<Field> = [`rank`, `title`, `status`]
 
 function sortsPlainly(rows: Array<StoredRow>, order: Order): boolean {
-  if (!indexedFields.includes(order.field)) return false
+  const { field } = order
+  if (field === `constant` || !indexedFields.includes(field)) return false
   const values = rows
-    .map((row) => row.value[order.field])
+    .map((row) => row.value[field])
     .filter((value) => value != null)
   const numeric = values.every(
     (value) => Number.isSafeInteger(value) || typeof value === `boolean`,
@@ -485,6 +514,7 @@ function withPlainPremise(generated: History, lead: `rank` | `title`): History {
         : row.title,
     })),
     where: generated.where.map(exactly),
+    whereShape: generated.whereShape,
     orderBy: [
       { ...first!, field: lead, stringSort: lexicalSort(first!.stringSort) },
       ...(second
@@ -509,6 +539,8 @@ function exactly(leaf: Leaf): Leaf {
   switch (leaf.op) {
     case `gt`:
       return { op: `eq`, field: leaf.field, value: leaf.value, reversed: false }
+    case `true`:
+      return { op: `eq`, field: `status`, value: 1, reversed: false }
     case `eq`:
       return { ...leaf, value: 1 }
     case `in`: {
@@ -665,6 +697,7 @@ const constructions = [
         { op: `in`, field: `status`, values: [1, `text 1`] },
         { op: `in`, field: `flag`, values: [`true`, 1] },
         { op: `eq`, field: `rank`, value: `fraction`, reversed: false },
+        { op: `true` },
       ]
       return {
         ...history,
@@ -681,7 +714,7 @@ const constructions = [
     (generated) => {
       const history = withRows(withPlainPremise(generated, `title`), 1)
       const [first, ...rest] = history.orderBy
-      const choice = generated.limit % 3
+      const choice = generated.limit % 4
       // A non-lexical sort breaks the premise only on a field with text.
       const rows = history.rows.map((row, index) =>
         index === 0 && (row.title === `null` || row.title === `missing`)
@@ -692,8 +725,8 @@ const constructions = [
         ...history,
         rows,
         orderBy:
-          choice === 0
-            ? [{ ...first!, field: `due` }, ...rest]
+          choice === 0 || choice === 3
+            ? [{ ...first!, field: choice === 0 ? `due` : `constant` }, ...rest]
             : [
                 {
                   ...first!,
@@ -749,6 +782,7 @@ const fixed: Array<{ name: string; history: History }> = [
     history: {
       rows: plainRows,
       where: [],
+      whereShape: `flat`,
       orderBy: [order(`rank`, `desc`)],
       limit: 3,
       offset: `none`,
@@ -759,6 +793,7 @@ const fixed: Array<{ name: string; history: History }> = [
     history: {
       rows: plainRows,
       where: [],
+      whereShape: `flat`,
       orderBy: [order(`rank`, `desc`)],
       limit: 4,
       offset: 2,
@@ -769,6 +804,7 @@ const fixed: Array<{ name: string; history: History }> = [
     history: {
       rows: plainRows,
       where: [{ op: `eq`, field: `status`, value: 1, reversed: false }],
+      whereShape: `flat`,
       orderBy: [order(`rank`, `desc`)],
       limit: 2,
       offset: `none`,
@@ -779,6 +815,7 @@ const fixed: Array<{ name: string; history: History }> = [
     history: {
       rows: plainRows,
       where: [{ op: `in`, field: `status`, values: [1, `text 1`] }],
+      whereShape: `flat`,
       orderBy: [order(`rank`, `asc`)],
       limit: 1_000_000,
       offset: `none`,
@@ -791,8 +828,43 @@ const fixed: Array<{ name: string; history: History }> = [
         title: `\uFFFD`,
       }),
       where: [{ op: `in`, field: `title`, values: [`a`, `\uD800`] }],
+      whereShape: `flat`,
       orderBy: [order(`rank`, `asc`)],
       limit: 1_000_000,
+      offset: `none`,
+    },
+  },
+  {
+    name: `status holds a Date at the latest epoch`,
+    history: {
+      rows: withRow(plainRows, 4, { status: `date max` }),
+      where: [{ op: `in`, field: `status`, values: [`max epoch`, 1] }],
+      whereShape: `flat`,
+      orderBy: [order(`rank`, `desc`)],
+      limit: 1_000_000,
+      offset: `none`,
+    },
+  },
+  {
+    // Locale order puts `a` before `B`; code-unit order puts `B` first.
+    name: `titles under a locale sort`,
+    history: {
+      rows: plainRows,
+      where: [],
+      whereShape: `flat`,
+      orderBy: [{ ...order(`title`, `asc`, `locale`), nulls: `last` }],
+      limit: 1,
+      offset: `none`,
+    },
+  },
+  {
+    name: `titles under a custom reverse sort`,
+    history: {
+      rows: plainRows,
+      where: [],
+      whereShape: `flat`,
+      orderBy: [{ ...order(`title`, `asc`, `custom`), nulls: `last` }],
+      limit: 3,
       offset: `none`,
     },
   },
@@ -801,6 +873,7 @@ const fixed: Array<{ name: string; history: History }> = [
     history: {
       rows: plainRows,
       where: [],
+      whereShape: `flat`,
       orderBy: [order(`rank`, `asc`)],
       limit: 2,
       offset: 0,
@@ -813,6 +886,7 @@ const fixed: Array<{ name: string; history: History }> = [
         rank: `x`,
       }),
       where: [],
+      whereShape: `flat`,
       orderBy: [order(`rank`, `desc`)],
       limit: 3,
       offset: `none`,
@@ -823,6 +897,7 @@ const fixed: Array<{ name: string; history: History }> = [
     history: {
       rows: withRow(plainRows, 7, { rank: `nan` }),
       where: [],
+      whereShape: `flat`,
       orderBy: [order(`rank`, `asc`)],
       limit: 3,
       offset: `none`,
@@ -835,6 +910,7 @@ const fixed: Array<{ name: string; history: History }> = [
         title: `\u{1F600}`,
       }),
       where: [],
+      whereShape: `flat`,
       orderBy: [order(`title`, `desc`, `lexical`)],
       limit: 1,
       offset: `none`,
@@ -847,6 +923,7 @@ const fixed: Array<{ name: string; history: History }> = [
         key: `astral`,
       }),
       where: [],
+      whereShape: `flat`,
       orderBy: [order(`rank`, `desc`)],
       limit: 1,
       offset: `none`,
@@ -855,7 +932,8 @@ const fixed: Array<{ name: string; history: History }> = [
 ]
 
 function whereOf(request: Request): IR.BasicExpression<boolean> | undefined {
-  const leaves = request.where.map((leaf) => {
+  const leaves = request.where.map((leaf): IR.BasicExpression<boolean> => {
+    if (leaf.op === `true`) return new IR.Value(true)
     const field = new IR.PropRef([leaf.field])
     switch (leaf.op) {
       case `in`:
@@ -871,8 +949,18 @@ function whereOf(request: Request): IR.BasicExpression<boolean> | undefined {
         return new IR.Func<boolean>(`gt`, [field, new IR.Value(leaf.value)])
     }
   })
-  if (leaves.length === 0) return undefined
-  return leaves.length === 1 ? leaves[0] : new IR.Func(`and`, leaves)
+  switch (request.whereShape) {
+    case `flat`:
+      if (leaves.length === 0) return undefined
+      return leaves.length === 1 ? leaves[0] : new IR.Func(`and`, leaves)
+    case `and`:
+      return new IR.Func(`and`, leaves)
+    case `nested`:
+      return new IR.Func(`and`, [
+        new IR.Func(`and`, leaves.slice(0, 1)),
+        ...leaves.slice(1),
+      ])
+  }
 }
 
 // A custom comparator that reverses code-unit order, so SQL's text order
@@ -882,7 +970,10 @@ const reverseCodeUnits = (left: string, right: string) =>
 
 function orderByOf(request: Request): IR.OrderBy {
   return request.orderBy.map((term) => ({
-    expression: new IR.PropRef([term.field]),
+    expression:
+      term.field === `constant`
+        ? new IR.Value(1)
+        : new IR.PropRef([term.field]),
     compareOptions: {
       direction: term.direction,
       nulls: term.nulls,
@@ -895,7 +986,8 @@ function orderByOf(request: Request): IR.OrderBy {
   }))
 }
 
-type Read = { keys: Array<string>; rawRows: number }
+// `rejected` holds the message of a load that rejected instead of returning.
+type Read = { keys: Array<string>; rawRows: number; rejected?: string }
 
 // A wrong design for calibration: the page reruns the unpaged request's SQL
 // read with LIMIT and OFFSET, so SQL pages its candidates and its own order.
@@ -947,15 +1039,26 @@ async function drive(
         expressionSql: [JSON.stringify({ type: `ref`, path: [field] })],
       })
 
+    // A legal request owes rows, so a rejection is an observation the laws
+    // judge, not a setup error.
     const load = async (paged: boolean): Promise<Read> => {
       driver.reads = []
-      const rows = await adapter.loadSubset(target, {
-        where: whereOf(plan.request),
-        orderBy: orderByOf(plan.request),
-        ...(paged
-          ? { limit: plan.request.limit, offset: plan.request.offset }
-          : {}),
-      })
+      let rows
+      try {
+        rows = await adapter.loadSubset(target, {
+          where: whereOf(plan.request),
+          orderBy: orderByOf(plan.request),
+          ...(paged
+            ? { limit: plan.request.limit, offset: plan.request.offset }
+            : {}),
+        })
+      } catch (error) {
+        return {
+          keys: [],
+          rawRows: 0,
+          rejected: error instanceof Error ? error.message : String(error),
+        }
+      }
       return {
         keys: rows.map((row) => String(row.key)),
         rawRows: driver.reads.reduce((sum, read) => sum + read.rawRows, 0),
@@ -986,6 +1089,14 @@ function check(plan: Plan, trace: ReadonlyArray<Observation>, owed: Owed) {
     Read | undefined
   if (!unpaged || !page)
     return violation(`page`, `the driver recorded no page`, `trace`)
+  if (unpaged.rejected !== undefined)
+    return violation(
+      `unpaged`,
+      `the unpaged request rejected: ${unpaged.rejected}`,
+      `filter`,
+    )
+  if (page.rejected !== undefined)
+    return violation(`page`, `the page rejected: ${page.rejected}`, `page`)
   const offset = plan.request.offset ?? 0
   const reached = new Set(
     trace
@@ -1125,18 +1236,16 @@ oracleProperty({
       history: { fixed: `status equals 1 beside coerced values` },
       driver: (plan, observe) => drive(plan, observe, true),
     },
-    ...states.map((state) => ({
-      name: `a construction omits ${state}`,
+    // One missing-state control per builder: each construction's check must
+    // reject a trace that lost the state it names.
+    ...constructions.map(({ name, enters }) => ({
+      name: `${name} omits its state`,
       law: `constructed reach`,
-      history: {
-        constructed:
-          state === `page in SQL`
-            ? `page in SQL by rank`
-            : `page in memory for one inexact leaf`,
-      },
+      history: { constructed: name },
       corrupt: (trace: ReadonlyArray<Observation>) =>
         trace.filter(
-          ({ checkpoint, value }) => checkpoint !== `reach` || value !== state,
+          ({ checkpoint, value }) =>
+            checkpoint !== `reach` || !enters.includes(value as State),
         ),
     })),
   ],
