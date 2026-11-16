@@ -1005,7 +1005,8 @@ function plainFieldPath(expression: IR.BasicExpression): string | undefined {
  * The conditions that narrow the SQL candidate of `expression` to exactly the
  * rows the row evaluator keeps: one per equality or membership leaf of a
  * conjunction that tests a plain field against literals of one kind, each of
- * which has a candidate. Any other predicate returns undefined.
+ * which has a candidate. An empty conjunction needs none. Any other predicate
+ * returns undefined.
  */
 function exactGuards(
   expression: IR.BasicExpression,
@@ -1013,8 +1014,7 @@ function exactGuards(
   if (expression.type !== `func`) return undefined
   if (expression.name === `and`) {
     const guards = expression.args.map(exactGuards)
-    return guards.length > 0 &&
-      guards.every((guard): guard is Array<string> => guard !== undefined)
+    return guards.every((guard): guard is Array<string> => guard !== undefined)
       ? guards.flat()
       : undefined
   }
@@ -1022,13 +1022,11 @@ function exactGuards(
     expression.args.length === 2 ? refAndLiteral(expression) : undefined
   if (!operands) return undefined
   const { field, literal } = operands
-  // A membership tests its first operand against the list in its second.
+  // A membership with the list first has no candidate, so it fails below.
   const literals =
     expression.name === `eq`
       ? [literal.value]
-      : expression.name === `in` &&
-          field === expression.args[0] &&
-          Array.isArray(literal.value)
+      : expression.name === `in` && Array.isArray(literal.value)
         ? literal.value
         : []
   const kind = exactLiteralKind(literals[0])
@@ -3863,7 +3861,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     // Every leaf of an exact conjunction has a candidate, so the safe
     // prefilter holds them all and the guards make it exact.
     const filter =
-      pageInSql && guards
+      pageInSql && guards?.length
         ? {
             ...safePrefilter!,
             sql: `(${safePrefilter!.sql}) AND ${guards.join(` AND `)}`,

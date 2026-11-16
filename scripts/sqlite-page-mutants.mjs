@@ -93,6 +93,14 @@ const MUTANTS = [
     replace: 'Number.isSafeInteger(value) && value! > 0',
     rationale: 'a zero limit or offset keeps the page in memory',
   },
+  {
+    id: `S13`,
+    find: '    return guards.every((guard): guard is Array<string> => guard !== undefined)',
+    replace:
+      '    return guards.length > 0 &&\n      guards.every((guard): guard is Array<string> => guard !== undefined)',
+    rationale:
+      'an empty conjunction keeps the page in memory, unlike an absent where',
+  },
 ].map((mutant) => ({ ...mutant, file: FILE }))
 
 await runMutants({
