@@ -72,7 +72,8 @@ indexed path. The grammar found one defect in the first version of this
 change: an empty conjunction read every row. The production change otherwise
 keeps its behavior and loses code: the exact filter returns only kind guards
 over the safe prefilter, one helper finds a comparison's field and literal,
-and the order probe finds the index of irregular rows in `sqlite_master`.
+and the order probe finds the index of irregular rows in `sqlite_master`
+within its one statement per order field.
 
 ### Evidence block
 
@@ -136,7 +137,7 @@ and the order probe finds the index of irregular rows in `sqlite_master`.
 `pnpm gap-report --package packages/db-sqlite-persistence-core --source
 src/sqlite-core-adapter.ts --seed 1997 --only <mutants>` selects every mutant
 of the functions this change edits or adds: 377 on `21c52a07` (the six edited
-functions) and 560 on `766a5d08` (those six and thirteen new ones). The
+functions) and 554 on `6302035a` (those six and thirteen new ones). The
 package's owners ran unchanged on each side; the only owner edit outside this
 change makes `sync-metadata-missing-row-oracle.test.ts` write its `owns` as a
 literal list, which both runs used, because the report refuses a computed one.
@@ -151,7 +152,7 @@ tests, all `sqlite-resume.retired-storage` timing cases.
 | `markIndexRemovedUnscheduled` | 0 / 18 | 0 / 17 |
 | `loadSubsetInternal` | 11 / 26 | 39 / 52 |
 | `handleSchemaMismatch` | 1 / 28 | 1 / 27 |
-| `sortsAsInMemory` | | 30 / 34 |
+| `sortsAsInMemory` | | 26 / 28 |
 | `exactGuards` | | 35 / 36 |
 | `exactLiteralKind` | | 14 / 19 |
 | `numberEqualityCandidates` | | 7 / 8 |
@@ -160,7 +161,7 @@ tests, all `sqlite-resume.retired-storage` timing cases.
 | `isPageBound` | | 3 / 4 |
 | `dropPersistedIndex` | | 0 / 4 |
 | five other new helpers | | 26 / 26 |
-| Total | 20 / 377 | 347 / 560 |
+| Total | 20 / 377 | 343 / 554 |
 
 Every mutant killed before is killed after: 15 by the same stable key, and 5
 whose statement this change rewrote by that statement's mutant (the
@@ -168,22 +169,36 @@ transaction of `ensureIndexUnscheduled`; `if (filter)`, its parameter push, and
 the returned page of `loadSubsetInternal`, where `safePrefilter` became
 `filter` and the return gained `pageInSql ?`).
 
-The 213 mutants still alive are listed by key in
-`2026-11-16-sqlite-ordered-page.json`. They stay open: 43 sit on lines this
+`6302035a` moved the index lookup of `sortsAsInMemory` into the probe's
+statement. The six mutants of the removed lookup left the report, four killed
+and two open. Apart from the eight mutants below, every other mutant killed
+on `f838f122`, the commit before it, is killed on `6302035a`: 341 by the same
+stable key and 2 by the key that their statement now has (the probe's query,
+and the last `return false`, whose ordinal moved).
+
+Eight mutants reach the slow sync-metadata campaigns: one of `isPageBound`,
+three of `compileOrderByClauses` and four of `loadSubsetInternal`, none on a
+line that `6302035a` changed. Under the load of a whole selection each runs
+for minutes, and its outcome varied between three runs of the same lines
+(killed, timed out or survived). Run alone, all eight survive on `f838f122`
+and on `6302035a`, so the table and the JSON count them as open.
+
+The 211 mutants still alive are listed by key in
+`2026-11-16-sqlite-ordered-page.json`. They stay open: 41 sit on lines this
 change added or rewrote, and 170 on lines of the six edited functions that it
 did not touch, which were gaps before it too. I ask for a maintainer allowance
-for all of them. The 43, by reason:
+for all of them. The 41, by reason:
 
 - 6 change text exactness that these hosts keep: `exactLiteralKind`'s NUL,
   U+FFFD and lone-surrogate exclusions (5) and the mixed-kind check of
   `exactGuards` (S07). See Limits.
-- 18 change only which indexes exist: `indexedFieldPath`'s guard,
+- 17 change only which indexes exist: `indexedFieldPath`'s guard,
   `dropPersistedIndex`, the stale-predicate rebuild and the compiler-upgrade
-  drop in `ensureIndexUnscheduled`, the drops in `markIndexRemovedUnscheduled`
-  and `handleSchemaMismatch`, and the index lookup of `sortsAsInMemory`. A
-  missing or extra index changes read and write cost, not a result; only an
-  observation of the database schema could see them.
-- 3 replace `return false` with `return undefined` in `sortsAsInMemory`, which
+  drop in `ensureIndexUnscheduled`, and the drops in
+  `markIndexRemovedUnscheduled` and `handleSchemaMismatch`. A missing or extra
+  index changes read and write cost, not a result; only an observation of the
+  database schema could see them.
+- 2 replace `return false` with `return undefined` in `sortsAsInMemory`, which
   its caller reads the same way.
 - 4 drop or flip `supported: true` on candidate fragments whose callers read
   only their SQL and bindings.
@@ -210,9 +225,9 @@ for all of them. The 43, by reason:
 ### Code weight
 
 `pnpm size:compare --packages db-sqlite-persistence-core --files` against
-`21c52a07`, production bundle, at `766a5d08`: the package grows 1,216 bytes
+`21c52a07`, production bundle, at `6302035a`: the package grows 1,206 bytes
 gzip and 1,053 brotli (at `3968a567` it grew 1,282 and 1,170), and
-`sqlite-core-adapter.js` grows 3,270 minified bytes (3,987 at `3968a567`). The `app` scenario does not
+`sqlite-core-adapter.js` grows 3,255 minified bytes (3,987 at `3968a567`). The `app` scenario does not
 change: it ships no SQLite persistence. The rest of the growth is the SQL text
 of the kind guards, the irregular-rows predicate and the order probe.
 
