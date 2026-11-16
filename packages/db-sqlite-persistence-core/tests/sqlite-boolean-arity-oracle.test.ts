@@ -2,7 +2,7 @@
 import { fc } from '@fast-check/vitest'
 import { expect } from 'vitest'
 import { IR } from '@tanstack/db'
-import { oracleProperty } from '../../db/tests/oracle-property'
+import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -12,6 +12,7 @@ import {
 import { SQLiteCorePersistenceAdapter } from '../src'
 import { CountingDriver } from './sqlite-boolean-arity-support'
 import type { Read } from './sqlite-boolean-arity-support'
+import type { Observation } from '../../db/tests/oracle-property'
 
 /**
  * # Boolean arity at the SQLite persistence boundary
@@ -56,6 +57,17 @@ import type { Read } from './sqlite-boolean-arity-support'
  * Fixed-seed and unseeded generated campaigns use the same grammar, driver,
  * refinement check, and budget. The seed/path environment variables below
  * replay a reduced failure directly.
+ *
+ * Declared states (generated campaigns): a number equality or membership atom
+ * decides some row while the whole predicate is pushable and selective, so
+ * the work law judges its SQL candidate; and a coerced number atom decides
+ * some row, so the public law judges the candidates that JavaScript must
+ * reject. An atom decides a row when forcing it true rather than false changes
+ * that row's membership. Two constructed histories per state splice the atom
+ * into a generated predicate: as a root child beside the generated children,
+ * or inside a nested group beside a generated group's atoms. Each records the
+ * state it must enter, and the generated campaign's check rejects a history
+ * that missed one.
  *
  * Driver/checkpoint: the real adapter runs against `node:sqlite`; a counting
  * driver records the SQL and raw row count of each Collection SELECT. At
@@ -195,8 +207,12 @@ function equalsNumber(value: unknown, target: number): boolean {
   return value instanceof Date ? value.getTime() === target : value === target
 }
 
-function valueOf(model: Model, row: Row): unknown {
+// Atoms whose value is forced, for `decides`.
+type Forced = { names: ReadonlyArray<Atom>; value: boolean }
+
+function valueOf(model: Model, row: Row, forced?: Forced): unknown {
   if (model.kind === 'atom') {
+    if (forced?.names.includes(model.atom)) return forced.value
     switch (model.atom) {
       case 'first':
       case 'unsupported-function':
@@ -249,7 +265,7 @@ function valueOf(model: Model, row: Row): unknown {
           : equalsNumber(row.coerced, 1) || equalsNumber(row.coerced, 2)
     }
   }
-  const values = model.children.map((child) => valueOf(child, row))
+  const values = model.children.map((child) => valueOf(child, row, forced))
   if (model.kind === 'and') {
     if (values.some((value) => value === false)) return false
     if (values.some((value) => value == null)) return null
@@ -428,7 +444,13 @@ function matrix(): Array<Model> {
   return cases
 }
 
-const atomArb = fc.constantFrom(...atoms).map(atom)
+// The unmapper lets fixed and constructed histories shrink as generated ones.
+const atomArb = fc.constantFrom(...atoms).map(atom, (value) => {
+  const name = (value as { kind?: unknown; atom?: unknown } | null)?.atom
+  if ((value as Model | null)?.kind !== 'atom' || !atoms.includes(name as Atom))
+    throw new Error('not an atom')
+  return name as Atom
+})
 const nestedArb = fc.record({
   kind: fc.constantFrom('and' as const, 'or' as const),
   children: fc.array(atomArb, { minLength: 0, maxLength: 3 }),
@@ -440,6 +462,81 @@ const modelArb = fc.record({
     maxLength: 3,
   }),
 })
+type History = Extract<Model, { kind: 'and' | 'or' }>
+
+// Whether forcing these atoms true rather than false changes some fixture
+// row's membership, so the public rows depend on how SQL and the evaluator
+// read them.
+function decides(model: Model, names: ReadonlyArray<Atom>): boolean {
+  return fixture.some(
+    (row) =>
+      (valueOf(model, row, { names, value: true }) === true) !==
+      (valueOf(model, row, { names, value: false }) === true),
+  )
+}
+
+const numberAtoms: ReadonlyArray<Atom> = ['eq-number', 'in-number']
+const coercedAtoms: ReadonlyArray<Atom> = [
+  'eq-number-coerced',
+  'in-number-coerced',
+]
+// The declared states, each with the atoms it splices and its premise.
+const numberStates = {
+  'number equality decides a row in SQL': {
+    atoms: numberAtoms,
+    enters: (model: Model) =>
+      canPush(model) &&
+      expectedKeys(model).length < fixture.length &&
+      decides(model, numberAtoms),
+  },
+  'coerced number equality decides a row': {
+    atoms: coercedAtoms,
+    enters: (model: Model) => decides(model, coercedAtoms),
+  },
+} as const
+type NumberState = keyof typeof numberStates
+const numberStateNames = Object.keys(numberStates) as Array<NumberState>
+const statesOf = (model: Model) =>
+  numberStateNames.filter((state) => numberStates[state].enters(model))
+
+// Construction obligations, by the identity of each builder's fresh history.
+const constructionStates = new WeakMap<History, ReadonlyArray<NumberState>>()
+
+// Splices one of the state's atoms into a generated predicate, as a root
+// child or inside a nested group, keeping the generated children that the
+// state allows. A splice whose other children hide the atom falls back to the
+// atom alone in the same position, which always decides a row.
+function splice(state: NumberState, nested: boolean) {
+  const { atoms: names, enters } = numberStates[state]
+  return (generated: History): History => {
+    const name = names[generated.children.length % names.length]!
+    const kept = generated.children.filter(
+      (child) =>
+        state !== 'number equality decides a row in SQL' || canPush(child),
+    )
+    const group = kept.find((child): child is History => child.kind !== 'atom')
+    const inner = generated.kind === 'and' ? 'or' : 'and'
+    const place = (siblings: Array<Model>, groupAtoms: Array<Model>) => ({
+      kind: generated.kind,
+      children: nested
+        ? [op(inner, atom(name), ...groupAtoms.slice(0, 2)), ...siblings]
+        : [atom(name), ...siblings],
+    })
+    const others = kept.filter((child) => !nested || child !== group)
+    const spliced = place(others.slice(0, 2), group?.children ?? [])
+    const history = enters(spliced) ? spliced : place([], [])
+    constructionStates.set(history, [state])
+    return history
+  }
+}
+
+const constructions = numberStateNames.flatMap((state) =>
+  [false, true].map((nested) => ({
+    name: `${state}, spliced ${nested ? 'in a nested group' : 'at the root'}`,
+    enters: [state],
+    build: splice(state, nested),
+  })),
+)
 
 function brief(failure: Failure | undefined) {
   if (!failure) return undefined
@@ -812,14 +909,58 @@ oracleProperty({
     authority: `The existing contract and authority stated beside this oracle's model.`,
     limits: `The existing bounded SQLite histories, production paths, and observations; no expanded coverage claim.`,
   },
-  histories: { arbitrary: modelArb, runs: 150, fixedSeeds: [1994] },
-  resolve: (history) => ({ history }),
-  model: recordedAssertionJudgment,
-  driver: (plan, observe) =>
-    recordAssertionJudgment(`existing SQLite judgment`, plan, observe, () =>
-      judgeBooleanHistory(plan.history),
-    ),
-  check: forwardAssertionJudgment,
+  owns: [`src/sqlite-core-adapter.ts`],
+  histories: {
+    arbitrary: modelArb,
+    runs: 150,
+    fixedSeeds: [1994],
+    states: numberStateNames,
+    constructed: constructions,
+  },
+  resolve: (history) => ({
+    history,
+    requiredStates: constructionStates.get(history) ?? [],
+  }),
+  model: (plan, trace) => ({
+    judgment: recordedAssertionJudgment(plan, trace),
+    requiredStates: plan.requiredStates,
+  }),
+  // The declared states come from the history; the existing judgment decides
+  // the laws. A driver error leaves no reach, so it stays a setup error.
+  driver: async (plan, observe) => {
+    await recordAssertionJudgment(
+      `existing SQLite judgment`,
+      plan,
+      observe,
+      () => judgeBooleanHistory(plan.history),
+    )
+    for (const state of statesOf(plan.history)) observe(`reach`, state)
+  },
+  check: (_plan, trace, owed) => {
+    if (owed.judgment.kind !== `pass`) return owed.judgment
+    const missing = owed.requiredStates.filter(
+      (state) =>
+        !trace.some(
+          ({ checkpoint, value }) => checkpoint === `reach` && value === state,
+        ),
+    )
+    return missing.length > 0
+      ? violation(
+          `constructed states`,
+          `the constructed history did not enter ${missing.join(`, `)}`,
+          `constructed reach`,
+        )
+      : pass
+  },
+  calibrations: numberStateNames.map((state) => ({
+    name: `a construction omits ${state}`,
+    law: `constructed reach`,
+    history: { constructed: `${state}, spliced at the root` },
+    corrupt: (trace: ReadonlyArray<Observation>) =>
+      trace.filter(
+        ({ checkpoint, value }) => checkpoint !== `reach` || value !== state,
+      ),
+  })),
 })
 oracleProperty({
   id: `sqlite-persistence.boolean-arity-fixed`,

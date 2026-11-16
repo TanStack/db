@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { fc } from '@fast-check/vitest'
 import { IR } from '@tanstack/db'
 import { SQLiteCorePersistenceAdapter } from '../src'
 import {
@@ -41,37 +42,60 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * Other requests may read every matching row. The page and filter laws hold
  * for every request.
  *
- * Model: `owedKeys` filters the dataset with that equality, and `pageInSql`
- * decides the work law's premise from the stored values alone. Neither calls
- * the evaluator, the comparator or the SQL compiler. The order of rows comes
- * from the request without `limit`, which sorts in JavaScript whatever SQL
- * returns; this oracle does not model the comparator.
+ * Model: `owedKeys` filters the stored rows with that equality, and
+ * `pageInSql` decides the work law's premise from the request and the stored
+ * values alone. Neither calls the evaluator, the comparator or the SQL
+ * compiler. The order of rows comes from the request without `limit`, which
+ * sorts in JavaScript whatever SQL returns; this oracle does not model the
+ * comparator. An absent `stringSort` is lexical, as the in-memory sort reads
+ * it.
  *
- * Histories: every query below runs on every dataset (`enumerated` below).
- * The plain dataset meets the work law's premise for its order fields and
- * stores Date, BigInt, boolean, numeric-text and ISO-text values beside the
- * number 1 in its filter field. Each other dataset breaks the premise once:
- * a Date, BigInt, NaN, fraction, object or numeric text in the order field
- * `rank`; U+E000, an astral character, a lone surrogate or NUL in the text
- * order field `title`; or such characters in two keys tied on `rank`. Queries
- * cover ascending and descending order, both null placements, an offset, two
- * order fields, the last text in lexical order, locale string sort, an
- * unindexed order field, number and string equality, number membership, a
- * conjunction with a boolean, a range filter, and the equality on the order
- * field that follows a page. Excluded: cursors, joins, expression order
- * fields, and stored values written by another library.
+ * History grammar: up to twelve rows and one request. A row draws each field
+ * from a token (`storedValue`), so a history stays JSON data and shrinks. The
+ * order fields `rank` and `title` mostly hold integers, booleans, plain text,
+ * null or nothing, and sometimes a value that breaks the work law's premise:
+ * a Date, BigInt, NaN, fraction, object or text in `rank`; U+E000, an astral
+ * character, a lone surrogate, U+FFFD or NUL in `title`. The filter field `status`
+ * stores every kind of value that SQLite compares with the number 1: 1, a
+ * Date of epoch 1, `1n`, `true`, `'1'` and the epoch's ISO text. A key is
+ * `k`, an optional U+E000 or astral character, and the row's index, so two
+ * high keys differ first at that character. The request draws zero to two
+ * `eq` (either operand order), `in` (zero to three literals) or range leaves
+ * over five fields, one or two order terms over `rank`, `title` and the
+ * unindexed `due`, each direction, null placement and string sort (default,
+ * lexical, locale, or a custom reverse comparator), a limit of 0..8 or one
+ * million, and no offset or one of 0..8.
+ *
+ * Declared states: `page in SQL` when the work law's premise holds, `page in
+ * memory` otherwise. Four constructed histories splice the premise into a
+ * generated history: they move the order onto `rank` or `title`, replace
+ * premise-breaking values and keys with plain ones, and make each leaf exact,
+ * keeping the generated rows, ties, nulls, directions, limit and offset; the
+ * third also adds an exact leaf, and the fourth sets a zero limit or a zero
+ * offset over at least two matching rows. Four constructed histories then
+ * break the premise in one way each: one premise-breaking order value, two
+ * tied rows with high keys, one inexact leaf (a range, a fraction, or a
+ * membership whose two kinds both match stored values), or an order on `due`
+ * or under a locale or custom sort. Each builder records the states its history must enter, and
+ * the check rejects a history that missed one, so generated and shrunk
+ * constructions are judged as well as each campaign's seeded one.
+ * Fixed histories keep the datasets that once rejected production mutants.
+ * Excluded: cursors, joins, expression order fields, and stored values that
+ * another library wrote.
  *
  * Driver and checkpoint: the real adapter runs against `node:sqlite` with a
  * counting driver, which records the rows each Collection SELECT returns. It
- * stores the dataset, ensures an expression index on `rank`, `title` and
+ * stores the rows, ensures an expression index on `rank`, `title` and
  * `status`, then loads the request without `limit` and the page, and
- * observes each result's keys and raw rows at `loadSubset` return.
+ * observes each result's keys and raw rows at `loadSubset` return. It then
+ * records the declared state the history entered.
  *
- * Calibration: trace mutants drop a Date match, ignore the offset, and read
- * every match for a page. A driver mutant pages the unpaged request's SQL
- * read, candidates and SQL order included. The page law rejects it on an
- * order field that mixes numbers and text, and on a `where` whose candidates
- * include BigInt, boolean and ISO-text values that JavaScript removes.
+ * Calibration: trace mutants drop a Date match, ignore the offset, read every
+ * match for a page, and omit each constructed state. A driver mutant pages
+ * the unpaged request's SQL read, candidates and SQL order included. The page
+ * law rejects it on an order field that mixes numbers and text, and on a
+ * `where` whose candidates include BigInt, boolean and ISO-text values that
+ * JavaScript removes.
  *
  * Limits: node:sqlite in one process; no native host, OPFS worker or
  * multi-process WAL. Fractions and integers past the signed 64-bit range stay
@@ -81,205 +105,267 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  */
 
 type Field = `rank` | `title` | `status` | `flag` | `n` | `due`
-type StoredRow = { key: string; value: Partial<Record<Field, unknown>> }
+type OrderField = `rank` | `title` | `due`
+type FilterField = `rank` | `title` | `status` | `flag` | `n`
+type KeyKind = `plain` | `private use` | `astral`
+// An integer stands for itself; a string names a stored value (`storedValue`).
+type Token = number | string
 
-// The default rows: ranks with ties and nulls, plain titles, and every kind
-// of value that SQLite compares with the number 1 in `status`.
-function plainRows(): Array<StoredRow> {
-  const rows: Array<[string, Partial<Record<Field, unknown>>]> = [
-    [`k01`, { rank: 5, title: `b`, status: 1, flag: true, n: 1, due: 3 }],
-    [`k02`, { rank: 3, title: `a`, status: new Date(1), flag: true, n: 2 }],
-    [`k03`, { rank: 9, title: `c`, status: 1n, flag: false, n: 3, due: 1 }],
-    [`k04`, { rank: 9, title: `b`, status: true, flag: 1, n: 0 }],
-    [`k05`, { rank: null, title: `d`, status: `1`, n: 4, due: 2 }],
-    [`k06`, { title: `a`, status: new Date(1).toISOString(), n: 5 }],
-    [`k07`, { rank: 1, title: null, status: 2, flag: true, n: 6 }],
-    [`k08`, { rank: 7, status: 1, flag: true, n: 7, due: 5 }],
-    [`k09`, { rank: 3, title: `e`, status: new Date(2), flag: false, n: 8 }],
-    [`k10`, { rank: 0, title: `c`, status: 1, flag: true, n: 9, due: 4 }],
-    [`k11`, { rank: 7, title: `f`, status: 0, n: 10 }],
-    [`k12`, { rank: 2, title: `B`, status: 1, flag: false, n: 0 }],
-  ]
-  return rows.map(([key, value]) => ({ key, value }))
+type Row = {
+  key: KeyKind
+  rank: Token
+  title: string
+  status: Token
+  flag: Token
+  n: number
+  due: Token
 }
-
-function withValue(
-  rows: Array<StoredRow>,
-  key: string,
-  field: Field,
-  value: unknown,
-): Array<StoredRow> {
-  return rows.map((row) =>
-    row.key === key ? { key, value: { ...row.value, [field]: value } } : row,
-  )
-}
-
-function withKey(
-  rows: Array<StoredRow>,
-  key: string,
-  replacement: string,
-): Array<StoredRow> {
-  return rows.map((row) =>
-    row.key === key ? { key: replacement, value: row.value } : row,
-  )
-}
-
-const datasets = {
-  plain: () => plainRows(),
-  'rank-booleans': () =>
-    withValue(
-      withValue(plainRows(), `k07`, `rank`, true),
-      `k10`,
-      `rank`,
-      false,
-    ),
-  'rank-date': () => withValue(plainRows(), `k08`, `rank`, new Date(8)),
-  'rank-bigint': () => withValue(plainRows(), `k08`, `rank`, 8n),
-  'rank-nan': () => withValue(plainRows(), `k08`, `rank`, Number.NaN),
-  'rank-fraction': () => withValue(plainRows(), `k08`, `rank`, 7.5),
-  'rank-object': () => withValue(plainRows(), `k08`, `rank`, { at: 8 }),
-  'rank-text': () =>
-    withValue(withValue(plainRows(), `k08`, `rank`, `4`), `k11`, `rank`, `x`),
-  'title-private-use': () =>
-    withValue(
-      withValue(plainRows(), `k03`, `title`, `\uE000`),
-      `k11`,
-      `title`,
-      `\u{1F600}`,
-    ),
-  'title-lone-surrogate': () =>
-    withValue(plainRows(), `k03`, `title`, `\uD800`),
-  'title-nul': () => withValue(plainRows(), `k03`, `title`, `b\u0000\uE000`),
-  // Both keys hold rank 9, so the key tie-break orders them.
-  'key-high': () =>
-    withKey(withKey(plainRows(), `k03`, `k\uE000`), `k04`, `k\u{1F600}`),
-} satisfies Record<string, () => Array<StoredRow>>
-type DatasetName = keyof typeof datasets
-
 type Leaf =
-  | { op: `eq`; field: Field; value: unknown }
-  | { op: `in`; field: Field; values: Array<unknown> }
-  | { op: `gt`; field: Field; value: number }
+  | { op: `eq`; field: FilterField; value: Token; reversed: boolean }
+  | { op: `in`; field: FilterField; values: Array<Token> }
+  | { op: `gt`; field: `n`; value: number }
 type Order = {
-  field: Field
+  field: OrderField
   direction: `asc` | `desc`
   nulls: `first` | `last`
-  stringSort?: `lexical` | `locale`
+  stringSort: `default` | `lexical` | `locale` | `custom`
 }
-type Query = {
+type History = {
+  rows: Array<Row>
   where: Array<Leaf>
+  orderBy: Array<Order>
+  limit: number
+  offset: number | `none`
+}
+
+// The stored value a token names. `missing` leaves the field out, and a
+// string that names no value below is that text.
+function storedValue(token: Token): unknown {
+  if (typeof token === `number`) return token
+  switch (token) {
+    case `null`:
+      return null
+    case `true`:
+      return true
+    case `false`:
+      return false
+    case `date 1`:
+      return new Date(1)
+    case `date 2`:
+      return new Date(2)
+    case `date 8`:
+      return new Date(8)
+    case `bigint 1`:
+      return 1n
+    case `bigint 8`:
+      return 8n
+    case `nan`:
+      return Number.NaN
+    case `fraction`:
+      return 1.5
+    case `object`:
+      return { at: 8 }
+    case `text 1`:
+      return `1`
+    case `text 4`:
+      return `4`
+    case `iso 1`:
+      return new Date(1).toISOString()
+    default:
+      return token
+  }
+}
+
+const plainTitles = [`a`, `ab`, `b`, `B`, `c`, `d`, `e`, `f`]
+// Text that SQLite stores or orders differently from JavaScript. SQLite may
+// read a stored lone surrogate as U+FFFD, the replacement character itself.
+const irregularTitles = [
+  `\uE000`,
+  `\u{1F600}`,
+  `\uD800`,
+  `\uFFFD`,
+  `b\u0000\uE000`,
+]
+const irregularRanks = [
+  `date 8`,
+  `bigint 8`,
+  `nan`,
+  `fraction`,
+  `object`,
+  `text 4`,
+  `x`,
+]
+const statusTokens = [
+  1,
+  2,
+  0,
+  `date 1`,
+  `date 2`,
+  `bigint 1`,
+  `true`,
+  `text 1`,
+  `iso 1`,
+  `null`,
+  `missing`,
+]
+const highKeyCharacters: Record<KeyKind, string> = {
+  plain: ``,
+  'private use': `\uE000`,
+  astral: `\u{1F600}`,
+}
+
+const rowArbitrary: fc.Arbitrary<Row> = fc.record({
+  key: fc.oneof(
+    { weight: 5, arbitrary: fc.constant<KeyKind>(`plain`) },
+    { weight: 1, arbitrary: fc.constantFrom<KeyKind>(`private use`, `astral`) },
+  ),
+  rank: fc.oneof(
+    { weight: 6, arbitrary: fc.integer({ min: -2, max: 9 }) },
+    {
+      weight: 2,
+      arbitrary: fc.constantFrom<Token>(`null`, `missing`, `true`, `false`),
+    },
+    { weight: 1, arbitrary: fc.constantFrom<Token>(...irregularRanks) },
+  ),
+  title: fc.oneof(
+    { weight: 6, arbitrary: fc.constantFrom(...plainTitles) },
+    { weight: 2, arbitrary: fc.constantFrom(`null`, `missing`) },
+    { weight: 1, arbitrary: fc.constantFrom(...irregularTitles) },
+  ),
+  status: fc.constantFrom<Token>(...statusTokens),
+  flag: fc.constantFrom<Token>(`true`, `false`, 1, `missing`),
+  n: fc.integer({ min: 0, max: 10 }),
+  due: fc.oneof(fc.integer({ min: 0, max: 5 }), fc.constant(`missing`)),
+})
+
+const filterFieldArbitrary = fc.constantFrom<FilterField>(
+  `status`,
+  `title`,
+  `rank`,
+  `flag`,
+  `n`,
+)
+const literalArbitrary: fc.Arbitrary<Token> = fc.oneof(
+  fc.integer({ min: -1, max: 9 }),
+  fc.constantFrom<Token>(
+    `a`,
+    `b`,
+    `B`,
+    `\uD800`,
+    `true`,
+    `false`,
+    `bigint 1`,
+    `fraction`,
+    `text 1`,
+  ),
+)
+const leafArbitrary: fc.Arbitrary<Leaf> = fc.oneof(
+  fc.record({
+    op: fc.constant(`eq` as const),
+    field: filterFieldArbitrary,
+    value: literalArbitrary,
+    reversed: fc.boolean(),
+  }),
+  fc.record({
+    op: fc.constant(`in` as const),
+    field: filterFieldArbitrary,
+    values: fc.array(literalArbitrary, { maxLength: 3 }),
+  }),
+  fc.record({
+    op: fc.constant(`gt` as const),
+    field: fc.constant(`n` as const),
+    value: fc.integer({ min: 0, max: 9 }),
+  }),
+)
+const orderArbitrary: fc.Arbitrary<Order> = fc.record({
+  field: fc.constantFrom<OrderField>(`rank`, `title`, `due`),
+  direction: fc.constantFrom(`asc` as const, `desc` as const),
+  nulls: fc.constantFrom(`first` as const, `last` as const),
+  stringSort: fc.constantFrom(
+    `default` as const,
+    `lexical` as const,
+    `locale` as const,
+    `custom` as const,
+  ),
+})
+const maxRows = 12
+const maxLeaves = 2
+const historyArbitrary: fc.Arbitrary<History> = fc.record({
+  rows: fc.array(rowArbitrary, { maxLength: maxRows }),
+  where: fc.array(leafArbitrary, { maxLength: maxLeaves }),
+  orderBy: fc.uniqueArray(orderArbitrary, {
+    minLength: 1,
+    maxLength: 2,
+    selector: (order) => order.field,
+  }),
+  limit: fc.oneof(fc.integer({ min: 0, max: 8 }), fc.constant(1_000_000)),
+  offset: fc.oneof(
+    fc.constant(`none` as const),
+    fc.integer({ min: 0, max: 8 }),
+  ),
+})
+
+type StoredRow = { key: string; value: Partial<Record<Field, unknown>> }
+type ResolvedLeaf =
+  | { op: `eq`; field: FilterField; value: unknown; reversed: boolean }
+  | { op: `in`; field: FilterField; values: Array<unknown> }
+  | { op: `gt`; field: `n`; value: number }
+type Request = {
+  where: Array<ResolvedLeaf>
   orderBy: Array<Order>
   limit: number
   offset?: number
 }
+const states = [`page in SQL`, `page in memory`] as const
+type State = (typeof states)[number]
+type Plan = {
+  rows: Array<StoredRow>
+  request: Request
+  // The states a constructed history must enter; none for a generated one.
+  requiredStates: ReadonlyArray<State>
+}
 
-const asc = (field: Field, nulls: `first` | `last` = `first`): Order => ({
-  field,
-  direction: `asc`,
-  nulls,
-})
-const desc = (field: Field, nulls: `first` | `last` = `first`): Order => ({
-  field,
-  direction: `desc`,
-  nulls,
-})
+// Construction obligations, by the identity of each builder's fresh history.
+const constructionStates = new WeakMap<History, ReadonlyArray<State>>()
 
-const queries = {
-  'rank-asc': { where: [], orderBy: [asc(`rank`)], limit: 3 },
-  'rank-asc-nulls-last': {
-    where: [],
-    orderBy: [asc(`rank`, `last`)],
-    limit: 3,
-  },
-  'rank-desc': { where: [], orderBy: [desc(`rank`)], limit: 3 },
-  'rank-desc-nulls-last': {
-    where: [],
-    orderBy: [desc(`rank`, `last`)],
-    limit: 3,
-  },
-  'rank-desc-offset': {
-    where: [],
-    orderBy: [desc(`rank`)],
-    limit: 4,
-    offset: 2,
-  },
-  'rank-then-title': {
-    where: [],
-    orderBy: [desc(`rank`), asc(`title`)],
-    limit: 5,
-  },
-  'title-lexical': {
-    where: [],
-    orderBy: [{ ...asc(`title`), stringSort: `lexical` }],
-    limit: 4,
-  },
-  'title-last': {
-    where: [],
-    orderBy: [{ ...desc(`title`), stringSort: `lexical` }],
-    limit: 1,
-  },
-  'title-locale': {
-    where: [],
-    orderBy: [{ ...asc(`title`), stringSort: `locale` }],
-    limit: 4,
-  },
-  'due-unindexed': { where: [], orderBy: [asc(`due`)], limit: 2 },
-  'status-eq': {
-    where: [{ op: `eq`, field: `status`, value: 1 }],
-    orderBy: [desc(`rank`)],
-    limit: 2,
-  },
-  'status-in-offset': {
-    where: [{ op: `in`, field: `status`, values: [1, 2] }],
-    orderBy: [asc(`rank`)],
-    limit: 3,
-    offset: 1,
-  },
-  'status-and-flag': {
-    where: [
-      { op: `eq`, field: `status`, value: 1 },
-      { op: `eq`, field: `flag`, value: true },
-    ],
-    orderBy: [desc(`rank`, `last`)],
-    limit: 2,
-  },
-  'title-eq': {
-    where: [{ op: `eq`, field: `title`, value: `b` }],
-    orderBy: [asc(`rank`)],
-    limit: 1,
-  },
-  'n-range': {
-    where: [{ op: `gt`, field: `n`, value: 2 }],
-    orderBy: [asc(`rank`)],
-    limit: 3,
-  },
-  'rank-boundary': {
-    where: [{ op: `eq`, field: `rank`, value: 9 }],
-    orderBy: [desc(`rank`)],
-    limit: 1,
-  },
-} satisfies Record<string, Query>
-type QueryName = keyof typeof queries
+const fields: ReadonlyArray<Field> = [
+  `rank`,
+  `title`,
+  `status`,
+  `flag`,
+  `n`,
+  `due`,
+]
 
-type History = { dataset: DatasetName; query: QueryName }
-type Plan = History & { rows: Array<StoredRow>; request: Query }
-
-const indexedFields: ReadonlyArray<Field> = [`rank`, `title`, `status`]
-
-const enumerated: Array<History> = (
-  Object.keys(datasets) as Array<DatasetName>
-).flatMap((dataset) =>
-  (Object.keys(queries) as Array<QueryName>).map((query) => ({
-    dataset,
-    query,
-  })),
-)
+function resolveLeaf(leaf: Leaf): ResolvedLeaf {
+  switch (leaf.op) {
+    case `eq`:
+      return { ...leaf, value: storedValue(leaf.value) }
+    case `in`:
+      return { ...leaf, values: leaf.values.map(storedValue) }
+    case `gt`:
+      return leaf
+  }
+}
 
 function resolve(history: History): Plan {
   return {
-    ...history,
-    rows: datasets[history.dataset](),
-    request: queries[history.query],
+    rows: history.rows.map((row, index) => {
+      const value: Partial<Record<Field, unknown>> = {}
+      for (const field of fields)
+        if (row[field] !== `missing`) value[field] = storedValue(row[field])
+      return {
+        key: `k${highKeyCharacters[row.key]}${String(index).padStart(2, `0`)}`,
+        value,
+      }
+    }),
+    request: {
+      where: history.where.map(resolveLeaf),
+      orderBy: history.orderBy,
+      limit: history.limit,
+      ...(history.offset === `none` ? {} : { offset: history.offset }),
+    },
+    requiredStates: constructionStates.get(history) ?? [],
   }
 }
 
@@ -291,7 +377,7 @@ function equalsLiteral(value: unknown, literal: unknown): boolean {
   return value === literal
 }
 
-function keepsRow(row: StoredRow, leaf: Leaf): boolean {
+function keepsRow(row: StoredRow, leaf: ResolvedLeaf): boolean {
   const value = row.value[leaf.field]
   switch (leaf.op) {
     case `eq`:
@@ -316,7 +402,7 @@ const plainText = (text: string) =>
     return char.length === 1 && unit > 0 && unit < 0xd800
   })
 
-function exactLeaf(leaf: Leaf): boolean {
+function exactLeaf(leaf: ResolvedLeaf): boolean {
   if (leaf.op === `gt`) return false
   const literals = leaf.op === `eq` ? [leaf.value] : leaf.values
   const kinds = new Set(
@@ -335,6 +421,8 @@ function exactLeaf(leaf: Leaf): boolean {
   return kinds.size === 1 && !kinds.has(`other`)
 }
 
+const indexedFields: ReadonlyArray<Field> = [`rank`, `title`, `status`]
+
 function sortsPlainly(rows: Array<StoredRow>, order: Order): boolean {
   if (!indexedFields.includes(order.field)) return false
   const values = rows
@@ -346,7 +434,9 @@ function sortsPlainly(rows: Array<StoredRow>, order: Order): boolean {
   const text = values.every(
     (value) => typeof value === `string` && plainText(value),
   )
-  return numeric || (text && order.stringSort !== `locale`)
+  const lexical =
+    order.stringSort === `default` || order.stringSort === `lexical`
+  return numeric || (text && lexical)
 }
 
 // The work law's premise, from the request and the stored values alone.
@@ -358,6 +448,9 @@ function pageInSql(plan: Plan): boolean {
   )
 }
 
+const stateOf = (plan: Plan): State =>
+  pageInSql(plan) ? `page in SQL` : `page in memory`
+
 function model(plan: Plan) {
   const keys = owedKeys(plan)
   const offset = plan.request.offset ?? 0
@@ -365,28 +458,439 @@ function model(plan: Plan) {
     keys,
     pageInSql: pageInSql(plan),
     pageRows: Math.max(0, Math.min(plan.request.limit, keys.length - offset)),
+    requiredStates: plan.requiredStates,
   }
 }
 type Owed = ReturnType<typeof model>
 
-function whereOf(request: Query): IR.BasicExpression<boolean> | undefined {
+// Constructions. Each keeps the generated rows, ties, nulls, directions,
+// limit and offset, and returns a fresh history that it records with the
+// state that history must enter.
+
+const lexicalSort = (sort: Order[`stringSort`]): Order[`stringSort`] =>
+  sort === `locale` || sort === `custom` ? `lexical` : sort
+
+// Replaces every value and key that breaks the work law's premise, moves the
+// order onto the indexed fields with `lead` first, and makes each leaf exact.
+function withPlainPremise(generated: History, lead: `rank` | `title`): History {
+  const [first, second] = generated.orderBy
+  const other: OrderField = lead === `rank` ? `title` : `rank`
+  return {
+    rows: generated.rows.map((row) => ({
+      ...row,
+      key: `plain` as const,
+      rank: irregularRanks.includes(String(row.rank)) ? row.n % 10 : row.rank,
+      title: irregularTitles.includes(row.title)
+        ? plainTitles[row.n % plainTitles.length]!
+        : row.title,
+    })),
+    where: generated.where.map(exactly),
+    orderBy: [
+      { ...first!, field: lead, stringSort: lexicalSort(first!.stringSort) },
+      ...(second
+        ? [
+            {
+              ...second,
+              field: other,
+              stringSort: lexicalSort(second.stringSort),
+            },
+          ]
+        : []),
+    ],
+    limit: generated.limit,
+    offset: generated.offset,
+  }
+}
+
+// An exact leaf on the same field: a range becomes an equality, and a
+// literal list of mixed or inexact kinds keeps its integers.
+function exactly(leaf: Leaf): Leaf {
+  if (exactLeaf(resolveLeaf(leaf))) return leaf
+  switch (leaf.op) {
+    case `gt`:
+      return { op: `eq`, field: leaf.field, value: leaf.value, reversed: false }
+    case `eq`:
+      return { ...leaf, value: 1 }
+    case `in`: {
+      const integers = leaf.values.filter((value) => typeof value === `number`)
+      return { ...leaf, values: integers.length > 0 ? integers : [1] }
+    }
+  }
+}
+
+const leadOf = (generated: History) =>
+  generated.orderBy[0]!.field === `title` ? `title` : `rank`
+
+const fallbackRow: Row = {
+  key: `plain`,
+  rank: 4,
+  title: `c`,
+  status: 1,
+  flag: `true`,
+  n: 4,
+  due: 1,
+}
+
+function withRows(history: History, count: number): History {
+  const rows = [...history.rows]
+  while (rows.length < count) rows.push({ ...fallbackRow, n: rows.length })
+  return { ...history, rows }
+}
+
+function constructed(
+  name: string,
+  state: State,
+  build: (generated: History) => History,
+) {
+  return {
+    name,
+    enters: [state],
+    build: (generated: History) => {
+      const history = build(generated)
+      constructionStates.set(history, [state])
+      return history
+    },
+  }
+}
+
+const constructions = [
+  constructed(`page in SQL by rank`, `page in SQL`, (generated) =>
+    withPlainPremise(generated, `rank`),
+  ),
+  constructed(`page in SQL by title`, `page in SQL`, (generated) =>
+    withPlainPremise(generated, `title`),
+  ),
+  constructed(
+    `page in SQL under an exact where`,
+    `page in SQL`,
+    (generated) => {
+      const history = withPlainPremise(generated, leadOf(generated))
+      const added: Leaf = {
+        op: `eq`,
+        field: `status`,
+        value: 1 + (generated.limit % 2),
+        reversed: generated.rows.length % 2 === 1,
+      }
+      return {
+        ...history,
+        where: [added, ...history.where].slice(0, maxLeaves),
+      }
+    },
+  ),
+  constructed(
+    `page in SQL at a zero limit or offset`,
+    `page in SQL`,
+    (generated) => {
+      // At least two rows match, so the page holds fewer rows than a read of
+      // every match returns.
+      const history = withRows(
+        { ...withPlainPremise(generated, leadOf(generated)), where: [] },
+        2,
+      )
+      return generated.limit % 2 === 0
+        ? { ...history, limit: 0 }
+        : { ...history, limit: 1, offset: 0 }
+    },
+  ),
+  constructed(
+    `page in memory for one irregular order value`,
+    `page in memory`,
+    (generated) => {
+      const lead = leadOf(generated)
+      const history = withRows(withPlainPremise(generated, lead), 1)
+      const at = generated.limit % history.rows.length
+      const row = history.rows[at]!
+      // Text breaks a numeric field only beside a number, so a field that
+      // holds no number gets an object instead.
+      const holdsNumber = history.rows.some(
+        (other, index) => index !== at && typeof other.rank === `number`,
+      )
+      const rank = irregularRanks[row.n % irregularRanks.length]!
+      const changed: Row =
+        lead === `rank`
+          ? {
+              ...row,
+              rank:
+                holdsNumber || (rank !== `text 4` && rank !== `x`)
+                  ? rank
+                  : `object`,
+            }
+          : { ...row, title: irregularTitles[row.n % irregularTitles.length]! }
+      return {
+        ...history,
+        rows: history.rows.map((other, index) =>
+          index === at ? changed : other,
+        ),
+      }
+    },
+  ),
+  constructed(
+    `page in memory for two tied rows with high keys`,
+    `page in memory`,
+    (generated) => {
+      const history = withRows(
+        withPlainPremise(generated, leadOf(generated)),
+        2,
+      )
+      const [first, second] = history.rows
+      const keys: Array<KeyKind> =
+        generated.limit % 2 === 0
+          ? [`private use`, `astral`]
+          : [`astral`, `private use`]
+      return {
+        ...history,
+        rows: history.rows.map((row, index) =>
+          index === 0
+            ? { ...first!, key: keys[0]! }
+            : index === 1
+              ? {
+                  ...second!,
+                  key: keys[1]!,
+                  rank: first!.rank,
+                  title: first!.title,
+                }
+              : row,
+        ),
+      }
+    },
+  ),
+  constructed(
+    `page in memory for one inexact leaf`,
+    `page in memory`,
+    (generated) => {
+      const history = withPlainPremise(generated, leadOf(generated))
+      // Each mixed membership matches stored values of both its kinds.
+      const inexact: Array<Leaf> = [
+        { op: `gt`, field: `n`, value: generated.limit % 9 },
+        { op: `in`, field: `status`, values: [1, `text 1`] },
+        { op: `in`, field: `flag`, values: [`true`, 1] },
+        { op: `eq`, field: `rank`, value: `fraction`, reversed: false },
+      ]
+      return {
+        ...history,
+        where: [
+          ...history.where.slice(0, maxLeaves - 1),
+          inexact[generated.rows.length % inexact.length]!,
+        ],
+      }
+    },
+  ),
+  constructed(
+    `page in memory for an unindexed or non-lexical order`,
+    `page in memory`,
+    (generated) => {
+      const history = withRows(withPlainPremise(generated, `title`), 1)
+      const [first, ...rest] = history.orderBy
+      const choice = generated.limit % 3
+      // A non-lexical sort breaks the premise only on a field with text.
+      const rows = history.rows.map((row, index) =>
+        index === 0 && (row.title === `null` || row.title === `missing`)
+          ? { ...row, title: `a` }
+          : row,
+      )
+      return {
+        ...history,
+        rows,
+        orderBy:
+          choice === 0
+            ? [{ ...first!, field: `due` }, ...rest]
+            : [
+                {
+                  ...first!,
+                  stringSort: choice === 1 ? `locale` : `custom`,
+                },
+                ...rest,
+              ],
+      }
+    },
+  ),
+]
+
+// Fixed histories: the datasets that rejected the production mutants named in
+// the coverage map, as members of the grammar.
+const plainRows: Array<Row> = (
+  [
+    [5, `b`, 1, `true`, 1, 3],
+    [3, `a`, `date 1`, `true`, 2, `missing`],
+    [9, `c`, `bigint 1`, `false`, 3, 1],
+    [9, `b`, `true`, 1, 0, `missing`],
+    [`null`, `d`, `text 1`, `missing`, 4, 2],
+    [`missing`, `a`, `iso 1`, `missing`, 5, `missing`],
+    [1, `null`, 2, `true`, 6, `missing`],
+    [7, `missing`, 1, `true`, 7, 5],
+    [3, `e`, `date 2`, `false`, 8, `missing`],
+    [0, `c`, 1, `true`, 9, 4],
+    [7, `f`, 0, `missing`, 10, `missing`],
+    [2, `B`, 1, `false`, 0, `missing`],
+  ] as const
+).map(([rank, title, status, flag, n, due]) => ({
+  key: `plain`,
+  rank,
+  title,
+  status,
+  flag,
+  n,
+  due,
+}))
+
+function withRow(rows: Array<Row>, index: number, change: Partial<Row>) {
+  return rows.map((row, at) => (at === index ? { ...row, ...change } : row))
+}
+
+const order = (
+  field: OrderField,
+  direction: Order[`direction`],
+  stringSort: Order[`stringSort`] = `default`,
+): Order => ({ field, direction, nulls: `first`, stringSort })
+
+const fixed: Array<{ name: string; history: History }> = [
+  {
+    name: `plain rows by rank descending, nulls first`,
+    history: {
+      rows: plainRows,
+      where: [],
+      orderBy: [order(`rank`, `desc`)],
+      limit: 3,
+      offset: `none`,
+    },
+  },
+  {
+    name: `plain rows by rank descending after an offset`,
+    history: {
+      rows: plainRows,
+      where: [],
+      orderBy: [order(`rank`, `desc`)],
+      limit: 4,
+      offset: 2,
+    },
+  },
+  {
+    name: `status equals 1 beside coerced values`,
+    history: {
+      rows: plainRows,
+      where: [{ op: `eq`, field: `status`, value: 1, reversed: false }],
+      orderBy: [order(`rank`, `desc`)],
+      limit: 2,
+      offset: `none`,
+    },
+  },
+  {
+    name: `status is 1 or the text 1`,
+    history: {
+      rows: plainRows,
+      where: [{ op: `in`, field: `status`, values: [1, `text 1`] }],
+      orderBy: [order(`rank`, `asc`)],
+      limit: 1_000_000,
+      offset: `none`,
+    },
+  },
+  {
+    name: `title is a or a lone surrogate beside the replacement character`,
+    history: {
+      rows: withRow(withRow(plainRows, 3, { title: `\uD800` }), 5, {
+        title: `\uFFFD`,
+      }),
+      where: [{ op: `in`, field: `title`, values: [`a`, `\uD800`] }],
+      orderBy: [order(`rank`, `asc`)],
+      limit: 1_000_000,
+      offset: `none`,
+    },
+  },
+  {
+    name: `plain rows at offset 0`,
+    history: {
+      rows: plainRows,
+      where: [],
+      orderBy: [order(`rank`, `asc`)],
+      limit: 2,
+      offset: 0,
+    },
+  },
+  {
+    name: `rank mixes numbers and text`,
+    history: {
+      rows: withRow(withRow(plainRows, 7, { rank: `text 4` }), 10, {
+        rank: `x`,
+      }),
+      where: [],
+      orderBy: [order(`rank`, `desc`)],
+      limit: 3,
+      offset: `none`,
+    },
+  },
+  {
+    name: `rank holds NaN`,
+    history: {
+      rows: withRow(plainRows, 7, { rank: `nan` }),
+      where: [],
+      orderBy: [order(`rank`, `asc`)],
+      limit: 3,
+      offset: `none`,
+    },
+  },
+  {
+    name: `title holds private-use and astral text`,
+    history: {
+      rows: withRow(withRow(plainRows, 2, { title: `\uE000` }), 10, {
+        title: `\u{1F600}`,
+      }),
+      where: [],
+      orderBy: [order(`title`, `desc`, `lexical`)],
+      limit: 1,
+      offset: `none`,
+    },
+  },
+  {
+    name: `two rows tied on rank have high keys`,
+    history: {
+      rows: withRow(withRow(plainRows, 2, { key: `private use` }), 3, {
+        key: `astral`,
+      }),
+      where: [],
+      orderBy: [order(`rank`, `desc`)],
+      limit: 1,
+      offset: `none`,
+    },
+  },
+]
+
+function whereOf(request: Request): IR.BasicExpression<boolean> | undefined {
   const leaves = request.where.map((leaf) => {
     const field = new IR.PropRef([leaf.field])
-    return leaf.op === `in`
-      ? new IR.Func<boolean>(`in`, [field, new IR.Value(leaf.values)])
-      : new IR.Func<boolean>(leaf.op, [field, new IR.Value(leaf.value)])
+    switch (leaf.op) {
+      case `in`:
+        return new IR.Func<boolean>(`in`, [field, new IR.Value(leaf.values)])
+      case `eq`:
+        return new IR.Func<boolean>(
+          `eq`,
+          leaf.reversed
+            ? [new IR.Value(leaf.value), field]
+            : [field, new IR.Value(leaf.value)],
+        )
+      case `gt`:
+        return new IR.Func<boolean>(`gt`, [field, new IR.Value(leaf.value)])
+    }
   })
   if (leaves.length === 0) return undefined
   return leaves.length === 1 ? leaves[0] : new IR.Func(`and`, leaves)
 }
 
-function orderByOf(request: Query): IR.OrderBy {
-  return request.orderBy.map((order) => ({
-    expression: new IR.PropRef([order.field]),
+// A custom comparator that reverses code-unit order, so SQL's text order
+// cannot stand in for it.
+const reverseCodeUnits = (left: string, right: string) =>
+  left < right ? 1 : left > right ? -1 : 0
+
+function orderByOf(request: Request): IR.OrderBy {
+  return request.orderBy.map((term) => ({
+    expression: new IR.PropRef([term.field]),
     compareOptions: {
-      direction: order.direction,
-      nulls: order.nulls,
-      ...(order.stringSort ? { stringSort: order.stringSort } : {}),
+      direction: term.direction,
+      nulls: term.nulls,
+      ...(term.stringSort === `custom`
+        ? { stringSort: `custom` as const, compare: reverseCodeUnits }
+        : term.stringSort === `default`
+          ? {}
+          : { stringSort: term.stringSort }),
     },
   }))
 }
@@ -464,13 +968,17 @@ async function drive(
         offset: plan.request.offset ?? 0,
       }
     observe(`page`, await load(true))
+    // The declared state is the premise of the history, not a production
+    // decision: production's paging is what the work law judges.
+    observe(`reach`, stateOf(plan))
   } finally {
     driver.db.close()
   }
 }
 
 // Filter first: a wrong filter also moves the page. Then the page against the
-// unpaged order, then the raw rows the page read.
+// unpaged order, then the raw rows the page read, then the construction's
+// states, which only a complete trace can show.
 function check(plan: Plan, trace: ReadonlyArray<Observation>, owed: Owed) {
   const unpaged = trace.find(({ checkpoint }) => checkpoint === `unpaged`)
     ?.value as Read | undefined
@@ -479,6 +987,12 @@ function check(plan: Plan, trace: ReadonlyArray<Observation>, owed: Owed) {
   if (!unpaged || !page)
     return violation(`page`, `the driver recorded no page`, `trace`)
   const offset = plan.request.offset ?? 0
+  const reached = new Set(
+    trace
+      .filter(({ checkpoint }) => checkpoint === `reach`)
+      .map(({ value }) => value),
+  )
+  const missing = owed.requiredStates.filter((state) => !reached.has(state))
   return (
     differs(
       `unpaged`,
@@ -503,56 +1017,66 @@ function check(plan: Plan, trace: ReadonlyArray<Observation>, owed: Owed) {
           `SQLite returned more stored rows than the page holds`,
         )
       : undefined) ??
-    pass
+    (missing.length > 0
+      ? violation(
+          `constructed states`,
+          `the constructed history did not enter ${missing.join(`, `)}`,
+          `constructed reach`,
+        )
+      : pass)
   )
 }
 
-const label = (history: History) => `${history.dataset}/${history.query}`
+const withKeys = (entry: Observation, keep: (key: string) => boolean) => ({
+  ...entry,
+  value: {
+    ...(entry.value as Read),
+    keys: (entry.value as Read).keys.filter(keep),
+  },
+})
 
 oracleProperty({
   id: `sqlite-persistence.ordered-page`,
   law: {
     statement: `At loadSubset return, an ordered page holds exactly the unpaged request's rows at its offset, in order; the unpaged request keeps exactly the rows whose fields equal the literals (a Date equals its epoch milliseconds); and when the where is a conjunction of exact equality or membership leaves and every order field is indexed and holds only integers and booleans, or only text below U+D800 sorted lexically, with keys of that text, SQLite returns no more stored rows than the page holds.`,
     authority: `The SQLite adapter's contract that the JavaScript evaluator and in-memory sort decide loadSubset results with SQL as a candidate read (PR #1997); the accepted goal that a paged live query reads its page, not every matching row.`,
-    limits: `Twelve datasets of twelve rows and sixteen requests on node:sqlite in one process; no cursors, joins, expression order fields, native hosts or OPFS. The comparator is not modeled: order comes from the unpaged request.`,
+    limits: `Up to twelve rows and one request per history on node:sqlite in one process; no cursors, joins, expression order fields, native hosts or OPFS. The comparator is not modeled: order comes from the unpaged request.`,
   },
   owns: [`src/sqlite-core-adapter.ts`],
   histories: {
-    enumerated,
-    states: [`page in SQL`, `page in memory`],
+    arbitrary: historyArbitrary,
+    runs: 100,
+    fixedSeeds: [1116],
+    states: [...states],
+    constructed: constructions,
+    fixed,
   },
-  label,
   resolve,
   model,
-  reached: (_plan, _trace, owed) => [
-    owed.pageInSql ? `page in SQL` : `page in memory`,
-  ],
   driver: (plan, observe) => drive(plan, observe),
   check,
   calibrations: [
     {
       name: `a Date match is dropped`,
       law: `filter`,
-      history: { enumerated: `plain/status-eq` },
-      corrupt: (trace) =>
-        trace.map((entry) =>
+      history: { fixed: `status equals 1 beside coerced values` },
+      corrupt: (trace, plan) => {
+        const dates = new Set(
+          plan.rows
+            .filter((row) => row.value.status instanceof Date)
+            .map((row) => row.key),
+        )
+        return trace.map((entry) =>
           entry.checkpoint === `unpaged`
-            ? {
-                ...entry,
-                value: {
-                  ...(entry.value as Read),
-                  keys: (entry.value as Read).keys.filter(
-                    (key) => key !== `k02`,
-                  ),
-                },
-              }
+            ? withKeys(entry, (key) => !dates.has(key))
             : entry,
-        ),
+        )
+      },
     },
     {
       name: `the page ignores its offset`,
       law: `page`,
-      history: { enumerated: `plain/rank-desc-offset` },
+      history: { fixed: `plain rows by rank descending after an offset` },
       corrupt: (trace, plan) =>
         trace.map((entry) =>
           entry.checkpoint === `page`
@@ -572,7 +1096,7 @@ oracleProperty({
     {
       name: `the page reads every match`,
       law: `work`,
-      history: { enumerated: `plain/status-eq` },
+      history: { fixed: `status equals 1 beside coerced values` },
       corrupt: (trace) =>
         trace.map((entry) =>
           entry.checkpoint === `page`
@@ -592,14 +1116,28 @@ oracleProperty({
     {
       name: `SQL pages an order field that mixes numbers and text`,
       law: `page`,
-      history: { enumerated: `rank-text/rank-desc` },
+      history: { fixed: `rank mixes numbers and text` },
       driver: (plan, observe) => drive(plan, observe, true),
     },
     {
       name: `SQL pages a candidate that admits coerced values`,
       law: `page`,
-      history: { enumerated: `plain/status-eq` },
+      history: { fixed: `status equals 1 beside coerced values` },
       driver: (plan, observe) => drive(plan, observe, true),
     },
+    ...states.map((state) => ({
+      name: `a construction omits ${state}`,
+      law: `constructed reach`,
+      history: {
+        constructed:
+          state === `page in SQL`
+            ? `page in SQL by rank`
+            : `page in memory for one inexact leaf`,
+      },
+      corrupt: (trace: ReadonlyArray<Observation>) =>
+        trace.filter(
+          ({ checkpoint, value }) => checkpoint !== `reach` || value !== state,
+        ),
+    })),
   ],
 })

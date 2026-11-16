@@ -15,7 +15,8 @@
  * BigInt ranges/IN within SQLite's signed-integer domain, and indexed numeric
  * comparisons with tagged values, null, missing, and text controls. Fixed
  * filters include safe-integer equality on a top-level and a nested field,
- * whose candidate also admits a Date's ISO text. Fractional equality,
+ * whose candidate also admits a Date's ISO text. The number-equality property
+ * below generates that law: its own section states the grammar. Fractional equality,
  * lower-wrapped BigInt IN, lone-surrogate coalesce, Date ranges, strftime,
  * and add keep full reads where SQLite could exclude a JavaScript match.
  * Integer threshold checks include adjacent fractional values.
@@ -91,7 +92,12 @@ import {
   createSQLiteCorePersistenceAdapter,
   decodePersistedStorageKey,
 } from '@tanstack/db-sqlite-persistence-core'
-import { oracleProperty } from '../../db/tests/oracle-config.js'
+import {
+  differs,
+  oracleProperty,
+  pass,
+  violation,
+} from '../../db/tests/oracle-config.js'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -897,6 +903,322 @@ describe(`SQLite expression-index oracle`, () => {
       ),
     model: recordedAssertionJudgment,
     check: forwardAssertionJudgment,
+  })
+
+  /**
+   * Safe-integer equality and membership on an indexed field.
+   *
+   * Law: the row evaluator equates a Date with its epoch milliseconds and any
+   * other value only with an identical one, while SQLite stores a Date as its
+   * ISO text. An `eq` or `in` of safe integers on an indexed path returns the
+   * rows that the evaluator keeps, its SQL candidate holds exactly those rows,
+   * and SQLite answers it by a search of the named expression index.
+   *
+   * Model: `numberMatches` walks each stored row's path with `readPath` and
+   * applies that equality. It does not call the SQL compiler or the
+   * evaluator.
+   *
+   * Grammar: a path of one root and up to three identifier or digit
+   * segments, a target in -10,000..10,000, `eq` or `in` (the target and the
+   * target plus two), and a target stored as a number, a Date, or both. Every
+   * history also stores the target plus one as a number and a Date, the
+   * target plus two, and the target as text, which neither law nor candidate
+   * may keep. Declared states: a Date equals an `eq` literal, and a Date equals
+   * an `in` literal. One constructed history per state sets the operator and
+   * stores a Date at the target, keeping the generated path, target and
+   * whether the number is stored too.
+   *
+   * Driver and checkpoint: the real adapter over BetterSqlite3 captures the
+   * Collection SELECT, runs its SQL and bindings directly, and explains its
+   * plan, at `loadSubset` return.
+   *
+   * Calibration: a driver that binds the number in place of the Date's ISO
+   * text loses the Date match, and trace mutants drop it from the candidate,
+   * scan the table, or omit a constructed state.
+   */
+  type NumberEqualityHistory = {
+    root: string
+    tail: Array<string>
+    target: number
+    operator: `eq` | `in`
+    stored: `number` | `date` | `both`
+  }
+  type NumberEqualityPlan = {
+    history: NumberEqualityHistory
+    path: Array<string>
+    literals: Array<number>
+    rows: Array<{ key: string; value: Record<string, unknown> }>
+    requiredStates: ReadonlyArray<string>
+  }
+  type NumberEqualityRead = {
+    adapterKeys: Array<string>
+    directSqlKeys: Array<string>
+    searchesNamedIndex: boolean
+    scansTable: boolean
+  }
+  const numberEqualityStates = [
+    `a Date equals an eq literal`,
+    `a Date equals an in literal`,
+  ]
+  const numberConstructionStates = new WeakMap<
+    NumberEqualityHistory,
+    ReadonlyArray<string>
+  >()
+  const numberEqualityArbitrary: fc.Arbitrary<NumberEqualityHistory> =
+    fc.record({
+      root: fc.constantFrom(`a`, `meta`, `priority`, `t0`, `xb1`),
+      tail: fc.array(fc.constantFrom(`order`, `n`, `e1`, `0`, `2`), {
+        maxLength: 3,
+      }),
+      target: fc.integer({ min: -10_000, max: 10_000 }),
+      operator: fc.constantFrom(`eq` as const, `in` as const),
+      stored: fc.constantFrom(`number` as const, `date` as const, `both` as const),
+    })
+
+  function resolveNumberEquality(
+    history: NumberEqualityHistory,
+  ): NumberEqualityPlan {
+    const path = [history.root, ...history.tail]
+    const { target } = history
+    const stored: Array<[string, unknown]> = [
+      ...(history.stored === `date`
+        ? []
+        : [[`number-target`, target] as [string, unknown]]),
+      ...(history.stored === `number`
+        ? []
+        : [[`date-target`, new Date(target)] as [string, unknown]]),
+      [`number-next`, target + 1],
+      [`date-next`, new Date(target + 1)],
+      [`number-second`, target + 2],
+      [`text-target`, String(target)],
+    ]
+    return {
+      history,
+      path,
+      literals: history.operator === `eq` ? [target] : [target, target + 2],
+      rows: stored.map(([key, value]) => ({
+        key,
+        value: createNestedRow(path, value as OracleScalar),
+      })),
+      requiredStates: numberConstructionStates.get(history) ?? [],
+    }
+  }
+
+  function numberMatches(plan: NumberEqualityPlan): Array<string> {
+    return plan.rows
+      .filter((row) => {
+        const value = readPath(row.value, plan.path)
+        return plan.literals.some((literal) =>
+          value instanceof Date
+            ? value.getTime() === literal
+            : value === literal,
+        )
+      })
+      .map((row) => row.key)
+      .sort()
+  }
+
+  const numberEqualityStatesOf = (plan: NumberEqualityPlan) =>
+    numberMatches(plan).some((key) => key.startsWith(`date-`))
+      ? [`a Date equals an ${plan.history.operator} literal`]
+      : []
+
+  async function driveNumberEquality(
+    plan: NumberEqualityPlan,
+    observe: (checkpoint: string, value: unknown) => void,
+    transformQuery?: QueryTransform,
+  ) {
+    const field = new IR.PropRef(plan.path)
+    const observation = await observeExpressionIndexScenario({
+      label: `number-${plan.history.operator}`,
+      indexExpression: field,
+      where:
+        plan.history.operator === `eq`
+          ? new IR.Func<boolean>(`eq`, [field, new IR.Value(plan.literals[0])])
+          : new IR.Func<boolean>(`in`, [field, new IR.Value(plan.literals)]),
+      rows: plan.rows,
+      transformQuery,
+    })
+    observe(`loadSubset`, {
+      adapterKeys: [...observation.adapterKeys].sort(),
+      directSqlKeys: [...observation.directSqlKeys].sort(),
+      searchesNamedIndex: planUsesNamedIndex(
+        observation.plan,
+        observation.tableName,
+        observation.indexName,
+      ),
+      scansTable: planScansTable(observation.plan, observation.tableName),
+    } satisfies NumberEqualityRead)
+    for (const state of numberEqualityStatesOf(plan)) observe(`reach`, state)
+  }
+
+  function checkNumberEquality(
+    plan: NumberEqualityPlan,
+    trace: ReadonlyArray<Observation>,
+    expected: { keys: Array<string>; requiredStates: ReadonlyArray<string> },
+  ): Verdict {
+    const read = trace.find(({ checkpoint }) => checkpoint === `loadSubset`)
+      ?.value as NumberEqualityRead | undefined
+    if (!read)
+      return violation(`loadSubset`, `the driver recorded no load`, `trace`)
+    const missing = expected.requiredStates.filter(
+      (state) =>
+        !trace.some(
+          ({ checkpoint, value }) => checkpoint === `reach` && value === state,
+        ),
+    )
+    return (
+      differs(
+        `loadSubset`,
+        `public rows`,
+        read.adapterKeys,
+        expected.keys,
+        `the adapter kept other rows than the model's equality`,
+      ) ??
+      differs(
+        `predicate query`,
+        `exact candidate`,
+        read.directSqlKeys,
+        expected.keys,
+        `the SQL candidate holds other rows than the model's equality`,
+      ) ??
+      differs(
+        `query plan`,
+        `named index`,
+        { searchesNamedIndex: read.searchesNamedIndex, scansTable: read.scansTable },
+        { searchesNamedIndex: true, scansTable: false },
+        `SQLite does not answer the candidate from the named index`,
+      ) ??
+      (missing.length > 0
+        ? violation(
+            `constructed states`,
+            `the constructed history did not enter ${missing.join(`, `)}`,
+            `constructed reach`,
+          )
+        : pass)
+    )
+  }
+
+  // Binds the number again where the candidate binds the Date's ISO text.
+  const numberInPlaceOfDate: QueryTransform = (query) => {
+    const json = query.params.find(
+      (param): param is string =>
+        typeof param === `string` && param.startsWith(`[`),
+    )
+    if (json !== undefined)
+      return {
+        sql: query.sql,
+        params: query.params.map((param) =>
+          param === json
+            ? JSON.stringify(
+                (JSON.parse(json) as Array<unknown>).filter(
+                  (value) => typeof value === `number`,
+                ),
+              )
+            : param,
+        ),
+      }
+    const number = query.params.find((param) => typeof param === `number`)
+    return {
+      sql: query.sql,
+      params: query.params.map((param) =>
+        typeof param === `string` && /^-?\d{4,6}-/.test(param)
+          ? number
+          : param,
+      ),
+    }
+  }
+
+  const mapLoad = (
+    trace: ReadonlyArray<Observation>,
+    change: (read: NumberEqualityRead) => NumberEqualityRead,
+  ) =>
+    trace.map((entry) =>
+      entry.checkpoint === `loadSubset`
+        ? { ...entry, value: change(entry.value as NumberEqualityRead) }
+        : entry,
+    )
+
+  oracleProperty({
+    id: `sqlite-persistence.expression-index.number-equality`,
+    law: {
+      statement: `An eq or in of safe integers on an indexed path returns the rows whose value equals a literal, a Date equal to its epoch milliseconds; the SQL candidate holds exactly those rows, and SQLite searches the named expression index for it.`,
+      authority: `RFC #1659 invariant 8 and SQLite expression-index matching; the row evaluator's equality, which equates a Date with its epoch milliseconds (PR #1997).`,
+      limits: `Paths of up to four identifier or digit segments, targets in -10,000..10,000, and the real BetterSqlite3 adapter in one process; fractional and unsafe numbers keep a full read and are outside this law.`,
+    },
+    owns: [`src/node-driver.ts`],
+    histories: {
+      arbitrary: numberEqualityArbitrary,
+      runs: DEFAULT_ORACLE_RUNS,
+      fixedSeeds: [DEFAULT_ORACLE_SEED],
+      states: numberEqualityStates,
+      constructed: ([`eq`, `in`] as const).map((operator) => ({
+        name: `a Date equals an ${operator} literal`,
+        enters: [`a Date equals an ${operator} literal`],
+        build: (generated: NumberEqualityHistory) => {
+          const history: NumberEqualityHistory = {
+            ...generated,
+            operator,
+            stored: generated.stored === `number` ? `both` : generated.stored,
+          }
+          numberConstructionStates.set(history, [
+            `a Date equals an ${operator} literal`,
+          ])
+          return history
+        },
+      })),
+    },
+    resolve: resolveNumberEquality,
+    model: (plan) => ({
+      keys: numberMatches(plan),
+      requiredStates: plan.requiredStates,
+    }),
+    driver: (plan, observe) => driveNumberEquality(plan, observe),
+    check: checkNumberEquality,
+    calibrations: [
+      {
+        name: `the candidate binds the number in place of the Date's ISO text`,
+        law: `public rows`,
+        history: { constructed: `a Date equals an eq literal` },
+        driver: (plan, observe) =>
+          driveNumberEquality(plan, observe, numberInPlaceOfDate),
+      },
+      {
+        name: `the membership candidate drops the Dates' ISO text`,
+        law: `public rows`,
+        history: { constructed: `a Date equals an in literal` },
+        driver: (plan, observe) =>
+          driveNumberEquality(plan, observe, numberInPlaceOfDate),
+      },
+      {
+        name: `the candidate drops the Date match`,
+        law: `exact candidate`,
+        history: { constructed: `a Date equals an eq literal` },
+        corrupt: (trace) =>
+          mapLoad(trace, (read) => ({
+            ...read,
+            directSqlKeys: read.directSqlKeys.filter(
+              (key) => !key.startsWith(`date-`),
+            ),
+          })),
+      },
+      {
+        name: `SQLite scans the table`,
+        law: `named index`,
+        history: { constructed: `a Date equals an in literal` },
+        corrupt: (trace) =>
+          mapLoad(trace, (read) => ({ ...read, scansTable: true })),
+      },
+      ...numberEqualityStates.map((state) => ({
+        name: `a construction omits ${state}`,
+        law: `constructed reach`,
+        history: { constructed: state },
+        corrupt: (trace: ReadonlyArray<Observation>) =>
+          trace.filter(
+            ({ checkpoint, value }) => checkpoint !== `reach` || value !== state,
+          ),
+      })),
+    ],
   })
 
   oracleProperty({
