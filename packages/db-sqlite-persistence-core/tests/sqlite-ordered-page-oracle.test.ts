@@ -64,8 +64,8 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * that character.
  *
  * The request draws zero to two leaves over five fields: `eq` in either
- * operand order, `in` with zero to three literals, a range, or the constant
- * `true`. They form the `where` without an `and` (no `where` for no leaf),
+ * operand order, `in` with zero to three literals, a range, or a constant
+ * leaf that keeps every row (`true` or `eq(1, 1)`). They form the `where` without an `and` (no `where` for no leaf),
  * always under one `and` (`and()` for no leaf), or with the first leaf in a
  * nested `and`; the law reads an empty conjunction as an absent `where`. It
  * draws one or two order terms over `rank`, `title`, the unindexed `due` or
@@ -95,7 +95,9 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * counting driver, which records the rows each Collection SELECT returns. It
  * stores the rows, ensures an expression index on `rank`, `title` and
  * `status`, then loads the request without `limit` and the page, and
- * observes each result's keys and raw rows at `loadSubset` return. A legal
+ * observes each result's keys and raw rows at `loadSubset` return. It ensures
+ * the indexes best effort, as the persisted wrapper does: a rejected
+ * `ensureIndex` is recorded and the loads go on. A legal
  * request owes rows, so a load that rejects is observed as such and breaks
  * the filter law (unpaged) or the page law. The driver then records the
  * declared state the history entered.
@@ -132,12 +134,13 @@ type Row = {
   n: number
   due: Token
 }
-// `true` is the constant leaf `true`, which keeps every row.
+// `true` keeps every row: the literal `true`, or the comparison `eq(1, 1)`,
+// which has no field.
 type Leaf =
   | { op: `eq`; field: FilterField; value: Token; reversed: boolean }
   | { op: `in`; field: FilterField; values: Array<Token> }
   | { op: `gt`; field: `n`; value: number }
-  | { op: `true` }
+  | { op: `true`; form: `value` | `comparison` }
 // How the leaves form the `where`: `flat` passes no `where` for no leaf, the
 // leaf itself for one, and their `and` for more; `and` always wraps them,
 // `and()` included; `nested` wraps the first leaf in an inner `and`.
@@ -304,7 +307,10 @@ const leafArbitrary: fc.Arbitrary<Leaf> = fc.oneof(
     field: fc.constant(`n` as const),
     value: fc.integer({ min: 0, max: 9 }),
   }),
-  fc.record({ op: fc.constant(`true` as const) }),
+  fc.record({
+    op: fc.constant(`true` as const),
+    form: fc.constantFrom(`value` as const, `comparison` as const),
+  }),
 )
 const orderArbitrary: fc.Arbitrary<Order> = fc.record({
   field: fc.constantFrom<OrderField>(`rank`, `title`, `due`, `constant`),
@@ -340,7 +346,7 @@ type ResolvedLeaf =
   | { op: `eq`; field: FilterField; value: unknown; reversed: boolean }
   | { op: `in`; field: FilterField; values: Array<unknown> }
   | { op: `gt`; field: `n`; value: number }
-  | { op: `true` }
+  | { op: `true`; form: `value` | `comparison` }
 type Request = {
   where: Array<ResolvedLeaf>
   whereShape: WhereShape
@@ -704,7 +710,7 @@ const constructions = [
         { op: `in`, field: `status`, values: [1, `text 1`] },
         { op: `in`, field: `flag`, values: [`true`, 1] },
         { op: `eq`, field: `rank`, value: `fraction`, reversed: false },
-        { op: `true` },
+        { op: `true`, form: generated.limit % 2 ? `value` : `comparison` },
       ]
       return {
         ...history,
@@ -876,6 +882,41 @@ const fixed: Array<{ name: string; history: History }> = [
     },
   },
   {
+    name: `title equals b`,
+    history: {
+      rows: plainRows,
+      where: [{ op: `eq`, field: `title`, value: `b`, reversed: false }],
+      whereShape: `flat`,
+      orderBy: [order(`rank`, `asc`)],
+      limit: 1,
+      offset: `none`,
+    },
+  },
+  {
+    name: `flag equals true`,
+    history: {
+      rows: plainRows,
+      where: [{ op: `eq`, field: `flag`, value: `true`, reversed: true }],
+      whereShape: `flat`,
+      orderBy: [order(`rank`, `desc`)],
+      limit: 2,
+      offset: `none`,
+    },
+  },
+  {
+    name: `status equals 1n`,
+    history: {
+      rows: plainRows,
+      where: [
+        { op: `eq`, field: `status`, value: `bigint 1`, reversed: false },
+      ],
+      whereShape: `flat`,
+      orderBy: [order(`rank`, `desc`)],
+      limit: 0,
+      offset: `none`,
+    },
+  },
+  {
     name: `plain rows at offset 0`,
     history: {
       rows: plainRows,
@@ -940,7 +981,10 @@ const fixed: Array<{ name: string; history: History }> = [
 
 function whereOf(request: Request): IR.BasicExpression<boolean> | undefined {
   const leaves = request.where.map((leaf): IR.BasicExpression<boolean> => {
-    if (leaf.op === `true`) return new IR.Value(true)
+    if (leaf.op === `true`)
+      return leaf.form === `value`
+        ? new IR.Value(true)
+        : new IR.Func<boolean>(`eq`, [new IR.Value(1), new IR.Value(1)])
     const field = new IR.PropRef([leaf.field])
     switch (leaf.op) {
       case `in`:
@@ -1041,10 +1085,20 @@ async function drive(
         value: row.value,
       })),
     })
+    // The persisted wrapper ensures indexes best effort, so a rejection is
+    // recorded and the loads go on: the work law then judges a page whose
+    // index was lost.
     for (const field of indexedFields)
-      await adapter.ensureIndex(target, field, {
-        expressionSql: [JSON.stringify({ type: `ref`, path: [field] })],
-      })
+      try {
+        await adapter.ensureIndex(target, field, {
+          expressionSql: [JSON.stringify({ type: `ref`, path: [field] })],
+        })
+      } catch (error) {
+        observe(`ensureIndex`, {
+          field,
+          rejected: error instanceof Error ? error.message : String(error),
+        })
+      }
 
     // A legal request owes rows, so a rejection is an observation the laws
     // judge, not a setup error.
