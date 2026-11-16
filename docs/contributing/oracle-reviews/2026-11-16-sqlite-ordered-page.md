@@ -62,8 +62,8 @@ Native hosts, OPFS workers and elapsed time are outside this owner.
 
 ## Follow-up: generated histories, gap report and code weight
 
-Reviewed head: the follow-up commits on `acdb1b25` that end with the commit
-adding this entry. The entry above describes `acdb1b25` and stays as recorded.
+Reviewed head: the follow-up commits on `3968a567` that end with the commit
+adding this entry. The entry above describes `3968a567` and stays as recorded.
 
 The ordered-page oracle replaced its enumeration with a generated grammar, the
 boolean-arity oracle declared reach for its number atoms and now names the
@@ -104,7 +104,7 @@ and the order probe finds the index of irregular rows in `sqlite_master`.
   `number equality decides a row in SQL` constructions and both generated
   units in its work check (`and(eq-number)` reads 20 rows with no `WHERE`).
   With a core build of `21c52a07`, the Node property fails both constructions
-  and both generated units under law `exact candidate`. On `439015c8`, the
+  and both generated units under law `exact candidate`. On `10e91757`, the
   first version of this change, the `and()` and nested `and(and())` shapes
   fail the work law (one stored row at offset 1 reads that row for an empty
   page).
@@ -136,7 +136,7 @@ and the order probe finds the index of irregular rows in `sqlite_master`.
 `pnpm gap-report --package packages/db-sqlite-persistence-core --source
 src/sqlite-core-adapter.ts --seed 1997 --only <mutants>` selects every mutant
 of the functions this change edits or adds: 377 on `21c52a07` (the six edited
-functions) and 560 on `a24b3c8e` (those six and thirteen new ones). The
+functions) and 560 on `766a5d08` (those six and thirteen new ones). The
 package's owners ran unchanged on each side; the only owner edit outside this
 change makes `sync-metadata-missing-row-oracle.test.ts` write its `owns` as a
 literal list, which both runs used, because the report refuses a computed one.
@@ -210,9 +210,9 @@ for all of them. The 43, by reason:
 ### Code weight
 
 `pnpm size:compare --packages db-sqlite-persistence-core --files` against
-`21c52a07`, production bundle, at `a24b3c8e`: the package grows 1,216 bytes
-gzip and 1,053 brotli (at `acdb1b25` it grew 1,282 and 1,170), and
-`sqlite-core-adapter.js` grows 3,270 minified bytes (3,987 at `acdb1b25`). The `app` scenario does not
+`21c52a07`, production bundle, at `766a5d08`: the package grows 1,216 bytes
+gzip and 1,053 brotli (at `3968a567` it grew 1,282 and 1,170), and
+`sqlite-core-adapter.js` grows 3,270 minified bytes (3,987 at `3968a567`). The `app` scenario does not
 change: it ships no SQLite persistence. The rest of the growth is the SQL text
 of the kind guards, the irregular-rows predicate and the order probe.
 

@@ -1,5 +1,5 @@
 {
- "head": "a24b3c8e",
+ "head": "766a5d08",
  "seed": 1997,
  "command": "pnpm gap-report --package packages/db-sqlite-persistence-core --source src/sqlite-core-adapter.ts --seed 1997 --only <mutants of the changed functions>",
  "open": [
