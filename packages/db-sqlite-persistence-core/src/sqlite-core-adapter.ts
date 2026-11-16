@@ -3936,12 +3936,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       const irregularSql = irregularOrderRowsSql(jsonPath)
       // `ensureIndex` creates and drops the index of irregular rows together
       // with the field's expression index. One built by a release with another
-      // predicate does not count.
-      const [indexed] = await driver.query(
-        `SELECT 1 FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND instr(sql, ?) > 0`,
-        [tableName, irregularSql],
-      )
-      if (!indexed) return false
+      // predicate does not count. Without that index the `WHERE` leaves no
+      // row, so SQLite computes no column and the probe reads no stored row.
       const [values] = await driver.query<{
         irregular: number
         low: string
@@ -3950,7 +3946,9 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         `SELECT
            EXISTS (SELECT 1 FROM ${tableSql} WHERE ${irregularSql}) AS irregular,
            typeof((SELECT min(${fieldSql}) FROM ${tableSql})) AS low,
-           typeof((SELECT max(${fieldSql}) FROM ${tableSql})) AS high`,
+           typeof((SELECT max(${fieldSql}) FROM ${tableSql})) AS high
+         WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND instr(sql, ?) > 0)`,
+        [tableName, irregularSql],
       )
       const lexical =
         clause.compareOptions.stringSort !== `locale` &&

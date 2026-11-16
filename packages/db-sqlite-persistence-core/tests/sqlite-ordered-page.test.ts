@@ -13,25 +13,27 @@ const spec = {
   expressionSql: [JSON.stringify({ type: `ref`, path: [`rank`] })],
 }
 
-// Records the query plan of the order probe, the read that checks an order
-// field before a page runs in SQL.
+// Records the order probe, the read that checks an order field before a page
+// runs in SQL, and its query plan.
 class ProbePlanDriver extends CountingDriver {
+  probes: Array<{ sql: string; params: Array<string | number> }> = []
   probePlans: Array<Array<string>> = []
 
   override query<T>(
     sql: string,
     params: ReadonlyArray<unknown> = [],
   ): Promise<ReadonlyArray<T>> {
-    if (sql.includes(` AS irregular,`))
+    if (sql.includes(` AS irregular,`)) {
+      const probe = { sql, params: params as Array<string | number> }
+      this.probes.push(probe)
       this.probePlans.push(
         (
           this.db
             .prepare(`EXPLAIN QUERY PLAN ${sql}`)
-            .all(...(params as Array<string | number>)) as Array<{
-            detail: string
-          }>
+            .all(...probe.params) as Array<{ detail: string }>
         ).map((row) => row.detail),
       )
+    }
     return super.query<T>(sql, params)
   }
 }
@@ -105,6 +107,28 @@ describe(`SQLite ordered page indexes`, () => {
         detail.includes(tableName),
       ))
         expect(step).toMatch(/ USING (COVERING )?INDEX /)
+    } finally {
+      driver.db.close()
+    }
+  })
+
+  it(`reads no stored value for the order probe once the irregular-rows index is gone`, async () => {
+    const { driver, adapter, loadPage } = await seededAdapter()
+    try {
+      await loadPage()
+      const [probe] = driver.probes
+      await adapter.markIndexRemoved(target, `rank`)
+      // A stored value that is not JSON makes every read of it throw.
+      driver.db.exec(`UPDATE "${tableName}" SET value = '{' WHERE key = 's:k1'`)
+
+      expect(driver.db.prepare(probe!.sql).all(...probe!.params)).toEqual([])
+      // The same columns without the index condition do read stored values.
+      const columns = probe!.sql.slice(
+        0,
+        probe!.sql.lastIndexOf(`WHERE EXISTS`),
+      )
+      expect(columns).toContain(` AS high`)
+      expect(() => driver.db.prepare(columns).all()).toThrow(/malformed JSON/)
     } finally {
       driver.db.close()
     }
