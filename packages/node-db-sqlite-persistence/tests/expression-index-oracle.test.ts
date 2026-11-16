@@ -972,7 +972,11 @@ describe(`SQLite expression-index oracle`, () => {
       }),
       target: fc.integer({ min: -10_000, max: 10_000 }),
       operator: fc.constantFrom(`eq` as const, `in` as const),
-      stored: fc.constantFrom(`number` as const, `date` as const, `both` as const),
+      stored: fc.constantFrom(
+        `number` as const,
+        `date` as const,
+        `both` as const,
+      ),
     })
 
   function resolveNumberEquality(
@@ -1085,7 +1089,10 @@ describe(`SQLite expression-index oracle`, () => {
       differs(
         `query plan`,
         `named index`,
-        { searchesNamedIndex: read.searchesNamedIndex, scansTable: read.scansTable },
+        {
+          searchesNamedIndex: read.searchesNamedIndex,
+          scansTable: read.scansTable,
+        },
         { searchesNamedIndex: true, scansTable: false },
         `SQLite does not answer the candidate from the named index`,
       ) ??
@@ -1122,9 +1129,7 @@ describe(`SQLite expression-index oracle`, () => {
     return {
       sql: query.sql,
       params: query.params.map((param) =>
-        typeof param === `string` && /^-?\d{4,6}-/.test(param)
-          ? number
-          : param,
+        typeof param === `string` && /^-?\d{4,6}-/.test(param) ? number : param,
       ),
     }
   }
@@ -1152,21 +1157,22 @@ describe(`SQLite expression-index oracle`, () => {
       runs: DEFAULT_ORACLE_RUNS,
       fixedSeeds: [DEFAULT_ORACLE_SEED],
       states: numberEqualityStates,
-      constructed: ([`eq`, `in`] as const).map((operator) => ({
-        name: `a Date equals an ${operator} literal`,
-        enters: [`a Date equals an ${operator} literal`],
-        build: (generated: NumberEqualityHistory) => {
-          const history: NumberEqualityHistory = {
-            ...generated,
-            operator,
-            stored: generated.stored === `number` ? `both` : generated.stored,
-          }
-          numberConstructionStates.set(history, [
-            `a Date equals an ${operator} literal`,
-          ])
-          return history
-        },
-      })),
+      constructed: ([`eq`, `in`] as const).map((operator) => {
+        const state = `a Date equals an ${operator} literal`
+        return {
+          name: state,
+          enters: [state],
+          build: (generated: NumberEqualityHistory) => {
+            const history: NumberEqualityHistory = {
+              ...generated,
+              operator,
+              stored: generated.stored === `number` ? `both` : generated.stored,
+            }
+            numberConstructionStates.set(history, [state])
+            return history
+          },
+        }
+      }),
     },
     resolve: resolveNumberEquality,
     model: (plan) => ({
@@ -1215,7 +1221,8 @@ describe(`SQLite expression-index oracle`, () => {
         history: { constructed: state },
         corrupt: (trace: ReadonlyArray<Observation>) =>
           trace.filter(
-            ({ checkpoint, value }) => checkpoint !== `reach` || value !== state,
+            ({ checkpoint, value }) =>
+              checkpoint !== `reach` || value !== state,
           ),
       })),
     ],

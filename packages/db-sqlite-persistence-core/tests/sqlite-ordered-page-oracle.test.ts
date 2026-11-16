@@ -136,11 +136,13 @@ type Row = {
 }
 // `true` keeps every row: the literal `true`, or the comparison `eq(1, 1)`,
 // which has no field.
-type Leaf =
-  | { op: `eq`; field: FilterField; value: Token; reversed: boolean }
-  | { op: `in`; field: FilterField; values: Array<Token> }
+type LeafOf<TLiteral> =
+  | { op: `eq`; field: FilterField; value: TLiteral; reversed: boolean }
+  | { op: `in`; field: FilterField; values: Array<TLiteral> }
   | { op: `gt`; field: `n`; value: number }
   | { op: `true`; form: `value` | `comparison` }
+// A history names its literals by token; a request holds their values.
+type Leaf = LeafOf<Token>
 // How the leaves form the `where`: `flat` passes no `where` for no leaf, the
 // leaf itself for one, and their `and` for more; `and` always wraps them,
 // `and()` included; `nested` wraps the first leaf in an inner `and`.
@@ -342,11 +344,7 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
 })
 
 type StoredRow = { key: string; value: Partial<Record<Field, unknown>> }
-type ResolvedLeaf =
-  | { op: `eq`; field: FilterField; value: unknown; reversed: boolean }
-  | { op: `in`; field: FilterField; values: Array<unknown> }
-  | { op: `gt`; field: `n`; value: number }
-  | { op: `true`; form: `value` | `comparison` }
+type ResolvedLeaf = LeafOf<unknown>
 type Request = {
   where: Array<ResolvedLeaf>
   whereShape: WhereShape
@@ -515,7 +513,6 @@ const lexicalSort = (sort: Order[`stringSort`]): Order[`stringSort`] =>
 // Replaces every value and key that breaks the work law's premise, moves the
 // order onto the indexed fields with `lead` first, and makes each leaf exact.
 function withPlainPremise(generated: History, lead: `rank` | `title`): History {
-  const [first, second] = generated.orderBy
   const other: OrderField = lead === `rank` ? `title` : `rank`
   return {
     rows: generated.rows.map((row) => ({
@@ -528,18 +525,11 @@ function withPlainPremise(generated: History, lead: `rank` | `title`): History {
     })),
     where: generated.where.map(exactly),
     whereShape: generated.whereShape,
-    orderBy: [
-      { ...first!, field: lead, stringSort: lexicalSort(first!.stringSort) },
-      ...(second
-        ? [
-            {
-              ...second,
-              field: other,
-              stringSort: lexicalSort(second.stringSort),
-            },
-          ]
-        : []),
-    ],
+    orderBy: generated.orderBy.map((term, index) => ({
+      ...term,
+      field: index === 0 ? lead : other,
+      stringSort: lexicalSort(term.stringSort),
+    })),
     limit: generated.limit,
     offset: generated.offset,
   }
@@ -580,6 +570,10 @@ function withRows(history: History, count: number): History {
   const rows = [...history.rows]
   while (rows.length < count) rows.push({ ...fallbackRow, n: rows.length })
   return { ...history, rows }
+}
+
+function withRow(rows: Array<Row>, index: number, change: Partial<Row>) {
+  return rows.map((row, at) => (at === index ? { ...row, ...change } : row))
 }
 
 function constructed(
@@ -651,20 +645,19 @@ const constructions = [
         (other, index) => index !== at && typeof other.rank === `number`,
       )
       const rank = irregularRanks[row.n % irregularRanks.length]!
-      const changed: Row =
-        lead === `rank`
-          ? {
-              ...row,
-              rank:
-                holdsNumber || (rank !== `text 4` && rank !== `x`)
-                  ? rank
-                  : `object`,
-            }
-          : { ...row, title: irregularTitles[row.n % irregularTitles.length]! }
       return {
         ...history,
-        rows: history.rows.map((other, index) =>
-          index === at ? changed : other,
+        rows: withRow(
+          history.rows,
+          at,
+          lead === `rank`
+            ? {
+                rank:
+                  holdsNumber || (rank !== `text 4` && rank !== `x`)
+                    ? rank
+                    : `object`,
+              }
+            : { title: irregularTitles[row.n % irregularTitles.length]! },
         ),
       }
     },
@@ -677,25 +670,18 @@ const constructions = [
         withPlainPremise(generated, leadOf(generated)),
         2,
       )
-      const [first, second] = history.rows
+      const first = history.rows[0]!
       const keys: Array<KeyKind> =
         generated.limit % 2 === 0
           ? [`private use`, `astral`]
           : [`astral`, `private use`]
       return {
         ...history,
-        rows: history.rows.map((row, index) =>
-          index === 0
-            ? { ...first!, key: keys[0]! }
-            : index === 1
-              ? {
-                  ...second!,
-                  key: keys[1]!,
-                  rank: first!.rank,
-                  title: first!.title,
-                }
-              : row,
-        ),
+        rows: withRow(withRow(history.rows, 0, { key: keys[0]! }), 1, {
+          key: keys[1]!,
+          rank: first.rank,
+          title: first.title,
+        }),
       }
     },
   ),
@@ -779,203 +765,133 @@ const plainRows: Array<Row> = (
   due,
 }))
 
-function withRow(rows: Array<Row>, index: number, change: Partial<Row>) {
-  return rows.map((row, at) => (at === index ? { ...row, ...change } : row))
-}
-
 const order = (
   field: OrderField,
   direction: Order[`direction`],
   stringSort: Order[`stringSort`] = `default`,
 ): Order => ({ field, direction, nulls: `first`, stringSort })
 
+// A fixed history: the plain rows under one order term, with no `where` and
+// no offset unless `change` gives them.
+const fixedHistory = (
+  orderBy: Order,
+  limit: number,
+  change: Partial<History> = {},
+): History => ({
+  rows: plainRows,
+  where: [],
+  whereShape: `flat`,
+  orderBy: [orderBy],
+  limit,
+  offset: `none`,
+  ...change,
+})
+
 const fixed: Array<{ name: string; history: History }> = [
   {
     name: `plain rows by rank descending, nulls first`,
-    history: {
-      rows: plainRows,
-      where: [],
-      whereShape: `flat`,
-      orderBy: [order(`rank`, `desc`)],
-      limit: 3,
-      offset: `none`,
-    },
+    history: fixedHistory(order(`rank`, `desc`), 3),
   },
   {
     name: `plain rows by rank descending after an offset`,
-    history: {
-      rows: plainRows,
-      where: [],
-      whereShape: `flat`,
-      orderBy: [order(`rank`, `desc`)],
-      limit: 4,
-      offset: 2,
-    },
+    history: fixedHistory(order(`rank`, `desc`), 4, { offset: 2 }),
   },
   {
     name: `status equals 1 beside coerced values`,
-    history: {
-      rows: plainRows,
+    history: fixedHistory(order(`rank`, `desc`), 2, {
       where: [{ op: `eq`, field: `status`, value: 1, reversed: false }],
-      whereShape: `flat`,
-      orderBy: [order(`rank`, `desc`)],
-      limit: 2,
-      offset: `none`,
-    },
+    }),
   },
   {
     name: `status is 1 or the text 1`,
-    history: {
-      rows: plainRows,
+    history: fixedHistory(order(`rank`, `asc`), 1_000_000, {
       where: [{ op: `in`, field: `status`, values: [1, `text 1`] }],
-      whereShape: `flat`,
-      orderBy: [order(`rank`, `asc`)],
-      limit: 1_000_000,
-      offset: `none`,
-    },
+    }),
   },
   {
     name: `title is a or a lone surrogate beside the replacement character`,
-    history: {
+    history: fixedHistory(order(`rank`, `asc`), 1_000_000, {
       rows: withRow(withRow(plainRows, 3, { title: `\uD800` }), 5, {
         title: `\uFFFD`,
       }),
       where: [{ op: `in`, field: `title`, values: [`a`, `\uD800`] }],
-      whereShape: `flat`,
-      orderBy: [order(`rank`, `asc`)],
-      limit: 1_000_000,
-      offset: `none`,
-    },
+    }),
   },
   {
     name: `status holds a Date at the latest epoch`,
-    history: {
+    history: fixedHistory(order(`rank`, `desc`), 1_000_000, {
       rows: withRow(plainRows, 4, { status: `date max` }),
       where: [{ op: `in`, field: `status`, values: [`max epoch`, 1] }],
-      whereShape: `flat`,
-      orderBy: [order(`rank`, `desc`)],
-      limit: 1_000_000,
-      offset: `none`,
-    },
+    }),
   },
   {
     // Locale order puts `a` before `B`; code-unit order puts `B` first.
     name: `titles under a locale sort`,
-    history: {
-      rows: plainRows,
-      where: [],
-      whereShape: `flat`,
-      orderBy: [{ ...order(`title`, `asc`, `locale`), nulls: `last` }],
-      limit: 1,
-      offset: `none`,
-    },
+    history: fixedHistory(
+      { ...order(`title`, `asc`, `locale`), nulls: `last` },
+      1,
+    ),
   },
   {
     name: `titles under a custom reverse sort`,
-    history: {
-      rows: plainRows,
-      where: [],
-      whereShape: `flat`,
-      orderBy: [{ ...order(`title`, `asc`, `custom`), nulls: `last` }],
-      limit: 3,
-      offset: `none`,
-    },
+    history: fixedHistory(
+      { ...order(`title`, `asc`, `custom`), nulls: `last` },
+      3,
+    ),
   },
   {
     name: `title equals b`,
-    history: {
-      rows: plainRows,
+    history: fixedHistory(order(`rank`, `asc`), 1, {
       where: [{ op: `eq`, field: `title`, value: `b`, reversed: false }],
-      whereShape: `flat`,
-      orderBy: [order(`rank`, `asc`)],
-      limit: 1,
-      offset: `none`,
-    },
+    }),
   },
   {
     name: `flag equals true`,
-    history: {
-      rows: plainRows,
+    history: fixedHistory(order(`rank`, `desc`), 2, {
       where: [{ op: `eq`, field: `flag`, value: `true`, reversed: true }],
-      whereShape: `flat`,
-      orderBy: [order(`rank`, `desc`)],
-      limit: 2,
-      offset: `none`,
-    },
+    }),
   },
   {
     name: `status equals 1n`,
-    history: {
-      rows: plainRows,
+    history: fixedHistory(order(`rank`, `desc`), 0, {
       where: [
         { op: `eq`, field: `status`, value: `bigint 1`, reversed: false },
       ],
-      whereShape: `flat`,
-      orderBy: [order(`rank`, `desc`)],
-      limit: 0,
-      offset: `none`,
-    },
+    }),
   },
   {
     name: `plain rows at offset 0`,
-    history: {
-      rows: plainRows,
-      where: [],
-      whereShape: `flat`,
-      orderBy: [order(`rank`, `asc`)],
-      limit: 2,
-      offset: 0,
-    },
+    history: fixedHistory(order(`rank`, `asc`), 2, { offset: 0 }),
   },
   {
     name: `rank mixes numbers and text`,
-    history: {
+    history: fixedHistory(order(`rank`, `desc`), 3, {
       rows: withRow(withRow(plainRows, 7, { rank: `text 4` }), 10, {
         rank: `x`,
       }),
-      where: [],
-      whereShape: `flat`,
-      orderBy: [order(`rank`, `desc`)],
-      limit: 3,
-      offset: `none`,
-    },
+    }),
   },
   {
     name: `rank holds NaN`,
-    history: {
+    history: fixedHistory(order(`rank`, `asc`), 3, {
       rows: withRow(plainRows, 7, { rank: `nan` }),
-      where: [],
-      whereShape: `flat`,
-      orderBy: [order(`rank`, `asc`)],
-      limit: 3,
-      offset: `none`,
-    },
+    }),
   },
   {
     name: `title holds private-use and astral text`,
-    history: {
+    history: fixedHistory(order(`title`, `desc`, `lexical`), 1, {
       rows: withRow(withRow(plainRows, 2, { title: `\uE000` }), 10, {
         title: `\u{1F600}`,
       }),
-      where: [],
-      whereShape: `flat`,
-      orderBy: [order(`title`, `desc`, `lexical`)],
-      limit: 1,
-      offset: `none`,
-    },
+    }),
   },
   {
     name: `two rows tied on rank have high keys`,
-    history: {
+    history: fixedHistory(order(`rank`, `desc`), 1, {
       rows: withRow(withRow(plainRows, 2, { key: `private use` }), 3, {
         key: `astral`,
       }),
-      where: [],
-      whereShape: `flat`,
-      orderBy: [order(`rank`, `desc`)],
-      limit: 1,
-      offset: `none`,
-    },
+    }),
   },
 ]
 
@@ -1040,6 +956,13 @@ function orderByOf(request: Request): IR.OrderBy {
 // `rejected` holds the message of a load that rejected instead of returning.
 type Read = { keys: Array<string>; rawRows: number; rejected?: string }
 
+const readAt = (trace: ReadonlyArray<Observation>, checkpoint: string) =>
+  trace.find((entry) => entry.checkpoint === checkpoint)?.value as
+    Read | undefined
+
+const messageOf = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
+
 // A wrong design for calibration: the page reruns the unpaged request's SQL
 // read with LIMIT and OFFSET, so SQL pages its candidates and its own order.
 class CandidatePagingDriver extends CountingDriver {
@@ -1094,10 +1017,7 @@ async function drive(
           expressionSql: [JSON.stringify({ type: `ref`, path: [field] })],
         })
       } catch (error) {
-        observe(`ensureIndex`, {
-          field,
-          rejected: error instanceof Error ? error.message : String(error),
-        })
+        observe(`ensureIndex`, { field, rejected: messageOf(error) })
       }
 
     // A legal request owes rows, so a rejection is an observation the laws
@@ -1114,11 +1034,7 @@ async function drive(
             : {}),
         })
       } catch (error) {
-        return {
-          keys: [],
-          rawRows: 0,
-          rejected: error instanceof Error ? error.message : String(error),
-        }
+        return { keys: [], rawRows: 0, rejected: messageOf(error) }
       }
       return {
         keys: rows.map((row) => String(row.key)),
@@ -1144,10 +1060,8 @@ async function drive(
 // unpaged order, then the raw rows the page read, then the construction's
 // states, which only a complete trace can show.
 function check(plan: Plan, trace: ReadonlyArray<Observation>, owed: Owed) {
-  const unpaged = trace.find(({ checkpoint }) => checkpoint === `unpaged`)
-    ?.value as Read | undefined
-  const page = trace.find(({ checkpoint }) => checkpoint === `page`)?.value as
-    Read | undefined
+  const unpaged = readAt(trace, `unpaged`)
+  const page = readAt(trace, `page`)
   if (!unpaged || !page)
     return violation(`page`, `the driver recorded no page`, `trace`)
   if (unpaged.rejected !== undefined)
@@ -1199,13 +1113,20 @@ function check(plan: Plan, trace: ReadonlyArray<Observation>, owed: Owed) {
   )
 }
 
-const withKeys = (entry: Observation, keep: (key: string) => boolean) => ({
-  ...entry,
-  value: {
-    ...(entry.value as Read),
-    keys: (entry.value as Read).keys.filter(keep),
-  },
-})
+// A trace mutant: the read at `checkpoint` takes the fields of `change`.
+const withRead = (
+  trace: ReadonlyArray<Observation>,
+  checkpoint: string,
+  change: (read: Read) => Partial<Read>,
+) =>
+  trace.map((entry) =>
+    entry.checkpoint === checkpoint
+      ? {
+          ...entry,
+          value: { ...(entry.value as Read), ...change(entry.value as Read) },
+        }
+      : entry,
+  )
 
 oracleProperty({
   id: `sqlite-persistence.ordered-page`,
@@ -1238,11 +1159,9 @@ oracleProperty({
             .filter((row) => row.value.status instanceof Date)
             .map((row) => row.key),
         )
-        return trace.map((entry) =>
-          entry.checkpoint === `unpaged`
-            ? withKeys(entry, (key) => !dates.has(key))
-            : entry,
-        )
+        return withRead(trace, `unpaged`, (read) => ({
+          keys: read.keys.filter((key) => !dates.has(key)),
+        }))
       },
     },
     {
@@ -1250,40 +1169,18 @@ oracleProperty({
       law: `page`,
       history: { fixed: `plain rows by rank descending after an offset` },
       corrupt: (trace, plan) =>
-        trace.map((entry) =>
-          entry.checkpoint === `page`
-            ? {
-                ...entry,
-                value: {
-                  ...(entry.value as Read),
-                  keys: (
-                    trace.find(({ checkpoint }) => checkpoint === `unpaged`)
-                      ?.value as Read
-                  ).keys.slice(0, plan.request.limit),
-                },
-              }
-            : entry,
-        ),
+        withRead(trace, `page`, () => ({
+          keys: readAt(trace, `unpaged`)!.keys.slice(0, plan.request.limit),
+        })),
     },
     {
       name: `the page reads every match`,
       law: `work`,
       history: { fixed: `status equals 1 beside coerced values` },
       corrupt: (trace) =>
-        trace.map((entry) =>
-          entry.checkpoint === `page`
-            ? {
-                ...entry,
-                value: {
-                  ...(entry.value as Read),
-                  rawRows: (
-                    trace.find(({ checkpoint }) => checkpoint === `unpaged`)
-                      ?.value as Read
-                  ).rawRows,
-                },
-              }
-            : entry,
-        ),
+        withRead(trace, `page`, () => ({
+          rawRows: readAt(trace, `unpaged`)!.rawRows,
+        })),
     },
     {
       name: `SQL pages an order field that mixes numbers and text`,
