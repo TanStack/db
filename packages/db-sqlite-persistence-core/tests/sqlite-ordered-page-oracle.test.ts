@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { fc } from '@fast-check/vitest'
-import { IR } from '@tanstack/db'
+import { IR, makeComparator } from '@tanstack/db'
+import { Temporal } from 'temporal-polyfill'
+import { vi } from 'vitest'
 import { SQLiteCorePersistenceAdapter } from '../src'
 import {
   differs,
@@ -16,25 +18,32 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  *
  * Authority: the SQLite adapter's contract that its JavaScript row evaluator
  * and in-memory sort decide `loadSubset` results, with SQL as a candidate
- * read (PR #1997). The work law comes from an accepted persistence goal: a
- * paged live query reads its page, not every matching row. A LinearLite
- * benchmark read all 100,000 stored rows to show 50.
+ * read (PR #1997), and TanStack DB's comparator, `makeComparator`, which
+ * orders live-query results, so a page that disagrees with it shows other
+ * rows. The work law comes from an accepted persistence goal: a paged live
+ * query reads its page, not every matching row. A LinearLite benchmark read
+ * all 100,000 stored rows to show 50.
  *
  * Page law: at `loadSubset` return, a request with `orderBy`, `limit` and
- * `offset` returns exactly the rows at those positions of the same request
- * without `limit` and `offset`, in the same order.
+ * `offset` returns exactly the rows at those positions of the comparator's
+ * order of the matching rows, ties broken by key. Where the comparator
+ * decides no single order, the page holds the rows at those positions of the
+ * same request without `limit` and `offset`, in the same order.
  *
  * Filter law: the request without `limit` returns exactly the rows that the
- * model's equality keeps. A Date equals the number of its epoch milliseconds
- * and every other value equals only an identical value, so `1n`, `true`,
- * `'1'` and the epoch's ISO text never equal the number 1.
+ * model's equality keeps. A ref reads the stored row as JavaScript does, so
+ * `items.length` is an array's or a string's length and `items.year` a
+ * Temporal.PlainDate's year. A Date equals the number of its epoch
+ * milliseconds and every other value equals only an identical value, so `1n`,
+ * `true`, `'1'` and the epoch's ISO text never equal the number 1.
  *
  * Work law: SQLite returns no more stored rows than the page holds when
  * - the `where` is absent or a conjunction of `eq` and `in` leaves on one
- *   field each, whose literals are all strings with UTF-16 code units in
- *   1..0xD7FF, all BigInts, or all safe-integer numbers, or an `eq` with a
- *   boolean;
- * - every `orderBy` field has an ensured expression index;
+ *   top-level field each, whose literals are all strings with UTF-16 code
+ *   units in 1..0xD7FF, all BigInts, or all safe-integer numbers, or an `eq`
+ *   with a boolean;
+ * - every `orderBy` term is a top-level field with an ensured expression
+ *   index;
  * - every stored value of those fields is null, missing, a safe integer or a
  *   boolean, or else every one is null, missing or a string whose UTF-16 code
  *   units are all in 1..0xD7FF, sorted lexically; and
@@ -42,13 +51,18 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * Other requests may read every matching row. The page and filter laws hold
  * for every request.
  *
- * Model: `owedKeys` filters the stored rows with that equality, and
+ * Model: `owedRows` filters the stored rows with that equality, reading each
+ * ref with `readRef`. `comparatorOrder` sorts them with `makeComparator` per
+ * order term, with the request's options, then by key in code-unit order, the
+ * adapter's tie-break. The comparator places nulls by `nulls` alone and
+ * reverses only non-null comparisons for `desc`; it orders NaN above every
+ * other value. It decides no single order when it orders two objects other
+ * than Dates by an identity that each runtime assigns, or when it is not a
+ * strict total order over the rows, as when text and numbers mix; the model
+ * then owes no page and the page law falls back to the unpaged request.
  * `pageInSql` decides the work law's premise from the request and the stored
- * values alone. Neither calls the evaluator, the comparator or the SQL
- * compiler. The order of rows comes from the request without `limit`, which
- * sorts in JavaScript whatever SQL returns; this oracle does not model the
- * comparator. An absent `stringSort` is lexical, as the in-memory sort reads
- * it.
+ * values alone. None of these calls the adapter, its comparator or the SQL
+ * compiler. An absent `stringSort` is lexical, as the comparator reads it.
  *
  * History grammar: up to twelve rows and one request. A row draws each field
  * from a token (`storedValue`), so a history stays JSON data and shrinks. The
@@ -59,17 +73,21 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * `status` stores every kind of value that SQLite compares with the number 1:
  * 1, a Date of epoch 1, `1n`, `true`, `'1'` and the epoch's ISO text, and a
  * Date at the latest valid epoch, 8.64e15, which a literal of that epoch and
- * of the next integer test from both sides. A key is `k`, an optional U+E000
- * or astral character, and the row's index, so two high keys differ first at
- * that character.
+ * of the next integer test from both sides. `items` holds an array, a string,
+ * a Temporal.PlainDate, a plain object with `length` and `year` members, null
+ * or nothing; the nested refs `items.length` and `items.year` read a property
+ * that the stored JSON lacks, except on the plain object. A key is `k`, an
+ * optional U+E000 or astral character, and the row's index, so two high keys
+ * differ first at that character.
  *
- * The request draws zero to two leaves over five fields: `eq` in either
- * operand order, `in` with zero to three literals, a range, or a constant
- * leaf that keeps every row (`true` or `eq(1, 1)`). They form the `where` without an `and` (no `where` for no leaf),
- * always under one `and` (`and()` for no leaf), or with the first leaf in a
- * nested `and`; the law reads an empty conjunction as an absent `where`. It
- * draws one or two order terms over `rank`, `title`, the unindexed `due` or
- * the constant 1, each direction, null placement and string sort (default,
+ * The request draws zero to two leaves over seven fields, the two nested refs
+ * included: `eq` in either operand order, `in` with zero to three literals, a
+ * range, or a constant leaf that keeps every row (`true` or `eq(1, 1)`). They
+ * form the `where` without an `and` (no `where` for no leaf), always under
+ * one `and` (`and()` for no leaf), or with the first leaf in a nested `and`;
+ * the law reads an empty conjunction as an absent `where`. It draws one or two
+ * order terms over `rank`, `title`, the unindexed `due`, the constant 1 or a
+ * nested ref, each direction, null placement and string sort (default,
  * lexical, locale, or a custom reverse comparator), a limit of 0..8 or one
  * million, and no offset or one of 0..8.
  *
@@ -84,43 +102,62 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * order value, two tied rows with high keys, one inexact leaf (a range, a
  * fraction, a constant leaf, or a membership whose two kinds both match
  * stored values), or an order on `due` or the constant, or under a locale or
- * custom sort. Each builder records the states its history must enter, and
- * the check rejects a history that missed one, so generated and shrunk
- * constructions are judged as well as each campaign's seeded one. Fixed
- * histories keep the datasets that once rejected production mutants.
- * Excluded: cursors, joins, orders on a computed field such as
- * `lower(title)`, and stored values that another library wrote.
+ * custom sort. Three states name the premises of a wrong design: `a null
+ * decides a descending page` when placing nulls opposite to `nulls` on `desc`
+ * terms changes the page; `a nested leaf keeps a JavaScript property` when an
+ * owed row's value at a nested leaf's ref is not its stored JSON member; and
+ * `a nested order decides the page` when reading the order terms as stored
+ * JSON chooses other rows. Two constructions enter each: a descending null
+ * on `rank` or `title` under the premise and on `due` in memory; a nested
+ * `eq` and a nested `in` that keep an array, a string or a PlainDate; and an
+ * order on each nested ref at limit 1. Each builder records the states its
+ * history must enter, and the check rejects a history that missed one, so
+ * generated and shrunk constructions are judged as well as each campaign's
+ * seeded one. The measured state `the comparator orders the page` counts the
+ * histories the comparator's order judges. Fixed histories keep the datasets
+ * that once rejected production mutants. Excluded: cursors, joins, orders on
+ * a computed field such as `lower(title)`, and stored values that another
+ * library wrote.
  *
  * Driver and checkpoint: the real adapter runs against `node:sqlite` with a
  * counting driver, which records the rows each Collection SELECT returns. It
- * stores the rows, ensures an expression index on `rank`, `title` and
- * `status`, then loads the request without `limit` and the page, and
- * observes each result's keys and raw rows at `loadSubset` return. It ensures
- * the indexes best effort, as the persisted wrapper does: a rejected
- * `ensureIndex` is recorded and the loads go on. A legal
- * request owes rows, so a load that rejects is observed as such and breaks
- * the filter law (unpaged) or the page law. The driver then records the
- * declared state the history entered.
+ * registers the Temporal polyfill that built the history's values as the
+ * global constructor, stores the rows, ensures an expression index on
+ * `rank`, `title`, `status`, `items.length` and `items.year`, then loads the
+ * request without `limit` and the page, and observes each result's keys and
+ * raw rows at `loadSubset` return. It ensures the indexes best effort, as the
+ * persisted wrapper does: a rejected `ensureIndex` is recorded and the loads
+ * go on. A legal request owes rows, so a load that rejects is observed as
+ * such and breaks the filter law (unpaged) or the page law. The driver then
+ * records the declared states the history entered.
  *
  * Calibration: trace mutants drop a Date match, ignore the offset, read every
- * match for a page, and omit the state of each constructed history. A driver
+ * match for a page, place descending nulls opposite to `nulls`, drop the rows
+ * that a nested leaf keeps through a JavaScript property, order a nested ref
+ * as stored JSON, and omit the states of each constructed history. A driver
  * mutant pages the unpaged request's SQL read, candidates and SQL order
- * included. The page
- * law rejects it on an order field that mixes numbers and text, and on a
- * `where` whose candidates include BigInt, boolean and ISO-text values that
- * JavaScript removes.
+ * included. The page law rejects it on an order field that mixes numbers and
+ * text, and on a `where` whose candidates include BigInt, boolean and
+ * ISO-text values that JavaScript removes.
  *
  * Limits: node:sqlite in one process; no native host, OPFS worker or
- * multi-process WAL. Fractions and integers past the signed 64-bit range stay
- * outside the work law's premise because their order would depend on how
- * SQLite rounds JSON reals, which this build cannot show. Raw rows are not
- * elapsed time.
+ * multi-process WAL. Where the comparator decides no single order, the page
+ * law only relates the page to the unpaged request. Nested refs read numbers
+ * only: a Temporal getter that returns a string, a boolean or a BigInt, such
+ * as `monthCode`, is outside the grammar. Fractions and integers past the
+ * signed 64-bit range stay outside the work law's premise because their order
+ * would depend on how SQLite rounds JSON reals, which this build cannot show.
+ * Raw rows are not elapsed time.
  */
 
-type Field = `rank` | `title` | `status` | `flag` | `n` | `due`
+type Field = `rank` | `title` | `status` | `flag` | `n` | `due` | `items`
+// A nested ref reads a property of `items` as JavaScript does: the length of
+// an array or a string, the year of a Temporal.PlainDate, or a plain object's
+// member, the only one of these that is also its stored JSON member.
+type NestedRef = `items.length` | `items.year`
 // `constant` orders by the literal 1, an expression that is not a field.
-type OrderField = `rank` | `title` | `due` | `constant`
-type FilterField = `rank` | `title` | `status` | `flag` | `n`
+type OrderField = `rank` | `title` | `due` | `constant` | NestedRef
+type FilterField = `rank` | `title` | `status` | `flag` | `n` | NestedRef
 type KeyKind = `plain` | `private use` | `astral`
 // An integer stands for itself; a string names a stored value (`storedValue`).
 type Token = number | string
@@ -133,6 +170,7 @@ type Row = {
   flag: Token
   n: number
   due: Token
+  items: Token
 }
 // `true` keeps every row: the literal `true`, or the comparison `eq(1, 1)`,
 // which has no field.
@@ -201,6 +239,20 @@ function storedValue(token: Token): unknown {
       return 8.64e15 + 1
     case `iso 1`:
       return new Date(1).toISOString()
+    case `array 0`:
+      return []
+    case `array 2`:
+      return [0, 1]
+    case `array 3`:
+      return [0, 1, 2]
+    case `year 2`:
+      return new Temporal.PlainDate(2, 1, 1)
+    case `year 3`:
+      return new Temporal.PlainDate(3, 1, 1)
+    case `members 2`:
+      return { length: 2, year: 2 }
+    case `members 3`:
+      return { length: 3, year: 3 }
     default:
       return token
   }
@@ -239,6 +291,21 @@ const statusTokens = [
   `null`,
   `missing`,
 ]
+// Strings `x`, `ab` and `abc` have lengths 1, 2 and 3.
+const itemsTokens = [
+  `array 0`,
+  `array 2`,
+  `array 3`,
+  `x`,
+  `ab`,
+  `abc`,
+  `year 2`,
+  `year 3`,
+  `members 2`,
+  `members 3`,
+  `null`,
+  `missing`,
+]
 const highKeyCharacters: Record<KeyKind, string> = {
   plain: ``,
   'private use': `\uE000`,
@@ -267,14 +334,17 @@ const rowArbitrary: fc.Arbitrary<Row> = fc.record({
   flag: fc.constantFrom<Token>(`true`, `false`, 1, `missing`),
   n: fc.integer({ min: 0, max: 10 }),
   due: fc.oneof(fc.integer({ min: 0, max: 5 }), fc.constant(`missing`)),
+  items: fc.constantFrom<Token>(...itemsTokens),
 })
 
+const nestedRefs: ReadonlyArray<NestedRef> = [`items.length`, `items.year`]
 const filterFieldArbitrary = fc.constantFrom<FilterField>(
   `status`,
   `title`,
   `rank`,
   `flag`,
   `n`,
+  ...nestedRefs,
 )
 const literalArbitrary: fc.Arbitrary<Token> = fc.oneof(
   fc.integer({ min: -1, max: 9 }),
@@ -315,7 +385,13 @@ const leafArbitrary: fc.Arbitrary<Leaf> = fc.oneof(
   }),
 )
 const orderArbitrary: fc.Arbitrary<Order> = fc.record({
-  field: fc.constantFrom<OrderField>(`rank`, `title`, `due`, `constant`),
+  field: fc.constantFrom<OrderField>(
+    `rank`,
+    `title`,
+    `due`,
+    `constant`,
+    ...nestedRefs,
+  ),
   direction: fc.constantFrom(`asc` as const, `desc` as const),
   nulls: fc.constantFrom(`first` as const, `last` as const),
   stringSort: fc.constantFrom(
@@ -352,8 +428,16 @@ type Request = {
   limit: number
   offset?: number
 }
-const states = [`page in SQL`, `page in memory`] as const
+const states = [
+  `page in SQL`,
+  `page in memory`,
+  `a null decides a descending page`,
+  `a nested leaf keeps a JavaScript property`,
+  `a nested order decides the page`,
+] as const
 type State = (typeof states)[number]
+// Counted, not required: how many histories the comparator's order judges.
+const comparatorOrders = `the comparator orders the page`
 type Plan = {
   rows: Array<StoredRow>
   request: Request
@@ -371,6 +455,7 @@ const fields: ReadonlyArray<Field> = [
   `flag`,
   `n`,
   `due`,
+  `items`,
 ]
 
 function resolveLeaf(leaf: Leaf): ResolvedLeaf {
@@ -407,6 +492,34 @@ function resolve(history: History): Plan {
   }
 }
 
+// A ref reads JavaScript properties, step by step, and stops at null or
+// undefined: `items.length` is an array's or a string's length.
+function readRef(value: StoredRow[`value`], ref: string): unknown {
+  let current: unknown = value
+  for (const segment of ref.split(`.`)) {
+    if (current == null) return current
+    current = (current as Record<string, unknown>)[segment]
+  }
+  return current
+}
+
+// The stored JSON member at a ref: only a plain object has members, so an
+// array, a string or a Temporal.PlainDate holds none.
+function jsonMember(value: StoredRow[`value`], ref: string): unknown {
+  let current: unknown = value
+  for (const segment of ref.split(`.`)) {
+    if (
+      current === null ||
+      typeof current !== `object` ||
+      Object.getPrototypeOf(current) !== Object.prototype ||
+      !Object.hasOwn(current, segment)
+    )
+      return undefined
+    current = (current as Record<string, unknown>)[segment]
+  }
+  return current
+}
+
 // The model's equality: a Date equals its epoch milliseconds, anything else
 // only an identical value. Null and missing match nothing.
 function equalsLiteral(value: unknown, literal: unknown): boolean {
@@ -417,7 +530,7 @@ function equalsLiteral(value: unknown, literal: unknown): boolean {
 
 function keepsRow(row: StoredRow, leaf: ResolvedLeaf): boolean {
   if (leaf.op === `true`) return true
-  const value = row.value[leaf.field]
+  const value = readRef(row.value, leaf.field)
   switch (leaf.op) {
     case `eq`:
       return equalsLiteral(value, leaf.value)
@@ -428,11 +541,87 @@ function keepsRow(row: StoredRow, leaf: ResolvedLeaf): boolean {
   }
 }
 
-function owedKeys(plan: Plan): Array<string> {
-  return plan.rows
-    .filter((row) => plan.request.where.every((leaf) => keepsRow(row, leaf)))
-    .map((row) => row.key)
-    .sort()
+const owedRows = (plan: Plan) =>
+  plan.rows.filter((row) =>
+    plan.request.where.every((leaf) => keepsRow(row, leaf)),
+  )
+
+/**
+ * The order that TanStack DB's comparator gives the owed rows: each term's
+ * value under `makeComparator` with the request's options, which places
+ * nulls by `nulls` alone and reverses only non-null comparisons for `desc`,
+ * then the keys in code-unit order, the adapter's tie-break. `read` gives a
+ * term's value. Undefined when the comparator decides no single order: it
+ * orders two objects other than Dates by an identity that each runtime
+ * assigns, or it is not a strict total order over these rows, as when text
+ * and numbers mix.
+ */
+function comparatorOrder(
+  rows: Array<StoredRow>,
+  orderBy: ReadonlyArray<Order>,
+  read: typeof readRef = readRef,
+): Array<string> | undefined {
+  // Set by `compare`, which TypeScript cannot see from here.
+  let byIdentity = false as boolean
+  const terms = orderBy.map((term) => ({
+    compare: makeComparator(compareOptionsOf(term)),
+    value: (row: StoredRow) =>
+      term.field === `constant` ? 1 : read(row.value, term.field),
+  }))
+  const compare = (left: StoredRow, right: StoredRow) => {
+    for (const term of terms) {
+      const [a, b] = [term.value(left), term.value(right)]
+      if (
+        typeof a === `object` &&
+        a !== null &&
+        typeof b === `object` &&
+        b !== null &&
+        !(a instanceof Date && b instanceof Date)
+      )
+        byIdentity = true
+      const result = term.compare(a, b)
+      if (result !== 0) return Math.sign(result)
+    }
+    return left.key < right.key ? -1 : left.key > right.key ? 1 : 0
+  }
+  const ordered = [...rows].sort(compare)
+  const total = ordered.every((left, at) =>
+    ordered
+      .slice(at + 1)
+      .every((right) => compare(left, right) < 0 && compare(right, left) > 0),
+  )
+  return total && !byIdentity ? ordered.map((row) => row.key) : undefined
+}
+
+const pageOf = (plan: Plan, order: Array<string> | undefined) => {
+  const offset = plan.request.offset ?? 0
+  return order?.slice(offset, offset + plan.request.limit)
+}
+
+// The page under the old design, which negated a whole `desc` comparison and
+// so placed nulls opposite to `nulls`.
+const nullsNegatedPage = (plan: Plan) =>
+  pageOf(
+    plan,
+    comparatorOrder(
+      owedRows(plan),
+      plan.request.orderBy.map((term) =>
+        term.direction === `desc`
+          ? { ...term, nulls: term.nulls === `first` ? `last` : `first` }
+          : term,
+      ),
+    ),
+  )
+
+// The page that reads each order term as its stored JSON member, as SQLite
+// sees it, in the comparator's order.
+function storedJsonPage(plan: Plan): Array<string> | undefined {
+  const window = pageOf(
+    plan,
+    comparatorOrder(owedRows(plan), plan.request.orderBy, jsonMember),
+  )
+  const order = comparatorOrder(owedRows(plan), plan.request.orderBy)
+  return window && order?.filter((key) => window.includes(key))
 }
 
 const plainText = (text: string) =>
@@ -441,8 +630,11 @@ const plainText = (text: string) =>
     return char.length === 1 && unit > 0 && unit < 0xd800
   })
 
+const topLevel = (field: string) => !field.includes(`.`)
+
 function exactLeaf(leaf: ResolvedLeaf): boolean {
-  if (leaf.op === `gt` || leaf.op === `true`) return false
+  if (leaf.op === `gt` || leaf.op === `true` || !topLevel(leaf.field))
+    return false
   const literals = leaf.op === `eq` ? [leaf.value] : leaf.values
   const kinds = new Set(
     literals.map((literal) =>
@@ -460,13 +652,19 @@ function exactLeaf(leaf: ResolvedLeaf): boolean {
   return kinds.size === 1 && !kinds.has(`other`)
 }
 
-const indexedFields: ReadonlyArray<Field> = [`rank`, `title`, `status`]
+// The driver ensures an expression index on each of these refs.
+const indexedRefs: ReadonlyArray<string> = [
+  `rank`,
+  `title`,
+  `status`,
+  ...nestedRefs,
+]
 
 function sortsPlainly(rows: Array<StoredRow>, order: Order): boolean {
   const { field } = order
-  if (field === `constant` || !indexedFields.includes(field)) return false
+  if (!indexedRefs.includes(field) || !topLevel(field)) return false
   const values = rows
-    .map((row) => row.value[field])
+    .map((row) => readRef(row.value, field))
     .filter((value) => value != null)
   const numeric = values.every(
     (value) => Number.isSafeInteger(value) || typeof value === `boolean`,
@@ -488,14 +686,55 @@ function pageInSql(plan: Plan): boolean {
   )
 }
 
-const stateOf = (plan: Plan): State =>
-  pageInSql(plan) ? `page in SQL` : `page in memory`
+const sameKeys = (left: Array<string>, right: Array<string>) =>
+  left.length === right.length && left.every((key) => right.includes(key))
+
+/**
+ * The declared states a history enters, from the plan alone. A null decides
+ * a descending page when the old design's page differs; a nested leaf keeps a
+ * JavaScript property when an owed row's value at a nested leaf's ref is not
+ * its stored JSON member; and a nested order decides the page when reading
+ * the order terms as stored JSON would choose other rows.
+ */
+function statesOf(plan: Plan): Array<string> {
+  const page = pageOf(
+    plan,
+    comparatorOrder(owedRows(plan), plan.request.orderBy),
+  )
+  const nullsNegated = nullsNegatedPage(plan)
+  const storedJson = storedJsonPage(plan)
+  return [
+    pageInSql(plan) ? `page in SQL` : `page in memory`,
+    ...(page ? [comparatorOrders] : []),
+    ...(page && nullsNegated && page.join() !== nullsNegated.join()
+      ? [`a null decides a descending page` as const]
+      : []),
+    ...(plan.request.where.some(
+      (leaf) =>
+        (leaf.op === `eq` || leaf.op === `in`) &&
+        !topLevel(leaf.field) &&
+        owedRows(plan).some(
+          (row) =>
+            readRef(row.value, leaf.field) !==
+            jsonMember(row.value, leaf.field),
+        ),
+    )
+      ? [`a nested leaf keeps a JavaScript property` as const]
+      : []),
+    ...(page && storedJson && !sameKeys(page, storedJson)
+      ? [`a nested order decides the page` as const]
+      : []),
+  ]
+}
 
 function model(plan: Plan) {
-  const keys = owedKeys(plan)
+  const keys = owedRows(plan)
+    .map((row) => row.key)
+    .sort()
   const offset = plan.request.offset ?? 0
   return {
     keys,
+    page: pageOf(plan, comparatorOrder(owedRows(plan), plan.request.orderBy)),
     pageInSql: pageInSql(plan),
     pageRows: Math.max(0, Math.min(plan.request.limit, keys.length - offset)),
     requiredStates: plan.requiredStates,
@@ -503,9 +742,9 @@ function model(plan: Plan) {
 }
 type Owed = ReturnType<typeof model>
 
-// Constructions. Each keeps the generated rows, ties, nulls, directions,
-// limit and offset, and returns a fresh history that it records with the
-// state that history must enter.
+// Constructions. Each keeps what of the generated history its states allow,
+// and returns a fresh history that it records with the states that history
+// must enter.
 
 const lexicalSort = (sort: Order[`stringSort`]): Order[`stringSort`] =>
   sort === `locale` || sort === `custom` ? `lexical` : sort
@@ -536,8 +775,11 @@ function withPlainPremise(generated: History, lead: `rank` | `title`): History {
 }
 
 // An exact leaf on the same field: a range becomes an equality, and a
-// literal list of mixed or inexact kinds keeps its integers.
+// literal list of mixed or inexact kinds keeps its integers. A leaf on a
+// nested ref, which is never exact, moves onto `n`.
 function exactly(leaf: Leaf): Leaf {
+  if ((leaf.op === `eq` || leaf.op === `in`) && !topLevel(leaf.field))
+    return exactly({ ...leaf, field: `n` })
   if (exactLeaf(resolveLeaf(leaf))) return leaf
   switch (leaf.op) {
     case `gt`:
@@ -564,6 +806,7 @@ const fallbackRow: Row = {
   flag: `true`,
   n: 4,
   due: 1,
+  items: `missing`,
 }
 
 function withRows(history: History, count: number): History {
@@ -578,30 +821,30 @@ function withRow(rows: Array<Row>, index: number, change: Partial<Row>) {
 
 function constructed(
   name: string,
-  state: State,
+  enters: ReadonlyArray<State>,
   build: (generated: History) => History,
 ) {
   return {
     name,
-    enters: [state],
+    enters,
     build: (generated: History) => {
       const history = build(generated)
-      constructionStates.set(history, [state])
+      constructionStates.set(history, enters)
       return history
     },
   }
 }
 
 const constructions = [
-  constructed(`page in SQL by rank`, `page in SQL`, (generated) =>
+  constructed(`page in SQL by rank`, [`page in SQL`], (generated) =>
     withPlainPremise(generated, `rank`),
   ),
-  constructed(`page in SQL by title`, `page in SQL`, (generated) =>
+  constructed(`page in SQL by title`, [`page in SQL`], (generated) =>
     withPlainPremise(generated, `title`),
   ),
   constructed(
     `page in SQL under an exact where`,
-    `page in SQL`,
+    [`page in SQL`],
     (generated) => {
       const history = withPlainPremise(generated, leadOf(generated))
       const added: Leaf = {
@@ -618,7 +861,7 @@ const constructions = [
   ),
   constructed(
     `page in SQL at a zero limit or offset`,
-    `page in SQL`,
+    [`page in SQL`],
     (generated) => {
       // At least two rows match, so the page holds fewer rows than a read of
       // every match returns.
@@ -633,7 +876,7 @@ const constructions = [
   ),
   constructed(
     `page in memory for one irregular order value`,
-    `page in memory`,
+    [`page in memory`],
     (generated) => {
       const lead = leadOf(generated)
       const history = withRows(withPlainPremise(generated, lead), 1)
@@ -664,7 +907,7 @@ const constructions = [
   ),
   constructed(
     `page in memory for two tied rows with high keys`,
-    `page in memory`,
+    [`page in memory`],
     (generated) => {
       const history = withRows(
         withPlainPremise(generated, leadOf(generated)),
@@ -687,7 +930,7 @@ const constructions = [
   ),
   constructed(
     `page in memory for one inexact leaf`,
-    `page in memory`,
+    [`page in memory`],
     (generated) => {
       const history = withPlainPremise(generated, leadOf(generated))
       // Each mixed membership matches stored values of both its kinds.
@@ -709,7 +952,7 @@ const constructions = [
   ),
   constructed(
     `page in memory for an unindexed or non-lexical order`,
-    `page in memory`,
+    [`page in memory`],
     (generated) => {
       const history = withRows(withPlainPremise(generated, `title`), 1)
       const [first, ...rest] = history.orderBy
@@ -736,26 +979,133 @@ const constructions = [
       }
     },
   ),
+  constructed(
+    `a null decides a descending page in SQL`,
+    [`a null decides a descending page`, `page in SQL`],
+    (generated) => nullOnDescendingPage(generated, leadOf(generated)),
+  ),
+  constructed(
+    `a null decides a descending page in memory`,
+    [`a null decides a descending page`, `page in memory`],
+    (generated) => nullOnDescendingPage(generated, `due`),
+  ),
+  ...([`eq`, `in`] as const).map((op) =>
+    constructed(
+      `a nested ${op} keeps a row by a JavaScript property`,
+      [`a nested leaf keeps a JavaScript property`],
+      (generated) => nestedLeaf(generated, op),
+    ),
+  ),
+  ...nestedRefs.map((ref) =>
+    constructed(
+      `a nested order on ${ref} decides the page`,
+      [`a nested order decides the page`],
+      (generated) => nestedOrder(generated, ref),
+    ),
+  ),
 ]
+
+// A descending first term on `lead` over a null and a non-null row, at limit
+// 1 with no where, so the page holds a null exactly when `nulls` is `first`.
+// `rank` and `title` keep the work law's premise; the unindexed `due` pages
+// in memory.
+function nullOnDescendingPage(
+  generated: History,
+  lead: `rank` | `title` | `due`,
+): History {
+  const history = withRows(
+    {
+      ...withPlainPremise(generated, lead === `due` ? `rank` : lead),
+      where: [],
+    },
+    2,
+  )
+  const [first, ...rest] = history.orderBy
+  const [empty, filled]: [Partial<Row>, Partial<Row>] =
+    lead === `rank`
+      ? [{ rank: `null` }, { rank: 4 }]
+      : lead === `title`
+        ? [{ title: `null` }, { title: `c` }]
+        : [{ due: `missing` }, { due: 3 }]
+  return {
+    ...history,
+    rows: withRow(withRow(history.rows, 0, empty), 1, filled),
+    orderBy: [
+      { ...first!, field: lead, direction: `desc` },
+      ...rest.filter((term) => term.field !== lead),
+    ],
+    limit: 1,
+    offset: `none`,
+  }
+}
+
+// The first row's `items` holds an array, a string or a Temporal.PlainDate
+// whose property at a nested ref equals the only leaf's literal, so that row
+// is owed through a property its stored JSON lacks.
+function nestedLeaf(generated: History, op: `eq` | `in`): History {
+  const history = withRows(generated, 1)
+  const literal = 2 + (history.rows.length % 2)
+  const ref: NestedRef = generated.limit % 2 ? `items.year` : `items.length`
+  const items =
+    ref === `items.year`
+      ? `year ${literal}`
+      : generated.where.length % 2
+        ? `array ${literal}`
+        : literal === 2
+          ? `ab`
+          : `abc`
+  const leaf: Leaf =
+    op === `eq`
+      ? { op, field: ref, value: literal, reversed: history.rows.length > 6 }
+      : { op, field: ref, values: [literal, history.rows.length % 4] }
+  return {
+    ...history,
+    rows: withRow(history.rows, 0, { items }),
+    where: [leaf],
+  }
+}
+
+// Two rows whose `items` give `ref` a JavaScript property, the first after
+// the second in the comparator's order and the second first among all rows
+// that are not null there, at limit 1 over plain keys and no where. Their
+// stored JSON holds no such member, so a page read as stored JSON starts at
+// the first key or at a plain object's member.
+function nestedOrder(generated: History, ref: NestedRef): History {
+  const history = withRows({ ...generated, where: [] }, 2)
+  const [first] = history.orderBy
+  const [low, high] =
+    ref === `items.year`
+      ? [`year 2`, `year 3`]
+      : [`array 0`, generated.limit % 2 ? `abc` : `array 3`]
+  const [before, after] = first!.direction === `asc` ? [low, high] : [high, low]
+  const plain = history.rows.map((row) => ({ ...row, key: `plain` as const }))
+  return {
+    ...history,
+    rows: withRow(withRow(plain, 0, { items: after }), 1, { items: before }),
+    orderBy: [{ ...first!, field: ref }],
+    limit: 1,
+    offset: `none`,
+  }
+}
 
 // Fixed histories: the datasets that rejected the production mutants named in
 // the coverage map, as members of the grammar.
 const plainRows: Array<Row> = (
   [
-    [5, `b`, 1, `true`, 1, 3],
-    [3, `a`, `date 1`, `true`, 2, `missing`],
-    [9, `c`, `bigint 1`, `false`, 3, 1],
-    [9, `b`, `true`, 1, 0, `missing`],
-    [`null`, `d`, `text 1`, `missing`, 4, 2],
-    [`missing`, `a`, `iso 1`, `missing`, 5, `missing`],
-    [1, `null`, 2, `true`, 6, `missing`],
-    [7, `missing`, 1, `true`, 7, 5],
-    [3, `e`, `date 2`, `false`, 8, `missing`],
-    [0, `c`, 1, `true`, 9, 4],
-    [7, `f`, 0, `missing`, 10, `missing`],
-    [2, `B`, 1, `false`, 0, `missing`],
+    [5, `b`, 1, `true`, 1, 3, `array 2`],
+    [3, `a`, `date 1`, `true`, 2, `missing`, `ab`],
+    [9, `c`, `bigint 1`, `false`, 3, 1, `year 2`],
+    [9, `b`, `true`, 1, 0, `missing`, `members 2`],
+    [`null`, `d`, `text 1`, `missing`, 4, 2, `array 0`],
+    [`missing`, `a`, `iso 1`, `missing`, 5, `missing`, `x`],
+    [1, `null`, 2, `true`, 6, `missing`, `missing`],
+    [7, `missing`, 1, `true`, 7, 5, `abc`],
+    [3, `e`, `date 2`, `false`, 8, `missing`, `null`],
+    [0, `c`, 1, `true`, 9, 4, `array 3`],
+    [7, `f`, 0, `missing`, 10, `missing`, `year 3`],
+    [2, `B`, 1, `false`, 0, `missing`, `members 3`],
   ] as const
-).map(([rank, title, status, flag, n, due]) => ({
+).map(([rank, title, status, flag, n, due, items]) => ({
   key: `plain`,
   rank,
   title,
@@ -763,6 +1113,7 @@ const plainRows: Array<Row> = (
   flag,
   n,
   due,
+  items,
 }))
 
 const order = (
@@ -886,6 +1237,32 @@ const fixed: Array<{ name: string; history: History }> = [
     }),
   },
   {
+    name: `items of each kind by length`,
+    history: fixedHistory(order(`items.length`, `asc`), 3),
+  },
+  {
+    name: `items by year descending after an offset`,
+    history: fixedHistory(
+      { ...order(`items.year`, `desc`), nulls: `last` },
+      2,
+      {
+        offset: 1,
+      },
+    ),
+  },
+  {
+    name: `items length equals 2`,
+    history: fixedHistory(order(`rank`, `asc`), 1_000_000, {
+      where: [{ op: `eq`, field: `items.length`, value: 2, reversed: false }],
+    }),
+  },
+  {
+    name: `items year is 2 or 3`,
+    history: fixedHistory(order(`rank`, `desc`), 1_000_000, {
+      where: [{ op: `in`, field: `items.year`, values: [2, 3] }],
+    }),
+  },
+  {
     name: `two rows tied on rank have high keys`,
     history: fixedHistory(order(`rank`, `desc`), 1, {
       rows: withRow(withRow(plainRows, 2, { key: `private use` }), 3, {
@@ -901,7 +1278,7 @@ function whereOf(request: Request): IR.BasicExpression<boolean> | undefined {
       return leaf.form === `value`
         ? new IR.Value(true)
         : new IR.Func<boolean>(`eq`, [new IR.Value(1), new IR.Value(1)])
-    const field = new IR.PropRef([leaf.field])
+    const field = new IR.PropRef(leaf.field.split(`.`))
     switch (leaf.op) {
       case `in`:
         return new IR.Func<boolean>(`in`, [field, new IR.Value(leaf.values)])
@@ -935,21 +1312,26 @@ function whereOf(request: Request): IR.BasicExpression<boolean> | undefined {
 const reverseCodeUnits = (left: string, right: string) =>
   left < right ? 1 : left > right ? -1 : 0
 
+// The request's compare options, which the model also hands the comparator.
+function compareOptionsOf(term: Order): IR.OrderByClause[`compareOptions`] {
+  return {
+    direction: term.direction,
+    nulls: term.nulls,
+    ...(term.stringSort === `custom`
+      ? { stringSort: `custom` as const, compare: reverseCodeUnits }
+      : term.stringSort === `default`
+        ? {}
+        : { stringSort: term.stringSort }),
+  }
+}
+
 function orderByOf(request: Request): IR.OrderBy {
   return request.orderBy.map((term) => ({
     expression:
       term.field === `constant`
         ? new IR.Value(1)
-        : new IR.PropRef([term.field]),
-    compareOptions: {
-      direction: term.direction,
-      nulls: term.nulls,
-      ...(term.stringSort === `custom`
-        ? { stringSort: `custom` as const, compare: reverseCodeUnits }
-        : term.stringSort === `default`
-          ? {}
-          : { stringSort: term.stringSort }),
-    },
+        : new IR.PropRef(term.field.split(`.`)),
+    compareOptions: compareOptionsOf(term),
   }))
 }
 
@@ -994,6 +1376,9 @@ async function drive(
   const driver = pageCandidates
     ? new CandidatePagingDriver()
     : new CountingDriver()
+  // The adapter stores and revives a Temporal value through the global
+  // constructor, which must be the one that built the history's values.
+  vi.stubGlobal(`Temporal`, Temporal)
   try {
     const adapter = new SQLiteCorePersistenceAdapter({ driver })
     const target = { kind: `eager` as const, collectionId: `ordered-page` }
@@ -1011,13 +1396,15 @@ async function drive(
     // The persisted wrapper ensures indexes best effort, so a rejection is
     // recorded and the loads go on: the work law then judges a page whose
     // index was lost.
-    for (const field of indexedFields)
+    for (const ref of indexedRefs)
       try {
-        await adapter.ensureIndex(target, field, {
-          expressionSql: [JSON.stringify({ type: `ref`, path: [field] })],
+        await adapter.ensureIndex(target, ref, {
+          expressionSql: [
+            JSON.stringify({ type: `ref`, path: ref.split(`.`) }),
+          ],
         })
       } catch (error) {
-        observe(`ensureIndex`, { field, rejected: messageOf(error) })
+        observe(`ensureIndex`, { field: ref, rejected: messageOf(error) })
       }
 
     // A legal request owes rows, so a rejection is an observation the laws
@@ -1048,16 +1435,18 @@ async function drive(
         offset: plan.request.offset ?? 0,
       }
     observe(`page`, await load(true))
-    // The declared state is the premise of the history, not a production
-    // decision: production's paging is what the work law judges.
-    observe(`reach`, stateOf(plan))
+    // The declared states are premises of the history, not production
+    // decisions: production's paging is what the work law judges.
+    for (const state of statesOf(plan)) observe(`reach`, state)
   } finally {
     driver.db.close()
+    vi.unstubAllGlobals()
   }
 }
 
 // Filter first: a wrong filter also moves the page. Then the page against the
-// unpaged order, then the raw rows the page read, then the construction's
+// comparator's order, or against the unpaged order where the comparator
+// decides none, then the raw rows the page read, then the construction's
 // states, which only a complete trace can show.
 function check(plan: Plan, trace: ReadonlyArray<Observation>, owed: Owed) {
   const unpaged = readAt(trace, `unpaged`)
@@ -1087,13 +1476,21 @@ function check(plan: Plan, trace: ReadonlyArray<Observation>, owed: Owed) {
       owed.keys,
       `the unpaged request kept other rows than the model's equality`,
     ) ??
-    differs(
-      `page`,
-      `page`,
-      page.keys,
-      unpaged.keys.slice(offset, offset + plan.request.limit),
-      `the page is not the unpaged order's rows at its offset`,
-    ) ??
+    (owed.page
+      ? differs(
+          `page`,
+          `page`,
+          page.keys,
+          owed.page,
+          `the page is not the comparator's rows at its offset`,
+        )
+      : differs(
+          `page`,
+          `page`,
+          page.keys,
+          unpaged.keys.slice(offset, offset + plan.request.limit),
+          `the page is not the unpaged order's rows at its offset`,
+        )) ??
     (owed.pageInSql
       ? differs(
           `page`,
@@ -1131,9 +1528,9 @@ const withRead = (
 oracleProperty({
   id: `sqlite-persistence.ordered-page`,
   law: {
-    statement: `At loadSubset return, an ordered page holds exactly the unpaged request's rows at its offset, in order; the unpaged request keeps exactly the rows whose fields equal the literals (a Date equals its epoch milliseconds); and when the where is a conjunction of exact equality or membership leaves and every order field is indexed and holds only integers and booleans, or only text below U+D800 sorted lexically, with keys of that text, SQLite returns no more stored rows than the page holds.`,
-    authority: `The SQLite adapter's contract that the JavaScript evaluator and in-memory sort decide loadSubset results with SQL as a candidate read (PR #1997); the accepted goal that a paged live query reads its page, not every matching row.`,
-    limits: `Up to twelve rows and one request per history on node:sqlite in one process; no cursors, joins, orders on a computed field, native hosts or OPFS. The comparator is not modeled: order comes from the unpaged request.`,
+    statement: `At loadSubset return, an ordered page holds exactly the rows at its offset of TanStack DB's comparator order of the matching rows, ties broken by key, or of the unpaged request's order where that comparator decides no single order; the unpaged request keeps exactly the rows whose refs, read as JavaScript reads them, equal the literals (a Date equals its epoch milliseconds); and when the where is a conjunction of exact equality or membership leaves on top-level fields and every order term is an indexed top-level field that holds only integers and booleans, or only text below U+D800 sorted lexically, with keys of that text, SQLite returns no more stored rows than the page holds.`,
+    authority: `The SQLite adapter's contract that the JavaScript evaluator and in-memory sort decide loadSubset results with SQL as a candidate read (PR #1997); makeComparator, which orders live-query results; the accepted goal that a paged live query reads its page, not every matching row.`,
+    limits: `Up to twelve rows and one request per history on node:sqlite in one process; no cursors, joins, orders on a computed field, native hosts or OPFS. Where the comparator decides no single order, the page is only related to the unpaged request. Nested refs read numbers only.`,
   },
   owns: [`src/sqlite-core-adapter.ts`],
   histories: {
@@ -1141,6 +1538,7 @@ oracleProperty({
     runs: 100,
     fixedSeeds: [1116],
     states: [...states],
+    measured: [comparatorOrders],
     constructed: constructions,
     fixed,
   },
@@ -1193,6 +1591,37 @@ oracleProperty({
       law: `page`,
       history: { fixed: `status equals 1 beside coerced values` },
       driver: (plan, observe) => drive(plan, observe, true),
+    },
+    {
+      name: `a descending page places nulls opposite to nulls`,
+      law: `page`,
+      history: { fixed: `plain rows by rank descending, nulls first` },
+      corrupt: (trace, plan) =>
+        withRead(trace, `page`, () => ({ keys: nullsNegatedPage(plan) })),
+    },
+    {
+      name: `the filter reads a nested ref as its stored JSON`,
+      law: `filter`,
+      history: { fixed: `items length equals 2` },
+      corrupt: (trace, plan) =>
+        withRead(trace, `unpaged`, (read) => ({
+          keys: read.keys.filter((key) => {
+            const row = plan.rows.find((stored) => stored.key === key)!
+            return plan.request.where.every(
+              (leaf) =>
+                leaf.op === `true` ||
+                readRef(row.value, leaf.field) ===
+                  jsonMember(row.value, leaf.field),
+            )
+          }),
+        })),
+    },
+    {
+      name: `the page orders a nested ref as its stored JSON`,
+      law: `page`,
+      history: { fixed: `items of each kind by length` },
+      corrupt: (trace, plan) =>
+        withRead(trace, `page`, () => ({ keys: storedJsonPage(plan) })),
     },
     // One missing-state control per builder: each construction's check must
     // reject a trace that lost the state it names.
