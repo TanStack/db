@@ -607,6 +607,10 @@ function compareOrderByValues(
   if (right == null) {
     return compareOptions.nulls === `first` ? 1 : -1
   }
+  // As TanStack DB's comparator, NaN orders above every other value.
+  if (Number.isNaN(left) || Number.isNaN(right)) {
+    return Number(Number.isNaN(left)) - Number(Number.isNaN(right))
+  }
 
   if (typeof left === `string` && typeof right === `string`) {
     if (compareOptions.stringSort === `custom`) {
