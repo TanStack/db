@@ -3,14 +3,13 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import {
+  checkDocumentedRequest,
   documentedHandlers,
   documentedMutationHistories,
   documentedMutationInputs,
   negativeDocumentedHandlers,
 } from './documented-mutations-oracle'
 import {
-  checkDocumentedRequest,
-  createDocumentedReach,
   extractDocumentedHandler,
   selectDocumentedHistories,
 } from './documented-mutations-support'
@@ -86,48 +85,10 @@ test(`finite replay selects the exact authored history and rejects an unknown id
   expect(() => selectDocumentedHistories(histories)).toThrow(/Unknown/)
 })
 
-test.each([undefined, `42`])(
-  `an irrelevant shared seed %s changes neither complete nor missing-case reach`,
-  (seed) => {
-    vi.stubEnv(`TANSTACK_DB_ORACLE_SEED`, seed)
-    vi.spyOn(console, `info`).mockImplementation(() => {})
-    const histories = documentedMutationHistories(`query`).filter(
-      (h) =>
-        h.handler.id === `query-handlers/insert` && h.apiOutcome === `success`,
-    )
-    const complete = createDocumentedReach(`controls`, histories.slice(0, 1))
-    const partial = createDocumentedReach(`controls`, histories)
-    for (const reach of [complete, partial]) {
-      reach.begin(histories[0]!.id)
-      for (const state of [
-        `entered`,
-        `api-request`,
-        `settlement-waiter`,
-        `server-written`,
-        `confirmation-held`,
-        `confirmation-accepted`,
-        `comparison:entered`,
-        `comparison:server-written`,
-        `comparison:confirmation-requested`,
-        `comparison:confirmation-accepted`,
-        `comparison:settled`,
-      ])
-        reach.reach(state)
-    }
-    expect(() => complete.finish()).not.toThrow()
-    expect(() => partial.finish()).toThrow(/peer:true/)
-  },
-)
-
-test(`unentered controls impose no reach but a partial finite campaign does`, () => {
-  vi.spyOn(console, `info`).mockImplementation(() => {})
-  const histories = documentedMutationHistories(`query`).slice(0, 2)
-  const reach = createDocumentedReach(`controls`, histories)
-  expect(() => reach.finish()).not.toThrow()
-  reach.begin(histories[0]!.id)
-  reach.reach(`entered`)
-  expect(() => reach.finish()).toThrow(/settlement-waiter/)
-})
+// Reach is no longer a counter beside the tests: each enumerated history owes
+// its own cuts (owedDocumentedCuts), and the native property's calibrations in
+// documented-mutations-oracle.ts show that the check rejects a lost reach cut,
+// a lost comparison cut, and a cut the history does not owe.
 
 test.each([`original instead of modified`, `wrong key`, `omitted field`])(
   `request collaborator rejects %s`,

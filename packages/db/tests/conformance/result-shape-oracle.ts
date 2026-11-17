@@ -17,7 +17,6 @@
  */
 import fc from 'fast-check'
 import { oracleRuns } from '../oracle-config'
-import { declareOracle } from '../oracle-declaration'
 import { differs, oracleProperty, pass, violation } from '../oracle-property'
 import { selectedRowKeys } from './result-laws'
 import { ScenarioLifetime } from './scenario-lifetime'
@@ -512,7 +511,6 @@ export function registerResultShapeOracle(driver: LiveQueryDriver): void {
       statement: `A binding projects data through its current authored query: a list exposes an array and findOne a row or undefined, at the native cut after a mode change, where only the shape is owed, and after it settles, where the selected rows and keyed state equal the source model.`,
       authority: `packages/db/tests/conformance/contract.ts and each adapter's public result type`,
       limits: `Enabled callback queries over one source of zero to four rows; disabled inputs, errors, supplied Collections, and DbClient stay with their existing conformance owners. No promise of synchronous row freshness or identical host scheduling.`,
-      owner: `Frameworks`,
     },
     histories: resultShapeHistories,
     model: shapeModel,
@@ -527,8 +525,3 @@ export function registerResultShapeOracle(driver: LiveQueryDriver): void {
 // Owns no production entry in packages/db: this module checks the public
 // observations that each framework driver passes it, so the framework packages
 // that run it own the entries it judges.
-declareOracle({
-  check: [checkResultShape],
-  model: [shapeModel],
-  grammar: [resultShapeHistories],
-})

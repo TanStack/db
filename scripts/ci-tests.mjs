@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { globSync, readFileSync } from 'node:fs'
+import { existsSync, globSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -60,11 +60,36 @@ for (const name of assigned) {
   }
 }
 
+// The DB package's type-level oracles each compile generated consumers, and
+// the framework's determinism test compiles its replayed histories again, so
+// one of them alone outlasts a shard's other files. They run in their own
+// group, db-3, and the two file shards run every other test file. With
+// db-replay, the groups run each DB test file exactly once.
+const dbTypeOracles = [
+  `tests/query/virtual-row-fields-types-oracle.test.ts`,
+  `tests/mutation-handler-types-oracle.test.ts`,
+]
+
+// A listed file that no longer exists would leave db-3 short while its
+// renamed successor fell back into a file shard, so every run checks them.
+const missingTypeOracles = dbTypeOracles.filter(
+  (file) => !existsSync(join(root, `packages/db`, file)),
+)
+if (missingTypeOracles.length > 0)
+  throw new Error(
+    `db-3 names missing test files: ${missingTypeOracles.join(`, `)}`,
+  )
+
 const [command, group] = process.argv.slice(2)
 if (command === `check`) {
   console.log(`CI groups cover all ${testPackages.length} package test scripts`)
 } else {
-  const dbShards = { 'db-1': `1/2`, 'db-2': `2/2`, 'db-replay': undefined }
+  const dbShards = {
+    'db-1': `1/2`,
+    'db-2': `2/2`,
+    'db-3': undefined,
+    'db-replay': undefined,
+  }
   const isDb = Object.hasOwn(dbShards, group)
   const packages = groups[isDb ? `db` : group]
   if (!packages || ![`build`, `test`].includes(command)) {
@@ -85,7 +110,17 @@ if (command === `check`) {
     const selection =
       group === `db-replay`
         ? [`tests/oracle-replay.test.ts`]
-        : [`--exclude=**/oracle-replay.test.ts`, `--shard=${dbShards[group]}`]
+        : group === `db-3`
+          ? dbTypeOracles
+          : [
+              `--exclude=**/oracle-replay.test.ts`,
+              // Vitest matches an exclusion by the file's own name; the
+              // names are unique in the package.
+              ...dbTypeOracles.map(
+                (file) => `--exclude=**/${file.split(`/`).pop()}`,
+              ),
+              `--shard=${dbShards[group]}`,
+            ]
     args = [
       `--filter`,
       `@tanstack/db`,

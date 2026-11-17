@@ -1,5 +1,14 @@
 # @tanstack/node-db-sqlite-persistence
 
+## 1.0.0-rc.1.5
+
+### Patch Changes
+
+- Update runtime dependencies while preserving the public API and CommonJS loading. Preserve Solid reactivity for own data fields and persist Electric snapshot resume checkpoints before subset loads succeed. ([#2374](https://github.com/TanStack/db/pull/2374))
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@1.0.0-rc.1.5
+
 ## 1.0.0-rc.1.4
 
 ### Patch Changes

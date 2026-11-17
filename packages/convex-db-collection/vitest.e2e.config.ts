@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
+    server: { deps: { inline: [`@tanstack/oracles`] } },
     globalSetup: [
       `./e2e/setup.ts`,
       `./e2e/auth-app/setup.ts`,

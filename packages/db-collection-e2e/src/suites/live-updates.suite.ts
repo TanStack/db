@@ -1,7 +1,7 @@
 /**
  * Reactive update and update-in-place cases whose expectations are written
  * out row by row. The notification history and unsubscribe laws that the
- * oracle suite declares are in live-updates-oracle.suite.ts, which runs this
+ * witness suite checks are in live-updates-witness.suite.ts, which runs this
  * suite too.
  */
 import { describe, expect, it } from 'vitest'

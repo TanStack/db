@@ -21,18 +21,15 @@
  * in-flight work. See ORACLE.md and the repository coverage map.
  */
 import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createTransaction } from '../../src'
+import { oracleProperty } from '../oracle-config'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-  recordOracleReplay,
-} from '../oracle-config'
-import { declareOracle } from '../oracle-declaration'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter'
 import {
   Channel,
   assertRows,
@@ -41,6 +38,7 @@ import {
   userRow,
   withHarness,
 } from './harness'
+import type { Verdict } from '../oracle-config'
 import type { Row } from './harness'
 
 const keys = [0, '0', 1, '1'] as const
@@ -123,18 +121,22 @@ async function runHistory(steps: Array<Step>) {
         versionKey: string
       }>(h.db, '_versions')
       // Typed key comparison avoids String conflating number 0 with string "0".
-      expect(
-        versions.keys.map((key) => JSON.stringify(key)).sort(),
-        cut + ': version ownership',
-      ).toEqual(
-        model
-          .flatMap((rows, slot) =>
-            rows.map((row) => JSON.stringify([names[slot], row.id])),
-          )
-          .sort(),
+      oracleAssertion(cut + ': version ownership', () =>
+        expect(
+          versions.keys.map((key) => JSON.stringify(key)).sort(),
+          cut + ': version ownership',
+        ).toEqual(
+          model
+            .flatMap((rows, slot) =>
+              rows.map((row) => JSON.stringify([names[slot], row.id])),
+            )
+            .sort(),
+        ),
       )
       for (const value of versions.rows) {
-        expect(value.versionKey).toEqual(expect.any(String))
+        oracleAssertion(`settled persistence comparison`, () =>
+          expect(value.versionKey).toEqual(expect.any(String)),
+        )
       }
       checks++
     }
@@ -241,109 +243,105 @@ async function runHistory(steps: Array<Step>) {
         )
         if (next < 0) continue
         if (changed.has(JSON.stringify(oldKey)))
-          expect(after.rows[next]!.versionKey).not.toBe(
-            before.rows[at]!.versionKey,
+          oracleAssertion(`settled persistence comparison`, () =>
+            expect(after.rows[next]!.versionKey).not.toBe(
+              before.rows[at]!.versionKey,
+            ),
           )
         else if (!touched.has(JSON.stringify(oldKey)))
-          expect(after.rows[next]!.versionKey).toBe(before.rows[at]!.versionKey)
+          oracleAssertion(`settled persistence comparison`, () =>
+            expect(after.rows[next]!.versionKey).toBe(
+              before.rows[at]!.versionKey,
+            ),
+          )
       }
     }
     for (const [slot, name] of names.entries()) {
       const reopened = await h.open(name)
       assertRows(reopened.values(), model[slot]!, 'fresh Collection restore')
     }
-    expect(checks).toBe(steps.length + 1)
+    oracleAssertion(`settled persistence comparison`, () =>
+      expect(checks).toBe(steps.length + 1),
+    )
   })
 }
 
-describe('settled histories', () => {
-  // Reconstruction witnesses preserve all action kinds even if random sampling
-  // or shrinking selects an empty history.
-  it('reconstructs replacement, ownership, typed keys and restart histories', async () => {
-    oracleRoute(`fixed history`)
-    await runHistory(
-      kinds.flatMap((kind, i) => [
-        { kind, slot: 0, key: i % 4, value: 1, optional: true },
-        { kind, slot: 1, key: (i + 1) % 4, value: 0, optional: false },
-      ]),
-    )
-  })
-  it('clears a previously confirmed update without retaining optimistic data', async () => {
-    oracleRoute(`fixed history`)
-    await runHistory([
-      { kind: 'write', slot: 0, key: 0, value: 0, optional: false },
-      { kind: 'clear', slot: 0, key: 0, value: 0, optional: false },
-    ])
-  })
-  it('refreshes changed imported rows while allowing identical replacements', async () => {
-    oracleRoute(`fixed history`)
-    const replacement: Step = {
-      kind: 'import',
-      slot: 0,
-      key: 0,
-      value: 1,
-      optional: true,
-    }
-    await runHistory([
-      replacement,
-      replacement,
-      { ...replacement, optional: false },
-    ])
-  })
-  it('preserves rows through authored no-op updates', async () => {
-    oracleRoute(`fixed history`)
-    const repeated: Step = {
-      kind: 'write',
-      slot: 0,
-      key: 0,
-      value: 0,
-      optional: false,
-    }
-    await runHistory([repeated, repeated])
-  })
+const importReplacement: Step = {
+  kind: 'import',
+  slot: 0,
+  key: 0,
+  value: 1,
+  optional: true,
+}
+const repeatedWrite: Step = {
+  kind: 'write',
+  slot: 0,
+  key: 0,
+  value: 0,
+  optional: false,
+}
 
+describe('settled histories', () => {
   // A fixed campaign and a random campaign share one grammar and budget. A path
   // replay of this property selects only its random campaign.
   const settledProperty = `indexeddb.settled-history`
-  const settledCampaign = (
-    mode: `fixed` | `random`,
-    parameters: { numRuns: number; seed?: number; path?: string },
-  ) => {
-    return async () => {
-      oracleRoute(oracleRouteOf(parameters))
-      console.info('indexeddb.persistence campaign', mode, parameters)
-      await fc.assert(fc.asyncProperty(history, runHistory), {
-        verbose: true,
-        ...parameters,
-        asyncReporter: async (details) => {
-          recordOracleReplay(settledProperty, details)
-          console.info('indexeddb.persistence completed', {
-            mode,
-            seed: details.seed,
-            path: details.counterexamplePath,
-            runs: details.numRuns,
-            failed: details.failed,
-          })
-          const report = await fc.asyncDefaultReportMessage(details)
-          if (report !== undefined)
-            throw new Error(report, { cause: details.errorInstance })
+  oracleProperty<Array<Step>, Verdict, { steps: Array<Step> }>({
+    id: settledProperty,
+    law: {
+      statement: `Each settled authored history reconstructs the same public, subscription, durable, export, peer and reopened rows with key-owned versions.`,
+      authority: `IndexedDB CRUD/persistence, store isolation, clear/import/export and cross-tab APIs; Collection optimistic settlement and cleanup`,
+      limits: `Controlled BroadcastChannel and fake IndexedDB, bounded scalar rows and sequential settled actions; no browser scheduling, crash durability or overlapping writers.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexed-db.ts#createIndexedDB',
+      'src/indexed-db.ts#indexedDBCollectionOptions',
+      'src/transactions.ts#createTransaction',
+    ],
+    histories: {
+      arbitrary: history,
+      runs: 30,
+      fixedSeeds: [1179001],
+      fixed: [
+        // Reconstruction witnesses preserve all action kinds even if random
+        // sampling or shrinking selects an empty history.
+        {
+          name: 'reconstructs replacement, ownership, typed keys and restart histories',
+          history: kinds.flatMap((kind, i): Array<Step> => [
+            { kind, slot: 0, key: i % 4, value: 1, optional: true },
+            { kind, slot: 1, key: (i + 1) % 4, value: 0, optional: false },
+          ]),
         },
-      })
-    }
-  }
-  oracleReplayTest(it)(
-    'matches authored data through fixed histories',
-    settledCampaign(
-      `fixed`,
-      oracleFixedSeed(1179001, { numRuns: oracleRuns(30) }),
-    ),
-    30_000,
-  )
-  oracleReplayTest(it, settledProperty)(
-    'matches authored data through random histories',
-    settledCampaign(`random`, oraclePropertyOptions(30, settledProperty)),
-    30_000,
-  )
+        {
+          name: 'clears a previously confirmed update without retaining optimistic data',
+          history: [
+            { kind: 'write', slot: 0, key: 0, value: 0, optional: false },
+            { kind: 'clear', slot: 0, key: 0, value: 0, optional: false },
+          ],
+        },
+        {
+          name: 'refreshes changed imported rows while allowing identical replacements',
+          history: [
+            importReplacement,
+            importReplacement,
+            { ...importReplacement, optional: false },
+          ],
+        },
+        {
+          name: 'preserves rows through authored no-op updates',
+          history: [repeatedWrite, repeatedWrite],
+        },
+      ],
+    },
+    resolve: (steps) => ({ steps }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`settled IndexedDB history`, plan, observe, () =>
+        runHistory(plan.steps),
+      ),
+    check: forwardAssertionJudgment,
+    timeout: 30_000,
+  })
 })
 
 // The manual-acceptance model: accepting one owner removes its authored key from
@@ -361,29 +359,13 @@ function acceptOwnerInModel(
   ]
 }
 
-// runHistory is the production driver and refinement check for the settled
-// history law: each checkpoint compares public, subscription, durable, export,
-// peer and version rows with the authored model that it keeps for the history.
-// acceptOwnerInModel is the model of the manual-acceptance test below.
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexed-db.ts#createIndexedDB',
-    'src/indexed-db.ts#indexedDBCollectionOptions',
-    'src/transactions.ts#createTransaction',
-  ],
-  check: [runHistory],
-  model: [acceptOwnerInModel],
-})
-
 /** Three distinct Collection identities receive one mixed manual payload.
  * The ledger changes only for the selected owner's acceptance, in each of six
  * orders. Same-store owners use disjoint keys; the sibling store reuses a key.
  * No assertion invents atomicity across those three native transactions or a
  * same-ID Collection policy. A skipped owner must leave its rows/versions alone.
  */
-it('manual acceptance partitions mixed payloads across three Collections in every order', async () => {
-  oracleRoute(`case`)
+async function manualAcceptance() {
   for (const order of [
     [0, 1, 2],
     [0, 2, 1],
@@ -414,17 +396,19 @@ it('manual acceptance partitions mixed payloads across three Collections in ever
       const tx = createTransaction({
         autoCommit: false,
         mutationFn: async ({ transaction }) => {
-          expect(
-            transaction.mutations.map((mutation) => [
-              mutation.collection.id,
-              mutation.type,
-              mutation.key,
-            ]),
-          ).toEqual(
-            collections.flatMap((collection, index) => [
-              [collection.id, 'delete', removed[index]],
-              [collection.id, 'insert', added[index]],
-            ]),
+          oracleAssertion(`settled persistence comparison`, () =>
+            expect(
+              transaction.mutations.map((mutation) => [
+                mutation.collection.id,
+                mutation.type,
+                mutation.key,
+              ]),
+            ).toEqual(
+              collections.flatMap((collection, index) => [
+                [collection.id, 'delete', removed[index]],
+                [collection.id, 'insert', added[index]],
+              ]),
+            ),
           )
           for (const index of order) {
             const priorVersions = await readStore<{ versionKey: string }>(
@@ -456,10 +440,12 @@ it('manual acceptance partitions mixed payloads across three Collections in ever
                 (candidate) =>
                   JSON.stringify(candidate) === JSON.stringify(key),
               )
-              expect(
-                afterVersions.rows[position],
-                'unrelated version ownership',
-              ).toEqual(priorVersions.rows[offset])
+              oracleAssertion('unrelated version ownership', () =>
+                expect(
+                  afterVersions.rows[position],
+                  'unrelated version ownership',
+                ).toEqual(priorVersions.rows[offset]),
+              )
             }
           }
         },
@@ -489,4 +475,30 @@ it('manual acceptance partitions mixed payloads across three Collections in ever
         )
     })
   }
+}
+
+oracleProperty({
+  id: `indexeddb.manual-acceptance`,
+  law: {
+    statement: `Manual acceptance of one mixed payload changes only the accepting owner's rows and versions, in every acceptance order, and peers and a fresh restore converge on the model.`,
+    authority: `IndexedDB CRUD/persistence, store isolation, clear/import/export and cross-tab APIs; Collection optimistic settlement and cleanup`,
+    limits: `Three Collection identities over two stores in all six acceptance orders; no atomicity across their three native transactions or same-ID Collection policy.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+    'src/transactions.ts#createTransaction',
+  ],
+  histories: [
+    'manual acceptance partitions mixed payloads across three Collections in every order',
+  ],
+  label: (name) => name,
+  resolve: (name) => ({ name }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`indexeddb.manual-acceptance`, plan, observe, () =>
+      manualAcceptance(),
+    ),
+  check: forwardAssertionJudgment,
 })

@@ -23,7 +23,7 @@ export default defineConfig({
     })),
     {
       name: 'webkit-persistent',
-      testMatch: ['**/value-oracle.spec.ts', '**/value.spec.ts'],
+      testMatch: ['**/value-witness.spec.ts', '**/value.spec.ts'],
       use: { browserName: 'webkit' },
     },
   ],

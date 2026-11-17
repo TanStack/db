@@ -19,12 +19,32 @@ import {
   transformPublicContainers,
 } from '../../src/query/compiler/route-metadata.js'
 import {
+  fieldStages,
+  overlapStages,
+  publicFieldCells,
+  publicFieldOverlapCells,
+  publicFieldOverlapFunctionalCells,
+} from '../conformance/public-field-oracle.js'
+import {
   createGrammarCollection,
   expectEveryForm,
   expectNoPrivateSymbolsDeep,
   includeInEveryForm,
+  materializationForms,
   runWithCleanup,
 } from './includes-context-transport-helpers.js'
+import {
+  checkMaterializedInputRows,
+  checkOuterJoinKeyRows,
+  checkpoints,
+  expectedMaterializedInputRows,
+  expectedOuterJoinKeyRows,
+  grammarCellName,
+  grammarCells,
+  materializedInputCells,
+  materializedInputGrammar,
+  routeContextGrammar,
+} from './includes-context-transport-model-oracle.js'
 import type {
   Cleanable,
   MaterializedForms,
@@ -516,4 +536,112 @@ describe(`correlated include route-context transport grammar`, () => {
     test(`query-ref metadata / ${routeMode}`, () =>
       runQueryRefMetadataCell(routeMode))
   }
+})
+
+// Grammar-size checks and checker calibrations for the route-context
+// transport oracle. They run no production: the size checks count the grammar
+// tables, and each calibration feeds a wrong row set to the oracle's check.
+describe(`route-context transport grammar and checks`, () => {
+  test(`expands every declared product without duplicate cells`, () => {
+    const expectedCellCount =
+      routeContextGrammar.parentProjection.shapes.length +
+      routeContextGrammar.correlationDomain.states.length +
+      routeContextGrammar.lexicalScope.scopes.length +
+      routeContextGrammar.aggregation.groupings.length *
+        routeContextGrammar.aggregation.placements.length +
+      routeContextGrammar.recursiveSource.boundaries.length *
+        routeContextGrammar.recursiveSource.phases.length +
+      routeContextGrammar.join.keySides.length *
+        routeContextGrammar.join.correlationAttachments.length +
+      routeContextGrammar.unionIdentity.forms.length +
+      routeContextGrammar.derivedResult.boundaries.length *
+        routeContextGrammar.derivedResult.selections.length *
+        routeContextGrammar.derivedResult.domains.length +
+      routeContextGrammar.namespaceCollision.locations.length *
+        routeContextGrammar.namespaceCollision.boundaries.length *
+        routeContextGrammar.namespaceCollision.names.length +
+      routeContextGrammar.publicSurface.shapes.length +
+      publicFieldCells.length +
+      publicFieldOverlapCells.length +
+      publicFieldOverlapFunctionalCells.length
+    const names = grammarCells.map(grammarCellName)
+
+    expect(grammarCells).toHaveLength(expectedCellCount)
+    expect(new Set(names)).toHaveLength(expectedCellCount)
+    expect(
+      grammarCells.filter(
+        (cell) =>
+          cell.family !== `public-field` &&
+          cell.family !== `public-field-overlap`,
+      ).length *
+        materializationForms.length *
+        checkpoints.length,
+    ).toBe(819)
+    expect(
+      grammarCells.filter((cell) => cell.family === `public-field`).length *
+        fieldStages.length *
+        4,
+    ).toBe(1200)
+    expect(
+      (publicFieldOverlapCells.length +
+        publicFieldOverlapFunctionalCells.length) *
+        overlapStages.length *
+        4,
+    ).toBe(432)
+  })
+
+  test(`expands every declared input boundary without duplicates`, () => {
+    const expected =
+      materializedInputGrammar.boundaries.length *
+      materializedInputGrammar.selections.length *
+      materializedInputGrammar.inputs.length
+    expect(materializedInputCells).toHaveLength(expected)
+    expect(
+      new Set(
+        materializedInputCells.map(
+          ({ boundary, selection, input }) =>
+            `${boundary}/${selection}/${input}`,
+        ),
+      ),
+    ).toHaveLength(expected)
+  })
+
+  test(`rejects lost children and cross-parent reuse at the public checkpoint`, () => {
+    const children = [
+      { id: 10, parentGroup: 1 },
+      { id: 20, parentGroup: 2 },
+    ]
+    const grandchildren = [{ id: 100, childId: 10, label: `ten` }]
+    const expected = expectedMaterializedInputRows(
+      { group: 1 },
+      children,
+      grandchildren,
+    )
+    const wrongRoute = expectedMaterializedInputRows(
+      { group: 2 },
+      children,
+      grandchildren,
+    )
+    checkMaterializedInputRows(expected, expected, `allowed`)
+    for (const wrong of [[], wrongRoute]) {
+      expect(() =>
+        checkMaterializedInputRows(wrong, expected, `calibration`),
+      ).toThrow()
+    }
+  })
+
+  test(`rejects missing and duplicated joined contributions`, () => {
+    const mains = [{ id: 10, link: 10, parentGroup: 1 }]
+    const children = [
+      { id: 20, link: 10, parentGroup: 1 },
+      { id: 21, link: 10, parentGroup: 1 },
+      { id: 10, link: 30, parentGroup: 1 },
+    ]
+    for (const join of [`inner`, `left`, `right`, `full`] as const) {
+      const expected = expectedOuterJoinKeyRows(mains, children, 1, join)
+      checkOuterJoinKeyRows(expected, expected)
+      for (const wrong of [expected.slice(1), [...expected, expected[0]!]])
+        expect(() => checkOuterJoinKeyRows(wrong, expected)).toThrow()
+    }
+  })
 })

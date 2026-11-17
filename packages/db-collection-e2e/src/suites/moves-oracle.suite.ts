@@ -6,13 +6,15 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { electricCollectionOptions } from '@tanstack/electric-db-collection'
+import { oracleProperty } from '../../../db/tests/oracle-property'
 import {
-  declareOracle,
-  oracleRoute,
-} from '../../../db/tests/oracle-declaration.js'
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../../db/tests/oracle-assertion-adapter'
 import { waitFor } from '../utils/helpers'
 import { expectNotificationHistory } from '../utils/notification-laws-oracle'
 import type { E2ETestConfig, Post, User } from '../types'
@@ -64,6 +66,30 @@ function assertOwnedPosts(actual: Array<CapturedPost>, expected: Array<Post>) {
     [...expected].sort(byId),
   )
 }
+
+// The law that every sync mode's move histories check. The finite world that
+// withMoveHistory builds from the authored row and activity commands is its
+// independent model; it does not read the provider's subquery parser or
+// output.
+//
+// Owns no production entry. The suite judges the collection adapter that its
+// consuming package runs it against (electric.e2e.test.ts), but that consumer
+// declares no `owns` either, so the gap report counts none of this suite's
+// kills. The coverage map records this as a follow-up under
+// "Shared e2e suites".
+const movesLaw = {
+  statement: `A Collection over a shape whose WHERE clause has a subquery holds exactly the history's owned posts whose owning user is active in its authored row and activity commands, each under its own key, and its change callbacks reconstruct its rows.`,
+  authority: `Electric shape subqueries: a row moves into or out of \`"userId" IN (SELECT id FROM users WHERE "isActive" = true)\` when its parent's activity changes; the change-notification law of notification-laws-oracle.ts.`,
+  limits: `Eight authored histories per sync mode, against real Postgres and Electric. Only the rows that a history owns are compared; Electric's tags are not observed.`,
+}
+
+// The replay manifest reads each property id from this module, so the ids
+// are written out, one per sync mode.
+const movesPropertyIds = {
+  eager: `collection-e2e.moves.eager`,
+  'on-demand': `collection-e2e.moves.on-demand`,
+  progressive: `collection-e2e.moves.progressive`,
+} satisfies Record<SyncMode, string>
 
 interface MoveHistory {
   own: <T extends MoveCollection>(collection: T) => T
@@ -374,640 +400,670 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
         throw new AggregateError(errors, 'Move history and cleanup failed')
     }
 
-    // Helper function to run all tests for a given sync mode
+    // Registers this sync mode's authored move histories. Each history is the
+    // command script that its test used to pass to withMoveHistory, unchanged:
+    // withMoveHistory still owns the finite world, the comparison, and the
+    // cleanup, and the property only names the script and runs it.
     function runTestsForSyncMode(syncMode: SyncMode) {
       describe(`${syncMode} mode`, () => {
-        it(`Initial snapshot contains only posts from active users`, async () => {
-          oracleRoute(`fixed history`)
-          await withMoveHistory(async (history) => {
-            if (!config.mutations) {
-              throw new Error(`Mutations not configured`)
-            }
-
-            // Insert 2 active users and 1 inactive user
-            const userId1 = randomUUID()
-            const userId2 = randomUUID()
-            const userId3 = randomUUID()
-
-            await history.insertUser({
-              id: userId1,
-              name: `Active User 1`,
-              email: `user1@test.com`,
-              age: 25,
-              isActive: true,
-              createdAt: new Date(),
-              metadata: null,
-              deletedAt: null,
-            })
-
-            await history.insertUser({
-              id: userId2,
-              name: `Active User 2`,
-              email: `user2@test.com`,
-              age: 30,
-              isActive: true,
-              createdAt: new Date(),
-              metadata: null,
-              deletedAt: null,
-            })
-
-            await history.insertUser({
-              id: userId3,
-              name: `Inactive User`,
-              email: `user3@test.com`,
-              age: 42,
-              isActive: false,
-              createdAt: new Date(),
-              metadata: null,
-              deletedAt: null,
-            })
-
-            // Wait for all 3 users to be synced to Electric before inserting posts
-            // This ensures the subquery in the WHERE clause can properly evaluate
-            await waitForUsersSynced([userId1, userId2, userId3])
-
-            // Insert posts for these users
-            const postId1 = randomUUID()
-            const postId2 = randomUUID()
-            const postId3 = randomUUID()
-
-            await history.insertPost({
-              id: postId1,
-              userId: userId1,
-              title: `Post 1`,
-              content: `Content 1`,
-              viewCount: 0,
-              largeViewCount: BigInt(0),
-              publishedAt: null,
-              deletedAt: null,
-            })
-
-            await history.insertPost({
-              id: postId2,
-              userId: userId2,
-              title: `Post 2`,
-              content: `Content 2`,
-              viewCount: 0,
-              largeViewCount: BigInt(0),
-              publishedAt: null,
-              deletedAt: null,
-            })
-
-            await history.insertPost({
-              id: postId3,
-              userId: userId3,
-              title: `Post 3`,
-              content: `Content 3`,
-              viewCount: 0,
-              largeViewCount: BigInt(0),
-              publishedAt: null,
-              deletedAt: null,
-            })
-
-            // Create collection on posts with WHERE clause: userId IN (SELECT id FROM users WHERE isActive = true)
-            const collection = history.own(
-              createPostsByActiveUsersCollection(syncMode),
-            )
-
-            // Wait for collection to sync
-            await history.ready(collection, syncMode)
-
-            // Wait for both posts to appear (users are active, so posts match the subquery)
-            await waitForItem(collection, postId1)
-            await waitForItem(collection, postId2)
-
-            // Verify only posts 1 and 2 are in the collection
-            expect(collection.has(postId1)).toBe(true)
-            await history.check(collection)
-            expect(collection.has(postId2)).toBe(true)
-            await history.check(collection)
-            expect(collection.has(postId3)).toBe(false)
-            await history.check(collection)
-
-            // Wait a bit to make sure post 3 is not coming in later
-            await new Promise((resolve) => setTimeout(resolve, 50))
-            expect(collection.has(postId3)).toBe(false)
-            await history.check(collection)
-
-            // Note: Tags are internal to Electric and may not be directly accessible
-            // The test verifies that posts with matching conditions appear in snapshot
-          })
-        })
-
-        it(`Move-in: row becomes eligible for subquery`, async () => {
-          oracleRoute(`fixed history`)
-          await withMoveHistory(async (history) => {
-            const collection = history.own(
-              createPostsByActiveUsersCollection(syncMode),
-            )
-            await history.ready(collection, syncMode)
-
-            if (!config.mutations) {
-              throw new Error(`Mutations not configured`)
-            }
-
-            // Insert user with isActive = false
-            const userId = randomUUID()
-            await history.insertUser({
-              id: userId,
-              name: `Inactive User`,
-              email: `inactive@test.com`,
-              age: 25,
-              isActive: false,
-              createdAt: new Date(),
-              metadata: null,
-              deletedAt: null,
-            })
-
-            // Wait for user to be synced to Electric before inserting post
-            await waitForUsersSynced([userId])
-
-            // Insert post for this user
-            const postId = randomUUID()
-            await history.insertPost({
-              id: postId,
-              userId,
-              title: `Inactive User Post`,
-              content: `Content`,
-              viewCount: 0,
-              largeViewCount: BigInt(0),
-              publishedAt: null,
-              deletedAt: null,
-            })
-
-            // Wait a bit to ensure post doesn't appear (user is inactive, so post doesn't match subquery)
-            await new Promise((resolve) => setTimeout(resolve, 500))
-            expect(collection.has(postId)).toBe(false)
-            await history.check(collection)
-
-            // Update user to isActive = true (move-in for the post)
-            await config.mutations.updateUser(userId, { isActive: true })
-            history.setActive(userId, true)
-
-            // Wait for post to appear (move-in)
-            await waitForItem(collection, postId, 1000)
-            expect(collection.has(postId)).toBe(true)
-            await history.check(collection)
-            expect(collection.get(postId)?.title).toBe(`Inactive User Post`)
-          })
-        })
-
-        it(`Move-out: row becomes ineligible for subquery`, async () => {
-          oracleRoute(`fixed history`)
-          await withMoveHistory(async (history) => {
-            const collection = history.own(
-              createPostsByActiveUsersCollection(syncMode),
-            )
-            await history.ready(collection, syncMode)
-
-            if (!config.mutations) {
-              throw new Error(`Mutations not configured`)
-            }
-
-            // Insert user with isActive = true
-            const userId = randomUUID()
-            await history.insertUser({
-              id: userId,
-              name: `Active User`,
-              email: `active@test.com`,
-              age: 25,
-              isActive: true,
-              createdAt: new Date(),
-              metadata: null,
-              deletedAt: null,
-            })
-
-            // Wait for user to be synced to Electric before inserting post
-            await waitForUsersSynced([userId])
-
-            // Insert post for this user
-            const postId = randomUUID()
-            await history.insertPost({
-              id: postId,
-              userId,
-              title: `Active User Post`,
-              content: `Content`,
-              viewCount: 0,
-              largeViewCount: BigInt(0),
-              publishedAt: null,
-              deletedAt: null,
-            })
-
-            // Wait for post to appear (user is active, so post matches subquery)
-            await waitForItem(collection, postId)
-            expect(collection.has(postId)).toBe(true)
-            await history.check(collection)
-
-            // Update user to isActive = false (move-out for the post)
-            await config.mutations.updateUser(userId, { isActive: false })
-            history.setActive(userId, false)
-
-            // Wait for post to be removed (move-out)
-            await waitForItemRemoved(collection, postId)
-            expect(collection.has(postId)).toBe(false)
-            await history.check(collection)
-          })
-        })
-
-        it(`Move-out → move-in cycle`, async () => {
-          oracleRoute(`fixed history`)
-          await withMoveHistory(async (history) => {
-            const collection = history.own(
-              createPostsByActiveUsersCollection(syncMode),
-            )
-            await history.ready(collection, syncMode)
-
-            if (!config.mutations) {
-              throw new Error(`Mutations not configured`)
-            }
-
-            // Insert user with isActive = true
-            const userId = randomUUID()
-            await history.insertUser({
-              id: userId,
-              name: `Flapping User`,
-              email: `flapping@test.com`,
-              age: 25,
-              isActive: true,
-              createdAt: new Date(),
-              metadata: null,
-              deletedAt: null,
-            })
-
-            // Wait for user to be synced to Electric before inserting post
-            await waitForUsersSynced([userId])
-
-            // Insert post for this user
-            const postId = randomUUID()
-            await history.insertPost({
-              id: postId,
-              userId,
-              title: `Flapping Post`,
-              content: `Content`,
-              viewCount: 0,
-              largeViewCount: BigInt(0),
-              publishedAt: null,
-              deletedAt: null,
-            })
-
-            await waitForItem(collection, postId)
-            expect(collection.has(postId)).toBe(true)
-            await history.check(collection)
-
-            // Move-out: isActive = false
-            await config.mutations.updateUser(userId, { isActive: false })
-            history.setActive(userId, false)
-            await waitForItemRemoved(collection, postId, 15000)
-            expect(collection.has(postId)).toBe(false)
-            await history.check(collection)
-
-            // Move-in: isActive = true
-            await config.mutations.updateUser(userId, { isActive: true })
-            history.setActive(userId, true)
-            await waitForItem(collection, postId, 15000)
-            expect(collection.has(postId)).toBe(true)
-            await history.check(collection)
-          })
-        })
-
-        it(`Title update while row stays within subquery`, async () => {
-          oracleRoute(`fixed history`)
-          await withMoveHistory(async (history) => {
-            const collection = history.own(
-              createPostsByActiveUsersCollection(syncMode),
-            )
-            await history.ready(collection, syncMode)
-
-            if (!config.mutations) {
-              throw new Error(`Mutations not configured`)
-            }
-
-            // Insert user with isActive = true
-            const userId = randomUUID()
-            await history.insertUser({
-              id: userId,
-              name: `Active User`,
-              email: `active@test.com`,
-              age: 25,
-              isActive: true,
-              createdAt: new Date(),
-              metadata: null,
-              deletedAt: null,
-            })
-
-            // Wait for user to be synced to Electric before inserting post
-            await waitForUsersSynced([userId])
-
-            // Insert post for this user
-            const postId = randomUUID()
-            await history.insertPost({
-              id: postId,
-              userId,
-              title: `Tagged Post`,
-              content: `Content`,
-              viewCount: 0,
-              largeViewCount: BigInt(0),
-              publishedAt: null,
-              deletedAt: null,
-            })
-
-            await waitForItem(collection, postId)
-            expect(collection.has(postId)).toBe(true)
-            await history.check(collection)
-
-            // This changes a visible row value; it is not a pure tag-only event.
-            // The post stays eligible because its user remains active.
-            await dbClient.query(
-              `UPDATE ${postsTable} SET title = $1 WHERE id = $2`,
-              [`Updated Tagged Post`, postId],
-            )
-            history.setTitle(postId, `Updated Tagged Post`)
-
-            // Wait a bit and verify post still exists
-            await new Promise((resolve) => setTimeout(resolve, 500))
-            expect(collection.has(postId)).toBe(true)
-            await history.check(collection)
-            expect(collection.get(postId)?.title).toBe(`Updated Tagged Post`)
-          })
-        })
-
-        it(`Database DELETE leads to row being removed from collection`, async () => {
-          oracleRoute(`fixed history`)
-          await withMoveHistory(async (history) => {
-            const collection = history.own(
-              createPostsByActiveUsersCollection(syncMode),
-            )
-            await history.ready(collection, syncMode)
-
-            if (!config.mutations) {
-              throw new Error(`Mutations not configured`)
-            }
-
-            // Insert user with isActive = true
-            const userId = randomUUID()
-            await history.insertUser({
-              id: userId,
-              name: `Active User`,
-              email: `active@test.com`,
-              age: 25,
-              isActive: true,
-              createdAt: new Date(),
-              metadata: null,
-              deletedAt: null,
-            })
-
-            // Wait for user to be synced to Electric before inserting post
-            await waitForUsersSynced([userId])
-
-            // Insert post for this user
-            const postId = randomUUID()
-            await history.insertPost({
-              id: postId,
-              userId,
-              title: `To Be Deleted`,
-              content: `Content`,
-              viewCount: 0,
-              largeViewCount: BigInt(0),
-              publishedAt: null,
-              deletedAt: null,
-            })
-
-            await waitForItem(collection, postId)
-            expect(collection.has(postId)).toBe(true)
-            await history.check(collection)
-
-            // Delete post in Postgres
-            await dbClient.query(`DELETE FROM ${postsTable} WHERE id = $1`, [
-              postId,
-            ])
-            history.removePost(postId)
-
-            // Wait for post to be removed
-            await waitForItemRemoved(collection, postId)
-            expect(collection.has(postId)).toBe(false)
-            await history.check(collection)
-          })
-        })
-
-        it(`Snapshot after move-out should not re-include removed rows`, async () => {
-          oracleRoute(`fixed history`)
-          await withMoveHistory(async (history) => {
-            if (!config.mutations) {
-              throw new Error(`Mutations not configured`)
-            }
-
-            // Create first collection
-            const collection1 = history.own(
-              createPostsByActiveUsersCollection(syncMode),
-            )
-            await history.ready(collection1, syncMode)
-
-            // Insert user with isActive = true
-            const userId = randomUUID()
-            await history.insertUser({
-              id: userId,
-              name: `Snapshot Test User`,
-              email: `snapshot@test.com`,
-              age: 25,
-              isActive: true,
-              createdAt: new Date(),
-              metadata: null,
-              deletedAt: null,
-            })
-
-            // Wait for user to be synced to Electric before inserting post
-            await waitForUsersSynced([userId])
-
-            // Insert post for this user
-            const postId = randomUUID()
-            await history.insertPost({
-              id: postId,
-              userId,
-              title: `Snapshot Test Post`,
-              content: `Content`,
-              viewCount: 0,
-              largeViewCount: BigInt(0),
-              publishedAt: null,
-              deletedAt: null,
-            })
-
-            await waitForItem(collection1, postId)
-            expect(collection1.has(postId)).toBe(true)
-            await history.check(collection1)
-
-            // Update user → post moves out
-            await config.mutations.updateUser(userId, { isActive: false })
-            history.setActive(userId, false)
-
-            await waitForItemRemoved(collection1, postId)
-            expect(collection1.has(postId)).toBe(false)
-            await history.check(collection1)
-
-            // Clean up first collection
-            await collection1.cleanup()
-
-            // Create fresh collection (new subscription)
-            const collection2 = history.own(
-              createPostsByActiveUsersCollection(syncMode),
-            )
-            await history.ready(collection2, syncMode)
-
-            // Wait a bit to ensure snapshot is complete
-            await new Promise((resolve) => setTimeout(resolve, 1000))
-
-            // Snapshot should NOT include the removed post (user is inactive)
-            expect(collection2.has(postId)).toBe(false)
-            await history.check(collection2)
-          })
-        })
-
-        it(`Multi-row transaction: some rows move in, some move out`, async () => {
-          oracleRoute(`fixed history`)
-          await withMoveHistory(async (history) => {
-            const collection = history.own(
-              createPostsByActiveUsersCollection(syncMode),
-            )
-            await history.ready(collection, syncMode)
-            const archiveCallbacks = history.observe(collection)
-
-            if (!config.mutations) {
-              throw new Error(`Mutations not configured`)
-            }
-
-            // Insert 3 users all with isActive = true
-            const userId1 = randomUUID()
-            const userId2 = randomUUID()
-            const userId3 = randomUUID()
-
-            await history.insertUser({
-              id: userId1,
-              name: `User 1`,
-              email: `user1@test.com`,
-              age: 25,
-              isActive: false,
-              createdAt: new Date(),
-              metadata: null,
-              deletedAt: null,
-            })
-
-            await history.insertUser({
-              id: userId2,
-              name: `User 2`,
-              email: `user2@test.com`,
-              age: 30,
-              isActive: true,
-              createdAt: new Date(),
-              metadata: null,
-              deletedAt: null,
-            })
-
-            await history.insertUser({
-              id: userId3,
-              name: `User 3`,
-              email: `user3@test.com`,
-              age: 35,
-              isActive: true,
-              createdAt: new Date(),
-              metadata: null,
-              deletedAt: null,
-            })
-
-            // Wait for all 3 users to be synced to Electric before inserting posts
-            // This ensures the subquery in the WHERE clause can properly evaluate
-            await waitForUsersSynced([userId1, userId2, userId3])
-
-            // Insert posts for these users
-            const postId1 = randomUUID()
-            const postId2 = randomUUID()
-            const postId3 = randomUUID()
-
-            await history.insertPost({
-              id: postId1,
-              userId: userId1,
-              title: `Post 1`,
-              content: `Content 1`,
-              viewCount: 0,
-              largeViewCount: BigInt(0),
-              publishedAt: null,
-              deletedAt: null,
-            })
-
-            await history.insertPost({
-              id: postId2,
-              userId: userId2,
-              title: `Post 2`,
-              content: `Content 2`,
-              viewCount: 0,
-              largeViewCount: BigInt(0),
-              publishedAt: null,
-              deletedAt: null,
-            })
-
-            await history.insertPost({
-              id: postId3,
-              userId: userId3,
-              title: `Post 3`,
-              content: `Content 3`,
-              viewCount: 0,
-              largeViewCount: BigInt(0),
-              publishedAt: null,
-              deletedAt: null,
-            })
-
-            // Wait for posts 2 and 3 to appear
-            await waitForItem(collection, postId2)
-            await waitForItem(collection, postId3)
-
-            expect(collection.has(postId1)).toBe(false)
-            await history.check(collection)
-
-            // In one SQL transaction:
-            // user1: isActive → true (post1 moves in)
-            // post2: title change (stays in since user2 is still active)
-            // user3: isActive → false (post3 moves out)
-            await dbClient.query(`BEGIN`)
-            try {
-              await dbClient.query(
-                `UPDATE ${usersTable} SET "isActive" = $1 WHERE id = $2`,
-                [true, userId1],
+        const moveHistories: Array<{
+          name: string
+          commands: (history: MoveHistory) => Promise<void>
+        }> = [
+          {
+            name: `Initial snapshot contains only posts from active users`,
+            commands: async (history) => {
+              if (!config.mutations) {
+                throw new Error(`Mutations not configured`)
+              }
+
+              // Insert 2 active users and 1 inactive user
+              const userId1 = randomUUID()
+              const userId2 = randomUUID()
+              const userId3 = randomUUID()
+
+              await history.insertUser({
+                id: userId1,
+                name: `Active User 1`,
+                email: `user1@test.com`,
+                age: 25,
+                isActive: true,
+                createdAt: new Date(),
+                metadata: null,
+                deletedAt: null,
+              })
+
+              await history.insertUser({
+                id: userId2,
+                name: `Active User 2`,
+                email: `user2@test.com`,
+                age: 30,
+                isActive: true,
+                createdAt: new Date(),
+                metadata: null,
+                deletedAt: null,
+              })
+
+              await history.insertUser({
+                id: userId3,
+                name: `Inactive User`,
+                email: `user3@test.com`,
+                age: 42,
+                isActive: false,
+                createdAt: new Date(),
+                metadata: null,
+                deletedAt: null,
+              })
+
+              // Wait for all 3 users to be synced to Electric before inserting posts
+              // This ensures the subquery in the WHERE clause can properly evaluate
+              await waitForUsersSynced([userId1, userId2, userId3])
+
+              // Insert posts for these users
+              const postId1 = randomUUID()
+              const postId2 = randomUUID()
+              const postId3 = randomUUID()
+
+              await history.insertPost({
+                id: postId1,
+                userId: userId1,
+                title: `Post 1`,
+                content: `Content 1`,
+                viewCount: 0,
+                largeViewCount: BigInt(0),
+                publishedAt: null,
+                deletedAt: null,
+              })
+
+              await history.insertPost({
+                id: postId2,
+                userId: userId2,
+                title: `Post 2`,
+                content: `Content 2`,
+                viewCount: 0,
+                largeViewCount: BigInt(0),
+                publishedAt: null,
+                deletedAt: null,
+              })
+
+              await history.insertPost({
+                id: postId3,
+                userId: userId3,
+                title: `Post 3`,
+                content: `Content 3`,
+                viewCount: 0,
+                largeViewCount: BigInt(0),
+                publishedAt: null,
+                deletedAt: null,
+              })
+
+              // Create collection on posts with WHERE clause: userId IN (SELECT id FROM users WHERE isActive = true)
+              const collection = history.own(
+                createPostsByActiveUsersCollection(syncMode),
               )
+
+              // Wait for collection to sync
+              await history.ready(collection, syncMode)
+
+              // Wait for both posts to appear (users are active, so posts match the subquery)
+              await waitForItem(collection, postId1)
+              await waitForItem(collection, postId2)
+
+              // Verify only posts 1 and 2 are in the collection
+              expect(collection.has(postId1)).toBe(true)
+              await history.check(collection)
+              expect(collection.has(postId2)).toBe(true)
+              await history.check(collection)
+              expect(collection.has(postId3)).toBe(false)
+              await history.check(collection)
+
+              // Wait a bit to make sure post 3 is not coming in later
+              await new Promise((resolve) => setTimeout(resolve, 50))
+              expect(collection.has(postId3)).toBe(false)
+              await history.check(collection)
+
+              // Note: Tags are internal to Electric and may not be directly accessible
+              // The test verifies that posts with matching conditions appear in snapshot
+            },
+          },
+
+          {
+            name: `Move-in: row becomes eligible for subquery`,
+            commands: async (history) => {
+              const collection = history.own(
+                createPostsByActiveUsersCollection(syncMode),
+              )
+              await history.ready(collection, syncMode)
+
+              if (!config.mutations) {
+                throw new Error(`Mutations not configured`)
+              }
+
+              // Insert user with isActive = false
+              const userId = randomUUID()
+              await history.insertUser({
+                id: userId,
+                name: `Inactive User`,
+                email: `inactive@test.com`,
+                age: 25,
+                isActive: false,
+                createdAt: new Date(),
+                metadata: null,
+                deletedAt: null,
+              })
+
+              // Wait for user to be synced to Electric before inserting post
+              await waitForUsersSynced([userId])
+
+              // Insert post for this user
+              const postId = randomUUID()
+              await history.insertPost({
+                id: postId,
+                userId,
+                title: `Inactive User Post`,
+                content: `Content`,
+                viewCount: 0,
+                largeViewCount: BigInt(0),
+                publishedAt: null,
+                deletedAt: null,
+              })
+
+              // Wait a bit to ensure post doesn't appear (user is inactive, so post doesn't match subquery)
+              await new Promise((resolve) => setTimeout(resolve, 500))
+              expect(collection.has(postId)).toBe(false)
+              await history.check(collection)
+
+              // Update user to isActive = true (move-in for the post)
+              await config.mutations.updateUser(userId, { isActive: true })
+              history.setActive(userId, true)
+
+              // Wait for post to appear (move-in)
+              await waitForItem(collection, postId, 1000)
+              expect(collection.has(postId)).toBe(true)
+              await history.check(collection)
+              expect(collection.get(postId)?.title).toBe(`Inactive User Post`)
+            },
+          },
+
+          {
+            name: `Move-out: row becomes ineligible for subquery`,
+            commands: async (history) => {
+              const collection = history.own(
+                createPostsByActiveUsersCollection(syncMode),
+              )
+              await history.ready(collection, syncMode)
+
+              if (!config.mutations) {
+                throw new Error(`Mutations not configured`)
+              }
+
+              // Insert user with isActive = true
+              const userId = randomUUID()
+              await history.insertUser({
+                id: userId,
+                name: `Active User`,
+                email: `active@test.com`,
+                age: 25,
+                isActive: true,
+                createdAt: new Date(),
+                metadata: null,
+                deletedAt: null,
+              })
+
+              // Wait for user to be synced to Electric before inserting post
+              await waitForUsersSynced([userId])
+
+              // Insert post for this user
+              const postId = randomUUID()
+              await history.insertPost({
+                id: postId,
+                userId,
+                title: `Active User Post`,
+                content: `Content`,
+                viewCount: 0,
+                largeViewCount: BigInt(0),
+                publishedAt: null,
+                deletedAt: null,
+              })
+
+              // Wait for post to appear (user is active, so post matches subquery)
+              await waitForItem(collection, postId)
+              expect(collection.has(postId)).toBe(true)
+              await history.check(collection)
+
+              // Update user to isActive = false (move-out for the post)
+              await config.mutations.updateUser(userId, { isActive: false })
+              history.setActive(userId, false)
+
+              // Wait for post to be removed (move-out)
+              await waitForItemRemoved(collection, postId)
+              expect(collection.has(postId)).toBe(false)
+              await history.check(collection)
+            },
+          },
+
+          {
+            name: `Move-out → move-in cycle`,
+            commands: async (history) => {
+              const collection = history.own(
+                createPostsByActiveUsersCollection(syncMode),
+              )
+              await history.ready(collection, syncMode)
+
+              if (!config.mutations) {
+                throw new Error(`Mutations not configured`)
+              }
+
+              // Insert user with isActive = true
+              const userId = randomUUID()
+              await history.insertUser({
+                id: userId,
+                name: `Flapping User`,
+                email: `flapping@test.com`,
+                age: 25,
+                isActive: true,
+                createdAt: new Date(),
+                metadata: null,
+                deletedAt: null,
+              })
+
+              // Wait for user to be synced to Electric before inserting post
+              await waitForUsersSynced([userId])
+
+              // Insert post for this user
+              const postId = randomUUID()
+              await history.insertPost({
+                id: postId,
+                userId,
+                title: `Flapping Post`,
+                content: `Content`,
+                viewCount: 0,
+                largeViewCount: BigInt(0),
+                publishedAt: null,
+                deletedAt: null,
+              })
+
+              await waitForItem(collection, postId)
+              expect(collection.has(postId)).toBe(true)
+              await history.check(collection)
+
+              // Move-out: isActive = false
+              await config.mutations.updateUser(userId, { isActive: false })
+              history.setActive(userId, false)
+              await waitForItemRemoved(collection, postId, 15000)
+              expect(collection.has(postId)).toBe(false)
+              await history.check(collection)
+
+              // Move-in: isActive = true
+              await config.mutations.updateUser(userId, { isActive: true })
+              history.setActive(userId, true)
+              await waitForItem(collection, postId, 15000)
+              expect(collection.has(postId)).toBe(true)
+              await history.check(collection)
+            },
+          },
+
+          {
+            name: `Title update while row stays within subquery`,
+            commands: async (history) => {
+              const collection = history.own(
+                createPostsByActiveUsersCollection(syncMode),
+              )
+              await history.ready(collection, syncMode)
+
+              if (!config.mutations) {
+                throw new Error(`Mutations not configured`)
+              }
+
+              // Insert user with isActive = true
+              const userId = randomUUID()
+              await history.insertUser({
+                id: userId,
+                name: `Active User`,
+                email: `active@test.com`,
+                age: 25,
+                isActive: true,
+                createdAt: new Date(),
+                metadata: null,
+                deletedAt: null,
+              })
+
+              // Wait for user to be synced to Electric before inserting post
+              await waitForUsersSynced([userId])
+
+              // Insert post for this user
+              const postId = randomUUID()
+              await history.insertPost({
+                id: postId,
+                userId,
+                title: `Tagged Post`,
+                content: `Content`,
+                viewCount: 0,
+                largeViewCount: BigInt(0),
+                publishedAt: null,
+                deletedAt: null,
+              })
+
+              await waitForItem(collection, postId)
+              expect(collection.has(postId)).toBe(true)
+              await history.check(collection)
+
+              // This changes a visible row value; it is not a pure tag-only event.
+              // The post stays eligible because its user remains active.
               await dbClient.query(
                 `UPDATE ${postsTable} SET title = $1 WHERE id = $2`,
-                [`Updated Post 2`, postId2],
+                [`Updated Tagged Post`, postId],
               )
-              await dbClient.query(
-                `UPDATE ${usersTable} SET "isActive" = $1 WHERE id = $2`,
-                [false, userId3],
+              history.setTitle(postId, `Updated Tagged Post`)
+
+              // Wait a bit and verify post still exists
+              await new Promise((resolve) => setTimeout(resolve, 500))
+              expect(collection.has(postId)).toBe(true)
+              await history.check(collection)
+              expect(collection.get(postId)?.title).toBe(`Updated Tagged Post`)
+            },
+          },
+
+          {
+            name: `Database DELETE leads to row being removed from collection`,
+            commands: async (history) => {
+              const collection = history.own(
+                createPostsByActiveUsersCollection(syncMode),
               )
-              await dbClient.query(`COMMIT`)
-            } catch (error) {
-              try {
-                await dbClient.query(`ROLLBACK`)
-              } catch (rollbackError) {
-                throw new AggregateError(
-                  [error, rollbackError],
-                  'SQL transaction and rollback failed',
-                )
+              await history.ready(collection, syncMode)
+
+              if (!config.mutations) {
+                throw new Error(`Mutations not configured`)
               }
-              throw error
-            }
-            history.setActive(userId1, true)
-            history.setTitle(postId2, `Updated Post 2`)
-            history.setActive(userId3, false)
 
-            // Wait for changes to propagate
-            await waitForItemRemoved(collection, postId3)
-            await history.check(collection)
-            expect(collection.has(postId1)).toBe(true) // post1: moved in (user1 active)
-            await history.check(collection)
-            expect(collection.has(postId2)).toBe(true) // post2: still in (user2 active)
-            await history.check(collection)
-            expect(collection.get(postId2)?.title).toBe(`Updated Post 2`)
-            expect(collection.has(postId3)).toBe(false) // post3: moved out (user3 inactive)
-            await history.check(collection)
+              // Insert user with isActive = true
+              const userId = randomUUID()
+              await history.insertUser({
+                id: userId,
+                name: `Active User`,
+                email: `active@test.com`,
+                age: 25,
+                isActive: true,
+                createdAt: new Date(),
+                metadata: null,
+                deletedAt: null,
+              })
 
-            archiveCallbacks()
-          })
+              // Wait for user to be synced to Electric before inserting post
+              await waitForUsersSynced([userId])
+
+              // Insert post for this user
+              const postId = randomUUID()
+              await history.insertPost({
+                id: postId,
+                userId,
+                title: `To Be Deleted`,
+                content: `Content`,
+                viewCount: 0,
+                largeViewCount: BigInt(0),
+                publishedAt: null,
+                deletedAt: null,
+              })
+
+              await waitForItem(collection, postId)
+              expect(collection.has(postId)).toBe(true)
+              await history.check(collection)
+
+              // Delete post in Postgres
+              await dbClient.query(`DELETE FROM ${postsTable} WHERE id = $1`, [
+                postId,
+              ])
+              history.removePost(postId)
+
+              // Wait for post to be removed
+              await waitForItemRemoved(collection, postId)
+              expect(collection.has(postId)).toBe(false)
+              await history.check(collection)
+            },
+          },
+
+          {
+            name: `Snapshot after move-out should not re-include removed rows`,
+            commands: async (history) => {
+              if (!config.mutations) {
+                throw new Error(`Mutations not configured`)
+              }
+
+              // Create first collection
+              const collection1 = history.own(
+                createPostsByActiveUsersCollection(syncMode),
+              )
+              await history.ready(collection1, syncMode)
+
+              // Insert user with isActive = true
+              const userId = randomUUID()
+              await history.insertUser({
+                id: userId,
+                name: `Snapshot Test User`,
+                email: `snapshot@test.com`,
+                age: 25,
+                isActive: true,
+                createdAt: new Date(),
+                metadata: null,
+                deletedAt: null,
+              })
+
+              // Wait for user to be synced to Electric before inserting post
+              await waitForUsersSynced([userId])
+
+              // Insert post for this user
+              const postId = randomUUID()
+              await history.insertPost({
+                id: postId,
+                userId,
+                title: `Snapshot Test Post`,
+                content: `Content`,
+                viewCount: 0,
+                largeViewCount: BigInt(0),
+                publishedAt: null,
+                deletedAt: null,
+              })
+
+              await waitForItem(collection1, postId)
+              expect(collection1.has(postId)).toBe(true)
+              await history.check(collection1)
+
+              // Update user → post moves out
+              await config.mutations.updateUser(userId, { isActive: false })
+              history.setActive(userId, false)
+
+              await waitForItemRemoved(collection1, postId)
+              expect(collection1.has(postId)).toBe(false)
+              await history.check(collection1)
+
+              // Clean up first collection
+              await collection1.cleanup()
+
+              // Create fresh collection (new subscription)
+              const collection2 = history.own(
+                createPostsByActiveUsersCollection(syncMode),
+              )
+              await history.ready(collection2, syncMode)
+
+              // Wait a bit to ensure snapshot is complete
+              await new Promise((resolve) => setTimeout(resolve, 1000))
+
+              // Snapshot should NOT include the removed post (user is inactive)
+              expect(collection2.has(postId)).toBe(false)
+              await history.check(collection2)
+            },
+          },
+
+          {
+            name: `Multi-row transaction: some rows move in, some move out`,
+            commands: async (history) => {
+              const collection = history.own(
+                createPostsByActiveUsersCollection(syncMode),
+              )
+              await history.ready(collection, syncMode)
+              const archiveCallbacks = history.observe(collection)
+
+              if (!config.mutations) {
+                throw new Error(`Mutations not configured`)
+              }
+
+              // Insert 3 users all with isActive = true
+              const userId1 = randomUUID()
+              const userId2 = randomUUID()
+              const userId3 = randomUUID()
+
+              await history.insertUser({
+                id: userId1,
+                name: `User 1`,
+                email: `user1@test.com`,
+                age: 25,
+                isActive: false,
+                createdAt: new Date(),
+                metadata: null,
+                deletedAt: null,
+              })
+
+              await history.insertUser({
+                id: userId2,
+                name: `User 2`,
+                email: `user2@test.com`,
+                age: 30,
+                isActive: true,
+                createdAt: new Date(),
+                metadata: null,
+                deletedAt: null,
+              })
+
+              await history.insertUser({
+                id: userId3,
+                name: `User 3`,
+                email: `user3@test.com`,
+                age: 35,
+                isActive: true,
+                createdAt: new Date(),
+                metadata: null,
+                deletedAt: null,
+              })
+
+              // Wait for all 3 users to be synced to Electric before inserting posts
+              // This ensures the subquery in the WHERE clause can properly evaluate
+              await waitForUsersSynced([userId1, userId2, userId3])
+
+              // Insert posts for these users
+              const postId1 = randomUUID()
+              const postId2 = randomUUID()
+              const postId3 = randomUUID()
+
+              await history.insertPost({
+                id: postId1,
+                userId: userId1,
+                title: `Post 1`,
+                content: `Content 1`,
+                viewCount: 0,
+                largeViewCount: BigInt(0),
+                publishedAt: null,
+                deletedAt: null,
+              })
+
+              await history.insertPost({
+                id: postId2,
+                userId: userId2,
+                title: `Post 2`,
+                content: `Content 2`,
+                viewCount: 0,
+                largeViewCount: BigInt(0),
+                publishedAt: null,
+                deletedAt: null,
+              })
+
+              await history.insertPost({
+                id: postId3,
+                userId: userId3,
+                title: `Post 3`,
+                content: `Content 3`,
+                viewCount: 0,
+                largeViewCount: BigInt(0),
+                publishedAt: null,
+                deletedAt: null,
+              })
+
+              // Wait for posts 2 and 3 to appear
+              await waitForItem(collection, postId2)
+              await waitForItem(collection, postId3)
+
+              expect(collection.has(postId1)).toBe(false)
+              await history.check(collection)
+
+              // In one SQL transaction:
+              // user1: isActive → true (post1 moves in)
+              // post2: title change (stays in since user2 is still active)
+              // user3: isActive → false (post3 moves out)
+              await dbClient.query(`BEGIN`)
+              try {
+                await dbClient.query(
+                  `UPDATE ${usersTable} SET "isActive" = $1 WHERE id = $2`,
+                  [true, userId1],
+                )
+                await dbClient.query(
+                  `UPDATE ${postsTable} SET title = $1 WHERE id = $2`,
+                  [`Updated Post 2`, postId2],
+                )
+                await dbClient.query(
+                  `UPDATE ${usersTable} SET "isActive" = $1 WHERE id = $2`,
+                  [false, userId3],
+                )
+                await dbClient.query(`COMMIT`)
+              } catch (error) {
+                try {
+                  await dbClient.query(`ROLLBACK`)
+                } catch (rollbackError) {
+                  throw new AggregateError(
+                    [error, rollbackError],
+                    'SQL transaction and rollback failed',
+                  )
+                }
+                throw error
+              }
+              history.setActive(userId1, true)
+              history.setTitle(postId2, `Updated Post 2`)
+              history.setActive(userId3, false)
+
+              // Wait for changes to propagate
+              await waitForItemRemoved(collection, postId3)
+              await history.check(collection)
+              expect(collection.has(postId1)).toBe(true) // post1: moved in (user1 active)
+              await history.check(collection)
+              expect(collection.has(postId2)).toBe(true) // post2: still in (user2 active)
+              await history.check(collection)
+              expect(collection.get(postId2)?.title).toBe(`Updated Post 2`)
+              expect(collection.has(postId3)).toBe(false) // post3: moved out (user3 inactive)
+              await history.check(collection)
+
+              archiveCallbacks()
+            },
+          },
+        ]
+        // A history is the script's name, which is data; the plan resolves it
+        // to the script.
+        const commandsByName = new Map(
+          moveHistories.map(({ name, commands }) => [name, commands]),
+        )
+        oracleProperty({
+          id: movesPropertyIds[syncMode],
+          law: movesLaw,
+          histories: moveHistories.map(({ name }) => name),
+          label: (name) => name,
+          resolve: (name) => ({ commands: commandsByName.get(name)! }),
+          model: recordedAssertionJudgment,
+          driver: async (plan, observe) => {
+            await recordAssertionJudgment(
+              movesLaw.statement,
+              plan,
+              observe,
+              () => withMoveHistory(plan.commands),
+            )
+          },
+          check: forwardAssertionJudgment,
         })
       })
     }
@@ -1018,10 +1074,3 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
     runTestsForSyncMode('progressive')
   })
 }
-
-// Owns no production entry. The suite judges the collection adapter that its
-// consuming package runs it against (electric.e2e.test.ts), but that consumer
-// declares no `owns` either, so the gap report counts none of this suite's
-// kills. The coverage map records this as a follow-up under
-// "Shared e2e suites".
-declareOracle({ check: [assertOwnedPosts] })

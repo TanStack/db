@@ -1,0 +1,700 @@
+{
+  "preConversionHead": "8160dc1ee350020eb3eeb67a876505a2c2d151ee",
+  "reviewedHead": "8318e90be49507bd11faf68dc3fb01c05db4e60e",
+  "frameworkCommit": "e1fb5048c6d33e958643360d87e168c302e03bd1",
+  "package": "packages/preact-db",
+  "source": "src/useLiveQuery.ts",
+  "comparison": {
+    "baselineComparisonSha256": "c1566d422b435f675c17243ce5645ed10608e6b36333d6b1cbc708cd7f7427cd",
+    "afterReportSha256": "bdd74f035f196b3d8f7c8a9943384e7c1352f5bddb8511c2538b647b1275bf6b",
+    "seed": 2291,
+    "contexts": 1,
+    "beforeCounts": {
+      "killed": 18,
+      "survived": 12,
+      "crashed": 17,
+      "unreached": 1
+    },
+    "afterCounts": {
+      "crashed": 17,
+      "killed": 18,
+      "survived": 12,
+      "unreached": 1
+    },
+    "preservedPriorKills": 18,
+    "exactKeySet": true,
+    "allOutcomesUnchanged": true,
+    "results": [
+      {
+        "key": "src/useLiveQuery.ts#onWindowChange:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "ordered window rows"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "ordered window rows"
+        ],
+        "afterId": "useLiveQuery.ts:M22"
+      },
+      {
+        "key": "src/useLiveQuery.ts#rerender:arithmetic-swap:const rerender = ( ) => setRevision ( ( revision ) => revision + 1 )",
+        "before": "survived",
+        "after": "survived",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M41"
+      },
+      {
+        "key": "src/useLiveQuery.ts#rerender:value-undefined:const rerender = ( ) => setRevision ( ( revision ) => revision + 1 )",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "source update rows"
+        ],
+        "afterLaws": [
+          "source update rows"
+        ],
+        "afterId": "useLiveQuery.ts:M40"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "outer window retains Collection"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "outer window retains Collection"
+        ],
+        "afterId": "useLiveQuery.ts:M20"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M14"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }~2",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterId": "useLiveQuery.ts:M16"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M25"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }~2",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterId": "useLiveQuery.ts:M27"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( observer . getSnapshot ( ) !== snapshot ) rerender ( )",
+        "before": "survived",
+        "after": "survived",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M45"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:commitWindow ( )",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "ordered window rows"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "ordered window rows"
+        ],
+        "afterId": "useLiveQuery.ts:M36"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:observer . subscribe ( rerender )",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "source update rows"
+        ],
+        "afterLaws": [
+          "source update rows"
+        ],
+        "afterId": "useLiveQuery.ts:M42"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:rerender ( )",
+        "before": "unreached",
+        "after": "unreached",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M47"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:useLayoutEffect ( ( ) => { const rerender = ( ) => setRevision ( ( revision ) => revision + 1 ) observer . subscribe ( rerender ) if ( observer . getSnapshot ( ) !== snapshot ) rerender ( ) return ( ) => observer . dispose ( ) } , [ observer ] )",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "source update rows"
+        ],
+        "afterLaws": [
+          "source update rows"
+        ],
+        "afterId": "useLiveQuery.ts:M39"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:useLayoutEffect ( ( ) => { if ( commitWindow ) { binding . identity = identity commitWindow ( ) } } )",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "ordered window rows"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "ordered window rows"
+        ],
+        "afterId": "useLiveQuery.ts:M33"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:drop-not:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M15"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:drop-not:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M26"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterId": "useLiveQuery.ts:M28"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }~2",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterId": "useLiveQuery.ts:M29"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }~3",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M30"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }~4",
+        "before": "survived",
+        "after": "survived",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M32"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )",
+        "before": "survived",
+        "after": "survived",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M18"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )~2",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "outer window retains Collection"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "outer window retains Collection"
+        ],
+        "afterId": "useLiveQuery.ts:M19"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )~3",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "outer window retains Collection"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "outer window retains Collection"
+        ],
+        "afterId": "useLiveQuery.ts:M21"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M7"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~2",
+        "before": "survived",
+        "after": "survived",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M9"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~3",
+        "before": "survived",
+        "after": "survived",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M10"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:if-false:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M13"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:if-false:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M24"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:if-false:if ( commitWindow ) { binding . identity = identity commitWindow ( ) }",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "ordered window rows"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "ordered window rows"
+        ],
+        "afterId": "useLiveQuery.ts:M35"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:if-false:if ( observer . getSnapshot ( ) !== snapshot ) rerender ( )",
+        "before": "survived",
+        "after": "survived",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M44"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:if-true:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterId": "useLiveQuery.ts:M12"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:if-true:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }",
+        "before": "survived",
+        "after": "survived",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M23"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:if-true:if ( commitWindow ) { binding . identity = identity commitWindow ( ) }",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M34"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:if-true:if ( observer . getSnapshot ( ) !== snapshot ) rerender ( )",
+        "before": "survived",
+        "after": "survived",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M43"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M31"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const [ , setRevision ] = useState ( 0 )",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M38"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const bindingRef = useRef < LiveQueryBinding | null > ( null )",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M11"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const claimsRef = useRef < LiveQuerySourceIdClaims | null > ( null )",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M1"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M17"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )",
+        "before": "survived",
+        "after": "survived",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M4"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~2",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterId": "useLiveQuery.ts:M5"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~3",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterId": "useLiveQuery.ts:M6"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~4",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M8"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const preparedValue = prepareLiveQueryValue ( input , undefined )",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M2"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const queryKey = getLiveQueryKey ( input )",
+        "before": "killed",
+        "after": "killed",
+        "beforeLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterLaws": [
+          "(unnamed)",
+          "bound options"
+        ],
+        "afterId": "useLiveQuery.ts:M3"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const snapshot = observer . getSnapshot ( )",
+        "before": "crashed",
+        "after": "crashed",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M37"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:if ( observer . getSnapshot ( ) !== snapshot ) rerender ( )",
+        "before": "survived",
+        "after": "survived",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M46"
+      },
+      {
+        "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:return ( ) => observer . dispose ( )",
+        "before": "survived",
+        "after": "survived",
+        "beforeLaws": [],
+        "afterLaws": [],
+        "afterId": "useLiveQuery.ts:M48"
+      }
+    ]
+  },
+  "provenance": {
+    "baselineReviewedHead": "629c910565db30f89d9f17006c18f4eea80c36c7",
+    "preConversionHead": "8160dc1ee350020eb3eeb67a876505a2c2d151ee",
+    "trackedTreeEquality": true,
+    "trackedTreeSha256": "2571258cdeff8fef620023ecb44140a235a6ffee437b77a25b232395eaa09669",
+    "baselineComparisonPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/oracle-convert-frameworks/docs/contributing/oracle-reviews/2026-11-10-preact-bound-options-oracle-conversion.json",
+    "baselineComparisonSha256": "c1566d422b435f675c17243ce5645ed10608e6b36333d6b1cbc708cd7f7427cd",
+    "baselineSeed": 2291,
+    "baselineStableKeys": 48,
+    "baselineKills": 18,
+    "installed": {
+      "preact": {
+        "realPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/oracle-convert-frameworks/node_modules/.pnpm/preact@11.2.0/node_modules/preact",
+        "version": "11.2.0",
+        "packageJsonSha256": "5b3f459ed59d374733fc2ca1b3036c91d2b5c0cb5fbc9505221929e746c1ab03"
+      },
+      "oracles": {
+        "realPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/oracle-convert-frameworks/node_modules/.pnpm/@tanstack+oracles@https+++pkg.pr.new+TanStack+oracles+@tanstack+oracles@e1fb504_fast-ch_339bc51621ec5fc7d94a6c5beca357fd/node_modules/@tanstack/oracles",
+        "version": "0.0.0",
+        "packageJsonSha256": "20b03b5e1c3ebd7c2296499990f713978de6eec28691e75f96ea2e8bacf477e3"
+      },
+      "vitest": {
+        "realPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/oracle-convert-frameworks/node_modules/.pnpm/vitest@5.1.0_@types+node@25.2.2_@vitest+coverage-istanbul@5.1.0_@vitest+ui@5.1.0_jsdom@_681eb78251539224b85f714f069f564c/node_modules/vitest",
+        "version": "5.1.0",
+        "packageJsonSha256": "cc2979885d9d149c8456128e7ae48038d815352cf1e6d1932eb631057a99f973"
+      },
+      "fast-check": {
+        "realPath": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/oracle-convert-frameworks/node_modules/.pnpm/fast-check@4.10.2/node_modules/fast-check",
+        "version": "4.10.2",
+        "packageJsonSha256": "3df7a54da656099e4f63c1577fc10aac90cb0078212067c856fa99970dcccdbb"
+      }
+    },
+    "localWorkspaceSha256": "318ae6063eebea2d04a90bd5385fc18f4e82c08f72f18ade9a35a2b4b3819d04",
+    "localLockfileSha256": "b6f0cb62284b844f8dc7bb7790149a62822a6a607b88ea75d1e4837a9a7ec009",
+    "legacyDriverPrefixUnchanged": true,
+    "limits": [
+      "Raw BEFORE/AFTER reports were lost during host restart. The committed complete 48-key comparison and its report hashes survive.",
+      "Tracked source/receiving-driver/owner-layout snapshots and pins match the recorded compatible baseline. Current dependency package metadata is preserved; the original environment was not byte-hashed, so whole-environment byte equality is not claimed."
+    ]
+  },
+  "finalSourceSha256": {
+    "packages/db/tests/bound-schema-receiver-oracle.ts": "5f4f916b04c9070f35e13d8369eaa661d7ee801700af9d21f24172d07e3c7fe6",
+    "packages/db/tests/live-query-bound-options-support.ts": "e5cbdacfd018c9134bc47095f2cf574227102845beb3030a64678d90f16b8ccf",
+    "packages/db/tests/oracle-config.ts": "ad2d20b38164dc3b2acc9f0372b31e46450d2af6448932257fd3d4474d9f0376",
+    "packages/db/tests/oracle-replay-manifest.ts": "b5328615f157597b79697fd4e4d1522ea32ba935fc4ed719fff1856b4726b643",
+    "packages/preact-db/tests/bound-schema-options-oracle.test.ts": "aa87b3344af7334270952ea89fd4e5aabf1930056eebca0617b4b229794f952b",
+    "packages/preact-db/tests/bound-options-oracle.test.ts": "7dcd77a3bebaf22f560b602e12297978e98942ae008c319ecc164439adbe215b",
+    "scripts/oracle-lint-settings.mjs": "435312cb693f174ce112c5458cd621bf47ab0c696b7dc642a28ee402435f134e"
+  },
+  "afterRun": {
+    "id": "928b30db4318",
+    "inputs": "1 source files, 3 oracle files, 3 ordinary test files, 0 authored mutants, seed 2291, pool threads"
+  },
+  "afterOptions": {
+    "pkg": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/oracle-convert-frameworks/packages/preact-db",
+    "envPrefix": "TANSTACK_DB_ORACLE",
+    "daemon": false,
+    "ordinary": false,
+    "contexts": 1,
+    "sources": [
+      "src/useLiveQuery.ts"
+    ],
+    "seed": "2291",
+    "out": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/oracle-convert-frameworks/.oracle-gaps-recovery/preact-schema-final-after",
+    "testTimeout": 15000,
+    "hangLimit": 10000,
+    "firstLimit": 2000,
+    "pool": "threads"
+  },
+  "afterEvidence": {
+    "reused": 0,
+    "computed": 123,
+    "cut": 0,
+    "idle": 0,
+    "spin": 0,
+    "rerun": 0,
+    "unchanged": 1
+  },
+  "nondeterministic": [],
+  "finiteCoverage": {
+    "histories": 72,
+    "cutsPerHistory": 12,
+    "checkedReachCells": 864,
+    "generatedRunBudgetBefore": null,
+    "generatedRunBudgetAfter": null
+  },
+  "validation": {
+    "preactTests": 148,
+    "unchangedReactSchemaTests": 216,
+    "manifestTests": 70,
+    "directFiniteTests": 79,
+    "independentPrefixCalibrations": 3,
+    "fullProjectTsc": 0,
+    "eslint": 0,
+    "lintChanged": {
+      "status": 1,
+      "newOracleViolations": 0,
+      "warning": "Earlier window conversion replaces generic preact.window-render budget 6 with 12 concrete property IDs, each 6; already explained in committed window conversion evidence."
+    },
+    "logs": {
+      "preact-schema-final-suite.log": {
+        "sha256": "57e0bb58ec03ffeca22b6f5425964ab86db8f5fd4c3b84455bfabeefe7400b30"
+      },
+      "react-schema-suite.log": {
+        "sha256": "67fe7197f75675634f3fc921a7b256dd09bac342fdad26ab8f9fb83a4e047fc1"
+      },
+      "schema-manifest-final.log": {
+        "sha256": "b68b515bcb0f7e46824f56cedaf82683987983cc7705741c0d5ba5990b73b9f0"
+      },
+      "preact-schema-full-typecheck.log": {
+        "sha256": "1da8d42142fdae4260c923457c670f8ca16dea4c7630f10c82fbd7ad4f1e4af8"
+      },
+      "preact-schema-full-typecheck-green.log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "schema-final-eslint.log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "schema-final-lint-changed.log": {
+        "sha256": "3ea2381affb962ab2a3b5be570383134001ac73fefe837287aa9023cf67d2949"
+      },
+      "schema-direct-campaign.log": {
+        "sha256": "5147d4715e1dd5b37c6d694b26c0600fe576e6ab453f4fdcb8d3ad1e29dd0697"
+      },
+      "schema-seeded-wrapper-rejection.log": {
+        "sha256": "9141fd1ad3f12ee11f20b2e9003ce6c6b6a135b8ff6f7977c30bd89536d9db71"
+      }
+    }
+  },
+  "replayValidation": {
+    "wrapper": [
+      "node",
+      "--import",
+      "tsx",
+      "packages/db/tests/oracle-replay.ts"
+    ],
+    "wrapperStatus": 1,
+    "wrapperEnumeratedGuidance": true,
+    "direct": [
+      "pnpm",
+      "exec",
+      "vitest",
+      "run",
+      "--maxWorkers=2",
+      "--coverage.enabled=false",
+      "-t",
+      "preact\\.bound-schema-options > ",
+      "tests/bound-schema-options-oracle.test.ts"
+    ],
+    "directStatus": 0,
+    "callerHadSeedPathProperty": true,
+    "directClearedSeedPathProperty": true
+  },
+  "independentReview": {
+    "finding": "S1",
+    "disposition": "fixed-now",
+    "initialCheckerSha256": "eef617a36e08caabe804704a29cbd7e08adb8d99fe5c0a016968e49c3beaf014",
+    "repairedCheckerSha256": "5f4f916b04c9070f35e13d8369eaa661d7ee801700af9d21f24172d07e3c7fe6",
+    "red": {
+      "status": 1,
+      "selectedCalibrations": 1,
+      "log": "\n RUN  v5.1.0 /Users/kyle.mathews/programs/tanstack-db/.worktrees/oracle-convert-frameworks\n\n \u276f packages/preact-db/.cache/schema-fidelity/probe.test.ts (3 tests | 1 failed | 2 skipped) 85ms\n   \u276f preact.bound-schema-options (3)\n     \u00d7 calibration: recorded binding violation before later driver error 83ms\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  packages/preact-db/.cache/schema-fidelity/probe.test.ts > preact.bound-schema-options > calibration: recorded binding violation before later driver error\nError: later retained update failure\n \u276f packages/preact-db/.cache/schema-fidelity/probe.test.ts:52:15\n     50|       if (checkpoint === 'retained binding') {\n     51|         observe(checkpoint, { ...(value as object), collection: false \u2026\n     52|         throw new Error('later retained update failure')\n       |               ^\n     53|       }\n     54|       observe(checkpoint, value)\n \u276f packages/db/tests/live-query-bound-options-support.ts:422:5\n \u276f withOracleCleanup packages/db/tests/utils.ts:34:5\n \u276f recordBoundSchemaHistory packages/db/tests/live-query-bound-options-support.ts:363:3\n \u276f recordGuarded node_modules/.pnpm/@tanstack+oracles@https+++pkg.pr.new+TanStack+oracles+@tanstack+oracles@e1fb504_fast-ch_339bc51621ec5fc7d94a6c5beca357fd/node_modules/@tanstack/oracles/src/oracle-property.ts:1308:5\n \u276f runOne node_modules/.pnpm/@tanstack+oracles@https+++pkg.pr.new+TanStack+oracles+@tanstack+oracles@e1fb504_fast-ch_339bc51621ec5fc7d94a6c5beca357fd/node_modules/@tanstack/oracles/src/oracle-property.ts:1214:55\n \u276f Object.run node_modules/.pnpm/@tanstack+oracles@https+++pkg.pr.new+TanStack+oracles+@tanstack+oracles@e1fb504_fast-ch_339bc51621ec5fc7d94a6c5beca357fd/node_modules/@tanstack/oracles/src/oracle-property.ts:1497:17\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  1 failed | 2 skipped (3)\n   Start at  11:50:52\n   Duration  3.59s (transform 56%, environment 33%, import 8%, tests 3%)\n\n"
+    },
+    "green": {
+      "status": 0,
+      "selectedCalibrations": 3,
+      "log": "\n RUN  v5.1.0 /Users/kyle.mathews/programs/tanstack-db/.worktrees/oracle-convert-frameworks\n\n\n Test Files  1 passed (1)\n      Tests  3 passed | 2 skipped (5)\n   Start at  11:53:06\n   Duration  3.08s (environment 52%, transform 33%, import 10%, tests 5%)\n\n"
+    },
+    "reproductionFiles": {
+      "packages/preact-db/.cache/schema-fidelity/config.mjs": "import { defineConfig } from 'vitest/config'\nimport { fileURLToPath } from 'node:url'\nconst root = fileURLToPath(new URL('../../../../', import.meta.url))\nexport default defineConfig({\n  root,\n  resolve: { alias: {\n    '@tanstack/db': `${root}packages/db/src/index.ts`,\n    '@tanstack/db-ivm': `${root}packages/db-ivm/src/index.ts`,\n  } },\n  test: {\n    include: ['packages/preact-db/.cache/schema-fidelity/probe.test.ts'],\n    environment: 'jsdom',\n    coverage: { enabled: false },\n    typecheck: { enabled: false },\n    maxWorkers: 1,\n  },\n})\n",
+      "packages/preact-db/.cache/schema-fidelity/probe.test.ts": "import { act } from 'preact/test-utils'\nimport { useLiveQuery } from '../../src/useLiveQuery'\nimport { oracleProperty } from '../../../db/tests/oracle-config'\nimport { boundSchemaHistories } from '../../../db/tests/live-query-bound-options-oracle'\nimport { modelBoundSchemaReceiver, checkBoundSchemaReceiver } from '../../../db/tests/bound-schema-receiver-oracle'\nimport { recordBoundSchemaHistory } from '../../../db/tests/live-query-bound-options-support'\nimport { renderHook, settle } from '../../tests/render-probe'\nimport type { BoundSchemaNativeHost } from '../../../db/tests/live-query-bound-options-support'\n\nconst history = {\n  ...boundSchemaHistories.find((h) => h.changeKey)!,\n  sourceRows: [\n    { id: 'one', label: '  source alpha  ', rank: 1 },\n    { id: 'peer', label: '  source beta  ', rank: 2 },\n  ],\n  retainedSourceLabel: '  later source retained  ',\n  reboundSourceLabel: '  later source rebound  ',\n}\nconst host: BoundSchemaNativeHost = {\n  mount: (input) => {\n    const mounted = renderHook(\n      (props: { revision: number; proposed: boolean }) => useLiveQuery(input(props)),\n      { initialProps: { revision: 0, proposed: false } },\n    )\n    return {\n      current: () => mounted.result.current,\n      rerender: mounted.rerender,\n      flush: async (action) => { act(() => { action?.() }); await settle() },\n      unmount: mounted.unmount,\n    }\n  },\n}\noracleProperty({\n  id: 'preact.bound-schema-options',\n  law: {\n    statement: 'Recorded schema binding violations outrank later driver errors.',\n    authority: 'ORC-010 and existing shared schema receiving contract.',\n    limits: 'One native history and a driver fault after a recorded binding mismatch.',\n    owner: 'packages/db/tests/live-query-bound-options-oracle.ts',\n  },\n  histories: [history],\n  label: () => 'recorded-binding-then-driver-error',\n  model: modelBoundSchemaReceiver,\n  check: checkBoundSchemaReceiver,\n  driver: (h, observe) => recordBoundSchemaHistory(h, host, observe),\n  calibrations: [{\n    name: 'recorded binding violation before later driver error',\n    law: 'bound schema binding',\n    driver: (h, observe) => recordBoundSchemaHistory(h, host, (checkpoint, value) => {\n      if (checkpoint === 'retained binding') {\n        observe(checkpoint, { ...(value as object), collection: false })\n        throw new Error('later retained update failure')\n      }\n      observe(checkpoint, value)\n    }),\n  }, {\n    name: 'recorded raw rows violation before later driver error',\n    law: 'bound schema rows',\n    driver: (h, observe) => recordBoundSchemaHistory(h, host, (checkpoint, value) => {\n      if (checkpoint === 'initial-source-raw') {\n        observe(checkpoint, { ...(value as object), collection: [] })\n        throw new Error('later raw-source failure')\n      }\n      observe(checkpoint, value)\n    }),\n  }, {\n    name: 'recorded held mutation violation before later driver error',\n    law: 'bound schema mutation',\n    driver: (h, observe) => recordBoundSchemaHistory(h, host, (checkpoint, value) => {\n      if (checkpoint === 'initial-held') {\n        observe(checkpoint, { ...(value as object), immediate: [] })\n        throw new Error('later held mutation failure')\n      }\n      observe(checkpoint, value)\n    }),\n  }],\n})\n"
+    }
+  },
+  "typeOnlyRepair": {
+    "file": "packages/preact-db/tests/bound-options-oracle.test.ts",
+    "change": "Annotate corrupt callback history as History; TypeScript contextual inference inside map otherwise inferred never.",
+    "runtimeChange": false
+  },
+  "localInstallationWorkaround": {
+    "package": "fake-indexeddb",
+    "blocked": "6.2.8",
+    "local": "6.2.7",
+    "committed": false
+  }
+}

@@ -3,16 +3,9 @@ import fc from 'fast-check'
 import { vi } from 'vitest'
 import { KeyScheduler } from '../src/executor/KeyScheduler'
 import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { BASE_TIME, createTransaction } from './key-scheduler-support'
 import type { Observation } from '../../db/tests/oracle-property'
 import type { OfflineTransaction } from '../src/types'
-
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
-  owns: [`src/executor/KeyScheduler.ts`],
-})
 
 type Command =
   | {
@@ -944,8 +937,10 @@ oracleProperty({
     statement: `KeyScheduler is one globally serial FIFO queue: equal creation times keep scheduling order, a delayed head blocks younger work, a failure updates retry data before releasing the active transaction without moving it, replay reconciliation retires only unissued IDs, clear retires all work and leaves the scheduler reusable, a removal returns the requested IDs other than the active one, which TransactionExecutor rejects, and a duplicate schedule of a pending ID returns false.`,
     authority: `the established KeyScheduler FIFO tests and TransactionExecutor's calling order (packages/offline-transactions/src/executor); for duplicate schedules, TransactionExecutor's outbox replay, which uses schedule's result to find newly loaded transactions`,
     limits: `Persistence, caller promise settlement, leadership, and real timers have separate owners; no fairness beyond FIFO order; at most seven pending IDs, a grammar bound (production has none); creation times never change after scheduling (maintainer decision, 2026-11-04), so no update changes one; the executor's promise that reloaded work can run at once belongs to the outbox replay owner; keeping the first record on a duplicate schedule awaits a maintainer decision.`,
-    owner: `Offline execution`,
   },
+  // What this oracle owns: the gap report judges these entries, and their
+  // reference trees within the package, by this file's tests.
+  owns: [`src/executor/KeyScheduler.ts`],
   histories: {
     arbitrary: legalHistory,
     states: [

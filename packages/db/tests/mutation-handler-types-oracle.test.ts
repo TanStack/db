@@ -539,7 +539,6 @@ oracleProperty({
     statement: `Query and Electric handlers admit exactly the results that Promise<void> accepts: a handler that returns a value, or a synchronous handler that returns, is rejected at its CRUD property with a Promise<void> diagnostic, and no other diagnostic appears.`,
     authority: `the approved RC handler migration and the public QueryCollectionConfig and ElectricCollectionConfig types`,
     limits: `Source entries only; built declarations, npm resolution, and application migrations are separate receivers.`,
-    owner: `RC public mutation-handler type admission`,
   },
   histories: typeShapes,
   label: ({ adapter, key, scalar, schema, data }) =>

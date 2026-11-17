@@ -35,11 +35,15 @@ import {
   useState,
 } from 'react'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import { createCollection, debounceStrategy } from '@tanstack/db'
 import { usePacedMutations } from '../src/usePacedMutations'
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import {
   mockSyncCollectionOptions,
   resetCleanupQueue,
@@ -105,23 +109,27 @@ const histories: ReadonlyArray<History> = [
 const collections: Array<{ cleanup: () => Promise<void> }> = []
 let collectionSequence = 0
 
-beforeEach(() => {
+// The per-history setup and teardown, formerly beforeEach and afterEach. A
+// history owns them, so a property test that runs several histories in turn,
+// such as the determinism test, starts each one from the same state.
+async function runPacedHistory(history: History, strictMode: boolean) {
   resetCleanupQueue()
   vi.useFakeTimers({ toFake: [`setTimeout`, `clearTimeout`] })
-})
-
-afterEach(async () => {
   try {
-    cleanup()
-    await vi.advanceTimersByTimeAsync(100)
-    await Promise.all(
-      collections.splice(0).map((collection) => collection.cleanup()),
-    )
+    await driveHistory(history, strictMode)
   } finally {
-    resetCleanupQueue()
-    vi.useRealTimers()
+    try {
+      cleanup()
+      await vi.advanceTimersByTimeAsync(100)
+      await Promise.all(
+        collections.splice(0).map((collection) => collection.cleanup()),
+      )
+    } finally {
+      resetCleanupQueue()
+      vi.useRealTimers()
+    }
   }
-})
+}
 
 // Rendering B does not change the committed callback owner. Committing B does.
 function expectedOutcome(history: History): ExpectedOutcome {
@@ -295,18 +303,26 @@ async function driveHistory(history: History, strictMode: boolean) {
   expect(trace, `callback trace after persistence`).toEqual(expected.trace)
 }
 
-describe.each([false, true])(
-  `paced callback ownership with StrictMode=%s`,
-  (strictMode) => {
-    it.each(histories)(`models $name`, async (history) => {
-      oracleRoute(`case`)
-      await driveHistory(history, strictMode)
-    })
-  },
-)
+const PACED_LAW = `paced callback ownership`
 
-declareOracle({
+oracleProperty({
+  id: `react.paced-mutations-render-cuts`,
+  law: {
+    statement: `usePacedMutations exposes callbacks from the latest committed render: a suspended render cannot replace them, a later commit makes its callbacks available before descendant layout effects, and mutate keeps its identity.`,
+    authority: `The paced callback ownership contract and expectedOutcome documented above.`,
+    limits: `The five bounded histories under ordinary and StrictMode schedules; no server delivery, transaction-admission affinity, or other frameworks.`,
+  },
   owns: [`src/usePacedMutations.ts#usePacedMutations`],
-  check: [driveHistory],
-  model: [expectedOutcome],
+  histories: [false, true].flatMap((strictMode) =>
+    histories.map((history) => ({ strictMode, history })),
+  ),
+  label: ({ strictMode, history }) =>
+    `paced callback ownership with StrictMode=${strictMode}: models ${history.name}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(PACED_LAW, plan, observe, () =>
+      runPacedHistory(plan.history.history, plan.history.strictMode),
+    ),
+  check: forwardAssertionJudgment,
 })

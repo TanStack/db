@@ -35,7 +35,6 @@ import {
   sortedRows,
 } from './local-storage-fixtures'
 import { withHistoryCleanup } from './optimistic-history-oracle'
-import { declareOracle } from './oracle-declaration'
 import { oracleProperty, pass, violation } from './oracle-property'
 import type { Row } from './local-storage-fixtures'
 
@@ -339,18 +338,14 @@ function checkHistory(
 // What this oracle owns: the gap report judges every function in
 // src/local-storage.ts by this file's generated automatic-write histories.
 
-declareOracle({
-  owns: [`src/local-storage.ts`],
-})
-
 oracleProperty({
   id: `local-storage.write-order`,
   law: {
     statement: `Automatic LocalStorage writes persist in author order: no accepted write settles or reaches storage ahead of an undecided predecessor, and settled storage, public rows, and a fresh restore equal the author-order fold of the accepted writes.`,
     authority: `LocalStorage guide (direct, persisted mutations); Collection settlement (when('settled')); order law and prompt-failure rule in local-storage-order-oracle.test.ts`,
     limits: `Up to three updates and deletes of two stored rows in one Collection; no inserts, manual acceptance, peers, or storage faults.`,
-    owner: `LocalStorage Collection`,
   },
+  owns: [`src/local-storage.ts`],
   histories,
   label: ({ writes, release, accepted }) =>
     `${writes.map((write) => `${write.kind[0]}${write.id}`).join(` `)} | release ${release.join(``)} | decisions ${accepted.map((value) => (value ? `Y` : `N`)).join(``)}`,

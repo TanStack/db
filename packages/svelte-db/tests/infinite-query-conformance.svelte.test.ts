@@ -17,7 +17,7 @@ import {
 import { flushSync, untrack } from 'svelte'
 import { describe, expect, it } from 'vitest'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
-import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite-oracle'
+import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite'
 import { registerInfiniteQueryUnitScenarios } from '../../db/tests/conformance/infinite-suite-cases'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'

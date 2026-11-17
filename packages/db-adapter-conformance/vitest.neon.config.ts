@@ -22,6 +22,7 @@ const config = defineConfig({
     },
   },
   test: {
+    server: { deps: { inline: [`@tanstack/oracles`] } },
     name: `@tanstack/db-adapter-conformance (neon)`,
     include: [`tests/neon-realtime-oracle.property.test.ts`],
     environment: `node`,

@@ -1,9 +1,33 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { DbClient, collectionOptions } from '../src'
-import { oracleRoute } from './oracle-config'
-import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty } from './oracle-config'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
+import {
+  adapterAction,
+  cases,
+  hydrationRows,
+  initialRows,
+  referenceRows,
+  target,
+} from './db-client-hydration-authority-model-oracle.js'
 import type { Collection, SyncConfig } from '../src'
 import type { ChangeMessage } from '../src/types'
+import type {
+  AdapterAction,
+  AdapterDecision,
+  HistoryAction,
+  HydrationOrder,
+  HydrationStage,
+  Metadata,
+  ObservedRow,
+  Row,
+  RowUpdateMode,
+  SeedRow,
+} from './db-client-hydration-authority-model-oracle.js'
 
 /**
  * # Can a hydration seed supersede applied adapter work?
@@ -77,187 +101,13 @@ import type { ChangeMessage } from '../src/types'
  * state-retention oracle and focused DbClient tests own queued transactions and
  * cancellation. This test does not establish provider transport order or a
  * later authoritative hydration epoch.
+ *
+ * The reference fold `referenceRows`, its seeds and adapter actions, and the
+ * bounded `cases` grammar are in db-client-hydration-authority-model-oracle.ts,
+ * which the ordinary reference tests also import.
  */
 
-type Row = { id: string; name: string; seeded?: string }
-type Metadata = { source: string }
-type RowUpdateMode = `partial` | `full`
-type SeedRow = { value: Row; metadata?: Metadata }
 type SyncActions = Parameters<SyncConfig<Row, string>[`sync`]>[0]
-type HydrationOrder = `before` | `after` | `both`
-type HydrationStage = `before` | `after`
-
-/** Each adapter decision names its operation and whether it names metadata. */
-const adapterDecisions = {
-  insert: { op: `insert`, metadata: false },
-  'insert+metadata': { op: `insert`, metadata: true },
-  update: { op: `update`, metadata: false },
-  'update+metadata': { op: `update`, metadata: true },
-  metadata: { op: `metadata`, metadata: true },
-  delete: { op: `delete`, metadata: false },
-  truncate: { op: `truncate`, metadata: false },
-} as const
-type AdapterDecision = keyof typeof adapterDecisions
-type AdapterAction =
-  | { kind: `adapter`; op: `insert` | `update`; row: Row; metadata?: Metadata }
-  | { kind: `adapter`; op: `metadata`; metadata: Metadata }
-  | { kind: `adapter`; op: `delete` }
-  | { kind: `adapter`; op: `truncate` }
-type HistoryAction =
-  { kind: `hydrate`; rows: ReadonlyArray<SeedRow> } | AdapterAction
-
-const target = `1`
-const peer = `2`
-const newKey = `3`
-
-/**
- * `initialData` is the first seed. It carries no metadata, and the target's
- * `seeded` field is one that no adapter write names.
- */
-const initialRows: ReadonlyArray<SeedRow> = [
-  { value: { id: peer, name: `initial-peer` } },
-  { value: { id: target, name: `initial-target`, seeded: `initial` } },
-]
-
-/**
- * The early chunk carries `seeded`, a field no adapter write names. The late
- * chunk omits it, so a merge of the late chunk over the early one is visible.
- */
-function hydrationRows(stage: HydrationStage): Array<SeedRow> {
-  const seeded: { seeded?: string } =
-    stage === `before` ? { seeded: stage } : {}
-  return [
-    { id: target, name: `${stage}-target` },
-    { id: peer, name: `${stage}-peer` },
-    { id: newKey, name: `${stage}-new` },
-  ].map((value) => ({
-    value: { ...value, ...seeded },
-    metadata: { source: `${stage}-hydration` },
-  }))
-}
-
-function adapterAction(decision: AdapterDecision): AdapterAction {
-  const { op, metadata } = adapterDecisions[decision]
-  if (op === `delete` || op === `truncate`) return { kind: `adapter`, op }
-  if (op === `metadata`)
-    return { kind: `adapter`, op, metadata: { source: `adapter-metadata` } }
-  return {
-    kind: `adapter`,
-    op,
-    row: { id: target, name: `adapter-${op}` },
-    ...(metadata ? { metadata: { source: `adapter-${op}` } } : {}),
-  }
-}
-
-type ObservedRow = { id: string; row: Row; metadata: Metadata | undefined }
-type Slot = {
-  row: Row | undefined
-  rowWritten: boolean
-  metadata: Metadata | undefined
-  metadataWritten: boolean
-}
-
-const sameRow = (left: Row, right: Row): boolean =>
-  left.id === right.id &&
-  left.name === right.name &&
-  left.seeded === right.seeded
-
-/**
- * Forward fold, key by key. A source write sets the written flag of each object
- * it touches. An insert names the row and its metadata: over a row that only a
- * seed supplied it replaces both, and an insert without metadata clears the
- * metadata. Over a row the source wrote, an equal insert keeps metadata unless
- * it names some. An update merges over the current row under `partial` mode,
- * and fixes metadata only when it names it. A metadata write fixes metadata
- * alone. A delete fixes both objects as absent. A truncate fixes every key,
- * including keys that a later seed names. A seed fills each object whose flag
- * is clear, so a later seed replaces an earlier seed's object whole.
- */
-function referenceRows(
-  initial: ReadonlyArray<SeedRow>,
-  history: ReadonlyArray<HistoryAction>,
-  rowUpdateMode: RowUpdateMode,
-): Array<ObservedRow> {
-  const slots = new Map<string, Slot>()
-  let truncated = false
-  const slotOf = (key: string): Slot => {
-    let slot = slots.get(key)
-    if (!slot) {
-      slot = {
-        row: undefined,
-        rowWritten: truncated,
-        metadata: undefined,
-        metadataWritten: truncated,
-      }
-      slots.set(key, slot)
-    }
-    return slot
-  }
-  const fixMetadata = (slot: Slot, metadata: Metadata | undefined): void => {
-    slot.metadata = metadata
-    slot.metadataWritten = true
-  }
-  const clear = (slot: Slot): void => {
-    slot.row = undefined
-    slot.rowWritten = true
-    fixMetadata(slot, undefined)
-  }
-  const insertRow = (slot: Slot, row: Row, metadata?: Metadata): void => {
-    if (slot.rowWritten && slot.row !== undefined) {
-      if (!sameRow(slot.row, row))
-        throw new Error(`insert over a source-written row must re-insert it`)
-      if (metadata !== undefined) fixMetadata(slot, metadata)
-      return
-    }
-    slot.row = row
-    slot.rowWritten = true
-    fixMetadata(slot, metadata)
-  }
-  const seed = (rows: ReadonlyArray<SeedRow>): void => {
-    for (const { value, metadata } of rows) {
-      const slot = slotOf(value.id)
-      if (!slot.rowWritten) slot.row = value
-      if (!slot.metadataWritten) slot.metadata = metadata
-    }
-  }
-  const write = (action: AdapterAction): void => {
-    if (action.op === `truncate`) {
-      truncated = true
-      for (const slot of slots.values()) clear(slot)
-      return
-    }
-    if (action.op === `delete`) {
-      clear(slotOf(target))
-      return
-    }
-    if (action.op === `metadata`) {
-      fixMetadata(slotOf(target), action.metadata)
-      return
-    }
-    const slot = slotOf(action.row.id)
-    if (action.op === `insert`) {
-      insertRow(slot, action.row, action.metadata)
-      return
-    }
-    slot.row =
-      rowUpdateMode === `partial` ? { ...slot.row, ...action.row } : action.row
-    slot.rowWritten = true
-    if (action.metadata !== undefined) fixMetadata(slot, action.metadata)
-  }
-
-  seed(initial)
-  for (const action of history) {
-    if (action.kind === `hydrate`) seed(action.rows)
-    else write(action)
-  }
-  return [...slots]
-    .flatMap(([id, slot]) =>
-      slot.row === undefined
-        ? []
-        : [{ id, row: slot.row, metadata: slot.metadata }],
-    )
-    .sort((left, right) => left.id.localeCompare(right.id))
-}
 
 /** Row data fields only; collection virtual props such as `$hasPendingWrites` are not data. */
 function rowData(row: Row): Row {
@@ -430,326 +280,72 @@ async function runHistory(
     })
 }
 
-// What this oracle owns: the gap report judges DbClient.collection and
-// DbClient.applyCollectionChunk by this file's hydration histories.
-declareOracle({
-  owns: [
-    `src/client.ts#DbClient.collection`,
-    `src/client.ts#DbClient.applyCollectionChunk`,
-  ],
-  check: [runHistory],
-  model: [referenceRows],
-})
+// Both seeds carry the same row fields, so the row check cannot tell a whole
+// replacement from a merge; only the metadata distinguishes them.
+function runAbsentLatestSeedMetadataHistory(): Promise<void> {
+  const row = { id: target, name: `seed`, seeded: `initial` }
+  return runHistory([], `both`, `partial`, (stage) =>
+    stage === `before`
+      ? [{ value: row, metadata: { source: `early-seed` } }]
+      : [{ value: row }],
+  )
+}
 
 describe(`DbClient hydration authority oracle`, () => {
-  type Case = {
-    decisions: ReadonlyArray<AdapterDecision>
-    label: string
-    order: HydrationOrder
-    rowUpdateMode: RowUpdateMode
-  }
-  const orders: ReadonlyArray<HydrationOrder> = [`before`, `after`, `both`]
-  const singles: ReadonlyArray<AdapterDecision> = [
-    `insert`,
-    `insert+metadata`,
-    `update`,
-    `update+metadata`,
-    `metadata`,
-    `delete`,
-    `truncate`,
-  ]
-  // A row an update brings back after a delete keeps the metadata the delete
-  // cleared: neither write leaves the metadata for a later seed.
-  const pairs = [
-    `delete,insert`,
-    `delete,insert+metadata`,
-    `delete,update`,
-    `delete,update+metadata`,
-    `insert,delete`,
-    `truncate,insert`,
-    `truncate,insert+metadata`,
-  ]
-  const cases: Array<Case> = ([`full`, `partial`] as const).flatMap(
-    (rowUpdateMode) => [
-      ...singles.flatMap((decision) =>
-        orders.map((order) => ({
-          decisions: [decision],
-          label: decision,
-          order,
-          rowUpdateMode,
-        })),
-      ),
-      ...pairs.map((label) => ({
-        decisions: label.split(`,`) as Array<AdapterDecision>,
-        label,
-        order: `after` as const,
-        rowUpdateMode,
-      })),
-    ],
-  )
-
-  // Seeds for the metadata law. Seed A carries `seeded` and metadata; seed B
-  // carries neither `seeded` nor metadata unless a test says otherwise.
-  const seedA: SeedRow = {
-    value: { id: target, name: `seed-a`, seeded: `x` },
-    metadata: { source: `seed-a` },
-  }
-  const seedB: SeedRow = {
-    value: { id: target, name: `seed-b` },
-    metadata: { source: `seed-b` },
-  }
-  const targetOf = (
-    rows: ReadonlyArray<ObservedRow>,
-  ): ObservedRow | undefined => rows.find((entry) => entry.id === target)
-  const hydrate = (rows: ReadonlyArray<SeedRow>) => ({
-    kind: `hydrate` as const,
-    rows,
-  })
-
-  it(`reaches applied delete and truncate with late hydration`, () => {
-    oracleRoute(`case`)
-    expect(cases).toContainEqual({
-      decisions: [`delete`],
-      label: `delete`,
-      order: `after`,
-      rowUpdateMode: `partial`,
-    })
-    expect(cases).toContainEqual({
-      decisions: [`truncate`],
-      label: `truncate`,
-      order: `after`,
-      rowUpdateMode: `partial`,
-    })
-    expect(
-      referenceRows(
-        initialRows,
-        [adapterAction(`delete`), hydrate(hydrationRows(`after`))],
-        `partial`,
-      ),
-    ).toEqual([
-      {
-        id: peer,
-        row: { id: peer, name: `after-peer` },
-        metadata: { source: `after-hydration` },
-      },
-      {
-        id: newKey,
-        row: { id: newKey, name: `after-new` },
-        metadata: { source: `after-hydration` },
-      },
-    ])
-  })
-
-  it(`reference folds the D5 rules over fixed histories`, () => {
-    oracleRoute(`case`)
-    const before = hydrate(hydrationRows(`before`))
-    const after = hydrate(hydrationRows(`after`))
-
-    // An insert replaces the seed's row and clears its metadata.
-    expect(
-      targetOf(
-        referenceRows(
-          initialRows,
-          [before, adapterAction(`insert`)],
-          `partial`,
-        ),
-      ),
-    ).toEqual({
-      id: target,
-      row: { id: target, name: `adapter-insert` },
-      metadata: undefined,
-    })
-    // A partial update merges over the seed and keeps its unnamed field and metadata.
-    expect(
-      targetOf(
-        referenceRows(
-          initialRows,
-          [before, adapterAction(`update`)],
-          `partial`,
-        ),
-      ),
-    ).toEqual({
-      id: target,
-      row: { id: target, name: `adapter-update`, seeded: `before` },
-      metadata: { source: `before-hydration` },
-    })
-    // An update that does not name metadata leaves the metadata open to a later seed.
-    expect(
-      targetOf(
-        referenceRows(initialRows, [adapterAction(`update`), after], `partial`),
-      ),
-    ).toEqual({
-      id: target,
-      row: { id: target, name: `adapter-update`, seeded: `initial` },
-      metadata: { source: `after-hydration` },
-    })
-    // An update that names metadata fixes it against a later seed.
-    expect(
-      targetOf(
-        referenceRows(
-          initialRows,
-          [adapterAction(`update+metadata`), after],
-          `partial`,
-        ),
-      ),
-    ).toEqual({
-      id: target,
-      row: { id: target, name: `adapter-update`, seeded: `initial` },
-      metadata: { source: `adapter-update` },
-    })
-    // A metadata-only write fixes the metadata and leaves the row to a later seed.
-    expect(
-      targetOf(
-        referenceRows(
-          initialRows,
-          [adapterAction(`metadata`), after],
-          `partial`,
-        ),
-      ),
-    ).toEqual({
-      id: target,
-      row: { id: target, name: `after-target` },
-      metadata: { source: `adapter-metadata` },
-    })
-    // The latest seed wins for a key no adapter write has written.
-    expect(
-      referenceRows(initialRows, [before, after], `partial`).find(
-        (entry) => entry.id === peer,
-      ),
-    ).toEqual({
-      id: peer,
-      row: { id: peer, name: `after-peer` },
-      metadata: { source: `after-hydration` },
-    })
-  })
-
-  it(`reference keeps the metadata of an equal re-insert of a source-written row`, () => {
-    oracleRoute(`case`)
-    expect(
-      targetOf(
-        referenceRows(
-          [seedA],
-          [adapterAction(`insert+metadata`), adapterAction(`insert`)],
-          `partial`,
-        ),
-      ),
-    ).toEqual({
-      id: target,
-      row: { id: target, name: `adapter-insert` },
-      metadata: { source: `adapter-insert` },
-    })
-    // The clear applies only over seed-only rows, so an unequal re-insert is
-    // outside the grammar and the reference refuses it.
-    expect(() =>
-      referenceRows(
-        [seedA],
-        [
-          adapterAction(`insert`),
-          { kind: `adapter`, op: `insert`, row: { id: target, name: `other` } },
-        ],
-        `partial`,
-      ),
-    ).toThrow(`insert over a source-written row must re-insert it`)
-  })
-
-  it(`reference lets seed B supply metadata when a partial update wrote only row data`, () => {
-    oracleRoute(`case`)
-    // Seed A's `seeded` survives the partial merge; B supplies only the metadata.
-    expect(
-      targetOf(
-        referenceRows(
-          [seedA],
-          [adapterAction(`update`), hydrate([seedB])],
-          `partial`,
-        ),
-      ),
-    ).toEqual({
-      id: target,
-      row: { id: target, name: `adapter-update`, seeded: `x` },
-      metadata: { source: `seed-b` },
-    })
-    // The update's metadata is the source's, so B's metadata is ignored.
-    expect(
-      targetOf(
-        referenceRows(
-          [seedA],
-          [adapterAction(`update+metadata`), hydrate([seedB])],
-          `partial`,
-        ),
-      ),
-    ).toEqual({
-      id: target,
-      row: { id: target, name: `adapter-update`, seeded: `x` },
-      metadata: { source: `adapter-update` },
-    })
-  })
-
-  it(`reference merges a partial update over the later seed when both seeds arrive first`, () => {
-    oracleRoute(`case`)
-    // Seed B replaces A's row whole, so the update's merge base has no `seeded`.
-    expect(
-      targetOf(
-        referenceRows(
-          [seedA],
-          [hydrate([seedB]), adapterAction(`update`)],
-          `partial`,
-        ),
-      ),
-    ).toEqual({
-      id: target,
-      row: { id: target, name: `adapter-update` },
-      metadata: { source: `seed-b` },
-    })
-  })
-
-  it(`reference leaves metadata absent when the latest seed names none`, () => {
-    oracleRoute(`case`)
-    expect(
-      targetOf(
-        referenceRows([seedA], [hydrate([{ value: seedB.value }])], `partial`),
-      ),
-    ).toEqual({
-      id: target,
-      row: { id: target, name: `seed-b` },
-      metadata: undefined,
-    })
-  })
-
-  it(`reference holds a metadata-only write against a later seed`, () => {
-    oracleRoute(`case`)
-    expect(
-      targetOf(
-        referenceRows(
-          [seedA],
-          [adapterAction(`metadata`), hydrate([seedB])],
-          `partial`,
-        ),
-      ),
-    ).toEqual({
-      id: target,
-      row: { id: target, name: `seed-b` },
-      metadata: { source: `adapter-metadata` },
-    })
-  })
-
-  it.each(cases)(
-    `keeps $label authoritative with hydration $order its receipt in $rowUpdateMode mode`,
-    async ({ decisions, order, rowUpdateMode }) => {
-      oracleRoute(`case`)
-      return runHistory(decisions, order, rowUpdateMode)
+  // What this oracle owns: the gap report judges DbClient.collection and
+  // DbClient.applyCollectionChunk by this file's hydration histories.
+  oracleProperty({
+    id: `db-client-hydration.authority`,
+    law: {
+      statement: `An adapter write is authoritative over hydration in either arrival order: at each completed action the synced store, the public rows, the change-message mirror, and the dehydrated row metadata equal the reference fold.`,
+      authority: `The D5 hydration authority rules stated above`,
+      limits: `One or two immediately applied adapter transactions on the target key, three keys, and at most two hydration chunks, in full and partial row-update modes.`,
     },
-  )
+    owns: [
+      `src/client.ts#DbClient.collection`,
+      `src/client.ts#DbClient.applyCollectionChunk`,
+    ],
+    histories: cases,
+    label: ({ label, order, rowUpdateMode }) =>
+      `keeps ${label} authoritative with hydration ${order} its receipt in ${rowUpdateMode} mode`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`hydration authority`, plan, observe, () =>
+        runHistory(
+          plan.history.decisions,
+          plan.history.order,
+          plan.history.rowUpdateMode,
+        ),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
-  // Both seeds carry the same row fields, so the row check cannot tell a whole
-  // replacement from a merge; only the metadata distinguishes them.
-  it(`keeps metadata absent when the latest seed names none, in production`, () => {
-    oracleRoute(`fixed history`)
-    const row = { id: target, name: `seed`, seeded: `initial` }
-    return runHistory([], `both`, `partial`, (stage) =>
-      stage === `before`
-        ? [{ value: row, metadata: { source: `early-seed` } }]
-        : [{ value: row }],
-    )
+  const absentLatestSeedMetadataHistories = [
+    {
+      name: `keeps metadata absent when the latest seed names none, in production`,
+    },
+  ]
+  oracleProperty({
+    id: `db-client-hydration.absent-seed-metadata`,
+    law: {
+      statement: `When the latest seed names no metadata, the row keeps no metadata, so a whole replacement is distinguished from a merge.`,
+      authority: `The D5 hydration authority rules stated above`,
+      limits: `One fixed history with two seeds of the same row fields and no adapter write; the generated grammar's hydration chunks always carry metadata.`,
+    },
+    owns: [
+      `src/client.ts#DbClient.collection`,
+      `src/client.ts#DbClient.applyCollectionChunk`,
+    ],
+    histories: absentLatestSeedMetadataHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`absent seed metadata`, plan, observe, () =>
+        runAbsentLatestSeedMetadataHistory(),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -809,10 +405,67 @@ function expectInterleavedRows(
   expect(rows).toEqual(expectedInterleavedRows(history))
 }
 
-declareOracle({
-  check: [expectAcceptedSeedRow, expectInterleavedRows],
-  model: [expectedInterleavedRows, expectedAcceptedSeedRow],
-})
+async function runInterleavingCase(history: Interleaving): Promise<void> {
+  let sync!: SyncActions
+  let release!: () => void
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const descriptor = collectionOptions<Row, string>({
+    id: `db-client-interleaving-${history.persisting}-${history.source}-${history.sourceKey}`,
+    getKey: (row) => row.id,
+    sync: {
+      sync: (params) => {
+        sync = params
+        params.markReady()
+      },
+    },
+    onInsert: () => held,
+  })
+  const client = new DbClient()
+  const collection = client.collection(descriptor) as Collection<Row, string>
+  try {
+    await collection.preload()
+    const mutation = history.persisting
+      ? collection.insert({ id: `local`, name: `local` })
+      : undefined
+    const sourceRow = {
+      id: history.sourceKey,
+      name: `source`,
+    }
+    if (history.source === `open-before-chunk`) {
+      sync.begin()
+      sync.write({ type: `insert`, value: sourceRow })
+    }
+    client.applyCollectionChunk({
+      collectionId: collection.id,
+      rows: [{ key: `seed`, value: { id: `seed`, name: `seed` } }],
+    })
+    // The accepted-row view also includes an open transaction's staged
+    // writes, which follow the chunk in commit order.
+    expectAcceptedSeedRow(
+      collection._state.getAcceptedSyncedRow(`seed`),
+      history,
+    )
+    if (history.source === `after-chunk`) {
+      sync.begin()
+      sync.write({ type: `insert`, value: sourceRow })
+    }
+    if (history.source !== `none`) {
+      const receipt = sync.commit()
+      void Promise.resolve(receipt).catch(() => undefined)
+    }
+    release()
+    await mutation?.when('settled').catch(() => undefined)
+    expectInterleavedRows(
+      observedRows(collection.values()).filter((row) => row.id !== `local`),
+      history,
+    )
+  } finally {
+    release()
+    await collection.cleanup()
+  }
+}
 
 describe(`DbClient hydration interleaving oracle`, () => {
   const interleavings: Array<Interleaving> = [false, true].flatMap(
@@ -827,72 +480,26 @@ describe(`DbClient hydration interleaving oracle`, () => {
       ),
   )
 
-  it.each(interleavings)(
-    `accepts a chunk with persisting=$persisting and source $source writing $sourceKey`,
-    async (history) => {
-      oracleRoute(`case`)
-      let sync!: SyncActions
-      let release!: () => void
-      const held = new Promise<void>((resolve) => {
-        release = resolve
-      })
-      const descriptor = collectionOptions<Row, string>({
-        id: `db-client-interleaving-${history.persisting}-${history.source}-${history.sourceKey}`,
-        getKey: (row) => row.id,
-        sync: {
-          sync: (params) => {
-            sync = params
-            params.markReady()
-          },
-        },
-        onInsert: () => held,
-      })
-      const client = new DbClient()
-      const collection = client.collection(descriptor) as Collection<
-        Row,
-        string
-      >
-      try {
-        await collection.preload()
-        const mutation = history.persisting
-          ? collection.insert({ id: `local`, name: `local` })
-          : undefined
-        const sourceRow = {
-          id: history.sourceKey,
-          name: `source`,
-        }
-        if (history.source === `open-before-chunk`) {
-          sync.begin()
-          sync.write({ type: `insert`, value: sourceRow })
-        }
-        client.applyCollectionChunk({
-          collectionId: collection.id,
-          rows: [{ key: `seed`, value: { id: `seed`, name: `seed` } }],
-        })
-        // The accepted-row view also includes an open transaction's staged
-        // writes, which follow the chunk in commit order.
-        expectAcceptedSeedRow(
-          collection._state.getAcceptedSyncedRow(`seed`),
-          history,
-        )
-        if (history.source === `after-chunk`) {
-          sync.begin()
-          sync.write({ type: `insert`, value: sourceRow })
-        }
-        if (history.source !== `none`) {
-          const receipt = sync.commit()
-          void Promise.resolve(receipt).catch(() => undefined)
-        }
-        release()
-        await mutation?.when('settled').catch(() => undefined)
-        expectInterleavedRows(
-          observedRows(collection.values()).filter((row) => row.id !== `local`),
-          history,
-        )
-      } finally {
-        release()
-        await collection.cleanup()
-      }
+  oracleProperty({
+    id: `db-client-hydration.interleaving`,
+    law: {
+      statement: `A hydration chunk is accepted at once while other work is pending: accepted readers see the seed row or an earlier open source transaction's staged write, and the settled rows are the union of seed and source rows in acceptance order.`,
+      authority: `The hydration chunk acceptance contract stated above`,
+      limits: `The bounded grammar of an optional persisting mutation crossed with a source transaction that is absent, opened before the chunk, or begun after it, writing the seeded key or another key.`,
     },
-  )
+    owns: [
+      `src/client.ts#DbClient.collection`,
+      `src/client.ts#DbClient.applyCollectionChunk`,
+    ],
+    histories: interleavings,
+    label: ({ persisting, source, sourceKey }) =>
+      `accepts a chunk with persisting=${persisting} and source ${source} writing ${sourceKey}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`hydration interleaving`, plan, observe, () =>
+        runInterleavingCase(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

@@ -6,7 +6,6 @@ import {
   pass,
   violation,
 } from '../../db/tests/oracle-property.js'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import type { PersistedTx, SQLiteDriver } from '../src'
 import type { Observation as TraceEntry } from '../../db/tests/oracle-property.js'
 
@@ -475,20 +474,14 @@ function checkReopen(
   )
 }
 
-declareOracle({
-  owns: [`src/sqlite-core-adapter.ts`],
-  check: [checkReopen],
-  model: [setupModel],
-})
-
 oracleProperty({
   id: `sqlite-persistence.setup-reopen`,
   law: {
     statement: `After a fresh adapter's first read of a registered Collection, its schema objects are exactly a fresh install's (same type, name, table, and SQL), both bookkeeping rows exist, and stored rows are unchanged, from every legal starting state; when all nine setup facts already hold for the registered schema version, the read issues no DDL or writes and costs at most one call more than a cached read. A partial state may cost more.`,
     authority: `the SQLite core adapter's per-Collection setup contract; the accepted persistence goal that reloads are fast (issue #2204)`,
     limits: `In-memory node:sqlite databases; no cache-generation claims, concurrent adapters, or dropped row tables that still hold rows. SQL text is checked against a production fresh install, not absolute definitions.`,
-    owner: `SQLite persistence`,
   },
+  owns: [`src/sqlite-core-adapter.ts`],
   histories: starts,
   label: (start) => start.name,
   model: setupModel,

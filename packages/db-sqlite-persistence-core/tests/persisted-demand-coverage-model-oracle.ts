@@ -1,4 +1,3 @@
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import type { CollectionStatus, LoadSubsetOptions } from '@tanstack/db'
 
 /**
@@ -556,4 +555,3 @@ export function coverageViolations(
 
 // Owns nothing: this module holds the model and check only. The production
 // path is driven by persisted-demand-coverage-oracle.test.ts and persisted-demand-coverage-campaign-oracle.test.ts, which declares the owned entry.
-declareOracle({ check: [coverageViolations], model: [expectedObservations] })

@@ -1,5 +1,14 @@
 # @tanstack/react-db
 
+## 1.0.0-rc.1.5
+
+### Patch Changes
+
+- Update runtime dependencies while preserving the public API and CommonJS loading. Preserve Solid reactivity for own data fields and persist Electric snapshot resume checkpoints before subset loads succeed. ([#2374](https://github.com/TanStack/db/pull/2374))
+
+- Updated dependencies [[`522f657`](https://github.com/TanStack/db/commit/522f65777a42673a1befcb8169854002894d15c0), [`a86aa43`](https://github.com/TanStack/db/commit/a86aa430418572a4834972aa60b7d6a18e2e08ba), [`6ec538e`](https://github.com/TanStack/db/commit/6ec538ecd3c8a966e6a1e93d88b82023021a47a4)]:
+  - @tanstack/db@1.0.0-rc.1.5
+
 ## 1.0.0-rc.1.4
 
 ### Patch Changes

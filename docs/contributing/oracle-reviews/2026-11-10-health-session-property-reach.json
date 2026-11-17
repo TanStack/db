@@ -1,0 +1,410 @@
+{
+  "source_head": "b56442c92",
+  "ssr_source_head": "a15c153e4",
+  "native_reach": [
+    {
+      "property": "ssr.stream-record-lifetime",
+      "campaign": "fixed seed 2229",
+      "native_reach": {
+        "arrival": 27,
+        "cleanup": 25,
+        "close": 24,
+        "error": 28,
+        "late-attempt": 54,
+        "local": 31,
+        "missing": 44,
+        "peer-first": 57,
+        "pending": 29,
+        "restart-after-cleanup": 62,
+        "undefined-cause": 50
+      }
+    },
+    {
+      "property": "ssr.stream-record-lifetime",
+      "campaign": "random seed",
+      "native_reach": {
+        "arrival": 30,
+        "cleanup": 23,
+        "close": 24,
+        "error": 27,
+        "late-attempt": 62,
+        "local": 39,
+        "missing": 39,
+        "peer-first": 62,
+        "pending": 26,
+        "restart-after-cleanup": 52,
+        "undefined-cause": 58
+      }
+    },
+    {
+      "property": "source-health.history",
+      "campaign": "random seed",
+      "native_reach": {
+        "an inner query's ready batch completes the query's own reload": 3,
+        "an inner query's ready batch makes the query ready": 3,
+        "cleanup and reload during a reload's open transaction": 4,
+        "cleanup from the Collection's health:change during a reload": 4,
+        "cleanup from the query's health:change during a reload": 8,
+        "direct subscriber during a reload": 12,
+        "fail on a stopped source": 9,
+        "failure frame clears with failures listed": 10,
+        "fresh run commits after a cleanup during a reload": 10,
+        "healthy names an unlisted value while failures are listed": 6,
+        "healthy removes one failure of several": 6,
+        "healthy removes the last listed failure": 6,
+        "markReady after fail": 5,
+        "markReady on a ready run": 5,
+        "ready callback throws during a reload": 3,
+        "reload completes at markReady without a snapshot": 12,
+        "reload ends before its first commit": 4,
+        "reload's insert of a kept row throws": 5,
+        "reload's new run reports over the retired run's frame": 4,
+        "report adds a failure to an open frame": 10,
+        "report repeats a listed failure": 6,
+        "retired cleanup rejects after a fresh start": 5,
+        "snapshot outside a reload": 7,
+        "snapshot replaces the rows during a reload": 9,
+        "untagged insert of a kept row": 4,
+        "write applies on the kept rows during a reload": 11
+      }
+    },
+    {
+      "property": "source-health.required-history",
+      "campaign": "fixed seed 20261029",
+      "native_reach": {
+        "an inner query's ready batch completes the query's own reload": 6,
+        "an inner query's ready batch makes the query ready": 6,
+        "cleanup and reload during a reload's open transaction": 6,
+        "cleanup from the Collection's health:change during a reload": 6,
+        "cleanup from the query's health:change during a reload": 6,
+        "direct subscriber during a reload": 6,
+        "fail on a stopped source": 6,
+        "failure frame clears with failures listed": 6,
+        "fresh run commits after a cleanup during a reload": 6,
+        "healthy names an unlisted value while failures are listed": 6,
+        "healthy removes one failure of several": 6,
+        "healthy removes the last listed failure": 6,
+        "markReady after fail": 6,
+        "markReady on a ready run": 6,
+        "ready callback throws during a reload": 6,
+        "reload completes at markReady without a snapshot": 6,
+        "reload ends before its first commit": 6,
+        "reload's insert of a kept row throws": 6,
+        "reload's new run reports over the retired run's frame": 6,
+        "report adds a failure to an open frame": 6,
+        "report repeats a listed failure": 6,
+        "retired cleanup rejects after a fresh start": 6,
+        "snapshot outside a reload": 6,
+        "snapshot replaces the rows during a reload": 6,
+        "untagged insert of a kept row": 6,
+        "write applies on the kept rows during a reload": 6
+      }
+    },
+    {
+      "property": "source-health.required-history",
+      "campaign": "random seed",
+      "native_reach": {
+        "an inner query's ready batch completes the query's own reload": 6,
+        "an inner query's ready batch makes the query ready": 6,
+        "cleanup and reload during a reload's open transaction": 6,
+        "cleanup from the Collection's health:change during a reload": 6,
+        "cleanup from the query's health:change during a reload": 6,
+        "direct subscriber during a reload": 6,
+        "fail on a stopped source": 6,
+        "failure frame clears with failures listed": 6,
+        "fresh run commits after a cleanup during a reload": 6,
+        "healthy names an unlisted value while failures are listed": 6,
+        "healthy removes one failure of several": 6,
+        "healthy removes the last listed failure": 6,
+        "markReady after fail": 6,
+        "markReady on a ready run": 6,
+        "ready callback throws during a reload": 6,
+        "reload completes at markReady without a snapshot": 6,
+        "reload ends before its first commit": 6,
+        "reload's insert of a kept row throws": 6,
+        "reload's new run reports over the retired run's frame": 6,
+        "report adds a failure to an open frame": 6,
+        "report repeats a listed failure": 6,
+        "retired cleanup rejects after a fresh start": 6,
+        "snapshot outside a reload": 6,
+        "snapshot replaces the rows during a reload": 6,
+        "untagged insert of a kept row": 6,
+        "write applies on the kept rows during a reload": 6
+      }
+    },
+    {
+      "property": "source-health.on-demand",
+      "campaign": "random seed",
+      "native_reach": {
+        "aborted load rejects beside a pending load after a request error": 7,
+        "aborted load succeeds beside a pending load after a request error": 2,
+        "cleanup during the query's own reload": 9,
+        "direct subscriber during a replay": 14,
+        "failed window move during the query's own reload": 2,
+        "query's own reload with a request error": 17,
+        "window move waits for a replay": 17
+      }
+    },
+    {
+      "property": "source-health.lazy-demand",
+      "campaign": "random seed",
+      "native_reach": {
+        "cleanup from a subscription's status:change during a reload": 8,
+        "cleanup from loadingSubset:change during a reload": 5,
+        "cleanup from the Collection's health:change during a reload": 9,
+        "cleanup from the query's health:change during a reload": 10,
+        "coverage checked during an open replay": 53,
+        "direct subscriber during a replay": 33,
+        "effect compared at a quiet checkpoint": 31,
+        "failed replay lists several failed loads": 8,
+        "load fails after joining a failed replay": 9,
+        "load throws": 14,
+        "parked demand during a replay": 13,
+        "reload during the first load": 9,
+        "reload from inside a deferred first load": 33,
+        "reload from inside loadSubset": 12,
+        "reload keeps a row the provider deleted": 5,
+        "replay load fails": 40,
+        "replay verdict lists an open failure again": 6,
+        "replay verdict replaces a single load's request error": 18,
+        "request error shown": 46,
+        "several request errors open": 10,
+        "truncate while a reload is in flight": 9
+      }
+    },
+    {
+      "property": "sync-metadata-session.flat",
+      "campaign": "fixed seed 2220001",
+      "native_reach": {
+        "duplicate source insert": 7,
+        "open transaction over a held transaction": 44,
+        "read with two held transactions": 22,
+        "truncate during a hold": 23
+      }
+    },
+    {
+      "property": "sync-metadata-session.flat",
+      "campaign": "random seed",
+      "native_reach": {
+        "duplicate source insert": 6,
+        "open transaction over a held transaction": 31,
+        "read with two held transactions": 14,
+        "truncate during a hold": 22
+      }
+    },
+    {
+      "property": "sync-metadata-session.nested",
+      "campaign": "fixed seed 2220002",
+      "native_reach": {
+        "abort keeps an inner commit": 13,
+        "nested commit": 63,
+        "nested commit during a hold": 52,
+        "open transaction over a held transaction": 59
+      }
+    },
+    {
+      "property": "sync-metadata-session.nested",
+      "campaign": "random seed",
+      "native_reach": {
+        "abort keeps an inner commit": 14,
+        "nested commit": 54,
+        "nested commit during a hold": 44,
+        "open transaction over a held transaction": 55
+      }
+    },
+    {
+      "property": "sync-metadata-session.seeds",
+      "campaign": "fixed seed 2220003",
+      "native_reach": {
+        "duplicate source insert during a hold": 8,
+        "duplicate source insert over a seeded row": 7,
+        "open transaction over a held transaction": 49,
+        "seed": 144,
+        "seed under a source insert": 31,
+        "seed under an open update": 9
+      }
+    },
+    {
+      "property": "sync-metadata-session.seeds",
+      "campaign": "random seed",
+      "native_reach": {
+        "duplicate source insert during a hold": 4,
+        "duplicate source insert over a seeded row": 5,
+        "open transaction over a held transaction": 30,
+        "seed": 91,
+        "seed under a source insert": 18,
+        "seed under an open update": 7
+      }
+    },
+    {
+      "property": "sync-metadata-session.seeds-full",
+      "campaign": "fixed seed 2220004",
+      "native_reach": {
+        "open transaction over a held transaction": 23,
+        "seed": 96,
+        "seed under a source insert": 28
+      }
+    },
+    {
+      "property": "sync-metadata-session.seeds-full",
+      "campaign": "random seed",
+      "native_reach": {
+        "open transaction over a held transaction": 33,
+        "seed": 91,
+        "seed under a source insert": 27
+      }
+    },
+    {
+      "property": "sync-metadata-session.nested-seeds",
+      "campaign": "fixed seed 2220005",
+      "native_reach": {
+        "duplicate source insert over a seeded row": 5,
+        "inner write to an enclosing row": 8,
+        "nested commit": 43,
+        "seed": 96,
+        "seed under a source insert": 22,
+        "seed under an open update": 6
+      }
+    },
+    {
+      "property": "sync-metadata-session.nested-seeds",
+      "campaign": "random seed",
+      "native_reach": {
+        "duplicate source insert over a seeded row": 4,
+        "inner write to an enclosing row": 12,
+        "nested commit": 45,
+        "seed": 95,
+        "seed under a source insert": 28,
+        "seed under an open update": 5
+      }
+    },
+    {
+      "property": "sync-metadata-session.nested-conflicts",
+      "campaign": "fixed seed 2220006",
+      "native_reach": {
+        "commit of an invalid transaction": 11,
+        "inner write to an enclosing row": 151,
+        "nested commit during a hold": 160,
+        "transaction invalidated": 34,
+        "write to an invalid transaction": 19
+      }
+    },
+    {
+      "property": "sync-metadata-session.nested-conflicts",
+      "campaign": "random seed",
+      "native_reach": {
+        "commit of an invalid transaction": 2,
+        "inner write to an enclosing row": 32,
+        "nested commit during a hold": 36,
+        "transaction invalidated": 7,
+        "write to an invalid transaction": 5
+      }
+    }
+  ],
+  "source_health_aggregate_gates": [
+    {
+      "property": "source-health.required-history",
+      "campaign": "fixed seed 20261029",
+      "counts": {
+        "direct subscriber during a reload": 30,
+        "reload ends before its first commit": 6,
+        "untagged insert of a kept row": 6,
+        "retired cleanup rejects after a fresh start": 6,
+        "cleanup and reload during a reload's open transaction": 6,
+        "write applies on the kept rows during a reload": 12,
+        "snapshot replaces the rows during a reload": 12,
+        "snapshot outside a reload": 6,
+        "reload completes at markReady without a snapshot": 6,
+        "markReady after fail": 6,
+        "markReady on a ready run": 6,
+        "ready callback throws during a reload": 6,
+        "reload's insert of a kept row throws": 6,
+        "fail on a stopped source": 6,
+        "cleanup from the Collection's health:change during a reload": 6,
+        "cleanup from the query's health:change during a reload": 13,
+        "fresh run commits after a cleanup during a reload": 12,
+        "report adds a failure to an open frame": 12,
+        "reload's new run reports over the retired run's frame": 6,
+        "failure frame clears with failures listed": 12,
+        "report repeats a listed failure": 6,
+        "healthy removes one failure of several": 6,
+        "healthy removes the last listed failure": 6,
+        "healthy names an unlisted value while failures are listed": 6,
+        "an inner query's ready batch makes the query ready": 6,
+        "an inner query's ready batch completes the query's own reload": 6
+      }
+    },
+    {
+      "property": "source-health.required-history",
+      "campaign": "random seed",
+      "counts": {
+        "direct subscriber during a reload": 24,
+        "reload ends before its first commit": 9,
+        "untagged insert of a kept row": 6,
+        "retired cleanup rejects after a fresh start": 6,
+        "cleanup and reload during a reload's open transaction": 6,
+        "write applies on the kept rows during a reload": 12,
+        "snapshot replaces the rows during a reload": 12,
+        "snapshot outside a reload": 6,
+        "reload completes at markReady without a snapshot": 6,
+        "markReady after fail": 6,
+        "markReady on a ready run": 6,
+        "ready callback throws during a reload": 7,
+        "reload's insert of a kept row throws": 6,
+        "fail on a stopped source": 7,
+        "cleanup from the Collection's health:change during a reload": 6,
+        "cleanup from the query's health:change during a reload": 10,
+        "fresh run commits after a cleanup during a reload": 12,
+        "report adds a failure to an open frame": 12,
+        "reload's new run reports over the retired run's frame": 6,
+        "failure frame clears with failures listed": 12,
+        "report repeats a listed failure": 6,
+        "healthy removes one failure of several": 6,
+        "healthy removes the last listed failure": 6,
+        "healthy names an unlisted value while failures are listed": 6,
+        "an inner query's ready batch makes the query ready": 6,
+        "an inner query's ready batch completes the query's own reload": 6
+      }
+    },
+    {
+      "property": "source-health.on-demand",
+      "campaign": "random seed",
+      "counts": {
+        "window move waits for a replay": 19,
+        "direct subscriber during a replay": 18,
+        "aborted load rejects beside a pending load after a request error": 8,
+        "aborted load succeeds beside a pending load after a request error": 3,
+        "query's own reload with a request error": 20,
+        "failed window move during the query's own reload": 3,
+        "cleanup during the query's own reload": 10
+      }
+    },
+    {
+      "property": "source-health.lazy-demand",
+      "campaign": "random seed",
+      "counts": {
+        "reload during the first load": 10,
+        "truncate while a reload is in flight": 10,
+        "replay load fails": 46,
+        "load throws": 15,
+        "direct subscriber during a replay": 43,
+        "effect compared at a quiet checkpoint": 32,
+        "request error shown": 53,
+        "coverage checked during an open replay": 61,
+        "parked demand during a replay": 15,
+        "reload from inside loadSubset": 13,
+        "reload from inside a deferred first load": 34,
+        "cleanup from the Collection's health:change during a reload": 10,
+        "cleanup from the query's health:change during a reload": 11,
+        "cleanup from loadingSubset:change during a reload": 6,
+        "cleanup from a subscription's status:change during a reload": 9,
+        "several request errors open": 11,
+        "load fails after joining a failed replay": 10,
+        "replay verdict replaces a single load's request error": 20,
+        "failed replay lists several failed loads": 9,
+        "reload keeps a row the provider deleted": 6,
+        "replay verdict lists an open failure again": 7
+      }
+    }
+  ]
+}

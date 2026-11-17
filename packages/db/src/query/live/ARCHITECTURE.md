@@ -1141,7 +1141,10 @@ new repair acquisitions remain. Every acquisition in this chain uses
 reusing completed or in-flight work. A source-order invalidation generation
 fences the chain. If another qualifying mutation arrives before it finishes,
 core starts a replacement repair before releasing the publication barrier and
-before the obsolete chain can issue another tie or refill. A qualifying change
+before the obsolete chain can issue another tie or refill. That holds for a
+step that a continuation the chain staged, or a window move that joined work
+blocked, would resume after the mutation: resuming it starts the replacement
+instead. A qualifying change
 that a retirement release delivers after the chain succeeds belongs to the
 same fence, including a delete of a row in its prefix, such as the boundary row or a tie the prefix holds: the repair keeps that newer debt, the next ordered pass starts its
 replacement before the barrier releases, and a window move waiting for the

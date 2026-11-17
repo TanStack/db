@@ -17,9 +17,13 @@
  * Cross-Collection and manual acceptance ordering are not
  * specified here. harness.ts controls handlers and observes raw durable rows.
  */
-import { expect, it } from 'vitest'
-import { declareOracle } from '../oracle-declaration'
-import { oracleRoute } from '../oracle-config'
+import { expect } from 'vitest'
+import { oracleProperty } from '../oracle-config'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter'
 import { initial } from './local-write-support'
 import {
   Channel,
@@ -69,137 +73,170 @@ function expectedRows(effects: Array<Effect>, mask: number, before = initial) {
 }
 // expectedRows is the model: the durable fold of the authored effects that the
 // mask accepts, in author order, from the rows that the peer action leaves.
-declareOracle({
+
+type WriteOrderHistory = {
+  kind: string
+  peerAction: 'none' | 'update' | 'delete' | 'replace'
+  order: Array<number>
+  mask: number
+}
+
+async function persistInMutationOrder({
+  kind,
+  peerAction,
+  order,
+  mask,
+}: WriteOrderHistory) {
+  const effects = grammars[kind]!
+  await withHarness(async (h) => {
+    await seed(h.db, 'items', initial)
+    const gates = effects.map(() => deferred()),
+      entered = effects.map(() => deferred())
+    let slot = 0
+    const handler = () => {
+      const index = slot++
+      entered[index]!.resolve()
+      return gates[index]!.promise
+    }
+    const c = await h.open('items', {
+      onInsert: handler,
+      onUpdate: handler,
+      onDelete: handler,
+    })
+    const peer = await h.open('items', { db: await h.connect() })
+    const outcomes = []
+    const succeeded = new Set<number>()
+    for (const [index, effect] of effects.entries()) {
+      const tx = effect.row
+        ? c.has(effect.key)
+          ? c.update(effect.key, (row) => {
+              row.name = effect.row!.name
+            })
+          : c.insert({ ...effect.row })
+        : c.delete(effect.key)
+      outcomes.push(
+        tx.when(`settled`).then(
+          () => {
+            succeeded.add(index)
+            return true
+          },
+          () => false,
+        ),
+      )
+      await entered[index]!.promise
+    }
+    // Peer persistence completes while all local handlers are held. Its
+    // authored effect is therefore the durable base for ordered local
+    // acceptance. This composes source work with several pending intents
+    // without assigning a winner to unordered cross-Collection writes.
+    const peerRow = { id: 1, name: 'peer' }
+    const beforeLocal =
+      peerAction === 'replace'
+        ? [peerRow]
+        : peerAction === 'delete'
+          ? initial.slice(1)
+          : peerAction === 'update'
+            ? [peerRow, initial[1]!]
+            : initial
+    if (peerAction === 'update')
+      await peer
+        .update(1, (row) => {
+          row.name = 'peer'
+        })
+        .when(`settled`)
+    if (peerAction === 'delete') await peer.delete(1).when(`settled`)
+    if (peerAction === 'replace') await peer.utils.importData([peerRow])
+    await Channel.deliver()
+    assertRows(
+      (await readStore<Row>(h.db, 'items')).rows,
+      beforeLocal,
+      'peer persistence before local decisions',
+    )
+    const decided = new Set<number>()
+    try {
+      for (const index of order) {
+        if (mask & (1 << index)) gates[index]!.resolve()
+        else gates[index]!.reject(new Error(`reject ${index}`))
+        decided.add(index)
+        // This is an author-prefix computation, not a second queue. The
+        // first undecided position bounds which effects may be durable.
+        let prefix = 0
+        while (decided.has(prefix)) prefix++
+        await Promise.all(outcomes.slice(0, prefix))
+        const durable = await readStore<Row>(h.db, 'items')
+        const expected = expectedRows(
+          effects.slice(0, prefix),
+          mask,
+          beforeLocal,
+        )
+        const cut = `decision ${index}, decided prefix ${prefix}`
+        assertRows(durable.rows, expected, cut + ': durable')
+        expect(
+          [...succeeded].every((position) => position < prefix),
+          cut + ': no later success',
+        ).toBe(true)
+        await Channel.deliver()
+        assertRows(peer.values(), expected, cut + ': peer')
+        const restored = await h.open()
+        assertRows(restored.values(), expected, cut + ': fresh restore')
+        await restored.cleanup()
+      }
+    } finally {
+      // A hostile implementation may fail at an intermediate cut. Release
+      // the remaining handlers without losing that primary assertion.
+      gates.forEach((gate) => gate.resolve())
+      await Promise.all(outcomes)
+    }
+    expect(await Promise.all(outcomes)).toEqual(
+      effects.map((_, index) => !!(mask & (1 << index))),
+    )
+    await Channel.deliver()
+    const expected = expectedRows(effects, mask, beforeLocal)
+    assertRows(
+      (await readStore<Row>(h.db, 'items')).rows,
+      expected,
+      'all handlers settled: durable',
+    )
+    for (const subject of [c, peer, await h.open()])
+      assertRows(
+        subject.values(),
+        expected,
+        'all handlers settled: public and restore',
+      )
+  })
+}
+
+oracleProperty({
+  id: `indexeddb.local-write-order`,
+  law: {
+    statement: `Automatic writes from one Collection persist in mutation order, independently of handler completion order; rejected handlers contribute no durable effect and do not stop later accepted writes.`,
+    authority: `The maintainer-approved local ordering law stated above`,
+    limits: `Three edit grammars of three effects, four peer actions, all six handler completion orders and all eight accept/reject masks; cross-Collection and manual acceptance ordering are not specified.`,
+  },
   owns: [
     'src/collection/index.ts#createCollection',
     'src/indexed-db.ts#createIndexedDB',
     'src/indexed-db.ts#indexedDBCollectionOptions',
   ],
-  model: [expectedRows],
+  histories: Object.keys(grammars).flatMap((kind) =>
+    (['none', 'update', 'delete', 'replace'] as const).flatMap((peerAction) =>
+      orders.flatMap((order) =>
+        Array.from({ length: 8 }, (_, mask): WriteOrderHistory => ({
+          kind,
+          peerAction,
+          order,
+          mask,
+        })),
+      ),
+    ),
+  ),
+  label: ({ kind, peerAction, order, mask }) =>
+    `${kind} persists accepted effects after peer ${peerAction} in mutation order (${order.join(',')}; mask ${mask})`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`indexeddb.local-write-order`, plan, observe, () =>
+      persistInMutationOrder(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })
-
-for (const [kind, effects] of Object.entries(grammars)) {
-  for (const peerAction of ['none', 'update', 'delete', 'replace'] as const)
-    for (const order of orders)
-      for (let mask = 0; mask < 8; mask++) {
-        it(`${kind} persists accepted effects after peer ${peerAction} in mutation order (${order.join(',')}; mask ${mask})`, async () => {
-          oracleRoute(`case`)
-          await withHarness(async (h) => {
-            await seed(h.db, 'items', initial)
-            const gates = effects.map(() => deferred()),
-              entered = effects.map(() => deferred())
-            let slot = 0
-            const handler = () => {
-              const index = slot++
-              entered[index]!.resolve()
-              return gates[index]!.promise
-            }
-            const c = await h.open('items', {
-              onInsert: handler,
-              onUpdate: handler,
-              onDelete: handler,
-            })
-            const peer = await h.open('items', { db: await h.connect() })
-            const outcomes = []
-            const succeeded = new Set<number>()
-            for (const [index, effect] of effects.entries()) {
-              const tx = effect.row
-                ? c.has(effect.key)
-                  ? c.update(effect.key, (row) => {
-                      row.name = effect.row!.name
-                    })
-                  : c.insert({ ...effect.row })
-                : c.delete(effect.key)
-              outcomes.push(
-                tx.when(`settled`).then(
-                  () => {
-                    succeeded.add(index)
-                    return true
-                  },
-                  () => false,
-                ),
-              )
-              await entered[index]!.promise
-            }
-            // Peer persistence completes while all local handlers are held. Its
-            // authored effect is therefore the durable base for ordered local
-            // acceptance. This composes source work with several pending intents
-            // without assigning a winner to unordered cross-Collection writes.
-            const peerRow = { id: 1, name: 'peer' }
-            const beforeLocal =
-              peerAction === 'replace'
-                ? [peerRow]
-                : peerAction === 'delete'
-                  ? initial.slice(1)
-                  : peerAction === 'update'
-                    ? [peerRow, initial[1]!]
-                    : initial
-            if (peerAction === 'update')
-              await peer
-                .update(1, (row) => {
-                  row.name = 'peer'
-                })
-                .when(`settled`)
-            if (peerAction === 'delete') await peer.delete(1).when(`settled`)
-            if (peerAction === 'replace') await peer.utils.importData([peerRow])
-            await Channel.deliver()
-            assertRows(
-              (await readStore<Row>(h.db, 'items')).rows,
-              beforeLocal,
-              'peer persistence before local decisions',
-            )
-            const decided = new Set<number>()
-            try {
-              for (const index of order) {
-                if (mask & (1 << index)) gates[index]!.resolve()
-                else gates[index]!.reject(new Error(`reject ${index}`))
-                decided.add(index)
-                // This is an author-prefix computation, not a second queue. The
-                // first undecided position bounds which effects may be durable.
-                let prefix = 0
-                while (decided.has(prefix)) prefix++
-                await Promise.all(outcomes.slice(0, prefix))
-                const durable = await readStore<Row>(h.db, 'items')
-                const expected = expectedRows(
-                  effects.slice(0, prefix),
-                  mask,
-                  beforeLocal,
-                )
-                const cut = `decision ${index}, decided prefix ${prefix}`
-                assertRows(durable.rows, expected, cut + ': durable')
-                expect(
-                  [...succeeded].every((position) => position < prefix),
-                  cut + ': no later success',
-                ).toBe(true)
-                await Channel.deliver()
-                assertRows(peer.values(), expected, cut + ': peer')
-                const restored = await h.open()
-                assertRows(restored.values(), expected, cut + ': fresh restore')
-                await restored.cleanup()
-              }
-            } finally {
-              // A hostile implementation may fail at an intermediate cut. Release
-              // the remaining handlers without losing that primary assertion.
-              gates.forEach((gate) => gate.resolve())
-              await Promise.all(outcomes)
-            }
-            expect(await Promise.all(outcomes)).toEqual(
-              effects.map((_, index) => !!(mask & (1 << index))),
-            )
-            await Channel.deliver()
-            const expected = expectedRows(effects, mask, beforeLocal)
-            assertRows(
-              (await readStore<Row>(h.db, 'items')).rows,
-              expected,
-              'all handlers settled: durable',
-            )
-            for (const subject of [c, peer, await h.open()])
-              assertRows(
-                subject.values(),
-                expected,
-                'all handlers settled: public and restore',
-              )
-          })
-        })
-      }
-}

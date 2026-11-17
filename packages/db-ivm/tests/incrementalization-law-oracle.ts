@@ -1,5 +1,4 @@
 import { fc } from '@fast-check/vitest'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { D2 } from '../src/d2.js'
 import { MultiSet } from '../src/multiset.js'
 import { output } from '../src/operators/output.js'
@@ -31,6 +30,20 @@ import type { Arbitrary } from 'fast-check'
  * row key so a replacement retracts the occupied row before it inserts a new
  * row with the same key.
  */
+
+// Only a comparison mismatch has semantic metadata. Invalid input, graph,
+// scheduling, model and fixture failures retain their original error kind.
+export class OracleComparisonMismatch extends Error {
+  constructor(
+    message: string,
+    readonly law: string,
+    readonly checkpoint: string,
+    readonly actual: unknown,
+    readonly expected: unknown,
+  ) {
+    super(message)
+  }
+}
 
 export type Weighted<T> = Array<[T, number]>
 
@@ -79,7 +92,20 @@ export function weightedStateArbitrary<T>(
   )
 }
 
+// An optional native recorder exposes the same normalized observations and
+// independent recomputation that the existing assertion compares. It does not
+// change the judgment or capture graph, scheduler, model, or setup errors.
+export type IncrementalizationComparisonRecorder = (
+  checkpoint: string,
+  value: {
+    law: string
+    actual: Array<[string, number]>
+    expected: Array<[string, number]>
+  },
+) => void
+
 export interface UnaryIncrementalizationLaw<Input, Output> {
+  observeComparison?: IncrementalizationComparisonRecorder
   name: string
   initial: Weighted<Input>
   batches: Array<Weighted<Input>>
@@ -91,6 +117,7 @@ export interface UnaryIncrementalizationLaw<Input, Output> {
 }
 
 export interface BinaryIncrementalizationLaw<Left, Right, Output> {
+  observeComparison?: IncrementalizationComparisonRecorder
   name: string
   initialLeft: Weighted<Left>
   initialRight: Weighted<Right>
@@ -214,14 +241,24 @@ function assertEqual<T>(
   kind: string,
   actual: State<T>,
   expected: State<T>,
+  observe?: IncrementalizationComparisonRecorder,
 ): void {
   const actualRows = normalized(actual)
   const expectedRows = normalized(expected)
+  observe?.(String(checkpoint), {
+    law: `${law}: ${kind}`,
+    actual: actualRows,
+    expected: expectedRows,
+  })
   if (JSON.stringify(actualRows) !== JSON.stringify(expectedRows)) {
-    throw new Error(
+    throw new OracleComparisonMismatch(
       `${law}: ${kind} diverged at checkpoint ${checkpoint}\n` +
         `expected ${JSON.stringify(expectedRows)}\n` +
         `actual   ${JSON.stringify(actualRows)}`,
+      `${law}: ${kind}`,
+      String(checkpoint),
+      actualRows,
+      expectedRows,
     )
   }
 }
@@ -355,6 +392,7 @@ function runUnary<Input, Output>(
       `output delta`,
       actualDelta,
       expectedDelta,
+      law.observeComparison,
     )
     addOutput(outputState, emitted, law.outputPolicy)
     assertEqual(
@@ -363,6 +401,7 @@ function runUnary<Input, Output>(
       `materialized output`,
       outputState,
       fromWeighted(after, law.outputPolicy),
+      law.observeComparison,
     )
   })
   return {
@@ -383,6 +422,7 @@ export function assertUnaryIncrementalization<Input, Output>(
     `partitioned output`,
     split.output,
     atomic.output,
+    law.observeComparison,
   )
   return {
     atomicCheckpoints: atomic.checkpoints,
@@ -465,6 +505,7 @@ function runBinary<Left, Right, Output>(
       `output delta`,
       actualDelta,
       expectedDelta,
+      law.observeComparison,
     )
     addOutput(outputState, emitted, law.outputPolicy)
     assertEqual(
@@ -473,6 +514,7 @@ function runBinary<Left, Right, Output>(
       `materialized output`,
       outputState,
       fromWeighted(after, law.outputPolicy),
+      law.observeComparison,
     )
   })
   return {
@@ -493,6 +535,7 @@ export function assertBinaryIncrementalization<Left, Right, Output>(
     `partitioned output`,
     split.output,
     atomic.output,
+    law.observeComparison,
   )
   return {
     atomicCheckpoints: atomic.checkpoints,
@@ -501,7 +544,3 @@ export function assertBinaryIncrementalization<Left, Right, Output>(
     splitDeliveries: split.deliveries,
   }
 }
-
-declareOracle({
-  check: [assertUnaryIncrementalization, assertBinaryIncrementalization],
-})

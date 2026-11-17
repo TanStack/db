@@ -28,15 +28,30 @@ import { ConvexClient } from 'convex/browser'
 import { ConvexReactClient } from 'convex/react'
 import { makeFunctionReference } from 'convex/server'
 import fc from 'fast-check'
-import { expect, inject, it } from 'vitest'
+import { expect, inject } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { convexPaginatedCollectionOptions } from '../src/index'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import { withTestCleanup } from '../tests/helpers'
-import { lazyOracleRuns, receiveBothSdks } from '../tests/lazy-paging-campaign'
+import {
+  lazyOracleBaseRuns,
+  receiveBothSdks,
+} from '../tests/lazy-paging-campaign'
 import { LazyWriteModel } from '../tests/lazy-paging-write-model-oracle'
 import type { LazyRow } from '../tests/lazy-paging-model-oracle'
 import type { ConvexCollectionClient } from '../src/index'
 import type { PaginationOptions, PaginationResult } from 'convex/server'
+
+type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
+type AssertionReach = {
+  beginHistory: () => void
+  reach: (state: string) => void
+}
 
 type Task = { _id: string; clientId: string; rank: number; text: string }
 type Kind = `insert` | `update` | `delete`
@@ -176,9 +191,17 @@ async function receive(h: History, sdk: `javascript` | `react`) {
     }) => {
       const active = plan!
       try {
-        expect(kind).toBe(active.cell.kind)
-        expect(transaction.mutations).toHaveLength(1)
-        expect(project(transaction.mutations[0]!.modified)).toEqual(active.row)
+        oracleAssertion(`lazy-app-write-oracle.test.ts:181:toBe`, () =>
+          expect(kind).toBe(active.cell.kind),
+        )
+        oracleAssertion(`lazy-app-write-oracle.test.ts:182:toHaveLength`, () =>
+          expect(transaction.mutations).toHaveLength(1),
+        )
+        oracleAssertion(`lazy-app-write-oracle.test.ts:183:toEqual`, () =>
+          expect(project(transaction.mutations[0]!.modified)).toEqual(
+            active.row,
+          ),
+        )
       } catch (error) {
         failures.push(error)
         active.entered.resolve()
@@ -282,8 +305,12 @@ async function receive(h: History, sdk: `javascript` | `react`) {
     )
     model.observeWindow(graph.toArray)
     await backend()
-    expect(source.utils.getSyncError()).toBeUndefined()
-    expect(graph.status).toBe(`ready`)
+    oracleAssertion(`lazy-app-write-oracle.test.ts:287:toBeUndefined`, () =>
+      expect(source.utils.getSyncError()).toBeUndefined(),
+    )
+    oracleAssertion(`lazy-app-write-oracle.test.ts:288:toBe`, () =>
+      expect(graph.status).toBe(`ready`),
+    )
     check()
   }
   const persisted: Array<Promise<unknown>> = []
@@ -295,7 +322,9 @@ async function receive(h: History, sdk: `javascript` | `react`) {
       await graph.preload()
       monitor = true
       await quiet()
-      expect(source.base.size).toBeLessThan(h.size)
+      oracleAssertion(`lazy-app-write-oracle.test.ts:300:toBeLessThan`, () =>
+        expect(source.base.size).toBeLessThan(h.size),
+      )
       reaches.add(`partial-source`)
       const sequence = [
         { kind: `insert` as const, rejected: false },
@@ -346,13 +375,17 @@ async function receive(h: History, sdk: `javascript` | `react`) {
         persisted.push(result)
         // The direct Collection read is synchronous; graph propagation has its
         // own publication boundary and is checked by the version monitor.
-        expect(
-          source.get(row.id) ? project(source.get(row.id)!) : undefined,
-        ).toEqual(cell.kind === `delete` ? undefined : row)
+        oracleAssertion(`lazy-app-write-oracle.test.ts:351:toEqual`, () =>
+          expect(
+            source.get(row.id) ? project(source.get(row.id)!) : undefined,
+          ).toEqual(cell.kind === `delete` ? undefined : row),
+        )
         await plan.entered.promise
         check()
         model.assertBackend((await writer.query(all, {})).map(project))
-        expect(model.rows()).toEqual(previous)
+        oracleAssertion(`lazy-app-write-oracle.test.ts:357:toEqual`, () =>
+          expect(model.rows()).toEqual(previous),
+        )
         const remote = {
           id: String(h.size - 1),
           rank: h.size - 1,
@@ -362,7 +395,9 @@ async function receive(h: History, sdk: `javascript` | `react`) {
           ...model.window(scope).at(-1)!,
           text: `${h.text}:visible-remote-${index}`,
         }
-        expect(visibleRemote.id).not.toBe(row.id)
+        oracleAssertion(`lazy-app-write-oracle.test.ts:367:toBe`, () =>
+          expect(visibleRemote.id).not.toBe(row.id),
+        )
         model.remote([
           { id: remote.id, row: remote },
           { id: visibleRemote.id, row: visibleRemote },
@@ -395,35 +430,48 @@ async function receive(h: History, sdk: `javascript` | `react`) {
             },
           )
           await waitFor(() => heldReceipts > before)
-          expect(
-            settled,
-            `demand growth escaped a persisting app handler`,
-          ).toBe(false)
+          oracleAssertion(`lazy-app-write-oracle.test.ts:400:toBe`, () =>
+            expect(
+              settled,
+              `demand growth escaped a persisting app handler`,
+            ).toBe(false),
+          )
           reaches.add(`growth-behind-app-receipt`)
         }
         if (!cell.rejected) model.offerConfirmation()
         notificationsHeld = true
         plan.before.resolve()
         await plan.server.promise
-        expect(Boolean(plan.error)).toBe(cell.rejected)
+        oracleAssertion(`lazy-app-write-oracle.test.ts:410:toBe`, () =>
+          expect(Boolean(plan!.error)).toBe(cell.rejected),
+        )
         model.acknowledge(!cell.rejected)
         await backend()
         model.startSettlement()
         plan.after.resolve()
         if (cell.rejected)
-          await expect(result).rejects.toThrow(`oracle rejected app write`)
+          await oracleAssertion(
+            `lazy-app-write-oracle.test.ts:416:toThrow`,
+            () => expect(result).rejects.toThrow(`oracle rejected app write`),
+          )
         else await result
         model.finishSettlement()
         const settledRow = model.rows().find((value) => value.id === row.id)
-        expect(
-          source.get(row.id) ? project(source.get(row.id)!) : undefined,
-          `app write law: source differs at application settlement`,
-        ).toEqual(settledRow)
-        if (!cell.rejected) {
+        oracleAssertion(`lazy-app-write-oracle.test.ts:420:toEqual`, () =>
           expect(
-            notifications.length,
-            `SDK notification-delay premise absent`,
-          ).toBeGreaterThan(0)
+            source.get(row.id) ? project(source.get(row.id)!) : undefined,
+            `app write law: source differs at application settlement`,
+          ).toEqual(settledRow),
+        )
+        if (!cell.rejected) {
+          oracleAssertion(
+            `lazy-app-write-oracle.test.ts:425:toBeGreaterThan`,
+            () =>
+              expect(
+                notifications.length,
+                `SDK notification-delay premise absent`,
+              ).toBeGreaterThan(0),
+          )
           reaches.add(`cached-confirmation-before-notification`)
         }
         releaseNotifications()
@@ -434,7 +482,9 @@ async function receive(h: History, sdk: `javascript` | `react`) {
         await quiet()
         reaches.add(`${cell.kind}:${cell.rejected ? `rejected` : `confirmed`}`)
       }
-      expect(source.base.size).toBeLessThan(model.rows().length)
+      oracleAssertion(`lazy-app-write-oracle.test.ts:439:toBeLessThan`, () =>
+        expect(source.base.size).toBeLessThan(model.rows().length),
+      )
       reaches.add(`unread-tail-after-writes`)
     },
     () => {
@@ -472,24 +522,61 @@ const states = [
   `javascript`,
   `react`,
 ] as const
-it(`receives app confirmations and atomic rejection on both sides during lazy acquisition`, async () => {
-  await runOracleCampaign(
-    `CONVEX_LAZY_APP_ORACLE`,
-    states,
-    (reach, parameters) =>
-      fc.assert(
-        fc.asyncProperty(grammar, async (h) => {
-          reach.beginHistory()
-          for (const [sdk, observed] of await receiveBothSdks((kind) =>
-            receive(h, kind),
-          )) {
-            for (const state of states)
-              if (observed.has(state)) reach.reach(state)
-            reach.reach(sdk)
-          }
-        }),
-        { numRuns: lazyOracleRuns(4), ...parameters },
-      ),
-    { fixedSeed: 20261030 },
-  )
-}, 120000)
+
+const convex_lazy_appHistory = grammar
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_lazy_appJudgment(
+  h: AssertionHistory<typeof convex_lazy_appHistory>,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  for (const [sdk, observed] of await receiveBothSdks((kind) =>
+    receive(h, kind),
+  )) {
+    for (const state of states) if (observed.has(state)) reach.reach(state)
+    reach.reach(sdk)
+  }
+}
+
+oracleProperty({
+  id: `convex.lazy-app`,
+  law: {
+    statement: `receives app confirmations and atomic rejection on both sides during lazy acquisition`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+  },
+  histories: {
+    arbitrary: convex_lazy_appHistory,
+    runs: lazyOracleBaseRuns(4),
+    fixedSeeds: [20261030],
+    measured: states,
+  },
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  // Every old bundle already constructs all its required states. Preserve
+  // its small backend run budget by checking that same reach per bundle,
+  // instead of adding another complete backend bundle as a native constructor.
+  driver: async (plan, observe) => {
+    const reached = new Set<string>()
+    await recordAssertionJudgment(
+      `convex.lazy-app`,
+      plan,
+      observe,
+      async () => {
+        await convex_lazy_appJudgment(plan.history, {
+          beginHistory: () => {},
+          reach: (state) => {
+            reached.add(state)
+            observe(`reach`, state)
+          },
+        })
+        oracleAssertion(`required state reach`, () =>
+          expect(states.filter((state) => !reached.has(state))).toEqual([]),
+        )
+      },
+    )
+  },
+  timeout: 120000,
+})

@@ -28,9 +28,17 @@ import {
   referenceRequestPredicate,
   withCleanup,
 } from './includes-cross-formulation-support.js'
+import {
+  assertTlpPartitions,
+  partitionAndRouteScenario,
+  recomputeNestedModel,
+  recomputeWindowedModel,
+  sharedRouteDeletionScenario,
+} from './includes-cross-formulation-model-oracle.js'
 import type { BasicExpression } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 import type {
+  ChildRow,
   FlatRow,
   NormalizedParent,
   ReferenceChild,
@@ -507,4 +515,117 @@ describe(`includes cross-formulation oracle`, () => {
       ])
     },
   )
+})
+
+// Model and checker calibrations for the cross-formulation oracle. They run no
+// production: the first steps the relationship and window models through the
+// named scenarios, and the second feeds the TLP check a wrong partition.
+describe(`includes cross-formulation model and checker`, () => {
+  test(`bounded grammar axes distinguish routes, order, partitions, and windows`, () => {
+    const parents = new Map(
+      partitionAndRouteScenario.parents.map((row) => [row.id, row]),
+    )
+    const children = new Map(
+      partitionAndRouteScenario.children.map((row) => [row.id, row]),
+    )
+    const ids = (rows: ReadonlyArray<NormalizedParent>) =>
+      rows.map((row) => ({
+        id: row.id,
+        children: row.children.map((c) => c.id),
+      }))
+
+    expect(ids(recomputeNestedModel(parents, children))).toEqual([
+      { id: 1, children: [11, 10] },
+      { id: 0, children: [11, 10] },
+    ])
+    parents.set(0, { id: 0, group: 1, position: 1 })
+    expect(ids(recomputeNestedModel(parents, children))).toEqual([
+      { id: 1, children: [11, 10] },
+      { id: 0, children: [12] },
+    ])
+    children.set(12, { ...children.get(12)!, parentGroup: 0 })
+    expect(ids(recomputeNestedModel(parents, children))).toEqual([
+      { id: 1, children: [12, 11, 10] },
+      { id: 0, children: [] },
+    ])
+    parents.set(0, { id: 0, group: 0, position: -1 })
+    expect(ids(recomputeNestedModel(parents, children))).toEqual([
+      { id: 0, children: [12, 11, 10] },
+      { id: 1, children: [12, 11, 10] },
+    ])
+    expect(
+      recomputeWindowedModel(parents, children, 0, 0).map(
+        (row) => row.children.length,
+      ),
+    ).toEqual([0, 0])
+    expect(ids(recomputeWindowedModel(parents, children, 1, 2))).toEqual([
+      { id: 0, children: [11, 10] },
+      { id: 1, children: [11, 10] },
+    ])
+    expect(ids(recomputeWindowedModel(parents, children, 2, 3))).toEqual([
+      { id: 0, children: [10] },
+      { id: 1, children: [10] },
+    ])
+
+    // The three child scores cover true, false, and unknown at pivot 0.
+    // Moving the pivot to -2 moves -1 into the complement; replacing null
+    // with a number removes the unknown partition. These are independent of
+    // the query evaluator used by the TLP production formulation.
+    const partition = (pivot: number) =>
+      [...children.values()].map((child) => ({
+        id: child.id,
+        branch:
+          child.score === null
+            ? `unknown`
+            : child.score < pivot
+              ? `predicate`
+              : `complement`,
+      }))
+    expect(partition(0)).toEqual([
+      { id: 10, branch: `unknown` },
+      { id: 11, branch: `predicate` },
+      { id: 12, branch: `complement` },
+    ])
+    expect(partition(-2)).toEqual([
+      { id: 10, branch: `unknown` },
+      { id: 11, branch: `complement` },
+      { id: 12, branch: `complement` },
+    ])
+    children.set(10, { ...children.get(10)!, score: 0 })
+    expect(partition(0).find((row) => row.id === 10)?.branch).toBe(`complement`)
+
+    const sharedChildren = new Map(
+      sharedRouteDeletionScenario.children.map((row) => [row.id, row]),
+    )
+    const sharedParents = new Map(
+      sharedRouteDeletionScenario.parents.map((row) => [row.id, row]),
+    )
+    expect(ids(recomputeNestedModel(sharedParents, sharedChildren))).toEqual([
+      { id: 0, children: [10, 11, 12] },
+      { id: 1, children: [10, 11, 12] },
+    ])
+    sharedChildren.delete(10)
+    expect(ids(recomputeNestedModel(sharedParents, sharedChildren))).toEqual([
+      { id: 0, children: [11, 12] },
+      { id: 1, children: [11, 12] },
+    ])
+  })
+
+  test(`TLP checker rejects a wrong branch even when the union is complete`, () => {
+    const rows: Array<ChildRow> = [
+      { id: 10, parentGroup: 0, score: null, position: 0 },
+      { id: 11, parentGroup: 0, score: -1, position: 1 },
+      { id: 12, parentGroup: 0, score: 1, position: 2 },
+    ]
+    const correct = [[rows[1]!], [rows[2]!], [rows[0]!]]
+    assertTlpPartitions(correct, rows, 0, `TLP calibration`)
+    const wrong = [[rows[0]!], [rows[2]!], [rows[1]!]]
+    expect(wrong.flat()).toHaveLength(rows.length)
+    expect(new Set(wrong.flat().map((row) => row.id))).toEqual(
+      new Set(rows.map((row) => row.id)),
+    )
+    expect(() =>
+      assertTlpPartitions(wrong, rows, 0, `TLP calibration`),
+    ).toThrow(`TLP calibration predicate partition`)
+  })
 })

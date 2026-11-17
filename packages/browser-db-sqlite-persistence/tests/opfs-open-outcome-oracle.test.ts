@@ -9,22 +9,24 @@
  * initialization requests that a loaded worker receives.
  *
  * No asset lookup runs here, because only the package build defines it. The
- * Chromium driver in `e2e/opfs-open-outcome-oracle.e2e.test.ts` supplies the
+ * Chromium driver in `e2e/opfs-open-outcome-witness.e2e.test.ts` supplies the
  * lookup and the real worker's WASM fetch.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { oracleRoute } from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
+import { afterEach, describe, vi } from 'vitest'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { openBrowserWASQLiteOPFSDatabase } from '../src/opfs-database'
 import {
   describeHistory,
   expectOpenOutcome,
-  expectedOpenOutcome,
   openHistories,
-  reachedOutcomes,
 } from './opfs-open-outcome-oracle'
+import { jsdomReach } from './opfs-open-outcome-jsdom-grammar-oracle'
 import type {
-  OpenDriverReach,
   OpenHistory,
   OpenObservation,
   OpenSettlement,
@@ -35,21 +37,9 @@ import type {
 } from '../src/opfs-worker-protocol'
 
 // The helper module declares the law and model; this driver is the only
-// production path that its open histories reach.
-declareOracle({
-  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
-  check: [expectOpenOutcome],
-  model: [expectedOpenOutcome],
-  grammar: [openHistories],
-})
-
-const jsdomReach: OpenDriverReach = {
-  lookup: [`not needed`],
-  workerStart: [`starts`, `throws`, `fails to load`],
-  wasm: [`loads`, `fails`],
-  init: [`answers`, `silent`],
-  interrupt: [`none`, `deadline`, `abort`],
-}
+// production path that its open histories reach. The grammar check that these
+// histories reach every outcome the driver controls is an ordinary test of
+// test code, in opfs-open-outcome-jsdom-grammar.test.ts.
 const histories = openHistories(jsdomReach)
 const deadlineMs = 40
 
@@ -220,23 +210,27 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
   return observation
 }
 
+// Each enumerated open history runs through the jsdom driver, and the helper
+// module's refinement check, expectOpenOutcome, judges the observation against
+// its expectedOpenOutcome model. The adapter transports that judgment.
+const openOutcomeLaw = `OPFS open outcome`
 describe(`OPFS open outcome oracle (jsdom driver)`, () => {
-  it(`reaches every outcome that this driver controls`, () => {
-    oracleRoute(`case`)
-    expect(reachedOutcomes(histories)).toEqual([
-      `initialization: AbortError`,
-      `initialization: TimeoutError`,
-      `none: opened`,
-      `wasm: PersistenceUnavailableError`,
-      `worker start: PersistenceUnavailableError`,
-    ])
-  })
-
-  it.each(histories.map((history) => [describeHistory(history), history]))(
-    `%s`,
-    async (_name, history) => {
-      oracleRoute(`case`)
-      expectOpenOutcome(history, await runOpenHistory(history))
+  oracleProperty({
+    id: `opfs.open-outcome`,
+    law: {
+      statement: `An OPFS open settles as the open outcome model predicts: a capability failure rejects with PersistenceUnavailableError, the deadline with TimeoutError, and an abort with its reason; a failed or interrupted open terminates the worker it started, and a later open can still succeed.`,
+      authority: `The README's open settlement promise, as opfs-open-outcome-oracle.ts states it.`,
+      limits: `The enumerated open histories that the jsdom driver controls; no asset lookup and no real worker WASM fetch (the Chromium witness supplies both).`,
     },
-  )
+    owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+    histories,
+    label: describeHistory,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(openOutcomeLaw, plan, observe, async () => {
+        expectOpenOutcome(plan.history, await runOpenHistory(plan.history))
+      }),
+    check: forwardAssertionJudgment,
+  })
 })

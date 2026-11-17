@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 1.0.0-rc.1.3
+
+### Patch Changes
+
+- Update runtime dependencies while preserving the public API and CommonJS loading. Preserve Solid reactivity for own data fields and persist Electric snapshot resume checkpoints before subset loads succeed. ([#2374](https://github.com/TanStack/db/pull/2374))
+
 ## 1.0.0-rc.1.2
 
 ### Patch Changes

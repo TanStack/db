@@ -327,6 +327,15 @@ export class OrderedSourceLoader {
       return this.pending
     }
     this.blockedLoadMore = undefined
+    // A repair step that a staged continuation or a blocked window move
+    // resumes after the chain's epoch moved starts the replacement instead:
+    // the obsolete chain issues no further tie or refill. A staged boundary
+    // step reaches this check too, because the invalidation cleared the
+    // settled boundary it would read.
+    if (continuesOrderedPrefixRepair && this.repairNeedsReplacement()) {
+      this.finishOrderedPrefixRepair(windowOperationGeneration)
+      return this.pending
+    }
     // A finite step staged under ordering debt cannot run ahead of the owed
     // read. An invalidation drops it. A failure, even one from before a
     // cursor reset that keeps the work staged after it, clears the boundary,

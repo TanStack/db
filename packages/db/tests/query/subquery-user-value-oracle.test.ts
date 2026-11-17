@@ -1,5 +1,5 @@
 import { D2, MultiSet, output } from '@tanstack/db-ivm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import {
   count,
   createLiveQueryCollection,
@@ -10,8 +10,12 @@ import { buildQuery } from '../../src/query/builder/index.js'
 import { compileQuery } from '../../src/query/compiler/index.js'
 import { collectCollectionSources } from '../../src/query/ir.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
-import { oracleRoute } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+import { oracleProperty } from '../oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import { stripVirtualProps } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 
@@ -124,23 +128,13 @@ function expectedFindOneCandidates(
     .sort((left, right) => left.personId - right.personId)
 }
 
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/query/compiler/index.ts#compileQuery',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
-  check: [expectPublicSnapshotFollowsModel],
-  model: [
-    expectedDistinctRows,
-    expectedAggregateJoinRows,
-    expectedFindOneCandidates,
-  ],
-})
+// Each named history below runs real live-query Collections and compares the
+// public snapshot with the models above, through
+// `expectPublicSnapshotFollowsModel` or the history's own comparisons.
+const subqueryAuthority = `The query API and the live-query architecture's public surface law, as stated at the start of this owner.`
 
 describe('subquery boundaries preserve operators and user rows', () => {
-  it('joins the distinct subquery result before applying the outer WHERE', async () => {
-    oracleRoute(`fixed history`)
+  async function runDistinctOuterWhereHistory(): Promise<void> {
     const persons = createControlledCollection<Person>(
       'distinct-outer-persons',
       people,
@@ -228,10 +222,9 @@ describe('subquery boundaries preserve operators and user rows', () => {
       await persons.collection.cleanup()
       await tagRows.collection.cleanup()
     }
-  })
+  }
 
-  it('recomputes a joined DISTINCT result after source writes', async () => {
-    oracleRoute(`fixed history`)
+  async function runJoinedDistinctWritesHistory(): Promise<void> {
     const persons = createControlledCollection<Person>(
       'distinct-history-persons',
       people,
@@ -300,10 +293,9 @@ describe('subquery boundaries preserve operators and user rows', () => {
         () => tagRows.collection.cleanup(),
       ],
     )
-  })
+  }
 
-  it('recomputes a joined aggregate QueryRef after source writes', async () => {
-    oracleRoute(`fixed history`)
+  async function runJoinedAggregateWritesHistory(): Promise<void> {
     const initialItems = [{ id: 1 }, { id: 2 }]
     const initialPeople = [{ id: 2 }]
     const source = createControlledCollection(
@@ -374,13 +366,12 @@ describe('subquery boundaries preserve operators and user rows', () => {
         () => persons.collection.cleanup(),
       ],
     )
-  })
+  }
 
   // A flat aggregate is legal by the query builder and has the same one-row
   // count as the nested aggregate above. Check the exact public row when
   // source counts and matching people change.
-  it('publishes a flat aggregate QueryRef join through source writes', async () => {
-    oracleRoute(`fixed history`)
+  async function runFlatAggregateJoinHistory(): Promise<void> {
     const source = createControlledCollection('flat-aggregate-items', [
       { id: 1 },
       { id: 2 },
@@ -439,12 +430,11 @@ describe('subquery boundaries preserve operators and user rows', () => {
         () => persons.collection.cleanup(),
       ],
     )
-  })
+  }
 
   // The public builder documents findOne() as returning the first result.
   // The nested QueryRef must reduce the candidates before the outer join.
-  it('publishes one ordered joined findOne QueryRef row through source writes', async () => {
-    oracleRoute(`fixed history`)
+  async function runOrderedFindOneHistory(): Promise<void> {
     const initialPeople = [
       { id: 1, groupId: 1 },
       { id: 2, groupId: 2 },
@@ -547,10 +537,9 @@ describe('subquery boundaries preserve operators and user rows', () => {
     for (const { checkpoint, actual, expected } of snapshots) {
       expect(actual, checkpoint).toEqual(expected)
     }
-  })
+  }
 
-  it('materializes one joined findOne value after source writes', async () => {
-    oracleRoute(`fixed history`)
+  async function runMaterializedFindOneHistory(): Promise<void> {
     const initialPeople = [
       { id: 1, groupId: 1, scope: 1 },
       { id: 2, groupId: 2, scope: 1 },
@@ -630,5 +619,149 @@ describe('subquery boundaries preserve operators and user rows', () => {
         () => anchors.collection.cleanup(),
       ],
     )
+  }
+
+  oracleProperty({
+    id: `subquery-user-value.distinct-outer-where`,
+    law: {
+      statement: `A DISTINCT QueryRef result is formed before the outer join and WHERE.`,
+      authority: subqueryAuthority,
+      limits: `One excluded outer row at preload.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [
+      `joins the distinct subquery result before applying the outer WHERE`,
+    ],
+    label: (history) => history,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`subquery user values`, plan, observe, () =>
+        runDistinctOuterWhereHistory(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `subquery-user-value.joined-distinct-writes`,
+    law: {
+      statement: `A joined DISTINCT QueryRef result is recomputed from source rows after each source write.`,
+      authority: subqueryAuthority,
+      limits: `One history that removes and restores duplicate support, then flips the outer predicate.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [`recomputes a joined DISTINCT result after source writes`],
+    label: (history) => history,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`subquery user values`, plan, observe, () =>
+        runJoinedDistinctWritesHistory(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `subquery-user-value.joined-aggregate-writes`,
+    law: {
+      statement: `A joined aggregate QueryRef is recomputed from source rows after each source write.`,
+      authority: subqueryAuthority,
+      limits: `One nested aggregate history, compared at each synchronous source write.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [`recomputes a joined aggregate QueryRef after source writes`],
+    label: (history) => history,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`subquery user values`, plan, observe, () =>
+        runJoinedAggregateWritesHistory(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `subquery-user-value.flat-aggregate-join`,
+    law: {
+      statement: `A flat aggregate QueryRef join publishes the model rows through source writes.`,
+      authority: subqueryAuthority,
+      limits: `One flat aggregate join history.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [
+      `publishes a flat aggregate QueryRef join through source writes`,
+    ],
+    label: (history) => history,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`subquery user values`, plan, observe, () =>
+        runFlatAggregateJoinHistory(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `subquery-user-value.ordered-find-one`,
+    law: {
+      statement: `A joined findOne QueryRef publishes one ordered candidate row through source writes.`,
+      authority: subqueryAuthority,
+      limits: `One joined findOne history across the initial, singleton, empty, restored, and default-key candidate cuts.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [
+      `publishes one ordered joined findOne QueryRef row through source writes`,
+    ],
+    label: (history) => history,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`subquery user values`, plan, observe, () =>
+        runOrderedFindOneHistory(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `subquery-user-value.materialized-find-one`,
+    law: {
+      statement: `A materialized joined findOne value follows the model candidate after source writes.`,
+      authority: subqueryAuthority,
+      limits: `One materialized control at the receiving boundary.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [`materializes one joined findOne value after source writes`],
+    label: (history) => history,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`subquery user values`, plan, observe, () =>
+        runMaterializedFindOneHistory(),
+      ),
+    check: forwardAssertionJudgment,
   })
 })

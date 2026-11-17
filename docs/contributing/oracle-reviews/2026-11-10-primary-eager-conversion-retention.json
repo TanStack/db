@@ -1,0 +1,576 @@
+{
+  "head": "777935fd68daa497fdd3c9db533845b710be68a1",
+  "parent": "c4c00b20b6c91549a2b9fe502096d0841520f3fe",
+  "seed": 2367,
+  "requiredStableOperatorKills": 12,
+  "retainedStableOperatorKills": 12,
+  "adapters": {
+    "rxdb": {
+      "run": {
+        "id": "5f5866b66af7",
+        "inputs": "1 source files, 4 oracle files, 1 ordinary test files, 1 authored mutants, seed 2367, pool forks; a partial run (--only or --sample)"
+      },
+      "requiredStableOperatorKills": 6,
+      "retainedStableOperatorKills": 6,
+      "stableOperatorComparison": [
+        {
+          "key": "src/rxdb.ts#sync:binary-swap:const persistence = params . metadata === undefined ? null : validateSyncPersistenceCapability ( params . metadata . persistence )",
+          "beforeId": "rxdb.ts:M3",
+          "afterId": "rxdb.ts:M3",
+          "afterOutcome": "killed"
+        },
+        {
+          "key": "src/rxdb.ts#sync:value-undefined:const persistence = params . metadata === undefined ? null : validateSyncPersistenceCapability ( params . metadata . persistence )",
+          "beforeId": "rxdb.ts:M4",
+          "afterId": "rxdb.ts:M4",
+          "afterOutcome": "killed"
+        },
+        {
+          "key": "src/rxdb.ts#initialFetch:field-drop:begin ( { snapshot : persistence !== null || ! collection . _state . acceptedSyncedEntries ( ) . next ( ) . done , } )",
+          "beforeId": "rxdb.ts:M7",
+          "afterId": "rxdb.ts:M7",
+          "afterOutcome": "killed"
+        },
+        {
+          "key": "src/rxdb.ts#initialFetch:binary-swap:begin ( { snapshot : persistence !== null || ! collection . _state . acceptedSyncedEntries ( ) . next ( ) . done , } )",
+          "beforeId": "rxdb.ts:M8",
+          "afterId": "rxdb.ts:M8",
+          "afterOutcome": "killed"
+        },
+        {
+          "key": "src/rxdb.ts#initialFetch:binary-swap:begin ( { snapshot : persistence !== null || ! collection . _state . acceptedSyncedEntries ( ) . next ( ) . done , } )~2",
+          "beforeId": "rxdb.ts:M9",
+          "afterId": "rxdb.ts:M9",
+          "afterOutcome": "killed"
+        },
+        {
+          "key": "src/rxdb.ts#initialFetch:drop-not:begin ( { snapshot : persistence !== null || ! collection . _state . acceptedSyncedEntries ( ) . next ( ) . done , } )",
+          "beforeId": "rxdb.ts:M10",
+          "afterId": "rxdb.ts:M10",
+          "afterOutcome": "killed"
+        }
+      ],
+      "excluded": [],
+      "nondeterministic": [],
+      "outcomes": {
+        "killed": 6,
+        "does-not-apply": 1
+      },
+      "adaptedSemanticControl": {
+        "run": {
+          "id": "d48451ac1f6a",
+          "inputs": "1 source files, 4 oracle files, 1 ordinary test files, 1 authored mutants, seed 2367, pool forks; a partial run (--only or --sample)"
+        },
+        "results": [
+          {
+            "id": "authored:pending-baseline-is-not-snapshot",
+            "key": "src/rxdb.ts#authored:pending-baseline-is-not-snapshot",
+            "outcome": "killed",
+            "by": [
+              "persisted startup conformance: RxDB > adapter.rxdb.persisted-startup through controlled > adapter.rxdb.persisted-startup > fixed seed 2367"
+            ]
+          }
+        ],
+        "excluded": [],
+        "nondeterministic": []
+      }
+    },
+    "powersync": {
+      "run": {
+        "id": "96e1e23c1c70",
+        "inputs": "1 source files, 4 oracle files, 10 ordinary test files, 1 authored mutants, seed 2367, pool forks; a partial run (--only or --sample)"
+      },
+      "requiredStableOperatorKills": 6,
+      "retainedStableOperatorKills": 6,
+      "stableOperatorComparison": [
+        {
+          "key": "src/powersync.ts#sync:binary-swap:const persistence = params . metadata === undefined ? null : validateSyncPersistenceCapability ( params . metadata . persistence )",
+          "beforeId": "powersync.ts:M35",
+          "afterId": "powersync.ts:M35",
+          "afterOutcome": "killed"
+        },
+        {
+          "key": "src/powersync.ts#sync:value-undefined:const persistence = params . metadata === undefined ? null : validateSyncPersistenceCapability ( params . metadata . persistence )",
+          "beforeId": "powersync.ts:M36",
+          "afterId": "powersync.ts:M36",
+          "afterOutcome": "killed"
+        },
+        {
+          "key": "src/powersync.ts#runEagerSync:field-drop:await establishTracking ( { snapshot : persistence !== null || ! collection . _state . acceptedSyncedEntries ( ) . next ( ) . done , when : { [ DiffTriggerOperation . INSERT ] : `TRUE` , [ DiffTriggerOperation . UPDATE ] : `TRUE` , [ DiffTriggerOperation . DELETE ] : `TRUE` , } , writeType : ( _rowId : string ) => `insert` , batchQuery : ( lockContext : LockContext , batchSize : number , cursor : number , ) => lockContext . getAll < TableType > ( sanitizeSQL `SELECT * FROM ${ viewName } LIMIT ? OFFSET ? `,\n                  [batchSize, cursor],\n                ),\n            },\n            appliedReceipts,\n          )",
+          "beforeId": "powersync.ts:M162",
+          "afterId": "powersync.ts:M162",
+          "afterOutcome": "killed"
+        },
+        {
+          "key": "src/powersync.ts#runEagerSync:binary-swap:await establishTracking ( { snapshot : persistence !== null || ! collection . _state . acceptedSyncedEntries ( ) . next ( ) . done , when : { [ DiffTriggerOperation . INSERT ] : `TRUE` , [ DiffTriggerOperation . UPDATE ] : `TRUE` , [ DiffTriggerOperation . DELETE ] : `TRUE` , } , writeType : ( _rowId : string ) => `insert` , batchQuery : ( lockContext : LockContext , batchSize : number , cursor : number , ) => lockContext . getAll < TableType > ( sanitizeSQL `SELECT * FROM ${ viewName } LIMIT ? OFFSET ? `,\n                  [batchSize, cursor],\n                ),\n            },\n            appliedReceipts,\n          )",
+          "beforeId": "powersync.ts:M163",
+          "afterId": "powersync.ts:M163",
+          "afterOutcome": "killed"
+        },
+        {
+          "key": "src/powersync.ts#runEagerSync:binary-swap:await establishTracking ( { snapshot : persistence !== null || ! collection . _state . acceptedSyncedEntries ( ) . next ( ) . done , when : { [ DiffTriggerOperation . INSERT ] : `TRUE` , [ DiffTriggerOperation . UPDATE ] : `TRUE` , [ DiffTriggerOperation . DELETE ] : `TRUE` , } , writeType : ( _rowId : string ) => `insert` , batchQuery : ( lockContext : LockContext , batchSize : number , cursor : number , ) => lockContext . getAll < TableType > ( sanitizeSQL `SELECT * FROM ${ viewName } LIMIT ? OFFSET ? `,\n                  [batchSize, cursor],\n                ),\n            },\n            appliedReceipts,\n          )~2",
+          "beforeId": "powersync.ts:M164",
+          "afterId": "powersync.ts:M164",
+          "afterOutcome": "killed"
+        },
+        {
+          "key": "src/powersync.ts#runEagerSync:drop-not:await establishTracking ( { snapshot : persistence !== null || ! collection . _state . acceptedSyncedEntries ( ) . next ( ) . done , when : { [ DiffTriggerOperation . INSERT ] : `TRUE` , [ DiffTriggerOperation . UPDATE ] : `TRUE` , [ DiffTriggerOperation . DELETE ] : `TRUE` , } , writeType : ( _rowId : string ) => `insert` , batchQuery : ( lockContext : LockContext , batchSize : number , cursor : number , ) => lockContext . getAll < TableType > ( sanitizeSQL `SELECT * FROM ${ viewName } LIMIT ? OFFSET ? `,\n                  [batchSize, cursor],\n                ),\n            },\n            appliedReceipts,\n          )",
+          "beforeId": "powersync.ts:M165",
+          "afterId": "powersync.ts:M165",
+          "afterOutcome": "killed"
+        }
+      ],
+      "excluded": [],
+      "nondeterministic": [],
+      "outcomes": {
+        "killed": 6,
+        "does-not-apply": 1
+      },
+      "adaptedSemanticControl": {
+        "state": "not rerun: identical receiving inputs retain prior evidence",
+        "originalRun": "79ea5f23bdad",
+        "originalOutcome": "killed",
+        "receivingInputComparison": {
+          "semanticControlRun": "79ea5f23bdad",
+          "controlOutcome": "killed",
+          "receivingUnit": "/private/tmp/tanstack-db-2394-conversion-audit-4b71d9d/packages/powersync-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts",
+          "capturedLocalSourceInputs": [
+            "packages/powersync-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts",
+            "packages/powersync-db-collection/tests/persisted-startup-driver.ts",
+            "packages/powersync-db-collection/tests/persisted-startup-common.ts",
+            "packages/db-adapter-conformance/tests/persisted-startup-oracle.ts",
+            "packages/db-sqlite-persistence-core/tests/reload-class-oracle.ts",
+            "packages/db/.oracle-gaps/bundle-4792d1a926ef4e18.mjs",
+            "packages/powersync-db-collection/src/index.ts",
+            "packages/powersync-db-collection/src/powersync.ts",
+            "packages/powersync-db-collection/tests/test-db-implementation.ts",
+            "packages/db-sqlite-persistence-core/src/index.ts",
+            "packages/db-adapter-conformance/tests/persisted-startup-oracle-suite.ts",
+            "packages/powersync-db-collection/src/PowerSyncTransactor.ts",
+            "packages/db-sqlite-persistence-core/src/persisted.ts",
+            "packages/db/tests/oracle-config.ts",
+            "packages/db-sqlite-persistence-core/src/sqlite-core-adapter.ts",
+            "packages/db-adapter-conformance/tests/persisted-startup-host.ts",
+            "packages/db-ivm/.oracle-gaps/bundle-24cb8e3a22ece0b1.mjs",
+            "packages/db/tests/oracle-declaration.ts",
+            "packages/powersync-db-collection/src/PendingOperationStore.ts",
+            "packages/db-adapter-conformance/tests/persisted-startup-driver.ts",
+            "packages/db-sqlite-persistence-core/src/remote-subset-wire.ts",
+            "packages/db-sqlite-persistence-core/src/errors.ts",
+            "packages/powersync-db-collection/src/sqlite-compiler.ts",
+            "packages/browser-db-sqlite-persistence/src/wa-sqlite-driver.ts",
+            "packages/powersync-db-collection/src/schema.ts",
+            "packages/powersync-db-collection/src/serialization.ts",
+            "packages/db-sqlite-persistence-core/src/sqlite-value.ts",
+            "packages/powersync-db-collection/src/definitions.ts",
+            "packages/powersync-db-collection/src/helpers.ts",
+            "packages/db-adapter-conformance/tests/memory-persistence.ts",
+            "packages/db/tests/oracle-cleanup.ts",
+            "packages/db-sqlite-persistence-core/src/remote-subset-owner.ts",
+            "packages/db-sqlite-persistence-core/src/committed-tx-anchor.ts"
+          ],
+          "changedReceivingInputs": [],
+          "conversionOnlyPaths": [
+            "packages/db-adapter-conformance/src/eager-live-source-oracle.ts",
+            "packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts",
+            "packages/db-adapter-conformance/tests/eager-live-source-oracle-suite.ts",
+            "packages/powersync-db-collection/tests/eager-live-source-history-oracle.ts",
+            "packages/rxdb-db-collection/tests/eager-live-source-history-oracle.ts",
+            "packages/powersync-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts",
+            "packages/rxdb-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts"
+          ],
+          "note": "Application source and persisted-startup receiving law are unchanged. This receiver killed the adapted semantic control before the seven-file primary conversion; repeat only if a changed receiving input requires distinct proof.",
+          "comparedInputHashes": {
+            "packages/powersync-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts": {
+              "before": "7568d4ea2858b7ab98b046c4ecb289f7b4e9389025e0f86027989978dbb41e30",
+              "after": "7568d4ea2858b7ab98b046c4ecb289f7b4e9389025e0f86027989978dbb41e30"
+            },
+            "packages/powersync-db-collection/tests/persisted-startup-driver.ts": {
+              "before": "de56d4941d2992534e5bfecf99e46d7b67ba0b5d0c5df8601cdf6c795144463c",
+              "after": "de56d4941d2992534e5bfecf99e46d7b67ba0b5d0c5df8601cdf6c795144463c"
+            },
+            "packages/powersync-db-collection/tests/persisted-startup-common.ts": {
+              "before": "d0a41302b4665d082748ef50d17cb8b2b82a3b041f3caca1a8321f2a844513c2",
+              "after": "d0a41302b4665d082748ef50d17cb8b2b82a3b041f3caca1a8321f2a844513c2"
+            },
+            "packages/db-adapter-conformance/tests/persisted-startup-oracle.ts": {
+              "before": "ec7671a2cf02b0d6330a647a19c0b7deec66a103d8787fd9f0451f32fcbb9281",
+              "after": "ec7671a2cf02b0d6330a647a19c0b7deec66a103d8787fd9f0451f32fcbb9281"
+            },
+            "packages/db-sqlite-persistence-core/tests/reload-class-oracle.ts": {
+              "before": "87ff35044401acb2ec0e175b2a0b5a575f078d9978f9e92033ea41bf52dfd707",
+              "after": "87ff35044401acb2ec0e175b2a0b5a575f078d9978f9e92033ea41bf52dfd707"
+            },
+            "packages/db/.oracle-gaps/bundle-4792d1a926ef4e18.mjs": {
+              "before": "9427ecb491f93b5246ab19211d25b457137087459dc697150abc27212e4989ec",
+              "after": "9427ecb491f93b5246ab19211d25b457137087459dc697150abc27212e4989ec"
+            },
+            "packages/powersync-db-collection/src/index.ts": {
+              "before": "38ae6d53f204ad1120830a3218802fba253812da56e1f3dffe09f3f418a8ee6f",
+              "after": "38ae6d53f204ad1120830a3218802fba253812da56e1f3dffe09f3f418a8ee6f"
+            },
+            "packages/powersync-db-collection/src/powersync.ts": {
+              "before": "d945eb99bff416fc9c7ba041a802fa842072e5cf03a71d02dd2ed214610df408",
+              "after": "d945eb99bff416fc9c7ba041a802fa842072e5cf03a71d02dd2ed214610df408"
+            },
+            "packages/powersync-db-collection/tests/test-db-implementation.ts": {
+              "before": "d78e942503c13f3cbb67744cefb186f203053ef09ebbf1bf273e457558008f4f",
+              "after": "d78e942503c13f3cbb67744cefb186f203053ef09ebbf1bf273e457558008f4f"
+            },
+            "packages/db-sqlite-persistence-core/src/index.ts": {
+              "before": "b8dfb2bca10830d4a88d87e6c481b2eebd15021d72c19be89dd566deed105c4a",
+              "after": "b8dfb2bca10830d4a88d87e6c481b2eebd15021d72c19be89dd566deed105c4a"
+            },
+            "packages/db-adapter-conformance/tests/persisted-startup-oracle-suite.ts": {
+              "before": "4616fecfbfe811338003197706b3e3839e911a55c6402ce21c63b5893f5a031a",
+              "after": "4616fecfbfe811338003197706b3e3839e911a55c6402ce21c63b5893f5a031a"
+            },
+            "packages/powersync-db-collection/src/PowerSyncTransactor.ts": {
+              "before": "62fc82ef7d0647651973429e289a7b12f2245f340ebf3e102ff0095ddecfb98a",
+              "after": "62fc82ef7d0647651973429e289a7b12f2245f340ebf3e102ff0095ddecfb98a"
+            },
+            "packages/db-sqlite-persistence-core/src/persisted.ts": {
+              "before": "96d8ed9ff3ef38e9c8862ff576e8bc16c8977daef492778e1a102eaddd542f04",
+              "after": "96d8ed9ff3ef38e9c8862ff576e8bc16c8977daef492778e1a102eaddd542f04"
+            },
+            "packages/db/tests/oracle-config.ts": {
+              "before": "1485c940fe28b4da67fc0416aa65e10eb303e2a269833d733aa60afae04707c7",
+              "after": "1485c940fe28b4da67fc0416aa65e10eb303e2a269833d733aa60afae04707c7"
+            },
+            "packages/db-sqlite-persistence-core/src/sqlite-core-adapter.ts": {
+              "before": "406e4058b85055fc7972c18786f9461856aa46c90932f6346dc6faccd1106a0c",
+              "after": "406e4058b85055fc7972c18786f9461856aa46c90932f6346dc6faccd1106a0c"
+            },
+            "packages/db-adapter-conformance/tests/persisted-startup-host.ts": {
+              "before": "181bdd316e64db99c0c9a779eb3d712817dfc47c7d1f92d8b51ad6bd18741e0a",
+              "after": "181bdd316e64db99c0c9a779eb3d712817dfc47c7d1f92d8b51ad6bd18741e0a"
+            },
+            "packages/db-ivm/.oracle-gaps/bundle-24cb8e3a22ece0b1.mjs": {
+              "before": "709480d0f96995f2f9e5eee132ae926e9e2f404bc03a8160801e7726b15b1916",
+              "after": "709480d0f96995f2f9e5eee132ae926e9e2f404bc03a8160801e7726b15b1916"
+            },
+            "packages/db/tests/oracle-declaration.ts": {
+              "before": "43171d5c71763a99d6bfcf04a06ff1e3cd4735ec3af19a7214ddcc96c73ad76f",
+              "after": "43171d5c71763a99d6bfcf04a06ff1e3cd4735ec3af19a7214ddcc96c73ad76f"
+            },
+            "packages/powersync-db-collection/src/PendingOperationStore.ts": {
+              "before": "1990ef80299439fc9acb7b86aecd1051e1c71d2230e9ac5f05c69e1e3425e36c",
+              "after": "1990ef80299439fc9acb7b86aecd1051e1c71d2230e9ac5f05c69e1e3425e36c"
+            },
+            "packages/db-adapter-conformance/tests/persisted-startup-driver.ts": {
+              "before": "e38e3a1635f6f6cfe9cdf9e3ec403da69d2b8b610d0249416c9f31163917e21b",
+              "after": "e38e3a1635f6f6cfe9cdf9e3ec403da69d2b8b610d0249416c9f31163917e21b"
+            },
+            "packages/db-sqlite-persistence-core/src/remote-subset-wire.ts": {
+              "before": "81227e40c2dc3a3e775c8b58e02085e02ded6689a5030e683c5755644d131f57",
+              "after": "81227e40c2dc3a3e775c8b58e02085e02ded6689a5030e683c5755644d131f57"
+            },
+            "packages/db-sqlite-persistence-core/src/errors.ts": {
+              "before": "04ff7138695d80d4b49abd230b3efd03a560ac91b37993e5dafb6cd4e3d3baa2",
+              "after": "04ff7138695d80d4b49abd230b3efd03a560ac91b37993e5dafb6cd4e3d3baa2"
+            },
+            "packages/powersync-db-collection/src/sqlite-compiler.ts": {
+              "before": "a0e4ab4f72345e4b63cfb22c5144404686e51471be69b76bb2e30155fa05aa9b",
+              "after": "a0e4ab4f72345e4b63cfb22c5144404686e51471be69b76bb2e30155fa05aa9b"
+            },
+            "packages/browser-db-sqlite-persistence/src/wa-sqlite-driver.ts": {
+              "before": "97b8778f1cef558623326185afdbd3ffd4618f37a4e21e6e75ab5d5c7ad7f1f3",
+              "after": "97b8778f1cef558623326185afdbd3ffd4618f37a4e21e6e75ab5d5c7ad7f1f3"
+            },
+            "packages/powersync-db-collection/src/schema.ts": {
+              "before": "656a6077b5c8b5393a9d4d1d2402797a2b01b8ac42626b384ec13a80f8e7935c",
+              "after": "656a6077b5c8b5393a9d4d1d2402797a2b01b8ac42626b384ec13a80f8e7935c"
+            },
+            "packages/powersync-db-collection/src/serialization.ts": {
+              "before": "5cfbf26939e7de565e39b92d836edd2adeba5193e2c5a327cf1c54ea7fb9bc7b",
+              "after": "5cfbf26939e7de565e39b92d836edd2adeba5193e2c5a327cf1c54ea7fb9bc7b"
+            },
+            "packages/db-sqlite-persistence-core/src/sqlite-value.ts": {
+              "before": "0ab554d0aec2743c271e0355926681b9290feef0948d2816a5e7f5c2799ad69f",
+              "after": "0ab554d0aec2743c271e0355926681b9290feef0948d2816a5e7f5c2799ad69f"
+            },
+            "packages/powersync-db-collection/src/definitions.ts": {
+              "before": "27c13705a302ab0aba2dbc0b776b3e74bdee90c4fb4487a63bc10e1fe6c11d2f",
+              "after": "27c13705a302ab0aba2dbc0b776b3e74bdee90c4fb4487a63bc10e1fe6c11d2f"
+            },
+            "packages/powersync-db-collection/src/helpers.ts": {
+              "before": "76406cce7f2b9bfe8500c6d4858319e6db4e5e7a12276c0c035f3a4363602146",
+              "after": "76406cce7f2b9bfe8500c6d4858319e6db4e5e7a12276c0c035f3a4363602146"
+            },
+            "packages/db-adapter-conformance/tests/memory-persistence.ts": {
+              "before": "a1c13629ada7e230b3038d9e55d50069ca6b2f7b003c3cc116f81cccc559cbcc",
+              "after": "a1c13629ada7e230b3038d9e55d50069ca6b2f7b003c3cc116f81cccc559cbcc"
+            },
+            "packages/db/tests/oracle-cleanup.ts": {
+              "before": "5c617b535e57195128ef9efc4a627b78227563af38bb40e5f932c35dfce009ce",
+              "after": "5c617b535e57195128ef9efc4a627b78227563af38bb40e5f932c35dfce009ce"
+            },
+            "packages/db-sqlite-persistence-core/src/remote-subset-owner.ts": {
+              "before": "487aefab574711b922b8bc7d3095af8ef8fe5caad859e6c935b575e03b08e07e",
+              "after": "487aefab574711b922b8bc7d3095af8ef8fe5caad859e6c935b575e03b08e07e"
+            },
+            "packages/db-sqlite-persistence-core/src/committed-tx-anchor.ts": {
+              "before": "4320bed340a5c83d42e351979db034a44f59de23138ccd8f796789aef30312ee",
+              "after": "4320bed340a5c83d42e351979db034a44f59de23138ccd8f796789aef30312ee"
+            }
+          },
+          "controlHashes": {
+            "control.json": {
+              "before": "4dd227a3d7816031726119d806607076900ce536f01fd1753eb9634888e95d58",
+              "after": "4dd227a3d7816031726119d806607076900ce536f01fd1753eb9634888e95d58"
+            }
+          },
+          "runtimeSha256": "eb96bdabfd1f6705345bbd459f9308d140c011fa55865efdb4fa8f61d048f55d"
+        }
+      }
+    }
+  },
+  "integrity": {
+    "head": "777935fd68daa497fdd3c9db533845b710be68a1",
+    "checkedCounts": {
+      "sources": 3730,
+      "buildArtifacts": 1092,
+      "workspaceBundles": 0,
+      "controls": 4,
+      "instruments": 0,
+      "instrumentFiles": 15
+    },
+    "changedFrozenFiles": [],
+    "originalCheckoutSourceLeaks": []
+  },
+  "conversionPaths": [
+    "packages/db-adapter-conformance/src/eager-live-source-oracle.ts",
+    "packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts",
+    "packages/db-adapter-conformance/tests/eager-live-source-oracle-suite.ts",
+    "packages/powersync-db-collection/tests/eager-live-source-history-oracle.ts",
+    "packages/rxdb-db-collection/tests/eager-live-source-history-oracle.ts",
+    "packages/powersync-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts",
+    "packages/rxdb-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts"
+  ],
+  "productionSourceHashes": {
+    "packages/powersync-db-collection/src/powersync.ts": "d945eb99bff416fc9c7ba041a802fa842072e5cf03a71d02dd2ed214610df408",
+    "packages/rxdb-db-collection/src/rxdb.ts": "2dca19cff8bb602b2aa59f46c7635035e49d0f1cda0a2222e1917f6d2eb8aa62"
+  },
+  "commands": {
+    "powersync": [
+      "/Users/kyle.mathews/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "/private/tmp/tanstack-db-2394-gap-cli-e1fb-integrity/oracle-gaps/index.mjs",
+      "--env-prefix",
+      "TANSTACK_DB_ORACLE",
+      "--package",
+      "packages/powersync-db-collection",
+      "--source",
+      "src/powersync.ts",
+      "--diff-base",
+      "caa936d5af5332a6eca64335d291ba8e42c8cf37",
+      "--seed",
+      "2367",
+      "--contexts",
+      "1",
+      "--only",
+      "powersync.ts:M35,powersync.ts:M36,powersync.ts:M162,powersync.ts:M163,powersync.ts:M164,powersync.ts:M165,authored:pending-baseline-is-not-snapshot",
+      "--mutants",
+      "/private/tmp/tanstack-db-2394-primary-eager-retention/.retention-audit/controls-powersync",
+      "--out",
+      "/private/tmp/tanstack-db-2394-primary-eager-retention/.retention-audit/powersync",
+      "--pool",
+      "forks"
+    ],
+    "rxdb": [
+      "/Users/kyle.mathews/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "/private/tmp/tanstack-db-2394-gap-cli-e1fb-integrity/oracle-gaps/index.mjs",
+      "--env-prefix",
+      "TANSTACK_DB_ORACLE",
+      "--package",
+      "packages/rxdb-db-collection",
+      "--source",
+      "src/rxdb.ts",
+      "--diff-base",
+      "caa936d5af5332a6eca64335d291ba8e42c8cf37",
+      "--seed",
+      "2367",
+      "--contexts",
+      "2",
+      "--only",
+      "rxdb.ts:M3,rxdb.ts:M4,rxdb.ts:M7,rxdb.ts:M8,rxdb.ts:M9,rxdb.ts:M10,authored:pending-baseline-is-not-snapshot",
+      "--mutants",
+      "/private/tmp/tanstack-db-2394-primary-eager-retention/.retention-audit/controls-rxdb",
+      "--out",
+      "/private/tmp/tanstack-db-2394-primary-eager-retention/.retention-audit/rxdb",
+      "--pool",
+      "forks"
+    ],
+    "rxdb-semantic-control": [
+      "/Users/kyle.mathews/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "/private/tmp/tanstack-db-2394-gap-cli-e1fb-integrity/oracle-gaps/index.mjs",
+      "--env-prefix",
+      "TANSTACK_DB_ORACLE",
+      "--package",
+      "packages/rxdb-db-collection",
+      "--source",
+      "src/rxdb.ts",
+      "--diff-base",
+      "caa936d5af5332a6eca64335d291ba8e42c8cf37",
+      "--seed",
+      "2367",
+      "--contexts",
+      "1",
+      "--only",
+      "authored:pending-baseline-is-not-snapshot",
+      "--mutants",
+      "/private/tmp/tanstack-db-2394-primary-eager-retention/.retention-audit/controls-rxdb-semantic-control",
+      "--out",
+      "/private/tmp/tanstack-db-2394-primary-eager-retention/.retention-audit/rxdb-semantic-control",
+      "--pool",
+      "forks"
+    ]
+  },
+  "runtime": {
+    "path": "/Users/kyle.mathews/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "version": "v24.22.1",
+    "pool": "forks"
+  },
+  "cleanPasses": {
+    "powersync": {
+      "first": {
+        "tests": 265,
+        "failed": [],
+        "units": [
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/powersync-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts",
+            "tests": 89,
+            "durationSeconds": 180.98364345800002,
+            "setupErrors": [],
+            "unhandled": []
+          },
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/powersync-db-collection/tests/eager-reload-conformance-oracle.property.test.ts",
+            "tests": 44,
+            "durationSeconds": 76.95766595900001,
+            "setupErrors": [],
+            "unhandled": []
+          },
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/powersync-db-collection/tests/persisted-capability-conformance-oracle.test.ts",
+            "tests": 46,
+            "durationSeconds": 7.5836148329999995,
+            "setupErrors": [],
+            "unhandled": []
+          },
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/powersync-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts",
+            "tests": 86,
+            "durationSeconds": 115.353795625,
+            "setupErrors": [],
+            "unhandled": []
+          }
+        ]
+      },
+      "second": {
+        "tests": 265,
+        "failed": [],
+        "units": [
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/powersync-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts",
+            "tests": 89,
+            "durationSeconds": 169.60518699900004,
+            "setupErrors": [],
+            "unhandled": []
+          },
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/powersync-db-collection/tests/eager-reload-conformance-oracle.property.test.ts",
+            "tests": 44,
+            "durationSeconds": 59.541002166999995,
+            "setupErrors": [],
+            "unhandled": []
+          },
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/powersync-db-collection/tests/persisted-capability-conformance-oracle.test.ts",
+            "tests": 46,
+            "durationSeconds": 7.2377974169999995,
+            "setupErrors": [],
+            "unhandled": []
+          },
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/powersync-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts",
+            "tests": 86,
+            "durationSeconds": 152.68622466699998,
+            "setupErrors": [],
+            "unhandled": []
+          }
+        ]
+      }
+    },
+    "rxdb": {
+      "first": {
+        "tests": 305,
+        "failed": [],
+        "units": [
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/rxdb-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts",
+            "tests": 129,
+            "durationSeconds": 64.750506251,
+            "setupErrors": [],
+            "unhandled": []
+          },
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/rxdb-db-collection/tests/persisted-capability-conformance-oracle.test.ts",
+            "tests": 46,
+            "durationSeconds": 1.4942143749999999,
+            "setupErrors": [],
+            "unhandled": []
+          },
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/rxdb-db-collection/tests/eager-reload-conformance-oracle.property.test.ts",
+            "tests": 44,
+            "durationSeconds": 7.912163875999999,
+            "setupErrors": [],
+            "unhandled": []
+          },
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/rxdb-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts",
+            "tests": 86,
+            "durationSeconds": 14.086647666000001,
+            "setupErrors": [],
+            "unhandled": []
+          }
+        ]
+      },
+      "second": {
+        "tests": 305,
+        "failed": [],
+        "units": [
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/rxdb-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts",
+            "tests": 129,
+            "durationSeconds": 58.656682040999996,
+            "setupErrors": [],
+            "unhandled": []
+          },
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/rxdb-db-collection/tests/persisted-capability-conformance-oracle.test.ts",
+            "tests": 46,
+            "durationSeconds": 0.787929541,
+            "setupErrors": [],
+            "unhandled": []
+          },
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/rxdb-db-collection/tests/eager-reload-conformance-oracle.property.test.ts",
+            "tests": 44,
+            "durationSeconds": 6.085587791999999,
+            "setupErrors": [],
+            "unhandled": []
+          },
+          {
+            "file": "/private/tmp/tanstack-db-2394-primary-eager-retention/packages/rxdb-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts",
+            "tests": 86,
+            "durationSeconds": 12.93134825,
+            "setupErrors": [],
+            "unhandled": []
+          }
+        ]
+      }
+    }
+  },
+  "limits": "These are repeat stable-key retention checks of the original12 PowerSync/RxDB kills, not12 new distinct kills. They cover the7-file primary oracle conversion with unchanged c4 production; later startup batching/performance source changes need their own evidence."
+}

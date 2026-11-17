@@ -1,6 +1,6 @@
 /**
  * Cold-successor checkpoint for the leader-close law in
- * `leader-close-oracle.opfs.spec.ts`, which owns the law and its histories.
+ * `leader-close-witness.opfs.spec.ts`, which owns the law and its histories.
  * This scenario states its own hand-written term and row expectations.
  */
 import { expect, test } from '@playwright/test'

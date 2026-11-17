@@ -78,8 +78,8 @@
  * Suspense, `select`, and every other clause keep the live-query Collection
  * and are outside this owner.
  */
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterAll, describe, expect, it } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { describe, expect } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Query } from '../../src/query/builder/index.js'
@@ -91,17 +91,13 @@ import {
 } from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
+import { oracleProperty } from '../oracle-config.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
-import { createOracleReach } from '../oracle-reach.js'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,
@@ -123,7 +119,7 @@ const reachStates = [
   // The reader's peer was unmounted, so no listener watches its group.
   `unwatched-reader-holds-rows-at-cleanup`,
 ] as const
-type Reach = ReturnType<typeof createOracleReach<(typeof reachStates)[number]>>
+type Reach = { reach: (state: (typeof reachStates)[number]) => void }
 
 const MISSING = Symbol(`missing`)
 type FieldValue = string | number | boolean | Date | null | typeof MISSING
@@ -661,7 +657,6 @@ function captureAppListenerErrors(): {
 
 async function runHistory(history: History, reach?: Reach): Promise<void> {
   const appErrors = captureAppListenerErrors()
-  reach?.beginHistory()
   const id = (n: number) => `r${n}`
   const rows = new Map<string, Row>()
   history.rows.forEach((row, n) =>
@@ -716,7 +711,9 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
     // The pooled view subscribes first, so after cleanup it is the one that
     // restarts the source.
     const view = createPooledLiveQuery(peerQuery(source, peer)(new Query()))
-    expect(view, `peer ${index} is poolable`).toBeDefined()
+    oracleAssertion(`peer ${index} is poolable`, () =>
+      expect(view, `peer ${index} is poolable`).toBeDefined(),
+    )
     // The throwing app listener subscribes first, so it runs before the
     // observers' listeners.
     const offThrowing = (view as unknown as { on: Collection[`on`] }).on(
@@ -780,11 +777,17 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
     reference: Mounted[`reference`],
   ) => {
     const snapshot = detached.getSnapshot()
-    expect(
-      (snapshot.data as Array<Record<string, unknown>>).map(describeRow),
-      `${label} detached rows`,
-    ).toEqual(reference.toArray.map((row) => describeRow(row)))
-    expect(snapshot.status, `${label} detached status`).toBe(reference.status)
+    oracleAssertion(`${label} detached rows`, () =>
+      expect(
+        (snapshot.data as Array<Record<string, unknown>>).map(describeRow),
+        `${label} detached rows`,
+      ).toEqual(reference.toArray.map((row) => describeRow(row))),
+    )
+    oracleAssertion(`${label} detached status`, () =>
+      expect(snapshot.status, `${label} detached status`).toBe(
+        reference.status,
+      ),
+    )
   }
   const check = (checkpoint: string) => {
     for (const { label, detached, reference } of unwatched) {
@@ -796,35 +799,53 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
       const snapshot = wholesale.getSnapshot()
       const reference = entry.reference
       const label = `${checkpoint}, peer ${index}`
-      expect(
-        (snapshot.data as Array<Record<string, unknown>>).map(describeRow),
-        `${label} rows`,
-      ).toEqual(reference.toArray.map((row) => describeRow(row)))
-      expect(snapshot.status, `${label} status`).toBe(reference.status)
+      oracleAssertion(`${label} rows`, () =>
+        expect(
+          (snapshot.data as Array<Record<string, unknown>>).map(describeRow),
+          `${label} rows`,
+        ).toEqual(reference.toArray.map((row) => describeRow(row))),
+      )
+      oracleAssertion(`${label} status`, () =>
+        expect(snapshot.status, `${label} status`).toBe(reference.status),
+      )
       reach?.reach(`wholesale-reader-compared`)
       // The view itself, which the observer reads only when notified.
-      expect(
-        [...view.entries()].map(([, row]) => describeRow(row)),
-        `${label} view rows`,
-      ).toEqual(reference.toArray.map((row) => describeRow(row)))
-      expect(view.status, `${label} view status`).toBe(reference.status)
+      oracleAssertion(`${label} view rows`, () =>
+        expect(
+          [...view.entries()].map(([, row]) => describeRow(row)),
+          `${label} view rows`,
+        ).toEqual(reference.toArray.map((row) => describeRow(row))),
+      )
+      oracleAssertion(`${label} view status`, () =>
+        expect(view.status, `${label} view status`).toBe(reference.status),
+      )
       // A reader that never subscribed sees the same rows and status.
       expectDetached(label, entry.detached, reference)
       reach?.reach(`detached-reader-compared`)
       const model = entry.frozen ?? expectedRows(rows, peer)
-      expect(
-        [...snapshot.state!.values()].map(describeFields).sort(),
-        `${label} model`,
-      ).toEqual(entry.frozen ? [] : model)
+      oracleAssertion(`${label} model`, () =>
+        expect(
+          [...snapshot.state!.values()].map(describeFields).sort(),
+          `${label} model`,
+        ).toEqual(entry.frozen ? [] : model),
+      )
       // The granular stream delivers each change once, with the type and
       // values the live-query Collection's stream has, and folds to the model.
-      expect(entry.violations, `${label} granular contradictions`).toEqual([])
-      expect(
-        [...entry.granularRows.values()].map(describeFields).sort(),
-        `${label} granular`,
-      ).toEqual(model)
-      expect(entry.pooledChanges.sort(), `${label} granular changes`).toEqual(
-        entry.referenceChanges.sort(),
+      oracleAssertion(`${label} granular contradictions`, () =>
+        expect(entry.violations, `${label} granular contradictions`).toEqual(
+          [],
+        ),
+      )
+      oracleAssertion(`${label} granular`, () =>
+        expect(
+          [...entry.granularRows.values()].map(describeFields).sort(),
+          `${label} granular`,
+        ).toEqual(model),
+      )
+      oracleAssertion(`${label} granular changes`, () =>
+        expect(entry.pooledChanges.sort(), `${label} granular changes`).toEqual(
+          entry.referenceChanges.sort(),
+        ),
       )
       reach?.reach(`granular-reader-compared`)
       entry.pooledChanges.length = 0
@@ -832,13 +853,17 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
       // A change in the ordered keys always advances the layout revision.
       const keys = JSON.stringify([...snapshot.state!.keys()])
       if (entry.layout && entry.layout.keys !== keys) {
-        expect(snapshot.layoutRevision, `${label} layout`).toBeGreaterThan(
-          entry.layout.revision,
+        oracleAssertion(`${label} layout`, () =>
+          expect(snapshot.layoutRevision, `${label} layout`).toBeGreaterThan(
+            entry.layout!.revision,
+          ),
         )
       }
       entry.layout = { keys, revision: snapshot.layoutRevision }
       // Observing a pooled view never builds its live-query Collection.
-      expect(view.collection, `${label} materialized`).toBeUndefined()
+      oracleAssertion(`${label} materialized`, () =>
+        expect(view.collection, `${label} materialized`).toBeUndefined(),
+      )
     }
   }
   // Resolves `keepF` against the model's current row.
@@ -1011,15 +1036,21 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
     for (const [index, { wholesale, reference, frozen }] of mounted) {
       if (frozen) continue
       const collection = wholesale.getSnapshot().collection!
-      expect(
-        (collection.toArray as Array<Record<string, unknown>>).map(describeRow),
-        `peer ${index} forwarded toArray`,
-      ).toEqual(reference.toArray.map((row) => describeRow(row)))
+      oracleAssertion(`peer ${index} forwarded toArray`, () =>
+        expect(
+          (collection.toArray as Array<Record<string, unknown>>).map(
+            describeRow,
+          ),
+          `peer ${index} forwarded toArray`,
+        ).toEqual(reference.toArray.map((row) => describeRow(row))),
+      )
       // Members the observer also reads must still behave as the Collection's.
-      expect(
-        [...collection.entries()].map(([key]) => key),
-        `peer ${index} forwarded entries`,
-      ).toEqual([...reference.entries()].map(([key]) => key))
+      oracleAssertion(`peer ${index} forwarded entries`, () =>
+        expect(
+          [...collection.entries()].map(([key]) => key),
+          `peer ${index} forwarded entries`,
+        ).toEqual([...reference.entries()].map(([key]) => key)),
+      )
       const narrower = new Func(`eq`, [new PropRef([`g`]), new Value(`x`)])
       const keysOf = (target: {
         currentStateAsChanges: (options: {
@@ -1029,11 +1060,18 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
         [...(target.currentStateAsChanges({ where: narrower }) || [])].map(
           (change) => change.key,
         )
-      expect(
-        keysOf(collection as unknown as Parameters<typeof keysOf>[0]),
-        `peer ${index} forwarded filter`,
-      ).toEqual(keysOf(reference as unknown as Parameters<typeof keysOf>[0]))
-      expect(collection.config, `peer ${index} forwarded config`).toBeDefined()
+      oracleAssertion(`peer ${index} forwarded filter`, () =>
+        expect(
+          keysOf(collection as unknown as Parameters<typeof keysOf>[0]),
+          `peer ${index} forwarded filter`,
+        ).toEqual(keysOf(reference as unknown as Parameters<typeof keysOf>[0])),
+      )
+      oracleAssertion(`peer ${index} forwarded config`, () =>
+        expect(
+          collection.config,
+          `peer ${index} forwarded config`,
+        ).toBeDefined(),
+      )
     }
   }, [
     () => {
@@ -1057,102 +1095,139 @@ function expectSnapshotMatchesReference(
   >,
   reference: ReturnType<typeof createLiveQueryCollection>,
 ): void {
-  expect(snapshot.status).toBe(reference.status)
-  expect([...snapshot.state!.keys()]).toEqual([...reference.keys()])
+  oracleAssertion(`expectSnapshotMatchesReference comparison 18`, () =>
+    expect(snapshot.status).toBe(reference.status),
+  )
+  oracleAssertion(`expectSnapshotMatchesReference comparison 19`, () =>
+    expect([...snapshot.state!.keys()]).toEqual([...reference.keys()]),
+  )
 }
 
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/live-query-observer.ts#createLiveQueryObserver',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/pooled-live-query.ts#createPooledLiveQuery',
-  ],
-  check: [runHistory, expectSnapshotMatchesReference],
-  model: [expectedKeys, expectedRows],
-})
+// Generated fields are plain values; this covers a field whose getter
+// throws, which both paths treat as a row that does not match. It compares
+// the pooled snapshot with the live-query Collection through the shared
+// `expectSnapshotMatchesReference` check.
+async function runThrowingGetterHistory(): Promise<void> {
+  const source = createCollection(
+    mockSyncCollectionOptions<any>({
+      id: `pooled-${serial++}`,
+      getKey: (row) => row.id,
+      initialData: [
+        { id: `a`, profile: { code: 1 } },
+        {
+          id: `b`,
+          profile: {
+            get code(): number {
+              throw new Error(`getter failed`)
+            },
+          },
+        },
+      ],
+    }),
+  )
+  await source.stateWhenReady()
+  const query = (q: any) =>
+    q.from({ r: source }).where(({ r }: any) => eq(r.profile.code, 1))
+  const pooled = createLiveQueryObserver(
+    createPooledLiveQuery(query(new Query())),
+    { mode: `wholesale` },
+  )
+  const stop = pooled.subscribe(() => {})
+  const reference = createLiveQueryCollection({ query, startSync: true })
+  await reference.preload()
+  const snapshot = pooled.getSnapshot()
+  expectSnapshotMatchesReference(snapshot, reference)
+  stop()
+  await source.cleanup({ dependents: true })
+}
 
 describe(`pooled live query oracle`, () => {
-  // The fixed histories and the fixed-seed campaign stand aside during any path
-  // replay. The random campaign below is the one that a replay of this
-  // property selects.
-  // Only generated histories count toward reach; a replay asserts nothing.
-  const reach = createOracleReach(property, reachStates)
-  let generatedRan = false
-  const runGenerated = (history: History) => {
-    generatedRan = true
-    return runHistory(history, reach)
-  }
-  if (!oracleReplayRequested()) {
-    // Generated fields are plain values; this covers a field whose getter
-    // throws, which both paths treat as a row that does not match.
-    it(`matches the live-query Collection when an eq path getter throws`, async () => {
-      oracleRoute(`fixed history`)
-      const source = createCollection(
-        mockSyncCollectionOptions<any>({
-          id: `pooled-${serial++}`,
-          getKey: (row) => row.id,
-          initialData: [
-            { id: `a`, profile: { code: 1 } },
-            {
-              id: `b`,
-              profile: {
-                get code(): number {
-                  throw new Error(`getter failed`)
-                },
-              },
-            },
-          ],
-        }),
-      )
-      await source.stateWhenReady()
-      const query = (q: any) =>
-        q.from({ r: source }).where(({ r }: any) => eq(r.profile.code, 1))
-      const pooled = createLiveQueryObserver(
-        createPooledLiveQuery(query(new Query())),
-        { mode: `wholesale` },
-      )
-      const stop = pooled.subscribe(() => {})
-      const reference = createLiveQueryCollection({ query, startSync: true })
-      await reference.preload()
-      const snapshot = pooled.getSnapshot()
-      expectSnapshotMatchesReference(snapshot, reference)
-      stop()
-      await source.cleanup({ dependents: true })
-    })
-
-    for (const { name, history } of fixedHistories) {
-      it(`matches the live-query Collection when ${name}`, () => {
-        oracleRoute(`case`)
-        return runHistory(history)
-      })
-    }
-    const historyFixedSeed = oracleFixedSeed(44_502_001, {
-      numRuns: oracleRuns(80),
-    })
-    fcTest.prop([historyArbitrary], historyFixedSeed)(
-      `matches the live-query Collection (fixed)`,
-      (history) => {
-        oracleRoute(oracleRouteOf(historyFixedSeed))
-        return runGenerated(history)
-      },
-    )
-    afterAll(() => {
-      if (generatedRan) {
-        process.stdout.write(
-          `pooled observer reach ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-        )
-        reach.assertReached()
-      }
-    })
-  }
-
-  const historyCampaign = oraclePropertyOptions(80, property)
-  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
-    `matches the live-query Collection (random)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(historyCampaign))
-      return runGenerated(history)
+  oracleProperty({
+    id: property,
+    law: {
+      statement: `A pooled live-query observer publishes the same rows, order, values, status and granular changes as the equivalent live-query Collection across writes, mounts and cleanup.`,
+      authority: `ARCHITECTURE.md, Pooled live queries, and the equality, Collection cleanup and observer contracts stated above.`,
+      limits: `The unchanged bounded eager-source grammar with up to three peers and eight steps; no on-demand, persistence, hydration, Suspense or selection.`,
     },
-  )
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/live-query-observer.ts#createLiveQueryObserver',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/pooled-live-query.ts#createPooledLiveQuery',
+    ],
+    histories: {
+      arbitrary: historyArbitrary,
+      runs: 80,
+      fixedSeeds: [44502001],
+      states: reachStates,
+      constructed: [
+        {
+          name: `mounted and unwatched readers hold rows at cleanup`,
+          enters: reachStates,
+          build: (generated): History => {
+            const literal = generated.peers[0]!.f
+            const peer = (index: number): Peer => {
+              const order = generated.peers[index]?.order
+              return { f: literal, ...(order === undefined ? {} : { order }) }
+            }
+            return {
+              ...generated,
+              rows: [
+                { f: literal, g: generated.rows[0]?.g ?? `x` },
+                ...generated.rows.slice(1),
+              ],
+              peers: [peer(0), peer(1), ...generated.peers.slice(2)],
+              steps: [
+                { kind: `cleanup-restart`, unmountFirst: 0 },
+                ...generated.steps.slice(0, 7),
+              ],
+            }
+          },
+        },
+      ],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { history: History }, observe) =>
+      recordAssertionJudgment(property, plan, observe, () =>
+        runHistory(plan.history, { reach: (state) => observe(`reach`, state) }),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  // The named histories hold Date values and a row whose field getter
+  // throws, which the generated grammar of plain values cannot take back. Each
+  // replays through the shared driver under its old test name.
+  const namedHistories = new Map<string, History | undefined>([
+    [`an eq path getter throws`, undefined],
+    ...fixedHistories.map(({ name, history }): [string, History] => [
+      name,
+      history,
+    ]),
+  ])
+  oracleProperty({
+    id: `pooled-live-query.publication-fixed`,
+    law: {
+      statement: `A pooled live-query observer publishes the same rows, order, values, status and granular changes as the equivalent live-query Collection across writes, mounts and cleanup.`,
+      authority: `ARCHITECTURE.md, Pooled live queries, and the equality, Collection cleanup and observer contracts stated above.`,
+      limits: `Named histories that the generated grammar of plain values cannot take back: a field whose eq path getter throws, and the fixed regressions.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/live-query-observer.ts#createLiveQueryObserver',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/pooled-live-query.ts#createPooledLiveQuery',
+    ],
+    histories: [...namedHistories.keys()],
+    label: (name) => `matches the live-query Collection when ${name}`,
+    resolve: (name) => ({ history: namedHistories.get(name) }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(property, plan, observe, () =>
+        plan.history === undefined
+          ? runThrowingGetterHistory()
+          : runHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
