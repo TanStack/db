@@ -150,6 +150,11 @@ const ownerGroups: ReadonlyArray<
     `boolean-arity-fixed`,
   ],
   [
+    `db-sqlite-persistence-core/tests/sqlite-ordered-page-oracle.test.ts`,
+    `sqlite-persistence`,
+    `ordered-page`,
+  ],
+  [
     `browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts`,
     `opfs`,
     `page-lifecycle-fixed mixed-execute-fixed terminal-event-fixed close-fixed failure-cleanup-fixed`,
@@ -1285,7 +1290,7 @@ const ownerGroups: ReadonlyArray<
   [
     `node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
     `sqlite-persistence`,
-    `expression-index bigint-roundtrip bigint-rejection expression-index.large-number expression-index.fixed-filter expression-index.native-identity expression-index.native-polarity`,
+    `expression-index bigint-roundtrip bigint-rejection expression-index.large-number expression-index.fixed-filter expression-index.native-identity expression-index.native-polarity expression-index.number-equality`,
   ],
   [
     `browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts`,
