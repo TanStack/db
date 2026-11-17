@@ -575,7 +575,12 @@ function resolve(history: History): Plan {
       writes.push({ type: `delete`, ...target })
       return
     }
-    const row = { key: target.key, value: storedRow(write.row, 0).value }
+    // An update merges its fields into the stored row, as the adapter's
+    // `update` mutation does, so a field it lacks keeps its value.
+    const row = {
+      key: target.key,
+      value: { ...target.value, ...storedRow(write.row, 0).value },
+    }
     rows = rows.map((stored) => (stored === target ? row : stored))
     writes.push({ type: `update`, ...row })
   })
