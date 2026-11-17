@@ -1,57 +1,8 @@
 {
- "head": "38161678",
+ "head": "16f5f5e3",
  "seed": 1997,
  "command": "pnpm gap-report --package packages/db-sqlite-persistence-core --source src/sqlite-core-adapter.ts --seed 1997 --only <mutants of the changed functions>",
  "open": [
-  {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:binary-swap:if ( typeof left === `string` && typeof right === `string` ) { if ( compareOptions . stringSort === `custom` ) { return compareOptions . compare ( left , right ) } if ( compareOptions . stringSort === `locale` ) { return left . localeCompare ( right , compareOptions . locale , compareOptions . localeOptions , ) } if ( left < right ) { return - 1 } if ( left > right ) { return 1 } return 0 }",
-   "line": 615,
-   "outcome": "survived",
-   "class": "not-distinguished",
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:binary-swap:if ( left < right ) { return - 1 }",
-   "line": 626,
-   "outcome": "survived",
-   "class": "not-judged",
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:return-undefined:return - 1",
-   "line": 627,
-   "outcome": "survived",
-   "class": "not-distinguished",
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:if-true:if ( left > right ) { return 1 }",
-   "line": 629,
-   "outcome": "survived",
-   "class": "not-judged",
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:binary-swap:if ( left > right ) { return 1 }",
-   "line": 629,
-   "outcome": "survived",
-   "class": "not-judged",
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:return-undefined:return 0~2",
-   "line": 632,
-   "outcome": "survived",
-   "class": "not-distinguished",
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:if-false:if ( Array . isArray ( left ) && Array . isArray ( right ) ) { const maxIndex = Math . min ( left . length , right . length ) for ( let index = 0 ; index < maxIndex ; index ++ ) { const comparison = compareOrderByValues ( left [ index ] , right [ index ] , compareOptions , ) if ( comparison !== 0 ) { return comparison } } return left . length - right . length }",
-   "line": 635,
-   "outcome": "survived",
-   "class": "branch-never-taken",
-   "changedLine": false
-  },
   {
    "key": "src/sqlite-core-adapter.ts#compareOrderByValues:binary-swap:if ( Array . isArray ( left ) && Array . isArray ( right ) ) { const maxIndex = Math . min ( left . length , right . length ) for ( let index = 0 ; index < maxIndex ; index ++ ) { const comparison = compareOrderByValues ( left [ index ] , right [ index ] , compareOptions , ) if ( comparison !== 0 ) { return comparison } } return left . length - right . length }",
    "line": 635,
@@ -60,78 +11,50 @@
    "changedLine": false
   },
   {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:value-undefined:if ( Array . isArray ( left ) && Array . isArray ( right ) ) { const maxIndex = Math . min ( left . length , right . length ) for ( let index = 0 ; index < maxIndex ; index ++ ) { const comparison = compareOrderByValues ( left [ index ] , right [ index ] , compareOptions , ) if ( comparison !== 0 ) { return comparison } } return left . length - right . length }",
-   "line": 635,
+   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:value-undefined:const maxIndex = Math . min ( left . length , right . length )",
+   "line": 636,
    "outcome": "survived",
    "class": "not-distinguished",
    "changedLine": false
   },
   {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:value-undefined:if ( Array . isArray ( left ) && Array . isArray ( right ) ) { const maxIndex = Math . min ( left . length , right . length ) for ( let index = 0 ; index < maxIndex ; index ++ ) { const comparison = compareOrderByValues ( left [ index ] , right [ index ] , compareOptions , ) if ( comparison !== 0 ) { return comparison } } return left . length - right . length }~2",
-   "line": 635,
-   "outcome": "unreached",
-   "class": null,
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:value-undefined:const maxIndex = Math . min ( left . length , right . length )",
-   "line": 636,
-   "outcome": "unreached",
-   "class": null,
-   "changedLine": false
-  },
-  {
    "key": "src/sqlite-core-adapter.ts#compareOrderByValues:loop-false:for ( let index = 0 ; index < maxIndex ; index ++ ) { const comparison = compareOrderByValues ( left [ index ] , right [ index ] , compareOptions , ) if ( comparison !== 0 ) { return comparison } }",
    "line": 637,
-   "outcome": "unreached",
-   "class": null,
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:binary-swap:for ( let index = 0 ; index < maxIndex ; index ++ ) { const comparison = compareOrderByValues ( left [ index ] , right [ index ] , compareOptions , ) if ( comparison !== 0 ) { return comparison } }",
-   "line": 637,
-   "outcome": "unreached",
-   "class": null,
+   "outcome": "survived",
+   "class": "not-distinguished",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#compareOrderByValues:value-undefined:const comparison = compareOrderByValues ( left [ index ] , right [ index ] , compareOptions , )",
    "line": 638,
-   "outcome": "unreached",
-   "class": null,
+   "outcome": "survived",
+   "class": "not-distinguished",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#compareOrderByValues:if-true:if ( comparison !== 0 ) { return comparison }",
    "line": 643,
-   "outcome": "unreached",
-   "class": null,
+   "outcome": "survived",
+   "class": "not-observed",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#compareOrderByValues:if-false:if ( comparison !== 0 ) { return comparison }",
    "line": 643,
-   "outcome": "unreached",
-   "class": null,
+   "outcome": "survived",
+   "class": "branch-never-taken",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#compareOrderByValues:binary-swap:if ( comparison !== 0 ) { return comparison }",
    "line": 643,
-   "outcome": "unreached",
-   "class": null,
+   "outcome": "survived",
+   "class": "not-observed",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#compareOrderByValues:return-undefined:return comparison",
    "line": 644,
-   "outcome": "unreached",
-   "class": null,
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:return-undefined:return left . length - right . length",
-   "line": 647,
    "outcome": "unreached",
    "class": null,
    "changedLine": false
@@ -176,20 +99,6 @@
    "line": 655,
    "outcome": "survived",
    "class": "not-distinguished",
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:if-false:if ( leftIsObject || rightIsObject ) { if ( leftIsObject && rightIsObject ) { return getOrderByObjectId ( left ) - getOrderByObjectId ( right ) } return leftIsObject ? 1 : - 1 }",
-   "line": 660,
-   "outcome": "survived",
-   "class": "not-judged",
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#compareOrderByValues:binary-swap:if ( leftIsObject || rightIsObject ) { if ( leftIsObject && rightIsObject ) { return getOrderByObjectId ( left ) - getOrderByObjectId ( right ) } return leftIsObject ? 1 : - 1 }",
-   "line": 660,
-   "outcome": "survived",
-   "class": "not-judged",
    "changedLine": false
   },
   {
@@ -286,8 +195,8 @@
   {
    "key": "src/sqlite-core-adapter.ts#isPageBound:binary-swap:return Number . isSafeInteger ( value ) && value ! >= 0",
    "line": 1103,
-   "outcome": "timeout",
-   "class": null,
+   "outcome": "survived",
+   "class": "not-distinguished",
    "changedLine": true
   },
   {
@@ -1082,13 +991,6 @@
    "changedLine": false
   },
   {
-   "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:field-drop:return { supported : true , sql : `` , params : [ ] , }",
-   "line": 1689,
-   "outcome": "survived",
-   "class": "not-distinguished",
-   "changedLine": false
-  },
-  {
    "key": "src/sqlite-core-adapter.ts#compileOrderByClauses:bool-flip:return { supported : true , sql : `` , params : [ ] , }",
    "line": 1689,
    "outcome": "survived",
@@ -1418,34 +1320,6 @@
    "changedLine": false
   },
   {
-   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:field-drop:const whereCompiled = options . where ? compileSqlExpression ( options . where ) : { supported : false , sql : `` , params : [ ] as Array < SqliteSupportedValue > }",
-   "line": 3855,
-   "outcome": "survived",
-   "class": "not-distinguished",
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:bool-flip:const whereCompiled = options . where ? compileSqlExpression ( options . where ) : { supported : false , sql : `` , params : [ ] as Array < SqliteSupportedValue > }",
-   "line": 3855,
-   "outcome": "survived",
-   "class": "not-observed",
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:field-drop:const whereCompiled = options . where ? compileSqlExpression ( options . where ) : { supported : false , sql : `` , params : [ ] as Array < SqliteSupportedValue > }~2",
-   "line": 3855,
-   "outcome": "survived",
-   "class": "not-distinguished",
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:field-drop:const whereCompiled = options . where ? compileSqlExpression ( options . where ) : { supported : false , sql : `` , params : [ ] as Array < SqliteSupportedValue > }~3",
-   "line": 3855,
-   "outcome": "survived",
-   "class": "not-distinguished",
-   "changedLine": false
-  },
-  {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:binary-swap:const pageable = isPageBound ( options . limit ) && ( options . offset === undefined || isPageBound ( options . offset ) ) && options . orderBy !== undefined && options . orderBy . length > 0~7",
    "line": 3867,
    "outcome": "survived",
@@ -1481,20 +1355,6 @@
    "changedLine": false
   },
   {
-   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:binary-swap:if ( queryParams . length > ( driver . maxBoundParameters ?? this . driver . maxBoundParameters ?? 999 ) ) { sql = `SELECT key, value, metadata, row_version FROM ${ collectionTableSql } `\n      queryParams.length = 0\n      pageInSql = false\n    }~2",
-   "line": 3908,
-   "outcome": "survived",
-   "class": "not-distinguished",
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:binary-swap:if ( queryParams . length > ( driver . maxBoundParameters ?? this . driver . maxBoundParameters ?? 999 ) ) { sql = `SELECT key, value, metadata, row_version FROM ${ collectionTableSql } `\n      queryParams.length = 0\n      pageInSql = false\n    }~3",
-   "line": 3908,
-   "outcome": "survived",
-   "class": "not-distinguished",
-   "changedLine": false
-  },
-  {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.loadSubsetInternal:bool-flip:pageInSql = false",
    "line": 3912,
    "outcome": "unreached",
@@ -1510,231 +1370,231 @@
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.sortsAsInMemory:return-undefined:return false~2",
-   "line": 3972,
+   "line": 3974,
    "outcome": "survived",
    "class": "not-distinguished",
    "changedLine": true
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.applyInMemoryOrderBy:binary-swap:if ( leftKey < rightKey ) { return - 1 }",
-   "line": 4029,
+   "line": 4031,
    "outcome": "survived",
    "class": "not-infected",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.applyInMemoryOrderBy:if-true:if ( leftKey > rightKey ) { return 1 }",
-   "line": 4032,
+   "line": 4034,
    "outcome": "survived",
    "class": "branch-never-taken",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.applyInMemoryOrderBy:if-false:if ( leftKey > rightKey ) { return 1 }",
-   "line": 4032,
+   "line": 4034,
    "outcome": "survived",
    "class": "not-observed",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.applyInMemoryOrderBy:binary-swap:if ( leftKey > rightKey ) { return 1 }",
-   "line": 4032,
+   "line": 4034,
    "outcome": "survived",
    "class": "not-infected",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.applyInMemoryOrderBy:return-undefined:return 1",
-   "line": 4033,
+   "line": 4035,
    "outcome": "survived",
    "class": "not-distinguished",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.applyInMemoryOrderBy:return-undefined:return 0",
-   "line": 4035,
+   "line": 4037,
    "outcome": "unreached",
    "class": null,
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:if-true:if ( this . schemaMismatchPolicy === `sync-absent-error` ) { throw new InvalidPersistedCollectionConfigError ( `Schema version mismatch for collection \"${ collectionId } \": found ${previousSchemaVersion}, expected ${nextSchemaVersion}. ` + `Set schemaMismatchPolicy to \"sync-present-reset\" or \"reset\" to allow automatic reset.` , ) }",
-   "line": 4427,
+   "line": 4429,
    "outcome": "crashed",
    "class": null,
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:if-false:if ( this . schemaMismatchPolicy === `sync-absent-error` ) { throw new InvalidPersistedCollectionConfigError ( `Schema version mismatch for collection \"${ collectionId } \": found ${previousSchemaVersion}, expected ${nextSchemaVersion}. ` + `Set schemaMismatchPolicy to \"sync-present-reset\" or \"reset\" to allow automatic reset.` , ) }",
-   "line": 4427,
+   "line": 4429,
    "outcome": "survived",
    "class": "branch-never-taken",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:binary-swap:if ( this . schemaMismatchPolicy === `sync-absent-error` ) { throw new InvalidPersistedCollectionConfigError ( `Schema version mismatch for collection \"${ collectionId } \": found ${previousSchemaVersion}, expected ${nextSchemaVersion}. ` + `Set schemaMismatchPolicy to \"sync-present-reset\" or \"reset\" to allow automatic reset.` , ) }",
-   "line": 4427,
+   "line": 4429,
    "outcome": "crashed",
    "class": null,
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:const collectionTableSql = quoteIdentifier ( tableName )",
-   "line": 4434,
+   "line": 4436,
    "outcome": "crashed",
    "class": null,
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:const tombstoneTableSql = quoteIdentifier ( tombstoneTableName )",
-   "line": 4435,
-   "outcome": "crashed",
-   "class": null,
-   "changedLine": false
-  },
-  {
-   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await this . runInTransaction ( async ( transactionDriver ) => { await this . assertCacheGenerationReadClaim ( transactionDriver , collectionId , cacheGenerationClaimId , ) const currentSchemaRows = await transactionDriver . query < { schema_version : number } > ( `SELECT schema_version\n         FROM collection_registry\n         WHERE collection_id = ?\n         LIMIT 1` , [ collectionId ] , ) const currentSchemaVersion = currentSchemaRows [ 0 ] ?. schema_version if ( currentSchemaVersion === nextSchemaVersion ) { return } if ( currentSchemaVersion !== previousSchemaVersion ) { throw new InvalidPersistedCollectionConfigError ( `Schema version changed concurrently for collection \"${ collectionId } \": ` + `found ${ currentSchemaVersion ?? `no registry entry` } after observing $ { previousSchemaVersion } ; ` +\n            ` refusing to reset it to $ { nextSchemaVersion } . `,\n        )\n      }\n\n      const persistedIndexes = await transactionDriver.query<{\n        index_name: string\n      }>(\n        ` SELECT index_name FROM persisted_index_registry WHERE collection_id = ? `,\n        [collectionId],\n      )\n      for (const row of persistedIndexes)\n        await dropPersistedIndex(transactionDriver, row.index_name)\n\n      await transactionDriver.run(\n        ` DELETE FROM collection_expected_keys WHERE collection_id = ? `,\n        [collectionId],\n      )\n      await transactionDriver.run(` DELETE FROM $ { collectionTableSql } `)\n      await transactionDriver.run(` DELETE FROM $ { tombstoneTableSql } `)\n      await transactionDriver.run(\n        ` DELETE FROM applied_tx WHERE collection_id = ? `,\n        [collectionId],\n      )\n      await transactionDriver.run(\n        ` DELETE FROM persisted_index_registry WHERE collection_id = ? `,\n        [collectionId],\n      )\n      await transactionDriver.run(\n        ` DELETE FROM collection_metadata WHERE collection_id = ? `,\n        [collectionId],\n      )\n      await transactionDriver.run(\n        ` UPDATE collection_registry SET schema_version = ? , updated_at = CAST ( strftime ( '%s' , 'now' ) AS INTEGER ) WHERE collection_id = ? `,\n        [nextSchemaVersion, collectionId],\n      )\n      await transactionDriver.run(\n        ` INSERT INTO collection_version ( collection_id , latest_row_version , key_set_evidence_available , key_set_evidence_incompatible ) VALUES ( ? , 0 , 1 , 0 ) ON CONFLICT ( collection_id ) DO UPDATE SET latest_row_version = 0 , key_set_evidence_available = 1 , key_set_evidence_incompatible = 0 , source_progress_incompatible = 0 `,\n        [collectionId],\n      )\n      await transactionDriver.run(\n        ` INSERT INTO collection_reset_epoch ( collection_id , reset_epoch , updated_at ) VALUES ( ? , 1 , CAST ( strftime ( '%s' , 'now' ) AS INTEGER ) ) ON CONFLICT ( collection_id ) DO UPDATE SET reset_epoch = collection_reset_epoch . reset_epoch + 1 , updated_at = CAST ( strftime ( '%s' , 'now' ) AS INTEGER ) `,\n        [collectionId],\n      )\n    })",
    "line": 4437,
    "outcome": "crashed",
    "class": null,
    "changedLine": false
   },
   {
+   "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await this . runInTransaction ( async ( transactionDriver ) => { await this . assertCacheGenerationReadClaim ( transactionDriver , collectionId , cacheGenerationClaimId , ) const currentSchemaRows = await transactionDriver . query < { schema_version : number } > ( `SELECT schema_version\n         FROM collection_registry\n         WHERE collection_id = ?\n         LIMIT 1` , [ collectionId ] , ) const currentSchemaVersion = currentSchemaRows [ 0 ] ?. schema_version if ( currentSchemaVersion === nextSchemaVersion ) { return } if ( currentSchemaVersion !== previousSchemaVersion ) { throw new InvalidPersistedCollectionConfigError ( `Schema version changed concurrently for collection \"${ collectionId } \": ` + `found ${ currentSchemaVersion ?? `no registry entry` } after observing $ { previousSchemaVersion } ; ` +\n            ` refusing to reset it to $ { nextSchemaVersion } . `,\n        )\n      }\n\n      const persistedIndexes = await transactionDriver.query<{\n        index_name: string\n      }>(\n        ` SELECT index_name FROM persisted_index_registry WHERE collection_id = ? `,\n        [collectionId],\n      )\n      for (const row of persistedIndexes)\n        await dropPersistedIndex(transactionDriver, row.index_name)\n\n      await transactionDriver.run(\n        ` DELETE FROM collection_expected_keys WHERE collection_id = ? `,\n        [collectionId],\n      )\n      await transactionDriver.run(` DELETE FROM $ { collectionTableSql } `)\n      await transactionDriver.run(` DELETE FROM $ { tombstoneTableSql } `)\n      await transactionDriver.run(\n        ` DELETE FROM applied_tx WHERE collection_id = ? `,\n        [collectionId],\n      )\n      await transactionDriver.run(\n        ` DELETE FROM persisted_index_registry WHERE collection_id = ? `,\n        [collectionId],\n      )\n      await transactionDriver.run(\n        ` DELETE FROM collection_metadata WHERE collection_id = ? `,\n        [collectionId],\n      )\n      await transactionDriver.run(\n        ` UPDATE collection_registry SET schema_version = ? , updated_at = CAST ( strftime ( '%s' , 'now' ) AS INTEGER ) WHERE collection_id = ? `,\n        [nextSchemaVersion, collectionId],\n      )\n      await transactionDriver.run(\n        ` INSERT INTO collection_version ( collection_id , latest_row_version , key_set_evidence_available , key_set_evidence_incompatible ) VALUES ( ? , 0 , 1 , 0 ) ON CONFLICT ( collection_id ) DO UPDATE SET latest_row_version = 0 , key_set_evidence_available = 1 , key_set_evidence_incompatible = 0 , source_progress_incompatible = 0 `,\n        [collectionId],\n      )\n      await transactionDriver.run(\n        ` INSERT INTO collection_reset_epoch ( collection_id , reset_epoch , updated_at ) VALUES ( ? , 1 , CAST ( strftime ( '%s' , 'now' ) AS INTEGER ) ) ON CONFLICT ( collection_id ) DO UPDATE SET reset_epoch = collection_reset_epoch . reset_epoch + 1 , updated_at = CAST ( strftime ( '%s' , 'now' ) AS INTEGER ) `,\n        [collectionId],\n      )\n    })",
+   "line": 4439,
+   "outcome": "crashed",
+   "class": null,
+   "changedLine": false
+  },
+  {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await this . assertCacheGenerationReadClaim ( transactionDriver , collectionId , cacheGenerationClaimId , )",
-   "line": 4438,
+   "line": 4440,
    "outcome": "survived",
    "class": "not-distinguished",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:const currentSchemaRows = await transactionDriver . query < { schema_version : number } > ( `SELECT schema_version\n         FROM collection_registry\n         WHERE collection_id = ?\n         LIMIT 1` , [ collectionId ] , )",
-   "line": 4443,
+   "line": 4445,
    "outcome": "crashed",
    "class": null,
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:optional-chain:const currentSchemaVersion = currentSchemaRows [ 0 ] ?. schema_version",
-   "line": 4452,
+   "line": 4454,
    "outcome": "survived",
    "class": "not-distinguished",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:if-true:if ( currentSchemaVersion === nextSchemaVersion ) { return }",
-   "line": 4453,
+   "line": 4455,
    "outcome": "crashed",
    "class": null,
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:if-false:if ( currentSchemaVersion === nextSchemaVersion ) { return }",
-   "line": 4453,
+   "line": 4455,
    "outcome": "survived",
    "class": "branch-never-taken",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:binary-swap:if ( currentSchemaVersion === nextSchemaVersion ) { return }",
-   "line": 4453,
+   "line": 4455,
    "outcome": "crashed",
    "class": null,
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:if-true:if ( currentSchemaVersion !== previousSchemaVersion ) { throw new InvalidPersistedCollectionConfigError ( `Schema version changed concurrently for collection \"${ collectionId } \": ` + `found ${ currentSchemaVersion ?? `no registry entry` } after observing $ { previousSchemaVersion } ; ` +\n            ` refusing to reset it to $ { nextSchemaVersion } . `,\n        )\n      }",
-   "line": 4456,
+   "line": 4458,
    "outcome": "crashed",
    "class": null,
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:if-false:if ( currentSchemaVersion !== previousSchemaVersion ) { throw new InvalidPersistedCollectionConfigError ( `Schema version changed concurrently for collection \"${ collectionId } \": ` + `found ${ currentSchemaVersion ?? `no registry entry` } after observing $ { previousSchemaVersion } ; ` +\n            ` refusing to reset it to $ { nextSchemaVersion } . `,\n        )\n      }",
-   "line": 4456,
+   "line": 4458,
    "outcome": "survived",
    "class": "branch-never-taken",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:binary-swap:if ( currentSchemaVersion !== previousSchemaVersion ) { throw new InvalidPersistedCollectionConfigError ( `Schema version changed concurrently for collection \"${ collectionId } \": ` + `found ${ currentSchemaVersion ?? `no registry entry` } after observing $ { previousSchemaVersion } ; ` +\n            ` refusing to reset it to $ { nextSchemaVersion } . `,\n        )\n      }",
-   "line": 4456,
+   "line": 4458,
    "outcome": "crashed",
    "class": null,
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:binary-swap:throw new InvalidPersistedCollectionConfigError ( `Schema version changed concurrently for collection \"${ collectionId } \": ` + `found ${ currentSchemaVersion ?? `no registry entry` } after observing $ { previousSchemaVersion } ; ` +\n            ` refusing to reset it to $ { nextSchemaVersion } . `,\n        )",
-   "line": 4459,
+   "line": 4461,
    "outcome": "unreached",
    "class": null,
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:const persistedIndexes = await transactionDriver . query < { index_name : string } > ( `SELECT index_name\n         FROM persisted_index_registry\n         WHERE collection_id = ?` , [ collectionId ] , )",
-   "line": 4464,
+   "line": 4466,
    "outcome": "crashed",
    "class": null,
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await dropPersistedIndex ( transactionDriver , row . index_name )",
-   "line": 4473,
+   "line": 4475,
    "outcome": "unreached",
    "class": null,
    "changedLine": true
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `DELETE FROM collection_expected_keys\n         WHERE collection_id = ?` , [ collectionId ] , )",
-   "line": 4475,
+   "line": 4477,
    "outcome": "survived",
    "class": "not-judged",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `DELETE FROM ${ tombstoneTableSql } `)",
-   "line": 4481,
+   "line": 4483,
    "outcome": "survived",
    "class": "not-judged",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `DELETE FROM applied_tx\n         WHERE collection_id = ?` , [ collectionId ] , )",
-   "line": 4482,
+   "line": 4484,
    "outcome": "survived",
    "class": "not-judged",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `DELETE FROM persisted_index_registry\n         WHERE collection_id = ?` , [ collectionId ] , )",
-   "line": 4487,
+   "line": 4489,
    "outcome": "survived",
    "class": "not-judged",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `DELETE FROM collection_metadata\n         WHERE collection_id = ?` , [ collectionId ] , )",
-   "line": 4492,
+   "line": 4494,
    "outcome": "survived",
    "class": "not-judged",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `UPDATE collection_registry\n         SET schema_version = ?,\n             updated_at = CAST(strftime('%s', 'now') AS INTEGER)\n         WHERE collection_id = ?` , [ nextSchemaVersion , collectionId ] , )",
-   "line": 4497,
+   "line": 4499,
    "outcome": "crashed",
    "class": null,
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `INSERT INTO collection_version (\n           collection_id,\n           latest_row_version,\n           key_set_evidence_available,\n           key_set_evidence_incompatible\n         )\n         VALUES (?, 0, 1, 0)\n         ON CONFLICT(collection_id) DO UPDATE SET\n           latest_row_version = 0,\n           key_set_evidence_available = 1,\n           key_set_evidence_incompatible = 0,\n           source_progress_incompatible = 0` , [ collectionId ] , )",
-   "line": 4504,
+   "line": 4506,
    "outcome": "survived",
    "class": "not-judged",
    "changedLine": false
   },
   {
    "key": "src/sqlite-core-adapter.ts#SQLiteCorePersistenceAdapter.handleSchemaMismatch:value-undefined:await transactionDriver . run ( `INSERT INTO collection_reset_epoch (collection_id, reset_epoch, updated_at)\n         VALUES (?, 1, CAST(strftime('%s', 'now') AS INTEGER))\n         ON CONFLICT(collection_id) DO UPDATE SET\n           reset_epoch = collection_reset_epoch.reset_epoch + 1,\n           updated_at = CAST(strftime('%s', 'now') AS INTEGER)` , [ collectionId ] , )",
-   "line": 4519,
+   "line": 4521,
    "outcome": "survived",
    "class": "not-judged",
    "changedLine": false
