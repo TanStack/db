@@ -1,9 +1,10 @@
 // Mutants for SQLite pages and number equality.
 //
-// Each mutant replaces one exact piece of production code with a plausible
-// wrong design. The harness applies it in memory through
+// Each mutant replaces exact pieces of production code with a plausible wrong
+// design: one `find` and `replace`, or `edits` when the design spans several
+// places. The harness applies it in memory through
 // `packages/db-sqlite-persistence-core/vitest.mutants.config.ts`, runs the
-// owner oracles, and expects every mutant to fail a named test unless the
+// owner oracles, and expects every mutant to fail a named law unless the
 // mutant is marked `equivalent`. A mutant whose target no longer matches, or
 // that never reached a transformed module, is an error: the list has drifted
 // from the code. A failure that names no law, such as a setup error, is an
@@ -32,10 +33,19 @@ const FILE = `packages/db-sqlite-persistence-core/src/sqlite-core-adapter.ts`
 const MUTANTS = [
   {
     id: `S01`,
-    find: '(clause.compareOptions.nulls === `first`) === (direction === `ASC`)',
-    replace: 'clause.compareOptions.nulls === `first`',
+    edits: [
+      {
+        find: 'clause.compareOptions.nulls === `first` ? `NULLS FIRST` : `NULLS LAST`',
+        replace:
+          '(clause.compareOptions.nulls === `first`) === (direction === `ASC`) ? `NULLS FIRST` : `NULLS LAST`',
+      },
+      {
+        find: '`desc` &&\n            leftValue != null &&\n            rightValue != null\n',
+        replace: '`desc`\n',
+      },
+    ],
     rationale:
-      'SQL places nulls as the request says, ignoring that the in-memory sort negates a desc comparison',
+      'the design before this fix: SQL and the in-memory sort negate a whole desc comparison, so nulls sit opposite to `nulls`',
   },
   {
     id: `S02`,
@@ -120,6 +130,21 @@ const MUTANTS = [
     rationale:
       'an empty conjunction keeps the page in memory, unlike an absent where',
   },
+  {
+    id: `S14`,
+    find: 'path.length === 1 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(path[0]!)',
+    replace:
+      'path.every((segment) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(segment))',
+    rationale:
+      'a nested ref counts as a top-level field, so it takes the number candidate and SQL paging although SQLite reads NULL where JavaScript reads a property',
+  },
+  {
+    id: `S15`,
+    find: '  if (Number.isNaN(left) || Number.isNaN(right)) {\n    return Number(Number.isNaN(left)) - Number(Number.isNaN(right))\n  }\n',
+    replace: '',
+    rationale:
+      'the in-memory sort ties NaN with every value, unlike the comparator, which orders it above them',
+  },
 ].map((mutant) => ({ ...mutant, file: FILE }))
 
 function run(mutant) {
@@ -181,8 +206,11 @@ if (process.argv.includes(`--list`)) {
 }
 
 // Validate every target before running anything.
-const drifted = selected.filter(
-  (m) => readFileSync(join(ROOT, m.file), `utf8`).split(m.find).length !== 2,
+const drifted = selected.filter((m) =>
+  (m.edits ?? [m]).some(
+    ({ find }) =>
+      readFileSync(join(ROOT, m.file), `utf8`).split(find).length !== 2,
+  ),
 )
 if (drifted.length > 0) {
   console.error(
