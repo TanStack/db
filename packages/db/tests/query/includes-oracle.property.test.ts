@@ -3604,14 +3604,15 @@ describe(`includes alpha-renaming across lexical scopes`, () => {
         ],
         beforeCampaign: () => reached.clear(),
         afterCampaign: () => {
-          oracleAssertion(`includes scoped-distinct reach`, () =>
-            expect(
-              SCOPED_DISTINCT_REACH_STATES.filter(
-                (state) => !reached.has(state),
-              ),
-              `unreached scoped DISTINCT states`,
-            ).toEqual([]),
-          )
+          if (!oracleReplayRequested())
+            oracleAssertion(`includes scoped-distinct reach`, () =>
+              expect(
+                SCOPED_DISTINCT_REACH_STATES.filter(
+                  (state) => !reached.has(state),
+                ),
+                `unreached scoped DISTINCT states`,
+              ).toEqual([]),
+            )
         },
       },
       `keeps include DISTINCT within each parent's relation [${label}]`,
