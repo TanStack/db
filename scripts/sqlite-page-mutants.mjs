@@ -6,8 +6,9 @@
 // owner oracles, and expects every mutant to fail a named test unless the
 // mutant is marked `equivalent`. A mutant whose target no longer matches, or
 // that never reached a transformed module, is an error: the list has drifted
-// from the code. A kill prints the first failing test and the law that its
-// oracle reported.
+// from the code. A failure that names no law, such as a setup error, is an
+// error too. A kill prints the first failing test and the law that its oracle
+// reported.
 //
 // Usage: node scripts/sqlite-page-mutants.mjs [--only=S01,S02] [--list]
 // The review record `docs/contributing/oracle-reviews/
@@ -159,11 +160,9 @@ function run(mutant) {
           done({ outcome: `not applied`, detail: output.slice(-2000) })
         else if (error?.killed) done({ outcome: `timeout` })
         else if (!error) done({ outcome: `survived` })
-        else if (failed)
-          done({
-            outcome: `killed`,
-            detail: law ? `${failed} (law: ${law})` : failed,
-          })
+        // Only a failure that names a law kills; any other is an error.
+        else if (failed && law)
+          done({ outcome: `killed`, detail: `${failed} (law: ${law})` })
         else done({ outcome: `error`, detail: output.slice(-2000) })
       },
     )
