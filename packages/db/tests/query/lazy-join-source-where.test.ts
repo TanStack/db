@@ -150,6 +150,54 @@ describe(`lazy join source where`, () => {
     ])
   })
 
+  it(`include: a where pushed into a joined subquery keeps the join-key filter`, async () => {
+    const todoLists = createEagerCollection(`todo-lists`, todoListRows)
+    const todos = createEagerCollection(`todos`, todoRows)
+    const { collection: users, loads } = createOnDemandCollection(
+      `users`,
+      userRows,
+    )
+
+    const live = createLiveQueryCollection((q) =>
+      q.from({ list: todoLists }).select(({ list }) => ({
+        id: list.id,
+        todos: toArray(
+          q
+            .from({ todo: todos })
+            .where(({ todo }) => eq(todo.listId, list.id))
+            .innerJoin(
+              { assignee: q.from({ user: users }) },
+              ({ todo, assignee }) => eq(todo.assigneeId, assignee.id),
+            )
+            .where(({ assignee }) => eq(assignee.active, true))
+            .select(({ todo, assignee }) => ({
+              id: todo.id,
+              assignee: assignee.id,
+            })),
+        ),
+      })),
+    )
+    cleanups.push(() => live.cleanup())
+    await live.preload()
+    await flushPromises()
+
+    expect(loads.length).toBeGreaterThan(0)
+    for (const load of loads) {
+      expect(hasKeyFilter(load, [7, 8, 9]), describeLoad(load)).toBe(true)
+    }
+    expect(
+      live.toArray
+        .map((list) => ({
+          id: list.id,
+          assignees: [...list.todos].map((todo) => todo.assignee).sort(),
+        }))
+        .sort((a, b) => a.id - b.id),
+    ).toEqual([
+      { id: 1, assignees: [7] },
+      { id: 2, assignees: [9] },
+    ])
+  })
+
   it(`include: a where on the parent-filtered side keeps the join-key filter`, async () => {
     const todoLists = createEagerCollection(`todo-lists`, todoListRows)
     const todos = createEagerCollection(`todos`, todoRows)
