@@ -1237,12 +1237,17 @@ const fixed: Array<{ name: string; history: History }> = [
     }),
   },
   {
+    // Nulls last, so the highest titles start the page.
     name: `title holds private-use and astral text`,
-    history: fixedHistory(order(`title`, `desc`, `lexical`), 1, {
-      rows: withRow(withRow(plainRows, 2, { title: `\uE000` }), 10, {
-        title: `\u{1F600}`,
-      }),
-    }),
+    history: fixedHistory(
+      { ...order(`title`, `desc`, `lexical`), nulls: `last` },
+      1,
+      {
+        rows: withRow(withRow(plainRows, 2, { title: `\uE000` }), 10, {
+          title: `\u{1F600}`,
+        }),
+      },
+    ),
   },
   {
     name: `items of each kind by length`,
@@ -1271,8 +1276,9 @@ const fixed: Array<{ name: string; history: History }> = [
     }),
   },
   {
+    // Nulls last, so the two rows tied at the highest rank start the page.
     name: `two rows tied on rank have high keys`,
-    history: fixedHistory(order(`rank`, `desc`), 1, {
+    history: fixedHistory({ ...order(`rank`, `desc`), nulls: `last` }, 1, {
       rows: withRow(withRow(plainRows, 2, { key: `private use` }), 3, {
         key: `astral`,
       }),
