@@ -122,10 +122,11 @@ describe(`SQLite ordered page indexes`, () => {
       driver.db.exec(`UPDATE "${tableName}" SET value = '{' WHERE key = 's:k1'`)
 
       expect(driver.db.prepare(probe!.sql).all(...probe!.params)).toEqual([])
-      // The same columns without the index condition do read stored values.
+      // The same columns without the encoding and index conditions do read
+      // stored values.
       const columns = probe!.sql.slice(
         0,
-        probe!.sql.lastIndexOf(`WHERE EXISTS`),
+        probe!.sql.lastIndexOf(`WHERE length(CAST('a' AS BLOB)) = 1`),
       )
       expect(columns).toContain(` AS high`)
       expect(() => driver.db.prepare(columns).all()).toThrow(/malformed JSON/)
