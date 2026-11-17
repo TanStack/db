@@ -1,81 +1,17 @@
 # SQLite number equality and ordered pages: oracle review
 
-Reviewed branch: `fix/sqlite-limit-and-number-prefilter`, two commits on
-`21c52a07`. The first narrows safe-integer equality and membership in SQL. The
-second applies `limit` and `offset` in SQL when SQL provably keeps and orders
-the same rows as the in-memory pipeline.
+Reviewed head: `be458c96` on `fix/sqlite-limit-and-number-prefilter`, based on
+`21c52a07`. The adapter last changed at `6302035a`, where the gap report and
+the code weight below were measured, and the oracle files at `454b2f56`, which
+changes no law, model rule, declared state, run budget or comparison.
 
-## Contract and evidence
+The change narrows safe-integer equality and membership in SQL, and applies
+`limit` and `offset` in SQL when SQL provably keeps and orders the same rows
+as the in-memory pipeline. The JavaScript row evaluator and in-memory sort
+decide `loadSubset` results, and SQL is a candidate read (PR #1997), so
+neither part may alter a public result.
 
-The JavaScript row evaluator and in-memory sort decide `loadSubset` results,
-and SQL is a candidate read (PR #1997). Neither change may alter a public
-result.
-
-Number equality: the boolean-arity oracle gains number atoms over a field that
-stores Dates beside numbers, and coerced twins over `1n`, `true`, `'1'`, the
-epoch's ISO text, `NaN`, `1.5` and null. Before the change, its row-work law was
-RED in 62 matrix cases and both direct number atoms (20 raw rows, no `WHERE`).
-After it, the law is GREEN, and public rows match before and after. The Node
-expression-index fixed filter gains safe-integer equality on a top-level and a
-nested field. Both were RED before (no number predicate reached SQL) and are
-GREEN with exact candidates, the bound number and the named index.
-
-Ordered pages: the new ordered-page oracle runs 192 enumerated histories. On
-the prior adapter, and after the number change alone, the 68 histories that
-reach `page in SQL` were RED for the work law, and no history violated the page
-or filter law. On the branch all 199 tests pass. Production mutants were RED
-for the page law: null placement that ignores the `desc` negation (25
-histories), the exact filter without kind guards (15), and paging without the
-irregular-rows probe (12).
-
-Suites on the branch, coverage disabled: SQLite core 104 files, 4,145 passed,
-49 expected failures, 1 skipped, 2 todo; Node persistence 16 files, 265 passed.
-Both package type checks and lint pass.
-
-## ORC-012 requirement audit
-
-| Requirement | Outcome |
-| --- | --- |
-| ORC-001 | Applicable. The law, its authority (the evaluator contract of PR #1997 and the paged-read goal) and its limits head the oracle and its `law` record. |
-| ORC-002 | Applicable. The filter model is its own equality; the work premise reads stored values, not SQL. Order comes from production's unpaged request, a relation between two executions, not a copy of the comparator. |
-| ORC-003 | Applicable. The oracle file states the laws, model, datasets, driver, checkpoint and limits beside the code. |
-| ORC-004 | Applicable to the enumeration. Each dataset changes one fact of the plain dataset; the mutant and calibration results show which datasets distinguish which wrong design. The Date, BigInt, fraction, object, lone-surrogate and NUL datasets order alike in SQLite and JavaScript on this build and witness public rows only. |
-| ORC-005 | Applicable. The real adapter runs on node:sqlite; a counting driver records the raw rows of each Collection SELECT; keys are observed at `loadSubset` return. |
-| ORC-006 | Applicable. Three trace calibrations, one mutant driver bound to two histories, and three production mutants (run once, not checked in) fail at the named laws. |
-| ORC-007 | Inapplicable. The property is enumerated, not generated. |
-| ORC-008 | Inapplicable. No stateful model. |
-| ORC-009 | Applicable. "Page in SQL" names the work law's premise; "irregular rows" names the stored values that SQLite and the in-memory sort may order differently. |
-| ORC-010 | Applicable. The driver closes its database in `finally`; a failure keeps its checkpoint and law. |
-| ORC-011 | Applicable. A shared fault in the in-memory sort would pass the page law; the filter law's independent equality and the work law do not depend on it. The comparator itself is outside this owner. |
-| ORC-013 | Applicable. Each production mutant is rejected by a nearby dataset that differs from the plain one in a single value or key. |
-| ORC-014 | Inapplicable. No controlled provider; node:sqlite is the real engine. |
-| ORC-015 | Applicable. `page in SQL` and `page in memory` are declared enumerated states; the reach test reports 68 and 124. |
-| ORC-016 | Applicable. The oracle file holds only `oracleProperty`; index lifecycle cases live in `sqlite-ordered-page.test.ts`. |
-
-## Scope left open
-
-Range filters (`gt`, `lt` and the cursor's `whereFrom`) keep the in-memory
-page, so later pages of a scrolled list still read every row below the cursor.
-Fractions, numbers past the signed 64-bit range, locale or custom string sort,
-expression order fields, and `where` clauses with `or` or `not` also keep it.
-Native hosts, OPFS workers and elapsed time are outside this owner.
-
-## Follow-up: generated histories, gap report and code weight
-
-Reviewed head: the follow-up commits on `3968a567` that end with the commit
-adding this entry. The entry above describes `3968a567` and stays as recorded.
-
-The ordered-page oracle replaced its enumeration with a generated grammar, the
-boolean-arity oracle declared reach for its number atoms and now names the
-adapter in `owns`, and a Node property generates safe-integer equality on an
-indexed path. The grammar found one defect in the first version of this
-change: an empty conjunction read every row. The production change otherwise
-keeps its behavior and loses code: the exact filter returns only kind guards
-over the safe prefilter, one helper finds a comparison's field and literal,
-and the order probe finds the index of irregular rows in `sqlite_master`
-within its one statement per order field.
-
-### Evidence block
+## Evidence block
 
 - **Law:** at `loadSubset` return, an ordered page holds exactly the unpaged
   request's rows at its offset; the unpaged request keeps the rows whose field
@@ -105,10 +41,10 @@ within its one statement per order field.
   `number equality decides a row in SQL` constructions and both generated
   units in its work check (`and(eq-number)` reads 20 rows with no `WHERE`).
   With a core build of `21c52a07`, the Node property fails both constructions
-  and both generated units under law `exact candidate`. On `10e91757`, the
-  first version of this change, the `and()` and nested `and(and())` shapes
+  and both generated units under law `exact candidate`. On `10e91757`, an
+  earlier commit of this branch, the `and()` and nested `and(and())` shapes
   fail the work law (one stored row at offset 1 reads that row for an empty
-  page).
+  page); `84a467ea` pages an empty conjunction as an absent `where`.
 - **GREEN:** the same commands on the branch pass: 74 ordered-page tests and
   23 boolean-arity tests, and the Node file's 59 tests.
 - **Mutant:** `node scripts/sqlite-page-mutants.mjs` applies thirteen
@@ -132,7 +68,7 @@ within its one statement per order field.
   drivers this review ran do neither; the browser and React Native drivers were
   not run. It needs a maintainer allowance.
 
-### Gap report
+## Gap report
 
 `pnpm gap-report --package packages/db-sqlite-persistence-core --source
 src/sqlite-core-adapter.ts --seed 1997 --only <mutants>` selects every mutant
@@ -169,19 +105,11 @@ transaction of `ensureIndexUnscheduled`; `if (filter)`, its parameter push, and
 the returned page of `loadSubsetInternal`, where `safePrefilter` became
 `filter` and the return gained `pageInSql ?`).
 
-`6302035a` moved the index lookup of `sortsAsInMemory` into the probe's
-statement. The six mutants of the removed lookup left the report, four killed
-and two open. Apart from the eight mutants below, every other mutant killed
-on `f838f122`, the commit before it, is killed on `6302035a`: 341 by the same
-stable key and 2 by the key that their statement now has (the probe's query,
-and the last `return false`, whose ordinal moved).
-
 Eight mutants reach the slow sync-metadata campaigns: one of `isPageBound`,
-three of `compileOrderByClauses` and four of `loadSubsetInternal`, none on a
-line that `6302035a` changed. Under the load of a whole selection each runs
-for minutes, and its outcome varied between three runs of the same lines
-(killed, timed out or survived). Run alone, all eight survive on `f838f122`
-and on `6302035a`, so the table and the JSON count them as open.
+three of `compileOrderByClauses` and four of `loadSubsetInternal`. Under the
+load of a whole selection each runs for minutes, and its outcome varied
+between three runs of the same lines (killed, timed out or survived). Run
+alone, all eight survive, so the table and the JSON count them as open.
 
 The 211 mutants still alive are listed by key in
 `2026-11-16-sqlite-ordered-page.json`. They stay open: 41 sit on lines this
@@ -222,14 +150,14 @@ for all of them. The 41, by reason:
   that cannot bind the page's values reads every row, a law decision for the
   maintainer.
 
-### Code weight
+## Code weight
 
 `pnpm size:compare --packages db-sqlite-persistence-core --files` against
 `21c52a07`, production bundle, at `6302035a`: the package grows 1,206 bytes
-gzip and 1,053 brotli (at `3968a567` it grew 1,282 and 1,170), and
-`sqlite-core-adapter.js` grows 3,255 minified bytes (3,987 at `3968a567`). The `app` scenario does not
-change: it ships no SQLite persistence. The rest of the growth is the SQL text
-of the kind guards, the irregular-rows predicate and the order probe.
+gzip and 1,053 brotli, and `sqlite-core-adapter.js` grows 3,255 minified
+bytes. The `app` scenario does not change: it ships no SQLite persistence. The
+growth is the SQL text of the kind guards, the irregular-rows predicate and
+the order probe, and the code that decides when a page is exact.
 
 Refactors tried and dropped:
 
@@ -246,14 +174,14 @@ Refactors tried and dropped:
 - Dropping the stale-predicate rebuild in `ensureIndex` would leave a future
   release that changes the predicate unable to page until a manual rebuild.
 
-### ORC-012 audit at this head
+## ORC-012 requirement audit
 
 | Requirement | Outcome |
 | --- | --- |
 | ORC-001 | Applicable. Each property's `law` record and opening prose state the law, its authority and its limits. |
 | ORC-002 | Applicable. The ordered-page model is its own equality and a premise over stored values; order comes from the unpaged request. The boolean-arity model folds an independent truth table. The Node model walks the stored path. None calls the evaluator, the comparator or the SQL compiler. |
 | ORC-003 | Applicable. The files keep the contract, model, grammar, driver and check beside their prose. |
-| ORC-004 | Applicable. Reconstruction: sixteen fixed histories rebuild the enumerated datasets that rejected mutants, as members of the grammar. Ablation: without the zero-bound construction S12 survived; without the `and` shapes the empty-conjunction defect was invisible; without the locale and custom fixed histories S05 survived on the seeded campaigns. Range: limits 0..8 and one million, offsets absent or 0..8, integers -2..9, epochs 1, 2, 8 and 8.64e15. Exclusion: negative, fractional and unsafe limits and offsets, Date and NaN literals, and orders on computed fields are outside the grammar and its laws. |
+| ORC-004 | Applicable. Reconstruction: sixteen fixed histories rebuild, as members of the grammar, the datasets that rejected mutants. Ablation: without the zero-bound construction S12 survived; without the `and` shapes the empty-conjunction defect was invisible; without the locale and custom fixed histories S05 survived on the seeded campaigns. Range: limits 0..8 and one million, offsets absent or 0..8, integers -2..9, epochs 1, 2, 8 and 8.64e15. Exclusion: negative, fractional and unsafe limits and offsets, Date and NaN literals, and orders on computed fields are outside the grammar and its laws. |
 | ORC-005 | Applicable. The real adapter runs on node:sqlite (core) and BetterSqlite3 (Node). The counting driver records raw rows per Collection SELECT; a rejected load is an observation. |
 | ORC-006 | Applicable. Trace and driver calibrations, a missing-state calibration per builder, and thirteen checked-in production mutants; twelve fail at a named law, S07 survives. |
 | ORC-007 | Applicable. Each generated property runs a fixed-seed campaign (1116, 1994, 1659005) and a random campaign with the same grammar, check and budget; failures print their seed, path and unit. |
