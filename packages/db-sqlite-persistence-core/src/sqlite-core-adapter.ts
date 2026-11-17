@@ -1700,11 +1700,9 @@ function compileOrderByClauses(
 
     const direction =
       clause.compareOptions.direction === `desc` ? `DESC` : `ASC`
-    // The in-memory sort negates whole comparisons for `desc`, nulls included.
+    // `nulls` alone places nulls; `desc` reverses only non-null comparisons.
     const nulls =
-      (clause.compareOptions.nulls === `first`) === (direction === `ASC`)
-        ? `NULLS FIRST`
-        : `NULLS LAST`
+      clause.compareOptions.nulls === `first` ? `NULLS FIRST` : `NULLS LAST`
     parts.push(`${compiledExpression.sql} ${direction} ${nulls}`)
   }
 
@@ -4003,9 +4001,13 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
           clause.compareOptions,
         )
 
+        // As TanStack DB's comparator: `nulls` alone places nulls, and `desc`
+        // reverses only a comparison of two non-null values.
         if (comparison !== 0) {
-          return clause.compareOptions.direction === `desc`
-            ? comparison * -1
+          return clause.compareOptions.direction === `desc` &&
+            leftValue != null &&
+            rightValue != null
+            ? -comparison
             : comparison
         }
       }
