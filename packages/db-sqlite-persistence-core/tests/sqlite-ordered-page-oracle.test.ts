@@ -1229,6 +1229,14 @@ const fixed: Array<{ name: string; history: History }> = [
     }),
   },
   {
+    // SQL returns the NaN row after the numbers, so the sort compares it as
+    // the left operand while it places it.
+    name: `NaN on the lowest key, nulls last`,
+    history: fixedHistory({ ...order(`rank`, `asc`), nulls: `last` }, 1, {
+      rows: withRow(plainRows, 0, { rank: `nan` }),
+    }),
+  },
+  {
     name: `title holds private-use and astral text`,
     history: fixedHistory(order(`title`, `desc`, `lexical`), 1, {
       rows: withRow(withRow(plainRows, 2, { title: `\uE000` }), 10, {
