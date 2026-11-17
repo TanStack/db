@@ -26,18 +26,22 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  *
  * Page law: at `loadSubset` return, a request with `orderBy`, `limit` and
  * `offset` returns exactly the rows at those positions of the comparator's
- * order of the matching rows, ties broken by key. Where the comparator
- * decides no single order, the page holds the rows at those positions of the
- * same request without `limit` and `offset`, in the same order.
+ * order of the matching rows, ties broken by key, before and after later
+ * writes. Where the comparator decides no single order, the page holds the
+ * rows at those positions of the same request without `limit` and `offset`,
+ * in the same order.
  *
  * Filter law: the request without `limit` returns exactly the rows that the
- * model's equality keeps. A ref reads the stored row as JavaScript does, so
+ * model's equality keeps, all leaves under a conjunction and some leaf under
+ * an `or`. A ref reads the stored row as JavaScript does, so
  * `items.length` is an array's or a string's length and `items.year` a
  * Temporal.PlainDate's year. A Date equals the number of its epoch
  * milliseconds and every other value equals only an identical value, so `1n`,
  * `true`, `'1'` and the epoch's ISO text never equal the number 1.
  *
  * Work law: SQLite returns no more stored rows than the page holds when
+ * - the database stores text as UTF-8, whose bytes order text below U+E000
+ *   as JavaScript's code units do;
  * - the `where` is absent or a conjunction of `eq` and `in` leaves on one
  *   top-level field each, whose literals are all strings with UTF-16 code
  *   units in 1..0xD7FF, all BigInts, or all safe-integer numbers, or an `eq`
@@ -47,8 +51,9 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * - every stored value of those fields is null, missing, a safe integer or a
  *   boolean, or else every one is null, missing or a string whose UTF-16 code
  *   units are all in 1..0xD7FF, sorted lexically; and
- * - every key is such a string.
- * Other requests may read every matching row. The page and filter laws hold
+ * - every key is such a string,
+ * all judged on the rows after the writes. Other requests may read every
+ * matching row. The page and filter laws hold
  * for every request.
  *
  * Model: `owedRows` filters the stored rows with that equality, reading each
@@ -56,20 +61,24 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * order term, with the request's options, then by key in code-unit order, the
  * adapter's tie-break. The comparator places nulls by `nulls` alone and
  * reverses only non-null comparisons for `desc`; it orders NaN above every
- * other value. It decides no single order when it orders two objects other
- * than Dates by an identity that each runtime assigns, or when it is not a
- * strict total order over the rows, as when text and numbers mix; the model
- * then owes no page and the page law falls back to the unpaged request.
+ * other value and compares arrays element by element. It decides no single
+ * order when it orders two objects other than Dates or arrays by an identity
+ * that each runtime assigns, or when it is not a strict total order over the
+ * rows, as when text and numbers mix; the model then owes no page and the page
+ * law falls back to the unpaged request. `resolve` applies the writes to the
+ * stored rows, and the model owes the warm page from the stored rows and the
+ * page from the rows after the writes.
  * `pageInSql` decides the work law's premise from the request and the stored
  * values alone. None of these calls the adapter, its comparator or the SQL
  * compiler. An absent `stringSort` is lexical, as the comparator reads it.
  *
  * History grammar: up to twelve rows and one request. A row draws each field
  * from a token (`storedValue`), so a history stays JSON data and shrinks. The
- * order fields `rank` and `title` mostly hold integers, booleans, plain text,
- * null or nothing, and sometimes a value that breaks the work law's premise:
- * a Date, BigInt, NaN, fraction, object or text in `rank`; U+E000, an astral
- * character, a lone surrogate, U+FFFD or NUL in `title`. The filter field
+ * order fields `rank` and `title` mostly hold integers, booleans, plain text
+ * (including é and Ā, below U+E000), null or nothing, and sometimes a value
+ * that breaks the work law's premise: a Date, BigInt, NaN, fraction, object,
+ * array or text in `rank`; U+E000, an astral character, a lone surrogate,
+ * U+FFFD or NUL in `title`. The filter field
  * `status` stores every kind of value that SQLite compares with the number 1:
  * 1, a Date of epoch 1, `1n`, `true`, `'1'` and the epoch's ISO text, and a
  * Date at the latest valid epoch, 8.64e15, which a literal of that epoch and
@@ -77,15 +86,19 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * a Temporal.PlainDate, a plain object with `length` and `year` members, null
  * or nothing; the nested refs `items.length` and `items.year` read a property
  * that the stored JSON lacks, except on the plain object. A key is `k`, an
- * optional U+E000 or astral character, and the row's index, so two high keys
- * differ first at that character.
+ * optional é, Ā, U+E000 or astral character, and the row's index, so two
+ * such keys differ first at that character. The database stores text as UTF-8
+ * or as UTF-16le, whose bytes put Ā (00 01) before é (E9 00). After the
+ * indexes exist and a first page has run, zero to two writes insert a row,
+ * replace the value of a stored row, or delete one.
  *
  * The request draws zero to two leaves over seven fields, the two nested refs
  * included: `eq` in either operand order, `in` with zero to three literals, a
  * range, or a constant leaf that keeps every row (`true` or `eq(1, 1)`). They
  * form the `where` without an `and` (no `where` for no leaf), always under
- * one `and` (`and()` for no leaf), or with the first leaf in a nested `and`;
- * the law reads an empty conjunction as an absent `where`. It draws one or two
+ * one `and` (`and()` for no leaf), with the first leaf in a nested `and`, or
+ * under one `or`; the law reads an empty conjunction as an absent `where`, and
+ * an empty `or` keeps no row. It draws one or two
  * order terms over `rank`, `title`, the unindexed `due`, the constant 1 or a
  * nested ref, each direction, null placement and string sort (default,
  * lexical, locale, or a custom reverse comparator), a limit of 0..8 or one
@@ -102,15 +115,27 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * order value, two tied rows with high keys, one inexact leaf (a range, a
  * fraction, a constant leaf, or a membership whose two kinds both match
  * stored values), or an order on `due` or the constant, or under a locale or
- * custom sort. Three states name the premises of a wrong design: `a null
+ * custom sort. Two more break it on arrays alone in `rank`, which SQLite
+ * compares as JSON text, and keep it with é and Ā in titles and keys. Seven
+ * states name the premises of a wrong design: `a null
  * decides a descending page` when placing nulls opposite to `nulls` on `desc`
  * terms changes the page; `a nested leaf keeps a JavaScript property` when an
  * owed row's value at a nested leaf's ref is not its stored JSON member; and
  * `a nested order decides the page` when reading the order terms as stored
- * JSON chooses other rows. Two constructions enter each: a descending null
- * on `rank` or `title` under the premise and on `due` in memory; a nested
- * `eq` and a nested `in` that keep an array, a string or a PlainDate; and an
- * order on each nested ref at limit 1. Each builder records the states its
+ * JSON chooses other rows; `a UTF-16 database orders text differently` when
+ * the premise holds but for the encoding and UTF-16le byte order chooses
+ * other rows; `a later term breaks the premise` when the first order term
+ * alone keeps it; `an or keeps a row through one leaf` when the premise holds
+ * but for the `or` and an owed row is null at another leaf's field; and `a
+ * later write breaks the premise` that held for the stored rows. Their
+ * constructions: a descending null on `rank` or `title` under the premise and
+ * on `due` in memory; a nested `eq` and a nested `in` that keep an array, a
+ * string or a PlainDate; an order on each nested ref at limit 1; titles é and
+ * Ā, and ranks tied over keys `kĀ00` and `ké01`, on a UTF-16le database; ranks
+ * tied before a title under a locale or the reverse sort, or with text at
+ * U+E000 and above; an `or` of a status and a title leaf over a row without a
+ * title and one without a status; and an insert or update of the text `'4'`
+ * into integer ranks 5..9. Each builder records the states its
  * history must enter, and the check rejects a history that missed one, so
  * generated and shrunk constructions are judged as well as each campaign's
  * seeded one. The measured state `the comparator orders the page` counts the
@@ -122,10 +147,11 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  * Driver and checkpoint: the real adapter runs against `node:sqlite` with a
  * counting driver, which records the rows each Collection SELECT returns. It
  * registers the Temporal polyfill that built the history's values as the
- * global constructor, stores the rows, ensures an expression index on
- * `rank`, `title`, `status`, `items.length` and `items.year`, then loads the
- * request without `limit` and the page, and observes each result's keys and
- * raw rows at `loadSubset` return. It ensures the indexes best effort, as the
+ * global constructor, sets the database encoding, stores the rows, ensures an
+ * expression index on `rank`, `title`, `status`, `items.length` and
+ * `items.year`, and loads the page once (`warm page`). It then commits each
+ * write, loads the request without `limit` and the page again, and observes
+ * each result's keys and raw rows at `loadSubset` return. It ensures the indexes best effort, as the
  * persisted wrapper does: a rejected `ensureIndex` is recorded and the loads
  * go on. A legal request owes rows, so a load that rejects is observed as
  * such and breaks the filter law (unpaged) or the page law. The driver then
@@ -142,7 +168,8 @@ import type { Observation } from '../../db/tests/oracle-property.js'
  *
  * Limits: node:sqlite in one process; no native host, OPFS worker or
  * multi-process WAL. Where the comparator decides no single order, the page
- * law only relates the page to the unpaged request. Nested refs read numbers
+ * law only relates the page to the unpaged request, and does not judge the
+ * warm page. Nested refs read numbers
  * only: a Temporal getter that returns a string, a boolean or a BigInt, such
  * as `monthCode`, is outside the grammar. Fractions and integers past the
  * signed 64-bit range stay outside the work law's premise because their order
@@ -158,7 +185,7 @@ type NestedRef = `items.length` | `items.year`
 // `constant` orders by the literal 1, an expression that is not a field.
 type OrderField = `rank` | `title` | `due` | `constant` | NestedRef
 type FilterField = `rank` | `title` | `status` | `flag` | `n` | NestedRef
-type KeyKind = `plain` | `private use` | `astral`
+type KeyKind = `plain` | `latin é` | `latin Ā` | `private use` | `astral`
 // An integer stands for itself; a string names a stored value (`storedValue`).
 type Token = number | string
 
@@ -183,8 +210,17 @@ type LeafOf<TLiteral> =
 type Leaf = LeafOf<Token>
 // How the leaves form the `where`: `flat` passes no `where` for no leaf, the
 // leaf itself for one, and their `and` for more; `and` always wraps them,
-// `and()` included; `nested` wraps the first leaf in an inner `and`.
-type WhereShape = `flat` | `and` | `nested`
+// `and()` included; `nested` wraps the first leaf in an inner `and`; `or`
+// wraps them in one `or`, which keeps no row for no leaf.
+type WhereShape = `flat` | `and` | `nested` | `or`
+// SQLite's text encoding for the database, which sets the byte order of text.
+type Encoding = `UTF-8` | `UTF-16le`
+// A write after the indexes exist: a new row, a new value for the row at
+// position `at` (modulo the row count), or that row's removal.
+type Write =
+  | { op: `insert`; row: Row }
+  | { op: `update`; at: number; row: Row }
+  | { op: `delete`; at: number }
 type Order = {
   field: OrderField
   direction: `asc` | `desc`
@@ -198,6 +234,8 @@ type History = {
   orderBy: Array<Order>
   limit: number
   offset: number | `none`
+  encoding: Encoding
+  writes: Array<Write>
 }
 
 // The stored value a token names. `missing` leaves the field out, and a
@@ -258,7 +296,10 @@ function storedValue(token: Token): unknown {
   }
 }
 
-const plainTitles = [`a`, `ab`, `b`, `B`, `c`, `d`, `e`, `f`]
+// `é` (U+00E9) and `Ā` (U+0100) order the same way in JavaScript and in
+// UTF-8 bytes, but not in UTF-16le bytes, where `Ā` (00 01) precedes `é`
+// (E9 00).
+const plainTitles = [`a`, `ab`, `b`, `B`, `c`, `d`, `e`, `f`, `é`, `Ā`]
 // Text that SQLite stores or orders differently from JavaScript. SQLite may
 // read a stored lone surrogate as U+FFFD, the replacement character itself.
 const irregularTitles = [
@@ -269,6 +310,8 @@ const irregularTitles = [
   `b\u0000\uE000`,
 ]
 const irregularRanks = [
+  `array 0`,
+  `array 3`,
   `date 8`,
   `bigint 8`,
   `nan`,
@@ -308,6 +351,8 @@ const itemsTokens = [
 ]
 const highKeyCharacters: Record<KeyKind, string> = {
   plain: ``,
+  'latin é': `é`,
+  'latin Ā': `Ā`,
   'private use': `\uE000`,
   astral: `\u{1F600}`,
 }
@@ -315,6 +360,7 @@ const highKeyCharacters: Record<KeyKind, string> = {
 const rowArbitrary: fc.Arbitrary<Row> = fc.record({
   key: fc.oneof(
     { weight: 5, arbitrary: fc.constant<KeyKind>(`plain`) },
+    { weight: 2, arbitrary: fc.constantFrom<KeyKind>(`latin é`, `latin Ā`) },
     { weight: 1, arbitrary: fc.constantFrom<KeyKind>(`private use`, `astral`) },
   ),
   rank: fc.oneof(
@@ -403,10 +449,22 @@ const orderArbitrary: fc.Arbitrary<Order> = fc.record({
 })
 const maxRows = 12
 const maxLeaves = 2
+const writeArbitrary: fc.Arbitrary<Write> = fc.oneof(
+  fc.record({ op: fc.constant(`insert` as const), row: rowArbitrary }),
+  fc.record({
+    op: fc.constant(`update` as const),
+    at: fc.nat({ max: maxRows - 1 }),
+    row: rowArbitrary,
+  }),
+  fc.record({
+    op: fc.constant(`delete` as const),
+    at: fc.nat({ max: maxRows - 1 }),
+  }),
+)
 const historyArbitrary: fc.Arbitrary<History> = fc.record({
   rows: fc.array(rowArbitrary, { maxLength: maxRows }),
   where: fc.array(leafArbitrary, { maxLength: maxLeaves }),
-  whereShape: fc.constantFrom<WhereShape>(`flat`, `and`, `nested`),
+  whereShape: fc.constantFrom<WhereShape>(`flat`, `and`, `nested`, `or`),
   orderBy: fc.uniqueArray(orderArbitrary, {
     minLength: 1,
     maxLength: 2,
@@ -417,6 +475,11 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
     fc.constant(`none` as const),
     fc.integer({ min: 0, max: 8 }),
   ),
+  encoding: fc.oneof(
+    { weight: 4, arbitrary: fc.constant<Encoding>(`UTF-8`) },
+    { weight: 1, arbitrary: fc.constant<Encoding>(`UTF-16le`) },
+  ),
+  writes: fc.array(writeArbitrary, { maxLength: 2 }),
 })
 
 type StoredRow = { key: string; value: Partial<Record<Field, unknown>> }
@@ -434,13 +497,25 @@ const states = [
   `a null decides a descending page`,
   `a nested leaf keeps a JavaScript property`,
   `a nested order decides the page`,
+  `a UTF-16 database orders text differently`,
+  `a later term breaks the premise`,
+  `an or keeps a row through one leaf`,
+  `a later write breaks the premise`,
 ] as const
 type State = (typeof states)[number]
 // Counted, not required: how many histories the comparator's order judges.
 const comparatorOrders = `the comparator orders the page`
+// A write as a Collection mutation of the adapter.
+type Mutation =
+  | { type: `insert` | `update`; key: string; value: StoredRow[`value`] }
+  | { type: `delete`; key: string; value: StoredRow[`value`] }
 type Plan = {
+  // The rows stored before the indexes, and the rows after the writes.
+  initialRows: Array<StoredRow>
   rows: Array<StoredRow>
+  writes: Array<Mutation>
   request: Request
+  encoding: Encoding
   // The states a constructed history must enter; none for a generated one.
   requiredStates: ReadonlyArray<State>
 }
@@ -470,17 +545,44 @@ function resolveLeaf(leaf: Leaf): ResolvedLeaf {
   }
 }
 
-function resolve(history: History): Plan {
+function storedRow(row: Row, index: number): StoredRow {
+  const value: Partial<Record<Field, unknown>> = {}
+  for (const field of fields)
+    if (row[field] !== `missing`) value[field] = storedValue(row[field])
   return {
-    rows: history.rows.map((row, index) => {
-      const value: Partial<Record<Field, unknown>> = {}
-      for (const field of fields)
-        if (row[field] !== `missing`) value[field] = storedValue(row[field])
-      return {
-        key: `k${highKeyCharacters[row.key]}${String(index).padStart(2, `0`)}`,
-        value,
-      }
-    }),
+    key: `k${highKeyCharacters[row.key]}${String(index).padStart(2, `0`)}`,
+    value,
+  }
+}
+
+function resolve(history: History): Plan {
+  const initialRows = history.rows.map(storedRow)
+  // An insert takes the next index after every stored row, so keys stay
+  // unique; an update or delete with no row left does nothing.
+  let rows = initialRows
+  const writes: Array<Mutation> = []
+  history.writes.forEach((write, index) => {
+    if (write.op === `insert`) {
+      const row = storedRow(write.row, maxRows + index)
+      rows = [...rows, row]
+      writes.push({ type: `insert`, ...row })
+      return
+    }
+    const target = rows[write.at % Math.max(rows.length, 1)]
+    if (!target) return
+    if (write.op === `delete`) {
+      rows = rows.filter((row) => row !== target)
+      writes.push({ type: `delete`, ...target })
+      return
+    }
+    const row = { key: target.key, value: storedRow(write.row, 0).value }
+    rows = rows.map((stored) => (stored === target ? row : stored))
+    writes.push({ type: `update`, ...row })
+  })
+  return {
+    initialRows,
+    rows,
+    writes,
     request: {
       where: history.where.map(resolveLeaf),
       whereShape: history.whereShape,
@@ -488,6 +590,7 @@ function resolve(history: History): Plan {
       limit: history.limit,
       ...(history.offset === `none` ? {} : { offset: history.offset }),
     },
+    encoding: history.encoding,
     requiredStates: constructionStates.get(history) ?? [],
   }
 }
@@ -541,30 +644,58 @@ function keepsRow(row: StoredRow, leaf: ResolvedLeaf): boolean {
   }
 }
 
-const owedRows = (plan: Plan) =>
-  plan.rows.filter((row) =>
-    plan.request.where.every((leaf) => keepsRow(row, leaf)),
+// An `or` keeps a row that some leaf keeps; every other shape is a
+// conjunction.
+const owedRows = (plan: Plan, rows = plan.rows) =>
+  rows.filter((row) =>
+    plan.request.whereShape === `or`
+      ? plan.request.where.some((leaf) => keepsRow(row, leaf))
+      : plan.request.where.every((leaf) => keepsRow(row, leaf)),
   )
+
+// Code-unit order, which JavaScript and SQLite's UTF-8 bytes share.
+const codeUnits = (left: string, right: string): number =>
+  left < right ? -1 : left > right ? 1 : 0
+
+// The byte order of UTF-16le text, which a UTF-16le SQLite database uses:
+// each code unit's low byte comes first.
+function utf16leBytes(left: string, right: string): number {
+  const bytes = (text: string) =>
+    [...Array(text.length).keys()].flatMap((at) => {
+      const unit = text.charCodeAt(at)
+      return [unit & 0xff, unit >> 8]
+    })
+  const [a, b] = [bytes(left), bytes(right)]
+  const at = a.findIndex((byte, index) => byte !== b[index])
+  return at === -1 ? a.length - b.length : at >= b.length ? 1 : a[at]! - b[at]!
+}
 
 /**
  * The order that TanStack DB's comparator gives the owed rows: each term's
  * value under `makeComparator` with the request's options, which places
  * nulls by `nulls` alone and reverses only non-null comparisons for `desc`,
  * then the keys in code-unit order, the adapter's tie-break. `read` gives a
- * term's value. Undefined when the comparator decides no single order: it
- * orders two objects other than Dates by an identity that each runtime
- * assigns, or it is not a strict total order over these rows, as when text
- * and numbers mix.
+ * term's value, and `text`, when given, replaces code-unit order for keys and
+ * for the text of terms under lexical sort. Undefined when the comparator
+ * decides no single order: it orders two objects other than Dates or arrays
+ * by an identity that each runtime assigns, or it is not a strict total
+ * order over these rows, as when text and numbers mix.
  */
 function comparatorOrder(
   rows: Array<StoredRow>,
   orderBy: ReadonlyArray<Order>,
   read: typeof readRef = readRef,
+  text: typeof codeUnits = codeUnits,
 ): Array<string> | undefined {
   // Set by `compare`, which TypeScript cannot see from here.
   let byIdentity = false as boolean
   const terms = orderBy.map((term) => ({
-    compare: makeComparator(compareOptionsOf(term)),
+    compare: makeComparator(
+      text !== codeUnits &&
+        (term.stringSort === `default` || term.stringSort === `lexical`)
+        ? { ...compareOptionsOf(term), stringSort: `custom`, compare: text }
+        : compareOptionsOf(term),
+    ),
     value: (row: StoredRow) =>
       term.field === `constant` ? 1 : read(row.value, term.field),
   }))
@@ -576,13 +707,14 @@ function comparatorOrder(
         a !== null &&
         typeof b === `object` &&
         b !== null &&
-        !(a instanceof Date && b instanceof Date)
+        !(a instanceof Date && b instanceof Date) &&
+        !(Array.isArray(a) && Array.isArray(b))
       )
         byIdentity = true
       const result = term.compare(a, b)
       if (result !== 0) return Math.sign(result)
     }
-    return left.key < right.key ? -1 : left.key > right.key ? 1 : 0
+    return text(left.key, right.key)
   }
   const ordered = [...rows].sort(compare)
   const total = ordered.every((left, at) =>
@@ -613,16 +745,20 @@ const nullsNegatedPage = (plan: Plan) =>
     ),
   )
 
-// The page that reads each order term as its stored JSON member, as SQLite
-// sees it, in the comparator's order.
-function storedJsonPage(plan: Plan): Array<string> | undefined {
-  const window = pageOf(
-    plan,
-    comparatorOrder(owedRows(plan), plan.request.orderBy, jsonMember),
-  )
+// The rows of the page chosen in another order, in the comparator's order.
+function windowIn(plan: Plan, other: Array<string> | undefined) {
+  const window = pageOf(plan, other)
   const order = comparatorOrder(owedRows(plan), plan.request.orderBy)
   return window && order?.filter((key) => window.includes(key))
 }
+
+// The page that reads each order term as its stored JSON member, as SQLite
+// sees it.
+const storedJsonPage = (plan: Plan) =>
+  windowIn(
+    plan,
+    comparatorOrder(owedRows(plan), plan.request.orderBy, jsonMember),
+  )
 
 const plainText = (text: string) =>
   [...text].every((char) => {
@@ -677,12 +813,24 @@ function sortsPlainly(rows: Array<StoredRow>, order: Order): boolean {
   return numeric || (text && lexical)
 }
 
-// The work law's premise, from the request and the stored values alone.
-function pageInSql(plan: Plan): boolean {
+/**
+ * The work law's premise, from the request and the stored values alone: a
+ * UTF-8 database, a `where` that is a conjunction of exact leaves, order
+ * terms that sort plainly, and plain keys. `rows` and `orderBy` default to
+ * the request's after the writes.
+ */
+function pageInSql(
+  plan: Plan,
+  rows = plan.rows,
+  orderBy = plan.request.orderBy,
+  encoding = plan.encoding,
+): boolean {
   return (
+    encoding === `UTF-8` &&
+    plan.request.whereShape !== `or` &&
     plan.request.where.every(exactLeaf) &&
-    plan.request.orderBy.every((order) => sortsPlainly(plan.rows, order)) &&
-    plan.rows.every((row) => plainText(`s:${row.key}`))
+    orderBy.every((order) => sortsPlainly(rows, order)) &&
+    rows.every((row) => plainText(`s:${row.key}`))
   )
 }
 
@@ -693,8 +841,14 @@ const sameKeys = (left: Array<string>, right: Array<string>) =>
  * The declared states a history enters, from the plan alone. A null decides
  * a descending page when the old design's page differs; a nested leaf keeps a
  * JavaScript property when an owed row's value at a nested leaf's ref is not
- * its stored JSON member; and a nested order decides the page when reading
- * the order terms as stored JSON would choose other rows.
+ * its stored JSON member; a nested order decides the page when reading the
+ * order terms as stored JSON would choose other rows. A UTF-16 database
+ * orders text differently when the premise holds but for the encoding and
+ * UTF-16le byte order would choose other rows; a later term breaks the
+ * premise when the first order term alone keeps it; an `or` keeps a row
+ * through one leaf when the premise holds but for the `or`, and an owed row
+ * is null or missing at another leaf's field; and a later write breaks the
+ * premise that held for the stored rows.
  */
 function statesOf(plan: Plan): Array<string> {
   const page = pageOf(
@@ -703,13 +857,26 @@ function statesOf(plan: Plan): Array<string> {
   )
   const nullsNegated = nullsNegatedPage(plan)
   const storedJson = storedJsonPage(plan)
-  return [
+  const utf16 = windowIn(
+    plan,
+    comparatorOrder(
+      owedRows(plan),
+      plan.request.orderBy,
+      readRef,
+      utf16leBytes,
+    ),
+  )
+  const leaves = plan.request.where.filter(
+    (leaf) => leaf.op === `eq` || leaf.op === `in`,
+  )
+  const entered: Array<string | false> = [
     pageInSql(plan) ? `page in SQL` : `page in memory`,
-    ...(page ? [comparatorOrders] : []),
-    ...(page && nullsNegated && page.join() !== nullsNegated.join()
-      ? [`a null decides a descending page` as const]
-      : []),
-    ...(plan.request.where.some(
+    !!page && comparatorOrders,
+    !!page &&
+      !!nullsNegated &&
+      page.join() !== nullsNegated.join() &&
+      `a null decides a descending page`,
+    plan.request.where.some(
       (leaf) =>
         (leaf.op === `eq` || leaf.op === `in`) &&
         !topLevel(leaf.field) &&
@@ -718,13 +885,33 @@ function statesOf(plan: Plan): Array<string> {
             readRef(row.value, leaf.field) !==
             jsonMember(row.value, leaf.field),
         ),
-    )
-      ? [`a nested leaf keeps a JavaScript property` as const]
-      : []),
-    ...(page && storedJson && !sameKeys(page, storedJson)
-      ? [`a nested order decides the page` as const]
-      : []),
+    ) && `a nested leaf keeps a JavaScript property`,
+    !!page &&
+      !!storedJson &&
+      !sameKeys(page, storedJson) &&
+      `a nested order decides the page`,
+    plan.encoding === `UTF-16le` &&
+      pageInSql(plan, plan.rows, plan.request.orderBy, `UTF-8`) &&
+      !!page &&
+      !!utf16 &&
+      !sameKeys(page, utf16) &&
+      `a UTF-16 database orders text differently`,
+    !pageInSql(plan) &&
+      pageInSql(plan, plan.rows, plan.request.orderBy.slice(0, 1)) &&
+      `a later term breaks the premise`,
+    plan.request.whereShape === `or` &&
+      leaves.length > 1 &&
+      pageInSql({ ...plan, request: { ...plan.request, whereShape: `and` } }) &&
+      owedRows(plan).some((row) =>
+        leaves.some((leaf) => readRef(row.value, leaf.field) == null),
+      ) &&
+      `an or keeps a row through one leaf`,
+    plan.writes.length > 0 &&
+      pageInSql(plan, plan.initialRows) &&
+      !pageInSql(plan) &&
+      `a later write breaks the premise`,
   ]
+  return entered.filter((state): state is string => state !== false)
 }
 
 function model(plan: Plan) {
@@ -734,6 +921,11 @@ function model(plan: Plan) {
   const offset = plan.request.offset ?? 0
   return {
     keys,
+    // The page owed before the writes, when the driver warms the adapter.
+    warmPage: pageOf(
+      plan,
+      comparatorOrder(owedRows(plan, plan.initialRows), plan.request.orderBy),
+    ),
     page: pageOf(plan, comparatorOrder(owedRows(plan), plan.request.orderBy)),
     pageInSql: pageInSql(plan),
     pageRows: Math.max(0, Math.min(plan.request.limit, keys.length - offset)),
@@ -749,21 +941,27 @@ type Owed = ReturnType<typeof model>
 const lexicalSort = (sort: Order[`stringSort`]): Order[`stringSort`] =>
   sort === `locale` || sort === `custom` ? `lexical` : sort
 
-// Replaces every value and key that breaks the work law's premise, moves the
-// order onto the indexed fields with `lead` first, and makes each leaf exact.
+// The row with every value and key that breaks the work law's premise
+// replaced by a plain one.
+const plainRow = (row: Row): Row => ({
+  ...row,
+  key: row.key === `private use` || row.key === `astral` ? `plain` : row.key,
+  rank: irregularRanks.includes(String(row.rank)) ? row.n % 10 : row.rank,
+  title: irregularTitles.includes(row.title)
+    ? plainTitles[row.n % plainTitles.length]!
+    : row.title,
+})
+
+// Replaces every value and key that breaks the work law's premise, in the
+// stored and the written rows, moves the order onto the indexed fields with
+// `lead` first, makes each leaf exact under a conjunction, and stores text as
+// UTF-8.
 function withPlainPremise(generated: History, lead: `rank` | `title`): History {
   const other: OrderField = lead === `rank` ? `title` : `rank`
   return {
-    rows: generated.rows.map((row) => ({
-      ...row,
-      key: `plain` as const,
-      rank: irregularRanks.includes(String(row.rank)) ? row.n % 10 : row.rank,
-      title: irregularTitles.includes(row.title)
-        ? plainTitles[row.n % plainTitles.length]!
-        : row.title,
-    })),
+    rows: generated.rows.map(plainRow),
     where: generated.where.map(exactly),
-    whereShape: generated.whereShape,
+    whereShape: generated.whereShape === `or` ? `and` : generated.whereShape,
     orderBy: generated.orderBy.map((term, index) => ({
       ...term,
       field: index === 0 ? lead : other,
@@ -771,6 +969,10 @@ function withPlainPremise(generated: History, lead: `rank` | `title`): History {
     })),
     limit: generated.limit,
     offset: generated.offset,
+    encoding: `UTF-8`,
+    writes: generated.writes.map((write) =>
+      write.op === `delete` ? write : { ...write, row: plainRow(write.row) },
+    ),
   }
 }
 
@@ -866,7 +1068,11 @@ const constructions = [
       // At least two rows match, so the page holds fewer rows than a read of
       // every match returns.
       const history = withRows(
-        { ...withPlainPremise(generated, leadOf(generated)), where: [] },
+        {
+          ...withPlainPremise(generated, leadOf(generated)),
+          where: [],
+          writes: [],
+        },
         2,
       )
       return generated.limit % 2 === 0
@@ -879,7 +1085,10 @@ const constructions = [
     [`page in memory`],
     (generated) => {
       const lead = leadOf(generated)
-      const history = withRows(withPlainPremise(generated, lead), 1)
+      const history = withRows(
+        { ...withPlainPremise(generated, lead), writes: [] },
+        1,
+      )
       const at = generated.limit % history.rows.length
       const row = history.rows[at]!
       // Text breaks a numeric field only beside a number, so a field that
@@ -910,7 +1119,7 @@ const constructions = [
     [`page in memory`],
     (generated) => {
       const history = withRows(
-        withPlainPremise(generated, leadOf(generated)),
+        { ...withPlainPremise(generated, leadOf(generated)), writes: [] },
         2,
       )
       const first = history.rows[0]!
@@ -954,7 +1163,10 @@ const constructions = [
     `page in memory for an unindexed or non-lexical order`,
     [`page in memory`],
     (generated) => {
-      const history = withRows(withPlainPremise(generated, `title`), 1)
+      const history = withRows(
+        { ...withPlainPremise(generated, `title`), writes: [] },
+        1,
+      )
       const [first, ...rest] = history.orderBy
       const choice = generated.limit % 4
       // A non-lexical sort breaks the premise only on a field with text.
@@ -1003,7 +1215,177 @@ const constructions = [
       (generated) => nestedOrder(generated, ref),
     ),
   ),
+  constructed(
+    `a UTF-16 database orders titles differently`,
+    [`a UTF-16 database orders text differently`],
+    (generated) => {
+      const history = onePlainTerm(generated, `title`)
+      // Every title is é or Ā, whose order UTF-16le bytes reverse.
+      return {
+        ...history,
+        rows: history.rows.map((row, index) => ({
+          ...row,
+          title: index % 2 ? `é` : `Ā`,
+        })),
+        encoding: `UTF-16le`,
+      }
+    },
+  ),
+  constructed(
+    `a UTF-16 database orders tied keys differently`,
+    [`a UTF-16 database orders text differently`],
+    (generated) => {
+      const history = onePlainTerm(generated, `rank`)
+      // Every rank ties, so the keys decide: `kĀ00` comes after `ké01` and
+      // every plain key in JavaScript, and before them in UTF-16le bytes.
+      const keys: Array<KeyKind> = [`latin Ā`, `latin é`]
+      return {
+        ...history,
+        rows: history.rows.map((row, index) => ({
+          ...row,
+          rank: 4,
+          key: keys[index] ?? `plain`,
+        })),
+        encoding: `UTF-16le`,
+      }
+    },
+  ),
+  constructed(
+    `a later term breaks the premise`,
+    [`a later term breaks the premise`, `page in memory`],
+    (generated) => {
+      const history = onePlainTerm(generated, `rank`)
+      // Every rank ties, so the title term decides, and each pair orders
+      // otherwise in SQLite's bytes: a locale sort, the reverse comparator, or
+      // text at U+E000 and above.
+      const [pair, stringSort] = (
+        [
+          [[`a`, `B`], `locale`],
+          [[`a`, `b`], `custom`],
+          [[`\uE000`, `\u{1F600}`], `lexical`],
+        ] as const
+      )[generated.limit % 3]!
+      const [first] = history.orderBy
+      const second = generated.orderBy[1] ?? generated.orderBy[0]!
+      return {
+        ...history,
+        rows: history.rows.map((row, index) => ({
+          ...row,
+          rank: 4,
+          title: pair[index % 2]!,
+        })),
+        orderBy: [first!, { ...second, field: `title`, stringSort }],
+      }
+    },
+  ),
+  constructed(
+    `an or keeps a row through one leaf`,
+    [`an or keeps a row through one leaf`, `page in memory`],
+    (generated) => {
+      const history = withRows(
+        { ...withPlainPremise(generated, leadOf(generated)), writes: [] },
+        2,
+      )
+      // The first row matches only the status leaf and has no title, the
+      // second only the title leaf and has no status.
+      return {
+        ...history,
+        rows: withRow(
+          withRow(history.rows, 0, { status: 1, title: `null` }),
+          1,
+          {
+            status: `null`,
+            title: `b`,
+          },
+        ),
+        where: [
+          { op: `eq`, field: `status`, value: 1, reversed: false },
+          {
+            op: `eq`,
+            field: `title`,
+            value: `b`,
+            reversed: generated.rows.length % 2 === 1,
+          },
+        ],
+        whereShape: `or`,
+        limit: 1_000_000,
+        offset: `none`,
+      }
+    },
+  ),
+  ...([`insert`, `update`] as const).map((op) =>
+    constructed(
+      `a later ${op} breaks the premise`,
+      [`a later write breaks the premise`],
+      (generated) => laterText(generated, op),
+    ),
+  ),
+  constructed(
+    `page in memory for an order on arrays`,
+    [`page in memory`],
+    (generated) => {
+      const history = onePlainTerm(generated, `rank`)
+      // Arrays compare element by element; SQLite compares their JSON text,
+      // which puts `[0,1,2]` before `[]`.
+      const arrays = [`array 0`, `array 3`]
+      return {
+        ...history,
+        rows: history.rows.map((row, index) => ({
+          ...row,
+          rank: arrays[index % arrays.length]!,
+        })),
+      }
+    },
+  ),
+  constructed(
+    `page in SQL over non-ASCII titles and keys`,
+    [`page in SQL`],
+    (generated) => {
+      const history = onePlainTerm(generated, `title`)
+      return {
+        ...history,
+        rows: withRow(
+          withRow(history.rows, 0, { key: `latin é`, title: `é` }),
+          1,
+          { key: `latin Ā`, title: `Ā` },
+        ),
+      }
+    },
+  ),
 ]
+
+// The plain premise on one order term over at least two rows, at limit 1
+// with no where and no writes, so the first row decides the page.
+function onePlainTerm(generated: History, lead: `rank` | `title`): History {
+  const history = withRows(
+    { ...withPlainPremise(generated, lead), where: [], writes: [] },
+    2,
+  )
+  return {
+    ...history,
+    orderBy: history.orderBy.slice(0, 1),
+    limit: 1,
+    offset: `none`,
+  }
+}
+
+// Ranks 5..9 under the premise, then a write of the text `'4'`, which the
+// comparator reads as 4 and so places first ascending and last descending,
+// while SQLite orders text after every number.
+function laterText(generated: History, op: `insert` | `update`): History {
+  const history = onePlainTerm(generated, `rank`)
+  const rows = history.rows.map((row) => ({ ...row, rank: 5 + (row.n % 5) }))
+  const row = { ...rows[0]!, rank: `text 4` }
+  return {
+    ...history,
+    rows,
+    writes: [
+      op === `insert`
+        ? { op, row }
+        : { op, at: generated.limit % rows.length, row },
+    ],
+  }
+}
 
 // A descending first term on `lead` over a null and a non-null row, at limit
 // 1 with no where, so the page holds a null exactly when `nulls` is `first`.
@@ -1017,6 +1399,7 @@ function nullOnDescendingPage(
     {
       ...withPlainPremise(generated, lead === `due` ? `rank` : lead),
       where: [],
+      writes: [],
     },
     2,
   )
@@ -1043,7 +1426,7 @@ function nullOnDescendingPage(
 // whose property at a nested ref equals the only leaf's literal, so that row
 // is owed through a property its stored JSON lacks.
 function nestedLeaf(generated: History, op: `eq` | `in`): History {
-  const history = withRows(generated, 1)
+  const history = withRows({ ...generated, writes: [] }, 1)
   const literal = 2 + (history.rows.length % 2)
   const ref: NestedRef = generated.limit % 2 ? `items.year` : `items.length`
   const items =
@@ -1071,7 +1454,16 @@ function nestedLeaf(generated: History, op: `eq` | `in`): History {
 // stored JSON holds no such member, so a page read as stored JSON starts at
 // the first key or at a plain object's member.
 function nestedOrder(generated: History, ref: NestedRef): History {
-  const history = withRows({ ...generated, where: [] }, 2)
+  // An empty `or` keeps no row, so the shape becomes a conjunction.
+  const history = withRows(
+    {
+      ...generated,
+      where: [],
+      whereShape: generated.whereShape === `or` ? `and` : generated.whereShape,
+      writes: [],
+    },
+    2,
+  )
   const [first] = history.orderBy
   const [low, high] =
     ref === `items.year`
@@ -1135,6 +1527,8 @@ const fixedHistory = (
   orderBy: [orderBy],
   limit,
   offset: `none`,
+  encoding: `UTF-8`,
+  writes: [],
   ...change,
 })
 
@@ -1276,6 +1670,66 @@ const fixed: Array<{ name: string; history: History }> = [
     }),
   },
   {
+    // UTF-16le bytes put Ā (00 01) before é (E9 00); JavaScript puts é first.
+    name: `titles é and Ā on a UTF-16le database`,
+    history: fixedHistory(order(`title`, `asc`, `lexical`), 3, {
+      rows: plainRows.map((row, index) => ({
+        ...row,
+        title: index % 2 ? `é` : `Ā`,
+      })),
+      encoding: `UTF-16le`,
+    }),
+  },
+  {
+    name: `titles é and Ā on a UTF-8 database`,
+    history: fixedHistory(order(`title`, `asc`, `lexical`), 3, {
+      rows: plainRows.map((row, index) => ({
+        ...row,
+        key: index % 3 ? `plain` : `latin é`,
+        title: index % 2 ? `é` : `Ā`,
+      })),
+    }),
+  },
+  {
+    // Every rank ties, so the title term decides under a locale sort.
+    name: `a locale title after a tied rank`,
+    history: fixedHistory(order(`rank`, `asc`), 1, {
+      rows: plainRows.map((row, index) => ({
+        ...row,
+        rank: 4,
+        title: index % 2 ? `a` : `B`,
+      })),
+      orderBy: [order(`rank`, `asc`), order(`title`, `asc`, `locale`)],
+    }),
+  },
+  {
+    name: `rank holds only arrays`,
+    history: fixedHistory(order(`rank`, `asc`), 2, {
+      rows: plainRows.map((row, index) => ({
+        ...row,
+        rank: index % 2 ? `array 0` : `array 3`,
+      })),
+    }),
+  },
+  {
+    name: `status is 1 or title is b`,
+    history: fixedHistory(order(`rank`, `asc`), 1_000_000, {
+      where: [
+        { op: `eq`, field: `status`, value: 1, reversed: false },
+        { op: `eq`, field: `title`, value: `b`, reversed: false },
+      ],
+      whereShape: `or`,
+    }),
+  },
+  {
+    // The page runs once on integer ranks, then a row gains the text '4'.
+    name: `a later insert of text into rank`,
+    history: fixedHistory(order(`rank`, `asc`), 2, {
+      rows: plainRows.map((row) => ({ ...row, rank: 5 + (row.n % 5) })),
+      writes: [{ op: `insert`, row: { ...plainRows[0]!, rank: `text 4` } }],
+    }),
+  },
+  {
     // Nulls last, so the two rows tied at the highest rank start the page.
     name: `two rows tied on rank have high keys`,
     history: fixedHistory({ ...order(`rank`, `desc`), nulls: `last` }, 1, {
@@ -1318,6 +1772,8 @@ function whereOf(request: Request): IR.BasicExpression<boolean> | undefined {
         new IR.Func(`and`, leaves.slice(0, 1)),
         ...leaves.slice(1),
       ])
+    case `or`:
+      return new IR.Func(`or`, leaves)
   }
 }
 
@@ -1390,23 +1846,26 @@ async function drive(
   const driver = pageCandidates
     ? new CandidatePagingDriver()
     : new CountingDriver()
+  // The encoding is set before the adapter creates any table.
+  driver.db.exec(`PRAGMA encoding = '${plan.encoding}'`)
   // The adapter stores and revives a Temporal value through the global
   // constructor, which must be the one that built the history's values.
   vi.stubGlobal(`Temporal`, Temporal)
   try {
     const adapter = new SQLiteCorePersistenceAdapter({ driver })
     const target = { kind: `eager` as const, collectionId: `ordered-page` }
-    await adapter.applyCommittedTx(target, {
-      txId: `seed`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: plan.rows.map((row) => ({
-        type: `insert` as const,
-        key: row.key,
-        value: row.value,
-      })),
-    })
+    const commit = (seq: number, mutations: Array<Mutation>) =>
+      adapter.applyCommittedTx(target, {
+        txId: `tx ${seq}`,
+        term: 1,
+        seq,
+        rowVersion: seq,
+        mutations,
+      })
+    await commit(
+      1,
+      plan.initialRows.map((row) => ({ type: `insert`, ...row })),
+    )
     // The persisted wrapper ensures indexes best effort, so a rejection is
     // recorded and the loads go on: the work law then judges a page whose
     // index was lost.
@@ -1442,6 +1901,11 @@ async function drive(
         rawRows: driver.reads.reduce((sum, read) => sum + read.rawRows, 0),
       }
     }
+    // The page runs once on the stored rows, so an adapter that remembered
+    // anything about them meets the writes; each write is its own commit.
+    observe(`warm page`, await load(true))
+    for (const [index, write] of plan.writes.entries())
+      await commit(index + 2, [write])
     observe(`unpaged`, await load(false))
     if (driver instanceof CandidatePagingDriver)
       driver.page = {
@@ -1458,15 +1922,22 @@ async function drive(
   }
 }
 
-// Filter first: a wrong filter also moves the page. Then the page against the
-// comparator's order, or against the unpaged order where the comparator
-// decides none, then the raw rows the page read, then the construction's
-// states, which only a complete trace can show.
+// Filter first: a wrong filter also moves the page. Then the warm page and
+// the page against the comparator's order, or the page against the unpaged
+// order where the comparator decides none, then the raw rows the page read,
+// then the construction's states, which only a complete trace can show.
 function check(plan: Plan, trace: ReadonlyArray<Observation>, owed: Owed) {
+  const warm = readAt(trace, `warm page`)
   const unpaged = readAt(trace, `unpaged`)
   const page = readAt(trace, `page`)
-  if (!unpaged || !page)
+  if (!warm || !unpaged || !page)
     return violation(`page`, `the driver recorded no page`, `trace`)
+  if (warm.rejected !== undefined)
+    return violation(
+      `warm page`,
+      `the warm page rejected: ${warm.rejected}`,
+      `page`,
+    )
   if (unpaged.rejected !== undefined)
     return violation(
       `unpaged`,
@@ -1490,6 +1961,15 @@ function check(plan: Plan, trace: ReadonlyArray<Observation>, owed: Owed) {
       owed.keys,
       `the unpaged request kept other rows than the model's equality`,
     ) ??
+    (owed.warmPage
+      ? differs(
+          `warm page`,
+          `page`,
+          warm.keys,
+          owed.warmPage,
+          `the page before the writes is not the comparator's rows at its offset`,
+        )
+      : undefined) ??
     (owed.page
       ? differs(
           `page`,
@@ -1542,9 +2022,9 @@ const withRead = (
 oracleProperty({
   id: `sqlite-persistence.ordered-page`,
   law: {
-    statement: `At loadSubset return, an ordered page holds exactly the rows at its offset of TanStack DB's comparator order of the matching rows, ties broken by key, or of the unpaged request's order where that comparator decides no single order; the unpaged request keeps exactly the rows whose refs, read as JavaScript reads them, equal the literals (a Date equals its epoch milliseconds); and when the where is a conjunction of exact equality or membership leaves on top-level fields and every order term is an indexed top-level field that holds only integers and booleans, or only text below U+D800 sorted lexically, with keys of that text, SQLite returns no more stored rows than the page holds.`,
+    statement: `At loadSubset return, before and after later writes, an ordered page holds exactly the rows at its offset of TanStack DB's comparator order of the matching rows, ties broken by key, or of the unpaged request's order where that comparator decides no single order; the unpaged request keeps exactly the rows whose refs, read as JavaScript reads them, equal the literals (a Date equals its epoch milliseconds); and when the database stores text as UTF-8, the where is a conjunction of exact equality or membership leaves on top-level fields, and every order term is an indexed top-level field that holds only integers and booleans, or only text below U+D800 sorted lexically, with keys of that text, SQLite returns no more stored rows than the page holds.`,
     authority: `The SQLite adapter's contract that the JavaScript evaluator and in-memory sort decide loadSubset results with SQL as a candidate read (PR #1997); makeComparator, which orders live-query results; the accepted goal that a paged live query reads its page, not every matching row.`,
-    limits: `Up to twelve rows and one request per history on node:sqlite in one process; no cursors, joins, orders on a computed field, native hosts or OPFS. Where the comparator decides no single order, the page is only related to the unpaged request. Nested refs read numbers only.`,
+    limits: `Up to twelve rows, two later writes and one request per history on node:sqlite in one process, in UTF-8 or UTF-16le; no cursors, joins, orders on a computed field, native hosts or OPFS. Where the comparator decides no single order, the page is only related to the unpaged request. Nested refs read numbers only.`,
   },
   owns: [`src/sqlite-core-adapter.ts`],
   histories: {
