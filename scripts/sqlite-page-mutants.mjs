@@ -145,6 +145,57 @@ const MUTANTS = [
     rationale:
       'the in-memory sort ties NaN with every value, unlike the comparator, which orders it above them',
   },
+  {
+    id: `S16`,
+    find: "length(CAST('a' AS BLOB)) = 1 AND ",
+    replace: '',
+    rationale:
+      'a UTF-16 database pages text and keys in SQL, where its bytes order them otherwise',
+  },
+  {
+    id: `S17`,
+    find: '    for (const clause of orderBy) {',
+    replace: '    for (const clause of orderBy.slice(0, 1)) {',
+    rationale: 'the probe checks only the first order term',
+  },
+  {
+    id: `S18`,
+    find: '  if (expression.name === `and`) {',
+    replace: '  if (expression.name === `and` || expression.name === `or`) {',
+    rationale:
+      'an `or` of exact leaves counts as an exact conjunction, so its kind guards drop rows that one leaf keeps',
+  },
+  {
+    id: `S19`,
+    edits: [
+      {
+        find: '    const tableSql = quoteIdentifier(tableName)\n    for (const clause of orderBy) {',
+        replace:
+          '    const tableSql = quoteIdentifier(tableName)\n    const probed = ((this as unknown as { probed?: Set<string> }).probed ??= new Set())\n    const probe = JSON.stringify([tableName, orderBy])\n    if (probed.has(probe)) return true\n    for (const clause of orderBy) {',
+      },
+      {
+        find: '        return false\n    }\n    return true\n  }',
+        replace:
+          '        return false\n    }\n    probed.add(probe)\n    return true\n  }',
+      },
+    ],
+    rationale:
+      'the adapter remembers a passing probe, so a row written later that breaks the premise still pages in SQL',
+  },
+  {
+    id: `S20`,
+    find: "WHEN 'array' THEN 1",
+    replace: "WHEN 'array' THEN 0",
+    rationale:
+      'an order field that holds arrays pages in SQL, which compares their JSON text',
+  },
+  {
+    id: `S21`,
+    find: ' AND (instr(${text}, char(0)) > 0 OR ${text} GLOB ${HIGH_CODE_POINT_GLOB}))`',
+    replace: ')`',
+    rationale:
+      'all non-ASCII text counts as irregular, so text below U+E000 never pages in SQL',
+  },
 ].map((mutant) => ({ ...mutant, file: FILE }))
 
 function run(mutant) {
