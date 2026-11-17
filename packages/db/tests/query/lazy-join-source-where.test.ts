@@ -88,14 +88,34 @@ function createOnDemandCollection<T extends { id: number }>(
 }
 
 // Lazy demand is the only part of a load that names join keys, so a keyed
-// load is one whose predicate mentions `id IN (...)`.
+// load is one whose predicate holds `id IN (...)`.
 function describeLoad(options: LoadSubsetOptions): string {
   return JSON.stringify(options.where)
 }
 
+type LoadPredicate = NonNullable<LoadSubsetOptions[`where`]>
+
+function sortedKeys(keys: Array<unknown>): string {
+  return JSON.stringify([...keys].sort())
+}
+
 function hasKeyFilter(options: LoadSubsetOptions, keys: Array<number>) {
-  const where = describeLoad(options)
-  return where.includes(`"name":"in"`) && where.includes(JSON.stringify(keys))
+  const isKeyFilter = (expression: LoadPredicate): boolean => {
+    if (expression.type !== `func`) return false
+    if (expression.name === `and`) {
+      return expression.args.some((arg) => isKeyFilter(arg as LoadPredicate))
+    }
+    const [ref, values] = expression.args
+    return (
+      expression.name === `in` &&
+      ref?.type === `ref` &&
+      JSON.stringify(ref.path) === JSON.stringify([`id`]) &&
+      values?.type === `val` &&
+      Array.isArray(values.value) &&
+      sortedKeys(values.value) === sortedKeys(keys)
+    )
+  }
+  return options.where !== undefined && isKeyFilter(options.where)
 }
 
 describe(`lazy join source where`, () => {
