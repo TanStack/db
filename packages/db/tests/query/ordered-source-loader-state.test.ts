@@ -387,7 +387,12 @@ describe(`Ordered source request ownership`, () => {
     }
   })
 
-  it(`retains finite leases after bounded repair fails until full-source recovery succeeds`, async () => {
+  it(`retains finite leases after bounded repair fails and retries with bounded repair`, async () => {
+    // Under the bounded-repair recovery law, when a plan can continue from a
+    // provider prefix (!requiresFullSource), a failed bounded repair does not
+    // upgrade to full-source recovery. Instead, recovery retries as another
+    // bounded repair. The new repair sets its boundary from its own settled
+    // requests, so partial writes from the failed request cannot mislead it.
     const requests: Array<{
       options: RequestOptions
       acquisition: LoadSubsetOptions
@@ -452,9 +457,10 @@ describe(`Ordered source request ownership`, () => {
       const retry = loader.loadMore(1)
       expect(retry).toBeDefined()
       expect(requests).toHaveLength(5)
-      expect(requests[4]!.options.orderBy).toBeUndefined()
+      // After bounded repair failure, retry is another bounded repair
+      expect(requests[4]!.options.orderBy).toBeDefined()
+      expect(requests[4]!.options.limit).toBeDefined()
       expect(requests[4]!.options.where).toBeUndefined()
-      expect(requests[4]!.options.limit).toBeUndefined()
       expect(requests[4]!.options.cursor).toBeUndefined()
       expect(requests[4]!.options.offset).toBeUndefined()
       await settle(4)
@@ -463,7 +469,7 @@ describe(`Ordered source request ownership`, () => {
         requests.map(({ options }) =>
           options.orderBy ? `prefix` : options.where ? `tie` : `full-source`,
         ),
-      ).toEqual([`prefix`, `tie`, `prefix`, `tie`, `full-source`])
+      ).toEqual([`prefix`, `tie`, `prefix`, `tie`, `prefix`])
       expect(releases).toEqual([3, 0, 1, 2])
     } finally {
       loader.dispose()

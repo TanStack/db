@@ -137,6 +137,7 @@ const staticOracleProperties = [
   `sqlite-persistence.open-transaction-boundary`,
   `sqlite-persistence.request-local-failure-buffered-source`,
   `sqlite-persistence.optimistic-history`,
+  `browser-persistence.two-tab-optimistic-history`,
   `trailbase.lifecycle`,
   `source-health.history`,
   `source-health.on-demand`,

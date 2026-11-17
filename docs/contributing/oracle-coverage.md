@@ -2610,6 +2610,17 @@ source position on sync commits; Electric already stores `{ handle, offset }`
 with each commit, PowerSync does not use this wrapper, and persisted Query
 collections have no log position.
 
+The [two-tab lane](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/two-tab-optimistic-history.test.ts)
+runs the same model and grammar with `peer-sync` steps: a second tab leads
+the real Browser coordinator, and its source transactions reach the tab under
+test through real SQLite and Node BroadcastChannel. `hold-store` holds the
+coordinator's writer lock. Ordinary peer histories pass. The lane is RED when
+a peer transaction applies by reloading durable rows while the tab's own
+earlier sync transaction is still queued or unannounced: a peer delete,
+truncate, or truncate-with-rows is lost or applied in parts, and the tab keeps
+a row the store and the peer do not have. Leadership transfer and a tab
+closing mid-history are outside this lane.
+
 The [PR #1914 follow-up review record](oracle-reviews/pr-1914-immediate-reload-follow-up.md)
 preserves the held-checkpoint and extra-POST mutant results at the exact
 reviewed executable commit.

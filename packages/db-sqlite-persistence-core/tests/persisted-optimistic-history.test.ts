@@ -207,7 +207,7 @@ it(`keeps a settled update over its insert while the update's server row waits b
 })
 
 it(`reconstructs the persisted grammar and excludes awaited acceptance during a hold`, () => {
-  const samples = fc.sample(wrappingSyncHistory, {
+  const samples = fc.sample(wrappingSyncHistory(false), {
     seed: 22_011,
     numRuns: 200,
   })
@@ -225,7 +225,7 @@ it(`reconstructs the persisted grammar and excludes awaited acceptance during a 
   }
 })
 
-fcTest.prop([wrappingSyncHistory], {
+fcTest.prop([wrappingSyncHistory(false)], {
   numRuns: oracleRuns(40),
   seed: 22_012,
 })(
@@ -234,7 +234,7 @@ fcTest.prop([wrappingSyncHistory], {
   60_000,
 )
 fcTest.prop(
-  [wrappingSyncHistory],
+  [wrappingSyncHistory(false)],
   oraclePropertyOptions(40, `sqlite-persistence.optimistic-history`),
 )(
   `persisted Collections match optimistic histories with a random or replayed seed`,
