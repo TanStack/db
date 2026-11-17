@@ -2,28 +2,34 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import ts from 'typescript'
-import { expect } from 'vitest'
 import { createDeferred } from '../src/deferred'
 import { mutationConfirmationRows } from './mutation-confirmation-oracle'
 import {
-  checkDocumentedMutation,
+  checkDocumentedRequest,
+  documentedApiFailure,
+  documentedErrorToken,
   documentedMutationInputs,
+  toDocumentedData,
 } from './documented-mutations-oracle'
 import { atMutationCheckpoint } from './mutation-confirmation-support'
 import { withOracleCleanup } from './utils'
-import { createOracleReach } from './oracle-reach'
 import type {
   DocumentedHandler,
   DocumentedMutationHistory,
   DocumentedMutationObservation,
+  DocumentedObservationData,
   DocumentedRow,
 } from './documented-mutations-oracle'
-import type { MutationConfirmationObservation } from './mutation-confirmation-oracle'
+import type {
+  MutationConfirmationCut,
+  MutationConfirmationObservation,
+} from './mutation-confirmation-oracle'
 import type { Collection, MutationFnParams } from '../src/index'
 
-// Finite replay selects one explicit history. A shared random seed is irrelevant
-// and cannot disable reach. Unrelated path replays stand aside at registration.
-// A named test subset without this selector keeps the full reach obligation.
+// Finite replay selects one explicit history. A shared random seed is
+// irrelevant: an enumerated property runs every history it is given, and every
+// history owes its own cuts. Unrelated path replays stand aside at
+// registration, as every enumerated oracleProperty test does.
 export function selectDocumentedHistories(
   histories: Array<DocumentedMutationHistory>,
 ) {
@@ -33,78 +39,6 @@ export function selectDocumentedHistories(
   if (selected.length !== 1)
     throw new Error(`Unknown documented mutation case: ${requested}`)
   return selected
-}
-
-export function createDocumentedReach(
-  adapter: string,
-  histories: Array<DocumentedMutationHistory>,
-) {
-  const states = histories.flatMap((h) => [
-    `${h.id}:entered`,
-    `${h.id}:api-request`,
-    `${h.id}:settlement-waiter`,
-    ...(h.apiOutcome === `reject-before-write`
-      ? []
-      : [`${h.id}:server-written`]),
-    ...(h.apiOutcome === `success` && h.handler.confirmation !== `none`
-      ? [
-          `${h.id}:confirmation-accepted`,
-          ...(h.handler.confirmation === `write`
-            ? []
-            : [`${h.id}:confirmation-held`]),
-        ]
-      : []),
-    ...(h.apiOutcome === `reject-after-write` ||
-    h.handler.confirmation === `none`
-      ? [`${h.id}:late-confirmed`]
-      : []),
-    ...[
-      `entered`,
-      `settled`,
-      ...(h.apiOutcome === `reject-before-write` ? [] : [`server-written`]),
-      ...(h.apiOutcome === `success` && h.handler.confirmation !== `none`
-        ? [
-            ...(h.handler.confirmation === `write`
-              ? []
-              : [`confirmation-requested`, `confirmation-accepted`]),
-          ]
-        : []),
-      ...(h.apiOutcome === `reject-after-write` ||
-      h.handler.confirmation === `none`
-        ? [`late-confirmed`]
-        : []),
-    ].map((cut) => `${h.id}:comparison:${cut}`),
-  ])
-  const counter = createOracleReach(`documented-${adapter}`, states, {
-    replaying: false,
-  })
-  let current = ``,
-    entered = 0
-  const cuts = new Map<string, number>()
-  return {
-    begin: (id: string) => {
-      current = id
-      entered++
-      counter.beginHistory()
-    },
-    reach: (state: string) => {
-      if (state.startsWith(`comparison:`)) {
-        const key = `${current}:${state}`
-        cuts.set(key, (cuts.get(key) ?? 0) + 1)
-      }
-      counter.reach(`${current}:${state}`)
-    },
-    finish: () => {
-      if (entered === 0) return
-      console.info(
-        `documented-${adapter} reach`,
-        Object.fromEntries(counter.counts()),
-        `comparisons`,
-        Object.fromEntries(cuts),
-      )
-      counter.assertReached()
-    },
-  }
 }
 
 export type DocumentedRuntimeHandler = (
@@ -253,67 +187,6 @@ export function documentedRows(
     .sort((a, b) => Number(b.id === editedKey) - Number(a.id === editedKey))
 }
 
-function expectedArguments(
-  history: DocumentedMutationHistory,
-  before: DocumentedRow,
-  optimistic: DocumentedRow,
-): Array<unknown> {
-  const changes = Object.fromEntries(
-    Object.entries(optimistic).filter(
-      ([key, value]) => !Object.is(value, before[key]) && key !== `id`,
-    ),
-  )
-  // Dates are unchanged in these payloads. Compare them by value rather than
-  // inventing a change because model/driver inputs use independent copies.
-  for (const [key, value] of Object.entries(changes))
-    if (
-      value instanceof Date &&
-      before[key] instanceof Date &&
-      value.getTime() === before[key].getTime()
-    )
-      delete changes[key]
-  switch (history.handler.payload) {
-    case `modified`:
-      return [optimistic]
-    case `changes`:
-      return [changes]
-    case `id-changes`:
-      return [before.id, changes]
-    case `where-data`:
-      return [{ where: { id: before.id }, data: changes }]
-    case `key`:
-      return [before.id]
-    case `rows`:
-      return [[optimistic]]
-    case `updates`:
-      return [[{ id: before.id, changes }]]
-    case `keys`:
-      return [[before.id]]
-  }
-}
-
-// Request checking is shared with hostile collaborator calibrations. It returns
-// the actual submitted data, never the independent expected payload.
-export function checkDocumentedRequest(
-  history: DocumentedMutationHistory,
-  before: DocumentedRow,
-  optimistic: DocumentedRow,
-  raw: Array<unknown>,
-): Array<unknown> {
-  const args =
-    history.handler.api === `fetch`
-      ? [JSON.parse((raw[1] as { body: string }).body) as unknown]
-      : raw
-  expect(args, `${history.id}: actual documented request`).toStrictEqual(
-    expectedArguments(history, before, optimistic),
-  )
-  if (history.handler.api === `fetch`) {
-    expect(raw[0]).toBe(`/api/todos`)
-    expect((raw[1] as { method: string }).method).toBe(`POST`)
-  }
-  return args
-}
-
 function committedRow(
   history: DocumentedMutationHistory,
   args: Array<unknown>,
@@ -360,28 +233,36 @@ function committedRow(
 }
 
 /**
- * One production loop receives Query and Electric through their real adapters.
- * API commit, API response, source delivery and handler-Promise settlement are
- * separately held. The fake backend uses the extracted handler's actual request.
- * No missing refetch is supplied by the fixture. Settlement races utility entry,
- * so a missing acknowledgement fails at the promised settlement comparison.
+ * The production driver. One production loop receives Query and Electric
+ * through their real adapters. API commit, API response, source delivery and
+ * handler-Promise settlement are separately held. The fake backend uses the
+ * extracted handler's actual request. No missing refetch is supplied by the
+ * fixture. Settlement races utility entry, so a missing acknowledgement fails
+ * at the promised settlement comparison.
+ *
+ * It records, and judges nothing except one control-flow guard:
+ * - `request`, each actual call the handler makes to its API, as data;
+ * - `api-request`, the call count and the controlled server ledger once the
+ *   first call has arrived;
+ * - `reach`, each held cut the history enters;
+ * - `comparison`, the mutation observation at each cut where the mutation
+ *   comparison runs, the settlement waiter's own snapshot included.
+ *
+ * The guard: the fake backend commits a row built from the actual request, so
+ * a request that the documented payload rejects commits nothing, rejects the
+ * call, and ends the history after `api-request`. Its recorded `request`
+ * observation is what the check rejects; the driver error comes later.
  */
-export async function runDocumentedMutation(
+export async function recordDocumentedMutation(
   history: DocumentedMutationHistory,
   root: string,
   createReceiver: (controls: DocumentedReceiverControls) => DocumentedReceiver,
-  reach: (state: string) => void,
+  record: (checkpoint: string, value: unknown) => void,
 ): Promise<void> {
   const inputs = documentedMutationInputs(history.handler)
   const initial = mutationConfirmationRows(
     history.mutation.operation,
     `initial`,
-    history.mutation.peer,
-    inputs,
-  )
-  const confirmed = mutationConfirmationRows(
-    history.mutation.operation,
-    `confirmed`,
     history.mutation.peer,
     inputs,
   )
@@ -394,7 +275,7 @@ export async function runDocumentedMutation(
     returned = createDeferred<void>()
   const confirmationRequested = createDeferred<void>(),
     confirmationAccepted = createDeferred<void>()
-  const failure = new Error(`documented API ${history.apiOutcome}`)
+  const failure = documentedApiFailure(history)
   let handlerWrites = 0,
     calls = 0,
     confirmationCalls = 0
@@ -405,12 +286,14 @@ export async function runDocumentedMutation(
   let error: unknown,
     requestFailure: unknown,
     receiver: DocumentedReceiver | undefined
-  let verdict: Promise<DocumentedMutationObservation> | undefined
+  let verdict: Promise<DocumentedObservationData> | undefined
   let inConfirmation = false,
     handlerActive = true
   const invoke = async (...raw: Array<unknown>) => {
     calls++
+    record(`request`, { raw: toDocumentedData(raw) })
     try {
+      // The guard above: the backend's ledger write needs the actual payload.
       const args = checkDocumentedRequest(
         history,
         inputs.before,
@@ -512,8 +395,10 @@ export async function runDocumentedMutation(
           : collection.update(inputs.before.id, (draft) => {
               Object.assign(draft, structuredClone(inputs.optimistic))
             })
-    const observe = (): DocumentedMutationObservation => ({
-      rows: documentedRows(collection, inputs.optimistic.id),
+    // The observation as data, taken now: rows as data, errors as their
+    // identity relation to the API failure and the handler's rejection.
+    const observe = (): DocumentedObservationData => ({
+      rows: toDocumentedData(documentedRows(collection, inputs.optimistic.id)),
       handlerWrites,
       confirmationCalls,
       confirmationStatus,
@@ -521,9 +406,9 @@ export async function runDocumentedMutation(
       providerRequests: receiver!.providerRequests(),
       state: transaction.state,
       settlement,
-      error,
+      error: documentedErrorToken(error, failure, handlerError),
       handlerOutcome,
-      handlerError,
+      handlerError: documentedErrorToken(handlerError, failure),
     })
     verdict = transaction.when(`settled`).then(
       () => {
@@ -536,24 +421,17 @@ export async function runDocumentedMutation(
         return observe()
       },
     )
-    const compare = (
-      cut: Parameters<typeof checkDocumentedMutation>[1],
-      observation = observe(),
-    ) => {
-      reach(`comparison:${cut}`)
-      checkDocumentedMutation(history, cut, observation, failure, inputs)
-    }
+    const compare = (cut: MutationConfirmationCut, observation = observe()) =>
+      record(`comparison`, { cut, observation })
+    const reach = (state: string) => record(`reach`, state)
     await atMutationCheckpoint(entered.promise, `documented handler entry`)
     reach(`entered`)
     compare(`entered`)
     entryGate.resolve()
     await atMutationCheckpoint(called.promise, `actual documented API request`)
     reach(`api-request`)
+    record(`api-request`, { calls, server: toDocumentedData(server) })
     if (requestFailure !== undefined) throw requestFailure
-    expect(calls).toBe(1)
-    expect(server, `actual server ledger`).toStrictEqual(
-      history.apiOutcome === `reject-before-write` ? initial : confirmed,
-    )
     if (history.apiOutcome !== `reject-before-write`) {
       reach(`server-written`)
       compare(`server-written`)
@@ -632,4 +510,11 @@ export async function runDocumentedMutation(
       verdict && atMutationCheckpoint(verdict, `documented cleanup settlement`),
     () => receiver?.cleanup(),
   ])
+}
+
+/** What a documented-mutation property states; each receiver names its owner. */
+export const documentedMutationLaw = {
+  statement: `A documented handler run through the real adapter sends exactly its documented API request once, leaves the controlled server ledger with the confirmed rows (the initial rows when the API rejects before writing), and makes its own Promise, the transaction and the Collection rows follow the mutation-confirmation model at every held cut, the settlement waiter's snapshot included. Each history reaches every cut that its confirmation strategy and API outcome owe, and no other.`,
+  authority: `packages/db/tests/documented-mutations-oracle.ts and mutation-confirmation-oracle.ts: the approved RC explicit-confirmation adapter contract; the guides' handler fences are the inputs.`,
+  limits: `Exact handler ASTs, one mutation, one edited key and an optional peer, through a controlled backend. Full schema/factory/query/component execution, awaitMatch, timeout guidance, multiple mutations, persistence wrappers and live providers are not claimed.`,
 }

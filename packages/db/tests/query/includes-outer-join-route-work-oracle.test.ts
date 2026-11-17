@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import {
   Query,
   createLiveQueryCollection,
@@ -8,8 +8,12 @@ import {
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises } from '../utils.js'
-import { declareOracle } from '../oracle-declaration.js'
-import { oracleRoute } from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import { createScopedSource } from './includes-scope-identity-oracle.js'
 import type { crossJoinParentRoutes } from '../../src/query/compiler/parent-routes.js'
 
@@ -112,154 +116,167 @@ const model = (
     ),
   )
 
-declareOracle({
-  owns: [
-    'src/collection/change-events.ts#createFilterFunctionFromExpression',
-    'src/collection/index.ts#createCollection',
-    'src/indexes/basic-index.ts',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
-  model: [model],
-})
+// The existing judgment of one fixture cell: the plain-row model at each cut,
+// and equal route assembly for one and three joined anchors.
+async function judgeOuterJoinRouteWork(
+  kind: Kind,
+  mode: `eager` | `onDemand`,
+): Promise<void> {
+  const parentRows: Array<Parent> = [{ id: 1 }, { id: 2 }]
+  const mainRows: Array<Main> = [
+    { id: 10, parentId: 1, anchorId: 7 },
+    { id: 11, parentId: 1, anchorId: 99 },
+  ]
+  const observe = async (anchorRows: Array<Anchor>, size: string) => {
+    const currentMains = new Map(mainRows.map((row) => [row.id, row]))
+    const parents = createScopedSource(
+      `route-work-parent-${kind}-${mode}-${size}`,
+      parentRows,
+      `eager`,
+    )
+    const mains = createScopedSource(
+      `route-work-main-${kind}-${mode}-${size}`,
+      mainRows,
+      mode,
+    )
+    const anchors = createScopedSource(
+      `route-work-anchor-${kind}-${mode}-${size}`,
+      anchorRows,
+      mode,
+    )
+    mains.collection.createIndex((row) => row.parentId, {
+      indexType: BasicIndex,
+    })
+    mains.collection.createIndex((row) => row.anchorId, {
+      indexType: BasicIndex,
+    })
+    anchors.collection.createIndex((row) => row.id, {
+      indexType: BasicIndex,
+    })
+    const live = createLiveQueryCollection({
+      query: new Query()
+        .from({ parent: parents.collection })
+        .select(({ parent }) => ({
+          id: parent.id,
+          rows: toArray(
+            new Query()
+              .from({ main: mains.collection })
+              .join(
+                { anchor: anchors.collection },
+                ({ main, anchor }) => eq(main.anchorId, anchor.id),
+                kind,
+              )
+              .where(({ main }) => eq(main.parentId, parent.id))
+              .select(({ main, anchor }) => ({
+                mainId: main.id,
+                anchorId: anchor.id,
+              })),
+          ),
+        })),
+    })
+
+    return withHistoryCleanup(
+      async () => {
+        const cuts: Array<{
+          cut: string
+          rows: Array<Expected>
+          assemblies: number
+        }> = []
+        const check = (cut: string) => {
+          const rows = sortRows(
+            live.toArray.flatMap(({ id, rows: children }) =>
+              children.map(({ mainId, anchorId }) => ({
+                parentId: id,
+                mainId,
+                anchorId,
+              })),
+            ),
+          )
+          expect(rows, `${size} at ${cut}`).toEqual(
+            model(parentRows, [...currentMains.values()], anchorRows, kind),
+          )
+          cuts.push({ cut, rows, assemblies: routeWork.assemblies })
+        }
+        routeWork.assemblies = 0
+        await live.preload()
+        check(`preload`)
+
+        const moved = { id: 11, parentId: 1, anchorId: 7 }
+        currentMains.set(11, moved)
+        routeWork.assemblies = 0
+        mains.put(moved)
+        await flushPromises()
+        check(`main key moves into match`)
+
+        currentMains.delete(10)
+        routeWork.assemblies = 0
+        mains.remove(10)
+        await flushPromises()
+        check(`matched main row disappears`)
+
+        const restored = { id: 10, parentId: 1, anchorId: 7 }
+        currentMains.set(10, restored)
+        routeWork.assemblies = 0
+        mains.put(restored)
+        await flushPromises()
+        check(`matched main row returns`)
+
+        const movedBack = { id: 11, parentId: 1, anchorId: 99 }
+        currentMains.set(11, movedBack)
+        routeWork.assemblies = 0
+        mains.put(movedBack)
+        await flushPromises()
+        check(`main key moves out of match`)
+        return cuts
+      },
+      () => [
+        () => live.cleanup(),
+        () => parents.collection.cleanup(),
+        () => mains.collection.cleanup(),
+        () => anchors.collection.cleanup(),
+      ],
+    )
+  }
+
+  const baseline = await observe([{ id: 7 }], `baseline`)
+  const scaled = await observe([{ id: 7 }, { id: 8 }, { id: 9 }], `scaled`)
+  expect(scaled.map(({ rows }) => rows)).toEqual(
+    baseline.map(({ rows }) => rows),
+  )
+  expect(scaled.map(({ assemblies }) => assemblies)).toEqual(
+    baseline.map(({ assemblies }) => assemblies),
+  )
+}
+
+const outerJoinRouteWorkLaw = `A RIGHT or FULL join correlated on its main source publishes the plain-row model and does not increase parent-route assembly when unrelated joined rows are added.`
+
+const outerJoinRouteWorkCells = ([`right`, `full`] as const).flatMap((kind) =>
+  ([`eager`, `onDemand`] as const).map((mode) => ({ kind, mode })),
+)
 
 describe(`direct outer-join route work`, () => {
-  for (const kind of [`right`, `full`] as const) {
-    for (const mode of [`eager`, `onDemand`] as const) {
-      test(`${kind} main correlation with ${mode} sources avoids work from unrelated joined rows`, async () => {
-        oracleRoute(`case`)
-        const parentRows: Array<Parent> = [{ id: 1 }, { id: 2 }]
-        const mainRows: Array<Main> = [
-          { id: 10, parentId: 1, anchorId: 7 },
-          { id: 11, parentId: 1, anchorId: 99 },
-        ]
-        const observe = async (anchorRows: Array<Anchor>, size: string) => {
-          const currentMains = new Map(mainRows.map((row) => [row.id, row]))
-          const parents = createScopedSource(
-            `route-work-parent-${kind}-${mode}-${size}`,
-            parentRows,
-            `eager`,
-          )
-          const mains = createScopedSource(
-            `route-work-main-${kind}-${mode}-${size}`,
-            mainRows,
-            mode,
-          )
-          const anchors = createScopedSource(
-            `route-work-anchor-${kind}-${mode}-${size}`,
-            anchorRows,
-            mode,
-          )
-          mains.collection.createIndex((row) => row.parentId, {
-            indexType: BasicIndex,
-          })
-          mains.collection.createIndex((row) => row.anchorId, {
-            indexType: BasicIndex,
-          })
-          anchors.collection.createIndex((row) => row.id, {
-            indexType: BasicIndex,
-          })
-          const live = createLiveQueryCollection({
-            query: new Query()
-              .from({ parent: parents.collection })
-              .select(({ parent }) => ({
-                id: parent.id,
-                rows: toArray(
-                  new Query()
-                    .from({ main: mains.collection })
-                    .join(
-                      { anchor: anchors.collection },
-                      ({ main, anchor }) => eq(main.anchorId, anchor.id),
-                      kind,
-                    )
-                    .where(({ main }) => eq(main.parentId, parent.id))
-                    .select(({ main, anchor }) => ({
-                      mainId: main.id,
-                      anchorId: anchor.id,
-                    })),
-                ),
-              })),
-          })
-
-          return withHistoryCleanup(
-            async () => {
-              const cuts: Array<{
-                cut: string
-                rows: Array<Expected>
-                assemblies: number
-              }> = []
-              const check = (cut: string) => {
-                const rows = sortRows(
-                  live.toArray.flatMap(({ id, rows: children }) =>
-                    children.map(({ mainId, anchorId }) => ({
-                      parentId: id,
-                      mainId,
-                      anchorId,
-                    })),
-                  ),
-                )
-                expect(rows, `${size} at ${cut}`).toEqual(
-                  model(
-                    parentRows,
-                    [...currentMains.values()],
-                    anchorRows,
-                    kind,
-                  ),
-                )
-                cuts.push({ cut, rows, assemblies: routeWork.assemblies })
-              }
-              routeWork.assemblies = 0
-              await live.preload()
-              check(`preload`)
-
-              const moved = { id: 11, parentId: 1, anchorId: 7 }
-              currentMains.set(11, moved)
-              routeWork.assemblies = 0
-              mains.put(moved)
-              await flushPromises()
-              check(`main key moves into match`)
-
-              currentMains.delete(10)
-              routeWork.assemblies = 0
-              mains.remove(10)
-              await flushPromises()
-              check(`matched main row disappears`)
-
-              const restored = { id: 10, parentId: 1, anchorId: 7 }
-              currentMains.set(10, restored)
-              routeWork.assemblies = 0
-              mains.put(restored)
-              await flushPromises()
-              check(`matched main row returns`)
-
-              const movedBack = { id: 11, parentId: 1, anchorId: 99 }
-              currentMains.set(11, movedBack)
-              routeWork.assemblies = 0
-              mains.put(movedBack)
-              await flushPromises()
-              check(`main key moves out of match`)
-              return cuts
-            },
-            () => [
-              () => live.cleanup(),
-              () => parents.collection.cleanup(),
-              () => mains.collection.cleanup(),
-              () => anchors.collection.cleanup(),
-            ],
-          )
-        }
-
-        const baseline = await observe([{ id: 7 }], `baseline`)
-        const scaled = await observe(
-          [{ id: 7 }, { id: 8 }, { id: 9 }],
-          `scaled`,
-        )
-        expect(scaled.map(({ rows }) => rows)).toEqual(
-          baseline.map(({ rows }) => rows),
-        )
-        expect(scaled.map(({ assemblies }) => assemblies)).toEqual(
-          baseline.map(({ assemblies }) => assemblies),
-        )
-      })
-    }
-  }
+  oracleProperty({
+    id: `includes-outer-join-route-work.main-correlation`,
+    law: {
+      statement: outerJoinRouteWorkLaw,
+      authority: `ARCHITECTURE.md law 12 (work) in packages/db/src/query/live/ARCHITECTURE.md, stated above.`,
+      limits: `The four enumerated RIGHT/FULL by eager/on-demand cells of the finite fixture; no index traversal, real-provider delivery, QueryRef routing, or exact operation-count claim.`,
+    },
+    owns: [
+      `src/collection/change-events.ts#createFilterFunctionFromExpression`,
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: outerJoinRouteWorkCells,
+    label: ({ kind, mode }) =>
+      `${kind} main correlation with ${mode} sources avoids work from unrelated joined rows`,
+    resolve: (cell) => ({ ...cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(outerJoinRouteWorkLaw, plan, observe, () =>
+        judgeOuterJoinRouteWork(plan.kind, plan.mode),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

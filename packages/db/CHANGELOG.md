@@ -1,5 +1,18 @@
 # @tanstack/db
 
+## 1.0.0-rc.1.5
+
+### Patch Changes
+
+- An explicit `cleanup()` now keeps the optimistic rows of a transaction that is still persisting cleared after the Collection restarts. Previously, a write made after the restart brought those rows back, so a row that cleanup had discarded reappeared. The transaction still holds its Collection until it settles. ([#2382](https://github.com/TanStack/db/pull/2382))
+
+- Show a row that a restarted sync run writes again after cleanup. A live-query observer (and so `useLiveQuery` in every framework adapter) that stayed subscribed through a Collection's cleanup and restart showed no row when the new sync run wrote a row equal to one it showed before cleanup, or when an on-demand restart reloaded it. The observer's Collection subscription now keeps none of the rows from before cleanup. ([#2378](https://github.com/TanStack/db/pull/2378))
+
+- Update runtime dependencies while preserving the public API and CommonJS loading. Preserve Solid reactivity for own data fields and persist Electric snapshot resume checkpoints before subset loads succeed. ([#2374](https://github.com/TanStack/db/pull/2374))
+
+- Updated dependencies [[`6ec538e`](https://github.com/TanStack/db/commit/6ec538ecd3c8a966e6a1e93d88b82023021a47a4)]:
+  - @tanstack/db-ivm@1.0.0-rc.1.3
+
 ## 1.0.0-rc.1.4
 
 ### Patch Changes

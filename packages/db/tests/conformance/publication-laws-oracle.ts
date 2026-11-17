@@ -14,7 +14,6 @@
  * arbitrary scheduling, status traces, or changes hidden within one turn.
  */
 import { expect } from 'vitest'
-import { declareOracle } from '../oracle-declaration.js'
 import { expectUnorderedRows } from './result-laws'
 
 export function expectPublishedRows(
@@ -41,4 +40,3 @@ export function expectPublishedRows(
 // Owns no production entry in packages/db: this module checks the public
 // observations that each framework driver passes it, so the framework packages
 // that run it own the entries it judges.
-declareOracle({ check: [expectPublishedRows] })

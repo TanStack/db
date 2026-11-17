@@ -1,26 +1,29 @@
+import { isDeepStrictEqual } from 'node:util'
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, vi } from 'vitest'
 import {
   OrderedLoaderInvariantError,
   OrderedSourceLoader,
 } from '../../src/query/live/ordered-source-loader.js'
 import { PropRef } from '../../src/query/ir.js'
-import { createOracleReach } from '../oracle-reach.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-  readOracleRunConfig,
+  isGeneratedOracleCampaign,
+  oracleProperty,
+  oracleReplayRequested,
 } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
+import {
+  compareAt,
+  observeComparison,
+  recordedComparison,
+  rejectAt,
+} from './ordered-comparison-oracle.js'
+import { checkRetirementProgress } from './ordered-source-loader-state-model-oracle.js'
 import {
   createDeferred,
   createOrderByInfo,
@@ -49,13 +52,16 @@ function tieValue(options: RequestOptions): unknown {
  * ARCHITECTURE.md, "Ordered requests, continuation, and recovery", gives the
  * loader authority rules for requests that overlap an ordering invalidation:
  *
- * - **Held:** a successful bounded repair holds the acquisitions it read.
- *   Only a later read that covers them may retire them: a newer repair, a
- *   full-source read, or a truncate replay that covers the source, or a
- *   prefix read issued after the repair that reaches every repair row still
- *   inside the window. That prefix counts once it succeeds or once a
- *   successful replay reacquires its demand while it is still in flight. A request issued before the invalidation proves no
- *   current coverage, so it never retires them.
+ * - **Held:** a successful bounded repair holds the acquisitions it read:
+ *   its prefix, its ties, and its refills. Only a later read that covers
+ *   them may retire them: a newer repair, a full-source read, or a truncate
+ *   replay that covers the source. A prefix read at least as long, issued
+ *   after one of the chain's prefixes, may also retire that prefix, but no
+ *   tie or cursor page (ARCHITECTURE.md: a successful larger prefix retires
+ *   settled smaller prefixes, not ties or cursor suffixes). That prefix counts once it succeeds or once a successful
+ *   replay reacquires its demand while it is still in flight. A request
+ *   issued before the invalidation proves no current coverage, so it never
+ *   retires them.
  * - **No leak:** once loading is quiet and no failure blocks it, the loader
  *   holds nothing issued before its last successful authoritative read.
  *   Otherwise every later refetch would read that request again. A
@@ -69,7 +75,14 @@ function tieValue(options: RequestOptions): unknown {
  *   oracle records any `OrderedLoaderInvariantError` the loader throws, so
  *   the generated histories also fuzz that table.
  * - **No stale step:** a repair chain whose ordering epoch moved is replaced
- *   before it issues another tie or refill.
+ *   before it issues another tie or refill. That includes a step that a
+ *   continuation the chain staged, or a window move that joined work
+ *   blocked, resumes after the move: the request it issues must start the
+ *   replacement, so its settlement cannot start the replacement again.
+ * - **One start per epoch:** a chain step does not read the chain's start
+ *   demand again unless an optimistic departure, a head insert, or a source
+ *   delete gave the window new source input since the start. Reading it
+ *   again restarts the repair without new debt.
  * - **Error identity:** a request that fails reports its own error through
  *   its participant. Neither a release's cleanup error nor a read the loader
  *   starts while handling it can replace that error. A dead request's failure
@@ -140,7 +153,24 @@ function tieValue(options: RequestOptions): unknown {
  * - a repair prefix is a step of a running chain, not a start, when it is
  *   issued while a chain member settles or by the continuation such a
  *   settlement left staged (a synchronous answer) or deferred (joined work),
- *   as an optimistic refill or a shrunk window's prefix is;
+ *   as an optimistic refill or a shrunk window's prefix is. The chain's start
+ *   and its steps are the chain's acquisitions. A graph pass that a release
+ *   callback runs does not consume that continuation: the loader blocks
+ *   ordered refinement until its release pass unwinds (ARCHITECTURE.md), so
+ *   the refinement resumes on a later pass. The one release outside a
+ *   release pass is a stale finite request that settles after its repair
+ *   finished and is released at once; the ledger sees it as the request
+ *   being settled, issued before the current epoch, in this truncate
+ *   generation, with no full-source lease. That its graph pass is ordinary
+ *   is a stated assumption: ARCHITECTURE.md says only that such a request
+ *   is released at once, not whether refinement is blocked meanwhile. If
+ *   production later blocks it, the driver may misclassify the next request
+ *   and report a false failure;
+ * - a request is resumed after an epoch move when it is authoritative and
+ *   finite, a continuation was owed, no request was settling, and the
+ *   ordering epoch moved since the latest start. That premise
+ *   over-approximates a pending continuation, so the no-stale-step law
+ *   judges such a request by what its own settlement issues;
  * - a truncate replay that settles while the subscription holds a
  *   full-source lease, even a failed one, covers the source and counts as a
  *   successful start after every earlier request; the leases it reacquired
@@ -214,7 +244,10 @@ function tieValue(options: RequestOptions): unknown {
  *
  * ## Checkpoints
  *
- * Held, one request at a time, and release are checked after every step.
+ * Held, one request at a time, and release are checked after every step,
+ * and inside the drain after each replay settlement and each request it
+ * settles: replay retirement can release a lease that a later read in the
+ * same drain covers.
  * A release that throws is an adapter bug: the loader reports it uncaught
  * from a microtask and changes nothing else, so each one must be reported
  * that way exactly once, and no other error may escape a microtask.
@@ -239,7 +272,10 @@ function tieValue(options: RequestOptions): unknown {
  * is not required then, the leak law does not judge the unfinished chain,
  * and the strand law accepts recovery that is owed behind it. A failed replay stays pending until the drain
  * settles it. The fake releases an acquisition when the loader calls its
- * release; it does not model an adapter that removes rows later.
+ * release; it does not model an adapter that removes rows later. The
+ * no-stale-step law sees an obsolete step only when it succeeds and its
+ * settlement then starts the replacement; a hung or failed obsolete step
+ * is not judged by it.
  */
 type LedgerRequest = {
   index: number
@@ -269,6 +305,15 @@ type LedgerRequest = {
   issuedTruncates: number
   failedTruncates: number
   failedAt: number
+  // How the loader asked for it, and the epoch moves before it was issued. A
+  // finite request issued before the current epoch is stale.
+  method: Observed[`method`]
+  issuedEpochMoves: number
+  // The repair chain the request belongs to: the ledger index of that chain's
+  // start. A full-source read and an ordinary page belong to none.
+  chain: number | undefined
+  // A pending continuation issued the request after its chain's epoch moved.
+  resumedAfterEpochMove: boolean
 }
 
 type AuthorityCommand =
@@ -530,30 +575,14 @@ type AuthorityObservation = {
   hungRequests: number
   offsetWindows: number
   releaseInvalidations: number
+  // Graph passes in the stale self-release, which runs outside a release
+  // pass, while a continuation was owed.
+  unblockedReleasePasses: number
+  epochMovesWithContinuation: number
   retirementSuccessorChains: number
   replayContinuationHandoffs: number
   // Current failed requests whose participant reason reached the identity cut.
   requestErrorChecks: number
-}
-
-// ARCHITECTURE's ordered repair and publication laws: a read started before
-// an invalidation cannot pay it, and a later read must start before replacement
-// publication. Event order comes only from observed source callbacks and
-// adapter requests on one clock; a read that starts after the invalidation is
-// in its epoch. Dispatch may be deferred while the public gate holds.
-function checkRetirementProgress(
-  invalidationAt: number | undefined,
-  startedAt: Array<number>,
-  publicationAt = Number.POSITIVE_INFINITY,
-): void {
-  if (
-    invalidationAt !== undefined &&
-    !startedAt.some((at) => at > invalidationAt && at < publicationAt)
-  ) {
-    throw new Error(
-      `retirement invalidation: no authoritative read followed the adapter invalidation before publication`,
-    )
-  }
 }
 
 type RetirementReceiverCase = {
@@ -822,8 +851,10 @@ async function checkRetirementReceiver(
   try {
     if (live) await live.preload()
     await flushPromises()
-    expect(visible(), `initial complete window`).toEqual(
-      expected(scenario.offset),
+    compareAt(`ordered-source-loader-state-oracle.test.ts:822`, () =>
+      expect(visible(), `initial complete window`).toEqual(
+        expected(scenario.offset),
+      ),
     )
     const prior = visible()
     armed = true
@@ -848,23 +879,36 @@ async function checkRetirementReceiver(
     }
     await committed
     await flushPromises()
-    expect(unloaded, `real subscription retirement was reached`).toBeDefined()
+    compareAt(`ordered-source-loader-state-oracle.test.ts:848`, () =>
+      expect(
+        unloaded,
+        `real subscription retirement was reached`,
+      ).toBeDefined(),
+    )
     if (scenario.holdReplacement && invalidation !== undefined) {
-      expect(
-        heldAnswers,
-        `replacement starts without later external graph input`,
-      ).toBeGreaterThan(0)
-      expect(
-        visible(),
-        `held replacement keeps the complete public window`,
-      ).toEqual(prior)
-      expect(
-        publications,
-        `held replacement publishes no partial window`,
-      ).toEqual([])
+      compareAt(`ordered-source-loader-state-oracle.test.ts:850`, () =>
+        expect(
+          heldAnswers,
+          `replacement starts without later external graph input`,
+        ).toBeGreaterThan(0),
+      )
+      compareAt(`ordered-source-loader-state-oracle.test.ts:854`, () =>
+        expect(
+          visible(),
+          `held replacement keeps the complete public window`,
+        ).toEqual(prior),
+      )
+      compareAt(`ordered-source-loader-state-oracle.test.ts:858`, () =>
+        expect(
+          publications,
+          `held replacement publishes no partial window`,
+        ).toEqual([]),
+      )
       if (move !== undefined) {
-        expect(move, `held replacement keeps the window move pending`).toBe(
-          `pending`,
+        compareAt(`ordered-source-loader-state-oracle.test.ts:863`, () =>
+          expect(move, `held replacement keeps the window move pending`).toBe(
+            `pending`,
+          ),
         )
       }
       reached(`held-answer`)
@@ -877,29 +921,39 @@ async function checkRetirementReceiver(
     }
     checkRetirementProgress(invalidation, starts, publications[0]?.at)
     if (invalidation === undefined) {
-      expect(
-        starts.filter((at) => at > unloaded!),
-        `an eviction during retirement keeps the repair's boundary`,
-      ).toEqual([])
+      compareAt(`ordered-source-loader-state-oracle.test.ts:877`, () =>
+        expect(
+          starts.filter((at) => at > unloaded!),
+          `an eviction during retirement keeps the repair's boundary`,
+        ).toEqual([]),
+      )
     }
-    expect(
-      visible(),
-      `settled public window after retirement invalidation`,
-    ).toEqual(expected())
+    compareAt(`ordered-source-loader-state-oracle.test.ts:882`, () =>
+      expect(
+        visible(),
+        `settled public window after retirement invalidation`,
+      ).toEqual(expected()),
+    )
     // A change subscription publishes only changed rows: an eviction can leave
     // the moved window's rows equal to the prior window's.
     const changed = JSON.stringify(expected()) !== JSON.stringify(prior)
-    expect(
-      publications.map(({ rows }) => rows),
-      `one complete replacement publication`,
-    ).toEqual(changed ? [expected()] : [])
-    if (move !== undefined) {
+    compareAt(`ordered-source-loader-state-oracle.test.ts:889`, () =>
       expect(
-        move,
-        `the window move settles with its chosen window visible`,
-      ).toEqual({ at: expect.any(Number), rows: expected() })
+        publications.map(({ rows }) => rows),
+        `one complete replacement publication`,
+      ).toEqual(changed ? [expected()] : []),
+    )
+    if (move !== undefined) {
+      compareAt(`ordered-source-loader-state-oracle.test.ts:894`, () =>
+        expect(
+          move,
+          `the window move settles with its chosen window visible`,
+        ).toEqual({ at: expect.any(Number), rows: expected() }),
+      )
     }
-    expect(effect?.disposed ?? false, `Effect remains active`).toBe(false)
+    compareAt(`ordered-source-loader-state-oracle.test.ts:899`, () =>
+      expect(effect?.disposed ?? false, `Effect remains active`).toBe(false),
+    )
   } finally {
     armed = false
     replacement.resolve()
@@ -918,7 +972,9 @@ async function checkAuthorityCase(
       | `late-release-invalidation`
       | `completed-repair-release`
       | `deferred-refill`
-      | `reset-continuation`,
+      | `reset-continuation`
+      | `release-pass-continuation`
+      | `release-pass-refill-resumed`,
   ) => void,
   observeRejection?: (reason: unknown) => unknown,
   observeRelease: (released: boolean) => boolean = (released) => released,
@@ -999,6 +1055,8 @@ async function checkAuthorityCase(
     }
   }
   let releaseViolation: string | undefined
+  let obsoleteStepViolation: string | undefined
+  let restartViolation: string | undefined
   let unexpressibleTieViolation: string | undefined
   let resetViolation: string | undefined
   // A disposed loader owns nothing: it issues no request and releases no
@@ -1022,6 +1080,35 @@ async function checkAuthorityCase(
   // continuation survives bookkeeping, while cursor reset discards its
   // boundary and every pre-reset request belongs to truncate replay.
   let continuationOwed = false
+  // The repair chain of the latest start, the request being settled, and a
+  // blocked release pass that ran while a continuation was owed.
+  let currentChain: number | undefined
+  // The ledger length at the last command that delivered new source input
+  // to the window: an optimistic departure, a head insert, or a source
+  // delete.
+  let lastSourceInputAt = -1
+  // Epoch moves while a repair continuation was owed.
+  let epochMovesWithContinuation = 0
+  let settlingRequest: LedgerRequest | undefined
+  let deferredByReleasePass:
+    { epochMoves: number; truncates: number } | undefined
+  let unblockedReleasePasses = 0
+  const sameDemand = (a: LedgerRequest, b: LedgerRequest) =>
+    a.method === b.method &&
+    isDeepStrictEqual(
+      [
+        a.options.orderBy,
+        a.options.limit,
+        a.options.where,
+        a.options.minValues,
+      ],
+      [
+        b.options.orderBy,
+        b.options.limit,
+        b.options.where,
+        b.options.minValues,
+      ],
+    )
   let invalidateNextPage = false
   let releaseFaults = 0
   let releaseInvalidations = 0
@@ -1082,6 +1169,21 @@ async function checkAuthorityCase(
       issuedTruncates: truncates,
       failedTruncates: -1,
       failedAt: -1,
+      method,
+      issuedEpochMoves: epochMoves,
+      chain: undefined,
+      // A continuation that the chain staged, or that joined work blocked,
+      // issues this request from a later graph pass after the chain's epoch
+      // moved. The chain must be replaced first (ARCHITECTURE.md, ordered
+      // repair), so this request must start the replacement.
+      resumedAfterEpochMove:
+        authoritative &&
+        !fullSource &&
+        continuationOwed &&
+        !settlingChainMember &&
+        settlingRequest === undefined &&
+        epochMovesAtLastStart >= 0 &&
+        epochMoves !== epochMovesAtLastStart,
     }
     ledger.push(request)
     // No cursor expresses a NaN or infinite rank, so the loader reads the
@@ -1123,7 +1225,68 @@ async function checkAuthorityCase(
     if (startsAuthority(request)) {
       epochMovesAtLastStart = epochMoves
       repairOwed = false
+      currentChain = fullSource ? undefined : request.index
     }
+    if (startsAuthority(request) || request.chainStep)
+      request.chain = currentChain
+    // No obsolete step: a request that a pending continuation issued after
+    // its chain's epoch moved must start the replacement. If its own
+    // successful settlement starts a repair of the same epoch, the request
+    // was a step of the obsolete chain. Its shape alone cannot tell: an
+    // unindexed step and a replacement start read the same prefix.
+    const resumed = settlingRequest
+    if (
+      resumed?.resumedAfterEpochMove &&
+      resumed.outcome === `ok` &&
+      resumed.issuedTruncates === truncates &&
+      resumed.issuedEpochMoves === epochMoves &&
+      authoritative &&
+      // A full-source read proves an obsolete step only when every installed
+      // rank is finite: a head insert or an unexpressible boundary sends a
+      // genuine replacement start's settlement to a full-source read too.
+      ((fullSource &&
+        snapshot().every(({ value }) => Number.isFinite(value.rank))) ||
+        (options.orderBy !== undefined &&
+          options.where === undefined &&
+          options.minValues === undefined))
+    ) {
+      obsoleteStepViolation ??= `request ${resumed.index} resumed a repair continuation after its chain's epoch moved, and its settlement started the replacement (request ${request.index}): it was a step of the obsolete chain`
+    }
+    // One start per epoch: a chain step that reads its chain's start demand
+    // again restarts the repair without new debt. Only new source input
+    // since the start, an optimistic departure, a head insert, or a source
+    // delete, can make that read return more (ARCHITECTURE.md, ordered
+    // repair: a prefix, then a tie and refill per new boundary).
+    if (
+      request.chainStep &&
+      request.chain !== undefined &&
+      sameDemand(ledger[request.chain]!, request) &&
+      lastSourceInputAt <= request.chain
+    ) {
+      restartViolation ??= `request ${request.index}, a step of repair chain ${request.chain}, read the chain's start demand again with no new source input since`
+    }
+    // A blocked release pass deferred a pending refill, and a later graph pass
+    // resumed it: a refetch step of the same chain, in the same epoch, that
+    // reads a demand the chain has not read. Only a staged or blocked
+    // continuation issues such a step from a pass; a new start, or a restart
+    // inside the chain, would read the chain's first prefix again.
+    if (
+      deferredByReleasePass &&
+      request.chainStep &&
+      ledger.every(
+        (other) =>
+          other === request ||
+          other.chain !== request.chain ||
+          !sameDemand(other, request),
+      ) &&
+      settlingRequest === undefined &&
+      !settlingChainMember &&
+      deferredByReleasePass.epochMoves === epochMoves &&
+      deferredByReleasePass.truncates === truncates
+    ) {
+      reached?.(`release-pass-refill-resumed`)
+    }
+    deferredByReleasePass = undefined
     // An issued request consumes an owed continuation. An ordinary page also
     // shows the chain finished, since none is issued while a repair runs.
     continuationOwed = false
@@ -1192,6 +1355,19 @@ async function checkAuthorityCase(
       if (truncatePending && !explicitRetrying && !coveredBySource) {
         releaseViolation ??= `request ${request.index} was released while a truncate replay was pending`
       }
+      // Every release the loader makes runs inside a release pass, which
+      // blocks ordered refinement until it unwinds, except one: a stale
+      // finite request that settles after its repair finished is released at
+      // once, from its own settlement (ARCHITECTURE.md, ordered repair). The
+      // driver sees that case directly: the request is the one it is
+      // settling, it was issued before the current epoch, in this truncate
+      // generation, and no full-source lease covers the source.
+      const selfRelease =
+        request === settlingRequest &&
+        !request.authoritative &&
+        request.issuedEpochMoves !== epochMoves &&
+        request.issuedTruncates === truncates &&
+        !coveredBySource
       request.released = true
       const invalidate = () => {
         if (!testCase.releaseInvalidates || releaseInvalidations > 0) return
@@ -1228,10 +1404,24 @@ async function checkAuthorityCase(
         return
       }
       if (testCase.releaseReenters && !reentering) {
+        // A release callback runs a graph pass while a repair continuation
+        // is still owed: the state where a pass that issues nothing must not
+        // be read as consuming that continuation.
+        if (continuationOwed && selfRelease) unblockedReleasePasses++
+        if (continuationOwed && !selfRelease) {
+          reached?.(`release-pass-continuation`)
+          deferredByReleasePass = { epochMoves, truncates }
+        }
         reentering = true
         reentrantPasses++
         try {
-          run(() => loader.loadMore())
+          // The loader blocks ordered refinement until its release pass
+          // unwinds (ARCHITECTURE.md, Ordered requests, continuation, and
+          // recovery), so that pass consumes no owed continuation. The
+          // refinement it asked for resumes on a later pass as the same chain.
+          // The stale self-release runs no pass, so its graph pass is an
+          // ordinary one.
+          run(() => loader.loadMore(), selfRelease)
         } finally {
           reentering = false
         }
@@ -1346,6 +1536,8 @@ async function checkAuthorityCase(
   )
   const invalidateSourceOrdering = loader.invalidateSourceOrdering.bind(loader)
   loader.invalidateSourceOrdering = () => {
+    if (continuationOwed && currentChain !== undefined)
+      epochMovesWithContinuation++
     epochMoves++
     invalidateSourceOrdering()
   }
@@ -1434,8 +1626,11 @@ async function checkAuthorityCase(
           tieValue(options) === endRank,
       )
     if (!issued) {
-      throw new Error(
-        `unproven report: a report over a first page that no row it read proves issued no bounded repair and no tie of its end`,
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1434`,
+        new Error(
+          `unproven report: a report over a first page that no row it read proves issued no bounded repair and no tie of its end`,
+        ),
       )
     }
   }
@@ -1455,7 +1650,7 @@ async function checkAuthorityCase(
       observe(error)
     }
     // A pass that issues nothing consumed or finished an owed continuation,
-    // unless joined work deferred it.
+    // unless joined work deferred it or a release pass blocked it.
     if (consumesContinuation && ledger.length === before && !joinedPending) {
       continuationOwed = false
     }
@@ -1468,6 +1663,8 @@ async function checkAuthorityCase(
   const replayPending = () => truncatePending
   function truncate() {
     truncates++
+    currentChain = undefined
+    deferredByReleasePass = undefined
     // Reset discards any staged continuation. A later settlement may stage a
     // new one only for a request issued in this replay generation.
     if (continuationOwed) reached?.(`reset-continuation`)
@@ -1498,6 +1695,7 @@ async function checkAuthorityCase(
     const chainMember = request.authoritative && !request.fullSource
     const before = ledger.length
     settlingChainMember = chainMember
+    settlingRequest = request
     if (ok) request.deferred.resolve()
     else {
       request.error = new Error(`request ${request.index} failed`)
@@ -1506,6 +1704,7 @@ async function checkAuthorityCase(
     settlingFailure = !ok
     answeringRepair = ok && chainMember
     await flush()
+    settlingRequest = undefined
     settlingFailure = false
     answeringRepair = false
     // The chain completed in this settlement when it issued no further step:
@@ -1579,28 +1778,61 @@ async function checkAuthorityCase(
     Math.max(lastAuthoritativeRead(), replayAuthority)
   const checkHeld = (checkpoint: string) => {
     if (identityViolation) {
-      throw new Error(`error identity ${checkpoint}: ${identityViolation}`)
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1579`,
+        new Error(`error identity ${checkpoint}: ${identityViolation}`),
+      )
     }
     if (disposeViolation) {
-      throw new Error(`dispose ${checkpoint}: ${disposeViolation}`)
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1582`,
+        new Error(`dispose ${checkpoint}: ${disposeViolation}`),
+      )
     }
     if (invariantViolation) {
-      throw new Error(`invariant ${checkpoint}: ${invariantViolation}`)
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1585`,
+        new Error(`invariant ${checkpoint}: ${invariantViolation}`),
+      )
     }
     if (releaseViolation) {
-      throw new Error(`release ${checkpoint}: ${releaseViolation}`)
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1588`,
+        new Error(`release ${checkpoint}: ${releaseViolation}`),
+      )
     }
     if (resetViolation) {
-      throw new Error(`reset ${checkpoint}: ${resetViolation}`)
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1591`,
+        new Error(`reset ${checkpoint}: ${resetViolation}`),
+      )
     }
     if (unexpressibleTieViolation) {
-      throw new Error(
-        `unexpressible tie ${checkpoint}: ${unexpressibleTieViolation}`,
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1594`,
+        new Error(
+          `unexpressible tie ${checkpoint}: ${unexpressibleTieViolation}`,
+        ),
+      )
+    }
+    if (obsoleteStepViolation) {
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:obsolete-step`,
+        new Error(`no obsolete step ${checkpoint}: ${obsoleteStepViolation}`),
+      )
+    }
+    if (restartViolation) {
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:restart`,
+        new Error(`one start per epoch ${checkpoint}: ${restartViolation}`),
       )
     }
     if (concurrencyViolation) {
-      throw new Error(
-        `one request at a time ${checkpoint}: ${concurrencyViolation}`,
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1599`,
+        new Error(
+          `one request at a time ${checkpoint}: ${concurrencyViolation}`,
+        ),
       )
     }
     // The latest successful repair prefix, if no later authoritative read
@@ -1619,27 +1851,44 @@ async function checkAuthorityCase(
       lastAuthoritativeSuccess() > repair.index
     )
       return
-    // A prefix read issued after the repair covers the repair's rows that are
-    // still inside the window when it reaches as far; it may retire the
-    // repair's prefix. One issued before the repair proves no current
-    // coverage and may not.
-    const windowRows = Math.min(
-      repair.options.limit ?? 0,
-      info.offset + info.limit,
-    )
-    const coveredByLaterPrefix = ledger.some(
-      (request) =>
-        request.index > repair.index &&
-        (request.outcome === `ok` || request.replayed) &&
-        request.options.orderBy !== undefined &&
-        request.options.where === undefined &&
-        request.options.minValues === undefined &&
-        (request.options.limit ?? 0) >= windowRows,
-    )
-    if (coveredByLaterPrefix) return
-    if (repair.released) {
-      throw new Error(
-        `held ${checkpoint}: request ${repair.index}, a successful repair prefix, was released before a later authoritative read succeeded`,
+    // Every successful acquisition of that chain stays held: its prefix,
+    // ties, and refills (ARCHITECTURE.md: only the new repair acquisitions
+    // remain, and a larger prefix does not retire ties or cursor suffixes).
+    // A prefix read issued after a prefix member covers that member's rows
+    // still inside the window when it reaches as far; it may retire it. One
+    // issued before it proves no current coverage and may not.
+    const isPrefix = (request: LedgerRequest) =>
+      request.options.orderBy !== undefined &&
+      request.options.where === undefined &&
+      request.options.minValues === undefined
+    for (const member of ledger) {
+      if (
+        member.chain !== repair.index ||
+        member.outcome !== `ok` ||
+        !member.released
+      )
+        continue
+      // Only a prefix at least as long retires a prefix member: a smaller
+      // later prefix that still reaches the window does not hold the
+      // member's other rows (ARCHITECTURE.md: a successful larger prefix
+      // retires settled smaller prefix acquisitions).
+      const coveredByLaterPrefix =
+        isPrefix(member) &&
+        ledger.some(
+          (request) =>
+            request.index > member.index &&
+            (request.outcome === `ok` || request.replayed) &&
+            isPrefix(request) &&
+            (request.options.limit ?? 0) >= (member.options.limit ?? 0),
+        )
+      if (coveredByLaterPrefix) continue
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:1638`,
+        new Error(
+          member === repair
+            ? `held ${checkpoint}: request ${repair.index}, a successful repair prefix, was released before a later authoritative read succeeded`
+            : `held ${checkpoint}: request ${member.index}, a successful acquisition of repair chain ${repair.index}, was released before a later authoritative read succeeded`,
+        ),
       )
     }
   }
@@ -1647,10 +1896,27 @@ async function checkAuthorityCase(
     joinedPending = false
     for (let round = 0; round < 40; round++) {
       // A release during the drain can start a truncate of its own.
-      if (truncatePending) settleReplay()
+      // A replay publishes only after every acquisition started inside its
+      // attempt settles (ARCHITECTURE.md, Replay participants), so the drain
+      // settles those first, as the real subscription waits for them.
+      const attempt = inflight().find(
+        (request) => request.index >= replayOwnedBefore,
+      )
+      if (truncatePending && attempt) {
+        await settle(attempt, true)
+        checkHeld(`after the drain settles request ${attempt.index}`)
+        continue
+      }
+      if (truncatePending) {
+        settleReplay()
+        // Replay retirement can release leases that a later read in this
+        // drain covers, so the held law is checked at each drain event.
+        checkHeld(`after the drain's replay settles`)
+      }
       const next = inflight()[0]
       if (next) {
         await settle(next, true)
+        checkHeld(`after the drain settles request ${next.index}`)
         continue
       }
       const before = ledger.length
@@ -1665,7 +1931,10 @@ async function checkAuthorityCase(
       )
         return
     }
-    throw new Error(`the loader did not reach a fixed point`)
+    rejectAt(
+      `ordered-source-loader-state-oracle.test.ts:1665`,
+      new Error(`the loader did not reach a fixed point`),
+    )
   }
   const ownFailureSince = (index: number) =>
     ledger.some(
@@ -1848,8 +2117,11 @@ async function checkAuthorityCase(
           // comes before the repair's prefix.
           const firstIssued = ledger[before]
           if (owesRepair && firstIssued && !firstIssued.authoritative) {
-            throw new Error(
-              `owed repair: request ${firstIssued.index}, an ordinary read, came before the repair a report owed`,
+            rejectAt(
+              `ordered-source-loader-state-oracle.test.ts:1848`,
+              new Error(
+                `owed repair: request ${firstIssued.index}, an ordinary read, came before the repair a report owed`,
+              ),
             )
           }
           // A report the loader cannot prove covers nothing it could change
@@ -1876,8 +2148,11 @@ async function checkAuthorityCase(
               .slice(before)
               .find(({ authoritative }) => authoritative)
             if (issued) {
-              throw new Error(
-                `ignored report: request ${issued.index} re-read the source for a report that covers nothing it could change`,
+              rejectAt(
+                `ordered-source-loader-state-oracle.test.ts:1876`,
+                new Error(
+                  `ignored report: request ${issued.index} re-read the source for a report that covers nothing it could change`,
+                ),
               )
             }
             ignoredReportsBeforeSettle++
@@ -1885,8 +2160,11 @@ async function checkAuthorityCase(
             // The loader ignores the report, so it reads nothing for it.
             const issued = ledger[before]
             if (issued) {
-              throw new Error(
-                `ignored report: request ${issued.index} was read for a report over coverage that ${coversSource ? `a full-source read` : `the loader's own first page`} proves`,
+              rejectAt(
+                `ordered-source-loader-state-oracle.test.ts:1885`,
+                new Error(
+                  `ignored report: request ${issued.index} was read for a report over coverage that ${coversSource ? `a full-source read` : `the loader's own first page`} proves`,
+                ),
               )
             }
             if (!coversSource) ignoredReportsInsideFirstPage++
@@ -1898,6 +2176,7 @@ async function checkAuthorityCase(
         }
         // A refetch delivered a row that sorts before every installed row.
         case `headInsert`: {
+          lastSourceInputAt = ledger.length
           // One `-Infinity` row at most: a second would tie with it, which
           // the fake's subtraction order cannot compare.
           const unexpressible =
@@ -1990,6 +2269,7 @@ async function checkAuthorityCase(
         // An optimistic overlay hides the window's row, so the loader must
         // refill it from the source.
         case `optimisticDeparture`:
+          lastSourceInputAt = ledger.length
           optimisticDepartures++
           loader.onSourceChanges(
             [{ type: `delete`, key: 1, value: { id: 1, rank: 1 } }],
@@ -2000,6 +2280,7 @@ async function checkAuthorityCase(
           await flush()
           break
         case `sourceDelete`:
+          lastSourceInputAt = ledger.length
           repairOwed = true
           sourceDeletes++
           loader.onSourceChanges(
@@ -2092,8 +2373,11 @@ async function checkAuthorityCase(
             (request.hung && request.authoritative),
         )
         if (!recovered) {
-          throw new Error(
-            `no strand: superseded request ${failed.index} failed, and no full-source read recovered it without an explicit retry`,
+          rejectAt(
+            `ordered-source-loader-state-oracle.test.ts:2092`,
+            new Error(
+              `no strand: superseded request ${failed.index} failed, and no full-source read recovered it without an explicit retry`,
+            ),
           )
         }
       }
@@ -2135,8 +2419,11 @@ async function checkAuthorityCase(
         !unfinishedChain &&
         leaked.length > 0
       ) {
-        throw new Error(
-          `no leak: requests ${JSON.stringify(leaked.map(({ index }) => index))} are still held after authoritative request ${authority} succeeded`,
+        rejectAt(
+          `ordered-source-loader-state-oracle.test.ts:2135`,
+          new Error(
+            `no leak: requests ${JSON.stringify(leaked.map(({ index }) => index))} are still held after authoritative request ${authority} succeeded`,
+          ),
         )
       }
       // A superseded request's failure owes only a full-source read; once one
@@ -2161,8 +2448,11 @@ async function checkAuthorityCase(
               ))),
       )
       if (!isDisposed() && heldFailures.length > 0) {
-        throw new Error(
-          `no leak: superseded failed requests ${JSON.stringify(heldFailures.map(({ index }) => index))} are still held after a full-source read recovered them`,
+        rejectAt(
+          `ordered-source-loader-state-oracle.test.ts:2161`,
+          new Error(
+            `no leak: superseded failed requests ${JSON.stringify(heldFailures.map(({ index }) => index))} are still held after a full-source read recovered them`,
+          ),
         )
       }
       // Progress: once loading is quiet, an invalidation and an ordinary pass
@@ -2199,8 +2489,11 @@ async function checkAuthorityCase(
         run(() => loader.loadMore())
         await flush()
         if (ledger.length === before) {
-          throw new Error(
-            `progress: an invalidation after the drain issued no request`,
+          rejectAt(
+            `ordered-source-loader-state-oracle.test.ts:2199`,
+            new Error(
+              `progress: an invalidation after the drain issued no request`,
+            ),
           )
         }
         // Cost: a full-source read is very expensive, so a repair avoids one
@@ -2231,8 +2524,11 @@ async function checkAuthorityCase(
           costChecks++
           const fullRead = repair.find(({ fullSource }) => fullSource)
           if (fullRead) {
-            throw new Error(
-              `cost: request ${fullRead.index} read the full source although a bounded repair was available`,
+            rejectAt(
+              `ordered-source-loader-state-oracle.test.ts:2231`,
+              new Error(
+                `cost: request ${fullRead.index} read the full source although a bounded repair was available`,
+              ),
             )
           }
           const authoritative = repair.filter(
@@ -2240,8 +2536,11 @@ async function checkAuthorityCase(
           ).length
           const chains = epochMoves - movesBefore
           if (authoritative > chains * (1 + 2 * snapshot().length)) {
-            throw new Error(
-              `cost: one invalidation issued ${authoritative} authoritative requests for ${chains} epoch moves`,
+            rejectAt(
+              `ordered-source-loader-state-oracle.test.ts:2240`,
+              new Error(
+                `cost: one invalidation issued ${authoritative} authoritative requests for ${chains} epoch moves`,
+              ),
             )
           }
           // Each boundary is a different read: no chain reads the same
@@ -2258,8 +2557,11 @@ async function checkAuthorityCase(
           }
           for (const [read, count] of reads) {
             if (count > chains) {
-              throw new Error(
-                `cost: one invalidation repeated the read ${read} ${count} times for ${chains} epoch moves`,
+              rejectAt(
+                `ordered-source-loader-state-oracle.test.ts:2258`,
+                new Error(
+                  `cost: one invalidation repeated the read ${read} ${count} times for ${chains} epoch moves`,
+                ),
               )
             }
           }
@@ -2271,8 +2573,11 @@ async function checkAuthorityCase(
       uncaught.errors.length !== thrownReleases.length ||
       uncaught.errors.some((error, index) => error !== thrownReleases[index])
     ) {
-      throw new Error(
-        `uncaught release reports: expected each throwing release once, got ${uncaught.errors.map(String).join(`, `)}`,
+      rejectAt(
+        `ordered-source-loader-state-oracle.test.ts:2271`,
+        new Error(
+          `uncaught release reports: expected each throwing release once, got ${uncaught.errors.map(String).join(`, `)}`,
+        ),
       )
     }
   } finally {
@@ -2323,6 +2628,8 @@ async function checkAuthorityCase(
     hungRequests,
     offsetWindows: testCase.offset > 0 && ledger.length > 0 ? 1 : 0,
     releaseInvalidations,
+    unblockedReleasePasses,
+    epochMovesWithContinuation,
     retirementSuccessorChains: ledger.filter(
       (request) =>
         startsAuthority(request) &&
@@ -2348,29 +2655,13 @@ const ordinaryScenario = {
 } as const
 
 const authorityProperty = `ordered-loader.request-authority`
-const authorityReplay = readOracleRunConfig()
-const authorityCampaigns =
-  authorityReplay.replayPath === undefined
-    ? ([`fixed`, `random`] as const)
-    : authorityReplay.replayProperty === authorityProperty
-      ? ([`replay`] as const)
-      : ([] as const)
+
+type AuthorityRegression = { label: string; testCase: AuthorityCase }
 
 // The authority law is checked by checkAuthorityCase: it runs one generated or
 // replayed history through the real loader and compares each observation with
 // the request ledger. The grammar is authorityCaseArbitrary, which the campaigns
 // and the calibration witnesses below read for coverage.
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/btree-index.ts',
-    'src/query/effect.ts#createEffect',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-    'src/query/live/ordered-source-loader.ts',
-  ],
-  check: [checkAuthorityCase, checkRetirementProgress, checkRetirementReceiver],
-  grammar: [authorityCaseArbitrary],
-})
 
 describe(`Ordered source request authority`, () => {
   // Checker calibration changes only the recorded participant reason. Every
@@ -2378,57 +2669,79 @@ describe(`Ordered source request authority`, () => {
   // Neither cleanup timing nor error text grants another value authority to
   // replace that failure. The existing generated authority grammar contains
   // these indexed/full-source, width, and throwing-release dimensions too.
-  it.each(
-    [false, true].flatMap((indexed) =>
-      ([1, 2] as const).flatMap((limit) =>
-        [false, true].flatMap((releaseFault) =>
-          [false, true].map((requiresFullSource) => ({
-            indexed,
-            limit,
-            releaseFault,
-            requiresFullSource,
-          })),
-        ),
+  const substitutionAxes = [false, true].flatMap((indexed) =>
+    ([1, 2] as const).flatMap((limit) =>
+      [false, true].flatMap((releaseFault) =>
+        [false, true].map((requiresFullSource) => ({
+          indexed,
+          limit,
+          releaseFault,
+          requiresFullSource,
+        })),
       ),
     ),
-  )(
-    `rejects substituted participant errors across current failures: %j`,
-    async (axes) => {
-      oracleRoute(`case`)
-      const testCase: AuthorityCase = {
-        ...ordinaryScenario,
-        ...axes,
-        settledFirst: false,
-        syncRepair: false,
-        history: [{ type: `settle`, pick: 0, ok: false }],
-      }
-      const genuine = await checkAuthorityCase(testCase)
-      if (axes.releaseFault) expect(genuine.releaseFaults).toBeGreaterThan(0)
-      for (const replacement of [
-        new Error(`release 0 failed`),
-        new Error(`another request failed`),
-        `release non-Error failure`,
-      ]) {
-        let substitutions = 0
-        try {
-          await expect(
-            checkAuthorityCase(testCase, undefined, () => {
-              substitutions++
-              return replacement
-            }),
-          ).rejects.toThrow(`error identity`)
-        } finally {
-          expect(substitutions).toBeGreaterThan(0)
-        }
-      }
-    },
   )
+  async function runSubstitutedParticipantErrors(
+    axes: (typeof substitutionAxes)[number],
+  ): Promise<void> {
+    const testCase: AuthorityCase = {
+      ...ordinaryScenario,
+      ...axes,
+      settledFirst: false,
+      syncRepair: false,
+      history: [{ type: `settle`, pick: 0, ok: false }],
+    }
+    const genuine = await checkAuthorityCase(testCase)
+    if (axes.releaseFault) expect(genuine.releaseFaults).toBeGreaterThan(0)
+    for (const replacement of [
+      new Error(`release 0 failed`),
+      new Error(`another request failed`),
+      `release non-Error failure`,
+    ]) {
+      let substitutions = 0
+      try {
+        await expect(
+          checkAuthorityCase(testCase, undefined, () => {
+            substitutions++
+            return replacement
+          }),
+        ).rejects.toThrow(`error identity`)
+      } finally {
+        expect(substitutions).toBeGreaterThan(0)
+      }
+    }
+  }
+  oracleProperty({
+    id: `ordered-loader.request-authority-substitution`,
+    law: {
+      statement: `Neither cleanup timing nor error text grants another value authority to replace a current request failure.`,
+      authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+      limits: `One legal current-failure history over the indexed/full-source, width, throwing-release, and full-source-requirement axes, each with three substituted participant reasons.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+    ],
+    histories: substitutionAxes,
+    label: (axes) =>
+      `rejects substituted participant errors across current failures: ${JSON.stringify(axes)}`,
+    resolve: (axes) => ({ axes }),
+    model: (plan, observations) => recordedComparison(plan, observations),
+    driver: (plan, observe) =>
+      observeComparison(plan, observe, () =>
+        runSubstitutedParticipantErrors(plan.axes),
+      ),
+    check: (_plan, _observations, verdict) => verdict,
+  })
 
   // The model's strand trace: a repair supersedes the in-flight tie and
   // finishes; a newer invalidation's reaction is deferred; the old tie fails.
-  it(`recovers a superseded tie that fails after its repair finished (generated campaign replay)`, async () => {
-    oracleRoute(`fixed history`)
-    await checkAuthorityCase({
+  const supersededTieRegression: AuthorityRegression = {
+    label: `recovers a superseded tie that fails after its repair finished (generated campaign replay)`,
+    testCase: {
       indexed: true,
       limit: 1,
       settledFirst: false,
@@ -2444,8 +2757,8 @@ describe(`Ordered source request authority`, () => {
         { type: `invalidate`, react: false },
         { type: `settle`, pick: 0, ok: false },
       ],
-    })
-  })
+    },
+  }
 
   // Traces the generated campaign found, kept as fixed regressions. Each ran
   // through the same laws and failed before its repair:
@@ -2486,443 +2799,518 @@ describe(`Ordered source request authority`, () => {
   //   start error replaced the request's own error in its participant);
   // A superseded page that fails before a covering replay settles reaches
   // the failed-lease law through a replay, which the campaigns rarely do.
-  // Two fixed regressions keep traces that first failed the generated
+  // Four fixed regressions keep traces that first failed the generated
   // campaign's own model: a chain step it took for a chain start (an optimistic
-  // refill, and a shrunk window's prefix deferred by joined work).
-  it.each([
-    {
-      name: `a throwing release during a window move that resumes a repair`,
-      testCase: {
-        indexed: true,
-        limit: 1,
-        settledFirst: true,
-        releaseFault: true,
-        syncRepair: true,
-        ...ordinaryScenario,
-        history: [
-          { type: `invalidate`, react: true },
-          { type: `invalidateThenFailOldest` },
-          { type: `move`, delta: 0 },
-          { type: `settleNewest` },
-        ],
+  // refill, a shrunk window's prefix deferred by joined work, and two refills
+  // deferred across a release pass during replay retirement).
+  const campaignRegressions: Array<AuthorityRegression> = (
+    [
+      {
+        name: `a throwing release during a window move that resumes a repair`,
+        testCase: {
+          indexed: true,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: true,
+          syncRepair: true,
+          ...ordinaryScenario,
+          history: [
+            { type: `invalidate`, react: true },
+            { type: `invalidateThenFailOldest` },
+            { type: `move`, delta: 0 },
+            { type: `settleNewest` },
+          ],
+        },
       },
-    },
-    {
-      name: `a repair that answers at once behind an older tie`,
-      testCase: {
-        indexed: true,
-        limit: 1,
-        settledFirst: false,
-        releaseFault: false,
-        syncRepair: true,
-        ...ordinaryScenario,
-        history: [
-          { type: `settleNewest` },
-          { type: `invalidate`, react: true },
-          { type: `invalidate`, react: true },
-          { type: `invalidate`, react: false },
-        ],
+      {
+        name: `a repair that answers at once behind an older tie`,
+        testCase: {
+          indexed: true,
+          limit: 1,
+          settledFirst: false,
+          releaseFault: false,
+          syncRepair: true,
+          ...ordinaryScenario,
+          history: [
+            { type: `settleNewest` },
+            { type: `invalidate`, react: true },
+            { type: `invalidate`, react: true },
+            { type: `invalidate`, react: false },
+          ],
+        },
       },
-    },
-    {
-      name: `a repair prefix that settles after a replay started its replacement`,
-      testCase: {
-        indexed: true,
-        limit: 1,
-        settledFirst: true,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        history: [
-          { type: `truncate` },
-          { type: `invalidate`, react: false },
-          { type: `move`, delta: -1 },
-          { type: `invalidate`, react: false },
-        ],
+      {
+        name: `a repair prefix that settles after a replay started its replacement`,
+        testCase: {
+          indexed: true,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          history: [
+            { type: `truncate` },
+            { type: `invalidate`, react: false },
+            { type: `move`, delta: -1 },
+            { type: `invalidate`, react: false },
+          ],
+        },
       },
-    },
-    {
-      name: `an optimistic refill inside a running repair chain`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: false,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        needsMore: false,
-        history: [
-          { type: `settleNewest` },
-          { type: `settleNewest` },
-          { type: `invalidate`, react: true },
-          { type: `settle`, pick: 0, ok: true },
-          { type: `optimisticDeparture` },
-        ],
+      {
+        name: `an optimistic refill inside a running repair chain`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: false,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          needsMore: false,
+          history: [
+            { type: `settleNewest` },
+            { type: `settleNewest` },
+            { type: `invalidate`, react: true },
+            { type: `settle`, pick: 0, ok: true },
+            { type: `optimisticDeparture` },
+          ],
+        },
       },
-    },
-    {
-      name: `a replay after an explicit retry whose release throws`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: true,
-        releaseFault: true,
-        syncRepair: false,
-        ...ordinaryScenario,
-        history: [
-          { type: `settleNewest` },
-          { type: `settle`, pick: 0, ok: false },
-          { type: `move`, delta: -1 },
-          { type: `truncate` },
-          { type: `replaySucceeds` },
-        ],
+      {
+        name: `a replay after an explicit retry whose release throws`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: true,
+          syncRepair: false,
+          ...ordinaryScenario,
+          history: [
+            { type: `settleNewest` },
+            { type: `settle`, pick: 0, ok: false },
+            { type: `move`, delta: -1 },
+            { type: `truncate` },
+            { type: `replaySucceeds` },
+          ],
+        },
       },
-    },
-    {
-      name: `a shrunk window's prefix deferred by joined work inside a repair`,
-      testCase: {
-        indexed: false,
-        limit: 2,
-        settledFirst: true,
-        releaseFault: false,
-        syncRepair: true,
-        ...ordinaryScenario,
-        joined: true,
-        needsMore: false,
-        history: [
-          { type: `settle`, pick: 0, ok: true },
-          { type: `report`, react: true },
-          { type: `joinedBusy` },
-          { type: `move`, delta: -1 },
-          { type: `settle`, pick: 0, ok: true },
-          { type: `replaySucceeds` },
-        ],
+      {
+        name: `a shrunk window's prefix deferred by joined work inside a repair`,
+        testCase: {
+          indexed: false,
+          limit: 2,
+          settledFirst: true,
+          releaseFault: false,
+          syncRepair: true,
+          ...ordinaryScenario,
+          joined: true,
+          needsMore: false,
+          history: [
+            { type: `settle`, pick: 0, ok: true },
+            { type: `report`, react: true },
+            { type: `joinedBusy` },
+            { type: `move`, delta: -1 },
+            { type: `settle`, pick: 0, ok: true },
+            { type: `replaySucceeds` },
+          ],
+        },
       },
-    },
-    {
-      name: `a repair tie from before a truncate that fails during the next repair`,
-      testCase: {
-        indexed: true,
-        limit: 1,
-        settledFirst: true,
-        releaseFault: false,
-        syncRepair: true,
-        ...ordinaryScenario,
-        history: [
-          { type: `syncInvalidatingPage` },
-          { type: `move`, delta: -1 },
-          { type: `invalidate`, react: true },
-          { type: `truncate` },
-          { type: `replaySucceeds` },
-          { type: `settle`, pick: 0, ok: true },
-          { type: `syncInvalidatingPage` },
-          { type: `invalidateThenFailOldest` },
-        ],
+      {
+        name: `a repair tie from before a truncate that fails during the next repair`,
+        testCase: {
+          indexed: true,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: false,
+          syncRepair: true,
+          ...ordinaryScenario,
+          history: [
+            { type: `syncInvalidatingPage` },
+            { type: `move`, delta: -1 },
+            { type: `invalidate`, react: true },
+            { type: `truncate` },
+            { type: `replaySucceeds` },
+            { type: `settle`, pick: 0, ok: true },
+            { type: `syncInvalidatingPage` },
+            { type: `invalidateThenFailOldest` },
+          ],
+        },
       },
-    },
-    {
-      name: `a superseded page that fails before a covering replay settles`,
-      testCase: {
-        indexed: true,
-        limit: 1,
-        settledFirst: true,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        history: [
-          { type: `settleNewest` },
-          { type: `truncate` },
-          { type: `move`, delta: 0 },
-          { type: `invalidate`, react: false },
-          { type: `move`, delta: 0 },
-          { type: `settle`, pick: 1, ok: false },
-          { type: `settleNewest` },
-          { type: `replaySucceeds` },
-        ],
+      {
+        name: `a superseded page that fails before a covering replay settles`,
+        testCase: {
+          indexed: true,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          history: [
+            { type: `settleNewest` },
+            { type: `truncate` },
+            { type: `move`, delta: 0 },
+            { type: `invalidate`, react: false },
+            { type: `move`, delta: 0 },
+            { type: `settle`, pick: 1, ok: false },
+            { type: `settleNewest` },
+            { type: `replaySucceeds` },
+          ],
+        },
       },
-    },
-    {
-      name: `a repair prefix that settles after full-source coverage`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: false,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        needsMore: false,
-        history: [
-          { type: `settle`, pick: 0, ok: true },
-          { type: `truncate` },
-          { type: `sourceDelete`, react: false },
-          { type: `move`, delta: -1 },
-          { type: `failOldest` },
-          { type: `replaySucceeds` },
-          { type: `settleNewest` },
-        ],
+      {
+        name: `a repair prefix that settles after full-source coverage`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: false,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          needsMore: false,
+          history: [
+            { type: `settle`, pick: 0, ok: true },
+            { type: `truncate` },
+            { type: `sourceDelete`, react: false },
+            { type: `move`, delta: -1 },
+            { type: `failOldest` },
+            { type: `replaySucceeds` },
+            { type: `settleNewest` },
+          ],
+        },
       },
-    },
-    {
-      name: `a backoff retry whose first release starts a truncate`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: false,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        retryTimer: true,
-        releaseTruncates: true,
-        history: [
-          { type: `settleNewest` },
-          { type: `report`, react: false },
-          { type: `joinedIdle` },
-          { type: `failOldest` },
-          { type: `invalidateThenFailOldest` },
-          { type: `timer` },
-          { type: `replaySucceeds` },
-        ],
+      {
+        name: `a backoff retry whose first release starts a truncate`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: false,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          retryTimer: true,
+          releaseTruncates: true,
+          history: [
+            { type: `settleNewest` },
+            { type: `report`, react: false },
+            { type: `joinedIdle` },
+            { type: `failOldest` },
+            { type: `invalidateThenFailOldest` },
+            { type: `timer` },
+            { type: `replaySucceeds` },
+          ],
+        },
       },
-    },
-    {
-      name: `a full-source transport that fails after a replay covered the source`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: true,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        history: [
-          { type: `truncate` },
-          { type: `move`, delta: 0 },
-          { type: `settleNewest` },
-          { type: `settleNewest` },
-          { type: `replaySucceeds` },
-          { type: `settle`, pick: 1, ok: false },
-        ],
+      {
+        name: `a full-source transport that fails after a replay covered the source`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          history: [
+            { type: `truncate` },
+            { type: `move`, delta: 0 },
+            { type: `settleNewest` },
+            { type: `settleNewest` },
+            { type: `replaySucceeds` },
+            { type: `settle`, pick: 1, ok: false },
+          ],
+        },
       },
-    },
-    {
-      name: `a repair prefix that fails after a replay finished its chain`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: true,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        needsMore: false,
-        history: [
-          { type: `report`, react: false },
-          { type: `settleNewest` },
-          { type: `truncate` },
-          { type: `move`, delta: -1 },
-          { type: `replaySucceeds` },
-          { type: `failOldest` },
-        ],
+      {
+        name: `a repair prefix that fails after a replay finished its chain`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          needsMore: false,
+          history: [
+            { type: `report`, react: false },
+            { type: `settleNewest` },
+            { type: `truncate` },
+            { type: `move`, delta: -1 },
+            { type: `replaySucceeds` },
+            { type: `failOldest` },
+          ],
+        },
       },
-    },
-    {
-      name: `a release that runs the graph during another request's settlement`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: false,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        releaseReenters: true,
-        history: [
-          { type: `truncate` },
-          { type: `replaySucceeds` },
-          { type: `optimisticDeparture` },
-          { type: `joinedBusy` },
-        ],
+      {
+        name: `a release that runs the graph during another request's settlement`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: false,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          releaseReenters: true,
+          history: [
+            { type: `truncate` },
+            { type: `replaySucceeds` },
+            { type: `optimisticDeparture` },
+            { type: `joinedBusy` },
+          ],
+        },
       },
-    },
-    {
-      name: `a superseded failure before a truncate whose replay covers the source`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: true,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        releaseTruncates: true,
-        releaseReenters: true,
-        history: [
-          { type: `invalidate`, react: true },
-          { type: `failOldest` },
-          { type: `replayFails` },
-        ],
+      {
+        name: `a superseded failure before a truncate whose replay covers the source`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          releaseTruncates: true,
+          releaseReenters: true,
+          history: [
+            { type: `invalidate`, react: true },
+            { type: `failOldest` },
+            { type: `replayFails` },
+          ],
+        },
       },
-    },
-    {
-      name: `a superseded failure whose recovery read throws while it starts`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: true,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        needsMore: false,
-        history: [
-          { type: `report`, react: true },
-          { type: `settleNewest` },
-          { type: `settle`, pick: 7, ok: true },
-          { type: `failOldestThrowingRecovery` },
-          { type: `pass` },
-        ],
+      {
+        name: `a superseded failure whose recovery read throws while it starts`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          needsMore: false,
+          history: [
+            { type: `report`, react: true },
+            { type: `settleNewest` },
+            { type: `settle`, pick: 7, ok: true },
+            { type: `failOldestThrowingRecovery` },
+            { type: `pass` },
+          ],
+        },
       },
-    },
-    {
-      name: `a page whose own delivery invalidates ordering`,
-      testCase: {
-        indexed: true,
-        limit: 1,
-        settledFirst: false,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        history: [
-          { type: `settle`, pick: 0, ok: true },
-          { type: `syncInvalidatingPage` },
-          { type: `settleNewest` },
-          { type: `pass` },
-          { type: `settleNewest` },
-          { type: `settleNewest` },
-          { type: `settle`, pick: 3, ok: true },
-        ],
+      {
+        name: `a page whose own delivery invalidates ordering`,
+        testCase: {
+          indexed: true,
+          limit: 1,
+          settledFirst: false,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          history: [
+            { type: `settle`, pick: 0, ok: true },
+            { type: `syncInvalidatingPage` },
+            { type: `settleNewest` },
+            { type: `pass` },
+            { type: `settleNewest` },
+            { type: `settleNewest` },
+            { type: `settle`, pick: 3, ok: true },
+          ],
+        },
       },
-    },
-    {
-      // The first page and its tie settle, then joined work starts. A report
-      // over the moved end stages only that end's tie, and pending joined
-      // work defers it. The pass after the joined work finishes must read it;
-      // a loader that dropped the staged tie read nothing.
-      name: `a staged end tie that waits for joined work`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: true,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        joined: true,
-        snapshotRows: 3,
-        needsMore: false,
-        history: [
-          { type: `settle`, pick: 0, ok: true },
-          { type: `settleNewest` },
-          { type: `joinedBusy` },
-          { type: `report`, react: true },
-          { type: `joinedIdle` },
-        ],
+      {
+        // The first page and its tie settle, then joined work starts. A report
+        // over the moved end stages only that end's tie, and pending joined
+        // work defers it. The pass after the joined work finishes must read it;
+        // a loader that dropped the staged tie read nothing.
+        name: `a staged end tie that waits for joined work`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          joined: true,
+          snapshotRows: 3,
+          needsMore: false,
+          history: [
+            { type: `settle`, pick: 0, ok: true },
+            { type: `settleNewest` },
+            { type: `joinedBusy` },
+            { type: `report`, react: true },
+            { type: `joinedIdle` },
+          ],
+        },
       },
-    },
-    {
-      // A truncate after a deferred unproven report hands the window to its
-      // replay, so the pass after the joined work owes no repair or tie.
-      name: `an unproven report whose deferred pass a truncate replaces`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: true,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        joined: true,
-        snapshotRows: 3,
-        needsMore: false,
-        history: [
-          { type: `joinedBusy` },
-          { type: `settle`, pick: 0, ok: true },
-          { type: `report`, react: true },
-          { type: `truncate` },
-          { type: `joinedIdle` },
-        ],
+      {
+        // A truncate after a deferred unproven report hands the window to its
+        // replay, so the pass after the joined work owes no repair or tie.
+        name: `an unproven report whose deferred pass a truncate replaces`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          joined: true,
+          snapshotRows: 3,
+          needsMore: false,
+          history: [
+            { type: `joinedBusy` },
+            { type: `settle`, pick: 0, ok: true },
+            { type: `report`, react: true },
+            { type: `truncate` },
+            { type: `joinedIdle` },
+          ],
+        },
       },
-    },
-    {
-      // Pending joined work defers the pass after an unproven report, so the
-      // repair or tie that the report owes waits for that work. The pass that
-      // runs when it finishes must start it. A random campaign found the law
-      // judging the deferred pass instead.
-      name: `an unproven report while joined work defers loading`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: true,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        joined: true,
-        snapshotRows: 3,
-        needsMore: false,
-        history: [
-          { type: `joinedBusy` },
-          { type: `settle`, pick: 0, ok: true },
-          { type: `settleNewest` },
-          { type: `report`, react: true },
-          { type: `joinedIdle` },
-        ],
+      {
+        // Pending joined work defers the pass after an unproven report, so the
+        // repair or tie that the report owes waits for that work. The pass that
+        // runs when it finishes must start it. A random campaign found the law
+        // judging the deferred pass instead.
+        name: `an unproven report while joined work defers loading`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          joined: true,
+          snapshotRows: 3,
+          needsMore: false,
+          history: [
+            { type: `joinedBusy` },
+            { type: `settle`, pick: 0, ok: true },
+            { type: `settleNewest` },
+            { type: `report`, react: true },
+            { type: `joinedIdle` },
+          ],
+        },
       },
-    },
-    {
-      // The first page read only the window, and the loader's tie request
-      // read a value past it, not the page's end. An installed row past the
-      // page can come from another request, so it proves nothing, and the
-      // report must repair. Ignoring it kept a window that missed a row tied
-      // with a refetched page's end.
-      name: `a report over a first page that read only the window`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: true,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        snapshotRows: 3,
-        needsMore: false,
-        history: [
-          { type: `settle`, pick: 0, ok: true },
-          { type: `settle`, pick: 0, ok: true },
-          { type: `report`, react: true },
-        ],
+      {
+        // The first page read only the window, and the loader's tie request
+        // read a value past it, not the page's end. An installed row past the
+        // page can come from another request, so it proves nothing, and the
+        // report must repair. Ignoring it kept a window that missed a row tied
+        // with a refetched page's end.
+        name: `a report over a first page that read only the window`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          snapshotRows: 3,
+          needsMore: false,
+          history: [
+            { type: `settle`, pick: 0, ok: true },
+            { type: `settle`, pick: 0, ok: true },
+            { type: `report`, react: true },
+          ],
+        },
       },
-    },
-    {
-      // Without the settled check, a report before the first page settled
-      // forced a full-source read.
-      name: `a report before any request settles`,
-      testCase: {
-        indexed: false,
-        limit: 1,
-        settledFirst: false,
-        releaseFault: false,
-        syncRepair: false,
-        ...ordinaryScenario,
-        history: [{ type: `report`, react: true }],
+      // A release callback ran a graph pass during replay retirement while
+      // joined work deferred the repair's refill. The driver took that blocked
+      // pass for one that consumed the refill, so the refill that resumed later
+      // counted as a new repair start and its chain's own leases as a leak.
+      // CI random seed -1691316941; an on-demand source.
+      {
+        name: `a release pass during replay retirement while a refill is deferred`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: false,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          joined: true,
+          releaseReenters: true,
+          releaseInvalidates: false,
+          history: [
+            { type: `settle`, pick: 0, ok: true },
+            { type: `report`, react: false },
+            { type: `truncate` },
+            { type: `move`, delta: -1 },
+            { type: `joinedBusy` },
+            { type: `settle`, pick: 0, ok: true },
+            { type: `settle`, pick: 0, ok: true },
+            { type: `settleNewest` },
+          ],
+        },
       },
-    },
-  ] satisfies Array<{ name: string; testCase: AuthorityCase }>)(
-    `keeps request authority for $name (generated campaign replay)`,
-    async ({ testCase }) => {
-      oracleRoute(`case`)
-      await checkAuthorityCase(testCase)
-    },
-  )
+      // The same misclassification after a synchronous repair answer, from the
+      // 2026-11-03 coverage-map entry (CI run 41699469835).
+      {
+        name: `a release pass during replay retirement after a synchronous repair answer`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: true,
+          releaseFault: false,
+          syncRepair: true,
+          ...ordinaryScenario,
+          joined: true,
+          releaseReenters: true,
+          releaseInvalidates: false,
+          history: [
+            { type: `truncate` },
+            { type: `settle`, pick: 0, ok: true },
+            { type: `invalidateThenFailOldest` },
+            { type: `move`, delta: -1 },
+            { type: `joinedBusy` },
+            { type: `settle`, pick: 0, ok: true },
+          ],
+        },
+      },
+      // A continuation of a repair chain resumed after its epoch moved and
+      // issued one more step of the obsolete chain; that step's settlement then
+      // started the replacement. Fixed seed 20261016 of the request-authority
+      // campaign found it once the no-stale-step law judged resumed requests.
+      {
+        name: `a staged repair step resumed after its epoch moved`,
+        testCase: {
+          indexed: true,
+          limit: 1,
+          settledFirst: false,
+          releaseFault: false,
+          syncRepair: true,
+          ...ordinaryScenario,
+          releaseInvalidates: false,
+          history: [
+            { type: `settle`, pick: 0, ok: true },
+            { type: `sourceDelete`, react: true },
+            { type: `invalidateThenFailOldest` },
+            { type: `settle`, pick: 0, ok: true },
+          ],
+        },
+      },
+      {
+        // Without the settled check, a report before the first page settled
+        // forced a full-source read.
+        name: `a report before any request settles`,
+        testCase: {
+          indexed: false,
+          limit: 1,
+          settledFirst: false,
+          releaseFault: false,
+          syncRepair: false,
+          ...ordinaryScenario,
+          history: [{ type: `report`, react: true }],
+        },
+      },
+    ] satisfies Array<{ name: string; testCase: AuthorityCase }>
+  ).map(({ name, testCase }) => ({
+    label: `keeps request authority for ${name} (generated campaign replay)`,
+    testCase,
+  }))
 
   // A replay's bookkeeping call is not a pass over the graph. In this trace,
   // joined work staged a repair refill, then replay settlement retired older
   // leases before the pass resumed that refill. It remains one repair chain.
   // Source: https://github.com/TanStack/db/issues/2296
-  it(`keeps a deferred repair refill in its chain after replay retirement`, async () => {
-    oracleRoute(`fixed history`)
-    await checkAuthorityCase({
+  const deferredRefillRegression: AuthorityRegression = {
+    label: `keeps a deferred repair refill in its chain after replay retirement`,
+    testCase: {
       indexed: false,
       limit: 1,
       settledFirst: true,
@@ -2939,87 +3327,265 @@ describe(`Ordered source request authority`, () => {
         { type: `joinedBusy` },
         { type: `settleNewest` },
       ],
-    })
+    },
+  }
+
+  // The fixed regressions above use the authority helper directly. The
+  // generated authority grammar maps its values without an unmapper, so it
+  // cannot take them back; each replays through `checkAuthorityCase` under its
+  // old test name.
+  oracleProperty({
+    id: `ordered-loader.request-authority-fixed`,
+    law: {
+      statement: `Each ordered-source request keeps exactly the authority the request ledger grants it through settlement, invalidation, replay, and recovery.`,
+      authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+      limits: `Named regressions that the generated campaigns found, each replayed through checkAuthorityCase.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+    ],
+    histories: [
+      supersededTieRegression,
+      ...campaignRegressions,
+      deferredRefillRegression,
+    ],
+    label: ({ label }) => label,
+    resolve: (regression) => ({ regression }),
+    model: (plan, observations) => recordedComparison(plan, observations),
+    driver: (plan, observe) =>
+      observeComparison(plan, observe, () =>
+        checkAuthorityCase(plan.regression.testCase),
+      ),
+    check: (_plan, _observations, verdict) => verdict,
   })
 
   // The broad grammar already generated the source trace. This directed
   // grammar makes its replay/continuation handoff frequent enough to measure,
   // while index-free prefix size, local rows, joined deferral, synchronous
-  // answers, and release-triggered truncation vary independently. Without
-  // joined deferral there is no held continuation; without the release truncate
-  // there is no replay bookkeeping to distinguish from a graph pass.
-  // `deferred-refill` needs a synchronous answer and a release-triggered
-  // truncate together: 6 of the 96 inputs. An eager source never reaches its
-  // adapter on release, so production cannot pair them; the campaign calibrates
-  // the driver's continuation provenance rather than a reachable product state.
-  // Random draws run twice the fixed count so that rare state stays above its
-  // minimum (expected 25 of 400).
+  // answers, release-triggered truncation, a graph pass inside each release
+  // callback, the truncate's place, and one or two provider answers vary
+  // independently. Without joined deferral there is no held continuation;
+  // without a truncate there is no replay bookkeeping to distinguish from a
+  // graph pass. A synchronous answer settles the repair prefix and issues its
+  // tie at once; an asynchronous one needs a second answer before joined work
+  // can defer the refill. A truncate before the repair hands the pre-truncate
+  // leases to replay retirement, so an on-demand source, whose release reaches
+  // the adapter, reaches `deferred-refill` and a release pass during it.
+  // Each declared state has a constructed history that fixes only the axes it
+  // needs. The campaign-local minima stay as they were. Random draws run twice
+  // the fixed count.
   const handoffProperty = `ordered-loader.replay-continuation`
-  const handoffCase = fc
+  const handoffResets = [
+    `none` as const,
+    `before-repair` as const,
+    `before-settle` as const,
+    `after-settle` as const,
+  ]
+  type HandoffAxes = {
+    limit: 1 | 2
+    snapshotRows: 1 | 3
+    syncRepair: boolean
+    joined: boolean
+    releaseTruncates: boolean
+    releaseReenters: boolean
+    reset: (typeof handoffResets)[number]
+    answers: 1 | 2
+  }
+  const handoffHistory = ({
+    reset,
+    answers,
+    ...axes
+  }: HandoffAxes): AuthorityCase => ({
+    ...ordinaryScenario,
+    indexed: false,
+    settledFirst: true,
+    releaseFault: false,
+    ...axes,
+    history: [
+      { type: `settle`, pick: 0, ok: true },
+      { type: `settle`, pick: 0, ok: true },
+      { type: `report`, react: false },
+      ...(reset === `before-repair` ? [{ type: `truncate` as const }] : []),
+      { type: `move`, delta: -1 },
+      { type: `joinedBusy` },
+      ...(reset === `before-settle` ? [{ type: `truncate` as const }] : []),
+      ...Array.from({ length: answers }, () => ({
+        type: `settleNewest` as const,
+      })),
+      ...(reset === `after-settle` ? [{ type: `truncate` as const }] : []),
+    ],
+  })
+  // The unmapper takes a history back to its axes, so constructed histories
+  // stay inside this grammar and shrink like generated ones.
+  const handoffAxes = (value: unknown): HandoffAxes => {
+    const candidate = value as AuthorityCase
+    for (const reset of handoffResets)
+      for (const answers of [1, 2] as const) {
+        const axes: HandoffAxes = {
+          limit: candidate.limit,
+          snapshotRows: candidate.snapshotRows,
+          syncRepair: candidate.syncRepair,
+          joined: candidate.joined,
+          releaseTruncates: candidate.releaseTruncates,
+          releaseReenters: candidate.releaseReenters,
+          reset,
+          answers,
+        }
+        if (isDeepStrictEqual(handoffHistory(axes), value)) return axes
+      }
+    throw new Error(`not a replay-continuation history`)
+  }
+  const handoffCase: fc.Arbitrary<AuthorityCase> = fc
     .record({
       limit: fc.constantFrom(1 as const, 2 as const),
       snapshotRows: fc.constantFrom(1 as const, 3 as const),
       syncRepair: fc.boolean(),
       joined: fc.boolean(),
       releaseTruncates: fc.boolean(),
-      reset: fc.constantFrom(
-        `none` as const,
-        `before-settle` as const,
-        `after-settle` as const,
-      ),
+      releaseReenters: fc.boolean(),
+      reset: fc.constantFrom(...handoffResets),
+      answers: fc.constantFrom(1 as const, 2 as const),
     })
-    .map(({ reset, ...axes }): AuthorityCase => ({
-      ...ordinaryScenario,
-      indexed: false,
-      settledFirst: true,
-      releaseFault: false,
-      ...axes,
-      history: [
-        { type: `settle`, pick: 0, ok: true },
-        { type: `settle`, pick: 0, ok: true },
-        { type: `report`, react: false },
-        { type: `move`, delta: -1 },
-        { type: `joinedBusy` },
-        ...(reset === `before-settle` ? [{ type: `truncate` as const }] : []),
-        { type: `settleNewest` },
-        ...(reset === `after-settle` ? [{ type: `truncate` as const }] : []),
+    .map(handoffHistory, handoffAxes)
+
+  describe(`preserves repair continuation identity across replay bookkeeping`, () => {
+    // Campaign-local counters preserve the legacy history minima; fixed examples
+    // and the framework's determinism check do not contribute to them.
+    const states = [`deferred-refill`, `reset-continuation`] as const
+    type State = (typeof states)[number]
+    let counts = new Map<State, number>()
+    let executed = 0
+
+    // A release callback runs a graph pass while the repair's deferred
+    // refill may still be pending. The loader blocks refinement until its
+    // release pass unwinds, so that pass consumes nothing, and the refill
+    // that resumes later is still a step of the repair chain. An on-demand
+    // source reaches it: an explicit truncate before the repair hands the
+    // pre-truncate leases to replay retirement, and two asynchronous answers
+    // settle the repair prefix and its tie while joined work defers the
+    // refill. The release reaches the adapter, so this pairing is one that
+    // production can produce.
+    // `release-pass-continuation` counts the passes where the driver's
+    // provenance owes a continuation, which over-approximates a pending one,
+    // so it is measured only. `release-pass-refill-resumed` is the required
+    // state: production then resumed the pending refill on a later graph pass
+    // as a step of the same chain that reads a new demand.
+    const releasePassState = `release-pass-continuation`
+    const resumedState = `release-pass-refill-resumed`
+
+    // The pinned runner reads this object at execution. Keep the existing
+    // fixed/random asymmetry without adding or widening a campaign.
+    const histories = {
+      arbitrary: handoffCase,
+      runs: 400,
+      fixedSeeds: [20261029],
+      states: [...states, resumedState],
+      measured: [releasePassState],
+      // Each builder keeps the generated limit, local rows, and release
+      // truncate, and fixes only the axes its states need.
+      constructed: [
+        {
+          name: `a release pass during replay retirement while an on-demand refill is deferred`,
+          enters: [`deferred-refill`, resumedState],
+          build: (generated: AuthorityCase) =>
+            handoffHistory({
+              ...handoffAxes(generated),
+              syncRepair: false,
+              joined: true,
+              releaseReenters: true,
+              reset: `before-repair`,
+              answers: 2,
+            }),
+        },
+        {
+          name: `a truncate after the repair's refill is deferred`,
+          enters: [`reset-continuation`],
+          build: (generated: AuthorityCase) =>
+            handoffHistory({
+              ...handoffAxes(generated),
+              joined: true,
+              reset: `after-settle`,
+              answers: 2,
+            }),
+        },
       ],
-    }))
-  const handoffCampaigns =
-    authorityReplay.replayPath === undefined
-      ? ([`fixed`, `random`] as const)
-      : authorityReplay.replayProperty === handoffProperty
-        ? ([`replay`] as const)
-        : ([] as const)
-  it.each(handoffCampaigns)(
-    `preserves repair continuation identity across replay bookkeeping (%s campaign)`,
-    async (campaign) => {
-      const reach = createOracleReach(
-        handoffProperty,
-        [`deferred-refill`, `reset-continuation`] as const,
-        { minimum: 5 },
+    }
+    beforeEach(({ task }) => {
+      counts = new Map(states.map((state) => [state, 0]))
+      executed = 0
+
+      histories.runs = task.name.startsWith(`fixed seed `) ? 200 : 400
+    })
+    afterEach(({ task }) => {
+      if (
+        !isGeneratedOracleCampaign(task.name) ||
+        task.result?.state === `fail`
       )
-      const parameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(20261029, { numRuns: oracleRuns(200) })
-          : oraclePropertyOptions(400, handoffProperty)
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(handoffCase, async (testCase) => {
-          reach.beginHistory()
+        return
+      process.stderr.write(
+        `${handoffProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts) })}\n`,
+      )
+      if (oracleReplayRequested()) return
+      for (const state of states)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(5)
+    })
+    oracleProperty({
+      id: handoffProperty,
+      law: {
+        statement: `preserves repair continuation identity across replay bookkeeping`,
+        authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+        limits: `One unindexed loader over a fake subscription, limit 1/2, offset 0, one fixed history shape around a deferred refill, and the request-ledger laws at their checkpoints. A loader that drops a deferred refill during a blocked pass fails only the constructed history's required reach, not a law; elsewhere in the grammar it passes (coverage map, ordered-loader authority, awaiting a maintainer decision).`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
+      histories: histories,
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) => {
+        const reached = new Set<string>()
+        await observeComparison(history, observe, async () => {
+          executed++
+          const entered = new Set<State>()
+          const enter = (state: State) => {
+            if (!counts.has(state))
+              throw new Error(`Undeclared loader state: ${state}`)
+            if (!entered.has(state)) {
+              entered.add(state)
+              counts.set(state, counts.get(state)! + 1)
+            }
+          }
+          const testCase = history
+
           await checkAuthorityCase(testCase, (state) => {
             if (state === `deferred-refill` || state === `reset-continuation`)
-              reach.reach(state)
+              enter(state)
+            if (
+              state === `deferred-refill` ||
+              state === `reset-continuation` ||
+              state === releasePassState ||
+              state === resumedState
+            )
+              reached.add(state)
           })
-        }),
-        parameters,
-      )
-      reach.assertReached()
-      process.stderr.write(
-        `${handoffProperty} ${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-      )
-    },
-  )
+        })
+        // The comparison's verdict is the first observation, so reach follows it.
+        for (const state of reached) observe(`reach`, state)
+      },
+      check: (_history, _observations, verdict) => verdict,
+    })
+  })
 
   // Generated suffixes compose callback invalidation with release faults,
   // replay/reset/disposal, retry timers, offsets, full-source plans, and later
@@ -3065,49 +3631,86 @@ describe(`Ordered source request authority`, () => {
         ...suffix,
       ],
     }))
-  const retirementCampaigns =
-    authorityReplay.replayPath === undefined
-      ? ([`fixed`, `random`] as const)
-      : authorityReplay.replayProperty === retirementProperty
-        ? ([`replay`] as const)
-        : ([] as const)
-  it.each(retirementCampaigns)(
-    `repairs an invalidation delivered during completed repair retirement (%s campaign)`,
-    async (campaign) => {
-      const reach = createOracleReach(
-        retirementProperty,
-        [
-          `release-invalidation`,
-          `late-release-invalidation`,
-          `completed-repair-release`,
-        ] as const,
-        { minimum: 20 },
+
+  describe(`repairs an invalidation delivered during completed repair retirement`, () => {
+    // Campaign-local counters preserve the legacy history minima; fixed examples
+    // and the framework's determinism check do not contribute to them.
+    const states = [
+      `release-invalidation`,
+      `late-release-invalidation`,
+      `completed-repair-release`,
+    ] as const
+    type State = (typeof states)[number]
+    let counts = new Map<State, number>()
+    let executed = 0
+
+    beforeEach(() => {
+      counts = new Map(states.map((state) => [state, 0]))
+      executed = 0
+    })
+    afterEach(({ task }) => {
+      if (
+        !isGeneratedOracleCampaign(task.name) ||
+        task.result?.state === `fail`
       )
-      const campaignParameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(20261029, { numRuns: oracleRuns(200) })
-          : oraclePropertyOptions(200, retirementProperty)
-      oracleRoute(oracleRouteOf(campaignParameters))
-      await fc.assert(
-        fc.asyncProperty(retirementCase, async (testCase) => {
-          reach.beginHistory()
+        return
+      process.stderr.write(
+        `${retirementProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts) })}\n`,
+      )
+      if (oracleReplayRequested()) return
+      for (const state of states)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(20)
+    })
+    oracleProperty({
+      id: retirementProperty,
+      law: {
+        statement: `repairs an invalidation delivered during completed repair retirement`,
+        authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
+      histories: {
+        arbitrary: retirementCase,
+        runs: 200,
+        fixedSeeds: [20261029],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          executed++
+          const entered = new Set<State>()
+          const enter = (state: State) => {
+            if (!counts.has(state))
+              throw new Error(`Undeclared loader state: ${state}`)
+            if (!entered.has(state)) {
+              entered.add(state)
+              counts.set(state, counts.get(state)! + 1)
+            }
+          }
+          const testCase = history
+
           await checkAuthorityCase(testCase, (state) => {
             if (
               state === `release-invalidation` ||
               state === `late-release-invalidation` ||
               state === `completed-repair-release`
             )
-              reach.reach(state)
+              enter(state)
           })
         }),
-        campaignParameters,
-      )
-      reach.assertReached()
-      process.stderr.write(
-        `${retirementProperty} ${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-      )
-    },
-  )
+      check: (_history, _observations, verdict) => verdict,
+    })
+  })
 
   // Real Collection and Effect consumers share the same provider grammar,
   // full-sort model, event-ordered progress relation, and publication check.
@@ -3197,63 +3800,100 @@ describe(`Ordered source request authority`, () => {
   // A shrink path belongs to one arbitrary and driver. The receiving grammar
   // has its own identity so replay never applies a controlled history's path.
   const retirementReceiverProperty = `ordered-loader.retirement-receiver`
-  const retirementReceiverCampaigns =
-    authorityReplay.replayPath === undefined
-      ? ([`fixed`, `random`] as const)
-      : authorityReplay.replayProperty === retirementReceiverProperty
-        ? ([`replay`] as const)
-        : ([] as const)
-  it.each(retirementReceiverCampaigns)(
-    `repairs retirement invalidation through a real subscription (%s campaign)`,
-    async (campaign) => {
-      const reach = createOracleReach(
-        retirementReceiverProperty,
-        [
-          `collection-release`,
-          `collection-window-release`,
-          `effect-release`,
-          `collection-held-answer`,
-          `collection-window-held-answer`,
-          `effect-held-answer`,
-          `delete-release`,
-          `delete-held-answer`,
-          `delete-boundary-release`,
-          `tie-delete-boundary`,
-          `delete-tie-release`,
-          `evict-release`,
-          `evict-tie-release`,
-        ] as const,
-        { minimum: 20 },
+
+  describe(`repairs retirement invalidation through a real subscription`, () => {
+    // Campaign-local counters preserve the legacy history minima; fixed examples
+    // and the framework's determinism check do not contribute to them.
+    const states = [
+      `collection-release`,
+      `collection-window-release`,
+      `effect-release`,
+      `collection-held-answer`,
+      `collection-window-held-answer`,
+      `effect-held-answer`,
+      `delete-release`,
+      `delete-held-answer`,
+      `delete-boundary-release`,
+      `tie-delete-boundary`,
+      `delete-tie-release`,
+      `evict-release`,
+      `evict-tie-release`,
+    ] as const
+    type State = (typeof states)[number]
+    let counts = new Map<State, number>()
+    let executed = 0
+
+    beforeEach(() => {
+      counts = new Map(states.map((state) => [state, 0]))
+      executed = 0
+    })
+    afterEach(({ task }) => {
+      if (
+        !isGeneratedOracleCampaign(task.name) ||
+        task.result?.state === `fail`
       )
-      const runParameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(20261029, { numRuns: oracleRuns(600) })
-          : oraclePropertyOptions(600, retirementReceiverProperty)
-      oracleRoute(oracleRouteOf(runParameters))
-      await fc.assert(
-        fc.asyncProperty(retirementReceiverCase, async (scenario) => {
-          reach.beginHistory()
+        return
+      process.stderr.write(
+        `${retirementReceiverProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts) })}\n`,
+      )
+      if (oracleReplayRequested()) return
+      for (const state of states)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(20)
+    })
+    oracleProperty({
+      id: retirementReceiverProperty,
+      law: {
+        statement: `repairs retirement invalidation through a real subscription`,
+        authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
+      histories: {
+        arbitrary: retirementReceiverCase,
+        runs: 600,
+        fixedSeeds: [20261029],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          executed++
+          const entered = new Set<State>()
+          const enter = (state: State) => {
+            if (!counts.has(state))
+              throw new Error(`Undeclared loader state: ${state}`)
+            if (!entered.has(state)) {
+              entered.add(state)
+              counts.set(state, counts.get(state)! + 1)
+            }
+          }
+          const scenario = history
+
           await checkRetirementReceiver(scenario, (cut) =>
-            reach.reach(
+            enter(
               cut === `release` || cut === `held-answer`
                 ? `${scenario.kind}-${cut}`
                 : cut,
             ),
           )
         }),
-        runParameters,
-      )
-      reach.assertReached()
-      process.stderr.write(
-        `${retirementReceiverProperty} ${campaign} ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
-      )
-    },
-  )
+      check: (_history, _observations, verdict) => verdict,
+    })
+  })
 
   // Fixed histories force a held answer in each real consumer. They use the
   // same model and comparison as the generated receiving campaign, and keep
   // mutant failure independent for the two publication paths.
-  it.each([
+  const heldReceiverCases = [
     [`collection`, `move`],
     [`collection-window`, `move`],
     [`effect`, `move`],
@@ -3262,111 +3902,197 @@ describe(`Ordered source request authority`, () => {
     [`collection`, `delete-tie`],
     [`collection`, `evict`],
     [`collection`, `evict-tie`],
-  ] as const)(
-    `receives retirement invalidation in a held %s replay (unload: %s)`,
-    async (kind, unloadChange) => {
-      oracleRoute(`case`)
-      await checkRetirementReceiver(
-        {
-          indexed: false,
-          limit:
-            unloadChange === `delete` || unloadChange === `delete-tie` ? 2 : 1,
-          synchronous: false,
-          offset: 0,
-          holdReplacement: true,
-          kind,
-          unloadChange,
-          boundaryTie:
-            unloadChange === `delete-tie`
-              ? `before`
-              : unloadChange === `delete-boundary` ||
-                  unloadChange === `evict-tie`
-                ? `after`
-                : `none`,
-        },
-        () => {},
-      )
+  ] as const
+  // The scenario of one held receiving case, as the old fixed test built it.
+  const heldReceiverScenario = ([
+    kind,
+    unloadChange,
+  ]: (typeof heldReceiverCases)[number]): RetirementReceiverCase => ({
+    indexed: false,
+    limit: unloadChange === `delete` || unloadChange === `delete-tie` ? 2 : 1,
+    synchronous: false,
+    offset: 0,
+    holdReplacement: true,
+    kind,
+    unloadChange,
+    boundaryTie:
+      unloadChange === `delete-tie`
+        ? `before`
+        : unloadChange === `delete-boundary` || unloadChange === `evict-tie`
+          ? `after`
+          : `none`,
+  })
+  oracleProperty({
+    id: `ordered-loader.retirement-receiver-fixed`,
+    law: {
+      statement: `repairs retirement invalidation through a real subscription`,
+      authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+      limits: `One held replacement answer in each real consumer and unload change, through the generated receiving campaign's checkRetirementReceiver.`,
     },
-  )
-
-  // A start before the invalidation, or after public replacement, cannot
-  // discharge the debt. These adversarial observations calibrate the same
-  // relation used by both consumers and the request ledger.
-  it.each([`before-invalidation`, `after-publication`] as const)(
-    `rejects a retirement start observed %s`,
-    (fault) => {
-      oracleRoute(`calibration`)
-      const startedAt = fault === `before-invalidation` ? 1 : 4
-      expect(() => checkRetirementProgress(2, [startedAt], 4)).toThrow(
-        `retirement invalidation`,
-      )
-    },
-  )
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+    ],
+    histories: heldReceiverCases,
+    label: ([kind, unloadChange]) =>
+      `receives retirement invalidation in a held ${kind} replay (unload: ${unloadChange})`,
+    resolve: (cell) => ({ scenario: heldReceiverScenario(cell) }),
+    model: (plan, observations) => recordedComparison(plan, observations),
+    driver: (plan, observe) =>
+      observeComparison(plan, observe, () =>
+        checkRetirementReceiver(plan.scenario, () => {}),
+      ),
+    check: (_plan, _observations, verdict) => verdict,
+  })
 
   // Calibrate the shared no-leak judgment with a retained-lease observation.
   // The real release callbacks still run; only their recorded result changes
   // at comparison. This works for source and minified builds without reading
   // private members. The same history first proves the unmodified path agrees.
-  it(`rejects retained successful acquisition observations after a covering repair`, async () => {
-    oracleRoute(`calibration`)
-    const testCase: AuthorityCase = {
-      ...ordinaryScenario,
-      indexed: true,
-      limit: 1,
-      settledFirst: true,
-      releaseFault: false,
-      syncRepair: false,
-      history: [{ type: `invalidate`, react: true }],
-    }
-    await checkAuthorityCase(testCase)
-    let substitutions = 0
-    try {
-      await expect(
-        checkAuthorityCase(testCase, undefined, undefined, (released) => {
-          if (released) substitutions++
-          return false
-        }),
-      ).rejects.toThrow(`no leak`)
-    } finally {
-      expect(substitutions).toBeGreaterThan(0)
-    }
+  const retainedLeaseCase: AuthorityCase = {
+    ...ordinaryScenario,
+    indexed: true,
+    limit: 1,
+    settledFirst: true,
+    releaseFault: false,
+    syncRepair: false,
+    history: [{ type: `invalidate`, react: true }],
+  }
+  oracleProperty({
+    id: `ordered-loader.retained-lease`,
+    law: {
+      statement: `A covering repair leaves no successful acquisition held.`,
+      authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+      limits: `One indexed history whose invalidation reaction issues a covering repair; its calibration changes only the recorded release result.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+    ],
+    histories: [
+      {
+        label: `rejects retained successful acquisition observations after a covering repair`,
+        testCase: retainedLeaseCase,
+      },
+    ],
+    label: ({ label }) => label,
+    resolve: (regression) => ({ regression }),
+    model: (plan, observations) => recordedComparison(plan, observations),
+    driver: (plan, observe) =>
+      observeComparison(plan, observe, () =>
+        checkAuthorityCase(plan.regression.testCase),
+      ),
+    check: (_plan, _observations, verdict) => verdict,
+    calibrations: [
+      {
+        name: `rejects retained successful acquisition observations after a covering repair`,
+        law: `retained successful acquisition`,
+        driver: (plan: { regression: AuthorityRegression }, observe) =>
+          observeComparison(plan, observe, async () => {
+            let substitutions = 0
+            try {
+              await checkAuthorityCase(
+                plan.regression.testCase,
+                undefined,
+                undefined,
+                (released) => {
+                  if (released) substitutions++
+                  return false
+                },
+              )
+            } catch (error) {
+              // Exactly the old matcher: a rejection whose message names the
+              // no-leak law, after at least one substituted release.
+              if (
+                substitutions > 0 &&
+                error instanceof Error &&
+                error.message.includes(`no leak`)
+              )
+                rejectAt(`retained successful acquisition`, error)
+              throw error
+            }
+            if (substitutions === 0)
+              throw new Error(`no release result was substituted`)
+          }),
+      },
+    ],
   })
 
-  it.each(authorityCampaigns)(
-    `holds, retires, and recovers requests under generated settlement orders (%s campaign)`,
-    async (campaign) => {
-      let supersededFailures = 0
-      let staleSettlementsAfterRepair = 0
-      let supersededFailuresAfterRepair = 0
-      let checkedStrandPremises = 0
-      let deferredShapes = 0
-      let releaseFaults = 0
-      let syncRepairs = 0
-      let invalidatingPages = 0
-      const identityReach = createOracleReach(
-        authorityProperty,
-        [
-          `current-request-error`,
-          `cleanup-fault-current-request-error`,
-          `retirement-invalidation`,
-          `retirement-with-release-fault`,
-          `retirement-with-truncate`,
-          `retirement-with-dispose`,
-          `retirement-with-reentrant-pass`,
-          `retirement-with-offset`,
-          `retirement-with-retry-timer`,
-          `retirement-with-later-chains`,
-        ] as const,
-        { minimum: 20 },
-      )
-      // Full-source plans are a sixth of cases and lose the callback when an
-      // answer is eager, so this overlap is rarer than the others.
-      const fullSourceReach = createOracleReach(
-        authorityProperty,
-        [`retirement-with-full-source-plan`] as const,
-        { minimum: 5 },
-      )
-      const later = {
+  describe(`holds, retires, and recovers requests under generated settlement orders`, () => {
+    // Campaign-local counters preserve the legacy history minima; fixed examples
+    // and the framework's determinism check do not contribute to them.
+    const states = [
+      `current-request-error`,
+      `cleanup-fault-current-request-error`,
+      `retirement-invalidation`,
+      `retirement-with-release-fault`,
+      `retirement-with-truncate`,
+      `retirement-with-dispose`,
+      `retirement-with-reentrant-pass`,
+      `retirement-with-offset`,
+      `retirement-with-retry-timer`,
+      `retirement-with-later-chains`,
+      `retirement-with-full-source-plan`,
+      // The ordering epoch moved while a repair continuation was owed: the
+      // premise of the no-obsolete-step law.
+      `continuation-before-epoch-move`,
+    ] as const
+    type State = (typeof states)[number]
+    let counts = new Map<State, number>()
+    let executed = 0
+    let supersededFailures = 0
+    let staleSettlementsAfterRepair = 0
+    let supersededFailuresAfterRepair = 0
+    let checkedStrandPremises = 0
+    let deferredShapes = 0
+    let releaseFaults = 0
+    let syncRepairs = 0
+    let invalidatingPages = 0
+    // Measured, not gated: graph passes in the stale self-release.
+    let unblockedReleasePasses = 0
+    let later = {
+      unexpressibleBoundaries: 0,
+      joinedDeferrals: 0,
+      ignoredReportsBeforeSettle: 0,
+      ignoredReportsInsideFirstPage: 0,
+      repairedReportsOnOwnPage: 0,
+      truncates: 0,
+      replayFailures: 0,
+      optimisticDepartures: 0,
+      sourceDeletes: 0,
+      timerRetries: 0,
+      shrinkingMoves: 0,
+      reentrantTruncates: 0,
+      stackedTruncates: 0,
+      truncatesAfterFailedReplay: 0,
+      reentrantPasses: 0,
+      disposals: 0,
+      startThrows: 0,
+      startThrowsDuringFailure: 0,
+      costChecks: 0,
+      hungRequests: 0,
+      offsetWindows: 0,
+    }
+
+    beforeEach(() => {
+      counts = new Map(states.map((state) => [state, 0]))
+      executed = 0
+      supersededFailures = 0
+      staleSettlementsAfterRepair = 0
+      supersededFailuresAfterRepair = 0
+      checkedStrandPremises = 0
+      deferredShapes = 0
+      releaseFaults = 0
+      syncRepairs = 0
+      invalidatingPages = 0
+      unblockedReleasePasses = 0
+      later = {
         unexpressibleBoundaries: 0,
         joinedDeferrals: 0,
         ignoredReportsBeforeSettle: 0,
@@ -3389,39 +4115,100 @@ describe(`Ordered source request authority`, () => {
         hungRequests: 0,
         offsetWindows: 0,
       }
-      const parameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(20261016, { numRuns: oracleRuns(10000) })
-          : oraclePropertyOptions(10000, authorityProperty)
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(authorityCaseArbitrary, async (testCase) => {
-          identityReach.beginHistory()
-          fullSourceReach.beginHistory()
+    })
+    afterEach(({ task }) => {
+      if (
+        !isGeneratedOracleCampaign(task.name) ||
+        task.result?.state === `fail`
+      )
+        return
+      process.stderr.write(
+        `${authorityProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts), unblockedReleasePasses })}\n`,
+      )
+      if (oracleReplayRequested()) return
+      for (const state of states)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(
+          state === `retirement-with-full-source-plan` ? 5 : 20,
+        )
+      expect(supersededFailures).toBeGreaterThan(0)
+      expect(staleSettlementsAfterRepair).toBeGreaterThan(0)
+      expect(supersededFailuresAfterRepair).toBeGreaterThan(0)
+      expect(checkedStrandPremises).toBeGreaterThan(0)
+      expect(deferredShapes).toBeGreaterThan(0)
+      expect(releaseFaults).toBeGreaterThan(0)
+      expect(syncRepairs).toBeGreaterThan(0)
+      expect(invalidatingPages).toBeGreaterThan(0)
+      for (const [dimension, count] of Object.entries(later)) {
+        if (
+          dimension === `startThrowsDuringFailure` ||
+          dimension === `ignoredReportsInsideFirstPage` ||
+          dimension === `repairedReportsOnOwnPage`
+        )
+          continue
+        expect(count, dimension).toBeGreaterThan(0)
+      }
+    })
+    oracleProperty({
+      id: authorityProperty,
+      law: {
+        statement: `holds, retires, and recovers requests under generated settlement orders`,
+        authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
+      histories: {
+        arbitrary: authorityCaseArbitrary,
+        runs: 10000,
+        fixedSeeds: [20261016],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          executed++
+          const entered = new Set<State>()
+          const enter = (state: State) => {
+            if (!counts.has(state))
+              throw new Error(`Undeclared loader state: ${state}`)
+            if (!entered.has(state)) {
+              entered.add(state)
+              counts.set(state, counts.get(state)! + 1)
+            }
+          }
+          const testCase = history
+
           const observation = await checkAuthorityCase(testCase)
           if (observation.releaseInvalidations > 0) {
-            identityReach.reach(`retirement-invalidation`)
+            enter(`retirement-invalidation`)
             if (observation.releaseFaults > 0)
-              identityReach.reach(`retirement-with-release-fault`)
+              enter(`retirement-with-release-fault`)
             if (observation.reentrantTruncates > 0)
-              identityReach.reach(`retirement-with-truncate`)
-            if (observation.disposals > 0)
-              identityReach.reach(`retirement-with-dispose`)
+              enter(`retirement-with-truncate`)
+            if (observation.disposals > 0) enter(`retirement-with-dispose`)
             if (observation.reentrantPasses > 0)
-              identityReach.reach(`retirement-with-reentrant-pass`)
-            if (observation.offsetWindows > 0)
-              identityReach.reach(`retirement-with-offset`)
-            if (testCase.retryTimer)
-              identityReach.reach(`retirement-with-retry-timer`)
+              enter(`retirement-with-reentrant-pass`)
+            if (observation.offsetWindows > 0) enter(`retirement-with-offset`)
+            if (testCase.retryTimer) enter(`retirement-with-retry-timer`)
             if (testCase.requiresFullSource)
-              fullSourceReach.reach(`retirement-with-full-source-plan`)
+              enter(`retirement-with-full-source-plan`)
             if (observation.retirementSuccessorChains > 1)
-              identityReach.reach(`retirement-with-later-chains`)
+              enter(`retirement-with-later-chains`)
           }
+          if (observation.epochMovesWithContinuation > 0)
+            enter(`continuation-before-epoch-move`)
           if (observation.requestErrorChecks > 0) {
-            identityReach.reach(`current-request-error`)
+            enter(`current-request-error`)
             if (observation.releaseFaults > 0)
-              identityReach.reach(`cleanup-fault-current-request-error`)
+              enter(`cleanup-fault-current-request-error`)
           }
           supersededFailures += observation.supersededFailures
           staleSettlementsAfterRepair += observation.staleSettlementsAfterRepair
@@ -3432,51 +4219,15 @@ describe(`Ordered source request authority`, () => {
           releaseFaults += observation.releaseFaults
           syncRepairs += observation.syncRepairs
           invalidatingPages += observation.invalidatingPages
+          unblockedReleasePasses += observation.unblockedReleasePasses
           for (const key of Object.keys(later) as Array<keyof typeof later>) {
             later[key] += observation[key]
           }
         }),
-        parameters,
-      )
-      // Reach witnesses: superseded requests fail, stale requests settle
-      // after a repair succeeded, the strand law is checkable, a superseded
-      // request fails after its repair finished while a newer invalidation's
-      // reaction is deferred, a release throws, a repair answers at once,
-      // and a page's own delivery invalidates ordering. Each later dimension
-      // also changes loader input at least once: an unexpressible boundary,
-      // deferred joined work, a truncate and a failed replay, an optimistic
-      // departure, a source delete, a backoff retry that issues a read, and
-      // a window that shrinks.
-      if (campaign !== `replay`) {
-        identityReach.assertReached()
-        fullSourceReach.assertReached()
-        process.stderr.write(
-          `${authorityProperty} identity ${campaign} ${JSON.stringify({ ...Object.fromEntries(identityReach.counts()), ...Object.fromEntries(fullSourceReach.counts()) })}\n`,
-        )
-        expect(supersededFailures).toBeGreaterThan(0)
-        expect(staleSettlementsAfterRepair).toBeGreaterThan(0)
-        expect(supersededFailuresAfterRepair).toBeGreaterThan(0)
-        expect(checkedStrandPremises).toBeGreaterThan(0)
-        expect(deferredShapes).toBeGreaterThan(0)
-        expect(releaseFaults).toBeGreaterThan(0)
-        expect(syncRepairs).toBeGreaterThan(0)
-        expect(invalidatingPages).toBeGreaterThan(0)
-        // A recovery start that throws while the loader handles a superseded
-        // failure, and a report inside the loader's first page, are too rare
-        // to require of every campaign; named replays reach them.
-        for (const [dimension, count] of Object.entries(later)) {
-          if (
-            dimension === `startThrowsDuringFailure` ||
-            dimension === `ignoredReportsInsideFirstPage` ||
-            dimension === `repairedReportsOnOwnPage`
-          )
-            continue
-          expect(count, dimension).toBeGreaterThan(0)
-        }
-      }
-    },
-    120_000,
-  )
+      check: (_history, _observations, verdict) => verdict,
+      timeout: 120_000,
+    })
+  })
 
   // The report laws need premises that the broad grammar rarely lines up.
   // Each history here starts with one of these prefixes over random case
@@ -3600,49 +4351,88 @@ describe(`Ordered source request authority`, () => {
       releaseDisposes: false,
       history: [...prefix.history, ...rest],
     }))
-  const unprovenReportCampaigns =
-    authorityReplay.replayPath === undefined
-      ? ([`fixed`, `random`] as const)
-      : authorityReplay.replayProperty === unprovenReportProperty
-        ? ([`replay`] as const)
-        : ([] as const)
 
-  it.each(unprovenReportCampaigns)(
-    `answers each loaded-subset report as its coverage requires (%s campaign)`,
-    async (campaign) => {
-      // Declared reach: histories where each report law judged a report.
-      const reportStates = [
-        `repairedReportsOnOwnPage`,
-        `ignoredReportsInsideFirstPage`,
-        `ignoredReportsOverFullSource`,
-        `ignoredReportsOverFallback`,
-        `movedEndReports`,
-        `reportsPastWindow`,
-        `reportsAfterDispose`,
-        `unexpressibleEndReports`,
-        `reportsOwingRepair`,
-        `reportsDuringWork`,
-      ] as const
-      const reach = createOracleReach(unprovenReportProperty, reportStates, {
-        minimum: 20,
-      })
-      const parameters =
-        campaign === `fixed`
-          ? oracleFixedSeed(20261023, { numRuns: oracleRuns(1000) })
-          : oraclePropertyOptions(1000, unprovenReportProperty)
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(unprovenReportCase, async (testCase) => {
-          reach.beginHistory()
+  describe(`answers each loaded-subset report as its coverage requires`, () => {
+    // Campaign-local counters preserve the legacy history minima; fixed examples
+    // and the framework's determinism check do not contribute to them.
+    const states = [
+      `repairedReportsOnOwnPage`,
+      `ignoredReportsInsideFirstPage`,
+      `ignoredReportsOverFullSource`,
+      `ignoredReportsOverFallback`,
+      `movedEndReports`,
+      `reportsPastWindow`,
+      `reportsAfterDispose`,
+      `unexpressibleEndReports`,
+      `reportsOwingRepair`,
+      `reportsDuringWork`,
+    ] as const
+    type State = (typeof states)[number]
+    let counts = new Map<State, number>()
+    let executed = 0
+
+    beforeEach(() => {
+      counts = new Map(states.map((state) => [state, 0]))
+      executed = 0
+    })
+    afterEach(({ task }) => {
+      if (
+        !isGeneratedOracleCampaign(task.name) ||
+        task.result?.state === `fail`
+      )
+        return
+      process.stderr.write(
+        `${unprovenReportProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts) })}\n`,
+      )
+      if (oracleReplayRequested()) return
+      for (const state of states)
+        expect(
+          counts.get(state),
+          `${state} history minimum`,
+        ).toBeGreaterThanOrEqual(20)
+    })
+    oracleProperty({
+      id: unprovenReportProperty,
+      law: {
+        statement: `answers each loaded-subset report as its coverage requires`,
+        authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
+        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+      },
+      owns: [
+        'src/collection/index.ts#createCollection',
+        'src/indexes/btree-index.ts',
+        'src/query/effect.ts#createEffect',
+        'src/query/live-query-collection.ts#createLiveQueryCollection',
+        'src/query/live/ordered-source-loader.ts',
+      ],
+      histories: {
+        arbitrary: unprovenReportCase,
+        runs: 1000,
+        fixedSeeds: [20261023],
+      },
+      model: (history, observations) =>
+        recordedComparison(history, observations),
+      driver: async (history, observe) =>
+        observeComparison(history, observe, async () => {
+          executed++
+          const entered = new Set<State>()
+          const enter = (state: State) => {
+            if (!counts.has(state))
+              throw new Error(`Undeclared loader state: ${state}`)
+            if (!entered.has(state)) {
+              entered.add(state)
+              counts.set(state, counts.get(state)! + 1)
+            }
+          }
+          const testCase = history
+
           const observation = await checkAuthorityCase(testCase)
-          for (const state of reportStates) {
-            if (observation[state] > 0) reach.reach(state)
+          for (const state of states) {
+            if (observation[state] > 0) enter(state)
           }
         }),
-        parameters,
-      )
-      reach.assertReached()
-    },
-    120_000,
-  )
+      check: (_history, _observations, verdict) => verdict,
+      timeout: 120_000,
+    })
+  })
 })

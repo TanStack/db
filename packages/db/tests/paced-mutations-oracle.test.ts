@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, vi } from 'vitest'
 import { createDeferred } from '../src/deferred'
 import { createPacedMutations } from '../src/paced-mutations'
 import {
@@ -6,14 +6,20 @@ import {
   queueStrategy,
   throttleStrategy,
 } from '../src/strategies'
-import { declareOracle } from './oracle-declaration.js'
 import {
   createReadyCollection,
   observeReceipt,
   origin,
   withCleanup,
 } from './paced-mutations-support'
-import { oracleRoute } from './oracle-config.js'
+import { oracleProperty } from './oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from './oracle-assertion-adapter.js'
+import { asyncRejection, rejection } from './calibration-rejection.js'
 import type { Start } from './paced-mutations-support'
 import type { Strategy } from '../src/strategies/types'
 import type { Transaction } from '../src/transactions'
@@ -324,25 +330,15 @@ function checkTimelineObservation(testCase: Case, actual: Observation): void {
 // What this oracle owns: the gap report judges the paced mutation queue and
 // the debounce, throttle, and queue strategies that pace it, by this file's
 // tests.
-declareOracle({
-  owns: [
-    `src/paced-mutations.ts`,
-    `src/strategies/debounceStrategy.ts`,
-    `src/strategies/throttleStrategy.ts`,
-    `src/strategies/queueStrategy.ts`,
-    `src/strategies/serial-pacer.ts`,
-  ],
-  check: [checkTimelineObservation, checkHeldPacing],
-  model: [
-    queueStarts,
-    debounceStarts,
-    throttleStarts,
-    nonLeadingThrottleStarts,
-    heldPacingTimes,
-    expectedHeldStarts,
-    expectedSuccessorCanceled,
-  ],
-})
+const pacedAuthority = `The public strategy docs and docs/guides/mutations.md "Key Design" stated above, with the virtual-clock model below`
+
+// Each history runs from the state the file's beforeEach gives an ordinary
+// test: fake timers at `origin`. A property test can run several histories
+// in one test (determinism, calibration), so each driver restores it first.
+function startAtOrigin(): void {
+  vi.useFakeTimers()
+  vi.setSystemTime(origin)
+}
 
 const queueActions: Array<Action> = [
   { kind: `mutate`, id: 1 },
@@ -463,104 +459,193 @@ const cases: Array<Case> = [
   },
 ]
 
+// Exactly the old matchers: each wrong answer must reject with an AssertionError.
+const isAssertionError = (error: Error) => error.name === `AssertionError`
+
 describe(`paced mutation timeline oracle`, () => {
-  for (const testCase of cases) {
-    it(testCase.name, async () => {
-      oracleRoute(`case`)
-      await runProduction(testCase, (actual) =>
-        checkTimelineObservation(testCase, actual),
-      )
-    })
-  }
-  it(`rejects front/back, trailing, and leading-edge mutants`, async () => {
-    oracleRoute(`calibration`)
-    const wrongStrategies: Array<{
-      caseName: string
-      strategy: () => Strategy
-    }> = [
-      {
-        caseName: `queue adds front and takes front`,
-        strategy: () =>
-          queueStrategy({
-            wait: 10,
-            addItemsTo: `front`,
-            getItemsFrom: `back`,
-          }),
-      },
-      {
-        caseName: `debounce persists after each quiet period`,
-        strategy: () =>
-          debounceStrategy({ wait: 10, leading: false, trailing: false }),
-      },
-      {
-        caseName: `throttle persists leading and trailing transactions`,
-        strategy: () =>
-          throttleStrategy({ wait: 10, leading: false, trailing: true }),
-      },
-    ]
-    for (const { caseName, strategy } of wrongStrategies) {
-      const lawful = cases.find((testCase) => testCase.name === caseName)
-      if (!lawful) throw new Error(`Missing calibration case`)
-      await expect(
-        runProduction({ ...lawful, strategy }, (actual) => {
-          expect(actual.starts).toEqual(lawful.expected)
-        }),
-      ).rejects.toMatchObject({ name: `AssertionError` })
-    }
-  })
-  it(`rejects capacity, overflow settlement, early throttle, and option mutation mutants`, async () => {
-    oracleRoute(`calibration`)
-    const capacityChecker = async (strategy: Strategy) => {
-      const collection = await createReadyCollection()
-      const mutate = createPacedMutations<number, { id: number }>({
-        onMutate: (id) => collection.insert({ id }),
-        mutationFn: () => Promise.resolve(),
-        strategy,
-      })
-      return withCleanup(strategy, collection, () => {
-        mutate(1)
-        mutate(2)
-        const third = mutate(3)
-        expect(third.state, `overflow settlement`).toBe(`failed`)
-        return Promise.resolve()
-      })
-    }
-    await expect(
-      capacityChecker(queueStrategy({ maxSize: Infinity, wait: 10 })),
-    ).rejects.toMatchObject({ name: `AssertionError` })
-
-    const falseGreen = queueStrategy({ maxSize: 1, wait: 10 })
-    const originalExecute = falseGreen.execute
-    falseGreen.execute = (fn) => {
-      originalExecute(fn)
-      return true
-    }
-    await expect(capacityChecker(falseGreen)).rejects.toMatchObject({
-      name: `AssertionError`,
-    })
-
-    const nonLeading = cases.find(
-      (testCase) =>
-        testCase.name ===
-        `explicit non-leading throttle waits for each trailing edge`,
-    )
-    if (!nonLeading) throw new Error(`Missing non-leading calibration case`)
-    await expect(
-      runProduction(
-        {
-          ...nonLeading,
-          strategy: () =>
-            throttleStrategy({ wait: 10, leading: true, trailing: true }),
+  oracleProperty({
+    id: `paced-mutations.timeline`,
+    law: {
+      statement: `Each pacing strategy starts the model's persistence calls at the model's virtual-clock times, groups calls into the model's transactions, keeps every call optimistic, and settles every receipt.`,
+      authority: pacedAuthority,
+      limits: `The named queue, debounce and throttle timeline cases with immediately fulfilled writes; the two calibrations replay their wrong strategies and options.`,
+    },
+    owns: [
+      `src/paced-mutations.ts`,
+      `src/strategies/debounceStrategy.ts`,
+      `src/strategies/throttleStrategy.ts`,
+      `src/strategies/queueStrategy.ts`,
+      `src/strategies/serial-pacer.ts`,
+    ],
+    histories: cases.map(({ name }) => name),
+    label: (name) => name,
+    resolve: (name) => ({
+      testCase: cases.find((candidate) => candidate.name === name)!,
+    }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `paced-mutations.timeline`,
+        plan,
+        observe,
+        async () => {
+          startAtOrigin()
+          await runProduction(plan.testCase, (actual) =>
+            checkTimelineObservation(plan.testCase, actual),
+          )
         },
-        (actual) => expect(actual.starts).toEqual(nonLeading.expected),
       ),
-    ).rejects.toMatchObject({ name: `AssertionError` })
+    check: forwardAssertionJudgment,
+    calibrations: [
+      {
+        name: `rejects front/back, trailing, and leading-edge mutants`,
+        law: `paced-mutations.timeline`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `paced-mutations.timeline`,
+            plan,
+            observe,
+            async () => {
+              startAtOrigin()
+              const rejections: Array<Error> = []
+              const wrongStrategies: Array<{
+                caseName: string
+                strategy: () => Strategy
+              }> = [
+                {
+                  caseName: `queue adds front and takes front`,
+                  strategy: () =>
+                    queueStrategy({
+                      wait: 10,
+                      addItemsTo: `front`,
+                      getItemsFrom: `back`,
+                    }),
+                },
+                {
+                  caseName: `debounce persists after each quiet period`,
+                  strategy: () =>
+                    debounceStrategy({
+                      wait: 10,
+                      leading: false,
+                      trailing: false,
+                    }),
+                },
+                {
+                  caseName: `throttle persists leading and trailing transactions`,
+                  strategy: () =>
+                    throttleStrategy({
+                      wait: 10,
+                      leading: false,
+                      trailing: true,
+                    }),
+                },
+              ]
+              for (const { caseName, strategy } of wrongStrategies) {
+                const lawful = cases.find(
+                  (testCase) => testCase.name === caseName,
+                )
+                if (!lawful) throw new Error(`Missing calibration case`)
+                rejections.push(
+                  await asyncRejection(isAssertionError, () =>
+                    runProduction({ ...lawful, strategy }, (actual) => {
+                      expect(actual.starts).toEqual(lawful.expected)
+                    }),
+                  ),
+                )
+              }
+              rejectAt(
+                `calibration: rejects front/back, trailing, and leading-edge mutants`,
+                rejections[0]!,
+              )
+            },
+          ),
+      },
+      {
+        name: `rejects capacity, overflow settlement, early throttle, and option mutation mutants`,
+        law: `paced-mutations.timeline`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(
+            `paced-mutations.timeline`,
+            plan,
+            observe,
+            async () => {
+              startAtOrigin()
+              const rejections: Array<Error> = []
+              const capacityChecker = async (strategy: Strategy) => {
+                const collection = await createReadyCollection()
+                const mutate = createPacedMutations<number, { id: number }>({
+                  onMutate: (id) => collection.insert({ id }),
+                  mutationFn: () => Promise.resolve(),
+                  strategy,
+                })
+                return withCleanup(strategy, collection, () => {
+                  mutate(1)
+                  mutate(2)
+                  const third = mutate(3)
+                  expect(third.state, `overflow settlement`).toBe(`failed`)
+                  return Promise.resolve()
+                })
+              }
+              rejections.push(
+                await asyncRejection(isAssertionError, () =>
+                  capacityChecker(
+                    queueStrategy({ maxSize: Infinity, wait: 10 }),
+                  ),
+                ),
+              )
 
-    const options: { wait: number; trailing?: boolean } = { wait: 10 }
-    options.trailing = true
-    expect(() => expect(options).toEqual({ wait: 10 })).toThrowError(
-      expect.objectContaining({ name: `AssertionError` }),
-    )
+              const falseGreen = queueStrategy({ maxSize: 1, wait: 10 })
+              const originalExecute = falseGreen.execute
+              falseGreen.execute = (fn) => {
+                originalExecute(fn)
+                return true
+              }
+              rejections.push(
+                await asyncRejection(isAssertionError, () =>
+                  capacityChecker(falseGreen),
+                ),
+              )
+
+              const nonLeading = cases.find(
+                (testCase) =>
+                  testCase.name ===
+                  `explicit non-leading throttle waits for each trailing edge`,
+              )
+              if (!nonLeading)
+                throw new Error(`Missing non-leading calibration case`)
+              rejections.push(
+                await asyncRejection(isAssertionError, () =>
+                  runProduction(
+                    {
+                      ...nonLeading,
+                      strategy: () =>
+                        throttleStrategy({
+                          wait: 10,
+                          leading: true,
+                          trailing: true,
+                        }),
+                    },
+                    (actual) =>
+                      expect(actual.starts).toEqual(nonLeading.expected),
+                  ),
+                ),
+              )
+
+              const options: { wait: number; trailing?: boolean } = { wait: 10 }
+              options.trailing = true
+              rejections.push(
+                rejection(isAssertionError, () =>
+                  expect(options).toEqual({ wait: 10 }),
+                ),
+              )
+              rejectAt(
+                `calibration: rejects capacity, overflow settlement, early throttle, and option mutation mutants`,
+                rejections[0]!,
+              )
+            },
+          ),
+      },
+    ],
   })
 })
 
@@ -761,14 +846,48 @@ async function checkHeldPacing(testCase: HeldPacingCase): Promise<void> {
 }
 
 describe(`paced persistence hold/release oracle`, () => {
-  for (const kind of [`debounce`, `throttle`] as const)
-    for (const leading of [true, false, undefined])
-      for (const trailing of [true, undefined] as const)
-        for (const releaseOffset of [-1, 0, 1, 10])
-          it(`${kind} leading ${String(leading)} trailing ${String(trailing)} release offset ${releaseOffset} preserves serial persistence and settlement`, async () => {
-            oracleRoute(`case`)
-            await checkHeldPacing({ kind, leading, trailing, releaseOffset })
-          })
+  oracleProperty({
+    id: `paced-mutations.held-pacing`,
+    law: {
+      statement: `Debounce and throttle keep one pending and one persisting transaction: a second write starts at the later of its timer edge and the first write's release, and settlement keeps each optimistic row and receipt until its own write settles.`,
+      authority: pacedAuthority,
+      limits: `Both strategies, leading/non-leading/default admission, and release one tick before, at, one tick after, or ten ticks after the second edge.`,
+    },
+    owns: [
+      `src/paced-mutations.ts`,
+      `src/strategies/debounceStrategy.ts`,
+      `src/strategies/throttleStrategy.ts`,
+      `src/strategies/queueStrategy.ts`,
+      `src/strategies/serial-pacer.ts`,
+    ],
+    histories: ([`debounce`, `throttle`] as const).flatMap((kind) =>
+      [true, false, undefined].flatMap((leading) =>
+        ([true, undefined] as const).flatMap((trailing) =>
+          [-1, 0, 1, 10].map((releaseOffset): HeldPacingCase => ({
+            kind,
+            leading,
+            trailing,
+            releaseOffset,
+          })),
+        ),
+      ),
+    ),
+    label: ({ kind, leading, trailing, releaseOffset }) =>
+      `${kind} leading ${String(leading)} trailing ${String(trailing)} release offset ${releaseOffset} preserves serial persistence and settlement`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `paced-mutations.held-pacing`,
+        plan,
+        observe,
+        async () => {
+          startAtOrigin()
+          await checkHeldPacing(plan.history)
+        },
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 // The settlement model: a pending successor is canceled by its own explicit
@@ -791,125 +910,167 @@ function expectedSuccessorCanceled(
  * and first success/rejection or pending rollback. The model uses the authored
  * key relationship and outcome, never production's conflict classifier.
  */
+type SettlementHistory = {
+  factory: `debounceStrategy` | `throttleStrategy`
+  leading: boolean
+  sameKey: boolean
+  outcome: `resolve` | `reject` | `cancel-pending`
+}
+const settlementFactories = { debounceStrategy, throttleStrategy }
+
+async function runSettlementHistory(history: SettlementHistory): Promise<void> {
+  const { leading, sameKey, outcome } = history
+  const factory = settlementFactories[history.factory]
+  const collection = await createReadyCollection([
+    { id: 1, value: 0 },
+    { id: 2, value: 0 },
+  ])
+  const strategy = factory({ wait: 10, leading, trailing: true })
+  const firstWrite = createDeferred<void>()
+  const secondWrite = createDeferred<void>()
+  const failure = new Error(`controlled persistence failure`)
+  const canceled = new Error(`pending transaction canceled`)
+  const starts: Array<number> = []
+  const mutate = createPacedMutations<
+    { id: number; value: number },
+    { id: number; value: number }
+  >({
+    strategy,
+    onMutate: ({ id, value }) =>
+      collection.update(id, (draft) => {
+        draft.value = value
+      }),
+    mutationFn: ({ transaction }) => {
+      const value = transaction.mutations[0].modified.value
+      starts.push(value)
+      return value === 1 ? firstWrite.promise : secondWrite.promise
+    },
+  })
+  await withCleanup(
+    strategy,
+    collection,
+    async () => {
+      const first = mutate({ id: 1, value: 1 })
+      const firstReceipt = observeReceipt(first)
+      await vi.advanceTimersByTimeAsync(leading ? 1 : 11)
+      const key = sameKey ? 1 : 2
+      const second = mutate({ id: key, value: 2 })
+      const secondReceipt = observeReceipt(second)
+      if (outcome === `cancel-pending`)
+        second.rollback({
+          error: canceled,
+          isSecondaryRollback: true,
+        })
+      await vi.advanceTimersByTimeAsync(30)
+      expect(starts, `held first write`).toEqual([1])
+      expect(firstReceipt.outcome).toBe(`pending`)
+      expect(
+        secondReceipt.outcome,
+        `pending admission or explicit cancellation`,
+      ).toBe(outcome === `cancel-pending` ? `rejected` : `pending`)
+      expect(
+        collection.get(key)?.value,
+        `optimistic successor while held`,
+      ).toBe(outcome === `cancel-pending` ? (sameKey ? 1 : 0) : 2)
+      if (outcome === `reject`) firstWrite.reject(failure)
+      else firstWrite.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+      const successorCanceled = expectedSuccessorCanceled(outcome, sameKey)
+      expect(starts, `only uncanceled successor persists`).toEqual(
+        successorCanceled ? [1] : [1, 2],
+      )
+      expect(firstReceipt.outcome).toBe(
+        outcome === `reject` ? `rejected` : `fulfilled`,
+      )
+      if (outcome === `reject`) expect(firstReceipt.error).toBe(failure)
+      expect(second.state).toBe(successorCanceled ? `failed` : `persisting`)
+      expect(secondReceipt.outcome).toBe(
+        successorCanceled ? `rejected` : `pending`,
+      )
+      expect(
+        collection.get(key)?.value,
+        `successor after first settlement`,
+      ).toBe(successorCanceled ? 0 : 2)
+      if (outcome === `cancel-pending`)
+        expect(secondReceipt.error).toBe(canceled)
+      secondWrite.resolve()
+      await vi.advanceTimersByTimeAsync(20)
+      expect(secondReceipt.outcome, `terminal successor receipt`).toBe(
+        successorCanceled ? `rejected` : `fulfilled`,
+      )
+      if (!successorCanceled) expect(secondReceipt.returnedSame).toBe(true)
+      expect(
+        [...collection.values()].map(({ id, value }) => ({
+          id,
+          value,
+        })),
+      ).toEqual([
+        { id: 1, value: 0 },
+        { id: 2, value: 0 },
+      ])
+      const next = mutate({ id: 2, value: 3 })
+      const nextReceipt = observeReceipt(next)
+      await vi.advanceTimersByTimeAsync(20)
+      expect(starts, `manager remains usable after settlement`).toEqual(
+        successorCanceled ? [1, 3] : [1, 2, 3],
+      )
+      expect(nextReceipt).toMatchObject({
+        outcome: `fulfilled`,
+        returnedSame: true,
+      })
+    },
+    async () => {
+      firstWrite.resolve()
+      secondWrite.resolve()
+      await vi.advanceTimersByTimeAsync(50)
+    },
+  )
+}
+
 describe(`paced settlement and pending ownership oracle`, () => {
-  for (const factory of [debounceStrategy, throttleStrategy])
-    for (const leading of [true, false])
-      for (const sameKey of [true, false])
-        for (const outcome of [`resolve`, `reject`, `cancel-pending`] as const)
-          it(`${factory.name} leading ${leading} same key ${sameKey} with ${outcome} preserves transaction settlement`, async () => {
-            oracleRoute(`case`)
-            const collection = await createReadyCollection([
-              { id: 1, value: 0 },
-              { id: 2, value: 0 },
-            ])
-            const strategy = factory({ wait: 10, leading, trailing: true })
-            const firstWrite = createDeferred<void>()
-            const secondWrite = createDeferred<void>()
-            const failure = new Error(`controlled persistence failure`)
-            const canceled = new Error(`pending transaction canceled`)
-            const starts: Array<number> = []
-            const mutate = createPacedMutations<
-              { id: number; value: number },
-              { id: number; value: number }
-            >({
-              strategy,
-              onMutate: ({ id, value }) =>
-                collection.update(id, (draft) => {
-                  draft.value = value
-                }),
-              mutationFn: ({ transaction }) => {
-                const value = transaction.mutations[0].modified.value
-                starts.push(value)
-                return value === 1 ? firstWrite.promise : secondWrite.promise
-              },
-            })
-            await withCleanup(
-              strategy,
-              collection,
-              async () => {
-                const first = mutate({ id: 1, value: 1 })
-                const firstReceipt = observeReceipt(first)
-                await vi.advanceTimersByTimeAsync(leading ? 1 : 11)
-                const key = sameKey ? 1 : 2
-                const second = mutate({ id: key, value: 2 })
-                const secondReceipt = observeReceipt(second)
-                if (outcome === `cancel-pending`)
-                  second.rollback({
-                    error: canceled,
-                    isSecondaryRollback: true,
-                  })
-                await vi.advanceTimersByTimeAsync(30)
-                expect(starts, `held first write`).toEqual([1])
-                expect(firstReceipt.outcome).toBe(`pending`)
-                expect(
-                  secondReceipt.outcome,
-                  `pending admission or explicit cancellation`,
-                ).toBe(outcome === `cancel-pending` ? `rejected` : `pending`)
-                expect(
-                  collection.get(key)?.value,
-                  `optimistic successor while held`,
-                ).toBe(outcome === `cancel-pending` ? (sameKey ? 1 : 0) : 2)
-                if (outcome === `reject`) firstWrite.reject(failure)
-                else firstWrite.resolve()
-                await vi.advanceTimersByTimeAsync(0)
-                const successorCanceled = expectedSuccessorCanceled(
-                  outcome,
-                  sameKey,
-                )
-                expect(starts, `only uncanceled successor persists`).toEqual(
-                  successorCanceled ? [1] : [1, 2],
-                )
-                expect(firstReceipt.outcome).toBe(
-                  outcome === `reject` ? `rejected` : `fulfilled`,
-                )
-                if (outcome === `reject`)
-                  expect(firstReceipt.error).toBe(failure)
-                expect(second.state).toBe(
-                  successorCanceled ? `failed` : `persisting`,
-                )
-                expect(secondReceipt.outcome).toBe(
-                  successorCanceled ? `rejected` : `pending`,
-                )
-                expect(
-                  collection.get(key)?.value,
-                  `successor after first settlement`,
-                ).toBe(successorCanceled ? 0 : 2)
-                if (outcome === `cancel-pending`)
-                  expect(secondReceipt.error).toBe(canceled)
-                secondWrite.resolve()
-                await vi.advanceTimersByTimeAsync(20)
-                expect(
-                  secondReceipt.outcome,
-                  `terminal successor receipt`,
-                ).toBe(successorCanceled ? `rejected` : `fulfilled`)
-                if (!successorCanceled)
-                  expect(secondReceipt.returnedSame).toBe(true)
-                expect(
-                  [...collection.values()].map(({ id, value }) => ({
-                    id,
-                    value,
-                  })),
-                ).toEqual([
-                  { id: 1, value: 0 },
-                  { id: 2, value: 0 },
-                ])
-                const next = mutate({ id: 2, value: 3 })
-                const nextReceipt = observeReceipt(next)
-                await vi.advanceTimersByTimeAsync(20)
-                expect(
-                  starts,
-                  `manager remains usable after settlement`,
-                ).toEqual(successorCanceled ? [1, 3] : [1, 2, 3])
-                expect(nextReceipt).toMatchObject({
-                  outcome: `fulfilled`,
-                  returnedSame: true,
-                })
-              },
-              async () => {
-                firstWrite.resolve()
-                secondWrite.resolve()
-                await vi.advanceTimersByTimeAsync(50)
-              },
-            )
-          })
+  oracleProperty({
+    id: `paced-mutations.settlement`,
+    law: {
+      statement: `Pacing keeps the Transaction rollback contract: a failed prior write rolls back pending same-key work, distinct-key work still persists, an explicitly rolled-back pending transaction never persists, and the manager stays usable.`,
+      authority: `Transaction.rollback and the optimistic-history owner, with ${pacedAuthority}`,
+      limits: `Both factories, leading/non-leading, same/distinct key, and first success, rejection or pending rollback.`,
+    },
+    owns: [
+      `src/paced-mutations.ts`,
+      `src/strategies/debounceStrategy.ts`,
+      `src/strategies/throttleStrategy.ts`,
+      `src/strategies/queueStrategy.ts`,
+      `src/strategies/serial-pacer.ts`,
+    ],
+    histories: ([`debounceStrategy`, `throttleStrategy`] as const).flatMap(
+      (factory) =>
+        [true, false].flatMap((leading) =>
+          [true, false].flatMap((sameKey) =>
+            ([`resolve`, `reject`, `cancel-pending`] as const).map(
+              (outcome): SettlementHistory => ({
+                factory,
+                leading,
+                sameKey,
+                outcome,
+              }),
+            ),
+          ),
+        ),
+    ),
+    label: ({ factory, leading, sameKey, outcome }) =>
+      `${factory} leading ${leading} same key ${sameKey} with ${outcome} preserves transaction settlement`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `paced-mutations.settlement`,
+        plan,
+        observe,
+        async () => {
+          startAtOrigin()
+          await runSettlementHistory(plan.history)
+        },
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

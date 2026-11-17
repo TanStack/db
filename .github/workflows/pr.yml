@@ -80,7 +80,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [db-1, db-2, db-replay]
+        group: [db-1, db-2, db-3, db-replay]
     env:
       TEST_GROUP: ${{ matrix.group }}
     steps:

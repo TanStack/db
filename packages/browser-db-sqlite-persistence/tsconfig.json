@@ -30,6 +30,7 @@
     "vite.config.ts",
     "vite.opfs.config.ts",
     "vitest.e2e.config.ts",
+    "vitest.adapter-oracles.config.ts",
     "playwright.opfs.config.ts",
     "playwright.opfs-electric.config.ts"
   ],

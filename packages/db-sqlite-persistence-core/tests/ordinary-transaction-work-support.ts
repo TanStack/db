@@ -2,6 +2,7 @@
 // The law and its independent model live in ordinary-transaction-work-oracle.ts.
 import { DatabaseSync } from 'node:sqlite'
 import { expect } from 'vitest'
+import { oracleAssertion } from '../../db/tests/oracle-assertion-adapter'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
 import { Temporal } from './temporal-value-oracle'
 import type { PersistedTx, SQLiteDriver } from '../src'
@@ -11,7 +12,6 @@ export type Row = Record<
   string | number | Temporal.Instant | Temporal.PlainDate
 >
 export type Tx = PersistedTx<Row, string>
-
 export function clone<T>(value: T): T {
   // Native Temporal values are immutable. structuredClone erases their slots.
   if (value instanceof Temporal.Instant || value instanceof Temporal.PlainDate)
@@ -24,7 +24,6 @@ export function clone<T>(value: T): T {
   }
   return value
 }
-
 type Fixture = {
   adapter: SQLiteCorePersistenceAdapter
   driver: SQLiteDriver
@@ -39,7 +38,6 @@ type Fixture = {
   corruptRowMetadata: (enabled: boolean) => void
   close: () => void
 }
-
 function binding(value: unknown): string | number | bigint | null {
   if (value == null) return null
   if (typeof value === 'boolean') return value ? 1 : 0
@@ -51,7 +49,6 @@ function binding(value: unknown): string | number | bigint | null {
     return value
   return String(value)
 }
-
 export function fixture(maxBoundParameters: number): Fixture {
   const database = new DatabaseSync(':memory:')
   const counts = { query: 0, run: 0, transactions: 0, maxParams: 0 }
@@ -129,16 +126,13 @@ export function fixture(maxBoundParameters: number): Fixture {
     close: () => database.close(),
   }
 }
-
 export type WriteCounts = Readonly<Fixture['counts']>
-
 export function beginMeasuredWrite(host: Fixture): void {
   host.counts.query = 0
   host.counts.run = 0
   host.counts.transactions = 0
   host.counts.maxParams = 0
 }
-
 export function finishMeasuredWrite(
   host: Fixture,
   checkpoint: string,
@@ -147,10 +141,13 @@ export function finishMeasuredWrite(
   // The optional increment is a checker control, never a production path.
   host.counts.transactions += extraTransactions
   const counts = { ...host.counts }
-  expect(counts.transactions, `${checkpoint}: one SQLite transaction`).toBe(1)
+  oracleAssertion('existing comparison at 151', () =>
+    expect(counts.transactions, `${checkpoint}: one SQLite transaction`).toBe(
+      1,
+    ),
+  )
   return counts
 }
-
 export function transaction(
   txId: string,
   seq: number,
@@ -168,7 +165,6 @@ export function transaction(
     collectionMetadataMutations,
   }
 }
-
 export function insertRows(count: number): Tx {
   const rows = Array.from({ length: count }, (_, index) => ({
     id: `row-${index}`,
@@ -186,33 +182,46 @@ export function insertRows(count: number): Tx {
     [{ type: 'set', key: 'cursor', value: { offset: count } }],
   )
 }
-
-export type SnapshotRow = { key: string; value: Row; metadata?: unknown }
-export type Tombstone = { key: string; value: Row; rowVersion: number }
+export type SnapshotRow = {
+  key: string
+  value: Row
+  metadata?: unknown
+}
+export type Tombstone = {
+  key: string
+  value: Row
+  rowVersion: number
+}
 export type Observation = {
   rows: Array<SnapshotRow>
-  collectionMetadata: Array<{ key: string; value: unknown }>
+  collectionMetadata: Array<{
+    key: string
+    value: unknown
+  }>
   keySet: unknown
   expectedKeys: Array<string>
   tombstones: Array<Tombstone>
-  position: { term: number; seq: number; rowVersion: number }
-  applied: Array<{ txId: string; rowVersion: number }>
+  position: {
+    term: number
+    seq: number
+    rowVersion: number
+  }
+  applied: Array<{
+    txId: string
+    rowVersion: number
+  }>
 }
-
 export function sortedKeys(values: Iterable<string>): Array<string> {
   return [...values].sort()
 }
-
 export function sortRows(rows: Array<SnapshotRow>): Array<SnapshotRow> {
   return [...rows].sort((a, b) => a.key.localeCompare(b.key))
 }
-
 function publicKey(encoded: string): string {
   if (!encoded.startsWith('s:'))
     throw new Error(`unexpected raw key ${encoded}`)
   return encoded.slice(2)
 }
-
 export async function observe(
   adapter: SQLiteCorePersistenceAdapter,
   driver: SQLiteDriver,
@@ -224,14 +233,21 @@ export async function observe(
   })
   const table = createPersistedTableName(collectionId, 't')
   const [expected, tombstones, applied] = await Promise.all([
-    driver.query<{ key: string }>(
+    driver.query<{
+      key: string
+    }>(
       'SELECT key FROM collection_expected_keys WHERE collection_id = ? ORDER BY key',
       [collectionId],
     ),
-    driver.query<{ key: string; value: string; row_version: number }>(
-      `SELECT key, value, row_version FROM "${table}" ORDER BY key`,
-    ),
-    driver.query<{ tx_id: string; row_version: number }>(
+    driver.query<{
+      key: string
+      value: string
+      row_version: number
+    }>(`SELECT key, value, row_version FROM "${table}" ORDER BY key`),
+    driver.query<{
+      tx_id: string
+      row_version: number
+    }>(
       'SELECT tx_id, row_version FROM applied_tx WHERE collection_id = ? ORDER BY term, seq',
       [collectionId],
     ),

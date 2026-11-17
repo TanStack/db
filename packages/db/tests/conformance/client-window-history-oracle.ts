@@ -5,7 +5,6 @@
  * owns input grammar. It imports no adapter or production identity machinery.
  */
 import fc from 'fast-check'
-import { declareOracle } from '../oracle-declaration'
 // Width/offset vary independently, including pages beyond the final row.
 // Every history moves twice and returns to the first page. Removing the held
 // readiness cut loses the distinction between a matching seed and local rows.
@@ -38,5 +37,3 @@ export const clientWindowStates = [
   `client scope switch`,
   `fresh old-page lookup`,
 ] as const
-
-declareOracle({ grammar: [clientWindowArbitrary] })

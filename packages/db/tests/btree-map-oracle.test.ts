@@ -1,15 +1,25 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { BTree } from '../src/utils/btree.js'
+import { oracleProperty } from './oracle-config.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from './oracle-assertion-adapter.js'
+import { clean, rejection } from './calibration-rejection.js'
+
+import {
+  applyAction,
+  arbitraryAction,
+  expectRange,
+  expectRefinement,
+  expectValue,
+  runMapHistory,
+} from './btree-map-oracle.js'
+import type { Verdict } from './oracle-config.js'
+import type { Action, Payload, ReferenceModel } from './btree-map-oracle.js'
 
 /**
  * # When does the B+ tree behave like a sorted Map?
@@ -48,34 +58,51 @@ import { declareOracle } from './oracle-declaration.js'
 // fixture returns NaN only for the pair such a comparison would use, so the
 // split must succeed without consulting it. Observe inserted-key reads and
 // whole ranges; the invalid pair is not a lookup order.
-it.each([
-  [16, 14],
-  [32, 46],
-])(
-  `preserves the Map across a split after %s accepted entries`,
-  (size, rightKey) => {
-    oracleRoute(`case`)
-    const insertedKey = size * 2
-    const tree = new BTree<number, Payload>(
-      (left, right) =>
-        left === insertedKey && right === rightKey ? NaN : left - right,
-      4,
-    )
-    const model: ReferenceModel = new Map()
-    for (let key = 0; key < insertedKey; key += 2)
-      applyAction(tree, model, { type: `put`, key, v: key })
-    for (const key of [insertedKey, insertedKey + 2]) {
-      applyAction(tree, model, { type: `put`, key, v: key })
-      const sorted = [...model.keys()].sort((left, right) => left - right)
-      expectRange(tree, model, sorted, -Infinity, Infinity, true)
-      expect(tree.minKey()).toBe(sorted[0])
-      expect(tree.maxKey()).toBe(sorted.at(-1))
-    }
-  },
-)
+function runSplitComparator([size, rightKey]: [number, number]): void {
+  const insertedKey = size * 2
+  const tree = new BTree<number, Payload>(
+    (left, right) =>
+      left === insertedKey && right === rightKey ? NaN : left - right,
+    4,
+  )
+  const model: ReferenceModel = new Map()
+  for (let key = 0; key < insertedKey; key += 2)
+    applyAction(tree, model, { type: `put`, key, v: key })
+  for (const key of [insertedKey, insertedKey + 2]) {
+    applyAction(tree, model, { type: `put`, key, v: key })
+    const sorted = [...model.keys()].sort((left, right) => left - right)
+    expectRange(tree, model, sorted, -Infinity, Infinity, true)
+    expect(tree.minKey()).toBe(sorted[0])
+    expect(tree.maxKey()).toBe(sorted.at(-1))
+  }
+}
 
-it(`accepts infinite comparison results that still provide an order`, () => {
-  oracleRoute(`fixed history`)
+const btreeAuthority = `BTree public API numeric Map contract stated above`
+
+oracleProperty({
+  id: `btree-map.split-comparator`,
+  law: {
+    statement: `A split determines the new child's position from the insertion index, so the tree stays a sorted Map without consulting the comparator pair that a redundant comparison would use.`,
+    authority: btreeAuthority,
+    limits: `Node size 4 after 16 and 32 accepted entries, with NaN returned only for the pair such a comparison would use.`,
+  },
+  owns: [`src/utils/btree.ts`],
+  histories: [
+    [16, 14],
+    [32, 46],
+  ] as Array<[number, number]>,
+  label: ([size]) =>
+    `preserves the Map across a split after ${size} accepted entries`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`btree-map.split-comparator`, plan, observe, () =>
+      runSplitComparator(plan.history),
+    ),
+  check: forwardAssertionJudgment,
+})
+
+function runInfiniteComparator(): void {
   const tree = new BTree<number, Payload>((left, right) =>
     left === right ? 0 : left < right ? -Infinity : Infinity,
   )
@@ -84,454 +111,289 @@ it(`accepts infinite comparison results that still provide an order`, () => {
     applyAction(tree, model, { type: `put`, key, v: key })
     expectRefinement(tree, model, key)
   }
-})
+}
 
-type Payload = { v: number }
-type Stored = Readonly<{ reference: Payload; v: number }>
-type ReferenceModel = Map<number, Stored>
-type Action =
-  | { type: `put`; key: number; v: number }
-  | { type: `delete` | `read` | `clear`; key: number }
-type ActionResult = boolean | undefined
-
-const arbitraryAction: fc.Arbitrary<Action> = fc.oneof(
-  fc.record({
-    type: fc.constant(`put` as const),
-    key: fc.integer({ min: 0, max: 199 }),
-    v: fc.integer(),
-  }),
-  fc.record({
-    type: fc.constantFrom(`delete` as const, `read` as const, `clear` as const),
-    key: fc.integer({ min: 0, max: 199 }),
-  }),
-)
-
-// A fixed campaign and a random campaign run the same history grammar. A path
-// replay of this property runs only its random campaign from the recorded seed
-// and shrink path: TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
-// TANSTACK_DB_ORACLE_PROPERTY=btree-map.history with
-// `pnpm exec vitest run packages/db/tests/btree-map-oracle.test.ts`.
-const btreeMapProperty = `btree-map.history`
-
-const mapHistoryProperty = fc.property(
-  fc.integer({ min: 4, max: 8 }),
-  fc.array(arbitraryAction, { minLength: 1, maxLength: 64 }),
-  (nodeSize, actions) => {
-    const tree = new BTree<number, Payload>((a, b) => a - b, nodeSize)
-    const model: ReferenceModel = new Map()
-    expectRefinement(tree, model, 0)
-    for (const action of actions) {
-      applyAction(tree, model, action)
-      expectRefinement(tree, model, action.key)
-    }
+oracleProperty({
+  id: `btree-map.infinite-comparator`,
+  law: {
+    statement: `Numeric BTree observations agree with the sorted Map when the comparator returns infinite results that still provide an order.`,
+    authority: btreeAuthority,
+    limits: `One fixed history of three puts under a comparator that returns -Infinity, 0 or Infinity.`,
   },
-)
-
-const mapHistoryCampaigns = [
-  {
-    name: `fixed`,
-    test: oracleReplayTest(it),
-    parameters: oracleFixedSeed(20260930, { numRuns: oracleRuns(100) }),
-  },
-  {
-    name: `random`,
-    test: oracleReplayTest(it, btreeMapProperty),
-    parameters: oraclePropertyOptions(100, btreeMapProperty),
-  },
-]
-
-// The model uses only Map operations and the declared numeric order. It does
-// not use the tree's nodes, search helpers, or traversal code.
-function stepModel(
-  model: ReferenceModel,
-  action: Action,
-  value: Payload | undefined,
-): ActionResult {
-  if (action.type === `put`) {
-    const inserted = !model.has(action.key)
-    model.set(action.key, Object.freeze({ reference: value!, v: action.v }))
-    return inserted
-  }
-  if (action.type === `delete`) return model.delete(action.key)
-  if (action.type === `clear`) model.clear()
-  return undefined
-}
-
-// The driver invokes the public BTree API. It shares only the generated input
-// payload with the model.
-function stepTree(
-  tree: BTree<number, Payload>,
-  action: Action,
-  value: Payload | undefined,
-): ActionResult {
-  if (action.type === `put`) return tree.set(action.key, value!)
-  if (action.type === `delete`) return tree.delete(action.key)
-  if (action.type === `clear`) tree.clear()
-  return undefined
-}
-
-function applyAction(
-  tree: BTree<number, Payload>,
-  model: ReferenceModel,
-  action: Action,
-): void {
-  const value = action.type === `put` ? { v: action.v } : undefined
-  const expectedResult = stepModel(model, action, value)
-  const actualResult = stepTree(tree, action, value)
-  expect(actualResult).toBe(expectedResult)
-
-  // Mutation return values alone cannot expose stale deletes/overwrites.
-  expectValue(tree.get(action.key), model.get(action.key))
-  expect(tree.has(action.key)).toBe(model.has(action.key))
-  expect(tree.size).toBe(model.size)
-}
-
-function expectValue(
-  actual: Payload | undefined,
-  expected: Stored | undefined,
-): void {
-  expect(actual).toBe(expected?.reference)
-  expect(actual?.v).toBe(expected?.v)
-}
-
-function expectPair(
-  actual: [number, Payload] | undefined,
-  key: number | undefined,
-  model: ReferenceModel,
-): void {
-  expect(actual).toEqual(
-    key === undefined ? undefined : [key, model.get(key)!.reference],
-  )
-  if (key !== undefined) expectValue(actual?.[1], model.get(key))
-}
-
-// Law 2 for one range. The expected keys come from the sorted model keys, not
-// from the tree's search or traversal code.
-function expectRange(
-  tree: BTree<number, Payload>,
-  model: ReferenceModel,
-  sorted: ReadonlyArray<number>,
-  low: number,
-  high: number,
-  includeHigh: boolean,
-): void {
-  const expected = sorted.filter(
-    (key) => key >= low && (includeHigh ? key <= high : key < high),
-  )
-  const seen: Array<number> = []
-  tree.forRange(low, high, includeHigh, (key, value) => {
-    seen.push(key)
-    expectValue(value, model.get(key))
-  })
-  expect(seen, `forRange(${low}, ${high}, ${includeHigh})`).toEqual(expected)
-}
-
-// This is the refinement check. It compares all public observations used by
-// the index code with the independent Map model at the current history cut.
-function expectRefinement(
-  tree: BTree<number, Payload>,
-  model: ReferenceModel,
-  probe: number,
-): void {
-  const sorted = [...model.keys()].sort((a, b) => a - b)
-  // A missing key must return the caller's fallback on either side of the
-  // tree, including when growth splits the root or deletion collapses it.
-  const fallback = { v: probe }
-  for (const key of [probe, (sorted[0] ?? 0) - 1, (sorted.at(-1) ?? 0) + 1]) {
-    expect(tree.get(key, fallback)).toBe(
-      model.has(key) ? model.get(key)!.reference : fallback,
-    )
-  }
-  expect(tree.size).toBe(model.size)
-  expect(tree.minKey()).toBe(sorted[0])
-  expect(tree.maxKey()).toBe(sorted[sorted.length - 1])
-  const seen: Array<number> = []
-  // Always invoke the scanner, including at initial/cleared/final empty cuts.
-  tree.forRange(
-    sorted[0] ?? -Infinity,
-    sorted[sorted.length - 1] ?? Infinity,
-    true,
-    (key, value) => {
-      seen.push(key)
-      expectValue(value, model.get(key))
-    },
-  )
-  expect(seen).toEqual(sorted)
-  // Bounds on existing keys test the inclusive and exclusive edges. Bounds
-  // around the probe test ranges that start or end between keys, and the
-  // reversed pair tests an empty range.
-  const rangeBounds: Array<[number, number]> = [
-    [probe - 23, probe + 37],
-    [probe, probe],
-    [probe + 5, probe - 5],
-    [sorted[1] ?? probe, sorted.at(-2) ?? probe],
-    [sorted[0] ?? probe, sorted[0] ?? probe],
-  ]
-  for (const [low, high] of rangeBounds) {
-    for (const includeHigh of [true, false]) {
-      expectRange(tree, model, sorted, low, high, includeHigh)
-    }
-  }
-  expectPair(
-    tree.nextHigherPair(probe),
-    sorted.find((key) => key > probe),
-    model,
-  )
-  expectPair(
-    tree.nextLowerPair(probe),
-    [...sorted].reverse().find((key) => key < probe),
-    model,
-  )
-  expectPair(tree.nextHigherPair(undefined), sorted[0], model)
-  expectPair(tree.nextLowerPair(undefined), sorted[sorted.length - 1], model)
-}
-
-// What this oracle owns: the gap report judges the B+ tree in
-// utils/btree.ts by this file's tests. The refinement check and the Map model
-// judge every public observation of the tree.
-declareOracle({
   owns: [`src/utils/btree.ts`],
-  check: [expectRefinement],
-  model: [stepModel],
+  histories: [
+    `accepts infinite comparison results that still provide an order`,
+  ],
+  label: (name) => name,
+  resolve: (name) => ({ name }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `btree-map.infinite-comparator`,
+      plan,
+      observe,
+      () => runInfiniteComparator(),
+    ),
+  check: forwardAssertionJudgment,
 })
 
 describe(`BTree Map oracle`, () => {
   // The 120,000-operation corpus takes about nine seconds with CI coverage.
   // This fixed-seed campaign is a stable depth campaign, not random discovery. Keep
   // every operation and assertion. This is not a five-second performance budget.
-  it(
-    `matches a Map oracle under random insert/delete/overwrite with small nodes`,
-    { timeout: 30_000 },
-    () => {
-      oracleRoute(`fixed seed`)
-      let seed = 12345
-      const rnd = () =>
-        (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff
-      for (let round = 0; round < 40; round++) {
-        const nodeSize = 4 + Math.floor(rnd() * 5)
-        const tree = new BTree<number, Payload>((a, b) => a - b, nodeSize)
-        const model: ReferenceModel = new Map()
-        const history: Array<Action> = []
-        try {
-          expectRefinement(tree, model, 0)
-          for (let step = 0; step < 3000; step++) {
-            const key = Math.floor(rnd() * 200)
-            const op = rnd()
-            const action: Action =
-              op < 0.5
-                ? { type: `put`, key, v: step }
-                : {
-                    type: op < 0.85 ? `delete` : op < 0.9 ? `clear` : `read`,
-                    key,
-                  }
-            history.push(action)
-            applyAction(tree, model, action)
-            if (step % 97 === 0)
-              expectRefinement(tree, model, Math.floor(rnd() * 200))
+  oracleProperty({
+    id: `btree-map.long-campaign`,
+    law: {
+      statement: `Numeric BTree point, range, fallback and neighbor observations agree with the independent sorted Map after every action.`,
+      authority: btreeAuthority,
+      limits: `One deterministic depth campaign: 40 rounds of 3,000 random puts, deletes, clears and reads over 200 keys with node sizes 4 through 8, from seed 12345.`,
+    },
+    owns: [`src/utils/btree.ts`],
+    histories: [
+      `matches a Map oracle under random insert/delete/overwrite with small nodes`,
+    ],
+    label: (name) => name,
+    resolve: (name) => ({ name }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`BTree Map refinement`, plan, observe, () => {
+        let seed = 12345
+        const rnd = () =>
+          (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff
+        for (let round = 0; round < 40; round++) {
+          const nodeSize = 4 + Math.floor(rnd() * 5)
+          const tree = new BTree<number, Payload>((a, b) => a - b, nodeSize)
+          const model: ReferenceModel = new Map()
+          const history: Array<Action> = []
+          try {
+            expectRefinement(tree, model, 0)
+            for (let step = 0; step < 3000; step++) {
+              const key = Math.floor(rnd() * 200)
+              const op = rnd()
+              const action: Action =
+                op < 0.5
+                  ? { type: `put`, key, v: step }
+                  : {
+                      type: op < 0.85 ? `delete` : op < 0.9 ? `clear` : `read`,
+                      key,
+                    }
+              history.push(action)
+              applyAction(tree, model, action)
+              if (step % 97 === 0)
+                expectRefinement(tree, model, Math.floor(rnd() * 200))
+            }
+            expectRefinement(tree, model, 100)
+          } catch (cause) {
+            throw new Error(
+              JSON.stringify({
+                law: `BT-map`,
+                initialSeed: 12345,
+                seed,
+                round,
+                nodeSize,
+                history,
+              }),
+              { cause },
+            )
           }
-          expectRefinement(tree, model, 100)
-        } catch (cause) {
-          throw new Error(
-            JSON.stringify({
-              law: `BT-map`,
-              initialSeed: 12345,
-              seed,
-              round,
-              nodeSize,
-              history,
-            }),
-            { cause },
-          )
         }
-      }
-    },
-  )
+      }),
+    check: forwardAssertionJudgment,
+    timeout: 30_000,
+  })
 
-  for (const campaign of mapHistoryCampaigns)
-    campaign.test(
-      `matches complete Map cuts across shrinkable histories (${campaign.name})`,
-      () => {
-        oracleRoute(oracleRouteOf(campaign.parameters))
-        fc.assert(mapHistoryProperty, campaign.parameters)
+  oracleProperty<
+    [number, Array<Action>],
+    Verdict,
+    { nodeSize: number; actions: Array<Action> }
+  >({
+    id: `btree-map.history`,
+    law: {
+      statement: `Numeric BTree point, range, fallback and neighbor observations agree with the independent sorted Map after every action.`,
+      authority: `BTree public API numeric Map contract stated above`,
+      limits: `Numeric keys, plain payloads and node sizes 4 through 8; comparator validation belongs to the index-update oracle.`,
+    },
+    // What this oracle owns: the gap report judges the B+ tree in
+    // utils/btree.ts by this file's tests. The refinement check and the Map model
+    // judge every public observation of the tree.
+    owns: [`src/utils/btree.ts`],
+    histories: {
+      arbitrary: fc.tuple(
+        fc.integer({ min: 4, max: 8 }),
+        fc.array(arbitraryAction, { minLength: 1, maxLength: 64 }),
+      ),
+      runs: 100,
+      fixedSeeds: [20260930],
+    },
+    resolve: ([nodeSize, actions]) => ({ nodeSize, actions }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`BTree Map refinement`, plan, observe, () =>
+        runMapHistory(plan.nodeSize, plan.actions),
+      ),
+    check: forwardAssertionJudgment,
+    // Each calibration replays its old body. The refinement check must reject
+    // every wrong answer with an error that the old matcher accepted, and
+    // every clean check in the body must still pass.
+    calibrations: [
+      {
+        name: `rejects wrong pair payloads, shared payload mutation and transient stale state`,
+        law: `BTree Map refinement`,
+        driver: (plan, observe) =>
+          recordAssertionJudgment(`BTree Map refinement`, plan, observe, () => {
+            const expected = (error: Error) => /expected/.test(error.message)
+            const rejections: Array<Error> = []
+            const tree = new BTree<number, Payload>((a, b) => a - b, 4)
+            const value = { v: 1 }
+            const model: ReferenceModel = new Map([
+              [1, Object.freeze({ reference: value, v: 1 })],
+            ])
+            tree.set(1, value)
+            clean(() => expectRefinement(tree, model, 0))
+            const wrongPair = vi
+              .spyOn(tree, `nextHigherPair`)
+              .mockReturnValue([1, { v: 2 }])
+            try {
+              rejections.push(
+                rejection(expected, () => expectRefinement(tree, model, 0)),
+              )
+            } finally {
+              wrongPair.mockRestore()
+            }
+            value.v = 2
+            expect(tree.get(1)).toBe(value) // The former identity-only check stays green.
+            rejections.push(
+              rejection(expected, () => expectRefinement(tree, model, 0)),
+            )
+            value.v = 1
+            clean(() => expectRefinement(tree, model, 0))
+            // A stale delete result can vanish at a later clear. Judge the earlier cut.
+            rejections.push(
+              rejection(expected, () => expectRefinement(tree, new Map(), 0)),
+            )
+            tree.clear()
+            clean(() => expectRefinement(tree, new Map(), 0))
+            const staleScan = vi
+              .spyOn(tree, `forRange`)
+              .mockImplementation((_low, _high, _inclusive, callback) => {
+                callback(1, value)
+              })
+            try {
+              rejections.push(
+                rejection(expected, () => expectRefinement(tree, new Map(), 0)),
+              )
+            } finally {
+              staleScan.mockRestore()
+            }
+            clean(() => expectRefinement(tree, new Map(), 0))
+            rejectAt(
+              `calibration: wrong pair payloads, shared payload mutation and transient stale state`,
+              rejections[0]!,
+            )
+          }),
       },
-    )
-
-  it(`replays a shrunk Map mismatch with the reported seed and path`, () => {
-    oracleRoute(`calibration`)
-    // A scanner that drops every row keeps the initial empty cut green. The
-    // first retained put fails at the public scan checkpoint.
-    const wrongScan = vi
-      .spyOn(BTree.prototype, `forRange`)
-      .mockImplementation(() => {})
-    try {
-      const failed = fc.check(mapHistoryProperty, {
-        seed: 20260930,
-        numRuns: 100,
-      })
-      expect(failed.failed).toBe(true)
-      expect(String(failed.errorInstance)).toMatch(/expected/)
-      if (failed.counterexamplePath === null)
-        throw new Error(`Missing Map mismatch replay path`)
-      const replay = fc.check(mapHistoryProperty, {
-        seed: failed.seed,
-        path: failed.counterexamplePath,
-        numRuns: 1,
-      })
-      expect(replay.failed).toBe(true)
-      expect(String(replay.errorInstance)).toMatch(/expected/)
-      expect(replay.counterexample).toEqual(failed.counterexample)
-    } finally {
-      wrongScan.mockRestore()
-    }
+      // Law 2 calibration. Each wrapper keeps the full scan correct, so only
+      // the partial and boundary range checks can reject it.
+      ...[
+        {
+          design: `ignores includeHigh`,
+          wrap: (scan: BTree<number, Payload>[`forRange`]) =>
+            ((low, high, _includeHigh, onFound) =>
+              scan(low, high, true, onFound)) as typeof scan,
+        },
+        {
+          design: `ignores the low bound`,
+          wrap: (scan: BTree<number, Payload>[`forRange`]) =>
+            ((_low, high, includeHigh, onFound) =>
+              scan(-Infinity, high, includeHigh, onFound)) as typeof scan,
+        },
+      ].map(({ design, wrap }) => ({
+        name: `rejects a range scan that ${design}`,
+        law: `BTree Map refinement`,
+        driver: (
+          plan: { nodeSize: number; actions: Array<Action> },
+          observe: (checkpoint: string, value: unknown) => void,
+        ) =>
+          recordAssertionJudgment(`BTree Map refinement`, plan, observe, () => {
+            const tree = new BTree<number, Payload>((a, b) => a - b, 4)
+            const model: ReferenceModel = new Map()
+            for (let key = 0; key < 40; key += 2)
+              applyAction(tree, model, { type: `put`, key, v: key })
+            clean(() => expectRefinement(tree, model, 21))
+            const scan = tree.forRange.bind(tree)
+            const wrongScan = vi
+              .spyOn(tree, `forRange`)
+              .mockImplementation(wrap(scan))
+            let rejected: Error
+            try {
+              rejected = rejection(
+                (error) => /forRange\(/.test(error.message),
+                () => expectRefinement(tree, model, 21),
+              )
+            } finally {
+              wrongScan.mockRestore()
+            }
+            clean(() => expectRefinement(tree, model, 21))
+            rejectAt(`calibration: range scan that ${design}`, rejected)
+          }),
+      })),
+    ],
   })
 
-  it.each([4, 5, 6, 7, 8])(
-    `preserves every cut through dense growth, retirement and reuse with node size %s`,
-    (nodeSize) => {
-      oracleRoute(`fixed history`)
-      const tree = new BTree<number, Payload>((a, b) => a - b, nodeSize)
-      const model: ReferenceModel = new Map()
-      expectRefinement(tree, model, 0)
-      // 64 entries exceed every selected leaf capacity. Deleting all then
-      // reinserting exercises collapse/reuse without asserting private shape.
-      const keys = Array.from({ length: 64 }, (_, key) => key)
-      for (const key of keys) {
-        const value = { v: key }
-        expect(tree.set(key, value)).toBe(true)
-        model.set(key, Object.freeze({ reference: value, v: key }))
-        expectRefinement(tree, model, key)
-      }
-      for (const key of [...keys].reverse()) {
-        expect(tree.delete(key)).toBe(true)
-        model.delete(key)
-        expectValue(tree.get(key), undefined)
-        expectRefinement(tree, model, key)
-      }
-      for (const key of keys) {
-        const value = { v: key + 100 }
-        expect(tree.set(key, value)).toBe(true)
-        model.set(key, Object.freeze({ reference: value, v: key + 100 }))
-        expectRefinement(tree, model, key)
-        const replacement = { v: key + 200 }
-        expect(tree.set(key, replacement)).toBe(false)
-        model.set(key, Object.freeze({ reference: replacement, v: key + 200 }))
-        expectRefinement(tree, model, key)
-      }
-      tree.clear()
-      model.clear()
-      expectRefinement(tree, model, 0)
-      const value = { v: 500 }
-      tree.set(0, value)
-      model.set(0, Object.freeze({ reference: value, v: 500 }))
-      expectRefinement(tree, model, 0)
-    },
-  )
-
-  it(`rejects wrong pair payloads, shared payload mutation and transient stale state`, () => {
-    oracleRoute(`calibration`)
-    const tree = new BTree<number, Payload>((a, b) => a - b, 4)
-    const value = { v: 1 }
-    const model: ReferenceModel = new Map([
-      [1, Object.freeze({ reference: value, v: 1 })],
-    ])
-    tree.set(1, value)
-    expectRefinement(tree, model, 0)
-    const wrongPair = vi
-      .spyOn(tree, `nextHigherPair`)
-      .mockReturnValue([1, { v: 2 }])
-    try {
-      expect(() => expectRefinement(tree, model, 0)).toThrowError(/expected/)
-    } finally {
-      wrongPair.mockRestore()
-    }
-    value.v = 2
-    expect(tree.get(1)).toBe(value) // The former identity-only check stays green.
-    expect(() => expectRefinement(tree, model, 0)).toThrowError(/expected/)
-    value.v = 1
-    expectRefinement(tree, model, 0)
-    // A stale delete result can vanish at a later clear. Judge the earlier cut.
-    expect(() => expectRefinement(tree, new Map(), 0)).toThrowError(/expected/)
-    tree.clear()
-    expectRefinement(tree, new Map(), 0)
-    const staleScan = vi
-      .spyOn(tree, `forRange`)
-      .mockImplementation((_low, _high, _inclusive, callback) => {
-        callback(1, value)
-      })
-    try {
-      expect(() => expectRefinement(tree, new Map(), 0)).toThrowError(
-        /expected/,
-      )
-    } finally {
-      staleScan.mockRestore()
-    }
-    expectRefinement(tree, new Map(), 0)
-  })
-
-  // Law 2 calibration. Each wrapper keeps the full scan correct, so only the
-  // partial and boundary range checks can reject it.
-  it.each([
-    {
-      design: `ignores includeHigh`,
-      wrap: (scan: BTree<number, Payload>[`forRange`]) =>
-        ((low, high, _includeHigh, onFound) =>
-          scan(low, high, true, onFound)) as typeof scan,
-    },
-    {
-      design: `ignores the low bound`,
-      wrap: (scan: BTree<number, Payload>[`forRange`]) =>
-        ((_low, high, includeHigh, onFound) =>
-          scan(-Infinity, high, includeHigh, onFound)) as typeof scan,
-    },
-  ])(`rejects a range scan that $design`, ({ wrap }) => {
-    oracleRoute(`calibration`)
-    const tree = new BTree<number, Payload>((a, b) => a - b, 4)
+  const runDenseCuts = (nodeSize: number) => {
+    const tree = new BTree<number, Payload>((a, b) => a - b, nodeSize)
     const model: ReferenceModel = new Map()
-    for (let key = 0; key < 40; key += 2)
-      applyAction(tree, model, { type: `put`, key, v: key })
-    expectRefinement(tree, model, 21)
-    const scan = tree.forRange.bind(tree)
-    const wrongScan = vi.spyOn(tree, `forRange`).mockImplementation(wrap(scan))
-    try {
-      expect(() => expectRefinement(tree, model, 21)).toThrowError(/forRange\(/)
-    } finally {
-      wrongScan.mockRestore()
+    expectRefinement(tree, model, 0)
+    // 64 entries exceed every selected leaf capacity. Deleting all then
+    // reinserting exercises collapse/reuse without asserting private shape.
+    const keys = Array.from({ length: 64 }, (_, key) => key)
+    for (const key of keys) {
+      const value = { v: key }
+      expect(tree.set(key, value)).toBe(true)
+      model.set(key, Object.freeze({ reference: value, v: key }))
+      expectRefinement(tree, model, key)
     }
-    expectRefinement(tree, model, 21)
-  })
-
-  it(`shrinks and replays a wrong neighbor payload without losing its pair key`, () => {
-    oracleRoute(`calibration`)
-    const property = fc.property(
-      fc.array(fc.integer({ min: 0, max: 20 }), { minLength: 1, maxLength: 8 }),
-      (values) => {
-        const tree = new BTree<number, Payload>((a, b) => a - b, 4)
-        const model: ReferenceModel = new Map()
-        values.forEach((v, key) =>
-          applyAction(tree, model, { type: `put`, key, v }),
-        )
-        expectRefinement(tree, model, -1)
-        // This pair keeps the expected key but has a wrong payload. The former
-        // key-only law accepted it.
-        const wrongPair: [number, Payload] = [0, { v: values[0]! + 1 }]
-        expect(wrongPair[0]).toBe(0)
-        expectPair(wrongPair, 0, model)
-      },
-    )
-    const failed = fc.check(property, { seed: 303102, numRuns: 1 })
-    expect(failed.failed).toBe(true)
-    expect(String(failed.errorInstance)).toMatch(/expected/)
-    expect(failed.counterexample?.[0].length).toBeGreaterThan(0)
-    if (failed.counterexamplePath === null)
-      throw new Error(`Missing calibration replay path`)
-    const replay = fc.check(property, {
-      seed: failed.seed,
-      path: failed.counterexamplePath,
-      numRuns: 1,
-      endOnFailure: true,
-    })
-    expect(replay.failed).toBe(true)
-    expect(String(replay.errorInstance)).toMatch(/expected/)
-    expect(replay.counterexample).toEqual(failed.counterexample)
+    for (const key of [...keys].reverse()) {
+      expect(tree.delete(key)).toBe(true)
+      model.delete(key)
+      expectValue(tree.get(key), undefined)
+      expectRefinement(tree, model, key)
+    }
+    for (const key of keys) {
+      const value = { v: key + 100 }
+      expect(tree.set(key, value)).toBe(true)
+      model.set(key, Object.freeze({ reference: value, v: key + 100 }))
+      expectRefinement(tree, model, key)
+      const replacement = { v: key + 200 }
+      expect(tree.set(key, replacement)).toBe(false)
+      model.set(key, Object.freeze({ reference: replacement, v: key + 200 }))
+      expectRefinement(tree, model, key)
+    }
+    tree.clear()
+    model.clear()
+    expectRefinement(tree, model, 0)
+    const value = { v: 500 }
+    tree.set(0, value)
+    model.set(0, Object.freeze({ reference: value, v: 500 }))
+    expectRefinement(tree, model, 0)
+  }
+  oracleProperty({
+    id: `btree-map.dense-cuts`,
+    law: {
+      statement: `Numeric BTree point, range, fallback and neighbor observations agree with the independent sorted Map after every action.`,
+      authority: btreeAuthority,
+      limits: `64 dense puts, reverse deletes, reinsertion with overwrite, clear and one put, at node sizes 4 through 8.`,
+    },
+    owns: [`src/utils/btree.ts`],
+    histories: [4, 5, 6, 7, 8],
+    label: (nodeSize) =>
+      `preserves every cut through dense growth, retirement and reuse with node size ${nodeSize}`,
+    resolve: (nodeSize) => ({ nodeSize }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`BTree Map refinement`, plan, observe, () =>
+        runDenseCuts(plan.nodeSize),
+      ),
+    check: forwardAssertionJudgment,
   })
 })

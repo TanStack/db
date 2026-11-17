@@ -15,11 +15,16 @@
  * promises readiness after it is a contract violation and throws. Only a
  * restart begins a new attempt.
  */
-import { expect, it } from 'vitest'
+import { expect } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
-import { declareOracle } from './oracle-declaration.js'
-import { oracleRoute } from './oracle-config.js'
+import { oracleProperty } from './oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
+import type { Verdict } from './oracle-config.js'
 import type { SyncConfig } from '../src/types.js'
 
 type Row = { id: number; value: string }
@@ -68,132 +73,175 @@ function expectReentrantStatuses(
   expect(statuses).toEqual(last === false ? [] : ['ready'])
 }
 
+// The original replacement-readiness case, unchanged: it drives production
+// and compares each cut with the model above.
+async function runReplacementCell({
+  status,
+  held,
+  first,
+  last,
+}: (typeof cells)[number]): Promise<void> {
+  let sync!: Sync
+  const finish = createDeferred<void>()
+  const c = createCollection<Row, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    gcTime: Infinity,
+    sync: {
+      sync: (params) => {
+        sync = params
+      },
+    },
+    onInsert: () => finish.promise,
+  })
+  const observed: Array<string> = []
+  const stop = c.subscribeChanges(() => {
+    observed.push(c.status)
+  })
+  c.on('status:change', ({ status: next }) => {
+    observed.push(next)
+  })
+  try {
+    sync.begin()
+    sync.write({ type: 'insert', value: { id: 1, value: 'initial' } })
+    sync.commit()
+    if (status === 'ready') sync.markReady()
+    // Loading admits edits after sync entry.
+    const optimistic = held
+      ? c.insert({ id: 9, value: 'optimistic' })
+      : undefined
+    observed.length = 0
+    // Structural callable widening makes the pre-fix run reach assertions:
+    // an ignored option is a semantic failure, never a compiler-error witness.
+    const truncate: (options?: { markReady?: boolean }) => void = sync.truncate
+    sync.begin()
+    truncate(first === undefined ? undefined : { markReady: first })
+    sync.write({ type: 'insert', value: { id: 2, value: 'discarded' } })
+    truncate(last === undefined ? undefined : { markReady: last })
+    sync.write({ type: 'insert', value: { id: 3, value: 'replacement' } })
+    const receipt = sync.commit()
+    const expectedStatus = expectedReplacementStatus(status, last)
+    expectReplacementStatus(c.status, observed, expectedStatus)
+    expect(
+      [...c.base.values()].map((row) => ({ id: row.id, value: row.value })),
+    ).toEqual([{ id: 3, value: 'replacement' }])
+    await receipt
+    if (held) expect(c.get(9)?.value).toBe('optimistic')
+    finish.resolve()
+    await optimistic?.when(`settled`)
+    expect.soft(c.status).toBe(expectedStatus)
+    // A later independent ordinary replacement is ready.
+    sync.begin()
+    sync.truncate()
+    sync.commit()
+    expect(c.status).toBe('ready')
+    expect(c.size).toBe(0)
+  } finally {
+    finish.resolve()
+    stop.unsubscribe()
+    await c.cleanup()
+  }
+}
+
 // What this oracle owns: the gap report judges how a truncate's replacement
 // rows set the Collection's readiness, in the sync path of sync.ts, by this
 // file's tests.
-declareOracle({
-  owns: [`src/collection/sync.ts`],
-  check: [expectReplacementStatus, expectReentrantStatuses],
-  model: [expectedReplacementStatus],
-})
-
-it.each(cells)(
-  'replacement readiness follows the final authored intent: %j',
-  async ({ status, held, first, last }) => {
-    oracleRoute(`case`)
-    let sync!: Sync
-    const finish = createDeferred<void>()
-    const c = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      startSync: true,
-      gcTime: Infinity,
-      sync: {
-        sync: (params) => {
-          sync = params
-        },
-      },
-      onInsert: () => finish.promise,
-    })
-    const observed: Array<string> = []
-    const stop = c.subscribeChanges(() => {
-      observed.push(c.status)
-    })
-    c.on('status:change', ({ status: next }) => {
-      observed.push(next)
-    })
-    try {
-      sync.begin()
-      sync.write({ type: 'insert', value: { id: 1, value: 'initial' } })
-      sync.commit()
-      if (status === 'ready') sync.markReady()
-      // Loading admits edits after sync entry.
-      const optimistic = held
-        ? c.insert({ id: 9, value: 'optimistic' })
-        : undefined
-      observed.length = 0
-      // Structural callable widening makes the pre-fix run reach assertions:
-      // an ignored option is a semantic failure, never a compiler-error witness.
-      const truncate: (options?: { markReady?: boolean }) => void =
-        sync.truncate
-      sync.begin()
-      truncate(first === undefined ? undefined : { markReady: first })
-      sync.write({ type: 'insert', value: { id: 2, value: 'discarded' } })
-      truncate(last === undefined ? undefined : { markReady: last })
-      sync.write({ type: 'insert', value: { id: 3, value: 'replacement' } })
-      const receipt = sync.commit()
-      const expectedStatus = expectedReplacementStatus(status, last)
-      expectReplacementStatus(c.status, observed, expectedStatus)
-      expect(
-        [...c.base.values()].map((row) => ({ id: row.id, value: row.value })),
-      ).toEqual([{ id: 3, value: 'replacement' }])
-      await receipt
-      if (held) expect(c.get(9)?.value).toBe('optimistic')
-      finish.resolve()
-      await optimistic?.when(`settled`)
-      expect.soft(c.status).toBe(expectedStatus)
-      // A later independent ordinary replacement is ready.
-      sync.begin()
-      sync.truncate()
-      sync.commit()
-      expect(c.status).toBe('ready')
-      expect(c.size).toBe(0)
-    } finally {
-      finish.resolve()
-      stop.unsubscribe()
-      await c.cleanup()
-    }
+oracleProperty<(typeof cells)[number], Verdict>({
+  id: `truncate-readiness.replacement-intent`,
+  law: {
+    statement: `A truncate's replacement makes the Collection ready unless its final authored intent is markReady:false, which keeps the current status, at every publication and after commit.`,
+    authority: `Sync truncate readiness contract stated above, the core boundary required by the IndexedDB retirement model`,
+    limits: `Initial loading or ready status, every pair of two truncate intents in one transaction, and an optional held optimistic transaction.`,
   },
-)
+  owns: [`src/collection/sync.ts`],
+  histories: cells,
+  label: (cell) =>
+    `replacement readiness follows the final authored intent: ${JSON.stringify(cell)}`,
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `truncate-readiness.replacement-intent`,
+      plan,
+      observe,
+      () => runReplacementCell(plan),
+    ),
+  check: forwardAssertionJudgment,
+})
 
 // Reentrant commits queue behind the publication currently notifying observers.
 // Their final replacement determines the next published batch, including its
 // readiness intent. An earlier replaced snapshot must not make that batch ready.
 // The Collection starts loading, so only a replacement can make it ready.
-it.each(intents.flatMap((first) => intents.map((last) => ({ first, last }))))(
-  'composes readiness of reentrant replacement batches: %j',
-  async ({ first, last }) => {
-    oracleRoute(`case`)
-    let sync!: Sync
-    const c = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      startSync: true,
-      gcTime: Infinity,
-      sync: {
-        sync: (params) => {
-          sync = params
-        },
-      },
-    })
-    let entered = false
-    const receipts: Array<ReturnType<Sync['commit']>> = []
-    const statuses: Array<string> = []
-    c.on('status:change', ({ status }) => {
-      statuses.push(status)
-    })
-    const subscription = c.subscribeChanges(() => {
-      if (entered) return
-      entered = true
-      for (const [index, markReady] of [first, last].entries()) {
-        sync.begin()
-        sync.truncate(markReady === undefined ? undefined : { markReady })
-        sync.write({
-          type: 'insert',
-          value: { id: index + 2, value: 'replacement' },
-        })
-        receipts.push(sync.commit())
-      }
-    })
-    try {
-      sync.begin()
-      sync.write({ type: 'insert', value: { id: 1, value: 'trigger' } })
-      sync.commit()
-      await Promise.all(receipts)
-      expect(entered).toBe(true)
-      expectReentrantStatuses(c.status, statuses, last)
-      expect([...c.keys()]).toEqual([3])
-    } finally {
-      subscription.unsubscribe()
-      await c.cleanup()
-    }
-  },
+const reentrantPairs = intents.flatMap((first) =>
+  intents.map((last) => ({ first, last })),
 )
+
+async function runReentrantPair({
+  first,
+  last,
+}: (typeof reentrantPairs)[number]): Promise<void> {
+  let sync!: Sync
+  const c = createCollection<Row, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    gcTime: Infinity,
+    sync: {
+      sync: (params) => {
+        sync = params
+      },
+    },
+  })
+  let entered = false
+  const receipts: Array<ReturnType<Sync['commit']>> = []
+  const statuses: Array<string> = []
+  c.on('status:change', ({ status }) => {
+    statuses.push(status)
+  })
+  const subscription = c.subscribeChanges(() => {
+    if (entered) return
+    entered = true
+    for (const [index, markReady] of [first, last].entries()) {
+      sync.begin()
+      sync.truncate(markReady === undefined ? undefined : { markReady })
+      sync.write({
+        type: 'insert',
+        value: { id: index + 2, value: 'replacement' },
+      })
+      receipts.push(sync.commit())
+    }
+  })
+  try {
+    sync.begin()
+    sync.write({ type: 'insert', value: { id: 1, value: 'trigger' } })
+    sync.commit()
+    await Promise.all(receipts)
+    expect(entered).toBe(true)
+    expectReentrantStatuses(c.status, statuses, last)
+    expect([...c.keys()]).toEqual([3])
+  } finally {
+    subscription.unsubscribe()
+    await c.cleanup()
+  }
+}
+
+oracleProperty<(typeof reentrantPairs)[number], Verdict>({
+  id: `truncate-readiness.reentrant-batches`,
+  law: {
+    statement: `Reentrant replacement commits queue behind the current publication, and the final replacement's readiness intent alone decides the next batch's status.`,
+    authority: `Sync truncate readiness contract stated above, the core boundary required by the IndexedDB retirement model`,
+    limits: `Every pair of readiness intents for two reentrant replacement transactions on a loading Collection.`,
+  },
+  owns: [`src/collection/sync.ts`],
+  histories: reentrantPairs,
+  label: (pair) =>
+    `composes readiness of reentrant replacement batches: ${JSON.stringify(pair)}`,
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `truncate-readiness.reentrant-batches`,
+      plan,
+      observe,
+      () => runReentrantPair(plan),
+    ),
+  check: forwardAssertionJudgment,
+})

@@ -26,22 +26,19 @@
  * shapes that the draft copy changes (see `insertOnly`). Mutation order,
  * peers, and Storage failures belong to the order and peer owners.
  */
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { describe, expect } from 'vitest'
 import { createCollection } from '../src/collection/index'
 import { SerializationError } from '../src/errors'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
+import { oracleProperty } from './oracle-config.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import {
   observeHistoryPromise,
   withHistoryCleanup,
@@ -341,33 +338,55 @@ async function runHistory({ entry, handler, payload }: History) {
       const label = `${entry} ${payload.label}`
 
       if (payload.restored === LOST) {
-        expect(settled.status, label).toBe(`rejected`)
+        oracleAssertion(label, () =>
+          expect(settled.status, label).toBe(`rejected`),
+        )
         if (settled.status === `rejected`)
-          expect(settled.reason, label).toBeInstanceOf(SerializationError)
-        expect(collection.get(`row`), `${label}: writer`).toEqual(previous)
-        expect(storage.getItem(storageKey), `${label}: durable`).toBe(before)
-        expect(handlerCalls, `${label}: handler`).toBe(0)
+          oracleAssertion(label, () =>
+            expect(settled.reason, label).toBeInstanceOf(SerializationError),
+          )
+        oracleAssertion(`${label}: writer`, () =>
+          expect(collection.get(`row`), `${label}: writer`).toEqual(previous),
+        )
+        oracleAssertion(`${label}: durable`, () =>
+          expect(storage.getItem(storageKey), `${label}: durable`).toBe(before),
+        )
+        oracleAssertion(`${label}: handler`, () =>
+          expect(handlerCalls, `${label}: handler`).toBe(0),
+        )
         return
       }
 
-      expect(settled.status, label).toBe(`fulfilled`)
-      expect(collection.get(`row`)?.payload, `${label}: writer`).toEqual(
-        payload.authored,
+      oracleAssertion(label, () =>
+        expect(settled.status, label).toBe(`fulfilled`),
+      )
+      oracleAssertion(`${label}: writer`, () =>
+        expect(collection.get(`row`)?.payload, `${label}: writer`).toEqual(
+          payload.authored,
+        ),
       )
       const durable = JSON.parse(storage.getItem(storageKey)!) as Record<
         string,
         { data: Row }
       >
-      expect(durable[`s:row`]?.data.payload, `${label}: durable`).toStrictEqual(
-        payload.restored,
+      oracleAssertion(`${label}: durable`, () =>
+        expect(
+          durable[`s:row`]?.data.payload,
+          `${label}: durable`,
+        ).toStrictEqual(payload.restored),
       )
-      expect(durable[`s:other`]?.data.payload, `${label}: peer row`).toBe(
-        `kept`,
+      oracleAssertion(`${label}: peer row`, () =>
+        expect(durable[`s:other`]?.data.payload, `${label}: peer row`).toBe(
+          `kept`,
+        ),
       )
       reopened = open(storage)
       await reopened.preload()
-      expect(reopened.get(`row`)?.payload, `${label}: restore`).toStrictEqual(
-        payload.restored,
+      oracleAssertion(`${label}: restore`, () =>
+        expect(
+          reopened!.get(`row`)?.payload,
+          `${label}: restore`,
+        ).toStrictEqual(payload.restored),
       )
     },
     () => [
@@ -377,101 +396,126 @@ async function runHistory({ entry, handler, payload }: History) {
   )
 }
 
-// What this oracle owns: the gap report judges every function in
-// src/local-storage.ts by this file's JSON-fidelity histories and fixed
-// payload cases.
-declareOracle({
-  owns: [`src/local-storage.ts`],
-  check: [runHistory],
-  model: [restoredArray, restoredObject],
-})
-
 describe(`LocalStorage value fidelity oracle`, () => {
-  if (!oracleReplayRequested()) {
-    // Fixed histories. The first is the reported case: a function property in
-    // an inserted row. The others place each lost kind under an array or an
-    // object, and check each documented normalization on every entry path.
-    const fixedPayloads: Array<Described> = [
-      ...lostLeaves.map((make) => make()),
-      lost(`nested function`, { a: { b: () => 1 } }),
-      lost(`function in array`, [1, () => 1]),
-      lost(`undefined entry`, [1, undefined]),
-      faithful(`Date`, new Date(0), new Date(0).toISOString()),
-      faithful(`toJSON object`, { toJSON: () => `x` }, `x`),
-      faithful(`undefined property`, { a: undefined, b: 1 }, { b: 1 }),
-      faithful(`negative zero`, -0, 0),
-      faithful(`empty containers`, { a: [], b: {} }),
+  // Fixed histories. The first is the reported case: a function property in
+  // an inserted row. The others place each lost kind under an array or an
+  // object, and check each documented normalization on every entry path.
+  const fixedPayloads: Array<Described> = [
+    ...lostLeaves.map((make) => make()),
+    lost(`nested function`, { a: { b: () => 1 } }),
+    lost(`function in array`, [1, () => 1]),
+    lost(`undefined entry`, [1, undefined]),
+    faithful(`Date`, new Date(0), new Date(0).toISOString()),
+    faithful(`toJSON object`, { toJSON: () => `x` }, `x`),
+    faithful(`undefined property`, { a: undefined, b: 1 }, { b: 1 }),
+    faithful(`negative zero`, -0, 0),
+    faithful(`empty containers`, { a: [], b: {} }),
+    faithful(
+      `toJSON function`,
+      Object.assign(() => 1, { toJSON: () => `x` }),
+      `x`,
+    ),
+    faithful(`boxed number`, new Number(2), 2),
+    faithful(
+      `toJSON undefined property`,
+      { a: { toJSON: () => undefined }, b: 1 },
+      { b: 1 },
+    ),
+    lost(`toJSON undefined entry`, [{ toJSON: () => undefined }]),
+    onlyInserted(
       faithful(
-        `toJSON function`,
-        Object.assign(() => 1, { toJSON: () => `x` }),
-        `x`,
+        `hidden symbol key`,
+        Object.defineProperty({ a: 1 }, Symbol(`s`), { value: 1 }),
+        { a: 1 },
       ),
-      faithful(`boxed number`, new Number(2), 2),
-      faithful(
-        `toJSON undefined property`,
-        { a: { toJSON: () => undefined }, b: 1 },
-        { b: 1 },
-      ),
-      lost(`toJSON undefined entry`, [{ toJSON: () => undefined }]),
-      onlyInserted(
-        faithful(
-          `hidden symbol key`,
-          Object.defineProperty({ a: 1 }, Symbol(`s`), { value: 1 }),
-          { a: 1 },
-        ),
-      ),
-    ]
-    const entries = [
-      `insert`,
-      `update`,
-      `manual insert`,
-      `manual update`,
-    ] as const
-    for (const entry of entries) {
-      for (const handler of [true, false]) {
-        for (const payload of fixedPayloads) {
-          if (!isLegal({ entry, handler, payload })) continue
-          it(`${entry} ${handler ? `with` : `without`} a handler of ${payload.label} ${payload.restored === LOST ? `rejects` : `persists its JSON form`}`, () => {
-            oracleRoute(`fixed history`)
-            return runHistory({ entry, handler, payload })
-          })
-        }
+    ),
+  ]
+  const entries = [
+    `insert`,
+    `update`,
+    `manual insert`,
+    `manual update`,
+  ] as const
+  // A payload holds functions and class instances, which are not history
+  // data, so each enumerated history is its test name; resolution builds the
+  // history that the shared driver runs.
+  const fixedHistories = new Map<string, () => History>()
+  for (const entry of entries) {
+    for (const handler of [true, false]) {
+      for (const payload of fixedPayloads) {
+        if (!isLegal({ entry, handler, payload })) continue
+        fixedHistories.set(
+          `${entry} ${handler ? `with` : `without`} a handler of ${payload.label} ${payload.restored === LOST ? `rejects` : `persists its JSON form`}`,
+          () => ({ entry, handler, payload }),
+        )
       }
-      // Storage must hold the JSON the check accepted. This `toJSON` returns
-      // the full value once and then a function, which JSON would drop, so a
-      // second serialization before the write would store a different row.
-      it(`${entry} stores the JSON that its check accepted`, () => {
-        oracleRoute(`fixed history`)
+    }
+    // Storage must hold the JSON the check accepted. This `toJSON` returns
+    // the full value once and then a function, which JSON would drop, so a
+    // second serialization before the write would store a different row.
+    fixedHistories.set(
+      `${entry} stores the JSON that its check accepted`,
+      () => {
         let calls = 0
         const payload = {
           toJSON: () => (calls++ === 0 ? `checked` : () => `later`),
         }
-        return runHistory({
+        return {
           entry,
           handler: true,
           payload: faithful(`toJSON that changes`, payload, `checked`),
-        })
-      })
-    }
-
-    const historyFixedSeed = oracleFixedSeed(20_261_021, {
-      numRuns: oracleRuns(300),
-    })
-    fcTest.prop([historyArbitrary], historyFixedSeed)(
-      `matches the JSON value model (fixed)`,
-      (history) => {
-        oracleRoute(oracleRouteOf(historyFixedSeed))
-        return runHistory(history)
+        }
       },
     )
   }
-  // A path replay of this property runs its one recorded history here.
-  const historyCampaign = oraclePropertyOptions(300, property)
-  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
-    `matches the JSON value model (random)`,
-    (history) => {
-      oracleRoute(oracleRouteOf(historyCampaign))
-      return runHistory(history)
+
+  oracleProperty({
+    id: `local-storage.value-fidelity-fixed`,
+    law: {
+      statement: `The default JSON storage boundary rejects lossy payloads without durable writes or handler calls, and restores accepted payloads in their independently described JSON form.`,
+      authority: `LocalStorage guide acceptance and restore contract stated above`,
+      limits: `The named payloads above on every legal entry path, with and without a handler; each is replayed through the same driver and comparison as the generated histories.`,
     },
-  )
+    owns: [`src/local-storage.ts`],
+    histories: [...fixedHistories.keys()],
+    label: (name) => name,
+    resolve: (name) => ({ history: fixedHistories.get(name)!() }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `local-storage value fidelity`,
+        plan,
+        observe,
+        () => runHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: property,
+    law: {
+      statement: `The default JSON storage boundary rejects lossy payloads without durable writes or handler calls, and restores accepted payloads in their independently described JSON form.`,
+      authority: `LocalStorage guide acceptance and restore contract stated above`,
+      limits: `The existing default-parser value grammar and entry paths; custom parsers, class instances, cross-realm values, getters, peer timing and Storage failures remain outside this owner.`,
+    },
+    // What this oracle owns: the gap report judges every function in
+    // src/local-storage.ts by this file's JSON-fidelity histories and fixed
+    // payload cases.
+    owns: [`src/local-storage.ts`],
+    histories: {
+      arbitrary: historyArbitrary,
+      runs: 300,
+      fixedSeeds: [20261021],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `local-storage value fidelity`,
+        plan,
+        observe,
+        () => runHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

@@ -35,8 +35,7 @@ import {
   observedView,
   toSqlRow,
 } from '../../db-adapter-conformance/src'
-import { MockRecordApi } from './mock-record-api'
-import type { Event, ListResponse } from 'trailbase'
+import type { Event, ListResponse, RecordApi } from 'trailbase'
 import type {
   ConformanceRow,
   ControlledProvider,
@@ -68,35 +67,50 @@ interface ProviderSession {
 }
 
 class TrailBaseProvider implements ControlledProvider {
-  readonly api = new MockRecordApi<ConformanceRecord>()
+  readonly api: RecordApi<ConformanceRecord>
   readonly sessions: Array<ProviderSession> = []
   private rows = new Map<number, ConformanceRow>()
 
   constructor() {
-    this.api.subscribe.mockImplementation(() => {
-      let controller!: ReadableStreamDefaultController<Event>
-      const session = { cancels: 0, locked: false } as ProviderSession
-      const stream = new ReadableStream<Event>({
-        start: (value) => {
-          controller = value
-        },
-        cancel: () => {
-          session.cancels += 1
-        },
-      })
-      session.stream = stream
-      session.controller = controller
-      this.sessions.push(session)
-      // A new sync run lists the source again from its current rows.
-      this.rows = new Map()
-      return Promise.resolve(stream)
-    })
-    this.api.list.mockImplementation(
-      () =>
+    const unsupported = () => {
+      throw new Error(`unused eager RecordApi operation`)
+    }
+    this.api = {
+      listOp: unsupported,
+      listGeoOp: unsupported,
+      read: unsupported,
+      readOp: unsupported,
+      create: unsupported,
+      createBulk: unsupported,
+      createOp: unsupported,
+      update: unsupported,
+      updateOp: unsupported,
+      delete: unsupported,
+      deleteOp: unsupported,
+      subscribeAll: unsupported,
+      subscribe: () => {
+        let controller!: ReadableStreamDefaultController<Event>
+        const session = { cancels: 0, locked: false } as ProviderSession
+        const stream = new ReadableStream<Event>({
+          start: (value) => {
+            controller = value
+          },
+          cancel: () => {
+            session.cancels += 1
+          },
+        })
+        session.stream = stream
+        session.controller = controller
+        this.sessions.push(session)
+        // A new sync run lists the source again from its current rows.
+        this.rows = new Map()
+        return Promise.resolve(stream)
+      },
+      list: () =>
         new Promise<ListResponse<ConformanceRecord>>((resolve, reject) => {
           this.latest().list = { resolve, reject }
         }),
-    )
+    }
   }
 
   private latest(): ProviderSession {

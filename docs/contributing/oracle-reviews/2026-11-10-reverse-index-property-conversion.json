@@ -1,0 +1,1068 @@
+{
+  "scope": "Reverse-index oracleProperty conversion, no production edits",
+  "sourceCommit": "3e6c0db1a897390bd0266fb09f836d842bb5653c",
+  "baselineCommit": "9a5214f2801c2c7918f6fd21ac5add317559322a",
+  "sourceSha256": {
+    "packages/db/tests/reverse-index-oracle.property.test.ts": "c0b3b06c1cb17107872b227398ed8bf1d4fb971f87dd5094d6c9c34cc8529728",
+    "packages/db/tests/oracle-config.ts": "92e601832652a5ddfabd7db0ce9ef00ef1f0fbc6555caac253fe70db0dab6108",
+    "scripts/oracle-lint-settings.mjs": "94aa298003f1660d77712af74303d9bcb1bc267bf100527e842d1d1ffd04a6d0",
+    "packages/db/src/indexes/reverse-index.ts": "ebf2d22eb0eec10acb4df154488862243ec20be117bc069fe307fc991853dd0b"
+  },
+  "framework": {
+    "revision": "e1fb504",
+    "filesSha256": {
+      "LICENSE": "a09cf172b475f76e0cb456e3cd346b1aa3fe5169ae5454f9f7fbe98b3e93c85f",
+      "package.json": "20b03b5e1c3ebd7c2296499990f713978de6eec28691e75f96ea2e8bacf477e3",
+      "oracle-gaps/capture-setup.mjs": "60d94d09ea3a6d6f360734cff081619b1dca5d1a2ccc7e6fc12bebc610f00429",
+      "oracle-gaps/authored.mjs": "2b190633ac3ea39d6ad614fded711a889d13da77ef39d6057af5fa6e9f18dbcb",
+      "oracle-gaps/evidence.mjs": "996424e67f31b611a32ef84e778331efb1a9915e3416f3c3777ebe97a21d9507",
+      "oracle-gaps/analysis.mjs": "79d97a43b5d9357e17a1a3f82c7b016e0607eca3d4422b4a39240d02e69089de",
+      "oracle-gaps/args.mjs": "5781d60a999a9c8c6e7df2a1724b359abc365a6a728bec408eca4f042dd27b54",
+      "oracle-gaps/schemata.mjs": "1439fc561aec1ecd58ea038ab17a446ff930e2d9054b6ba5ef8690be32e79d1e",
+      "oracle-gaps/report.mjs": "373741c0d9cd88b5e3ed5fc3f1f82a4d611e9622af726c9015796466d9906f3a",
+      "oracle-gaps/check.mjs": "b750ac24396b54cc826596589f53d6c8fcda060063fa90e0fac5536d7528dc44",
+      "oracle-gaps/index.mjs": "ed88db0f4ebc3cfdd5daacc7f4af781e2558a60f5ce763eefffbf5b17c97b0fa",
+      "oracle-gaps/owners.mjs": "aa2e1dbda741e70d7ec8fba944541108de96c9bbf452a42ef4a6cc38df05b960",
+      "oracle-gaps/daemon.mjs": "67e08f4143532406ae06c77123afc23f210edf21a21ed8835676fd8e6250a782",
+      "oracle-gaps/classify.mjs": "809f52e995d024d906a94ae3167cb3a18b448b456e08e7e0a069d2dbdaae4eff",
+      "src/oracle-property.ts": "579adcfad076c10731cdbd150d3ff8b4a161b8c7277aeb574ab7c357fcb4d507",
+      "src/oracle-route.ts": "83ab8fd20c3400c41df4d22e7078660042cdaf218782d0d815b1e601f6a22a07",
+      "src/oracle-replay-witness.ts": "120bdc7d3a856411cd4e89a79a0714f9dab4ab46a74d9aa5021d9baa3e580b44",
+      "src/oracle-declaration.ts": "ded08f5d486674eb4c178e3719acd44fa306cf9f55aefbd8e69a5d5e3c3eec71",
+      "src/oracle-failure-fidelity.ts": "f95203e1c3f7d9f256f10862dd7b9627e85879321fd82b214a3f40ad01ed6901",
+      "src/declaration.ts": "915cf141b2f24d67f0c819e2246d077c15737723db0f98730e1cd3630b7dd2f8",
+      "src/oracle-environment.ts": "155a1236a917e41c31e7d0cfc6b405f08658ceff80316f3b8bfb4f6c1b7f7f10",
+      "src/oracle-config.ts": "7716051c7ccba6357b902ec08adffd27992dc04145e6a017e03400d17fa5105f",
+      "src/index.ts": "35ef44706c3d1602f3da95fb3d539ade2a017796dcf9581b621683ce6bd50b88",
+      "node_modules/.bin/tsserver": "7ab4f62cb8741990db754e942d65a712b83d3f9d4ec734bad774959adce9301b",
+      "node_modules/.bin/vitest": "9f617fc78858e5426a11b9ac4842a6ed092af8642d04bde55dce156a885a8a85",
+      "node_modules/.bin/tsc": "569025d37307bc3f8c9082973550caddc412c8c54f1b4aec6b4d509910263244",
+      "dist/esm/oracle-declaration.d.ts": "9f83b828768180acb5db588e08dfda4e2f40503e9853aa97483a667358b6df61",
+      "dist/esm/oracle-environment.js": "48d34944ebbe421dd4d4b28b38e9cb5246952d712e97c557b034bbdb1c7a44e3",
+      "dist/esm/oracle-environment.js.map": "0b4f8070803ffc256654eff89051d3d68f038943881f9f275177d1835a0b75f6",
+      "dist/esm/oracle-declaration.js.map": "13b9f097c7f3311b52b9d7fdf9b92c5f6ed78d9cd1f4343d4c41bc5f04ae0c39",
+      "dist/esm/oracle-config.js": "3c103c4adcb7afc785ef52b11bf29dad61054b60eac196cb0c525a44e54eef3b",
+      "dist/esm/oracle-route.d.ts": "455e9465bd54e567e78be11e481e232ff80d1dd09abfed5e136f566ec0919006",
+      "dist/esm/declaration.js": "56de675cb831a3833dde0d4cf5ebb32be9d7351980deafb1ee1caffcdf675b4c",
+      "dist/esm/oracle-failure-fidelity.js.map": "3dbdc6c8afa1276f929cf40b13516e92b2e5e715fe5d1490f150f70c07e6e512",
+      "dist/esm/oracle-replay-witness.d.ts": "e87a5f5e9b42619783269ca9c346bd9fb31aa06b43e55ad9c4921b5447caec53",
+      "dist/esm/oracle-config.js.map": "8aacc929f07d2441c8af786e09f3cae9d70c100ea5e1d483c82a30b1119c8766",
+      "dist/esm/declaration.d.ts": "bca9a91e8542e20cea264cd2f5f9f25b83623d059f645a5a6b96ec5ff757ca82",
+      "dist/esm/index.js": "733a0d550709980393f4b2e318d4eecabbb99305ce6597e4566a1e74b5a70212",
+      "dist/esm/oracle-route.js": "6ba478a0dde0adc198f8bccaddadeacc100cde69206e6a7ec3d198d758595606",
+      "dist/esm/oracle-environment.d.ts": "ec5fdeec7d905f8ecbaaef7100971852146427cf1fe7dafa9d24338c7f71192e",
+      "dist/esm/oracle-failure-fidelity.d.ts": "8c24113bce60003e187046d798aac6ab1e38801618dd5e356b112a53d9b7fe9b",
+      "dist/esm/oracle-config.d.ts": "257d1d24561613dcf0443e8ae7ce92c9abce5a424a4be69b57cb8ae247076bd8",
+      "dist/esm/oracle-route.js.map": "2688dc817cc6c56a718e08262992d335b30276c7f186507a1ae474aeec31a0cf",
+      "dist/esm/oracle-property.js": "e7724f82a72e53c0456c9d2e40317ded27ab0a461fd03a3b8183048d13cfb493",
+      "dist/esm/index.js.map": "4aa10cceaaff3392b4edaaad307579422f0e944b7a78523842aa7e9108b9f595",
+      "dist/esm/oracle-property.js.map": "644cf6b8e4ff71f4b7e8f2271acabdf7e9940fd0c82b35319bab66ec888b930b",
+      "dist/esm/oracle-declaration.js": "25ad5cdb13a8f71b845a5309c08b88c7bb46c69845710360eef63c3d932b552f",
+      "dist/esm/index.d.ts": "2106bf98830198666682d7ebcb27ad5f3539c970e408bbad6c18ed77f3709583",
+      "dist/esm/oracle-failure-fidelity.js": "26d02296dd13485a51cd4e4fa685342a25b354ec8d5b018ca252ea9d78cd7885",
+      "dist/esm/declaration.js.map": "3005f273933b31cf787f5c2ad16705d854bb8d37588d2658b84fe57d13f9f2d1",
+      "dist/esm/oracle-replay-witness.js.map": "5423ed7d829c199abf7c5356aabc0b248832e5cc8b3f180ebcff9712b6c0552a",
+      "dist/esm/oracle-property.d.ts": "2f24cda988462669cdcdaa3bb778ac942dc32f75544ae11e9d26cba9aeb8bdac",
+      "dist/esm/oracle-replay-witness.js": "aa468cd9a0fbce6a13967ddbafb2bf2fe322e185fba5a9d4d42d78cdab31e280",
+      "dist/cjs/declaration.cjs": "04bc9b54d1a934aea7f7f0309440adf02498ded381626eeea2c5200ef83849b8",
+      "dist/cjs/oracle-declaration.d.cts": "9f83b828768180acb5db588e08dfda4e2f40503e9853aa97483a667358b6df61",
+      "dist/cjs/oracle-route.d.cts": "455e9465bd54e567e78be11e481e232ff80d1dd09abfed5e136f566ec0919006",
+      "dist/cjs/oracle-route.cjs": "cc7501f2a69305d56a2eadaeb174ca8ee37702e419625ea9065a09a04a45bd46",
+      "dist/cjs/declaration.cjs.map": "2bb13c2952f6c6dc3371d1e67d7bf1bc7c6104a6d61e7a8f0eb39d91123f6de6",
+      "dist/cjs/declaration.d.cts": "bca9a91e8542e20cea264cd2f5f9f25b83623d059f645a5a6b96ec5ff757ca82",
+      "dist/cjs/oracle-declaration.cjs.map": "4e471f580b46b147701b57369da1a9195ed19be5e4b91d675e2a6e38da9a9922",
+      "dist/cjs/oracle-declaration.cjs": "141a7dfb67d5d698207af959f8c3c452f5846af70430e535bd342ad1d8ae72bc",
+      "dist/cjs/oracle-route.cjs.map": "c8c976ac79a206efc78fa51d374ac733a2bd6497122bbd79171c3545816e12c2"
+    }
+  },
+  "acceptedPair": {
+    "seed": 42,
+    "prefix": "TANSTACK_DB_ORACLE",
+    "runtimeSeedVariable": "TANSTACK_DB_ORACLE_SEED",
+    "contexts": 1,
+    "filtered": false,
+    "sampled": false,
+    "before": {
+      "run": {
+        "id": "77c707fd41e6",
+        "inputs": "1 source files, 120 oracle files, 242 ordinary test files, 0 authored mutants, seed 42, pool threads"
+      },
+      "evidence": {
+        "reused": 0,
+        "computed": 274,
+        "cut": 0,
+        "idle": 0,
+        "spin": 0,
+        "rerun": 0,
+        "unchanged": 2
+      },
+      "reportSha256": "e733687ff6b235d421048b18c938eb76fe5c68ce3c23edc1c447e0db5c207397",
+      "staticOutcomes": {
+        "crashed": 6,
+        "killed": 23,
+        "survived": 5,
+        "unreached": 15
+      },
+      "nondeterministicTests": 69,
+      "reverseOwnerNondeterministicTests": []
+    },
+    "after": {
+      "run": {
+        "id": "6a2225a82b14",
+        "inputs": "1 source files, 120 oracle files, 242 ordinary test files, 0 authored mutants, seed 42, pool threads"
+      },
+      "evidence": {
+        "reused": 0,
+        "computed": 275,
+        "cut": 0,
+        "idle": 0,
+        "spin": 0,
+        "rerun": 0,
+        "unchanged": 2
+      },
+      "reportSha256": "5a79e5a58aead7a80676aa0170f0f65c75e71ff70c756e466b436c1aa86b20c1",
+      "staticOutcomes": {
+        "crashed": 6,
+        "killed": 23,
+        "survived": 5,
+        "unreached": 15
+      },
+      "nondeterministicTests": 69,
+      "reverseOwnerNondeterministicTests": []
+    },
+    "previousSemanticKills": 23,
+    "retainedNamedSemanticKills": 23,
+    "previousThrownLawDetections": 0,
+    "identicalStableKeys": 49,
+    "noExclusions": true,
+    "immutableAfterTrackedFiles": 3597,
+    "inputManifestSha256": "40275bdd42b1883e0afe13077e37717618a4f66d608373805e266d0072733594",
+    "beforeTrackedManifestSha256": "2241f7be9890e7252407feedab712f41d200ba9aeded3ec7a15b4130d923408e",
+    "afterTrackedManifestSha256": "3f94074d68423bed482cc07bee7922ad73b00424ff0acfd6480fda6f852df362",
+    "pairComparatorSha256": "5afcf32d90bae0bf561a572cd2517ffb76fd9cd704710b1f92110cf63012e30f"
+  },
+  "reach": {
+    "runBudgetPerCampaign": 200,
+    "minimumPerDeclaredState": 1,
+    "fixedSeed": 2045,
+    "reseededRandomSeed": 42,
+    "counts": {
+      "fixed seed 2045": {
+        "asc index, nulls first": 65,
+        "asc index, nulls last": 37,
+        "cursor read": 128,
+        "desc index, nulls first": 66,
+        "desc index, nulls last": 41,
+        "filter rejection": 68,
+        "mixed value groups": 167,
+        "nullish cursor": 56,
+        "nullish cursor before values": 32,
+        "numeric cursor": 72,
+        "start read": 81,
+        "zero read": 34
+      },
+      "random seed": {
+        "asc index, nulls first": 66,
+        "asc index, nulls last": 57,
+        "cursor read": 126,
+        "desc index, nulls first": 52,
+        "desc index, nulls last": 34,
+        "filter rejection": 68,
+        "mixed value groups": 158,
+        "nullish cursor": 52,
+        "nullish cursor before values": 24,
+        "numeric cursor": 74,
+        "start read": 83,
+        "zero read": 34
+      }
+    },
+    "finiteLargeHistories": 4,
+    "finiteHistoriesCountTowardReach": false
+  },
+  "controls": {
+    "generatedConstruction": {
+      "seed": 42,
+      "seededExamples": 9,
+      "firstGenerated": [
+        {
+          "index": 9,
+          "requiredStates": [
+            "zero read"
+          ]
+        },
+        {
+          "index": 10,
+          "requiredStates": []
+        },
+        {
+          "index": 11,
+          "requiredStates": [
+            "desc index, nulls last",
+            "start read",
+            "mixed value groups"
+          ]
+        },
+        {
+          "index": 12,
+          "requiredStates": []
+        },
+        {
+          "index": 13,
+          "requiredStates": [
+            "asc index, nulls first",
+            "start read",
+            "mixed value groups"
+          ]
+        },
+        {
+          "index": 14,
+          "requiredStates": []
+        },
+        {
+          "index": 15,
+          "requiredStates": []
+        },
+        {
+          "index": 16,
+          "requiredStates": [
+            "asc index, nulls first",
+            "start read",
+            "mixed value groups"
+          ]
+        },
+        {
+          "index": 17,
+          "requiredStates": [
+            "cursor read",
+            "nullish cursor"
+          ]
+        },
+        {
+          "index": 18,
+          "requiredStates": []
+        }
+      ],
+      "constructedGenerated": 104
+    },
+    "nativeInitialOnlyEnforcement": "false GREEN with zero-read observation omitted only for fresh generated constructions",
+    "sharedEnforcement": {
+      "result": "RED",
+      "law": "constructed reach",
+      "checkpoint": "constructed states",
+      "seed": 42,
+      "shrinkPath": "9:0:0:0:0:0:0"
+    },
+    "mutatedDirectReplay": "same named RED",
+    "cleanDirectReplay": "GREEN",
+    "lateDriverFailure": "original Error: reverse late-driver sentinel remains primary",
+    "restoredByteForByteBeforeAfter": true,
+    "artifactsSha256": {
+      "reverse-native-generated-omission.ts": "2e035c685e2b2da90616015a7afee95b8f6966d42bb688fc0d7a463e07252cfa",
+      "reverse-native-generated-omission.log": "b6a26da7a7bccfcfde53851f83d62d0a02358f94884e16e46d4e81482124e37e",
+      "reverse-shared-generated-omission.ts": "d7eecbb7fe090ae756929f6c2f4c8f92cf77af3adcdfbaeb67713a65c76eacc7",
+      "reverse-shared-generated-omission.log": "82b4a343f7b17d980a13b665d6e72483ed64996ff0c12ecc3c3e3bfd01f9a1eb",
+      "reverse-shared-generated-omission-replay.log": "6565690c96e233ac8fff7013577187341a25418353bb44aa189672b447c2d3f6",
+      "reverse-late-driver-failure.ts": "78c08373d257a0cc6a59f858faebbdb70db817e6a4e67a2e72896e4614695011",
+      "reverse-late-driver-failure.log": "1cdd293b3f1d6cd10fb209789fd740b0937cf5937942a98cb6cc72a7a4970754",
+      "reverse-restored-replay.log": "fa6135eff66284d5f49f358fe4fa1e28c7dde7a13dcea2f197451a1284b54401",
+      "reverse-light-strengthened.log": "4443a2477f0c8551f14cc123e6e9bf646087b115688ab1976beb6224e4e10f75",
+      "reverse-light-final-seed42.log": "fd4fac9d5200fc10c10703e32022afad524afe806bd8d9de1ba9191502317d56"
+    }
+  },
+  "rows": [
+    {
+      "id": "indexes/reverse-index.ts:M1",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.lookup:binary-swap:const reverseOperation = operation === `gt` ? `lt` : operation === `gte` ? `lte` : operation === `lt` ? `gt` : operation === `lte` ? `gte` : operation",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 27,
+      "position": 909,
+      "operator": "binary-swap",
+      "original": "===",
+      "replacement": "!==",
+      "anchor": "const reverseOperation = operation === `gt` ? `lt` : operation === `gte` ? `lte` : operation === `lt` ? `gt` : operation === `lte` ? `gte` : operation",
+      "function": "ReverseIndex.lookup",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M2",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.lookup:binary-swap:const reverseOperation = operation === `gt` ? `lt` : operation === `gte` ? `lte` : operation === `lt` ? `gt` : operation === `lte` ? `gte` : operation~2",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 29,
+      "position": 953,
+      "operator": "binary-swap",
+      "original": "===",
+      "replacement": "!==",
+      "anchor": "const reverseOperation = operation === `gt` ? `lt` : operation === `gte` ? `lte` : operation === `lt` ? `gt` : operation === `lte` ? `gte` : operation",
+      "function": "ReverseIndex.lookup",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M3",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.lookup:binary-swap:const reverseOperation = operation === `gt` ? `lt` : operation === `gte` ? `lte` : operation === `lt` ? `gt` : operation === `lte` ? `gte` : operation~3",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 31,
+      "position": 1003,
+      "operator": "binary-swap",
+      "original": "===",
+      "replacement": "!==",
+      "anchor": "const reverseOperation = operation === `gt` ? `lt` : operation === `gte` ? `lte` : operation === `lt` ? `gt` : operation === `lte` ? `gte` : operation",
+      "function": "ReverseIndex.lookup",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M4",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.lookup:binary-swap:const reverseOperation = operation === `gt` ? `lt` : operation === `gte` ? `lte` : operation === `lt` ? `gt` : operation === `lte` ? `gte` : operation~4",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 33,
+      "position": 1055,
+      "operator": "binary-swap",
+      "original": "===",
+      "replacement": "!==",
+      "anchor": "const reverseOperation = operation === `gt` ? `lt` : operation === `gte` ? `lte` : operation === `lt` ? `gt` : operation === `lte` ? `gte` : operation",
+      "function": "ReverseIndex.lookup",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M5",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.lookup:value-undefined:return this . originalIndex . lookup ( reverseOperation , value )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 36,
+      "position": 1124,
+      "operator": "value-undefined",
+      "original": "this.originalIndex.lookup(reverseOperation, value)",
+      "replacement": "undefined",
+      "anchor": "return this . originalIndex . lookup ( reverseOperation , value )",
+      "function": "ReverseIndex.lookup",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M6",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.rangeQuery:value-undefined:return this . originalIndex . rangeQueryReversed ( options )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 40,
+      "position": 1250,
+      "operator": "value-undefined",
+      "original": "this.originalIndex.rangeQueryReversed(options)",
+      "replacement": "undefined",
+      "anchor": "return this . originalIndex . rangeQueryReversed ( options )",
+      "function": "ReverseIndex.rangeQuery",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M7",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.take:if-true:if ( this . nullsFirst === undefined ) { return this . originalIndex . takeReversed ( n , from , filterFn ) }",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 50,
+      "position": 1735,
+      "operator": "if-true",
+      "original": "this.nullsFirst === undefined",
+      "replacement": "true",
+      "anchor": "if ( this . nullsFirst === undefined ) { return this . originalIndex . takeReversed ( n , from , filterFn ) }",
+      "function": "ReverseIndex.take",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M8",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.take:if-false:if ( this . nullsFirst === undefined ) { return this . originalIndex . takeReversed ( n , from , filterFn ) }",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 50,
+      "position": 1735,
+      "operator": "if-false",
+      "original": "this.nullsFirst === undefined",
+      "replacement": "false",
+      "anchor": "if ( this . nullsFirst === undefined ) { return this . originalIndex . takeReversed ( n , from , filterFn ) }",
+      "function": "ReverseIndex.take",
+      "before": "survived",
+      "after": "survived",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M9",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.take:binary-swap:if ( this . nullsFirst === undefined ) { return this . originalIndex . takeReversed ( n , from , filterFn ) }",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 50,
+      "position": 1751,
+      "operator": "binary-swap",
+      "original": "===",
+      "replacement": "!==",
+      "anchor": "if ( this . nullsFirst === undefined ) { return this . originalIndex . takeReversed ( n , from , filterFn ) }",
+      "function": "ReverseIndex.take",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M10",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.take:value-undefined:return this . originalIndex . takeReversed ( n , from , filterFn )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 51,
+      "position": 1781,
+      "operator": "value-undefined",
+      "original": "this.originalIndex.takeReversed(n, from, filterFn)",
+      "replacement": "undefined",
+      "anchor": "return this . originalIndex . takeReversed ( n , from , filterFn )",
+      "function": "ReverseIndex.take",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M11",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.take:value-undefined:return this . read ( n , filterFn , from ?? null )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 53,
+      "position": 1849,
+      "operator": "value-undefined",
+      "original": "this.read(n, filterFn, from ?? null)",
+      "replacement": "undefined",
+      "anchor": "return this . read ( n , filterFn , from ?? null )",
+      "function": "ReverseIndex.take",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M12",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.take:binary-swap:return this . read ( n , filterFn , from ?? null )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 53,
+      "position": 1877,
+      "operator": "binary-swap",
+      "original": "??",
+      "replacement": "&&",
+      "anchor": "return this . read ( n , filterFn , from ?? null )",
+      "function": "ReverseIndex.take",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M13",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.takeFromStart:if-true:if ( this . nullsFirst === undefined ) { return this . originalIndex . takeReversedFromEnd ( n , filterFn ) }",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 57,
+      "position": 1976,
+      "operator": "if-true",
+      "original": "this.nullsFirst === undefined",
+      "replacement": "true",
+      "anchor": "if ( this . nullsFirst === undefined ) { return this . originalIndex . takeReversedFromEnd ( n , filterFn ) }",
+      "function": "ReverseIndex.takeFromStart",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M14",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.takeFromStart:if-false:if ( this . nullsFirst === undefined ) { return this . originalIndex . takeReversedFromEnd ( n , filterFn ) }",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 57,
+      "position": 1976,
+      "operator": "if-false",
+      "original": "this.nullsFirst === undefined",
+      "replacement": "false",
+      "anchor": "if ( this . nullsFirst === undefined ) { return this . originalIndex . takeReversedFromEnd ( n , filterFn ) }",
+      "function": "ReverseIndex.takeFromStart",
+      "before": "survived",
+      "after": "survived",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M15",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.takeFromStart:binary-swap:if ( this . nullsFirst === undefined ) { return this . originalIndex . takeReversedFromEnd ( n , filterFn ) }",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 57,
+      "position": 1992,
+      "operator": "binary-swap",
+      "original": "===",
+      "replacement": "!==",
+      "anchor": "if ( this . nullsFirst === undefined ) { return this . originalIndex . takeReversedFromEnd ( n , filterFn ) }",
+      "function": "ReverseIndex.takeFromStart",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M16",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.takeFromStart:value-undefined:return this . originalIndex . takeReversedFromEnd ( n , filterFn )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 58,
+      "position": 2022,
+      "operator": "value-undefined",
+      "original": "this.originalIndex.takeReversedFromEnd(n, filterFn)",
+      "replacement": "undefined",
+      "anchor": "return this . originalIndex . takeReversedFromEnd ( n , filterFn )",
+      "function": "ReverseIndex.takeFromStart",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M17",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.takeFromStart:value-undefined:return this . read ( n , filterFn )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 60,
+      "position": 2091,
+      "operator": "value-undefined",
+      "original": "this.read(n, filterFn)",
+      "replacement": "undefined",
+      "anchor": "return this . read ( n , filterFn )",
+      "function": "ReverseIndex.takeFromStart",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M18",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:value-undefined:const nullish = new Set ( [ ... this . originalIndex . equalityLookup ( null ) , ... this . originalIndex . equalityLookup ( undefined ) , ] )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 72,
+      "position": 2477,
+      "operator": "value-undefined",
+      "original": "this.originalIndex.equalityLookup(null)",
+      "replacement": "undefined",
+      "anchor": "const nullish = new Set ( [ ... this . originalIndex . equalityLookup ( null ) , ... this . originalIndex . equalityLookup ( undefined ) , ] )",
+      "function": "ReverseIndex.read",
+      "before": "crashed",
+      "after": "crashed",
+      "afterLaws": [],
+      "beforeDetail": "TypeError: globalThis.__oracleGaps.v is not a function or its return value is not iterable",
+      "afterDetail": "TypeError: globalThis.__oracleGaps.v is not a function or its return value is not iterable"
+    },
+    {
+      "id": "indexes/reverse-index.ts:M19",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:value-undefined:const nullish = new Set ( [ ... this . originalIndex . equalityLookup ( null ) , ... this . originalIndex . equalityLookup ( undefined ) , ] )~2",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 73,
+      "position": 2527,
+      "operator": "value-undefined",
+      "original": "this.originalIndex.equalityLookup(undefined)",
+      "replacement": "undefined",
+      "anchor": "const nullish = new Set ( [ ... this . originalIndex . equalityLookup ( null ) , ... this . originalIndex . equalityLookup ( undefined ) , ] )",
+      "function": "ReverseIndex.read",
+      "before": "crashed",
+      "after": "crashed",
+      "afterLaws": [],
+      "beforeDetail": "TypeError: globalThis.__oracleGaps.v is not a function or its return value is not iterable",
+      "afterDetail": "TypeError: globalThis.__oracleGaps.v is not a function or its return value is not iterable"
+    },
+    {
+      "id": "indexes/reverse-index.ts:M20",
+      "key": "src/indexes/reverse-index.ts#keep:binary-swap:const keep = ( key : TKey ) => filterFn ?. ( key ) ?? true",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 75,
+      "position": 2628,
+      "operator": "binary-swap",
+      "original": "??",
+      "replacement": "&&",
+      "anchor": "const keep = ( key : TKey ) => filterFn ?. ( key ) ?? true",
+      "function": "keep",
+      "before": "survived",
+      "after": "survived",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M21",
+      "key": "src/indexes/reverse-index.ts#keep:value-undefined:const keep = ( key : TKey ) => filterFn ?. ( key ) ?? true",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 75,
+      "position": 2612,
+      "operator": "value-undefined",
+      "original": "filterFn?.(key)",
+      "replacement": "undefined",
+      "anchor": "const keep = ( key : TKey ) => filterFn ?. ( key ) ?? true",
+      "function": "keep",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M22",
+      "key": "src/indexes/reverse-index.ts#keep:bool-flip:const keep = ( key : TKey ) => filterFn ?. ( key ) ?? true",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 75,
+      "position": 2631,
+      "operator": "bool-flip",
+      "original": "true",
+      "replacement": "false",
+      "anchor": "const keep = ( key : TKey ) => filterFn ?. ( key ) ?? true",
+      "function": "keep",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M23",
+      "key": "src/indexes/reverse-index.ts#accept:binary-swap:const accept = ( key : TKey ) => ! nullish . has ( key ) && keep ( key )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 76,
+      "position": 2688,
+      "operator": "binary-swap",
+      "original": "&&",
+      "replacement": "||",
+      "anchor": "const accept = ( key : TKey ) => ! nullish . has ( key ) && keep ( key )",
+      "function": "accept",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M24",
+      "key": "src/indexes/reverse-index.ts#accept:drop-not:const accept = ( key : TKey ) => ! nullish . has ( key ) && keep ( key )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 76,
+      "position": 2670,
+      "operator": "drop-not",
+      "original": "!",
+      "replacement": "",
+      "anchor": "const accept = ( key : TKey ) => ! nullish . has ( key ) && keep ( key )",
+      "function": "accept",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M25",
+      "key": "src/indexes/reverse-index.ts#accept:value-undefined:const accept = ( key : TKey ) => ! nullish . has ( key ) && keep ( key )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 76,
+      "position": 2671,
+      "operator": "value-undefined",
+      "original": "nullish.has(key)",
+      "replacement": "undefined",
+      "anchor": "const accept = ( key : TKey ) => ! nullish . has ( key ) && keep ( key )",
+      "function": "accept",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M26",
+      "key": "src/indexes/reverse-index.ts#accept:value-undefined:const accept = ( key : TKey ) => ! nullish . has ( key ) && keep ( key )~2",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 76,
+      "position": 2691,
+      "operator": "value-undefined",
+      "original": "keep(key)",
+      "replacement": "undefined",
+      "anchor": "const accept = ( key : TKey ) => ! nullish . has ( key ) && keep ( key )",
+      "function": "accept",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M27",
+      "key": "src/indexes/reverse-index.ts#values:binary-swap:const values = ( count : number ) => count <= 0 ? [ ] : from == null ? this . originalIndex . takeReversedFromEnd ( count , accept ) : this . originalIndex . takeReversed ( count , from , accept )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 78,
+      "position": 2751,
+      "operator": "binary-swap",
+      "original": "<=",
+      "replacement": "<",
+      "anchor": "const values = ( count : number ) => count <= 0 ? [ ] : from == null ? this . originalIndex . takeReversedFromEnd ( count , accept ) : this . originalIndex . takeReversed ( count , from , accept )",
+      "function": "values",
+      "before": "survived",
+      "after": "survived",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M28",
+      "key": "src/indexes/reverse-index.ts#values:value-undefined:const values = ( count : number ) => count <= 0 ? [ ] : from == null ? this . originalIndex . takeReversedFromEnd ( count , accept ) : this . originalIndex . takeReversed ( count , from , accept )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 81,
+      "position": 2804,
+      "operator": "value-undefined",
+      "original": "this.originalIndex.takeReversedFromEnd(count, accept)",
+      "replacement": "undefined",
+      "anchor": "const values = ( count : number ) => count <= 0 ? [ ] : from == null ? this . originalIndex . takeReversedFromEnd ( count , accept ) : this . originalIndex . takeReversed ( count , from , accept )",
+      "function": "values",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M29",
+      "key": "src/indexes/reverse-index.ts#values:value-undefined:const values = ( count : number ) => count <= 0 ? [ ] : from == null ? this . originalIndex . takeReversedFromEnd ( count , accept ) : this . originalIndex . takeReversed ( count , from , accept )~2",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 82,
+      "position": 2870,
+      "operator": "value-undefined",
+      "original": "this.originalIndex.takeReversed(count, from, accept)",
+      "replacement": "undefined",
+      "anchor": "const values = ( count : number ) => count <= 0 ? [ ] : from == null ? this . originalIndex . takeReversedFromEnd ( count , accept ) : this . originalIndex . takeReversed ( count , from , accept )",
+      "function": "values",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M30",
+      "key": "src/indexes/reverse-index.ts#nulls:binary-swap:const nulls = ( count : number ) => count <= 0 ? [ ] : [ ... nullish ] . sort ( compareKeys ) . filter ( keep ) . slice ( 0 , count )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 84,
+      "position": 2972,
+      "operator": "binary-swap",
+      "original": "<=",
+      "replacement": "<",
+      "anchor": "const nulls = ( count : number ) => count <= 0 ? [ ] : [ ... nullish ] . sort ( compareKeys ) . filter ( keep ) . slice ( 0 , count )",
+      "function": "nulls",
+      "before": "survived",
+      "after": "survived",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M31",
+      "key": "src/indexes/reverse-index.ts#nulls:value-undefined:const nulls = ( count : number ) => count <= 0 ? [ ] : [ ... nullish ] . sort ( compareKeys ) . filter ( keep ) . slice ( 0 , count )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 86,
+      "position": 3000,
+      "operator": "value-undefined",
+      "original": "[...nullish].sort(compareKeys).filter(keep).slice(0, count)",
+      "replacement": "undefined",
+      "anchor": "const nulls = ( count : number ) => count <= 0 ? [ ] : [ ... nullish ] . sort ( compareKeys ) . filter ( keep ) . slice ( 0 , count )",
+      "function": "nulls",
+      "before": "crashed",
+      "after": "crashed",
+      "afterLaws": [],
+      "beforeDetail": "TypeError: head is not iterable",
+      "afterDetail": "TypeError: head is not iterable"
+    },
+    {
+      "id": "indexes/reverse-index.ts:M32",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:if-true:if ( from === null ) return this . nullsFirst ? values ( n ) : [ ]",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 87,
+      "position": 3068,
+      "operator": "if-true",
+      "original": "from === null",
+      "replacement": "true",
+      "anchor": "if ( from === null ) return this . nullsFirst ? values ( n ) : [ ]",
+      "function": "ReverseIndex.read",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M33",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:if-false:if ( from === null ) return this . nullsFirst ? values ( n ) : [ ]",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 87,
+      "position": 3068,
+      "operator": "if-false",
+      "original": "from === null",
+      "replacement": "false",
+      "anchor": "if ( from === null ) return this . nullsFirst ? values ( n ) : [ ]",
+      "function": "ReverseIndex.read",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M34",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:binary-swap:if ( from === null ) return this . nullsFirst ? values ( n ) : [ ]",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 87,
+      "position": 3073,
+      "operator": "binary-swap",
+      "original": "===",
+      "replacement": "!==",
+      "anchor": "if ( from === null ) return this . nullsFirst ? values ( n ) : [ ]",
+      "function": "ReverseIndex.read",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M35",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:value-undefined:return this . nullsFirst ? values ( n ) : [ ]",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 87,
+      "position": 3108,
+      "operator": "value-undefined",
+      "original": "values(n)",
+      "replacement": "undefined",
+      "anchor": "return this . nullsFirst ? values ( n ) : [ ]",
+      "function": "ReverseIndex.read",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M36",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:if-true:if ( this . nullsFirst && from === undefined ) { const head = nulls ( n ) return [ ... head , ... values ( n - head . length ) ] }",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 88,
+      "position": 3131,
+      "operator": "if-true",
+      "original": "this.nullsFirst && from === undefined",
+      "replacement": "true",
+      "anchor": "if ( this . nullsFirst && from === undefined ) { const head = nulls ( n ) return [ ... head , ... values ( n - head . length ) ] }",
+      "function": "ReverseIndex.read",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M37",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:if-false:if ( this . nullsFirst && from === undefined ) { const head = nulls ( n ) return [ ... head , ... values ( n - head . length ) ] }",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 88,
+      "position": 3131,
+      "operator": "if-false",
+      "original": "this.nullsFirst && from === undefined",
+      "replacement": "false",
+      "anchor": "if ( this . nullsFirst && from === undefined ) { const head = nulls ( n ) return [ ... head , ... values ( n - head . length ) ] }",
+      "function": "ReverseIndex.read",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M38",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:binary-swap:if ( this . nullsFirst && from === undefined ) { const head = nulls ( n ) return [ ... head , ... values ( n - head . length ) ] }",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 88,
+      "position": 3147,
+      "operator": "binary-swap",
+      "original": "&&",
+      "replacement": "||",
+      "anchor": "if ( this . nullsFirst && from === undefined ) { const head = nulls ( n ) return [ ... head , ... values ( n - head . length ) ] }",
+      "function": "ReverseIndex.read",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M39",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:binary-swap:if ( this . nullsFirst && from === undefined ) { const head = nulls ( n ) return [ ... head , ... values ( n - head . length ) ] }~2",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 88,
+      "position": 3155,
+      "operator": "binary-swap",
+      "original": "===",
+      "replacement": "!==",
+      "anchor": "if ( this . nullsFirst && from === undefined ) { const head = nulls ( n ) return [ ... head , ... values ( n - head . length ) ] }",
+      "function": "ReverseIndex.read",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M40",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:value-undefined:const head = nulls ( n )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 89,
+      "position": 3191,
+      "operator": "value-undefined",
+      "original": "nulls(n)",
+      "replacement": "undefined",
+      "anchor": "const head = nulls ( n )",
+      "function": "ReverseIndex.read",
+      "before": "crashed",
+      "after": "crashed",
+      "afterLaws": [],
+      "beforeDetail": "TypeError: head is not iterable",
+      "afterDetail": "TypeError: head is not iterable"
+    },
+    {
+      "id": "indexes/reverse-index.ts:M41",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:value-undefined:return [ ... head , ... values ( n - head . length ) ]",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 90,
+      "position": 3226,
+      "operator": "value-undefined",
+      "original": "values(n - head.length)",
+      "replacement": "undefined",
+      "anchor": "return [ ... head , ... values ( n - head . length ) ]",
+      "function": "ReverseIndex.read",
+      "before": "crashed",
+      "after": "crashed",
+      "afterLaws": [],
+      "beforeDetail": "TypeError: globalThis.__oracleGaps.v is not a function or its return value is not iterable",
+      "afterDetail": "TypeError: globalThis.__oracleGaps.v is not a function or its return value is not iterable"
+    },
+    {
+      "id": "indexes/reverse-index.ts:M42",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:value-undefined:const keys = values ( n )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 92,
+      "position": 3274,
+      "operator": "value-undefined",
+      "original": "values(n)",
+      "replacement": "undefined",
+      "anchor": "const keys = values ( n )",
+      "function": "ReverseIndex.read",
+      "before": "killed",
+      "after": "killed",
+      "afterLaws": [
+        "order"
+      ]
+    },
+    {
+      "id": "indexes/reverse-index.ts:M43",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.read:value-undefined:return this . nullsFirst ? keys : [ ... keys , ... nulls ( n - keys . length ) ]",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 93,
+      "position": 3333,
+      "operator": "value-undefined",
+      "original": "nulls(n - keys.length)",
+      "replacement": "undefined",
+      "anchor": "return this . nullsFirst ? keys : [ ... keys , ... nulls ( n - keys . length ) ]",
+      "function": "ReverseIndex.read",
+      "before": "crashed",
+      "after": "crashed",
+      "afterLaws": [],
+      "beforeDetail": "TypeError: globalThis.__oracleGaps.v is not a function or its return value is not iterable",
+      "afterDetail": "TypeError: globalThis.__oracleGaps.v is not a function or its return value is not iterable"
+    },
+    {
+      "id": "indexes/reverse-index.ts:M44",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.supports:value-undefined:return this . originalIndex . supports ( operation )",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 99,
+      "position": 3480,
+      "operator": "value-undefined",
+      "original": "this.originalIndex.supports(operation)",
+      "replacement": "undefined",
+      "anchor": "return this . originalIndex . supports ( operation )",
+      "function": "ReverseIndex.supports",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M45",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.supportsOrderOptimization:binary-swap:return this . originalIndex . supportsOrderOptimization === true",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 107,
+      "position": 3731,
+      "operator": "binary-swap",
+      "original": "===",
+      "replacement": "!==",
+      "anchor": "return this . originalIndex . supportsOrderOptimization === true",
+      "function": "ReverseIndex.supportsOrderOptimization",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M46",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.supportsOrderOptimization:bool-flip:return this . originalIndex . supportsOrderOptimization === true",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 107,
+      "position": 3735,
+      "operator": "bool-flip",
+      "original": "true",
+      "replacement": "false",
+      "anchor": "return this . originalIndex . supportsOrderOptimization === true",
+      "function": "ReverseIndex.supportsOrderOptimization",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M47",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.canOptimizeRangeFor:binary-swap:return this . originalIndex . canOptimizeRangeFor ?. ( value ) ?? true",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 111,
+      "position": 3853,
+      "operator": "binary-swap",
+      "original": "??",
+      "replacement": "&&",
+      "anchor": "return this . originalIndex . canOptimizeRangeFor ?. ( value ) ?? true",
+      "function": "ReverseIndex.canOptimizeRangeFor",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M48",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.canOptimizeRangeFor:value-undefined:return this . originalIndex . canOptimizeRangeFor ?. ( value ) ?? true",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 111,
+      "position": 3805,
+      "operator": "value-undefined",
+      "original": "this.originalIndex.canOptimizeRangeFor?.(value)",
+      "replacement": "undefined",
+      "anchor": "return this . originalIndex . canOptimizeRangeFor ?. ( value ) ?? true",
+      "function": "ReverseIndex.canOptimizeRangeFor",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    },
+    {
+      "id": "indexes/reverse-index.ts:M49",
+      "key": "src/indexes/reverse-index.ts#ReverseIndex.canOptimizeRangeFor:bool-flip:return this . originalIndex . canOptimizeRangeFor ?. ( value ) ?? true",
+      "source": "src/indexes/reverse-index.ts",
+      "line": 111,
+      "position": 3856,
+      "operator": "bool-flip",
+      "original": "true",
+      "replacement": "false",
+      "anchor": "return this . originalIndex . canOptimizeRangeFor ?. ( value ) ?? true",
+      "function": "ReverseIndex.canOptimizeRangeFor",
+      "before": "unreached",
+      "after": "unreached",
+      "afterLaws": []
+    }
+  ],
+  "limits": "Preservation only. Unchanged unreached/surviving sites and runtime crashes remain gaps. No source-gap closure claim."
+}

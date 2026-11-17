@@ -15,7 +15,6 @@ import {
   wrappingSteps,
   wrappingSyncHistory,
 } from '../../db/tests/optimistic-history-oracle'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { persistedCollectionOptions } from '../src'
 import type { CollectionConfig } from '@tanstack/db'
@@ -265,20 +264,14 @@ const abortReleasingHold = (
   ]
 }
 
-declareOracle({
-  owns: [`src/persisted.ts`],
-  check: [checkOptimisticHistory],
-  model: [optimisticHistoryModel],
-})
-
 oracleProperty({
   id: `sqlite-persistence.optimistic-history`,
   law: {
     statement: `A persisted Collection exposes the rows, publications, request outcomes, receipts, and tracked transactions that the optimistic-history model owes at every step, including while a durable store step is held and after a deferred source transaction aborts.`,
     authority: `packages/db/tests/optimistic-history-oracle.ts header (the optimistic and sync history contract, held rows behind a wrapping sync)`,
     limits: `An in-memory adapter, not SQLite timing or coordinator messages; no awaited acceptance during a hold; no schema, partial-update, or reentrant grammar.`,
-    owner: `Optimistic state`,
   },
+  owns: [`src/persisted.ts`],
   histories: {
     arbitrary: wrappingSyncHistory,
     states: [`deferred-hold`, `abort-release`],

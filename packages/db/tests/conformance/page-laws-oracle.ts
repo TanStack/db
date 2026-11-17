@@ -1,5 +1,4 @@
 import { expect } from 'vitest'
-import { declareOracle } from '../oracle-declaration.js'
 import { expectOrderedRows } from './result-laws'
 
 /** Page labels and request timing are separate laws, not inferred from rows. */
@@ -25,4 +24,3 @@ export function expectPageRows(
 // Owns no production entry in packages/db: this module checks the public
 // observations that each framework driver passes it, so the framework packages
 // that run it own the entries it judges.
-declareOracle({ check: [expectPageRows] })

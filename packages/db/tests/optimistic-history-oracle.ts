@@ -7,7 +7,6 @@ import { createDeferred } from '../src/deferred.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
 import { whenSyncAccepted } from '../src/sync-receipt.js'
 import { createTransaction } from '../src/transactions.js'
-import { declareOracle } from './oracle-declaration.js'
 import { forwardCut, pass, violation, withinTurns } from './oracle-property.js'
 import type { CollectionConfig, SyncConfig } from '../src/types.js'
 
@@ -1866,8 +1865,6 @@ export async function runOptimisticHistory(
     ],
   )
 }
-
-declareOracle({ check: [runOptimisticHistory], model: [HistoryModel] })
 
 // ===========================================================================
 // The optimistic history as oracleProperty parts

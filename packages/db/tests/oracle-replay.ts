@@ -29,7 +29,9 @@ if (entry?.status !== `assertion`) {
     `oracle replay target ${property}: ${entry?.status ?? `missing manifest entry`}` +
       (entry?.command === undefined
         ? ``
-        : `. Replay it with: ${entry.environment.join(` `)} ${entry.command}`),
+        : entry.status === `enumerated-campaign`
+          ? `. Run its enumerated cases with: ${entry.command}`
+          : `. Replay it with: ${entry.environment.join(` `)} ${entry.command}`),
   )
 }
 

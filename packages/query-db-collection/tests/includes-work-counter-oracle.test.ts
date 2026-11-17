@@ -6,10 +6,14 @@ import {
   include,
 } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { evaluateReferenceExpression } from '../../db/tests/reference-expression-oracle'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { queryCollectionOptions } from '../src/query'
 import type { Collection } from '@tanstack/db'
 
@@ -504,143 +508,201 @@ function expectIrrelevantBranchWork(
   )
 }
 
-// What this oracle owns: the source Query collections that queryCollectionOptions
-// builds for each level of the nested includes tree. Its model is the
-// reachable tree derived from the source foreign keys.
-declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
-  model: [expectedTreeEntries, expectedTreeCounts],
-  check: [
-    checkNestedTreeShape,
-    expectNestedTreeShape,
-    expectNestedTreeWork,
-    expectIrrelevantBranchWork,
-  ],
-})
+// ## Fixed tree cases
+//
+// Each case runs the real nested-includes query over Query collections and
+// compares the reachable shape and source work with the independent tree
+// (checkNestedTreeShape and the expect helpers above). The comparison
+// controls corrupt a copy of the captured observation, or the copied public
+// rows before capture, and require the same comparison to reject it.
+
+// The complete reachable tree for `rootCount` roots.
+async function checkReachableShape(rootCount: number): Promise<void> {
+  await checkNestedTreeShape(rootCount, (observation) =>
+    expectNestedTreeShape(observation, rootCount),
+  )
+}
+
+// Traversing the result must not deliver more source rows.
+async function checkTraversalDelivery(): Promise<void> {
+  await checkNestedTreeShape(20, (observation) => {
+    expect(observation.sourceRowsDeliveredAfterTraversal).toEqual(
+      observation.sourceRowsDeliveredAtPreload,
+    )
+  })
+}
+
+// Disconnected branches add no acquisition or delivery at preload.
+async function checkDisconnectedBranches(
+  irrelevantBranchCount: number,
+): Promise<void> {
+  const observations: Array<NestedTreeShape> = []
+  await checkNestedTreeShape(
+    2,
+    (observation) => {
+      expectNestedTreeShape(observation, 2)
+      observations.push(observation)
+    },
+    (rows) => rows,
+    0,
+    true,
+  )
+  await checkNestedTreeShape(
+    2,
+    (observation) => {
+      expectNestedTreeShape(observation, 2)
+      observations.push(observation)
+    },
+    (rows) => rows,
+    irrelevantBranchCount,
+    true,
+  )
+  const [baseline, scaled] = observations as [NestedTreeShape, NestedTreeShape]
+  expectIrrelevantBranchWork(baseline, scaled)
+
+  // An extra acquisition for an unreachable branch could leave the public
+  // tree correct. It must still fail this comparison at preload.
+  const wrongWork: NestedTreeShape = {
+    ...scaled,
+    acquisitionAttemptsAtPreload: {
+      ...scaled.acquisitionAttemptsAtPreload,
+      branches: scaled.acquisitionAttemptsAtPreload.branches + 1,
+    },
+  }
+  expect(() => expectIrrelevantBranchWork(baseline, wrongWork)).toThrow()
+}
+
+// The work comparison rejects a repeated source row delivery after traversal.
+async function checkRepeatedDeliveryRejected(): Promise<void> {
+  await checkNestedTreeShape(2, (observation) => {
+    expectNestedTreeShape(observation, 2)
+    const repeatedDelivery: NestedTreeShape = {
+      ...observation,
+      sourceRowsDeliveredAfterTraversal: {
+        ...observation.sourceRowsDeliveredAfterTraversal,
+        branches: observation.sourceRowsDeliveredAfterTraversal.branches + 1,
+      },
+    }
+    expect(() => expectNestedTreeWork(repeatedDelivery, 2)).toThrow()
+  })
+}
+
+// The entry comparison rejects a subtree swap or a corrupted value even when
+// reachable cardinality and source work agree.
+async function checkCorruptedTreeRejected(
+  fault: `subtree swap` | `value corruption`,
+): Promise<void> {
+  await checkNestedTreeShape(2, (observation) =>
+    expectNestedTreeShape(observation, 2),
+  )
+  await checkNestedTreeShape(
+    2,
+    (observation) => {
+      expectNestedTreeWork(observation, 2)
+      expect(() => expectTreeEntries(observation.entries, 2)).toThrow()
+    },
+    (roots) => {
+      expect(roots).toHaveLength(2)
+      const [first, second] = roots as [NodeRow, NodeRow]
+      // Corrupt copied public rows before capture, not expected records or
+      // production state. Both branches still use real child Collections.
+      return fault === `subtree swap`
+        ? [
+            { ...first, children: second.children },
+            { ...second, children: first.children },
+          ]
+        : [{ ...first, value: `wrong root value` }, second]
+    },
+  )
+}
+
+type TreeCase =
+  | { name: string; kind: `shape`; rootCount: number }
+  | { name: string; kind: `traversal` }
+  | { name: string; kind: `disconnected`; irrelevantBranchCount: number }
+  | { name: string; kind: `repeated delivery` }
+  | {
+      name: string
+      kind: `corrupted tree`
+      fault: `subtree swap` | `value corruption`
+    }
+
+// Keep every value from the former fixed-seed sample (2, 3, 4, 13, 17),
+// plus nearby sizes. The empty and reported-size endpoints stay explicit.
+const treeCases: Array<TreeCase> = [
+  ...[1, 2, 3, 4, 5, 10, 13, 17].map((rootCount): TreeCase => ({
+    name: `preserves the complete reachable nested tree shape for ${rootCount} roots`,
+    kind: `shape`,
+    rootCount,
+  })),
+  {
+    name: `exposes no nested collections for an empty root query`,
+    kind: `shape`,
+    rootCount: 0,
+  },
+  // These semantic counters do not claim to measure elapsed time or internal
+  // allocations. They fix source delivery at preload and reachable shape.
+  {
+    name: `checks the reported 20-by-2-by-5-by-10 tree`,
+    kind: `shape`,
+    rootCount: 20,
+  },
+  {
+    name: `does not deliver more source rows while traversing the result`,
+    kind: `traversal`,
+  },
+  ...[1, 3].map((irrelevantBranchCount): TreeCase => ({
+    name: `does not acquire or deliver ${irrelevantBranchCount} disconnected branches at preload`,
+    kind: `disconnected`,
+    irrelevantBranchCount,
+  })),
+  {
+    name: `rejects a repeated source row delivery after traversal`,
+    kind: `repeated delivery`,
+  },
+  ...([`subtree swap`, `value corruption`] as const).map((fault): TreeCase => ({
+    name: `rejects ${fault} even when reachable cardinality and source work agree`,
+    kind: `corrupted tree`,
+    fault,
+  })),
+]
+
+function runTreeCase(treeCase: TreeCase): Promise<void> {
+  switch (treeCase.kind) {
+    case `shape`:
+      return checkReachableShape(treeCase.rootCount)
+    case `traversal`:
+      return checkTraversalDelivery()
+    case `disconnected`:
+      return checkDisconnectedBranches(treeCase.irrelevantBranchCount)
+    case `repeated delivery`:
+      return checkRepeatedDeliveryRejected()
+    case `corrupted tree`:
+      return checkCorruptedTreeRejected(treeCase.fault)
+  }
+}
 
 describe(`nested includes reachable-shape oracle`, () => {
-  // Keep every value from the former fixed-seed sample (2, 3, 4, 13, 17),
-  // plus nearby sizes. The empty and reported-size endpoints stay explicit.
-  it.each([1, 2, 3, 4, 5, 10, 13, 17])(
-    `preserves the complete reachable nested tree shape for %i roots`,
-    async (rootCount) => {
-      oracleRoute(`case`)
-      await checkNestedTreeShape(rootCount, (observation) =>
-        expectNestedTreeShape(observation, rootCount),
-      )
+  oracleProperty({
+    id: `query-db.includes-work-counter`,
+    law: {
+      statement: `A nested includes query over Query collections exposes exactly the reachable tree derived from the source foreign keys, and acquires and delivers only the reachable source rows at preload, without more delivery during traversal.`,
+      authority: `The reachable-shape contract stated at the top of this file; query/live/ARCHITECTURE.md includes materialization.`,
+      limits: `The fixed root counts, disconnected-branch counts and comparison controls above; semantic counters, not elapsed time or internal allocations.`,
     },
-  )
-
-  it(`exposes no nested collections for an empty root query`, async () => {
-    oracleRoute(`case`)
-    await checkNestedTreeShape(0, (observation) =>
-      expectNestedTreeShape(observation, 0),
-    )
+    // What this oracle owns: the source Query collections that
+    // queryCollectionOptions builds for each level of the nested includes
+    // tree. Its model is the reachable tree derived from the source foreign
+    // keys.
+    owns: [`src/query.ts#queryCollectionOptions`],
+    histories: treeCases,
+    label: ({ name }) => name,
+    resolve: (treeCase) => ({ treeCase }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`reachable tree`, plan, observe, () =>
+        runTreeCase(plan.treeCase),
+      ),
+    check: forwardAssertionJudgment,
   })
-
-  it(`checks the reported 20-by-2-by-5-by-10 tree`, async () => {
-    oracleRoute(`case`)
-    // These semantic counters do not claim to measure elapsed time or internal
-    // allocations. They fix source delivery at preload and reachable shape.
-    await checkNestedTreeShape(20, (observation) =>
-      expectNestedTreeShape(observation, 20),
-    )
-  })
-
-  it(`does not deliver more source rows while traversing the result`, async () => {
-    oracleRoute(`case`)
-    await checkNestedTreeShape(20, (observation) => {
-      expect(observation.sourceRowsDeliveredAfterTraversal).toEqual(
-        observation.sourceRowsDeliveredAtPreload,
-      )
-    })
-  })
-
-  it.each([1, 3])(
-    `does not acquire or deliver %i disconnected branches at preload`,
-    async (irrelevantBranchCount) => {
-      oracleRoute(`case`)
-      const observations: Array<NestedTreeShape> = []
-      await checkNestedTreeShape(
-        2,
-        (observation) => {
-          expectNestedTreeShape(observation, 2)
-          observations.push(observation)
-        },
-        (rows) => rows,
-        0,
-        true,
-      )
-      await checkNestedTreeShape(
-        2,
-        (observation) => {
-          expectNestedTreeShape(observation, 2)
-          observations.push(observation)
-        },
-        (rows) => rows,
-        irrelevantBranchCount,
-        true,
-      )
-      const [baseline, scaled] = observations as [
-        NestedTreeShape,
-        NestedTreeShape,
-      ]
-      expectIrrelevantBranchWork(baseline, scaled)
-
-      // An extra acquisition for an unreachable branch could leave the public
-      // tree correct. It must still fail this comparison at preload.
-      const wrongWork: NestedTreeShape = {
-        ...scaled,
-        acquisitionAttemptsAtPreload: {
-          ...scaled.acquisitionAttemptsAtPreload,
-          branches: scaled.acquisitionAttemptsAtPreload.branches + 1,
-        },
-      }
-      expect(() => expectIrrelevantBranchWork(baseline, wrongWork)).toThrow()
-    },
-  )
-
-  it(`rejects a repeated source row delivery after traversal`, async () => {
-    oracleRoute(`calibration`)
-    await checkNestedTreeShape(2, (observation) => {
-      expectNestedTreeShape(observation, 2)
-      const repeatedDelivery: NestedTreeShape = {
-        ...observation,
-        sourceRowsDeliveredAfterTraversal: {
-          ...observation.sourceRowsDeliveredAfterTraversal,
-          branches: observation.sourceRowsDeliveredAfterTraversal.branches + 1,
-        },
-      }
-      expect(() => expectNestedTreeWork(repeatedDelivery, 2)).toThrow()
-    })
-  })
-
-  it.each([`subtree swap`, `value corruption`] as const)(
-    `rejects %s even when reachable cardinality and source work agree`,
-    async (fault) => {
-      oracleRoute(`calibration`)
-      await checkNestedTreeShape(2, (observation) =>
-        expectNestedTreeShape(observation, 2),
-      )
-      await checkNestedTreeShape(
-        2,
-        (observation) => {
-          expectNestedTreeWork(observation, 2)
-          expect(() => expectTreeEntries(observation.entries, 2)).toThrow()
-        },
-        (roots) => {
-          expect(roots).toHaveLength(2)
-          const [first, second] = roots as [NodeRow, NodeRow]
-          // Corrupt copied public rows before capture, not expected records or
-          // production state. Both branches still use real child Collections.
-          return fault === `subtree swap`
-            ? [
-                { ...first, children: second.children },
-                { ...second, children: first.children },
-              ]
-            : [{ ...first, value: `wrong root value` }, second]
-        },
-      )
-    },
-  )
 })

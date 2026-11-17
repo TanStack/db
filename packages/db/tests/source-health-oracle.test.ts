@@ -220,8 +220,8 @@
  * rule that a root Collection's request error clears only for a load
  * started after the failure.
  */
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterAll, describe, expect, it as vitestIt } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { afterAll, afterEach, beforeEach, describe, expect } from 'vitest'
 import { createCollection, findProblems } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { createEffect } from '../src/query/effect.js'
@@ -235,19 +235,20 @@ import {
 } from '../src/errors.js'
 import { RequestErrors } from '../src/collection/lifecycle.js'
 import { createDeferred } from '../src/deferred.js'
-import { createOracleReach } from './oracle-reach.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
+  isGeneratedOracleCampaign,
   oracleReplayRequested,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  readOracleRunConfig,
 } from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty } from './oracle-property.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import { flushPromises } from './utils.js'
 import { createSource } from './source-health-support.js'
+import type { Verdict } from './oracle-property.js'
 import type {
   PooledView,
   Row,
@@ -261,32 +262,6 @@ import type {
   HealthNode,
   LoadSubsetOptions,
 } from '../src/types.js'
-
-// The model steps each Collection and derives the trees, rows, request errors,
-// and gates that the public observations must equal; the checks compare them.
-// What this oracle owns: the gap report judges the Collection's status and
-// health tree, its request errors, and the demand that loads its rows, by this
-// file's tests.
-declareOracle({
-  owns: [
-    `src/collection/health-tree.ts`,
-    `src/collection/lifecycle.ts`,
-    `src/collection/subscription.ts`,
-  ],
-  check: [expectIdentity, expectRequestErrors, expectHeldDemandCovered],
-  model: [
-    applyModel,
-    applySourceStep,
-    expectedTree,
-    expectedQuerySize,
-    applyWindowStep,
-    settleWindow,
-    applyLazyStep,
-    expectedRequestErrors,
-    expectedOverlap,
-    expectedOnDemandReload,
-  ],
-})
 
 type Shape =
   `direct` | `join` | `self-join` | `nested` | `include` | `pooled-nested`
@@ -1593,7 +1568,11 @@ function expectIdentity(
   label: string,
 ): void {
   const changed = JSON.stringify(before) !== JSON.stringify(after)
-  expect(previous === next, `${label}: ${after.alias} identity`).toBe(!changed)
+  oracleAssertion(`expectIdentity:1599`, () =>
+    expect(previous === next, `${label}: ${after.alias} identity`).toBe(
+      !changed,
+    ),
+  )
   if (!changed) return
   after.sources.forEach((source, index) =>
     expectIdentity(
@@ -1722,9 +1701,15 @@ async function expectReloadEnded(
     () => (outcome = `rejected`),
   )
   await flushPromises()
-  expect(outcome, `${label}: the reload settles`).not.toBe(`pending`)
+  oracleAssertion(`expectReloadEnded:1728`, () =>
+    expect(outcome, `${label}: the reload settles`).not.toBe(`pending`),
+  )
   if (ended.reloadingAtCleanup)
-    expect(outcome, `${label}: the cleaned-up reload rejects`).toBe(`rejected`)
+    oracleAssertion(`expectReloadEnded:1730`, () =>
+      expect(outcome, `${label}: the cleaned-up reload rejects`).toBe(
+        `rejected`,
+      ),
+    )
 }
 
 // The states the main grammar's later laws depend on (ORC-015). Only the
@@ -1757,9 +1742,48 @@ const historyReachStates = [
   `an inner query's ready batch makes the query ready`,
   `an inner query's ready batch completes the query's own reload`,
 ] as const
-type HistoryReach = ReturnType<
-  typeof createOracleReach<(typeof historyReachStates)[number]>
->
+// Registration counts each state once per history, as the old campaign gate
+// did. The driver still decides reach at its original observation checkpoint.
+function healthHistoryReach<TState extends string>(
+  counts: Map<TState, number>,
+  observe: (checkpoint: string, value: unknown) => void,
+  fixed?: Set<TState>,
+): { reach: (state: TState) => void } {
+  const entered = new Set<TState>()
+  return {
+    reach(state) {
+      if (!counts.has(state))
+        throw new Error(`undeclared source-health state: ${state}`)
+      observe(`reach`, state)
+      fixed?.add(state)
+      if (entered.has(state)) return
+      entered.add(state)
+      counts.set(state, counts.get(state)! + 1)
+    },
+  }
+}
+function assertHealthReach<TState extends string>(
+  property: string,
+  counts: Map<TState, number>,
+  fixed?: Set<TState>,
+): void {
+  if (oracleReplayRequested()) return
+  for (const [state, count] of counts) {
+    expect(
+      count,
+      `${property}: ${state} history minimum`,
+    ).toBeGreaterThanOrEqual(1)
+    if (fixed)
+      expect(
+        fixed.has(state),
+        `${property}: fixed examples reach ${state}`,
+      ).toBe(true)
+  }
+}
+
+type HistoryReach = {
+  reach: (state: (typeof historyReachStates)[number]) => void
+}
 
 async function runHistory(
   shape: Shape,
@@ -1902,10 +1926,12 @@ async function runHistory(
   const consoleError = console.error
   console.error = () => {}
   try {
-    expect(
-      query.health,
-      `${shape}: the query exposes a health tree`,
-    ).toBeDefined()
+    oracleAssertion(`runHistory:1931`, () =>
+      expect(
+        query.health,
+        `${shape}: the query exposes a health tree`,
+      ).toBeDefined(),
+    )
     begin()
     await flushPromises()
     let previous = query.health
@@ -2355,9 +2381,13 @@ async function runHistory(
       stopReadyCallback()
 
       if (expected !== `ok`) {
-        expect(thrown, `${label}: contract violation throws`).toBeDefined()
+        oracleAssertion(`runHistory:2384`, () =>
+          expect(thrown, `${label}: contract violation throws`).toBeDefined(),
+        )
       } else {
-        expect(thrown, `${label}: legal step`).toBeUndefined()
+        oracleAssertion(`runHistory:2386`, () =>
+          expect(thrown, `${label}: legal step`).toBeUndefined(),
+        )
       }
       // A first-ready callback runs when the step makes the Collection ready
       // for the first time in its lifetime; its throw is reported uncaught,
@@ -2366,12 +2396,17 @@ async function runHistory(
         const firstReady =
           firstReadyBefore && model.sources[step.source].gate === `ready`
         if (firstReady) reach?.reach(`ready callback throws during a reload`)
-        expect(uncaught, `${label}: ready callback reported uncaught`).toEqual(
-          firstReady ? [readyFailure] : [],
+        oracleAssertion(`runHistory:2395`, () =>
+          expect(
+            uncaught,
+            `${label}: ready callback reported uncaught`,
+          ).toEqual(firstReady ? [readyFailure] : []),
         )
       }
-      expect(query.status, `${label}: gate`).toBe(
-        model.query.gate as CollectionStatus,
+      oracleAssertion(`runHistory:2399`, () =>
+        expect(query.status, `${label}: gate`).toBe(
+          model.query.gate as CollectionStatus,
+        ),
       )
       if (reloadCleanup) await expectReloadEnded(reloadCleanup, label)
       // Rows: each Collection shows its applied rows, and a diffing adapter
@@ -2380,40 +2415,50 @@ async function runHistory(
       for (const name of shapeSources[shape]) {
         const source = model.sources[name]
         const collection = sources[name].collection
-        expect(tagsOf(collection.toArray), `${label}: ${name} rows`).toEqual(
-          sortedTags(source.rows),
+        oracleAssertion(`runHistory:2409`, () =>
+          expect(tagsOf(collection.toArray), `${label}: ${name} rows`).toEqual(
+            sortedTags(source.rows),
+          ),
         )
         if (source.cleaning || source.retired) mirrored[name] = false
         // A source that started again after cleanup, by any path, gets a
         // fresh direct subscriber.
         else if (directSubscribers && !mirrored[name]) mirrorSource(name)
         if (mirrored[name])
-          expect(
-            sortedTags(mirrors[name]),
-            `${label}: ${name} direct subscriber rows`,
-          ).toEqual(sortedTags(source.rows))
+          oracleAssertion(`runHistory:2417`, () =>
+            expect(
+              sortedTags(mirrors[name]),
+              `${label}: ${name} direct subscriber rows`,
+            ).toEqual(sortedTags(source.rows)),
+          )
         // Cleanup ends the run at the adapter, and nothing starts one until
         // the Collection starts again.
         if (source.retired)
-          expect(
-            sources[name].liveRuns(),
-            `${label}: ${name} sync runs live after cleanup`,
-          ).toBe(0)
+          oracleAssertion(`runHistory:2424`, () =>
+            expect(
+              sources[name].liveRuns(),
+              `${label}: ${name} sync runs live after cleanup`,
+            ).toBe(0),
+          )
         if (source.gate === `crashed`) continue
-        expect(
-          sortedTags(
-            new Map(
-              [...collection._state.acceptedSyncedEntries()].map(
-                ([key, row]) => [key, row.tag ?? 0],
+        oracleAssertion(`runHistory:2429`, () =>
+          expect(
+            sortedTags(
+              new Map(
+                [...collection._state.acceptedSyncedEntries()].map(
+                  ([key, row]) => [key, row.tag ?? 0],
+                ),
               ),
             ),
-          ),
-          `${label}: ${name} baseline`,
-        ).toEqual(sortedTags(expectedBaseline(source)))
+            `${label}: ${name} baseline`,
+          ).toEqual(sortedTags(expectedBaseline(source))),
+        )
       }
       if (model.query.gate === `ready`) {
-        expect(size(), `${label}: query rows`).toBe(
-          expectedQuerySize(shape, model),
+        oracleAssertion(`runHistory:2441`, () =>
+          expect(size(), `${label}: query rows`).toBe(
+            expectedQuerySize(shape, model),
+          ),
         )
         // Law 9: the query becomes ready with its complete graph result,
         // also when its own reload completes. A step is one source batch, so
@@ -2424,36 +2469,50 @@ async function runHistory(
         if (step.kind !== `restart`)
           for (const event of events)
             if (event.kind === `status` && event.status === `ready`)
-              expect(event.size, `${label}: query rows when ready`).toBe(
-                expectedQuerySize(shape, model),
+              oracleAssertion(`runHistory:2453`, () =>
+                expect(event.size, `${label}: query rows when ready`).toBe(
+                  expectedQuerySize(shape, model),
+                ),
               )
       }
       // The Effect ends once, through onSourceError. One that ends as it is
       // created, over a stopped source, leaves nothing on that source.
-      expect(effect!.disposed, `${label}: effect ended`).toBe(
-        !model.effect.live,
+      oracleAssertion(`runHistory:2459`, () =>
+        expect(effect!.disposed, `${label}: effect ended`).toBe(
+          !model.effect.live,
+        ),
       )
-      expect(effectErrors.length, `${label}: effect source errors`).toBe(
-        model.effect.errors,
+      oracleAssertion(`runHistory:2462`, () =>
+        expect(effectErrors.length, `${label}: effect source errors`).toBe(
+          model.effect.errors,
+        ),
       )
       if (step.kind === `effect` && !model.effect.live) {
-        expect(
-          listenersOn(sources.A.collection),
-          `${label}: listeners left by the ended effect`,
-        ).toBe(listenersBeforeEffect)
+        oracleAssertion(`runHistory:2466`, () =>
+          expect(
+            listenersOn(sources.A.collection),
+            `${label}: listeners left by the ended effect`,
+          ).toBe(listenersBeforeEffect),
+        )
       }
       const tree = expectedTree(shape, model)
       const next = query.health
-      expect(project(next), `${label}: health tree`).toEqual(tree)
-      expect(
-        findProblems(next).map(problemOf),
-        `${label}: findProblems`,
-      ).toEqual(expectedProblems(tree))
+      oracleAssertion(`runHistory:2473`, () =>
+        expect(project(next), `${label}: health tree`).toEqual(tree),
+      )
+      oracleAssertion(`runHistory:2474`, () =>
+        expect(
+          findProblems(next).map(problemOf),
+          `${label}: findProblems`,
+        ).toEqual(expectedProblems(tree)),
+      )
 
       // Identity: a reader can compare trees with `===`. Reading twice gives
       // the same tree, and a step replaces exactly the nodes on the path to
       // what changed.
-      expect(query.health === next, `${label}: stable read`).toBe(true)
+      oracleAssertion(`runHistory:2482`, () =>
+        expect(query.health === next, `${label}: stable read`).toBe(true),
+      )
       const after = expectedTree(shape, model, true)
       if (step.kind !== `restart` && !reloadsWithinStep) {
         expectIdentity(previous, next, before, after, label)
@@ -2465,14 +2524,18 @@ async function runHistory(
       // not announced. The last event leaves a reader with the current tree.
       if (step.kind !== `restart`) {
         for (const [at, event] of events.entries()) {
-          expect(event.status, `${label}: event ${at} status announced`).toBe(
-            event.announced,
+          oracleAssertion(`runHistory:2494`, () =>
+            expect(event.status, `${label}: event ${at} status announced`).toBe(
+              event.announced,
+            ),
           )
           if (event.kind === `status`) {
-            expect(
-              events[at + 1]?.kind,
-              `${label}: health follows status`,
-            ).toBe(`health`)
+            oracleAssertion(`runHistory:2498`, () =>
+              expect(
+                events[at + 1]?.kind,
+                `${label}: health follows status`,
+              ).toBe(`health`),
+            )
           }
         }
         // A query a cleanup ended announces nothing more; a read still
@@ -2482,10 +2545,12 @@ async function runHistory(
           !model.queryDetached &&
           JSON.stringify(before) !== JSON.stringify(after)
         ) {
-          expect(
-            events.at(-1)?.tree,
-            `${label}: last event is current`,
-          ).toEqual(tree)
+          oracleAssertion(`runHistory:2511`, () =>
+            expect(
+              events.at(-1)?.tree,
+              `${label}: last event is current`,
+            ).toEqual(tree),
+          )
           // Law 17: a report or a healthy call is one change, also when it
           // only adds a failure to the frame or empties it, so the query
           // announces it once.
@@ -2493,10 +2558,12 @@ async function runHistory(
             expected === `ok` &&
             (step.kind === `report` || step.kind === `healthy`)
           )
-            expect(
-              events.filter((event) => event.kind === `health`).length,
-              `${label}: one health:change`,
-            ).toBe(1)
+            oracleAssertion(`runHistory:2522`, () =>
+              expect(
+                events.filter((event) => event.kind === `health`).length,
+                `${label}: one health:change`,
+              ).toBe(1),
+            )
         }
         // A report of a value already listed, or a healthy call for a value
         // not listed, leaves the frame as it was: nothing changed, so
@@ -2507,10 +2574,12 @@ async function runHistory(
           `source` in step &&
           sameFailures(frameBefore, model.sources[step.source].failures)
         )
-          expect(
-            events.filter((event) => event.kind === `health`).length,
-            `${label}: an unchanged frame announces nothing`,
-          ).toBe(0)
+          oracleAssertion(`runHistory:2536`, () =>
+            expect(
+              events.filter((event) => event.kind === `health`).length,
+              `${label}: an unchanged frame announces nothing`,
+            ).toBe(0),
+          )
       }
     }
   } finally {
@@ -3133,18 +3202,42 @@ const namedHistories: Record<string, ReadonlyArray<Step>> = {
   ],
 }
 
-// Named path replay executes its generated property without the fixed examples.
-const it = oracleReplayTest(vitestIt)
-
 describe(`source failure and health oracle`, () => {
-  for (const shape of shapes) {
-    for (const [name, steps] of Object.entries(namedHistories)) {
-      it(`${shape}: ${name}`, () => {
-        oracleRoute(`fixed history`)
-        return runHistory(shape, steps)
-      })
-    }
-  }
+  // Every named history runs in every shape through the shared driver and
+  // its independent source and query models. The generated arbitrary maps
+  // its histories without an unmapper, so it cannot take these back; they
+  // register as one enumerated property.
+  const namedShapeHistories = shapes.flatMap((shape) =>
+    Object.entries(namedHistories).map(([name, steps]) => ({
+      shape,
+      name,
+      steps,
+    })),
+  )
+  oracleProperty<(typeof namedShapeHistories)[number], Verdict>({
+    id: `source-health.history-fixed`,
+    law: {
+      statement: `Every generated source step preserves the independently derived status, rows, health tree and event identities.`,
+      authority: `The source-health laws and independent source and query models stated above.`,
+      limits: `The named histories in each of the six shapes, which the generated arbitrary cannot take back; each is replayed through the same driver and models.`,
+    },
+    owns: [
+      `src/collection/health-tree.ts`,
+      `src/collection/lifecycle.ts`,
+      `src/collection/subscription.ts`,
+    ],
+    histories: namedShapeHistories,
+    label: ({ shape, name }) => `${shape}: ${name}`,
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(
+        `source-health.history-fixed`,
+        history,
+        observe,
+        () => runHistory(history.shape, history.steps),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   const stepArb: fc.Arbitrary<Step> = fc.oneof(
     {
@@ -3375,103 +3468,133 @@ describe(`source failure and health oracle`, () => {
       on(`ready`, `A`),
     ]),
   ]
-  const historyReach = createOracleReach(
-    `source-health.history`,
-    historyReachStates,
-  )
+  const historyCounts = new Map(historyReachStates.map((state) => [state, 0]))
   let historiesRan = false
-  const randomCampaign = oraclePropertyOptions(60, `source-health.history`)
-  oracleReplayTest(fcTest, `source-health.history`).prop(
-    [
-      fc
-        .tuple(
-          fc.constantFrom(...shapes),
-          fc.option(fc.constantFrom(...reachPrefixes), { freq: 6 }),
-          fc.array(stepArb, { maxLength: 12 }),
-        )
-        .map(([shape, prefix, rest]): [Shape, Array<Step>] => [
-          (prefix && prefixShapes.get(prefix)) ?? shape,
-          [...(prefix ?? []), ...rest],
-        ]),
-      fc.boolean(),
-    ],
-    randomCampaign,
-  )(
-    `generated histories refine the model`,
-    ([shape, steps], directSubscribers) => {
-      oracleRoute(oracleRouteOf(randomCampaign))
-      historiesRan = true
-      historyReach.beginHistory()
-      return withDeadline(
-        runHistory(shape, steps, directSubscribers, historyReach),
+  let structuralCampaign = false
+  beforeEach(({ task }) => {
+    structuralCampaign = isGeneratedOracleCampaign(task.name)
+  })
+  const historyArbitrary = fc.tuple(
+    fc
+      .tuple(
+        fc.constantFrom(...shapes),
+        fc.option(fc.constantFrom(...reachPrefixes), { freq: 6 }),
+        fc.array(stepArb, { maxLength: 12 }),
       )
-    },
-    120_000,
+      .map(([shape, prefix, rest]): [Shape, Array<Step>] => [
+        (prefix && prefixShapes.get(prefix)) ?? shape,
+        [...(prefix ?? []), ...rest],
+      ]),
+    fc.boolean(),
   )
-  // Optional prefixes preserve broad exploration, but cannot guarantee rare
-  // premises at a finite random budget. Every structural campaign therefore
-  // executes each existing prefix in a context that can observe its law.
-  // The same generated suffix follows each prefix; runHistory still compares
-  // every step, including snapshot commits, against the unchanged model.
-  // Join exercises both sources; only the inner-ready prefix requires nested.
-  // Direct subscribers remain present here. The original 60 random histories
-  // retain all six shapes and both direct-subscriber choices above.
-  const requiredProperty = `source-health.required-history`
-  const config = readOracleRunConfig()
-  for (const seed of config.campaignSeed === undefined
-    ? [20261029, undefined]
-    : [undefined]) {
-    const requiredReach = createOracleReach(
-      requiredProperty,
-      historyReachStates,
-      { replaying: oracleReplayRequested() },
-    )
-    let requiredRan = false
-    const randomCampaign2 = {
-      ...oraclePropertyOptions(6, requiredProperty),
-      ...(seed === undefined ? {} : oracleFixedSeed(seed)),
-    }
-    oracleReplayTest(fcTest, requiredProperty).prop(
-      [fc.array(stepArb, { maxLength: 12 })],
-      randomCampaign2,
-    )(
-      `required histories refine the model (${seed ?? `random`})`,
-      async (rest) => {
-        oracleRoute(oracleRouteOf(randomCampaign2))
-        requiredRan = true
-        historiesRan = true
-        for (const prefix of reachPrefixes) {
-          historyReach.beginHistory()
-          requiredReach.beginHistory()
-          await withDeadline(
-            runHistory(
-              prefixShapes.get(prefix) ?? `join`,
-              [...prefix, ...rest],
-              true,
-              {
-                ...requiredReach,
-                reach(state) {
-                  requiredReach.reach(state)
-                  historyReach.reach(state)
-                },
-              },
-            ),
-          )
-        }
-      },
-      120_000,
-    )
-    afterAll(() => {
-      if (requiredRan) {
-        requiredReach.assertReached()
-        console.info(
-          `source-health required reach (${seed ?? `random`}): ${JSON.stringify(Object.fromEntries(requiredReach.counts()))}`,
+  type StructuralHistory = [[Shape, Array<Step>], boolean]
+  oracleProperty<StructuralHistory, Verdict>({
+    id: `source-health.history`,
+    law: {
+      statement: `Every generated source step preserves the independently derived status, rows, health tree and event identities.`,
+      authority: `The source-health laws and independent source and query models stated above.`,
+      limits: `The unchanged six shapes, optional reach prefixes, twelve-step suffix and direct-subscriber choices.`,
+    },
+    owns: [
+      `src/collection/health-tree.ts`,
+      `src/collection/lifecycle.ts`,
+      `src/collection/subscription.ts`,
+    ],
+    histories: {
+      arbitrary: historyArbitrary,
+      runs: 60,
+      fixedSeeds: [],
+      measured: historyReachStates,
+    },
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(`source health history`, history, observe, () => {
+        const [[shape, steps], directSubscribers] = history
+        if (structuralCampaign) historiesRan = true
+        const counts = structuralCampaign
+          ? historyCounts
+          : new Map(historyReachStates.map((state) => [state, 0]))
+        return withDeadline(
+          runHistory(
+            shape,
+            steps,
+            directSubscribers,
+            healthHistoryReach(counts, observe),
+          ),
         )
-      }
+      }),
+    check: forwardAssertionJudgment,
+    timeout: 120_000,
+  })
+  // Every existing prefix still runs against each generated suffix. These
+  // batches retain their separate fixed/random reach gates and six-run budget.
+  describe(`required structural prefixes`, () => {
+    const requiredProperty = `source-health.required-history`
+    let counts = new Map(historyReachStates.map((state) => [state, 0]))
+    beforeEach(() => {
+      counts = new Map(historyReachStates.map((state) => [state, 0]))
     })
-  }
+    afterEach(({ task }) => {
+      if (!structuralCampaign || task.result?.state === `fail`) return
+      assertHealthReach(requiredProperty, counts)
+      process.stdout.write(
+        `${requiredProperty} ${task.name} minimums ${JSON.stringify(Object.fromEntries(counts))}\n`,
+      )
+    })
+    oracleProperty<Array<Step>, Verdict>({
+      id: requiredProperty,
+      law: {
+        statement: `Every existing reach prefix obeys the shared source-health model at each step before and through a generated suffix.`,
+        authority: `The source-health model and existing structural reach prefixes above.`,
+        limits: `The unchanged join contexts, nested inner-ready prefix, direct subscribers and twelve-step suffix.`,
+      },
+      owns: [
+        `src/collection/health-tree.ts`,
+        `src/collection/lifecycle.ts`,
+        `src/collection/subscription.ts`,
+      ],
+      histories: {
+        arbitrary: fc.array(stepArb, { maxLength: 12 }),
+        runs: 6,
+        fixedSeeds: [20261029],
+        measured: historyReachStates,
+      },
+      model: recordedAssertionJudgment,
+      driver: (rest, observe) =>
+        recordAssertionJudgment(requiredProperty, rest, observe, async () => {
+          if (structuralCampaign) historiesRan = true
+          for (const prefix of reachPrefixes) {
+            const localCounts = structuralCampaign
+              ? counts
+              : new Map(historyReachStates.map((state) => [state, 0]))
+            const local = healthHistoryReach(localCounts, observe)
+            const shared = healthHistoryReach(
+              structuralCampaign
+                ? historyCounts
+                : new Map(historyReachStates.map((state) => [state, 0])),
+              () => {},
+            )
+            await withDeadline(
+              runHistory(
+                prefixShapes.get(prefix) ?? `join`,
+                [...prefix, ...rest],
+                true,
+                {
+                  reach(state) {
+                    local.reach(state)
+                    shared.reach(state)
+                  },
+                },
+              ),
+            )
+          }
+        }),
+      check: forwardAssertionJudgment,
+      timeout: 120_000,
+    })
+  })
   afterAll(() => {
-    if (historiesRan) historyReach.assertReached()
+    if (historiesRan) assertHealthReach(`source-health.history`, historyCounts)
   })
 })
 
@@ -3495,6 +3618,96 @@ function expectedOverlap({ outcomes, first }: OverlapHistory) {
   })
 }
 
+async function runOverlapHistory(history: OverlapHistory): Promise<void> {
+  const loads: Array<ReturnType<typeof createDeferred<void>>> = []
+  let deferLoads = false
+  let params!: SyncParams
+  const source = createCollection<Row, number>({
+    id: `health-overlap-${Math.random().toString(36).slice(2)}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    gcTime: 0,
+    sync: {
+      sync: (next) => {
+        params = next
+        next.markReady()
+        return {
+          loadSubset: () => {
+            if (!deferLoads) return Promise.resolve()
+            const load = createDeferred<void>()
+            loads.push(load)
+            return load.promise
+          },
+        }
+      },
+    },
+  })
+  const query = createLiveQueryCollection((q) =>
+    q
+      .from({ row: source })
+      .orderBy(({ row }) => row.id)
+      .limit(2),
+  )
+  const consoleError = console.error
+  console.error = () => {}
+  try {
+    await query.preload()
+    params.begin()
+    for (const id of [1, 2, 3, 4])
+      params.write({ type: `insert`, value: { id, parentId: id } })
+    params.commit()
+    await flushPromises()
+    deferLoads = true
+    void Promise.resolve(query.utils.setWindow({ offset: 2, limit: 2 })).catch(
+      () => undefined,
+    )
+    await flushPromises()
+    params.begin()
+    params.write({ type: `delete`, value: { id: 3, parentId: 3 } })
+    params.commit()
+    await flushPromises()
+    // Premise: both loads are in flight at once.
+    expect(loads).toHaveLength(2)
+    const model = expectedOverlap(history)
+    const order = history.first === 0 ? [0, 1] : [1, 0]
+    for (const [step, load] of order.entries()) {
+      if (history.outcomes[load] === `ok`) loads[load]!.resolve()
+      else loads[load]!.reject(new Error(`load ${load} failed`))
+      await flushPromises()
+      expect(
+        query.health.error?.message ?? null,
+        `after load ${load} settles`,
+      ).toBe(model[step])
+      expect(query.status).toBe(`ready`)
+    }
+    // A load started after the failure clears it when it succeeds.
+    if (model.at(-1) !== null) {
+      void Promise.resolve(
+        query.utils.setWindow({ offset: 6, limit: 2 }),
+      ).catch(() => undefined)
+      await flushPromises()
+      // The loader may have started more loads while the two settled; a
+      // load started before the failure clears nothing, so settle every
+      // load until the one the window move started has succeeded.
+      const started = loads.length
+      for (let index = 2; index < loads.length; index++) {
+        loads[index]!.resolve()
+        await flushPromises()
+      }
+      expect(loads.length, `the window move started a load`).toBeGreaterThan(2)
+      expect(started).toBeGreaterThan(2)
+      expect(
+        query.health.error?.message ?? null,
+        `after a later load succeeds`,
+      ).toBeNull()
+    }
+  } finally {
+    console.error = consoleError
+    await query.cleanup()
+    await source.cleanup()
+  }
+}
+
 describe(`overlapping root loads`, () => {
   const histories: Array<OverlapHistory> = []
   for (const a of [`ok`, `fail`] as const)
@@ -3502,102 +3715,28 @@ describe(`overlapping root loads`, () => {
       for (const first of [0, 1] as const)
         histories.push({ outcomes: [a, b], first })
 
-  it.each(histories)(
-    `outcomes $outcomes, load $first settles first`,
-    async (history) => {
-      oracleRoute(`case`)
-      const loads: Array<ReturnType<typeof createDeferred<void>>> = []
-      let deferLoads = false
-      let params!: SyncParams
-      const source = createCollection<Row, number>({
-        id: `health-overlap-${Math.random().toString(36).slice(2)}`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        gcTime: 0,
-        sync: {
-          sync: (next) => {
-            params = next
-            next.markReady()
-            return {
-              loadSubset: () => {
-                if (!deferLoads) return Promise.resolve()
-                const load = createDeferred<void>()
-                loads.push(load)
-                return load.promise
-              },
-            }
-          },
-        },
-      })
-      const query = createLiveQueryCollection((q) =>
-        q
-          .from({ row: source })
-          .orderBy(({ row }) => row.id)
-          .limit(2),
-      )
-      const consoleError = console.error
-      console.error = () => {}
-      try {
-        await query.preload()
-        params.begin()
-        for (const id of [1, 2, 3, 4])
-          params.write({ type: `insert`, value: { id, parentId: id } })
-        params.commit()
-        await flushPromises()
-        deferLoads = true
-        void Promise.resolve(
-          query.utils.setWindow({ offset: 2, limit: 2 }),
-        ).catch(() => undefined)
-        await flushPromises()
-        params.begin()
-        params.write({ type: `delete`, value: { id: 3, parentId: 3 } })
-        params.commit()
-        await flushPromises()
-        // Premise: both loads are in flight at once.
-        expect(loads).toHaveLength(2)
-        const model = expectedOverlap(history)
-        const order = history.first === 0 ? [0, 1] : [1, 0]
-        for (const [step, load] of order.entries()) {
-          if (history.outcomes[load] === `ok`) loads[load]!.resolve()
-          else loads[load]!.reject(new Error(`load ${load} failed`))
-          await flushPromises()
-          expect(
-            query.health.error?.message ?? null,
-            `after load ${load} settles`,
-          ).toBe(model[step])
-          expect(query.status).toBe(`ready`)
-        }
-        // A load started after the failure clears it when it succeeds.
-        if (model.at(-1) !== null) {
-          void Promise.resolve(
-            query.utils.setWindow({ offset: 6, limit: 2 }),
-          ).catch(() => undefined)
-          await flushPromises()
-          // The loader may have started more loads while the two settled; a
-          // load started before the failure clears nothing, so settle every
-          // load until the one the window move started has succeeded.
-          const started = loads.length
-          for (let index = 2; index < loads.length; index++) {
-            loads[index]!.resolve()
-            await flushPromises()
-          }
-          expect(
-            loads.length,
-            `the window move started a load`,
-          ).toBeGreaterThan(2)
-          expect(started).toBeGreaterThan(2)
-          expect(
-            query.health.error?.message ?? null,
-            `after a later load succeeds`,
-          ).toBeNull()
-        }
-      } finally {
-        console.error = consoleError
-        await query.cleanup()
-        await source.cleanup()
-      }
+  oracleProperty<OverlapHistory, Verdict>({
+    id: `source-health.overlap`,
+    law: {
+      statement: `A request error clears only when a load started after the failure succeeds; overlapping loads that started before it keep the latest failure.`,
+      authority: `The overlapping root loads law stated above and its independent expectedOverlap model.`,
+      limits: `The eight outcome and settlement orders of two overlapping root loads of one ordered, limited query.`,
     },
-  )
+    owns: [
+      `src/collection/health-tree.ts`,
+      `src/collection/lifecycle.ts`,
+      `src/collection/subscription.ts`,
+    ],
+    histories,
+    label: ({ outcomes, first }) =>
+      `outcomes ${outcomes.join(`,`)}, load ${first} settles first`,
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(`source-health.overlap`, history, observe, () =>
+        runOverlapHistory(history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -3653,6 +3792,112 @@ function expectedOnDemandReload(
   )
 }
 
+async function runOnDemandReloadHistory(
+  history: OnDemandReloadHistory,
+): Promise<void> {
+  let runs = 0
+  const runLoads: Array<Array<() => void>> = [[], [], []]
+  const newRunReady = createDeferred<void>()
+  const source = createCollection<Row, number>({
+    id: `health-on-demand-reload-${Math.random().toString(36).slice(2)}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    gcTime: 0,
+    sync: {
+      sync: (params) => {
+        const run = ++runs
+        if (run === 1 || history.firstCommit === `empty-inside-sync`) {
+          params.markReady()
+        } else if (history.firstCommit === `row-inside-sync`) {
+          params.begin()
+          params.write({ type: `insert`, value: { id: 5, parentId: 15 } })
+          params.commit()
+          params.markReady()
+        } else {
+          void newRunReady.promise.then(() => params.markReady())
+        }
+        return {
+          loadSubset: () => {
+            const serve = () => {
+              params.begin()
+              for (const row of providerRows(run))
+                params.write({
+                  type:
+                    params.collection._state.getAcceptedSyncedRow(row.id) ===
+                    undefined
+                      ? `insert`
+                      : `update`,
+                  value: row,
+                })
+              params.commit()
+            }
+            if (run === 1) {
+              serve()
+              return true
+            }
+            const load = createDeferred<void>()
+            runLoads[run]!.push(() => {
+              serve()
+              load.resolve()
+            })
+            return load.promise
+          },
+        }
+      },
+    },
+  })
+  const query = createLiveQueryCollection((q) => {
+    const rows = q.from({ row: source })
+    return history.query === `all`
+      ? rows
+      : rows.where(({ row }) => eq(row.id, 1))
+  })
+  const sorted = (rows: Array<Row>) =>
+    [...rows]
+      .map(({ id, parentId }) => ({ id, parentId }))
+      .sort((a, b) => a.id - b.id)
+  try {
+    await query.preload()
+    expect(sorted(query.toArray)).toEqual(expectedOnDemandReload(history, 1))
+
+    let reloaded = false
+    const reload = source.reload().then(() => {
+      reloaded = true
+    })
+    newRunReady.resolve()
+    await flushPromises()
+    expect(
+      runLoads[2]!.length,
+      `the new run reloads the query's subset`,
+    ).toBeGreaterThan(0)
+    expect(sorted(query.toArray), `while the loads are in flight`).toEqual(
+      expectedOnDemandReload(history, 1),
+    )
+    expect(
+      sorted(source.toArray),
+      `a direct read while the loads are in flight`,
+    ).toEqual([
+      ...providerRows(1),
+      ...(history.firstCommit === `row-inside-sync`
+        ? [{ id: 5, parentId: 15 }]
+        : []),
+    ])
+
+    for (const serve of runLoads[2]!.splice(0)) serve()
+    await reload
+    await flushPromises()
+    expect(reloaded).toBe(true)
+    expect(sorted(query.toArray), `after the loads settle`).toEqual(
+      expectedOnDemandReload(history, 2),
+    )
+    expect(query.status).toBe(`ready`)
+    expect(source.health.hasErrors).toBe(false)
+  } finally {
+    await query.cleanup()
+    await source.cleanup()
+  }
+}
+
 describe(`on-demand reload`, () => {
   const histories: Array<OnDemandReloadHistory> = []
   for (const firstCommit of [
@@ -3663,116 +3908,31 @@ describe(`on-demand reload`, () => {
     for (const query of [`all`, `row-1`] as const)
       histories.push({ firstCommit, query })
 
-  it.each(histories)(
-    `first commit $firstCommit, query $query`,
-    async (history) => {
-      oracleRoute(`case`)
-      let runs = 0
-      const runLoads: Array<Array<() => void>> = [[], [], []]
-      const newRunReady = createDeferred<void>()
-      const source = createCollection<Row, number>({
-        id: `health-on-demand-reload-${Math.random().toString(36).slice(2)}`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        gcTime: 0,
-        sync: {
-          sync: (params) => {
-            const run = ++runs
-            if (run === 1 || history.firstCommit === `empty-inside-sync`) {
-              params.markReady()
-            } else if (history.firstCommit === `row-inside-sync`) {
-              params.begin()
-              params.write({ type: `insert`, value: { id: 5, parentId: 15 } })
-              params.commit()
-              params.markReady()
-            } else {
-              void newRunReady.promise.then(() => params.markReady())
-            }
-            return {
-              loadSubset: () => {
-                const serve = () => {
-                  params.begin()
-                  for (const row of providerRows(run))
-                    params.write({
-                      type:
-                        params.collection._state.getAcceptedSyncedRow(
-                          row.id,
-                        ) === undefined
-                          ? `insert`
-                          : `update`,
-                      value: row,
-                    })
-                  params.commit()
-                }
-                if (run === 1) {
-                  serve()
-                  return true
-                }
-                const load = createDeferred<void>()
-                runLoads[run]!.push(() => {
-                  serve()
-                  load.resolve()
-                })
-                return load.promise
-              },
-            }
-          },
-        },
-      })
-      const query = createLiveQueryCollection((q) => {
-        const rows = q.from({ row: source })
-        return history.query === `all`
-          ? rows
-          : rows.where(({ row }) => eq(row.id, 1))
-      })
-      const sorted = (rows: Array<Row>) =>
-        [...rows]
-          .map(({ id, parentId }) => ({ id, parentId }))
-          .sort((a, b) => a.id - b.id)
-      try {
-        await query.preload()
-        expect(sorted(query.toArray)).toEqual(
-          expectedOnDemandReload(history, 1),
-        )
-
-        let reloaded = false
-        const reload = source.reload().then(() => {
-          reloaded = true
-        })
-        newRunReady.resolve()
-        await flushPromises()
-        expect(
-          runLoads[2]!.length,
-          `the new run reloads the query's subset`,
-        ).toBeGreaterThan(0)
-        expect(sorted(query.toArray), `while the loads are in flight`).toEqual(
-          expectedOnDemandReload(history, 1),
-        )
-        expect(
-          sorted(source.toArray),
-          `a direct read while the loads are in flight`,
-        ).toEqual([
-          ...providerRows(1),
-          ...(history.firstCommit === `row-inside-sync`
-            ? [{ id: 5, parentId: 15 }]
-            : []),
-        ])
-
-        for (const serve of runLoads[2]!.splice(0)) serve()
-        await reload
-        await flushPromises()
-        expect(reloaded).toBe(true)
-        expect(sorted(query.toArray), `after the loads settle`).toEqual(
-          expectedOnDemandReload(history, 2),
-        )
-        expect(query.status).toBe(`ready`)
-        expect(source.health.hasErrors).toBe(false)
-      } finally {
-        await query.cleanup()
-        await source.cleanup()
-      }
+  oracleProperty<OnDemandReloadHistory, Verdict>({
+    id: `source-health.on-demand-reload`,
+    law: {
+      statement: `A live query over an on-demand Collection keeps its rows until a reload's new run has reloaded its subset, and then shows the new run's rows.`,
+      authority: `The on-demand reload law stated above and its independent expectedOnDemandReload model.`,
+      limits: `The three first-commit forms of the new run crossed with an unfiltered query and a query for row 1.`,
     },
-  )
+    owns: [
+      `src/collection/health-tree.ts`,
+      `src/collection/lifecycle.ts`,
+      `src/collection/subscription.ts`,
+    ],
+    histories,
+    label: ({ firstCommit, query }) =>
+      `first commit ${firstCommit}, query ${query}`,
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(
+        `source-health.on-demand-reload`,
+        history,
+        observe,
+        () => runOnDemandReloadHistory(history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -4352,23 +4512,29 @@ function expectRequestErrors(
   label: string,
 ): void {
   const error = node.error
-  expect(
-    {
-      message: error?.message ?? null,
-      errors: error?.errors.map((failure) => failure.message) ?? [],
-    },
-    `${label}: request error`,
-  ).toEqual({
-    message: frame.length > 0 ? causes.get(frame.at(-1)!)!.message : null,
-    errors: frame.map((serial) => causes.get(serial)!.message),
-  })
+  oracleAssertion(`expectRequestErrors:4354`, () =>
+    expect(
+      {
+        message: error?.message ?? null,
+        errors: error?.errors.map((failure) => failure.message) ?? [],
+      },
+      `${label}: request error`,
+    ).toEqual({
+      message: frame.length > 0 ? causes.get(frame.at(-1)!)!.message : null,
+      errors: frame.map((serial) => causes.get(serial)!.message),
+    }),
+  )
   if (!error) return
-  expect(error.cause, `${label}: request error cause`).toBe(
-    causes.get(frame.at(-1)!),
+  oracleAssertion(`expectRequestErrors:4365`, () =>
+    expect(error.cause, `${label}: request error cause`).toBe(
+      causes.get(frame.at(-1)!),
+    ),
   )
   error.errors.forEach((failure, index) =>
-    expect(failure.cause, `${label}: request error ${index} cause`).toBe(
-      causes.get(frame[index]!),
+    oracleAssertion(`expectRequestErrors:4369`, () =>
+      expect(failure.cause, `${label}: request error ${index} cause`).toBe(
+        causes.get(frame[index]!),
+      ),
     ),
   )
 }
@@ -4414,8 +4580,11 @@ function watchRequestErrorAnnouncements(query: Collection<any, any>) {
         // Checked while the query is ready: see the coverage map for a
         // crash, which the query announces twice.
         if (tree.status === `ready`)
-          expect(facts, `${label}: announcement ${index} is a change`).not.toBe(
-            previous,
+          oracleAssertion(`watchRequestErrorAnnouncements:4416`, () =>
+            expect(
+              facts,
+              `${label}: announcement ${index} is a change`,
+            ).not.toBe(previous),
           )
         previous = facts
       })
@@ -4425,8 +4594,10 @@ function watchRequestErrorAnnouncements(query: Collection<any, any>) {
         const at = errors[index]!.at
         const prior = seen.get(serial)
         if (prior && prior.shownAt === shownAt.get(serial))
-          expect(at, `${label}: request error ${index} keeps its at`).toBe(
-            prior.at,
+          oracleAssertion(`watchRequestErrorAnnouncements:4427`, () =>
+            expect(at, `${label}: request error ${index} keeps its at`).toBe(
+              prior.at,
+            ),
           )
         seen.set(serial, { at, shownAt: shownAt.get(serial) })
       })
@@ -4467,7 +4638,9 @@ function expectHeldDemandCovered(
       !judged.has(key) &&
       !(errorShown && (demand.failed.has(key) || demand.replayFailed)),
   )
-  expect(uncovered, `${label}: held demand is covered`).toEqual([])
+  oracleAssertion(`expectHeldDemandCovered:4469`, () =>
+    expect(uncovered, `${label}: held demand is covered`).toEqual([]),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -4742,13 +4915,15 @@ function watchDirectly(
   )
   return {
     check: (label: string) =>
-      expect(
-        [...rows].sort(([a], [b]) => a - b),
-        `${label}: direct subscriber rows`,
-      ).toEqual(
-        collection.toArray
-          .map((row): [number, number] => [row.id, row.parentId])
-          .sort(([a], [b]) => a - b),
+      oracleAssertion(`watchDirectly:4744`, () =>
+        expect(
+          [...rows].sort(([a], [b]) => a - b),
+          `${label}: direct subscriber rows`,
+        ).toEqual(
+          collection.toArray
+            .map((row): [number, number] => [row.id, row.parentId])
+            .sort(([a], [b]) => a - b),
+        ),
       ),
     stop: () =>
       (current.subscription as { unsubscribe: () => void }).unsubscribe(),
@@ -4775,9 +4950,9 @@ const demandReachStates = [
   // it because a reload was in flight when the run retired.
   `cleanup during the query's own reload`,
 ] as const
-type DemandReach = ReturnType<
-  typeof createOracleReach<(typeof demandReachStates)[number]>
->
+type DemandReach = {
+  reach: (state: (typeof demandReachStates)[number]) => void
+}
 
 async function runDemandHistory(
   steps: ReadonlyArray<WindowStep>,
@@ -5003,7 +5178,9 @@ async function runDemandHistory(
       settleWindow(model, step, settled, loads.length)
       deriveDemandGate(model)
 
-      expect(query.status, `${label}: query status`).toBe(model.gate)
+      oracleAssertion(`runDemandHistory:5003`, () =>
+        expect(query.status, `${label}: query status`).toBe(model.gate),
+      )
       watcher?.check(label)
       const shownError = expectedRequestError(model.demand)
       if (model.gate === `ready`) {
@@ -5013,12 +5190,16 @@ async function runDemandHistory(
           causes,
           label,
         )
-        expect(query.health.reloading, `${label}: query reloading`).toBe(
-          model.selfReload !== undefined,
+        oracleAssertion(`runDemandHistory:5013`, () =>
+          expect(query.health.reloading, `${label}: query reloading`).toBe(
+            model.selfReload !== undefined,
+          ),
         )
         // Its promise settles when it completes, and not before.
-        expect(reloadPending, `${label}: query reload pending`).toBe(
-          model.selfReload !== undefined,
+        oracleAssertion(`runDemandHistory:5017`, () =>
+          expect(reloadPending, `${label}: query reload pending`).toBe(
+            model.selfReload !== undefined,
+          ),
         )
       }
       if (model.selfReload?.moveFailed)
@@ -5029,18 +5210,22 @@ async function runDemandHistory(
         model.demand.shownAt,
       )
       if (model.gate === `ready` && model.selfReload)
-        expect(
-          query.toArray.map((row) => row.id),
-          `${label}: rows during the query's own reload`,
-        ).toEqual(rowsAtSelfReload)
+        oracleAssertion(`runDemandHistory:5029`, () =>
+          expect(
+            query.toArray.map((row) => row.id),
+            `${label}: rows during the query's own reload`,
+          ).toEqual(rowsAtSelfReload),
+        )
       // With no load in flight, the reported window is the one the query
       // shows: a move that failed, also through a failed replay, does not
       // advance it (Atomic window publication).
       if (model.gate === `ready` && loads.length === 0)
-        expect(
-          query.utils.getWindow()?.offset,
-          `${label}: reported window`,
-        ).toBe(model.shown)
+        oracleAssertion(`runDemandHistory:5037`, () =>
+          expect(
+            query.utils.getWindow()?.offset,
+            `${label}: reported window`,
+          ).toBe(model.shown),
+        )
       expectHeldDemandCovered(
         model,
         loads.map(() => new Set([windowDemand])),
@@ -5049,18 +5234,22 @@ async function runDemandHistory(
       )
       const sourceNode = query.health.sources[0]!
       if (model.source.gate !== `crashed`) {
-        expect(
-          sourceNode.failureReason?.message ?? null,
-          `${label}: source failureReason`,
-        ).toBe(
-          model.source.stopped
-            ? null
-            : (model.source.failures.at(-1)?.message ?? null),
+        oracleAssertion(`runDemandHistory:5049`, () =>
+          expect(
+            sourceNode.failureReason?.message ?? null,
+            `${label}: source failureReason`,
+          ).toBe(
+            model.source.stopped
+              ? null
+              : (model.source.failures.at(-1)?.message ?? null),
+          ),
         )
-        expect(
-          sourceNode.error?.message ?? null,
-          `${label}: source error`,
-        ).toBe(model.source.stopped?.message ?? null)
+        oracleAssertion(`runDemandHistory:5057`, () =>
+          expect(
+            sourceNode.error?.message ?? null,
+            `${label}: source error`,
+          ).toBe(model.source.stopped?.message ?? null),
+        )
       }
       if (
         model.gate === `ready` &&
@@ -5068,10 +5257,12 @@ async function runDemandHistory(
         shownError === null &&
         !model.selfReload
       ) {
-        expect(
-          query.toArray.map((row) => row.id),
-          `${label}: window rows`,
-        ).toEqual([model.shown + 1, model.shown + 2])
+        oracleAssertion(`runDemandHistory:5068`, () =>
+          expect(
+            query.toArray.map((row) => row.id),
+            `${label}: window rows`,
+          ).toEqual([model.shown + 1, model.shown + 2]),
+        )
       }
     }
   } finally {
@@ -5248,11 +5439,38 @@ describe(`on-demand demand grammar`, () => {
     `restart`,
     `settle-ok`,
   ]
-  for (const [name, steps] of Object.entries(named))
-    it(name, () => {
-      oracleRoute(`fixed history`)
-      return runDemandHistory(steps)
-    })
+  // Each named history replays through the demand driver and its
+  // independent model, as the generated property's histories do. The
+  // generated arbitrary maps its steps without an unmapper, so it cannot
+  // take these back; they register as one enumerated property.
+  const namedDemandHistories = Object.entries(named).map(([name, steps]) => ({
+    name,
+    steps,
+  }))
+  oracleProperty<(typeof namedDemandHistories)[number], Verdict>({
+    id: `source-health.on-demand-fixed`,
+    law: {
+      statement: `Window demand, replay, source health and atomic publication refine the shared independent demand model.`,
+      authority: `The demand and window laws and source model stated above.`,
+      limits: `The named histories, which the generated arbitrary cannot take back; each is replayed through the same demand driver and model.`,
+    },
+    owns: [
+      `src/collection/health-tree.ts`,
+      `src/collection/lifecycle.ts`,
+      `src/collection/subscription.ts`,
+    ],
+    histories: namedDemandHistories,
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(
+        `source-health.on-demand-fixed`,
+        history,
+        observe,
+        () => runDemandHistory(history.steps),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   const step = fc.constantFrom<WindowStep>(
     `window`,
@@ -5320,47 +5538,79 @@ describe(`on-demand demand grammar`, () => {
   const demandExamples = demandReachPrefixes.map(
     (prefix): [Array<WindowStep>, boolean] => [[...prefix], true],
   )
-  const demandReach = createOracleReach(
-    `source-health.on-demand`,
-    demandReachStates,
-    { fixedHistories: demandExamples.length },
-  )
-  let demandHistoriesRan = false
-  afterAll(() => {
-    if (demandHistoriesRan) demandReach.assertReached()
-  })
-  const randomCampaign3 = oraclePropertyOptions(60, `source-health.on-demand`, {
-    examples: demandExamples,
-  })
-  oracleReplayTest(fcTest, `source-health.on-demand`).prop(
-    [
-      fc
-        .tuple(
-          fc.option(fc.constantFrom(...demandReachPrefixes), { freq: 4 }),
-          fc.array(step, { maxLength: 10 }),
-        )
-        .map(([prefix, rest]): Array<WindowStep> => [
-          ...(prefix ?? []),
-          ...rest,
-        ]),
-      fc.boolean(),
-    ],
-    randomCampaign3,
-  )(
-    `generated demand histories refine the model`,
-    (steps, directSubscriber) => {
-      oracleRoute(oracleRouteOf(randomCampaign3))
-      demandHistoriesRan = true
-      // fast-check passes an example's input by reference.
-      demandReach.beginHistory({
-        fixed: demandExamples.some(([example]) => example === steps),
-      })
-      return withDeadline(
-        runDemandHistory(steps, directSubscriber, demandReach),
+  const demandArbitrary = fc.tuple(
+    fc
+      .tuple(
+        fc.option(fc.constantFrom(...demandReachPrefixes), { freq: 4 }),
+        fc.array(step, { maxLength: 10 }),
       )
-    },
-    120_000,
+      .map(([prefix, rest]): Array<WindowStep> => [...(prefix ?? []), ...rest]),
+    fc.boolean(),
   )
+  type DemandHistory = [Array<WindowStep>, boolean]
+  let counts = new Map(demandReachStates.map((state) => [state, 0]))
+  let fixed = new Set<(typeof demandReachStates)[number]>()
+  let campaign = false
+  beforeEach(async ({ task }) => {
+    campaign = task.name === `random seed: generated`
+    counts = new Map(demandReachStates.map((state) => [state, 0]))
+    fixed = new Set()
+    if (!campaign || oracleReplayRequested()) return
+    // Keep examples before the base random histories, as in the old runner.
+    for (const [steps, directSubscriber] of demandExamples)
+      await withDeadline(
+        runDemandHistory(
+          steps,
+          directSubscriber,
+          healthHistoryReach(counts, () => {}, fixed),
+        ),
+      )
+  })
+  afterEach(({ task }) => {
+    if (!campaign || task.result?.state === `fail`) return
+    assertHealthReach(`source-health.on-demand`, counts, fixed)
+    process.stdout.write(
+      `source-health.on-demand minimums ${JSON.stringify(Object.fromEntries(counts))}\n`,
+    )
+  })
+  oracleProperty<DemandHistory, Verdict>({
+    id: `source-health.on-demand`,
+    law: {
+      statement: `Window demand, replay, source health and atomic publication refine the shared independent demand model.`,
+      authority: `The demand and window laws and source model stated above.`,
+      limits: `The unchanged reach prefixes, ten-step suffix, direct-subscriber choices and adapter-abort contract.`,
+    },
+    owns: [
+      `src/collection/health-tree.ts`,
+      `src/collection/lifecycle.ts`,
+      `src/collection/subscription.ts`,
+    ],
+    histories: {
+      arbitrary: demandArbitrary,
+      runs: 60,
+      fixedSeeds: [],
+      measured: demandReachStates,
+    },
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(
+        `source-health.on-demand`,
+        history,
+        observe,
+        () => {
+          const [steps, directSubscriber] = history
+          return withDeadline(
+            runDemandHistory(
+              steps,
+              directSubscriber,
+              healthHistoryReach(counts, observe),
+            ),
+          )
+        },
+      ),
+    check: forwardAssertionJudgment,
+    timeout: 120_000,
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -5549,9 +5799,7 @@ const lazyReachStates = [
   `reload keeps a row the provider deleted`,
   `replay verdict lists an open failure again`,
 ] as const
-type LazyReach = ReturnType<
-  typeof createOracleReach<(typeof lazyReachStates)[number]>
->
+type LazyReach = { reach: (state: (typeof lazyReachStates)[number]) => void }
 
 // `asyncChildReady`: the child Collection's reload calls markReady() after
 // sync() returns, so its loads in flight settle before the replay exists.
@@ -5848,10 +6096,12 @@ async function runLazyHistory(
     // (ARCHITECTURE, "Cleanup, restart, and detached waiters"), so nothing
     // ends and the reload goes on.
     if (!dependents && effect && !effect.disposed) {
-      await expect(
-        ended.cleanup,
-        `${label}: plain cleanup under an Effect`,
-      ).rejects.toBeInstanceOf(CollectionHasSubscribersError)
+      await oracleAssertion(`runLazyHistory:5847`, () =>
+        expect(
+          ended.cleanup,
+          `${label}: plain cleanup under an Effect`,
+        ).rejects.toBeInstanceOf(CollectionHasSubscribersError),
+      )
       return
     }
     if (ended.notified)
@@ -5866,14 +6116,23 @@ async function runLazyHistory(
       )
     await ended.cleanup
     await expectReloadEnded(ended, label)
-    expect(children.status, `${label}: child status`).toBe(`cleaned-up`)
-    expect(
-      childRunCounts.started - childRunCounts.ended,
-      `${label}: child sync runs live after cleanup`,
-    ).toBe(0)
+    oracleAssertion(`runLazyHistory:5865`, () =>
+      expect(children.status, `${label}: child status`).toBe(`cleaned-up`),
+    )
+    oracleAssertion(`runLazyHistory:5866`, () =>
+      expect(
+        childRunCounts.started - childRunCounts.ended,
+        `${label}: child sync runs live after cleanup`,
+      ).toBe(0),
+    )
     if (dependents) {
-      expect(query.status, `${label}: query status`).toBe(`cleaned-up`)
-      if (effect) expect(effect.disposed, `${label}: effect ended`).toBe(true)
+      oracleAssertion(`runLazyHistory:5871`, () =>
+        expect(query.status, `${label}: query status`).toBe(`cleaned-up`),
+      )
+      if (effect)
+        oracleAssertion(`runLazyHistory:5872`, () =>
+          expect(effect!.disposed, `${label}: effect ended`).toBe(true),
+        )
     }
     // A fresh start: its run's commit is the child's rows and baseline.
     void children.preload().catch(() => undefined)
@@ -5882,18 +6141,24 @@ async function runLazyHistory(
     childParams.write({ type: `insert`, value: { id: 99, parentId: 99 } })
     childParams.commit()
     await flushPromises()
-    expect(
-      children.toArray.map((row) => row.id),
-      `${label}: fresh run rows`,
-    ).toEqual([99])
-    expect(
-      [...children._state.acceptedSyncedEntries()].map(([key]) => key),
-      `${label}: fresh run baseline`,
-    ).toEqual([99])
+    oracleAssertion(`runLazyHistory:5881`, () =>
+      expect(
+        children.toArray.map((row) => row.id),
+        `${label}: fresh run rows`,
+      ).toEqual([99]),
+    )
+    oracleAssertion(`runLazyHistory:5885`, () =>
+      expect(
+        [...children._state.acceptedSyncedEntries()].map(([key]) => key),
+        `${label}: fresh run baseline`,
+      ).toEqual([99]),
+    )
   }
   try {
     if (deferredStart) {
-      expect(children._deferSyncStart(), `the child start defers`).toBe(true)
+      oracleAssertion(`runLazyHistory:5892`, () =>
+        expect(children._deferSyncStart(), `the child start defers`).toBe(true),
+      )
       reloadInLoad = deferredStart === `reload-in-first-load`
     }
     void query.preload().catch(() => undefined)
@@ -5902,16 +6167,22 @@ async function runLazyHistory(
       // The query's preload is independent demand, which releases a deferred
       // sync start (the deferred-acquisition oracle owns that law), so its
       // first load enters the adapter from the released start.
-      expect(requests.length, `the first load ran`).toBeGreaterThan(0)
+      oracleAssertion(`runLazyHistory:5901`, () =>
+        expect(requests.length, `the first load ran`).toBeGreaterThan(0),
+      )
     }
     report()
     for (const reentrant of reentrantReloads.splice(0)) {
       reach?.reach(`reload from inside a deferred first load`)
-      expect(reentrant.inFlight).toBe(false)
-      await expect(
-        reentrant.promise,
-        `a reload from inside the deferred first load rejects`,
-      ).rejects.toBeInstanceOf(CollectionReloadDuringSyncEntryError)
+      oracleAssertion(`runLazyHistory:5906`, () =>
+        expect(reentrant.inFlight).toBe(false),
+      )
+      await oracleAssertion(`runLazyHistory:5907`, () =>
+        expect(
+          reentrant.promise,
+          `a reload from inside the deferred first load rejects`,
+        ).rejects.toBeInstanceOf(CollectionReloadDuringSyncEntryError),
+      )
     }
     if (directSubscriber) watcher = watchDirectly(children, boundary)
     if (withEffect) {
@@ -6027,21 +6298,25 @@ async function runLazyHistory(
       await flushPromises()
       const stepRequests = [...requests]
       if (expectedRequests?.[index])
-        expect(
-          stepRequests.map((request) => [...request.keys].sort()),
-          `${label}: requests`,
-        ).toEqual(expectedRequests[index])
+        oracleAssertion(`runLazyHistory:6026`, () =>
+          expect(
+            stepRequests.map((request) => [...request.keys].sort()),
+            `${label}: requests`,
+          ).toEqual(expectedRequests[index]),
+        )
       report(step.kind === `reload` || step.kind === `truncate`)
       // A truncate replays the query's demand: the adapter receives a
       // request for every key the query still needs, also one whose load
       // threw, since a throw holds its demand as a rejection does.
       if (truncates && (model.gate === `ready` || model.gate === `loading`))
-        expect(
-          [...model.demand.held].filter((key) =>
-            stepRequests.every((request) => !request.keys.has(key)),
-          ),
-          `${label}: keys the truncate replay did not request`,
-        ).toEqual([])
+        oracleAssertion(`runLazyHistory:6035`, () =>
+          expect(
+            [...model.demand.held].filter((key) =>
+              stepRequests.every((request) => !request.keys.has(key)),
+            ),
+            `${label}: keys the truncate replay did not request`,
+          ).toEqual([]),
+        )
       deriveDemandGate(model)
       // The child Collection holds exactly the model's rows: a row the
       // provider deleted stays, also after a reload that its new run
@@ -6052,19 +6327,25 @@ async function runLazyHistory(
         run > 1
       )
         reach?.reach(`reload keeps a row the provider deleted`)
-      expect(
-        children.toArray.map((row) => row.id / 10).sort((a, b) => a - b),
-        `${label}: child Collection rows`,
-      ).toEqual([...model.source.rows.keys()].sort((a, b) => a - b))
+      oracleAssertion(`runLazyHistory:6051`, () =>
+        expect(
+          children.toArray.map((row) => row.id / 10).sort((a, b) => a - b),
+          `${label}: child Collection rows`,
+        ).toEqual([...model.source.rows.keys()].sort((a, b) => a - b)),
+      )
       for (const reentrant of reentrantReloads.splice(0))
         if (reentrant.inFlight) void reentrant.promise.catch(() => undefined)
         else
-          await expect(
-            reentrant.promise,
-            `${label}: a reload from inside loadSubset rejects`,
-          ).rejects.toBeInstanceOf(CollectionReloadDuringSyncEntryError)
+          await oracleAssertion(`runLazyHistory:6058`, () =>
+            expect(
+              reentrant.promise,
+              `${label}: a reload from inside loadSubset rejects`,
+            ).rejects.toBeInstanceOf(CollectionReloadDuringSyncEntryError),
+          )
 
-      expect(query.status, `${label}: query status`).toBe(model.gate)
+      oracleAssertion(`runLazyHistory:6063`, () =>
+        expect(query.status, `${label}: query status`).toBe(model.gate),
+      )
       watcher?.check(label)
       const { demand } = model
       if (watcher && demand.replayActive)
@@ -6082,31 +6363,41 @@ async function runLazyHistory(
       )
         reach?.reach(`several request errors open`)
       for (const rule of demand.applied) reach?.reach(rule)
-      expect(query.health, `${label}: stable read`).toBe(query.health)
+      oracleAssertion(`runLazyHistory:6081`, () =>
+        expect(query.health, `${label}: stable read`).toBe(query.health),
+      )
       if (
         demandOnly &&
         !replayBefore &&
         JSON.stringify(project(query.health)) === factsBefore
       ) {
-        expect(query.health, `${label}: unchanged tree keeps identity`).toBe(
-          treeBefore,
+        oracleAssertion(`runLazyHistory:6087`, () =>
+          expect(query.health, `${label}: unchanged tree keeps identity`).toBe(
+            treeBefore,
+          ),
         )
-        expect(
-          announcements,
-          `${label}: unchanged tree announces nothing`,
-        ).toBe(announcedBefore)
+        oracleAssertion(`runLazyHistory:6090`, () =>
+          expect(
+            announcements,
+            `${label}: unchanged tree announces nothing`,
+          ).toBe(announcedBefore),
+        )
       }
       // Law 17: a step that leaves different facts, such as a failure added
       // to or gone from the request error's list, gives a new tree and
       // announces it.
       if (JSON.stringify(project(query.health)) !== factsBefore) {
-        expect(query.health, `${label}: changed tree is new`).not.toBe(
-          treeBefore,
+        oracleAssertion(`runLazyHistory:6099`, () =>
+          expect(query.health, `${label}: changed tree is new`).not.toBe(
+            treeBefore,
+          ),
         )
-        expect(
-          announcements,
-          `${label}: changed tree is announced`,
-        ).toBeGreaterThan(announcedBefore)
+        oracleAssertion(`runLazyHistory:6102`, () =>
+          expect(
+            announcements,
+            `${label}: changed tree is announced`,
+          ).toBeGreaterThan(announcedBefore),
+        )
       }
       if (model.gate === `ready` && demand.replayActive)
         reach?.reach(`coverage checked during an open replay`)
@@ -6152,24 +6443,28 @@ async function runLazyHistory(
           (row: { parent: Row; child?: Row }) =>
             [row.parent.id, row.child?.id ?? null] as const,
         )
-        expect(
-          [...rows].sort((a, b) => a[0] - b[0]),
-          `${label}: rows`,
-        ).toEqual(
-          [...demand.held]
-            .sort((a, b) => a - b)
-            .slice(0, window)
-            .map((key) => [key, isLoaded(model, key) ? key * 10 : null]),
+        oracleAssertion(`runLazyHistory:6151`, () =>
+          expect(
+            [...rows].sort((a, b) => a[0] - b[0]),
+            `${label}: rows`,
+          ).toEqual(
+            [...demand.held]
+              .sort((a, b) => a - b)
+              .slice(0, window)
+              .map((key) => [key, isLoaded(model, key) ? key * 10 : null]),
+          ),
         )
         // An Effect over the same query that a load failure has not ended
         // has received the same rows by now.
         if (effect && !effect.disposed)
           reach?.reach(`effect compared at a quiet checkpoint`)
         if (effect && !effect.disposed)
-          expect(
-            [...effectRows.values()].sort((a, b) => a[0] - b[0]),
-            `${label}: effect rows`,
-          ).toEqual([...rows].sort((a, b) => a[0] - b[0]))
+          oracleAssertion(`runLazyHistory:6165`, () =>
+            expect(
+              [...effectRows.values()].sort((a, b) => a[0] - b[0]),
+              `${label}: effect rows`,
+            ).toEqual([...rows].sort((a, b) => a[0] - b[0])),
+          )
       }
     }
     // The ending's cleanup and fresh start are outside the announcement
@@ -6316,851 +6611,851 @@ describe(`lazy join demand grammar`, () => {
         { kind: `unparent`, key: 3 },
       ],
   }
-  for (const [name, steps] of Object.entries(named))
-    it(name, () => {
-      oracleRoute(`fixed history`)
-      return runLazyHistory(steps)
-    })
-  // A churn replay request fails, then a demand change releases it while it
-  // still shares a key with a replay load that later fails too.
-  it(`a failed replay does not list a load the query released before its verdict`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 2 },
-      { kind: `parent`, key: 3 },
-      { kind: `truncate` },
-      { kind: `settle-last-fail` },
-      { kind: `settle-last-fail` },
-      { kind: `settle-last-fail` },
-      { kind: `unparent`, key: 3 },
-      { kind: `settle-last-fail` },
-      { kind: `settle-first-ok` },
-      { kind: `reload` },
-      { kind: `settle-last-fail` },
-      { kind: `unparent`, key: 1 },
-      { kind: `settle-fail` },
-    ])
-  })
-  it(`a demand change that asks for a failed key again keeps its replay open`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `reload` },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-last-fail` },
-      { kind: `unparent`, key: 1 },
-    ])
-  })
-  it(`a first load waits for a replay load that no demand change follows`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `parent`, key: 3 },
-      { kind: `settle-first-ok` },
-      { kind: `reload` },
-      { kind: `unparent`, key: 3 },
-    ])
-  })
-  it(`a demand change after a failed replay load requests its key again`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `reload` },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-last-fail` },
-      { kind: `unparent`, key: 1 },
-    ])
-  })
-  it(`a reload's retired load decides nothing when its abort rejects it`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `reload` },
-      { kind: `settle-last-ok` },
-      { kind: `settle-first-fail` },
-    ])
-  })
-  it(`a later load of the failed key clears its error while another load is pending`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `unparent`, key: 1 },
-      { kind: `parent`, key: 1 },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-first-fail` },
-      { kind: `parent`, key: 3 },
-      { kind: `settle-last-ok` },
-    ])
-  })
-  it(`a demand change aborts a replay load and must request its still-held key again`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
+  // A named lazy history: its steps and the driver options it runs under.
+  type LazyFixedHistory = {
+    name: string
+    steps: ReadonlyArray<LazyStep>
+    options?: Omit<NonNullable<Parameters<typeof runLazyHistory>[1]>, `reach`>
+  }
+  const lazyFixedHistories: Array<LazyFixedHistory> = [
+    ...Object.entries(named).map(([name, steps]) => ({ name, steps })),
+    // A churn replay request fails, then a demand change releases it while it
+    // still shares a key with a replay load that later fails too.
+    {
+      name: `a failed replay does not list a load the query released before its verdict`,
+      steps: [
         { kind: `settle-ok` },
-        { kind: `parent`, key: 2 },
-        { kind: `settle-fail` },
-        { kind: `unparent`, key: 1 },
-        { kind: `fail` },
-        { kind: `truncate` },
-        { kind: `parent`, key: 1 },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  // Neighbours of the parked-join history: the parked demand is requested
-  // when its source restarts, and the replay then settles as usual; the
-  // parked demand retires instead, which aborts the replay.
-  it(`a parked demand loads when its source restarts, and the replay then settles`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `settle-ok` },
-        { kind: `parent`, key: 2 },
-        { kind: `settle-fail` },
-        { kind: `unparent`, key: 1 },
-        { kind: `fail` },
-        { kind: `truncate` },
-        { kind: `parent`, key: 1 },
-        { kind: `reload` },
-        { kind: `settle-ok` },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  it(`a parked replay ends when its last demand retires`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `settle-ok` },
-        { kind: `parent`, key: 2 },
-        { kind: `settle-fail` },
-        { kind: `unparent`, key: 1 },
-        { kind: `fail` },
-        { kind: `truncate` },
-        { kind: `parent`, key: 1 },
-        { kind: `unparent`, key: 1 },
-        { kind: `unparent`, key: 2 },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  it(`a load that fails during a replay is decided by the replay's verdict`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `reload` },
-      { kind: `parent`, key: 3 },
-      { kind: `settle-last-fail` },
-      { kind: `settle-first-fail` },
-      { kind: `unparent`, key: 3 },
-    ])
-  })
-  it(`a reload during the first load fails it only for a demand still held`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `parent`, key: 3 },
-      { kind: `reload` },
-      { kind: `settle-first-fail` },
-      { kind: `parent`, key: 2 },
-      { kind: `unparent`, key: 3 },
-      { kind: `unparent`, key: 2 },
-    ])
-  })
-  it(`a second reload replaces a load that failed during the first replay`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `reload` },
-      { kind: `parent`, key: 3 },
-      { kind: `settle-last-fail` },
-      { kind: `reload` },
-      { kind: `settle-ok` },
-    ])
-  })
-  it(`a second reload's replay replaces the first replay's loads`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `parent`, key: 2 },
-      { kind: `reload` },
-      { kind: `reload` },
-      { kind: `unparent`, key: 1 },
-      { kind: `settle-first-ok` },
-      { kind: `settle-last-ok` },
-      { kind: `settle-first-fail` },
-    ])
-  })
-  it(`a reload after a truncate keeps the first load waiting for its replay`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `parent`, key: 3 },
-      { kind: `settle-last-ok` },
-      { kind: `truncate` },
-      { kind: `unparent`, key: 1 },
-      { kind: `reload` },
-    ])
-  })
-  it(`a truncate replay's success clears the error of a key whose retry it replaced`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-fail` },
-      { kind: `unparent`, key: 1 },
-      { kind: `truncate` },
-      { kind: `settle-last-ok` },
-    ])
-  })
-  it(`a failed replay succeeds for the demand left after its failed demand retires`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `reload` },
-      { kind: `settle-fail` },
-      { kind: `parent`, key: 3 },
-      { kind: `unparent`, key: 1 },
-      { kind: `settle-ok` },
-      { kind: `settle-fail` },
-    ])
-  })
-  it(`a demand change's replacement keeps a reload's replay open in the first load`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `reload` },
-        { kind: `truncate` },
-        { kind: `parent`, key: 3 },
-        { kind: `parent`, key: 2 },
-        { kind: `settle-first-fail` },
-        { kind: `settle-last-fail` },
-        { kind: `unparent`, key: 3 },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  it(`a first load waits for a source reload's whole replay`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `parent`, key: 3 },
-      { kind: `parent`, key: 2 },
-      { kind: `unparent`, key: 1 },
-      { kind: `reload` },
-      { kind: `settle-last-fail` },
-    ])
-  })
-  // The CI counterexample of the coarse verdict's predecessor (seed
-  // -838690579): a reload after the source stopped replays the demand, a
-  // demand change joins the replay, and the replay fails with both loads.
-  it(`a reload after the source stopped replays its demand and fails with every load`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `settle-ok` },
-        { kind: `fail` },
-        { kind: `truncate` },
-        { kind: `reload` },
-        { kind: `parent`, key: 2 },
-        { kind: `child-ready` },
-        { kind: `settle-fail` },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  it(`a reload during the first load with a late ready does not fail the query`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([{ kind: `reload` }, { kind: `settle-ok` }], {
-      asyncChildReady: true,
-    })
-  })
-  // A failed replay stays open for the demand the query still holds (law
-  // 9). The newer errors of key 3's joined load and of the replacement that
-  // throws, a rejection like any other, show over the replay's error; once
-  // their keys retire, the replay's error, still open, shows again.
-  it(`a failed replay's error shows again when the newer errors over it retire`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `reload` },
-      { kind: `settle-fail` },
-      { kind: `parent`, key: 3 },
-      { kind: `unparent`, key: 1 },
-      { kind: `throw-next` },
-      { kind: `settle-last-fail` },
-      { kind: `parent`, key: 2 },
-      { kind: `unparent`, key: 2 },
-      { kind: `parent`, key: 1 },
-      { kind: `unparent`, key: 3 },
-    ])
-  })
-  // Law 10: a later load decides its key, also after a replay loaded it.
-  it(`a load that throws after a failed replay shows its own error`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `reload` },
-      { kind: `settle-fail` },
-      { kind: `parent`, key: 3 },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-ok` },
-      { kind: `throw-next` },
-      { kind: `unparent`, key: 1 },
-    ])
-  })
-  // Law 9: once the failed demand retires, the replay succeeds for the
-  // demand it loaded, without another load.
-  it(`a failed replay succeeds when its failed demand retires after the rest loaded`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `reload` },
-      { kind: `settle-fail` },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-ok` },
-      { kind: `unparent`, key: 1 },
-    ])
-  })
-  // Law 10: a replacement that loads the failed key again decides it.
-  it(`a replacement that loads a failed replay key again lets the replay succeed`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `reload` },
-      { kind: `settle-fail` },
-      { kind: `parent`, key: 3 },
-      { kind: `parent`, key: 2 },
-      { kind: `unparent`, key: 3 },
-      { kind: `settle-ok` },
-    ])
-  })
-  // Law 9: only a demand that made no request waits as parked. A replay
-  // load that a child with a failed first load still serves fails the replay
-  // as any replay load does.
-  it(`a replay load fails the replay while its child shows a failed first load`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `settle-ok` },
-        { kind: `fail` },
-        { kind: `truncate` },
-        { kind: `settle-fail` },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  // Law 9: a replay load that the query aborted settled nothing, so the
-  // parked demand that replaces it is still owed a load.
-  it(`a parked demand that replaces an aborted replay load holds the replay`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `settle-ok` },
-        { kind: `parent`, key: 2 },
-        { kind: `settle-fail` },
-        { kind: `reload` },
-        { kind: `fail` },
-        { kind: `unparent`, key: 1 },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  // Law 9: a truncate aborts the loads before it and replays the demand; an
-  // aborted load that the adapter still finishes decides nothing, so a
-  // request error waits for the replay.
-  it(`a load the truncate aborted does not clear a request error`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-fail` },
-      { kind: `parent`, key: 3 },
-      { kind: `truncate` },
-      { kind: `settle-first-ok` },
-    ])
-  })
-  // Law 10: a demand change retries a segment whose load failed, also while
-  // that failure waits for a replay; the retry then decides the key, and the
-  // first load succeeds.
-  // The truncate after the reload began is the run's own replacement: it
-  // replays again, as every truncate does.
-  it(`a demand change retries a load that failed during a replay in the first load`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `reload` },
-        { kind: `truncate` },
-        { kind: `parent`, key: 3 },
-        { kind: `settle-first-fail` },
-        { kind: `parent`, key: 2 },
-        { kind: `unparent`, key: 3 },
-        { kind: `settle-ok` },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  // Law 10 and law 9: a demand change retries a key whose replay load
-  // failed, and the retry decides it, before the replay is judged.
-  it(`a demand change retries a key whose truncate replay load failed in the first load`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `parent`, key: 3 },
-      { kind: `truncate` },
-      { kind: `settle-last-fail` },
-      { kind: `parent`, key: 2 },
-      { kind: `unparent`, key: 1 },
-      { kind: `settle-ok` },
-    ])
-  })
-  // A replay re-requests a demand parked behind a failed first load; that
-  // request replaces the parked wait, so the replay completes and publishes.
-  it(`a truncate replay re-requests parked demand and then publishes it`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `settle-ok` },
-        { kind: `fail` },
-        { kind: `truncate` },
-        { kind: `parent`, key: 3 },
-        { kind: `truncate` },
-        { kind: `settle-ok` },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  // Releasing a parked demand removes its parked acquisition, so a demand
-  // for the same key parks again.
-  it(`a parked demand released and asked for again parks again`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `settle-ok` },
-        { kind: `fail` },
-        { kind: `truncate` },
-        { kind: `parent`, key: 2 },
-        { kind: `unparent`, key: 2 },
-        { kind: `parent`, key: 2 },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  // Replays a 30x counterexample: request failures, a thrown request, and a
-  // reload's replay, then a demand change that retires a failed request.
-  it(`a request error frame after a thrown request and a reload`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 2 },
-      { kind: `parent`, key: 3 },
-      { kind: `truncate` },
-      { kind: `settle-last-fail` },
-      { kind: `settle-last-fail` },
-      { kind: `settle-last-fail` },
-      { kind: `unparent`, key: 3 },
-      { kind: `settle-last-fail` },
-      { kind: `settle-first-ok` },
-      { kind: `parent`, key: 3 },
-      { kind: `unparent`, key: 1 },
-      { kind: `throw-next` },
-      { kind: `reload` },
-      { kind: `unparent`, key: 3 },
-    ])
-  })
-  // A reload of a failed first load fails its replay, then the child's
-  // restart requests the parked demand; when that demand retires, the
-  // replay's failure still belongs to key 1, which the query holds, so its
-  // request error stays (law 16; a failed replay stays open while the query
-  // holds demand).
-  // A parked demand's acquisition never loaded, so the truncate replay's
-  // request of it is its own first load: when it fails, it covers nothing,
-  // and the next demand change parks a retry that holds the failed replay
-  // open (law 10; a 30-times counterexample of the model, which let the
-  // failed request cover the key and judged the replay a success).
-  it(`a demand change retries a parked key whose replay request failed`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `settle-ok` },
-        { kind: `fail` },
-        { kind: `truncate` },
-        { kind: `parent`, key: 3 },
-        { kind: `truncate` },
-        { kind: `settle-fail` },
-        { kind: `unparent`, key: 1 },
-        { kind: `reload` },
-        { kind: `child-ready` },
-        { kind: `settle-ok` },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  it(`a failed replay's error stays when parked demand retires after the child restarts`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `settle-ok` },
-        { kind: `fail` },
-        { kind: `truncate` },
-        { kind: `reload` },
-        { kind: `settle-fail` },
-        { kind: `parent`, key: 2 },
-        { kind: `child-ready` },
-        { kind: `unparent`, key: 2 },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  // A replay's failed request keeps its acquisition's coverage, so releasing
-  // a parked key requests nothing more and the replay fails for the key it
-  // could not load again.
-  it(`a failed replay request still covers its key when a parked key retires`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `settle-ok` },
-        { kind: `fail` },
-        { kind: `truncate` },
-        { kind: `parent`, key: 3 },
-        { kind: `settle-fail` },
-        { kind: `unparent`, key: 3 },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  // Law 10: a later demand change drops a parked replacement that no longer
-  // matches the held keys, so a replay failure it would have replaced
-  // stands.
-  it(`a demand change drops a parked replacement that no longer matches`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `settle-ok` },
-        { kind: `fail` },
-        { kind: `truncate` },
-        { kind: `parent`, key: 3 },
-        { kind: `settle-first-fail` },
-        { kind: `parent`, key: 2 },
-        { kind: `unparent`, key: 2 },
-        { kind: `unparent`, key: 3 },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  // A reload from inside the adapter's loadSubset rejects and changes
-  // nothing; the query keeps its demand and does not crash.
-  // Law 9: a demand change counts as one step. This change retires a
-  // fragmented-churn replacement and another segment while the replaced
-  // segment's replay load has failed; judged between the two releases, the
-  // replay would succeed, but judged once after the change it fails for the
-  // key the query still holds (law 16).
-  it(`a demand change that retires a replacement and another segment judges the replay once`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 3 },
-      { kind: `settle-ok` },
-      { kind: `unparent`, key: 3 },
-      { kind: `truncate` },
-      { kind: `settle-last-ok` },
-      { kind: `settle-last-fail` },
-      { kind: `unparent`, key: 1 },
-    ])
-  })
-  it(`a reload from inside loadSubset rejects and leaves the query running`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `reload-in-load` },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-ok` },
-    ])
-  })
-  // Maintainer decision (law 16): of several open request errors, the node
-  // shows the newest. The load of key 3 fails first and the older load of
-  // key 2 fails after it, so key 2's error shows; once key 2 retires, key
-  // 3's error is the newest open one.
-  // A 30-times counterexample: key 2's load failed, so its request error
-  // shows, and a replay then fails for keys 2 and 3. The replay's problem
-  // lists both failed loads in failure order after key 2's earlier failure,
-  // which stays open, and shows the newest.
-  it(`a failed replay's verdict replaces an earlier open failure`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-fail` },
-      { kind: `parent`, key: 3 },
-      { kind: `reload` },
-      { kind: `settle-fail` },
-    ])
-  })
-  it(`a failed truncate replay's verdict replaces an earlier open failure`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-fail` },
-      { kind: `parent`, key: 3 },
-      { kind: `truncate` },
-      { kind: `settle-fail` },
-    ])
-  })
-  it(`a replay load replaced by a later load of its key leaves the replay's list`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-fail` },
-      { kind: `truncate` },
-      { kind: `settle-last-fail` },
-      { kind: `unparent`, key: 1 },
-      { kind: `settle-last-fail` },
-    ])
-  })
-  it(`the node shows the newest open request error`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 2 },
-      { kind: `parent`, key: 3 },
-      { kind: `settle-last-fail` },
-      { kind: `settle-first-fail` },
-      { kind: `unparent`, key: 2 },
-    ])
-  })
-  // Maintainer decision (law 16): a replay's success clears the error of
-  // every key it loaded again, also a key whose earlier load threw. The
-  // churn replacement for keys 1 and 2 throws; the truncate replay then
-  // loads both again through the older loads the query still holds.
-  it(`a replay's success clears every request error of its demand`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 3 },
-      { kind: `settle-ok` },
-      { kind: `throw-next` },
-      { kind: `unparent`, key: 3 },
-      { kind: `truncate` },
-      { kind: `settle-ok` },
-    ])
-  })
-  // Maintainer decision: a request error belongs to the request that
-  // failed. The churn replacement for keys 1 and 2 throws while the
-  // truncate replay is in flight; when its demand retires, the replay's
-  // older load of key 1 decides that key, and its success leaves no error.
-  it(`a replay's success clears the error of a failed request whose demand retired`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 2 },
-      { kind: `parent`, key: 3 },
-      { kind: `truncate` },
-      { kind: `throw-next` },
-      { kind: `unparent`, key: 3 },
-      { kind: `unparent`, key: 2 },
-      { kind: `settle-ok` },
-    ])
-  })
-  // Law 9 (maintainer decision): a failed replay stays open while the query
-  // holds demand, and its error clears when its failed demand retires after
-  // the rest loaded. Here the failed demand is the churn replacement for
-  // keys 1 and 3, which fails after the replay failed; when it retires, key
-  // 3's earlier replay load decides key 3, and the replay succeeds.
-  it(`a failed replay succeeds when a failed replacement retires after the rest loaded`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `reload` },
-      { kind: `settle-fail` },
-      { kind: `parent`, key: 3 },
-      { kind: `parent`, key: 2 },
-      { kind: `settle-ok` },
-      { kind: `unparent`, key: 2 },
-      { kind: `settle-last-fail` },
-      { kind: `unparent`, key: 1 },
-    ])
-  })
-  // Law 16 (maintainer decision): only a replay in flight defers a load's
-  // error. After the truncate replay failed, key 3's load and the churn
-  // replacement join it; the replacement's failure shows its own error at
-  // once, although key 3's load is still pending.
-  it(`a load that joins a failed replay shows its own error when it fails`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 2 },
-      { kind: `truncate` },
-      { kind: `settle-last-fail` },
-      { kind: `settle-last-fail` },
-      { kind: `parent`, key: 3 },
-      { kind: `unparent`, key: 1 },
-      { kind: `settle-last-fail` },
-    ])
-  })
-  // Law 16 and the maintainer decision on which error shows: keys 2 and 3
-  // join the reload's replay in flight, and all three loads fail in order.
-  // The replay reports its error, then each joined load fails with its own
-  // error in failure order, so key 3's error, the newest, shows.
-  it(`a failed replay lists the loads that failed during it in failure order`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `reload` },
-      { kind: `parent`, key: 2 },
-      { kind: `parent`, key: 3 },
-      { kind: `settle-fail` },
-    ])
-  })
-  // Law 10: a key's latest load decides it. After the replay failed, key 2's
-  // load and the churn replacement for keys 2 and 3 join it; key 2's older
-  // load then fails while the replacement is pending, and decides nothing,
-  // so the replay's error still shows.
-  it(`an older load's failure decides nothing while its key's replacement is pending`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `reload` },
-      { kind: `settle-fail` },
-      { kind: `parent`, key: 2 },
-      { kind: `parent`, key: 3 },
-      { kind: `unparent`, key: 1 },
-      { kind: `settle-first-fail` },
-    ])
-  })
-  // A thrown churn replacement fails its keys as a rejected one does
-  // (maintainer decision: a throw is a rejection; law 10: a failed load
-  // covers nothing), so the next demand change retires it, and the older
-  // load that still covers the held key decides it: its failure is the
-  // key's request error now. The twins must agree.
-  for (const replacement of [`throws`, `rejects`] as const)
-    it(`a churn replacement that ${replacement} leaves its key to the older load after the next demand change`, () => {
-      oracleRoute(`fixed history`)
-      return runLazyHistory([
-        { kind: `settle-ok` },
-        { kind: `parent`, key: 2 },
-        { kind: `parent`, key: 3 },
-        ...(replacement === `throws`
-          ? [
-              { kind: `throw-next` } as const,
-              { kind: `unparent`, key: 2 } as const,
-            ]
-          : [
-              { kind: `unparent`, key: 2 } as const,
-              { kind: `settle-last-fail` } as const,
-            ]),
-        { kind: `unparent`, key: 1 },
-        { kind: `settle-first-fail` },
-      ])
-    })
-  // Law 9: the replay succeeds only as a replacement for the demand that
-  // remains. A replay load of the churn replacement for {1, 2} loads both
-  // keys, then the replay load of {2} fails, and the query releases the
-  // replacement: what it loaded before its release does not count, so the
-  // replay fails for key 2 (a 30-times counterexample of the model, which
-  // let the released load decide key 2).
-  it(`a released replay load's success does not count for the replay's verdict`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory([
-      { kind: `settle-ok` },
-      { kind: `parent`, key: 2 },
-      { kind: `parent`, key: 3 },
-      { kind: `truncate` },
-      { kind: `settle-last-fail` },
-      { kind: `settle-last-fail` },
-      { kind: `settle-last-fail` },
-      { kind: `unparent`, key: 3 },
-      { kind: `settle-last-fail` },
-      { kind: `settle-first-ok` },
-      { kind: `truncate` },
-      { kind: `settle-last-ok` },
-      { kind: `settle-last-fail` },
-      { kind: `unparent`, key: 1 },
-      { kind: `settle-ok` },
-    ])
-  })
-  // Law 10: a failed load covers nothing, so a replacement that asks for its
-  // keys again after it failed is their acquisition now. A failed replay
-  // lists a failed replay load only until such a request, also when the
-  // replacement fails too (maintainer decision; 30-times counterexamples of
-  // production, which listed every replay load whose replacement failed).
-  for (const [name, steps] of [
-    [
-      `a contraction`,
-      [
-        { kind: `settle-ok` },
-        { kind: `parent`, key: 2 },
-        { kind: `settle-fail` },
-        { kind: `truncate` },
-        { kind: `parent`, key: 3 },
-        { kind: `settle-first-fail` },
-        { kind: `unparent`, key: 3 },
-        { kind: `settle-fail` },
-      ],
-    ],
-    [
-      `a churn after a failed reload`,
-      [
-        { kind: `settle-ok` },
-        { kind: `reload` },
-        { kind: `settle-fail` },
         { kind: `parent`, key: 2 },
         { kind: `parent`, key: 3 },
         { kind: `truncate` },
         { kind: `settle-last-fail` },
-        { kind: `unparent`, key: 1 },
-        { kind: `settle-fail` },
-      ],
-    ],
-  ] as const)
-    it(`a failed replay does not list a failed load that ${name} asked for again`, () => {
-      oracleRoute(`fixed history`)
-      return runLazyHistory(steps)
-    })
-  // Law 9: a failed replay request the query released holds nothing, so a
-  // parked demand change that asks for its key again parks it, and the key
-  // stays covered (a 30-times counterexample of the model, which left it to
-  // the released request's verdict).
-  it(`a parked growth asks again for a key whose released replay request failed`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `settle-ok` },
-        { kind: `fail` },
-        { kind: `truncate` },
-        { kind: `parent`, key: 2 },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 3 },
+        { kind: `settle-last-fail` },
+        { kind: `settle-first-ok` },
+        { kind: `reload` },
         { kind: `settle-last-fail` },
         { kind: `unparent`, key: 1 },
-        { kind: `parent`, key: 1 },
-        { kind: `unparent`, key: 2 },
-      ],
-      { holdChildReady: true },
-    )
-  })
-  // Q1 (review 2): an ordered window over the join. A lazy load that fails
-  // after readiness is a request error, and the query still publishes the
-  // window's rows (law 16: a failed request does not hold publication).
-  it(`a failed lazy load under an ordered window still publishes the window`, () => {
-    oracleRoute(`fixed history`)
-    return runLazyHistory(
-      [
-        { kind: `settle-ok` },
-        { kind: `parent`, key: 2 },
         { kind: `settle-fail` },
-        { kind: `parent`, key: 3 },
-        { kind: `settle-ok` },
       ],
-      { window: 2 },
-    )
-  })
-  // The generated replay of the fixed cleanup witness in source-health.test.ts:
-  // a cleanup from the query's subscription's status listener while the
-  // reload replays its demand, for each cleanup form.
-  it.each([false, true])(
-    `a cleanup from a subscription's status listener during a reload leaves no replacement armed (dependents: %s)`,
-    (dependents) => {
-      oracleRoute(`case`)
-      return runLazyHistory([{ kind: `settle-ok` }], {
-        ending: { at: `subscription-status`, dependents },
-      })
     },
-  )
+    {
+      name: `a demand change that asks for a failed key again keeps its replay open`,
+      steps: [
+        { kind: `reload` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 1 },
+      ],
+    },
+    {
+      name: `a first load waits for a replay load that no demand change follows`,
+      steps: [
+        { kind: `parent`, key: 3 },
+        { kind: `settle-first-ok` },
+        { kind: `reload` },
+        { kind: `unparent`, key: 3 },
+      ],
+    },
+    {
+      name: `a demand change after a failed replay load requests its key again`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 1 },
+      ],
+    },
+    {
+      name: `a reload's retired load decides nothing when its abort rejects it`,
+      steps: [
+        { kind: `reload` },
+        { kind: `settle-last-ok` },
+        { kind: `settle-first-fail` },
+      ],
+    },
+    {
+      name: `a later load of the failed key clears its error while another load is pending`,
+      steps: [
+        { kind: `unparent`, key: 1 },
+        { kind: `parent`, key: 1 },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-first-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-last-ok` },
+      ],
+    },
+    {
+      name: `a demand change aborts a replay load and must request its still-held key again`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 1 },
+      ],
+      options: { holdChildReady: true },
+    },
+    // Neighbours of the parked-join history: the parked demand is requested
+    // when its source restarts, and the replay then settles as usual; the
+    // parked demand retires instead, which aborts the replay.
+    {
+      name: `a parked demand loads when its source restarts, and the replay then settles`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 1 },
+        { kind: `reload` },
+        { kind: `settle-ok` },
+      ],
+      options: { holdChildReady: true },
+    },
+    {
+      name: `a parked replay ends when its last demand retires`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 1 },
+        { kind: `unparent`, key: 1 },
+        { kind: `unparent`, key: 2 },
+      ],
+      options: { holdChildReady: true },
+    },
+    {
+      name: `a load that fails during a replay is decided by the replay's verdict`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-last-fail` },
+        { kind: `settle-first-fail` },
+        { kind: `unparent`, key: 3 },
+      ],
+    },
+    {
+      name: `a reload during the first load fails it only for a demand still held`,
+      steps: [
+        { kind: `parent`, key: 3 },
+        { kind: `reload` },
+        { kind: `settle-first-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `unparent`, key: 3 },
+        { kind: `unparent`, key: 2 },
+      ],
+    },
+    {
+      name: `a second reload replaces a load that failed during the first replay`,
+      steps: [
+        { kind: `reload` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-last-fail` },
+        { kind: `reload` },
+        { kind: `settle-ok` },
+      ],
+    },
+    {
+      name: `a second reload's replay replaces the first replay's loads`,
+      steps: [
+        { kind: `parent`, key: 2 },
+        { kind: `reload` },
+        { kind: `reload` },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-first-ok` },
+        { kind: `settle-last-ok` },
+        { kind: `settle-first-fail` },
+      ],
+    },
+    {
+      name: `a reload after a truncate keeps the first load waiting for its replay`,
+      steps: [
+        { kind: `parent`, key: 3 },
+        { kind: `settle-last-ok` },
+        { kind: `truncate` },
+        { kind: `unparent`, key: 1 },
+        { kind: `reload` },
+      ],
+    },
+    {
+      name: `a truncate replay's success clears the error of a key whose retry it replaced`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `truncate` },
+        { kind: `settle-last-ok` },
+      ],
+    },
+    {
+      name: `a failed replay succeeds for the demand left after its failed demand retires`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-ok` },
+        { kind: `settle-fail` },
+      ],
+    },
+    {
+      name: `a demand change's replacement keeps a reload's replay open in the first load`,
+      steps: [
+        { kind: `reload` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 3 },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-first-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 3 },
+      ],
+      options: { holdChildReady: true },
+    },
+    {
+      name: `a first load waits for a source reload's whole replay`,
+      steps: [
+        { kind: `parent`, key: 3 },
+        { kind: `parent`, key: 2 },
+        { kind: `unparent`, key: 1 },
+        { kind: `reload` },
+        { kind: `settle-last-fail` },
+      ],
+    },
+    // The CI counterexample of the coarse verdict's predecessor (seed
+    // -838690579): a reload after the source stopped replays the demand, a
+    // demand change joins the replay, and the replay fails with both loads.
+    {
+      name: `a reload after the source stopped replays its demand and fails with every load`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `reload` },
+        { kind: `parent`, key: 2 },
+        { kind: `child-ready` },
+        { kind: `settle-fail` },
+      ],
+      options: { holdChildReady: true },
+    },
+    {
+      name: `a reload during the first load with a late ready does not fail the query`,
+      steps: [{ kind: `reload` }, { kind: `settle-ok` }],
+      options: {
+        asyncChildReady: true,
+      },
+    },
+    // A failed replay stays open for the demand the query still holds (law
+    // 9). The newer errors of key 3's joined load and of the replacement that
+    // throws, a rejection like any other, show over the replay's error; once
+    // their keys retire, the replay's error, still open, shows again.
+    {
+      name: `a failed replay's error shows again when the newer errors over it retire`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `unparent`, key: 1 },
+        { kind: `throw-next` },
+        { kind: `settle-last-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `unparent`, key: 2 },
+        { kind: `parent`, key: 1 },
+        { kind: `unparent`, key: 3 },
+      ],
+    },
+    // Law 10: a later load decides its key, also after a replay loaded it.
+    {
+      name: `a load that throws after a failed replay shows its own error`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-ok` },
+        { kind: `throw-next` },
+        { kind: `unparent`, key: 1 },
+      ],
+    },
+    // Law 9: once the failed demand retires, the replay succeeds for the
+    // demand it loaded, without another load.
+    {
+      name: `a failed replay succeeds when its failed demand retires after the rest loaded`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-ok` },
+        { kind: `unparent`, key: 1 },
+      ],
+    },
+    // Law 10: a replacement that loads the failed key again decides it.
+    {
+      name: `a replacement that loads a failed replay key again lets the replay succeed`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `parent`, key: 2 },
+        { kind: `unparent`, key: 3 },
+        { kind: `settle-ok` },
+      ],
+    },
+    // Law 9: only a demand that made no request waits as parked. A replay
+    // load that a child with a failed first load still serves fails the replay
+    // as any replay load does.
+    {
+      name: `a replay load fails the replay while its child shows a failed first load`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `settle-fail` },
+      ],
+      options: { holdChildReady: true },
+    },
+    // Law 9: a replay load that the query aborted settled nothing, so the
+    // parked demand that replaces it is still owed a load.
+    {
+      name: `a parked demand that replaces an aborted replay load holds the replay`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `reload` },
+        { kind: `fail` },
+        { kind: `unparent`, key: 1 },
+      ],
+      options: { holdChildReady: true },
+    },
+    // Law 9: a truncate aborts the loads before it and replays the demand; an
+    // aborted load that the adapter still finishes decides nothing, so a
+    // request error waits for the replay.
+    {
+      name: `a load the truncate aborted does not clear a request error`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-first-ok` },
+      ],
+    },
+    // Law 10: a demand change retries a segment whose load failed, also while
+    // that failure waits for a replay; the retry then decides the key, and the
+    // first load succeeds.
+    // The truncate after the reload began is the run's own replacement: it
+    // replays again, as every truncate does.
+    {
+      name: `a demand change retries a load that failed during a replay in the first load`,
+      steps: [
+        { kind: `reload` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-first-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `unparent`, key: 3 },
+        { kind: `settle-ok` },
+      ],
+      options: { holdChildReady: true },
+    },
+    // Law 10 and law 9: a demand change retries a key whose replay load
+    // failed, and the retry decides it, before the replay is judged.
+    {
+      name: `a demand change retries a key whose truncate replay load failed in the first load`,
+      steps: [
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-ok` },
+      ],
+    },
+    // A replay re-requests a demand parked behind a failed first load; that
+    // request replaces the parked wait, so the replay completes and publishes.
+    {
+      name: `a truncate replay re-requests parked demand and then publishes it`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-ok` },
+      ],
+      options: { holdChildReady: true },
+    },
+    // Releasing a parked demand removes its parked acquisition, so a demand
+    // for the same key parks again.
+    {
+      name: `a parked demand released and asked for again parks again`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 2 },
+        { kind: `unparent`, key: 2 },
+        { kind: `parent`, key: 2 },
+      ],
+      options: { holdChildReady: true },
+    },
+    // Replays a 30x counterexample: request failures, a thrown request, and a
+    // reload's replay, then a demand change that retires a failed request.
+    {
+      name: `a request error frame after a thrown request and a reload`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 3 },
+        { kind: `settle-last-fail` },
+        { kind: `settle-first-ok` },
+        { kind: `parent`, key: 3 },
+        { kind: `unparent`, key: 1 },
+        { kind: `throw-next` },
+        { kind: `reload` },
+        { kind: `unparent`, key: 3 },
+      ],
+    },
+    // A reload of a failed first load fails its replay, then the child's
+    // restart requests the parked demand; when that demand retires, the
+    // replay's failure still belongs to key 1, which the query holds, so its
+    // request error stays (law 16; a failed replay stays open while the query
+    // holds demand).
+    // A parked demand's acquisition never loaded, so the truncate replay's
+    // request of it is its own first load: when it fails, it covers nothing,
+    // and the next demand change parks a retry that holds the failed replay
+    // open (law 10; a 30-times counterexample of the model, which let the
+    // failed request cover the key and judged the replay a success).
+    {
+      name: `a demand change retries a parked key whose replay request failed`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `reload` },
+        { kind: `child-ready` },
+        { kind: `settle-ok` },
+      ],
+      options: { holdChildReady: true },
+    },
+    {
+      name: `a failed replay's error stays when parked demand retires after the child restarts`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `child-ready` },
+        { kind: `unparent`, key: 2 },
+      ],
+      options: { holdChildReady: true },
+    },
+    // A replay's failed request keeps its acquisition's coverage, so releasing
+    // a parked key requests nothing more and the replay fails for the key it
+    // could not load again.
+    {
+      name: `a failed replay request still covers its key when a parked key retires`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-fail` },
+        { kind: `unparent`, key: 3 },
+      ],
+      options: { holdChildReady: true },
+    },
+    // Law 10: a later demand change drops a parked replacement that no longer
+    // matches the held keys, so a replay failure it would have replaced
+    // stands.
+    {
+      name: `a demand change drops a parked replacement that no longer matches`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-first-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `unparent`, key: 2 },
+        { kind: `unparent`, key: 3 },
+      ],
+      options: { holdChildReady: true },
+    },
+    // A reload from inside the adapter's loadSubset rejects and changes
+    // nothing; the query keeps its demand and does not crash.
+    // Law 9: a demand change counts as one step. This change retires a
+    // fragmented-churn replacement and another segment while the replaced
+    // segment's replay load has failed; judged between the two releases, the
+    // replay would succeed, but judged once after the change it fails for the
+    // key the query still holds (law 16).
+    {
+      name: `a demand change that retires a replacement and another segment judges the replay once`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-ok` },
+        { kind: `unparent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-last-ok` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 1 },
+      ],
+    },
+    {
+      name: `a reload from inside loadSubset rejects and leaves the query running`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `reload-in-load` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-ok` },
+      ],
+    },
+    // Maintainer decision (law 16): of several open request errors, the node
+    // shows the newest. The load of key 3 fails first and the older load of
+    // key 2 fails after it, so key 2's error shows; once key 2 retires, key
+    // 3's error is the newest open one.
+    // A 30-times counterexample: key 2's load failed, so its request error
+    // shows, and a replay then fails for keys 2 and 3. The replay's problem
+    // lists both failed loads in failure order after key 2's earlier failure,
+    // which stays open, and shows the newest.
+    {
+      name: `a failed replay's verdict replaces an earlier open failure`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+      ],
+    },
+    {
+      name: `a failed truncate replay's verdict replaces an earlier open failure`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-fail` },
+      ],
+    },
+    {
+      name: `a replay load replaced by a later load of its key leaves the replay's list`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-last-fail` },
+      ],
+    },
+    {
+      name: `the node shows the newest open request error`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-last-fail` },
+        { kind: `settle-first-fail` },
+        { kind: `unparent`, key: 2 },
+      ],
+    },
+    // Maintainer decision (law 16): a replay's success clears the error of
+    // every key it loaded again, also a key whose earlier load threw. The
+    // churn replacement for keys 1 and 2 throws; the truncate replay then
+    // loads both again through the older loads the query still holds.
+    {
+      name: `a replay's success clears every request error of its demand`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-ok` },
+        { kind: `throw-next` },
+        { kind: `unparent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-ok` },
+      ],
+    },
+    // Maintainer decision: a request error belongs to the request that
+    // failed. The churn replacement for keys 1 and 2 throws while the
+    // truncate replay is in flight; when its demand retires, the replay's
+    // older load of key 1 decides that key, and its success leaves no error.
+    {
+      name: `a replay's success clears the error of a failed request whose demand retired`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `throw-next` },
+        { kind: `unparent`, key: 3 },
+        { kind: `unparent`, key: 2 },
+        { kind: `settle-ok` },
+      ],
+    },
+    // Law 9 (maintainer decision): a failed replay stays open while the query
+    // holds demand, and its error clears when its failed demand retires after
+    // the rest loaded. Here the failed demand is the churn replacement for
+    // keys 1 and 3, which fails after the replay failed; when it retires, key
+    // 3's earlier replay load decides key 3, and the replay succeeds.
+    {
+      name: `a failed replay succeeds when a failed replacement retires after the rest loaded`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-ok` },
+        { kind: `unparent`, key: 2 },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 1 },
+      ],
+    },
+    // Law 16 (maintainer decision): only a replay in flight defers a load's
+    // error. After the truncate replay failed, key 3's load and the churn
+    // replacement join it; the replacement's failure shows its own error at
+    // once, although key 3's load is still pending.
+    {
+      name: `a load that joins a failed replay shows its own error when it fails`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-last-fail` },
+      ],
+    },
+    // Law 16 and the maintainer decision on which error shows: keys 2 and 3
+    // join the reload's replay in flight, and all three loads fail in order.
+    // The replay reports its error, then each joined load fails with its own
+    // error in failure order, so key 3's error, the newest, shows.
+    {
+      name: `a failed replay lists the loads that failed during it in failure order`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `parent`, key: 2 },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-fail` },
+      ],
+    },
+    // Law 10: a key's latest load decides it. After the replay failed, key 2's
+    // load and the churn replacement for keys 2 and 3 join it; key 2's older
+    // load then fails while the replacement is pending, and decides nothing,
+    // so the replay's error still shows.
+    {
+      name: `an older load's failure decides nothing while its key's replacement is pending`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `reload` },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 2 },
+        { kind: `parent`, key: 3 },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-first-fail` },
+      ],
+    },
+    // A thrown churn replacement fails its keys as a rejected one does
+    // (maintainer decision: a throw is a rejection; law 10: a failed load
+    // covers nothing), so the next demand change retires it, and the older
+    // load that still covers the held key decides it: its failure is the
+    // key's request error now. The twins must agree.
+    ...([`throws`, `rejects`] as const).map(
+      (replacement): LazyFixedHistory => ({
+        name: `a churn replacement that ${replacement} leaves its key to the older load after the next demand change`,
+        steps: [
+          { kind: `settle-ok` },
+          { kind: `parent`, key: 2 },
+          { kind: `parent`, key: 3 },
+          ...(replacement === `throws`
+            ? [
+                { kind: `throw-next` } as const,
+                { kind: `unparent`, key: 2 } as const,
+              ]
+            : [
+                { kind: `unparent`, key: 2 } as const,
+                { kind: `settle-last-fail` } as const,
+              ]),
+          { kind: `unparent`, key: 1 },
+          { kind: `settle-first-fail` },
+        ],
+      }),
+    ),
+    // Law 9: the replay succeeds only as a replacement for the demand that
+    // remains. A replay load of the churn replacement for {1, 2} loads both
+    // keys, then the replay load of {2} fails, and the query releases the
+    // replacement: what it loaded before its release does not count, so the
+    // replay fails for key 2 (a 30-times counterexample of the model, which
+    // let the released load decide key 2).
+    {
+      name: `a released replay load's success does not count for the replay's verdict`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `parent`, key: 3 },
+        { kind: `truncate` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 3 },
+        { kind: `settle-last-fail` },
+        { kind: `settle-first-ok` },
+        { kind: `truncate` },
+        { kind: `settle-last-ok` },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `settle-ok` },
+      ],
+    },
+    // Law 10: a failed load covers nothing, so a replacement that asks for its
+    // keys again after it failed is their acquisition now. A failed replay
+    // lists a failed replay load only until such a request, also when the
+    // replacement fails too (maintainer decision; 30-times counterexamples of
+    // production, which listed every replay load whose replacement failed).
+    ...(
+      [
+        [
+          `a contraction`,
+          [
+            { kind: `settle-ok` },
+            { kind: `parent`, key: 2 },
+            { kind: `settle-fail` },
+            { kind: `truncate` },
+            { kind: `parent`, key: 3 },
+            { kind: `settle-first-fail` },
+            { kind: `unparent`, key: 3 },
+            { kind: `settle-fail` },
+          ],
+        ],
+        [
+          `a churn after a failed reload`,
+          [
+            { kind: `settle-ok` },
+            { kind: `reload` },
+            { kind: `settle-fail` },
+            { kind: `parent`, key: 2 },
+            { kind: `parent`, key: 3 },
+            { kind: `truncate` },
+            { kind: `settle-last-fail` },
+            { kind: `unparent`, key: 1 },
+            { kind: `settle-fail` },
+          ],
+        ],
+      ] as const
+    ).map(([name, steps]) => ({
+      name: `a failed replay does not list a failed load that ${name} asked for again`,
+      steps,
+    })),
+    // Law 9: a failed replay request the query released holds nothing, so a
+    // parked demand change that asks for its key again parks it, and the key
+    // stays covered (a 30-times counterexample of the model, which left it to
+    // the released request's verdict).
+    {
+      name: `a parked growth asks again for a key whose released replay request failed`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `fail` },
+        { kind: `truncate` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-last-fail` },
+        { kind: `unparent`, key: 1 },
+        { kind: `parent`, key: 1 },
+        { kind: `unparent`, key: 2 },
+      ],
+      options: { holdChildReady: true },
+    },
+    // Q1 (review 2): an ordered window over the join. A lazy load that fails
+    // after readiness is a request error, and the query still publishes the
+    // window's rows (law 16: a failed request does not hold publication).
+    {
+      name: `a failed lazy load under an ordered window still publishes the window`,
+      steps: [
+        { kind: `settle-ok` },
+        { kind: `parent`, key: 2 },
+        { kind: `settle-fail` },
+        { kind: `parent`, key: 3 },
+        { kind: `settle-ok` },
+      ],
+      options: { window: 2 },
+    },
+    // The generated replay of the fixed cleanup witness in source-health.test.ts:
+    // a cleanup from the query's subscription's status listener while the
+    // reload replays its demand, for each cleanup form.
+    ...[false, true].map((dependents) => ({
+      name: `a cleanup from a subscription's status listener during a reload leaves no replacement armed (dependents: ${String(dependents)})`,
+      steps: [{ kind: `settle-ok` }] as ReadonlyArray<LazyStep>,
+      options: { ending: { at: `subscription-status`, dependents } } as const,
+    })),
+  ]
+  // Each named history, fixed regression, and cleanup case replays through
+  // the lazy driver and its independent demand model, as the generated
+  // property's histories do. The generated arbitrary maps its steps without
+  // an unmapper, so it cannot take these histories back; they register as
+  // one enumerated property.
+  oracleProperty<LazyFixedHistory, Verdict>({
+    id: `source-health.lazy-demand-fixed`,
+    law: {
+      statement: `Lazy parent demand, request failures, replay and health observations refine the shared demand and source models.`,
+      authority: `The source-health and lazy-demand laws and independent models stated above.`,
+      limits: `Named histories and fixed regressions that the generated arbitrary cannot take back; each is replayed through the same lazy driver and model.`,
+    },
+    owns: [
+      `src/collection/health-tree.ts`,
+      `src/collection/lifecycle.ts`,
+      `src/collection/subscription.ts`,
+    ],
+    histories: lazyFixedHistories,
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(
+        `source-health.lazy-demand-fixed`,
+        history,
+        observe,
+        () => runLazyHistory(history.steps, history.options),
+      ),
+    check: forwardAssertionJudgment,
+  })
   // A load, then a reload whose load fails.
   const failedReload: { steps: ReadonlyArray<LazyStep> } = {
     steps: [{ kind: `settle-ok` }, { kind: `reload` }, { kind: `settle-fail` }],
@@ -7348,37 +7643,22 @@ describe(`lazy join demand grammar`, () => {
       ),
     ),
   ]
-  const lazyReach = createOracleReach(
-    `source-health.lazy-demand`,
-    lazyReachStates,
-    { fixedHistories: lazyExamples.length },
+  const lazyArbitrary = fc.tuple(
+    fc
+      .tuple(
+        fc.option(fc.constantFrom(...lazyReachPrefixes), { freq: 4 }),
+        fc.array(step, { maxLength: 10 }),
+      )
+      .map(([prefix, rest]): LazySteps => ({ prefix, rest })),
+    lazyOptions,
   )
-  let lazyHistoriesRan = false
-  afterAll(() => {
-    if (lazyHistoriesRan) lazyReach.assertReached()
-  })
-  const randomCampaign4 = oraclePropertyOptions(
-    100,
-    `source-health.lazy-demand`,
-    {
-      examples: lazyExamples,
-    },
-  )
-  oracleReplayTest(fcTest, `source-health.lazy-demand`).prop(
-    [
-      fc
-        .tuple(
-          fc.option(fc.constantFrom(...lazyReachPrefixes), { freq: 4 }),
-          fc.array(step, { maxLength: 10 }),
-        )
-        .map(([prefix, rest]): LazySteps => ({ prefix, rest })),
-      lazyOptions,
-    ],
-    randomCampaign4,
-  )(
-    `generated lazy demand histories refine the model`,
-    (
-      lazySteps,
+  type LazyHistory = [LazySteps, LazyOptions]
+  let counts = new Map(lazyReachStates.map((state) => [state, 0]))
+  let fixed = new Set<(typeof lazyReachStates)[number]>()
+  let campaign = false
+  const run = (history: LazyHistory, reach: LazyReach) => {
+    const [
+      { prefix, rest },
       {
         asyncChildReady,
         generatedHoldChildReady,
@@ -7388,31 +7668,67 @@ describe(`lazy join demand grammar`, () => {
         deferredStart,
         ending,
       },
-    ) => {
-      oracleRoute(oracleRouteOf(randomCampaign4))
-      const { prefix, rest } = lazySteps
-      const steps = [...(prefix?.steps ?? []), ...rest]
-      const holdChildReady = prefix?.holdChildReady ?? generatedHoldChildReady
-      lazyHistoriesRan = true
-      // fast-check passes an example's input by reference.
-      lazyReach.beginHistory({
-        fixed: lazyExamples.some(([example]) => example === lazySteps),
-      })
-      return withDeadline(
-        runLazyHistory(steps, {
-          asyncChildReady,
-          holdChildReady,
-          directSubscriber,
-          withEffect,
-          window: windowed ? 2 : undefined,
-          reach: lazyReach,
-          deferredStart,
-          ending,
-        }),
+    ] = history
+    return withDeadline(
+      runLazyHistory([...(prefix?.steps ?? []), ...rest], {
+        asyncChildReady,
+        holdChildReady: prefix?.holdChildReady ?? generatedHoldChildReady,
+        directSubscriber,
+        withEffect,
+        window: windowed ? 2 : undefined,
+        reach,
+        deferredStart,
+        ending,
+      }),
+    )
+  }
+  beforeEach(async ({ task }) => {
+    campaign = task.name === `random seed: generated`
+    counts = new Map(lazyReachStates.map((state) => [state, 0]))
+    fixed = new Set()
+    if (!campaign || oracleReplayRequested()) return
+    for (const example of lazyExamples)
+      await run(
+        example,
+        healthHistoryReach(counts, () => {}, fixed),
       )
+  })
+  afterEach(({ task }) => {
+    if (!campaign || task.result?.state === `fail`) return
+    assertHealthReach(`source-health.lazy-demand`, counts, fixed)
+    process.stdout.write(
+      `source-health.lazy-demand minimums ${JSON.stringify(Object.fromEntries(counts))}\n`,
+    )
+  })
+  oracleProperty<LazyHistory, Verdict>({
+    id: `source-health.lazy-demand`,
+    law: {
+      statement: `Lazy parent demand, request failures, replay and health observations refine the shared demand and source models.`,
+      authority: `The source-health and lazy-demand laws and independent models stated above.`,
+      limits: `The unchanged prefixes, ten-step suffix, controlled driver options and final cleanup observation cuts.`,
     },
-    120_000,
-  )
+    owns: [
+      `src/collection/health-tree.ts`,
+      `src/collection/lifecycle.ts`,
+      `src/collection/subscription.ts`,
+    ],
+    histories: {
+      arbitrary: lazyArbitrary,
+      runs: 100,
+      fixedSeeds: [],
+      measured: lazyReachStates,
+    },
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(
+        `source-health.lazy-demand`,
+        history,
+        observe,
+        () => run(history, healthHistoryReach(counts, observe)),
+      ),
+    check: forwardAssertionJudgment,
+    timeout: 120_000,
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -7446,6 +7762,80 @@ describe(`lazy join demand grammar`, () => {
  * cause's order is the order of its first failure among the failures open
  * before the step.
  */
+function checkRequestErrorHistory(
+  steps: Array<{
+    kind: `fail` | `fail-shared` | `fail-several` | `fail-again` | `settle`
+    key: string
+  }>,
+): void {
+  const tracker = new RequestErrors()
+  const failing: Array<{ key: string; cause: Error; order: number }> = []
+  let failures = 0
+  // The failures still failing, once per cause, oldest first.
+  const listed = () => [
+    ...new Set(
+      [...failing].sort((a, b) => a.order - b.order).map(({ cause }) => cause),
+    ),
+  ]
+  const same = (a: Array<Error>, b: Array<Error>) =>
+    a.length === b.length && a.every((cause, index) => cause === b[index])
+  for (const { kind, key: issuer } of steps) {
+    const before = listed()
+    const shownBefore = tracker.problem
+    const open = [...failing]
+    const own = failing
+      .filter((entry) => entry.key === issuer)
+      .map(({ cause }) => cause)
+    for (let index = failing.length - 1; index >= 0; index--)
+      if (failing[index]!.key === issuer) failing.splice(index, 1)
+    if (kind === `settle`) tracker.settle(issuer)
+    else {
+      const causes =
+        kind === `fail-several`
+          ? [new Error(`${issuer} failed`), new Error(`${issuer} failed again`)]
+          : kind === `fail-again`
+            ? [...own, new Error(`${issuer} failed again`)]
+            : [
+                (kind === `fail-shared` ? failing[0]?.cause : undefined) ??
+                  new Error(`${issuer} failed`),
+              ]
+      for (const cause of causes)
+        failing.push({
+          key: issuer,
+          cause,
+          order:
+            open.find((entry) => entry.cause === cause)?.order ?? ++failures,
+        })
+      tracker.fail(issuer, causes)
+    }
+    // A change makes the problem a new object.
+    const changed = tracker.problem !== shownBefore
+    const after = listed()
+    oracleAssertion(`checkRequestErrorHistory:7479`, () =>
+      expect(changed, `${kind} ${issuer} reports a change`).toBe(
+        !same(before, after),
+      ),
+    )
+    // A problem whose failures did not change stays, the same object.
+    if (same(before, after))
+      oracleAssertion(`checkRequestErrorHistory:7483`, () =>
+        expect(tracker.problem).toBe(shownBefore),
+      )
+    oracleAssertion(`checkRequestErrorHistory:7484`, () =>
+      expect(tracker.problem?.cause ?? null).toBe(after.at(-1) ?? null),
+    )
+    oracleAssertion(`checkRequestErrorHistory:7485`, () =>
+      expect(
+        same(
+          (tracker.problem?.errors ?? []).map(({ cause }) => cause as Error),
+          after,
+        ),
+        `${kind} ${issuer}: listed failures`,
+      ).toBe(true),
+    )
+  }
+}
+
 describe(`request error bookkeeping`, () => {
   const key = fc.constantFrom(`a`, `b`, `c`)
   const step = fc.oneof(
@@ -7455,80 +7845,31 @@ describe(`request error bookkeeping`, () => {
     fc.record({ kind: fc.constant(`fail-again` as const), key }),
     fc.record({ kind: fc.constant(`settle` as const), key }),
   )
-  const randomCampaign5 = oraclePropertyOptions(
-    100,
-    `source-health.request-errors`,
-  )
-  oracleReplayTest(fcTest, `source-health.request-errors`).prop(
-    [fc.array(step, { maxLength: 12 })],
-    randomCampaign5,
-  )(
-    `a node shows the latest failure still failing and lists them all`,
-    (steps) => {
-      oracleRoute(oracleRouteOf(randomCampaign5))
-      const tracker = new RequestErrors()
-      const failing: Array<{ key: string; cause: Error; order: number }> = []
-      let failures = 0
-      // The failures still failing, once per cause, oldest first.
-      const listed = () => [
-        ...new Set(
-          [...failing]
-            .sort((a, b) => a.order - b.order)
-            .map(({ cause }) => cause),
-        ),
-      ]
-      const same = (a: Array<Error>, b: Array<Error>) =>
-        a.length === b.length && a.every((cause, index) => cause === b[index])
-      for (const { kind, key: issuer } of steps) {
-        const before = listed()
-        const shownBefore = tracker.problem
-        const open = [...failing]
-        const own = failing
-          .filter((entry) => entry.key === issuer)
-          .map(({ cause }) => cause)
-        for (let index = failing.length - 1; index >= 0; index--)
-          if (failing[index]!.key === issuer) failing.splice(index, 1)
-        if (kind === `settle`) tracker.settle(issuer)
-        else {
-          const causes =
-            kind === `fail-several`
-              ? [
-                  new Error(`${issuer} failed`),
-                  new Error(`${issuer} failed again`),
-                ]
-              : kind === `fail-again`
-                ? [...own, new Error(`${issuer} failed again`)]
-                : [
-                    (kind === `fail-shared` ? failing[0]?.cause : undefined) ??
-                      new Error(`${issuer} failed`),
-                  ]
-          for (const cause of causes)
-            failing.push({
-              key: issuer,
-              cause,
-              order:
-                open.find((entry) => entry.cause === cause)?.order ??
-                ++failures,
-            })
-          tracker.fail(issuer, causes)
-        }
-        // A change makes the problem a new object.
-        const changed = tracker.problem !== shownBefore
-        const after = listed()
-        expect(changed, `${kind} ${issuer} reports a change`).toBe(
-          !same(before, after),
-        )
-        // A problem whose failures did not change stays, the same object.
-        if (same(before, after)) expect(tracker.problem).toBe(shownBefore)
-        expect(tracker.problem?.cause ?? null).toBe(after.at(-1) ?? null)
-        expect(
-          same(
-            (tracker.problem?.errors ?? []).map(({ cause }) => cause as Error),
-            after,
-          ),
-          `${kind} ${issuer}: listed failures`,
-        ).toBe(true)
-      }
+  oracleProperty<Parameters<typeof checkRequestErrorHistory>[0], Verdict>({
+    id: `source-health.request-errors`,
+    law: {
+      statement: `A node shows its newest still-open failure and lists every open failure once in original order, retaining identity when its frame does not change.`,
+      authority: `The maintainer decisions and independent open-failure list model stated above.`,
+      limits: `The unchanged three issuers, twelve-step histories and five report/settlement actions.`,
     },
-  )
+    owns: [
+      `src/collection/health-tree.ts`,
+      `src/collection/lifecycle.ts`,
+      `src/collection/subscription.ts`,
+    ],
+    histories: {
+      arbitrary: fc.array(step, { maxLength: 12 }),
+      runs: 100,
+      fixedSeeds: [],
+    },
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(
+        `request error bookkeeping`,
+        history,
+        observe,
+        () => checkRequestErrorHistory(history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

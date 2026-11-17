@@ -6,11 +6,20 @@ import { IR, createCollection } from '@tanstack/db'
 import { describe, expect, it } from 'vitest'
 import { queryCollectionOptions } from '../src/query'
 import { sameOrderedIds, settle } from './refetch-ordered-prefix-support'
+import { pageEndStructuralHistories } from './refetch-ordered-prefix-grammar-oracle'
 import type { LoadSubsetOptions } from '@tanstack/db'
 
 let collectionSequence = 0
 
 describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () => {
+  // Moved from the oracle's structural page-end census: the grammar must
+  // still enumerate every width, offset, hold regime and direction.
+  it(`enumerates every structural page-end history`, () => {
+    expect(
+      pageEndStructuralHistories.length,
+      `fixed page-end histories`,
+    ).toBeGreaterThanOrEqual(48)
+  })
   it(`the comparison rejects a window with the right size but a stale row`, () => {
     expect(sameOrderedIds([5, 4], [5, 4])).toBe(true)
     expect(sameOrderedIds([4, 1], [5, 4])).toBe(false)

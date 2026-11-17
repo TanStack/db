@@ -1,5 +1,5 @@
 import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createLiveQueryCollection, eq } from '../src/query/index.js'
@@ -11,14 +11,17 @@ import {
   withHistoryCleanup,
 } from './optimistic-history-oracle.js'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
+  isGeneratedOracleCampaign,
+  oracleProperty,
+  oracleReplayRequested,
 } from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
-import { createOracleReach } from './oracle-reach.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from './oracle-assertion-adapter.js'
 import type { Collection } from '../src/collection/index.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 import type { ReplacementRow, Row } from './optimistic-transaction-support.js'
@@ -205,10 +208,12 @@ async function runSameKey(
           ...mutation,
           changes: { note },
         }))
-      expect(
-        calls + (fault === `canceled-persistence` ? 1 : 0),
-        `net persistence count`,
-      ).toBe(canceled ? 0 : 1)
+      oracleAssertion(`net persistence count`, () =>
+        expect(
+          calls + (fault === `canceled-persistence` ? 1 : 0),
+          `net persistence count`,
+        ).toBe(canceled ? 0 : 1),
+      )
       const expected = canceled
         ? []
         : [
@@ -223,16 +228,22 @@ async function runSameKey(
                   : changedFields,
             },
           ]
-      expect(request, `net authored payload`).toStrictEqual(expected)
+      oracleAssertion(`net authored payload`, () =>
+        expect(request, `net authored payload`).toStrictEqual(expected),
+      )
       if (success || canceled) gate.resolve()
       else gate.reject(new Error(`same-key rejection`))
       await persisted.settled
       await committed.settled
-      expect(persisted.read().status).toBe(
-        success || canceled ? `fulfilled` : `rejected`,
+      oracleAssertion('runSameKey', () =>
+        expect(persisted.read().status).toBe(
+          success || canceled ? `fulfilled` : `rejected`,
+        ),
       )
-      expect(committed.read().status).toBe(
-        success || canceled ? `fulfilled` : `rejected`,
+      oracleAssertion('runSameKey', () =>
+        expect(committed!.read().status).toBe(
+          success || canceled ? `fulfilled` : `rejected`,
+        ),
       )
       expectRows(
         source.values(),
@@ -270,104 +281,176 @@ async function runSameKey(
 describe(`Same-key transaction laws`, () => {
   // A reinsert of the original row restores it, so the pair cancels: no net
   // request and no persistence call. Generation never restores (value >= 1).
-  it.each([true, false])(
-    `cancels a delete and a reinsert that restores the row (success=%s)`,
-    async (success) => {
-      oracleRoute(`case`)
-      await runSameKey({
-        sequence: `delete-insert`,
-        value: 0,
-        note: `original`,
+  // Each authored sequence then runs with both handler outcomes. One
+  // enumerated property replays these scenarios through runSameKey.
+  const sameKeyCases: Array<{
+    name: string
+    scenarios: Array<SameKeyScenario>
+  }> = [
+    ...[true, false].map((success) => ({
+      name: `cancels a delete and a reinsert that restores the row (success=${success})`,
+      scenarios: [
+        {
+          sequence: `delete-insert` as const,
+          value: 0,
+          note: `original`,
+          success,
+        },
+      ],
+    })),
+    ...sameKeySequences.map((sequence) => ({
+      name: `preserves authored sequence ${sequence}`,
+      scenarios: [false, true].map((success) => ({
+        sequence,
         success,
-      })
+        value: 7,
+        note: `last`,
+      })),
+    })),
+  ]
+  oracleProperty({
+    id: `collection-state.same-key-cases`,
+    law: {
+      statement: `Same-key authored operations collapse to one net request while retaining exact original, modified and changed fields.`,
+      authority: `The public manual transaction and Collection mutation contracts in docs/guides/mutations.md and the same-key truth table stated above`,
+      limits: `The restoring delete-insert pair and each authored two-operation sequence with both handler outcomes, through the same runSameKey driver and checks as the generated campaign.`,
     },
-  )
-  it.each(sameKeySequences)(
-    `preserves authored sequence %s`,
-    async (sequence) => {
-      oracleRoute(`case`)
-      for (const success of [false, true])
-        await runSameKey({ sequence, success, value: 7, note: `last` })
-    },
-  )
-  it.each([505201, undefined])(
-    `varies merged request fields, seed=%s`,
-    async (seed) => {
-      const reach = createOracleReach(
+    owns: [`src/transactions.ts`, `src/collection/mutations.ts`],
+    histories: sameKeyCases,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
         `collection-state.same-key`,
-        [`sign-only-reinsert`],
-        { minimum: 3 },
-      )
-      const parameters =
-        seed === undefined
-          ? oraclePropertyOptions(40, `collection-state.same-key`)
-          : oracleFixedSeed(seed, { numRuns: oracleRuns(40) })
-      oracleRoute(oracleRouteOf(parameters))
-      await fc.assert(
-        fc.asyncProperty(
-          fc.oneof(
-            {
-              weight: 4,
-              arbitrary: fc.record({
-                sequence: fc.constantFrom(...sameKeySequences),
-                success: fc.boolean(),
-                value: fc.oneof(
-                  fc.integer({ min: 1, max: 50 }),
-                  fc.constant(-0),
-                ),
-                note: fc.oneof(
-                  fc
-                    .string({ minLength: 1, maxLength: 8 })
-                    .map((s) => `new:${s}`),
-                  fc.constant(`original`),
-                ),
-              }),
-            },
-            // A reinsert that differs from the original row only by a
-            // zero's sign; at random, one history in 20 is one.
-            {
-              weight: 1,
-              arbitrary: fc.record({
-                sequence: fc.constant(`delete-insert` as const),
-                success: fc.boolean(),
-                value: fc.constant(-0),
-                note: fc.constant(`original`),
-              }),
+        plan,
+        observe,
+        async () => {
+          for (const scenario of plan.history.scenarios)
+            await runSameKey(scenario)
+        },
+      ),
+    check: forwardAssertionJudgment,
+    calibrations: ([`dropped-field`, `canceled-persistence`] as const).map(
+      (fault) => ({
+        name: `rejects ${fault}`,
+        law: `collection-state.same-key`,
+        driver: (plan: object, observe: (c: string, v: unknown) => void) =>
+          recordAssertionJudgment(
+            `collection-state.same-key`,
+            plan,
+            observe,
+            async () => {
+              const scenario: SameKeyScenario = {
+                sequence:
+                  fault === `dropped-field` ? `update-update` : `insert-delete`,
+                success: true,
+                value: 7,
+                note: `last`,
+              }
+              await runSameKey(scenario)
+              try {
+                await runSameKey(scenario, fault)
+              } catch (error) {
+                // Exactly the old matcher: the rejection is an AssertionError.
+                if (error instanceof Error && error.name === `AssertionError`)
+                  rejectAt(`calibration ${fault}`, error)
+                throw new Error(
+                  `rejects ${fault}: the check rejected with an error the old matcher did not accept: ${String(error)}`,
+                )
+              }
             },
           ),
-          (scenario) => {
-            reach.beginHistory()
+      }),
+    ),
+  })
+  // Preserve the original per-campaign minimum of three sign-only
+  // reinserts. Each generated scenario contributes at most one reach hit.
+  describe(`same-key campaign reach`, () => {
+    let signOnlyReinserts = 0
+    beforeEach(() => {
+      signOnlyReinserts = 0
+    })
+    afterEach(({ task }) => {
+      if (
+        isGeneratedOracleCampaign(task.name) &&
+        task.result?.state !== `fail` &&
+        !oracleReplayRequested()
+      )
+        expect(
+          signOnlyReinserts,
+          `sign-only-reinsert history minimum`,
+        ).toBeGreaterThanOrEqual(3)
+    })
+    oracleProperty({
+      id: `collection-state.same-key`,
+      law: {
+        statement: `Same-key authored operations collapse to one net request while retaining exact original, modified and changed fields.`,
+        authority: `The public manual transaction and Collection mutation contracts in docs/guides/mutations.md and the same-key truth table stated above`,
+        limits: `The existing two-operation numeric-key grammar with controlled sync acknowledgement; provider timing, cross-Collection transactions and arbitrary overlapping histories remain outside this driver.`,
+      },
+      // What this oracle owns: the gap report judges the transaction's authored
+      // payload and its same-key merge, and the Collection's mutation intake, by this
+      // file's tests.
+      // The check drivers run one history and compare its public observations with
+      // the expected world they compute from the scenario. The typed-key payload model
+      // is the authored key list.
+      owns: [`src/transactions.ts`, `src/collection/mutations.ts`],
+      histories: {
+        arbitrary: fc.oneof(
+          {
+            weight: 4,
+            arbitrary: fc.record({
+              sequence: fc.constantFrom(...sameKeySequences),
+              success: fc.boolean(),
+              value: fc.oneof(fc.integer({ min: 1, max: 50 }), fc.constant(-0)),
+              note: fc.oneof(
+                fc
+                  .string({ minLength: 1, maxLength: 8 })
+                  .map((s) => `new:${s}`),
+                fc.constant(`original`),
+              ),
+            }),
+          },
+          // A reinsert that differs from the original row only by a
+          // zero's sign; at random, one history in 20 is one.
+          {
+            weight: 1,
+            arbitrary: fc.record({
+              sequence: fc.constant(`delete-insert` as const),
+              success: fc.boolean(),
+              value: fc.constant(-0),
+              note: fc.constant(`original`),
+            }),
+          },
+        ),
+        runs: 40,
+        fixedSeeds: [505201],
+        measured: [`sign-only-reinsert`],
+      },
+      resolve: (history) => ({ history }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(
+          `collection-state.same-key`,
+          plan,
+          observe,
+          () => {
+            const scenario = plan.history
             if (
               scenario.sequence === `delete-insert` &&
               Object.is(scenario.value, -0) &&
               scenario.note === `original`
             ) {
-              reach.reach(`sign-only-reinsert`)
+              signOnlyReinserts++
+              observe(`reach`, `sign-only-reinsert`)
             }
             return runSameKey(scenario)
           },
         ),
-        parameters,
-      )
-      reach.assertReached()
-    },
-  )
-  it.each([`dropped-field`, `canceled-persistence`] as const)(
-    `rejects %s`,
-    async (fault) => {
-      oracleRoute(`calibration`)
-      const scenario: SameKeyScenario = {
-        sequence: fault === `dropped-field` ? `update-update` : `insert-delete`,
-        success: true,
-        value: 7,
-        note: `last`,
-      }
-      await runSameKey(scenario)
-      await expect(runSameKey(scenario, fault)).rejects.toMatchObject({
-        name: `AssertionError`,
-      })
-    },
-  )
+      check: forwardAssertionJudgment,
+    })
+  })
 })
 
 type ReplacementMutation = {
@@ -462,211 +545,265 @@ async function runDeleteInsertReplacement(
   )
 }
 
-describe(`Delete then insert transaction laws`, () => {
-  it(`cancels an exact same-key restoration`, async () => {
-    oracleRoute(`fixed history`)
-    await runDeleteInsertReplacement(
-      [{ id: 1, value: 0, note: `original` }],
-      undefined,
-    )
+type SymmetricReplacement = {
+  name: string
+  replacement: ReplacementRow
+  changes: object
+}
+const symmetricReplacements: Array<SymmetricReplacement> = [
+  {
+    name: `removed field`,
+    replacement: { id: 1, value: 0 },
+    changes: { note: undefined },
+  },
+  {
+    name: `null field`,
+    replacement: { id: 1, value: null, note: null },
+    changes: { value: null, note: null },
+  },
+  {
+    name: `undefined field`,
+    replacement: { id: 1, value: undefined, note: `original` },
+    changes: { value: undefined },
+  },
+  {
+    name: `added field`,
+    replacement: { id: 1, value: 0, note: `original`, added: `new` },
+    changes: { added: `new` },
+  },
+]
+
+async function convertToSymmetricUpdate({
+  replacement,
+  changes,
+}: SymmetricReplacement): Promise<void> {
+  await runDeleteInsertReplacement([replacement], {
+    type: `update`,
+    original: { id: 1, value: 0, note: `original` },
+    modified: replacement,
+    changes,
+    metadata: { operation: `insert`, index: 0 },
+    syncMetadata: {
+      delete: true,
+      shared: `insert`,
+      insert: true,
+    },
   })
+}
 
-  it.each([
-    {
-      name: `removed field`,
-      replacement: { id: 1, value: 0 },
-      changes: { note: undefined },
-    },
-    {
-      name: `null field`,
-      replacement: { id: 1, value: null, note: null },
-      changes: { value: null, note: null },
-    },
-    {
-      name: `undefined field`,
-      replacement: { id: 1, value: undefined, note: `original` },
-      changes: { value: undefined },
-    },
-    {
-      name: `added field`,
-      replacement: { id: 1, value: 0, note: `original`, added: `new` },
-      changes: { added: `new` },
-    },
-  ] satisfies Array<{
-    name: string
-    replacement: ReplacementRow
-    changes: object
-  }>)(
-    `converts a $name to one symmetric update`,
-    async ({ replacement, changes }) => {
-      oracleRoute(`case`)
-      await runDeleteInsertReplacement([replacement], {
-        type: `update`,
-        original: { id: 1, value: 0, note: `original` },
-        modified: replacement,
-        changes,
-        metadata: { operation: `insert`, index: 0 },
-        syncMetadata: {
-          delete: true,
-          shared: `insert`,
-          insert: true,
-        },
-      })
-    },
+async function cancelExactRestoration(): Promise<void> {
+  await runDeleteInsertReplacement(
+    [{ id: 1, value: 0, note: `original` }],
+    undefined,
   )
+}
 
-  it(`reduces repeated delete and insert pairs to the final net update`, async () => {
-    oracleRoute(`fixed history`)
-    const first = { id: 1, value: 1, note: `first` }
-    const final = { id: 1, value: 2, added: `final` }
-    await runDeleteInsertReplacement([first, final], {
+async function reduceRepeatedPairs(): Promise<void> {
+  const first = { id: 1, value: 1, note: `first` }
+  const final = { id: 1, value: 2, added: `final` }
+  await runDeleteInsertReplacement([first, final], {
+    type: `update`,
+    original: { id: 1, value: 0, note: `original` },
+    modified: final,
+    changes: { value: 2, note: undefined, added: `final` },
+    metadata: { operation: `insert`, index: 1 },
+    syncMetadata: {
+      delete: true,
+      shared: `insert`,
+      insert: true,
+    },
+  })
+}
+
+async function preserveFirstPreimage(): Promise<void> {
+  const original = { id: 1, value: 0, note: `original` }
+  const replacement = { id: 1, value: 2, note: `original` }
+  await runDeleteInsertReplacement(
+    [],
+    {
       type: `update`,
-      original: { id: 1, value: 0, note: `original` },
-      modified: final,
-      changes: { value: 2, note: undefined, added: `final` },
-      metadata: { operation: `insert`, index: 1 },
+      original,
+      modified: replacement,
+      changes: { value: 2 },
+      metadata: { operation: `insert` },
       syncMetadata: {
         delete: true,
         shared: `insert`,
         insert: true,
       },
-    })
-  })
-
-  it(`preserves the first preimage through duplicate deletes before replacement`, async () => {
-    oracleRoute(`fixed history`)
-    const original = { id: 1, value: 0, note: `original` }
-    const replacement = { id: 1, value: 2, note: `original` }
-    await runDeleteInsertReplacement(
-      [],
-      {
-        type: `update`,
-        original,
-        modified: replacement,
-        changes: { value: 2 },
+    },
+    original,
+    (collection) => {
+      collection.update(1, (draft) => {
+        draft.value = 1
+      })
+      collection.delete([1, 1])
+      collection.insert(replacement, {
         metadata: { operation: `insert` },
-        syncMetadata: {
-          delete: true,
-          shared: `insert`,
-          insert: true,
-        },
-      },
-      original,
-      (collection) => {
-        collection.update(1, (draft) => {
-          draft.value = 1
-        })
-        collection.delete([1, 1])
-        collection.insert(replacement, {
-          metadata: { operation: `insert` },
-        })
-      },
-    )
-  })
+      })
+    },
+  )
+}
 
-  it(`compares nested replacement values structurally`, async () => {
-    oracleRoute(`fixed history`)
-    const original = {
-      id: 1,
-      value: 0,
-      note: `original`,
-      nested: { count: 1 },
-    }
-    await runDeleteInsertReplacement(
-      [{ ...original, nested: { count: 1 } }],
-      undefined,
+async function compareNestedReplacement(): Promise<void> {
+  const original = {
+    id: 1,
+    value: 0,
+    note: `original`,
+    nested: { count: 1 },
+  }
+  await runDeleteInsertReplacement(
+    [{ ...original, nested: { count: 1 } }],
+    undefined,
+    original,
+  )
+  await runDeleteInsertReplacement(
+    [{ ...original, nested: { count: 2 } }],
+    {
+      type: `update`,
       original,
-    )
-    await runDeleteInsertReplacement(
-      [{ ...original, nested: { count: 2 } }],
-      {
-        type: `update`,
-        original,
-        modified: { ...original, nested: { count: 2 } },
-        changes: { nested: { count: 2 } },
-        metadata: { operation: `insert`, index: 0 },
-        syncMetadata: {
-          delete: true,
-          shared: `insert`,
-          insert: true,
-        },
+      modified: { ...original, nested: { count: 2 } },
+      changes: { nested: { count: 2 } },
+      metadata: { operation: `insert`, index: 0 },
+      syncMetadata: {
+        delete: true,
+        shared: `insert`,
+        insert: true,
       },
-      original,
-    )
-  })
+    },
+    original,
+  )
+}
 
-  it(`delivers a replacement that differs only by an enumerable symbol`, async () => {
-    oracleRoute(`fixed history`)
-    const field = Symbol(`replacement field`)
-    const original = { id: 1, value: 0, [field]: 0 }
-    const replacement = { id: 1, value: 0, [field]: 1 }
-    const request = await runDeleteInsertReplacement(
-      [replacement],
-      {
-        type: `update`,
-        original,
-        modified: replacement,
-        changes: {},
-        metadata: { operation: `insert`, index: 0 },
-        syncMetadata: {
-          delete: true,
-          shared: `insert`,
-          insert: true,
-        },
+async function deliverSymbolReplacement(): Promise<void> {
+  const field = Symbol(`replacement field`)
+  const original = { id: 1, value: 0, [field]: 0 }
+  const replacement = { id: 1, value: 0, [field]: 1 }
+  const request = await runDeleteInsertReplacement(
+    [replacement],
+    {
+      type: `update`,
+      original,
+      modified: replacement,
+      changes: {},
+      metadata: { operation: `insert`, index: 0 },
+      syncMetadata: {
+        delete: true,
+        shared: `insert`,
+        insert: true,
       },
+    },
+    original,
+  )
+
+  expect(Reflect.ownKeys(request[0]!.changes)).toStrictEqual([])
+  expect(Reflect.get(request[0]!.modified, field)).toBe(1)
+}
+
+async function useOwnStringKeyOrder(): Promise<void> {
+  const original = {
+    10: `remove numeric`,
+    2: `stable numeric`,
+    id: 1,
+    value: 0,
+    before: `remove string`,
+    stable: `same`,
+  }
+  const replacement = {
+    1: `add numeric`,
+    2: `stable numeric`,
+    id: 1,
+    value: 0,
+    stable: `same`,
+    after: `add string`,
+  }
+  const request = await runDeleteInsertReplacement(
+    [replacement],
+    {
+      type: `update`,
       original,
-    )
-
-    expect(Reflect.ownKeys(request[0]!.changes)).toStrictEqual([])
-    expect(Reflect.get(request[0]!.modified, field)).toBe(1)
-  })
-
-  it(`uses own-string key order for a symmetric replacement diff`, async () => {
-    oracleRoute(`fixed history`)
-    const original = {
-      10: `remove numeric`,
-      2: `stable numeric`,
-      id: 1,
-      value: 0,
-      before: `remove string`,
-      stable: `same`,
-    }
-    const replacement = {
-      1: `add numeric`,
-      2: `stable numeric`,
-      id: 1,
-      value: 0,
-      stable: `same`,
-      after: `add string`,
-    }
-    const request = await runDeleteInsertReplacement(
-      [replacement],
-      {
-        type: `update`,
-        original,
-        modified: replacement,
-        changes: {
-          1: `add numeric`,
-          10: undefined,
-          before: undefined,
-          after: `add string`,
-        },
-        metadata: { operation: `insert`, index: 0 },
-        syncMetadata: {
-          delete: true,
-          shared: `insert`,
-          insert: true,
-        },
+      modified: replacement,
+      changes: {
+        1: `add numeric`,
+        10: undefined,
+        before: undefined,
+        after: `add string`,
       },
-      original,
-    )
+      metadata: { operation: `insert`, index: 0 },
+      syncMetadata: {
+        delete: true,
+        shared: `insert`,
+        insert: true,
+      },
+    },
+    original,
+  )
 
-    expect(Object.keys(request[0]!.changes)).toStrictEqual([
-      `1`,
-      `10`,
-      `before`,
-      `after`,
-    ])
+  expect(Object.keys(request[0]!.changes)).toStrictEqual([
+    `1`,
+    `10`,
+    `before`,
+    `after`,
+  ])
+}
+
+// Each history names one authored replacement; its body runs
+// runDeleteInsertReplacement with the request that history owes.
+const deleteInsertCases: ReadonlyArray<readonly [string, () => Promise<void>]> =
+  [
+    [`cancels an exact same-key restoration`, cancelExactRestoration],
+    ...symmetricReplacements.map(
+      (row) =>
+        [
+          `converts a ${row.name} to one symmetric update`,
+          () => convertToSymmetricUpdate(row),
+        ] as const,
+    ),
+    [
+      `reduces repeated delete and insert pairs to the final net update`,
+      reduceRepeatedPairs,
+    ],
+    [
+      `preserves the first preimage through duplicate deletes before replacement`,
+      preserveFirstPreimage,
+    ],
+    [
+      `compares nested replacement values structurally`,
+      compareNestedReplacement,
+    ],
+    [
+      `delivers a replacement that differs only by an enumerable symbol`,
+      deliverSymbolReplacement,
+    ],
+    [
+      `uses own-string key order for a symmetric replacement diff`,
+      useOwnStringKeyOrder,
+    ],
+  ]
+
+describe(`Delete then insert transaction laws`, () => {
+  oracleProperty({
+    id: `collection-state.delete-insert`,
+    law: {
+      statement: `A same-key delete then insert in one transaction reaches the handler as its net request: nothing for an exact restoration, otherwise one symmetric update with the first preimage, the final row and its exact changes.`,
+      authority: `The public manual transaction and Collection mutation contracts in docs/guides/mutations.md and the same-key truth table stated above`,
+      limits: `The named authored replacements over one Collection and one manual transaction; each history states the request it owes.`,
+    },
+    owns: [`src/transactions.ts`, `src/collection/mutations.ts`],
+    histories: deleteInsertCases.map(([name]) => name),
+    label: (name) => name,
+    resolve: (name) => ({
+      run: deleteInsertCases.find(([candidate]) => candidate === name)![1],
+    }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `collection-state.delete-insert`,
+        plan,
+        observe,
+        () => plan.run(),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -685,7 +822,9 @@ function expectRows(
   expected: Iterable<Row>,
   cut: string,
 ) {
-  expect(ordered(actual), cut).toStrictEqual(ordered(expected))
+  oracleAssertion(cut, () =>
+    expect(ordered(actual), cut).toStrictEqual(ordered(expected)),
+  )
 }
 
 async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
@@ -772,10 +911,14 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
     ] as const) {
       for (const row of rows) {
         const expectedPending = pendingKeys.has(row.id)
-        expect(
-          row.$hasPendingWrites,
+        oracleAssertion(
           `${label}: ${surface} row ${row.id} pending local write`,
-        ).toBe(expectedPending)
+          () =>
+            expect(
+              row.$hasPendingWrites,
+              `${label}: ${surface} row ${row.id} pending local write`,
+            ).toBe(expectedPending),
+        )
       }
     }
     const read = ordered(source.values())
@@ -815,11 +958,15 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
         label,
       )
       for (const change of publication.changes) {
-        expect(typeof change.key, `${label}: native callback key type`).toBe(
-          `number`,
+        oracleAssertion(`${label}: native callback key type`, () =>
+          expect(typeof change.key, `${label}: native callback key type`).toBe(
+            `number`,
+          ),
         )
-        expect(change.key, `${label}: callback key matches row`).toBe(
-          change.value.id,
+        oracleAssertion(`${label}: callback key matches row`, () =>
+          expect(change.key, `${label}: callback key matches row`).toBe(
+            change.value.id,
+          ),
         )
       }
       expectRows(publication.rows, expected.values(), `${label}: callback read`)
@@ -910,8 +1057,14 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
       const pendingRows = scenario.optimistic ? proposed : base
       check(pendingRows, `complete mutation scope`, true, draftPendingKeys)
       committed = observeHistoryPromise(tx.commit())
-      expect(mutationCalls, `whole mutation persistence delivery count`).toBe(1)
-      expect(payload, `actual mutation function entered`).toBeDefined()
+      oracleAssertion(`whole mutation persistence delivery count`, () =>
+        expect(mutationCalls, `whole mutation persistence delivery count`).toBe(
+          1,
+        ),
+      )
+      oracleAssertion(`actual mutation function entered`, () =>
+        expect(payload, `actual mutation function entered`).toBeDefined(),
+      )
       if (fault === `payload`)
         payload![0]!.modified.note = `wrong transmitted value`
       const expectedPayload = scenario.order.map((type) => {
@@ -929,8 +1082,10 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
                 : base.get(key)!,
         }
       })
-      expect(payload, `whole authored mutation payload`).toStrictEqual(
-        expectedPayload,
+      oracleAssertion(`whole authored mutation payload`, () =>
+        expect(payload, `whole authored mutation payload`).toStrictEqual(
+          expectedPayload,
+        ),
       )
       expectHistoryOutcome(
         persisted.read(),
@@ -954,8 +1109,11 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
         gate.resolve()
       }
       await Promise.all([persisted.settled, settled.settled, committed.settled])
-      expect(mutationCalls, `settled mutation persistence delivery count`).toBe(
-        1,
+      oracleAssertion(`settled mutation persistence delivery count`, () =>
+        expect(
+          mutationCalls,
+          `settled mutation persistence delivery count`,
+        ).toBe(1),
       )
       expectHistoryOutcome(
         persisted.read(),
@@ -1038,62 +1196,84 @@ describe(`Whole mixed transaction publication`, () => {
       })),
     ),
   )
-  it.each(cells)(`publishes complete transaction cuts %j`, async (cell) => {
-    oracleRoute(`case`)
-    await runTransaction({ ...cell, value: 17, note: `new row` })
-  })
-  it.each([505202, undefined])(
-    `varies full payloads, seed=%s`,
-    async (seed) => {
-      const campaignParameters =
-        seed === undefined
-          ? oraclePropertyOptions(100, `collection-state.mixed-transaction`)
-          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })
-      oracleRoute(oracleRouteOf(campaignParameters))
-      await fc.assert(
-        fc.asyncProperty(
-          fc.record({
-            order: fc.constantFrom(...orders),
-            optimistic: fc.boolean(),
-            outcome: fc.constantFrom(
-              `resolve` as const,
-              `reject` as const,
-              `rollback` as const,
-            ),
-            value: fc.integer({ min: 1, max: 100 }),
-            note: fc.string({ maxLength: 10 }),
-          }),
-          (scenario) => runTransaction(scenario),
+  oracleProperty({
+    id: `collection-state.mixed-transaction`,
+    law: {
+      statement: `A mixed-key transaction retains whole ordered mutation payloads and publishes coherent row, event and settlement cuts.`,
+      authority: `The public manual transaction and Collection mutation contracts in docs/guides/mutations.md, with optimistic snapshot and settlement laws owned by optimistic-history-oracle.ts`,
+      limits: `The existing one-Collection manual transaction grammar and controlled sync acknowledgements; provider timing, cross-Collection transactions and arbitrary overlapping same-key histories remain outside this driver.`,
+    },
+    owns: [`src/transactions.ts`, `src/collection/mutations.ts`],
+    histories: {
+      arbitrary: fc.record({
+        order: fc.constantFrom(...orders),
+        optimistic: fc.boolean(),
+        outcome: fc.constantFrom(
+          `resolve` as const,
+          `reject` as const,
+          `rollback` as const,
         ),
-        campaignParameters,
-      )
+        value: fc.integer({ min: 1, max: 100 }),
+        note: fc.string({ maxLength: 10 }),
+      }),
+      runs: 100,
+      fixedSeeds: [505202],
+      fixed: cells.map((cell) => ({
+        name: `publishes complete transaction cuts ${JSON.stringify(cell)}`,
+        history: { ...cell, value: 17, note: `new row` },
+      })),
     },
-  )
-  it.each([
-    `missing-delete`,
-    `untouched-field`,
-    `partial-publication`,
-    `payload`,
-    `string-key`,
-    `previous-value`,
-    `update-as-insert`,
-  ] as const)(
-    `rejects captured %s through the real transaction driver's checks`,
-    async (fault) => {
-      oracleRoute(`calibration`)
-      const scenario: Scenario = {
-        order: [`insert`, `update`, `delete`],
-        optimistic: true,
-        outcome: `resolve`,
-        value: 17,
-        note: `new row`,
-      }
-      await runTransaction(scenario)
-      await expect(runTransaction(scenario, fault)).rejects.toMatchObject({
-        name: `AssertionError`,
-      })
-    },
-  )
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `collection-state.mixed-transaction`,
+        plan,
+        observe,
+        () => runTransaction(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+    calibrations: (
+      [
+        `missing-delete`,
+        `untouched-field`,
+        `partial-publication`,
+        `payload`,
+        `string-key`,
+        `previous-value`,
+        `update-as-insert`,
+      ] as const
+    ).map((fault) => ({
+      name: `rejects captured ${fault} through the real transaction driver's checks`,
+      law: `collection-state.mixed-transaction`,
+      driver: (plan: object, observe: (c: string, v: unknown) => void) =>
+        recordAssertionJudgment(
+          `collection-state.mixed-transaction`,
+          plan,
+          observe,
+          async () => {
+            const scenario: Scenario = {
+              order: [`insert`, `update`, `delete`],
+              optimistic: true,
+              outcome: `resolve`,
+              value: 17,
+              note: `new row`,
+            }
+            await runTransaction(scenario)
+            try {
+              await runTransaction(scenario, fault)
+            } catch (error) {
+              // Exactly the old matcher: the rejection is an AssertionError.
+              if (error instanceof Error && error.name === `AssertionError`)
+                rejectAt(`calibration ${fault}`, error)
+              throw new Error(
+                `rejects captured ${fault}: the check rejected with an error the old matcher did not accept: ${String(error)}`,
+              )
+            }
+          },
+        ),
+    })),
+  })
 })
 
 // The authored key list, in order and with multiplicity, is the payload that
@@ -1115,111 +1295,127 @@ function expectedTypedKeyPayload(
 // no encoded production globalKey participates in the comparison. Cross each
 // same-text pair with inserts, updates, deletes, repeated updates, and rollback.
 // Existing same-key grammars still require genuine repeated keys to collapse.
-for (const { numberKey, reversed } of [0, -1, 1, 1.5].flatMap((key) =>
-  [false, true].map((reverseOrder) => ({
-    numberKey: key,
-    reversed: reverseOrder,
-  })),
-)) {
-  for (const operation of [`insert`, `update`, `delete`, `repeat`] as const) {
-    for (const success of [true, false]) {
-      it(`keeps typed ${numberKey} keys distinct during ${operation}, success=${success}, reversed=${reversed}`, async () => {
-        oracleRoute(`case`)
-        type TypedRow = { id: string | number; value: number }
-        const keys = reversed
-          ? [String(numberKey), numberKey]
-          : [numberKey, String(numberKey)]
-        const initial =
-          operation === `insert` ? [] : keys.map((id) => ({ id, value: 0 }))
-        const proposed =
-          operation === `delete`
-            ? []
-            : keys.map((id, i) => ({ id, value: i + 10 }))
-        let sync!: Parameters<SyncConfig<TypedRow>[`sync`]>[0]
-        const source = createCollection<TypedRow>({
-          getKey: (row) => row.id,
-          sync: {
-            sync(actions) {
-              sync = actions
-              actions.begin()
-              for (const value of initial)
-                actions.write({ type: `insert`, value })
-              actions.commit()
-              actions.markReady()
-            },
-          },
-        })
-        const payload: Array<{
-          key: string | number
-          type: string
-          value: number
-        }> = []
-        const tx = createTransaction<TypedRow>({
-          autoCommit: false,
-          mutationFn: ({ transaction }) => {
-            for (const mutation of transaction.mutations)
-              payload.push({
-                key: mutation.key,
-                type: mutation.type,
-                value: operation === `delete` ? 0 : mutation.modified.value,
-              })
-            if (!success) return Promise.reject(new Error(`authored rejection`))
-            sync.begin()
-            for (const mutation of transaction.mutations) {
-              if (mutation.type === `delete`)
-                sync.write({ type: `delete`, key: mutation.key })
-              else sync.write({ type: mutation.type, value: mutation.modified })
-            }
-            sync.commit()
-            return Promise.resolve()
-          },
-        })
-        const persisted = observeHistoryPromise(tx.when(`settled`))
-        await withHistoryCleanup(
-          async () => {
-            await source.preload()
-            tx.mutate(() => {
-              keys.forEach((key, index) => {
-                if (operation === `insert`)
-                  source.insert({ id: key, value: index + 10 })
-                else if (operation === `delete`) source.delete(key)
-                else {
-                  if (operation === `repeat`)
-                    source.update(key, (draft) => {
-                      draft.value = 3
-                    })
-                  source.update(key, (draft) => {
-                    draft.value = index + 10
-                  })
-                }
-              })
-            })
-            const committed = observeHistoryPromise(tx.commit())
-            await committed.settled
-            await persisted.settled
-            expect(payload, `handler payload retains typed keys`).toEqual(
-              expectedTypedKeyPayload(keys, operation),
-            )
-            const expected = success ? proposed : initial
-            expect(source.size).toBe(expected.length)
-            for (const row of expected)
-              expect(source.get(row.id)?.value).toBe(row.value)
-          },
-          () => [() => source.cleanup()],
-        )
-      })
-    }
-  }
+type TypedKeyHistory = {
+  numberKey: number
+  reversed: boolean
+  operation: `insert` | `update` | `delete` | `repeat`
+  success: boolean
 }
 
-// What this oracle owns: the gap report judges the transaction's authored
-// payload and its same-key merge, and the Collection's mutation intake, by this
-// file's tests.
-// The check drivers run one history and compare its public observations with
-// the expected world they compute from the scenario. The typed-key payload model
-// is the authored key list.
-declareOracle({
+async function runTypedKeys({
+  numberKey,
+  reversed,
+  operation,
+  success,
+}: TypedKeyHistory): Promise<void> {
+  type TypedRow = { id: string | number; value: number }
+  const keys = reversed
+    ? [String(numberKey), numberKey]
+    : [numberKey, String(numberKey)]
+  const initial =
+    operation === `insert` ? [] : keys.map((id) => ({ id, value: 0 }))
+  const proposed =
+    operation === `delete` ? [] : keys.map((id, i) => ({ id, value: i + 10 }))
+  let sync!: Parameters<SyncConfig<TypedRow>[`sync`]>[0]
+  const source = createCollection<TypedRow>({
+    getKey: (row) => row.id,
+    sync: {
+      sync(actions) {
+        sync = actions
+        actions.begin()
+        for (const value of initial) actions.write({ type: `insert`, value })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  const payload: Array<{
+    key: string | number
+    type: string
+    value: number
+  }> = []
+  const tx = createTransaction<TypedRow>({
+    autoCommit: false,
+    mutationFn: ({ transaction }) => {
+      for (const mutation of transaction.mutations)
+        payload.push({
+          key: mutation.key,
+          type: mutation.type,
+          value: operation === `delete` ? 0 : mutation.modified.value,
+        })
+      if (!success) return Promise.reject(new Error(`authored rejection`))
+      sync.begin()
+      for (const mutation of transaction.mutations) {
+        if (mutation.type === `delete`)
+          sync.write({ type: `delete`, key: mutation.key })
+        else sync.write({ type: mutation.type, value: mutation.modified })
+      }
+      sync.commit()
+      return Promise.resolve()
+    },
+  })
+  const persisted = observeHistoryPromise(tx.when(`settled`))
+  await withHistoryCleanup(
+    async () => {
+      await source.preload()
+      tx.mutate(() => {
+        keys.forEach((key, index) => {
+          if (operation === `insert`)
+            source.insert({ id: key, value: index + 10 })
+          else if (operation === `delete`) source.delete(key)
+          else {
+            if (operation === `repeat`)
+              source.update(key, (draft) => {
+                draft.value = 3
+              })
+            source.update(key, (draft) => {
+              draft.value = index + 10
+            })
+          }
+        })
+      })
+      const committed = observeHistoryPromise(tx.commit())
+      await committed.settled
+      await persisted.settled
+      expect(payload, `handler payload retains typed keys`).toEqual(
+        expectedTypedKeyPayload(keys, operation),
+      )
+      const expected = success ? proposed : initial
+      expect(source.size).toBe(expected.length)
+      for (const row of expected)
+        expect(source.get(row.id)?.value).toBe(row.value)
+    },
+    () => [() => source.cleanup()],
+  )
+}
+
+oracleProperty({
+  id: `collection-state.typed-keys`,
+  law: {
+    statement: `Typed keys that share their text keep distinct identities through a whole transaction: the handler payload is the authored key list, in order and with multiplicity, and settlement leaves the authored or initial rows.`,
+    authority: `The public manual transaction and Collection mutation contracts in docs/guides/mutations.md`,
+    limits: `Number keys 0, -1, 1 and 1.5 beside their string forms in both orders, under insert, update, delete and repeated update, with success and rejection.`,
+  },
   owns: [`src/transactions.ts`, `src/collection/mutations.ts`],
-  check: [runTransaction, runSameKey, runDeleteInsertReplacement],
-  model: [expectedTypedKeyPayload],
+  histories: [0, -1, 1, 1.5].flatMap((numberKey) =>
+    [false, true].flatMap((reversed) =>
+      ([`insert`, `update`, `delete`, `repeat`] as const).flatMap((operation) =>
+        [true, false].map((success): TypedKeyHistory => ({
+          numberKey,
+          reversed,
+          operation,
+          success,
+        })),
+      ),
+    ),
+  ),
+  label: ({ numberKey, reversed, operation, success }) =>
+    `keeps typed ${numberKey} keys distinct during ${operation}, success=${success}, reversed=${reversed}`,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`collection-state.typed-keys`, plan, observe, () =>
+      runTypedKeys(plan.history),
+    ),
+  check: forwardAssertionJudgment,
 })

@@ -236,6 +236,19 @@ removal does not cancel a running named mutation function. If that call later
 fails, its waiting promises reject with the named mutation function error and
 the removed row is not retried. Call `dispose()` when the executor's owner ends.
 
+You can replace an executor to change its configuration while keeping the same
+Collections and durable outbox. Disposal stops new processing and releases
+resources. It preserves pending optimistic state and caller promises. A
+successor in the same runtime that replays the outbox and retains every configured
+Collection object under its existing registry key settles the original transaction
+receipts and per-ID waiters. An unchanged ancillary Collection does not transfer
+callers when an affected Collection object changes. Core's conflicting-transaction
+rollback rules still apply to pending restored snapshots. You can
+construct a new storage adapter over that outbox. Without resumed work, the
+callers remain pending. This does not transfer promises across tabs or a page
+reload. On logout, separately clean up the account's Collections and decide
+whether to keep or discard its stored outbox.
+
 ## Use SQLite persistence with the outbox
 
 This React Native recipe stores applied Collection rows in OP-SQLite and pending mutations in AsyncStorage. The Query Collection supplies server sync. Install the packages for both stores and for Query Collection sync:

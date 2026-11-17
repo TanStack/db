@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util'
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { afterAll, beforeEach, describe, expect, vi } from 'vitest'
 import {
   IR,
   createCollection,
@@ -15,21 +15,26 @@ import {
 } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../../query-db-collection/src/query'
 import { electricCollectionOptions } from '../src/electric'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
+import { oracleReplayRequested } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   checkMutationConfirmation,
   mutationConfirmationHistories,
   mutationConfirmationInputs,
 } from '../../db/tests/mutation-confirmation-oracle'
+import {
+  expectPersistenceInterleavingObservation,
+  expectQueuedPresenceAtDurabilityHold,
+  isSdkResetFramedPartition,
+  persistenceInterleavingCampaignArbitrary,
+  queuedPresenceArbitraries,
+  queuedPresenceFixedSeed,
+  reconstructPersistenceInterleavingCampaign,
+} from './electric-adapter-grammar-oracle'
+import {
+  checkExistingElectricComparison,
+  existingElectricComparison,
+} from './electric-property-oracle'
 import {
   atCheckpoint,
   startUnmetWaits,
@@ -67,6 +72,11 @@ import {
   subsetEnd,
   upToDate,
 } from './electric-adapter-support'
+import type {
+  PersistenceInterleavingCampaign,
+  PersistenceInterleavingObservation,
+  QueuedPresenceHistory,
+} from './electric-adapter-grammar-oracle'
 import type { MutationConfirmationObservation } from '../../db/tests/mutation-confirmation-oracle'
 import type {
   ObservedPreload,
@@ -86,14 +96,17 @@ import type {
   RetryWait,
 } from './electric-retry-decision-model'
 
-// Replays one generated law directly with the shared oracle variables:
+// Replay a generated law by copying its complete printed Replay: coordinates,
+// including TANSTACK_DB_ORACLE_UNIT='<reported random unit>'. The old command
+// below records the pre-unit interface; current Vitest selection uses the
+// reported unit rather than its former '(replay)' test-name suffix:
 // TANSTACK_DB_ORACLE_PROPERTY=<property>
 // TANSTACK_DB_ORACLE_SEED=<reported seed>
 // TANSTACK_DB_ORACLE_PATH=<reported path>
 // pnpm exec vitest run tests/electric-oracle.property.test.ts -t '<law name> \(replay\)'
 const registeredHistoryProperties = new Set<string>()
 
-function electricHistoryProperty<T>(
+function electricHistoryOptions<T>(
   property: string,
   name: string,
   arbitrary: fc.Arbitrary<T>,
@@ -102,36 +115,31 @@ function electricHistoryProperty<T>(
   check: (value: T) => void | Promise<void>,
   timeout?: number,
   examples?: Array<[T]>,
-): void {
+) {
   if (registeredHistoryProperties.has(property)) {
     throw new Error(`duplicate Electric history property: ${property}`)
   }
   registeredHistoryProperties.add(property)
-  // A path replay of this property runs only the random campaign, from its
-  // path. The fixed campaign stands aside during every path replay.
-  oracleReplayTest(fcTest).prop(
-    [arbitrary],
-    oracleFixedSeed(fixedSeed, { numRuns: oracleRuns(baseRuns), examples }),
-  )(
-    `${name} (fixed)`,
-    (...args) => {
-      oracleRoute(`fixed seed`)
-      return check(...args)
+  return {
+    id: property,
+    law: {
+      statement: name,
+      authority: `The named independent Electric model/comparison passed to electricHistoryOptions and its adjacent contract prose.`,
+      limits: `The existing generated history domain and controlled SDK boundary; no new product or real-service claim.`,
     },
+    histories: {
+      arbitrary,
+      runs: baseRuns,
+      fixedSeeds: [fixedSeed],
+      fixed: examples?.flatMap(([history], index) => [
+        { name: `retained fixed history ${index}`, history },
+        { name: `retained random history ${index}`, history },
+      ]),
+    },
+    ...existingElectricComparison(property, check),
+    check: checkExistingElectricComparison,
     timeout,
-  )
-  const randomCampaign = {
-    ...oraclePropertyOptions(baseRuns, property),
-    examples,
   }
-  oracleReplayTest(fcTest, property).prop([arbitrary], randomCampaign)(
-    `${name} (random)`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(randomCampaign))
-      return check(...args)
-    },
-    timeout,
-  )
 }
 
 vi.mock(`@electric-sql/client`, async () => {
@@ -155,249 +163,237 @@ vi.mock(`@electric-sql/client`, async () => {
  */
 describe(`mutation outcome and confirmation`, () => {
   const mutationHistories = mutationConfirmationHistories(`electric`)
-  const mutationReach = createOracleReach(
-    `electric.mutation-confirmation`,
-    mutationHistories.map(
-      (h) =>
-        `${h.operation}/${h.outcome}/${h.confirmation}/${h.returned}/peer:${h.peer}`,
-    ),
+  const mutationCases = new Map(
+    mutationHistories.map((h) => [
+      `${h.operation}/${h.outcome}/${h.confirmation}/${h.returned}/peer:${h.peer}`,
+      0,
+    ]),
   )
   afterAll(() => {
-    mutationReach.assertReached()
+    if (!oracleReplayRequested())
+      expect([...mutationCases].filter(([, count]) => count < 1)).toEqual([])
     console.info(
       `electric.mutation-confirmation reach`,
-      Object.fromEntries(mutationReach.counts()),
+      Object.fromEntries(mutationCases),
     )
   })
-  it.each(mutationHistories)(
-    `settles a handler independently of discarded values: %j`,
-    async (history) => {
-      oracleRoute(`case`)
-      mutationReach.beginHistory()
-      const { operation, confirmation, outcome, returned } = history
-      const localReach = createOracleReach(`electric.mutation-cuts`, [
-        `entered`,
-        `settled`,
-        `settlement-waiter`,
-        ...(outcome === `reject-before-write` ? [] : [`server-written`]),
-        ...(confirmation === `none`
-          ? []
-          : [`confirmation-requested`, `confirmation-accepted`]),
-        ...(confirmation === `none` && outcome !== `reject-before-write`
-          ? [`late-confirmed`]
-          : []),
+  // One enumerated history through the real Electric adapter, compared with
+  // the shared outcome/confirmation model at each cut.
+  async function runMutationConfirmationHistory(
+    history: (typeof mutationHistories)[number],
+  ): Promise<void> {
+    const { operation, confirmation, outcome, returned } = history
+    const expectedCuts = [
+      `entered`,
+      `settled`,
+      `settlement-waiter`,
+      ...(outcome === `reject-before-write` ? [] : [`server-written`]),
+      ...(confirmation === `none`
+        ? []
+        : [`confirmation-requested`, `confirmation-accepted`]),
+      ...(confirmation === `none` && outcome !== `reject-before-write`
+        ? [`late-confirmed`]
+        : []),
+    ]
+    const observedCuts = new Set<string>()
+    resetElectricOracleMocks()
+    let subscriber!: (messages: Array<Message<OracleRow>>) => void
+    mockSubscribe.mockImplementationOnce((callback) => {
+      subscriber = callback
+      return () => {}
+    })
+    const enterRelease = createDeferred<void>()
+    const confirmationRelease = createDeferred<void>()
+    const settleRelease = createDeferred<void>()
+    const entered = createDeferred<void>()
+    const serverWritten = createDeferred<void>()
+    const confirmationAccepted = createDeferred<void>()
+    const confirmationRequested = createDeferred<void>()
+    const failure = new Error(`handler ${outcome}`)
+    let handlerWrites = 0
+    let confirmationCalls = 0
+    let confirmationStatus: MutationConfirmationObservation[`confirmationStatus`] = `not-requested`
+    let settlement: MutationConfirmationObservation[`settlement`] = `pending`
+    let error: unknown
+    let verdict: Promise<MutationConfirmationObservation> | undefined
+    let releaseCollection: (() => Promise<void>) | undefined
+    await withElectricCleanup(async () => {
+      const message = change(operation, 1, `confirmed`)
+      if (operation !== `delete`)
+        message.value = { ...mutationConfirmationInputs.confirmed }
+      message.headers.txids = [55]
+      const handler = async () => {
+        entered.resolve()
+        await enterRelease.promise
+        if (outcome === `reject-before-write`) throw failure
+        handlerWrites++
+        serverWritten.resolve()
+        await confirmationRelease.promise
+        if (confirmation === `txid`) {
+          confirmationCalls++
+          confirmationStatus = `pending`
+          const ack = collection.utils.awaitTxId(55).then(() => {
+            confirmationStatus = `accepted`
+          })
+          confirmationRequested.resolve()
+          await ack
+        }
+        confirmationAccepted.resolve()
+        await settleRelease.promise
+        if (outcome === `reject-after-write`) throw failure
+        return returned === `legacy-txid` ? { txid: 55 } : undefined
+      }
+      const runtimeHandler = handler as unknown as () => Promise<void>
+      const collection = createCollection(
+        electricCollectionOptions<OracleRow>({
+          id: `discarded-value-${JSON.stringify(history)}`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          startSync: true,
+          getKey: (row) => row.id,
+          onInsert: runtimeHandler,
+          onUpdate: runtimeHandler,
+          onDelete: runtimeHandler,
+        }),
+      )
+      releaseCollection = () => collection.cleanup()
+      subscriber([
+        ...(history.peer ? [change(`insert`, 2, `peer`)] : []),
+        ...(operation === `insert` ? [] : [change(`insert`, 1, `before`)]),
+        upToDate,
       ])
-      localReach.beginHistory()
-      resetElectricOracleMocks()
-      let subscriber!: (messages: Array<Message<OracleRow>>) => void
-      mockSubscribe.mockImplementationOnce((callback) => {
-        subscriber = callback
-        return () => {}
+      await atCheckpoint(collection.preload(), `initial Electric preload`)
+      const transaction =
+        operation === `insert`
+          ? collection.insert({ ...mutationConfirmationInputs.optimistic })
+          : operation === `delete`
+            ? collection.delete(1)
+            : collection.update(1, (draft) => {
+                draft.name = `optimistic`
+              })
+      const observe = (): MutationConfirmationObservation => ({
+        rows: collection.toArray
+          .map(({ id, name, stable }) => ({ id, name, stable }))
+          .sort((a, b) => a.id - b.id),
+        handlerWrites,
+        confirmationCalls,
+        fetches: 0,
+        confirmationStatus,
+        providerRequests:
+          mockStream.requestSnapshot.mock.calls.length +
+          mockStream.fetchSnapshot.mock.calls.length +
+          mockStream.forceDisconnectAndRefresh.mock.calls.length,
+        state: transaction.state,
+        settlement,
+        error,
       })
-      const enterRelease = createDeferred<void>()
-      const confirmationRelease = createDeferred<void>()
-      const settleRelease = createDeferred<void>()
-      const entered = createDeferred<void>()
-      const serverWritten = createDeferred<void>()
-      const confirmationAccepted = createDeferred<void>()
-      const confirmationRequested = createDeferred<void>()
-      const failure = new Error(`handler ${outcome}`)
-      let handlerWrites = 0
-      let confirmationCalls = 0
-      let confirmationStatus: MutationConfirmationObservation[`confirmationStatus`] = `not-requested`
-      let settlement: MutationConfirmationObservation[`settlement`] = `pending`
-      let error: unknown
-      let verdict: Promise<MutationConfirmationObservation> | undefined
-      let releaseCollection: (() => Promise<void>) | undefined
-      await withElectricCleanup(async () => {
-        const message = change(operation, 1, `confirmed`)
-        if (operation !== `delete`)
-          message.value = { ...mutationConfirmationInputs.confirmed }
-        message.headers.txids = [55]
-        const handler = async () => {
-          entered.resolve()
-          await enterRelease.promise
-          if (outcome === `reject-before-write`) throw failure
-          handlerWrites++
-          serverWritten.resolve()
-          await confirmationRelease.promise
-          if (confirmation === `txid`) {
-            confirmationCalls++
-            confirmationStatus = `pending`
-            const ack = collection.utils.awaitTxId(55).then(() => {
-              confirmationStatus = `accepted`
-            })
-            confirmationRequested.resolve()
-            await ack
-          }
-          confirmationAccepted.resolve()
-          await settleRelease.promise
-          if (outcome === `reject-after-write`) throw failure
-          return returned === `legacy-txid` ? { txid: 55 } : undefined
-        }
-        const runtimeHandler = handler as unknown as () => Promise<void>
-        const collection = createCollection(
-          electricCollectionOptions<OracleRow>({
-            id: `discarded-value-${JSON.stringify(history)}`,
-            shapeOptions: {
-              url: `http://test-url`,
-              params: { table: `test_table` },
-            },
-            startSync: true,
-            getKey: (row) => row.id,
-            onInsert: runtimeHandler,
-            onUpdate: runtimeHandler,
-            onDelete: runtimeHandler,
-          }),
-        )
-        releaseCollection = () => collection.cleanup()
-        subscriber([
-          ...(history.peer ? [change(`insert`, 2, `peer`)] : []),
-          ...(operation === `insert` ? [] : [change(`insert`, 1, `before`)]),
-          upToDate,
-        ])
-        await atCheckpoint(collection.preload(), `initial Electric preload`)
-        const transaction =
-          operation === `insert`
-            ? collection.insert({ ...mutationConfirmationInputs.optimistic })
-            : operation === `delete`
-              ? collection.delete(1)
-              : collection.update(1, (draft) => {
-                  draft.name = `optimistic`
-                })
-        const observe = (): MutationConfirmationObservation => ({
-          rows: collection.toArray
-            .map(({ id, name, stable }) => ({ id, name, stable }))
-            .sort((a, b) => a.id - b.id),
-          handlerWrites,
-          confirmationCalls,
-          fetches: 0,
-          confirmationStatus,
-          providerRequests:
-            mockStream.requestSnapshot.mock.calls.length +
-            mockStream.fetchSnapshot.mock.calls.length +
-            mockStream.forceDisconnectAndRefresh.mock.calls.length,
-          state: transaction.state,
-          settlement,
-          error,
-        })
-        verdict = transaction.when(`settled`).then(
-          () => {
-            settlement = `fulfilled`
-            return observe()
-          },
-          (reason: unknown) => {
-            settlement = `rejected`
-            error = reason
-            return observe()
-          },
-        )
-        await atCheckpoint(entered.promise, `Electric handler entry`)
-        checkMutationConfirmation(history, `entered`, observe(), failure)
-        localReach.reach(`entered`)
-        enterRelease.resolve()
-        if (outcome !== `reject-before-write`) {
-          await atCheckpoint(serverWritten.promise, `Electric server write`)
-          checkMutationConfirmation(
-            history,
-            `server-written`,
-            observe(),
-            failure,
-          )
-          localReach.reach(`server-written`)
-          confirmationRelease.resolve()
-          if (confirmation === `txid`) {
-            await atCheckpoint(
-              confirmationRequested.promise,
-              `Electric acknowledgement registration`,
-            )
-            await Promise.resolve()
-            checkMutationConfirmation(
-              history,
-              `confirmation-requested`,
-              observe(),
-              failure,
-            )
-            localReach.reach(`confirmation-requested`)
-            subscriber([message, upToDate])
-          }
-          await atCheckpoint(
-            confirmationAccepted.promise,
-            `Electric confirmation acceptance`,
-          )
-          if (confirmation !== `none`) {
-            checkMutationConfirmation(
-              history,
-              `confirmation-accepted`,
-              observe(),
-              failure,
-            )
-            localReach.reach(`confirmation-accepted`)
-          }
-          settleRelease.resolve()
-        }
-        const atWaiter = await atCheckpoint(
-          verdict,
-          `Electric handler settlement`,
-        )
-        checkMutationConfirmation(history, `settled`, atWaiter, failure)
-        localReach.reach(`settlement-waiter`)
-        checkMutationConfirmation(history, `settled`, observe(), failure)
-        localReach.reach(`settled`)
-        if (confirmation === `none` && outcome !== `reject-before-write`) {
-          const ack = collection.utils.awaitTxId(55)
-          subscriber([message, upToDate])
-          await atCheckpoint(ack, `later Electric stream confirmation`)
-          checkMutationConfirmation(
-            history,
-            `late-confirmed`,
-            observe(),
-            failure,
-          )
-          localReach.reach(`late-confirmed`)
-          checkMutationConfirmation(history, `settled`, atWaiter, failure)
-        }
-        localReach.assertReached()
-        mutationReach.reach(
-          `${operation}/${outcome}/${confirmation}/${returned}/peer:${history.peer}`,
-        )
-      }, [
+      verdict = transaction.when(`settled`).then(
         () => {
-          enterRelease.resolve()
-          confirmationRelease.resolve()
-          settleRelease.resolve()
-          if (confirmationStatus === `pending`) {
-            const message = change(operation, 1, `confirmed`)
-            if (operation !== `delete`)
-              message.value = { ...mutationConfirmationInputs.confirmed }
-            message.headers.txids = [55]
-            subscriber([message, upToDate])
-          }
+          settlement = `fulfilled`
+          return observe()
         },
-        () => verdict && atCheckpoint(verdict, `Electric cleanup settlement`),
-        () => releaseCollection?.(),
-      ])
+        (reason: unknown) => {
+          settlement = `rejected`
+          error = reason
+          return observe()
+        },
+      )
+      await atCheckpoint(entered.promise, `Electric handler entry`)
+      checkMutationConfirmation(history, `entered`, observe(), failure)
+      observedCuts.add(`entered`)
+      enterRelease.resolve()
+      if (outcome !== `reject-before-write`) {
+        await atCheckpoint(serverWritten.promise, `Electric server write`)
+        checkMutationConfirmation(history, `server-written`, observe(), failure)
+        observedCuts.add(`server-written`)
+        confirmationRelease.resolve()
+        if (confirmation === `txid`) {
+          await atCheckpoint(
+            confirmationRequested.promise,
+            `Electric acknowledgement registration`,
+          )
+          await Promise.resolve()
+          checkMutationConfirmation(
+            history,
+            `confirmation-requested`,
+            observe(),
+            failure,
+          )
+          observedCuts.add(`confirmation-requested`)
+          subscriber([message, upToDate])
+        }
+        await atCheckpoint(
+          confirmationAccepted.promise,
+          `Electric confirmation acceptance`,
+        )
+        if (confirmation !== `none`) {
+          checkMutationConfirmation(
+            history,
+            `confirmation-accepted`,
+            observe(),
+            failure,
+          )
+          observedCuts.add(`confirmation-accepted`)
+        }
+        settleRelease.resolve()
+      }
+      const atWaiter = await atCheckpoint(
+        verdict,
+        `Electric handler settlement`,
+      )
+      checkMutationConfirmation(history, `settled`, atWaiter, failure)
+      observedCuts.add(`settlement-waiter`)
+      checkMutationConfirmation(history, `settled`, observe(), failure)
+      observedCuts.add(`settled`)
+      if (confirmation === `none` && outcome !== `reject-before-write`) {
+        const ack = collection.utils.awaitTxId(55)
+        subscriber([message, upToDate])
+        await atCheckpoint(ack, `later Electric stream confirmation`)
+        checkMutationConfirmation(history, `late-confirmed`, observe(), failure)
+        observedCuts.add(`late-confirmed`)
+        checkMutationConfirmation(history, `settled`, atWaiter, failure)
+      }
+      if (!oracleReplayRequested())
+        expect(expectedCuts.filter((cut) => !observedCuts.has(cut))).toEqual([])
+      const mutationCase = `${operation}/${outcome}/${confirmation}/${returned}/peer:${history.peer}`
+      mutationCases.set(mutationCase, mutationCases.get(mutationCase)! + 1)
+    }, [
+      () => {
+        enterRelease.resolve()
+        confirmationRelease.resolve()
+        settleRelease.resolve()
+        if (confirmationStatus === `pending`) {
+          const message = change(operation, 1, `confirmed`)
+          if (operation !== `delete`)
+            message.value = { ...mutationConfirmationInputs.confirmed }
+          message.headers.txids = [55]
+          subscriber([message, upToDate])
+        }
+      },
+      () => verdict && atCheckpoint(verdict, `Electric cleanup settlement`),
+      () => releaseCollection?.(),
+    ])
+  }
+  oracleProperty({
+    id: `electric.mutation-confirmation`,
+    law: {
+      statement: `A mutation handler settles from its own outcome and confirmation, independently of the values it returns or discards.`,
+      authority: `The shared outcome/confirmation model in packages/db/tests/mutation-confirmation-oracle.ts, received through the Electric adapter.`,
+      limits: `The finite Electric mutation-confirmation histories over controlled ShapeStream delivery; no live Electric-service claim.`,
     },
-  )
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: mutationHistories,
+    label: (history) =>
+      `settles a handler independently of discarded values: ${JSON.stringify(history)}`,
+    ...existingElectricComparison(
+      `electric.mutation-confirmation`,
+      runMutationConfirmationHistory,
+    ),
+    check: checkExistingElectricComparison,
+  })
 })
-
-function isSdkResetFramedPartition(
-  batches: Array<Array<Message<OracleRow>>>,
-): boolean {
-  // Model the installed SDK's HTTP 409 reset path: it publishes a synthetic
-  // singleton reset, not the response body. See electric-sdk-framing.test.ts.
-  // Arbitrary data/reset coalescing is outside this verified protocol domain;
-  // this is not a claim that the SDK validates every other server response.
-  return batches.every(
-    (batch) =>
-      batch.length <= 1 ||
-      batch.every(
-        (message) =>
-          (message.headers as Record<string, unknown>).control !==
-          `must-refetch`,
-      ),
-  )
-}
 
 type SourceLedgerEvent = {
   type: `source-commit`
@@ -430,29 +426,6 @@ function foldSourceLedgerThrough(
 const durablePrefixProperty = `electric.durable-prefix`
 const publicationBeforePersistenceProperty = `electric.publication-before-persistence`
 const adapterFailurePolicyProperty = `electric.adapter-failure-policy`
-
-function durablePrefixPropertyOptions(mode: `fixed` | `random`): {
-  numRuns: number
-  seed?: number
-  path?: string
-} {
-  if (mode === `fixed`)
-    return oracleFixedSeed(20260921, { numRuns: oracleRuns(10) })
-  return oraclePropertyOptions(10, durablePrefixProperty)
-}
-
-function persistencePolicyPropertyOptions(
-  mode: `fixed` | `random`,
-  property: string,
-): {
-  numRuns: number
-  seed?: number
-  path?: string
-} {
-  if (mode === `fixed`)
-    return oracleFixedSeed(20260923, { numRuns: oracleRuns(8) })
-  return oraclePropertyOptions(8, property)
-}
 
 async function runRejectedDurablePrefixWitness(
   id: string,
@@ -625,78 +598,9 @@ type ReferenceState = {
  * convergence. ShapeStream is mocked at the installed SDK boundary, so this
  * owner does not establish live-service framing or native-host scheduling.
  */
-type QueuedPresenceHistory =
-  `insert-update` | `update-update` | `delete-update` | `truncate-update`
-
-type QueuedPresenceCampaign = {
-  histories: Array<QueuedPresenceHistory>
-  names: [string, string]
-}
-
 const queuedPresenceProperty = `electric.queued-presence-order`
-const queuedPresenceFixedSeed = 20_260_924
 const queuedPresenceRuns = 8
-const queuedPresenceHistories: ReadonlyArray<QueuedPresenceHistory> = [
-  `insert-update`,
-  `update-update`,
-  `delete-update`,
-  `truncate-update`,
-]
-const queuedPresenceArbitraries: [
-  fc.Arbitrary<Array<QueuedPresenceHistory>>,
-  fc.Arbitrary<[string, string]>,
-] = [
-  fc.uniqueArray(fc.constantFrom(...queuedPresenceHistories), {
-    minLength: queuedPresenceHistories.length,
-    maxLength: queuedPresenceHistories.length,
-  }),
-  fc.tuple(fc.string({ maxLength: 12 }), fc.string({ maxLength: 12 })),
-]
 const persistenceInterleavingProperty = `electric.persistence-interleaving`
-
-function queuedPresencePropertyOptions(mode: `fixed` | `random`): {
-  numRuns: number
-  seed?: number
-  path?: string
-} {
-  if (mode === `fixed`) {
-    return oracleFixedSeed(queuedPresenceFixedSeed, {
-      numRuns: oracleRuns(queuedPresenceRuns),
-    })
-  }
-  return oraclePropertyOptions(queuedPresenceRuns, queuedPresenceProperty)
-}
-
-function reconstructQueuedPresenceCampaign(
-  value: unknown,
-): QueuedPresenceCampaign {
-  if (typeof value !== `object` || value === null) {
-    throw new Error(`queued-presence campaign must be an object`)
-  }
-  const campaign = value as { histories?: unknown; names?: unknown }
-  if (
-    !Array.isArray(campaign.histories) ||
-    campaign.histories.length !== queuedPresenceHistories.length ||
-    new Set(campaign.histories).size !== queuedPresenceHistories.length ||
-    !campaign.histories.every((history) =>
-      queuedPresenceHistories.includes(history),
-    )
-  ) {
-    throw new Error(
-      `queued-presence histories must contain every supported transition exactly once`,
-    )
-  }
-  if (
-    !Array.isArray(campaign.names) ||
-    campaign.names.length !== 2 ||
-    !campaign.names.every(
-      (name) => typeof name === `string` && name.length <= 12,
-    )
-  ) {
-    throw new Error(`queued-presence names are outside the grammar`)
-  }
-  return campaign as unknown as QueuedPresenceCampaign
-}
 
 function expectedQueuedPresenceRows(
   history: QueuedPresenceHistory,
@@ -713,22 +617,6 @@ function expectedQueuedPresenceRows(
     })
   }
   return expectedRows
-}
-
-function expectQueuedPresenceAtDurabilityHold(
-  actual: Array<[string | number, string, string]>,
-  history: QueuedPresenceHistory,
-  gate: OracleRow,
-): void {
-  const expectedRows = new Map<string | number, OracleRow>([[1, gate]])
-  if (history !== `insert-update`) {
-    expectedRows.set(2, {
-      id: 2,
-      name: `baseline`,
-      stable: `stable-2`,
-    })
-  }
-  expect(actual).toEqual(rowsFromMap(expectedRows))
 }
 
 async function runQueuedPresenceCampaign(
@@ -877,86 +765,6 @@ async function runQueuedPresenceHistory(
  * These histories exercise the persisted Collection wrapper and mocked
  * Electric callback boundary, not native-host scheduling.
  */
-type PersistenceInterleavingKind =
-  `open-transaction-hydration` | `subset-supersedes-absence`
-
-type PersistenceInterleavingCampaign = {
-  histories: Array<PersistenceInterleavingKind>
-  names: [string, string]
-}
-
-type PersistenceInterleavingObservation =
-  | {
-      kind: `open-transaction-hydration`
-      hydrationStartedBeforeCommit: boolean
-      hydrationOutcomeBeforeRelease: string
-      cachedRowBeforeRelease: boolean
-      hydrationOutcome: string
-      publicRowsAtHydrationSettlement: Array<[string | number, string, string]>
-      deliveryErrors: Array<string>
-      publicRows: Array<[string | number, string, string]>
-      durableRows: Array<[string | number, string, string]>
-      status: string
-      publicError: string | undefined
-    }
-  | {
-      kind: `subset-supersedes-absence`
-      publicRows: Array<[string | number, string, string]>
-      durableRows: Array<[string | number, string, string]>
-      status: string
-      publicError: string | undefined
-    }
-
-const persistenceInterleavingKinds: ReadonlyArray<PersistenceInterleavingKind> =
-  [`open-transaction-hydration`, `subset-supersedes-absence`]
-
-const persistenceInterleavingCampaignArbitrary: fc.Arbitrary<PersistenceInterleavingCampaign> =
-  fc.record({
-    histories: fc.uniqueArray(
-      fc.constantFrom(...persistenceInterleavingKinds),
-      {
-        minLength: persistenceInterleavingKinds.length,
-        maxLength: persistenceInterleavingKinds.length,
-      },
-    ),
-    names: fc.tuple(
-      fc.string({ minLength: 1, maxLength: 12 }),
-      fc.string({ minLength: 1, maxLength: 12 }),
-    ),
-  })
-
-function reconstructPersistenceInterleavingCampaign(
-  value: unknown,
-): PersistenceInterleavingCampaign {
-  if (typeof value !== `object` || value === null) {
-    throw new Error(`persistence-interleaving campaign must be an object`)
-  }
-  const campaign = value as { histories?: unknown; names?: unknown }
-  if (
-    !Array.isArray(campaign.histories) ||
-    campaign.histories.length !== persistenceInterleavingKinds.length ||
-    new Set(campaign.histories).size !== persistenceInterleavingKinds.length ||
-    !campaign.histories.every((history) =>
-      persistenceInterleavingKinds.includes(history),
-    )
-  ) {
-    throw new Error(
-      `persistence-interleaving histories must contain every supported schedule exactly once`,
-    )
-  }
-  if (
-    !Array.isArray(campaign.names) ||
-    campaign.names.length !== 2 ||
-    !campaign.names.every(
-      (name) =>
-        typeof name === `string` && name.length >= 1 && name.length <= 12,
-    )
-  ) {
-    throw new Error(`persistence-interleaving names are outside the grammar`)
-  }
-  return campaign as PersistenceInterleavingCampaign
-}
-
 function errorName(error: unknown): string {
   return typeof error === `object` &&
     error !== null &&
@@ -1186,39 +994,6 @@ async function observeSubsetSupersedesAbsence(
       data: [],
     })
   }
-}
-
-function expectPersistenceInterleavingObservation(
-  observation: PersistenceInterleavingObservation,
-  names: [string, string],
-): void {
-  const rows: Array<[string | number, string, string]> = [
-    [1, names[1], `stable-1`],
-  ]
-  if (observation.kind === `open-transaction-hydration`) {
-    const rowsWithCache = [...rows, [2, `cached`, `stable-2`] as const]
-    expect(observation, JSON.stringify(observation)).toEqual({
-      kind: `open-transaction-hydration`,
-      hydrationStartedBeforeCommit: false,
-      hydrationOutcomeBeforeRelease: `pending`,
-      cachedRowBeforeRelease: false,
-      hydrationOutcome: `AbortError`,
-      publicRowsAtHydrationSettlement: rowsWithCache,
-      deliveryErrors: [],
-      publicRows: rowsWithCache,
-      durableRows: rowsWithCache,
-      status: `ready`,
-      publicError: undefined,
-    })
-    return
-  }
-  expect(observation, JSON.stringify(observation)).toEqual({
-    kind: `subset-supersedes-absence`,
-    publicRows: rows,
-    durableRows: rows,
-    status: `ready`,
-    publicError: undefined,
-  })
 }
 
 async function runPersistenceInterleavingCampaign(
@@ -2735,19 +2510,35 @@ describe(`Electric adapter laws`, () => {
     resetElectricOracleMocks()
   })
 
-  oracleReplayTest(it).each(
-    ([`eager`, `on-demand`, `progressive`] as const).flatMap((syncMode) =>
-      [0, 1, 2].map((removals) => ({ syncMode, removals })),
-    ),
-  )(
-    `preserves live updates after $removals initial tagged move-outs in $syncMode mode`,
-    ({ syncMode, removals }) => {
-      oracleRoute(`case`)
-      return checkInitialMoveOut(syncMode, removals, 1, `updated`)
+  // Each case runs one sync mode, where the generated property runs all
+  // three per history, so they are enumerated cases of the same driver.
+  oracleProperty({
+    id: `electric.initial-tagged-move-outs-cases`,
+    law: {
+      statement: `generated initial tagged move-outs preserve later live updates`,
+      authority: `The named independent Electric model/comparison passed to electricHistoryOptions and its adjacent contract prose.`,
+      limits: `Row 1 updated after zero to two initial tagged move-outs, in each sync mode separately; the same driver as electric.initial-tagged-move-outs.`,
     },
-  )
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: ([`eager`, `on-demand`, `progressive`] as const).flatMap(
+      (syncMode) => [0, 1, 2].map((removals) => ({ syncMode, removals })),
+    ),
+    label: ({ syncMode, removals }) =>
+      `preserves live updates after ${removals} initial tagged move-outs in ${syncMode} mode`,
+    ...existingElectricComparison(
+      `electric.initial-tagged-move-outs-cases`,
+      ({
+        syncMode,
+        removals,
+      }: {
+        syncMode: ElectricSyncMode
+        removals: number
+      }) => checkInitialMoveOut(syncMode, removals, 1, `updated`),
+    ),
+    check: checkExistingElectricComparison,
+  })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration1 = electricHistoryOptions(
     `electric.initial-tagged-move-outs`,
     `generated initial tagged move-outs preserve later live updates`,
     fc.tuple(
@@ -2763,8 +2554,19 @@ describe(`Electric adapter laws`, () => {
       }
     },
   )
+  oracleProperty({
+    ...electricHistoryRegistration1,
+    id: `electric.initial-tagged-move-outs`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration1.histories,
+      runs: 20,
+      fixedSeeds: [42_715],
+    },
+    check: checkExistingElectricComparison,
+  })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration2 = electricHistoryOptions(
     `electric.process-grammar`,
     `generated process grammar preserves lifecycle and concurrent-collection isolation`,
     fc.array(processCommandArb, { maxLength: 20 }),
@@ -2775,196 +2577,177 @@ describe(`Electric adapter laws`, () => {
       await runProcessGrammar(`process-grammar-${processGrammarRun}`, commands)
     },
   )
-
-  oracleReplayTest(it)(
-    `delivers retired callbacks without advancing a failed lifecycle`,
-    async () => {
-      oracleRoute(`fixed history`)
-      const result = await runProcessGrammar(`process-grammar-terminal-error`, [
-        {
-          kind: `batch`,
-          slot: `a`,
-          operation: `update`,
-          id: 1,
-          name: `unseen`,
-          txid: 55,
-        },
-        { kind: `snapshot`, slot: `a`, id: 1, name: `stale callback` },
-        {
-          kind: `retired-callback`,
-          slot: `a`,
-          id: 1,
-          name: `actually delivered`,
-        },
-      ])
-      expect(
-        result.reached
-          .filter(({ command }) => command.kind === `retired-callback`)
-          .map(({ result: reached }) => reached),
-      ).toEqual([
-        `delivered: retired callback`,
-        `delivered: retired callback`,
-        `delivered: retired callback`,
-      ])
-      expect(
-        result.reached.find(
-          ({ command }) =>
-            command.kind === `snapshot` && command.name === `stale callback`,
-        )?.result,
-      ).toBe(`skipped: terminal error`)
+  oracleProperty({
+    ...electricHistoryRegistration2,
+    id: `electric.process-grammar`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration2.histories,
+      runs: 20,
+      fixedSeeds: [42_716],
     },
-  )
+    check: checkExistingElectricComparison,
+  })
 
-  oracleReplayTest(it).each([`invalid-resume`, `cleanup`] as const)(
-    `records an initial preload's %s rejection before continuing the grammar`,
-    async (failure) => {
-      oracleRoute(`case`)
-      const result = await runProcessGrammar(`preload-${failure}`, [
-        { kind: `create`, slot: `a` },
-        { kind: `import`, slot: `a`, txid: 4, resume: true },
-        { kind: `preload`, slot: `a` },
-        ...(failure === `cleanup`
-          ? [{ kind: `cleanup` as const, slot: `a` as const }]
-          : [
-              {
-                kind: `batch` as const,
-                slot: `a` as const,
-                operation: `update` as const,
-                id: 3,
-                name: `unseen`,
-                txid: 56,
-              },
-            ]),
-        { kind: `retired-callback`, slot: `a`, id: 3, name: `after rejection` },
-      ])
-      expect(result.preloads.map(({ status }) => status)).toEqual([
-        `fulfilled`,
-        `fulfilled`,
-        `rejected`,
-      ])
-      const rejected = result.preloads[2]!
-      if (rejected.status === `rejected`) {
-        expect(rejected.reason).toMatchObject(
-          failure === `cleanup`
-            ? { name: `AbortError` }
-            : {
-                message: `Electric resume state referenced an unseen row; a full snapshot is required`,
-              },
-        )
-      }
-      expect(
-        result.reached.find(
-          ({ command }) =>
-            command.kind === `retired-callback` &&
-            command.name === `after rejection`,
-        )?.result,
-      ).toBe(`delivered: retired callback`)
-    },
-  )
-
-  oracleReplayTest(it)(
-    `publishes an Electric source commit before its adapter persistence settles`,
-    async () => {
-      oracleRoute(`case`)
-      await runPublicationBeforePersistenceWitness(
-        `publication-before-persistence-fixed`,
-        { id: 41, name: `visible first`, stable: `stable-41` },
-        741,
+  // Named process-grammar witnesses. Each runs authored commands through
+  // runProcessGrammar and its model, then checks what that history reached.
+  async function runTerminalErrorWitness(): Promise<void> {
+    const result = await runProcessGrammar(`process-grammar-terminal-error`, [
+      {
+        kind: `batch`,
+        slot: `a`,
+        operation: `update`,
+        id: 1,
+        name: `unseen`,
+        txid: 55,
+      },
+      { kind: `snapshot`, slot: `a`, id: 1, name: `stale callback` },
+      {
+        kind: `retired-callback`,
+        slot: `a`,
+        id: 1,
+        name: `actually delivered`,
+      },
+    ])
+    expect(
+      result.reached
+        .filter(({ command }) => command.kind === `retired-callback`)
+        .map(({ result: reached }) => reached),
+    ).toEqual([
+      `delivered: retired callback`,
+      `delivered: retired callback`,
+      `delivered: retired callback`,
+    ])
+    expect(
+      result.reached.find(
+        ({ command }) =>
+          command.kind === `snapshot` && command.name === `stale callback`,
+      )?.result,
+    ).toBe(`skipped: terminal error`)
+  }
+  async function runPreloadRejectionWitness(
+    failure: `invalid-resume` | `cleanup`,
+  ): Promise<void> {
+    const result = await runProcessGrammar(`preload-${failure}`, [
+      { kind: `create`, slot: `a` },
+      { kind: `import`, slot: `a`, txid: 4, resume: true },
+      { kind: `preload`, slot: `a` },
+      ...(failure === `cleanup`
+        ? [{ kind: `cleanup` as const, slot: `a` as const }]
+        : [
+            {
+              kind: `batch` as const,
+              slot: `a` as const,
+              operation: `update` as const,
+              id: 3,
+              name: `unseen`,
+              txid: 56,
+            },
+          ]),
+      { kind: `retired-callback`, slot: `a`, id: 3, name: `after rejection` },
+    ])
+    expect(result.preloads.map(({ status }) => status)).toEqual([
+      `fulfilled`,
+      `fulfilled`,
+      `rejected`,
+    ])
+    const rejected = result.preloads[2]!
+    if (rejected.status === `rejected`) {
+      expect(rejected.reason).toMatchObject(
+        failure === `cleanup`
+          ? { name: `AbortError` }
+          : {
+              message: `Electric resume state referenced an unseen row; a full snapshot is required`,
+            },
       )
+    }
+    expect(
+      result.reached.find(
+        ({ command }) =>
+          command.kind === `retired-callback` &&
+          command.name === `after rejection`,
+      )?.result,
+    ).toBe(`delivered: retired callback`)
+  }
+  type ProcessGrammarWitness =
+    | { witness: `terminal-error` }
+    | { witness: `preload-rejection`; failure: `invalid-resume` | `cleanup` }
+  oracleProperty({
+    id: `electric.process-grammar-fixed`,
+    law: {
+      statement: `generated process grammar preserves lifecycle and concurrent-collection isolation`,
+      authority: `The named independent Electric model/comparison passed to electricHistoryOptions and its adjacent contract prose.`,
+      limits: `Three authored command histories (a terminal error with retired callbacks, and an initial preload's invalid-resume or cleanup rejection), through the same runProcessGrammar driver as electric.process-grammar.`,
     },
-  )
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: [
+      { witness: `terminal-error` },
+      { witness: `preload-rejection`, failure: `invalid-resume` },
+      { witness: `preload-rejection`, failure: `cleanup` },
+    ] satisfies Array<ProcessGrammarWitness>,
+    label: (history: ProcessGrammarWitness) =>
+      history.witness === `terminal-error`
+        ? `delivers retired callbacks without advancing a failed lifecycle`
+        : `records an initial preload's ${history.failure} rejection before continuing the grammar`,
+    ...existingElectricComparison(
+      `electric.process-grammar-fixed`,
+      (history: ProcessGrammarWitness) =>
+        history.witness === `terminal-error`
+          ? runTerminalErrorWitness()
+          : runPreloadRejectionWitness(history.failure),
+    ),
+    check: checkExistingElectricComparison,
+  })
 
-  oracleReplayTest(it)(
-    `reconstructs the queued-presence grammar and rejects ablated, out-of-range, and foreign campaigns`,
-    () => {
-      oracleRoute(`fixed seed`)
-      const campaigns = fc.sample(fc.tuple(...queuedPresenceArbitraries), {
-        seed: queuedPresenceFixedSeed,
-        numRuns: 20,
-      })
-      for (const [histories, names] of campaigns) {
-        expect(reconstructQueuedPresenceCampaign({ histories, names })).toEqual(
-          {
-            histories,
-            names,
-          },
-        )
-      }
-
-      oracleRoute(`calibration`)
-      const witness = {
-        histories: [...queuedPresenceHistories],
-        names: [``, `x`.repeat(12)] as [string, string],
-      }
-      expect(reconstructQueuedPresenceCampaign(witness)).toEqual(witness)
-      expect(() =>
-        reconstructQueuedPresenceCampaign({ names: witness.names }),
-      ).toThrow()
-      expect(() =>
-        reconstructQueuedPresenceCampaign({ histories: witness.histories }),
-      ).toThrow()
-      expect(() =>
-        reconstructQueuedPresenceCampaign({
-          ...witness,
-          histories: witness.histories.slice(1),
-        }),
-      ).toThrow()
-      expect(() =>
-        reconstructQueuedPresenceCampaign({
-          ...witness,
-          histories: [
-            `insert-update`,
-            `insert-update`,
-            `delete-update`,
-            `truncate-update`,
-          ],
-        }),
-      ).toThrow()
-      expect(() =>
-        reconstructQueuedPresenceCampaign({
-          ...witness,
-          histories: [
-            `insert-update`,
-            `update-update`,
-            `delete-update`,
-            `replace-update`,
-          ],
-        }),
-      ).toThrow()
-      expect(() =>
-        reconstructQueuedPresenceCampaign({
-          ...witness,
-          names: [`x`.repeat(13), ``],
-        }),
-      ).toThrow()
+  // The authored witness uses its own source txid, which the generated
+  // property derives from the row id, so it is an enumerated case.
+  oracleProperty({
+    id: `electric.publication-before-persistence-fixed`,
+    law: {
+      statement: `generated Electric commits publish before adapter persistence settles`,
+      authority: `The named independent Electric model/comparison passed to electricHistoryOptions and its adjacent contract prose.`,
+      limits: `The authored row 41 with source txid 741, through the same driver as the generated publication-before-persistence property.`,
     },
-  )
-
-  oracleReplayTest(it)(
-    `rejects named wrong answer: later callback publishes before durability`,
-    () => {
-      oracleRoute(`calibration`)
-      expect(() =>
-        expectQueuedPresenceAtDurabilityHold(
-          [
-            [1, `holds persistence`, `stable-1`],
-            [2, `later`, `stable-2`],
-          ],
-          `insert-update`,
-          { id: 1, name: `holds persistence`, stable: `stable-1` },
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: [
+      {
+        row: { id: 41, name: `visible first`, stable: `stable-41` },
+        txid: 741,
+      },
+    ],
+    label: () =>
+      `publishes an Electric source commit before its adapter persistence settles`,
+    ...existingElectricComparison(
+      `electric.publication-before-persistence-fixed`,
+      ({ row, txid }: { row: OracleRow; txid: number }) =>
+        runPublicationBeforePersistenceWitness(
+          `publication-before-persistence-fixed`,
+          row,
+          txid,
         ),
-      ).toThrow()
-    },
-  )
+    ),
+    check: checkExistingElectricComparison,
+  })
 
-  const randomCampaign = queuedPresencePropertyOptions(`fixed`)
-  oracleReplayTest(fcTest).prop(queuedPresenceArbitraries, randomCampaign)(
-    `generated queued Electric histories preserve staged presence and reset fences (fixed)`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(randomCampaign))
-      return runQueuedPresenceCampaign(...args)
-    },
+  const electricHistoryRegistration3 = electricHistoryOptions(
+    queuedPresenceProperty,
+    `generated queued Electric histories preserve staged presence and reset fences`,
+    fc.tuple(...queuedPresenceArbitraries),
+    queuedPresenceRuns,
+    queuedPresenceFixedSeed,
+    (args) => runQueuedPresenceCampaign(...args),
   )
+  oracleProperty({
+    ...electricHistoryRegistration3,
+    id: queuedPresenceProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration3.histories,
+      runs: queuedPresenceRuns,
+      fixedSeeds: [queuedPresenceFixedSeed],
+    },
+    check: checkExistingElectricComparison,
+  })
 
   const publicationPolicyArbitraries: [
     fc.Arbitrary<number>,
@@ -2978,43 +2761,65 @@ describe(`Electric adapter laws`, () => {
       800 + id,
     )
   }
-  const randomCampaign2 = persistencePolicyPropertyOptions(
-    `fixed`,
+  const electricHistoryRegistration4 = electricHistoryOptions(
     publicationBeforePersistenceProperty,
+    `generated Electric commits publish before adapter persistence settles`,
+    fc.tuple(...publicationPolicyArbitraries),
+    8,
+    20260923,
+    (args) => checkPublicationPolicy(...args),
   )
-  oracleReplayTest(fcTest).prop(publicationPolicyArbitraries, randomCampaign2)(
-    `generated Electric commits publish before adapter persistence settles (fixed)`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(randomCampaign2))
-      return checkPublicationPolicy(...args)
+  oracleProperty({
+    ...electricHistoryRegistration4,
+    id: publicationBeforePersistenceProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration4.histories,
+      runs: 8,
+      fixedSeeds: [20260923],
     },
-  )
-  const randomCampaign3 = persistencePolicyPropertyOptions(
-    `random`,
-    publicationBeforePersistenceProperty,
-  )
-  oracleReplayTest(fcTest, publicationBeforePersistenceProperty).prop(
-    publicationPolicyArbitraries,
-    randomCampaign3,
-  )(
-    `generated Electric commits publish before adapter persistence settles (random)`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(randomCampaign3))
-      return checkPublicationPolicy(...args)
-    },
-  )
+    check: checkExistingElectricComparison,
+  })
 
-  oracleReplayTest(it)(
-    `turns adapter rejection into a named terminal Electric persistence error`,
-    async () => {
-      oracleRoute(`case`)
-      await runPersistenceFailureCrashOnlyWitness(
-        `terminal-persistence-error-fixed`,
-        { id: 51, name: `published before failure`, stable: `stable-51` },
-        { id: 52, name: `must not be admitted`, stable: `stable-52` },
-      )
+  // The authored witness's later row is id 52, which the generated property's
+  // id + 100 rule cannot produce, so it is an enumerated case.
+  oracleProperty({
+    id: `electric.adapter-failure-policy-fixed`,
+    law: {
+      statement: `generated adapter failures reject publicly and admit no later Electric work`,
+      authority: `The named independent Electric model/comparison passed to electricHistoryOptions and its adjacent contract prose.`,
+      limits: `The authored rows 51 and 52, through the same driver as the generated adapter-failure property.`,
     },
-  )
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: [
+      {
+        published: {
+          id: 51,
+          name: `published before failure`,
+          stable: `stable-51`,
+        },
+        rejected: { id: 52, name: `must not be admitted`, stable: `stable-52` },
+      },
+    ],
+    label: () =>
+      `turns adapter rejection into a named terminal Electric persistence error`,
+    ...existingElectricComparison(
+      `electric.adapter-failure-policy-fixed`,
+      ({
+        published,
+        rejected,
+      }: {
+        published: OracleRow
+        rejected: OracleRow
+      }) =>
+        runPersistenceFailureCrashOnlyWitness(
+          `terminal-persistence-error-fixed`,
+          published,
+          rejected,
+        ),
+    ),
+    check: checkExistingElectricComparison,
+  })
 
   const failurePolicyArbitraries: [
     fc.Arbitrary<number>,
@@ -3031,33 +2836,27 @@ describe(`Electric adapter laws`, () => {
       { id: id + 100, name: names[1], stable: `stable-${id + 100}` },
     )
   }
-  const randomCampaign4 = persistencePolicyPropertyOptions(
-    `fixed`,
+  const electricHistoryRegistration5 = electricHistoryOptions(
     adapterFailurePolicyProperty,
+    `generated adapter failures reject publicly and admit no later Electric work`,
+    fc.tuple(...failurePolicyArbitraries),
+    8,
+    20260923,
+    (args) => checkFailurePolicy(...args),
   )
-  oracleReplayTest(fcTest).prop(failurePolicyArbitraries, randomCampaign4)(
-    `generated adapter failures reject publicly and admit no later Electric work (fixed)`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(randomCampaign4))
-      return checkFailurePolicy(...args)
+  oracleProperty({
+    ...electricHistoryRegistration5,
+    id: adapterFailurePolicyProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration5.histories,
+      runs: 8,
+      fixedSeeds: [20260923],
     },
-  )
-  const randomCampaign5 = persistencePolicyPropertyOptions(
-    `random`,
-    adapterFailurePolicyProperty,
-  )
-  oracleReplayTest(fcTest, adapterFailurePolicyProperty).prop(
-    failurePolicyArbitraries,
-    randomCampaign5,
-  )(
-    `generated adapter failures reject publicly and admit no later Electric work (random)`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(randomCampaign5))
-      return checkFailurePolicy(...args)
-    },
-  )
+    check: checkExistingElectricComparison,
+  })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration6 = electricHistoryOptions(
     `electric.design-convergence`,
     `operational and denotational reference designs agree before checking production`,
     fc.tuple(
@@ -3093,170 +2892,295 @@ describe(`Electric adapter laws`, () => {
       }
     },
   )
-
-  oracleReplayTest(it)(
-    `distinguishes plausible unseen-update and reset-visibility semantics`,
-    async () => {
-      oracleRoute(`case`)
-      const completeUnseenUpdate: ChangeMessage<OracleRow> = {
-        key: `1`,
-        value: { id: 1, name: `complete`, stable: `stable-1` },
-        headers: { operation: `update` },
-      }
-      const updateHistory = [[completeUnseenUpdate, upToDate]]
-      expect(recomputeCommittedRows(updateHistory, `ignore`)).toEqual([])
-      expect(recomputeCommittedRows(updateHistory, `promote-complete`)).toEqual(
-        [[1, `complete`, `stable-1`]],
-      )
-      const updateActual = await runTrace(
-        `design-unseen-update`,
-        `eager`,
-        [],
-        updateHistory,
-      )
-      expect(updateActual.rows).toEqual(
-        recomputeCommittedRows(updateHistory, `ignore`),
-      )
-
-      const resetHistory = [
-        [change(`insert`, 1, `committed`), upToDate],
-        [mustRefetch],
-      ]
-      const atomicReset = recomputedSnapshots([], resetHistory)
-      const immediateReset: typeof atomicReset = [atomicReset[0]!, []]
-      expect(atomicReset).not.toEqual(immediateReset)
-      const resetActual = await runTrace(
-        `design-reset-visibility`,
-        `eager`,
-        [],
-        resetHistory,
-      )
-      expect(resetActual.snapshots).toEqual(atomicReset)
+  oracleProperty({
+    ...electricHistoryRegistration6,
+    id: `electric.design-convergence`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration6.histories,
+      runs: 24,
+      fixedSeeds: [42_717],
     },
-  )
+    check: checkExistingElectricComparison,
+  })
 
-  oracleReplayTest(it)(
-    `keeps SDK reset callbacks separate from every neighboring message kind`,
-    () => {
-      oracleRoute(`case`)
-      const neighbors: Array<Message<OracleRow>> = [
-        change(`insert`, 1, `row`),
-        change(`update`, 1, `row`),
-        change(`delete`, 1, `row`),
-        {
-          headers: { event: `move-out`, patterns: [{ pos: 0, value: `left` }] },
-        },
+  // Named design witnesses. Each runs authored histories through runTrace,
+  // the persisted and Query traces or the scheduler driver, and compares them
+  // with the reference reducers (or, for the HTTP transcript, with complete
+  // snapshots authored independently of both reducers).
+  async function runUnseenUpdateAndResetVisibilityWitness(): Promise<void> {
+    const completeUnseenUpdate: ChangeMessage<OracleRow> = {
+      key: `1`,
+      value: { id: 1, name: `complete`, stable: `stable-1` },
+      headers: { operation: `update` },
+    }
+    const updateHistory = [[completeUnseenUpdate, upToDate]]
+    expect(recomputeCommittedRows(updateHistory, `ignore`)).toEqual([])
+    expect(recomputeCommittedRows(updateHistory, `promote-complete`)).toEqual([
+      [1, `complete`, `stable-1`],
+    ])
+    const updateActual = await runTrace(
+      `design-unseen-update`,
+      `eager`,
+      [],
+      updateHistory,
+    )
+    expect(updateActual.rows).toEqual(
+      recomputeCommittedRows(updateHistory, `ignore`),
+    )
+
+    const resetHistory = [
+      [change(`insert`, 1, `committed`), upToDate],
+      [mustRefetch],
+    ]
+    const atomicReset = recomputedSnapshots([], resetHistory)
+    const immediateReset: typeof atomicReset = [atomicReset[0]!, []]
+    expect(atomicReset).not.toEqual(immediateReset)
+    const resetActual = await runTrace(
+      `design-reset-visibility`,
+      `eager`,
+      [],
+      resetHistory,
+    )
+    expect(resetActual.snapshots).toEqual(atomicReset)
+  }
+  async function runCallbackAtomicAndSubsetPublicationWitness(): Promise<void> {
+    const callbackHistory = [
+      [
+        change(`insert`, 1, `before-control`),
         upToDate,
+        change(`update`, 1, `after-control`),
+      ],
+    ]
+    const callbackAtomic = recomputeCommittedRows(callbackHistory)
+    const freezeAtControl: typeof callbackAtomic = [
+      [1, `before-control`, `stable-1`],
+    ]
+    expect(callbackAtomic).toEqual([[1, `after-control`, `stable-1`]])
+    expect(callbackAtomic).not.toEqual(freezeAtControl)
+    expect(isSdkResetFramedPartition([[upToDate, mustRefetch]])).toBe(false)
+    expect(
+      isSdkResetFramedPartition([[mustRefetch, subsetEnd, mustRefetch]]),
+    ).toBe(false)
+
+    const readyPrefix = [[upToDate]]
+    const subsetHistory = [
+      [change(`insert`, 1, `subset-publication`)],
+      [subsetEnd],
+    ]
+    const subsetPublishes = recomputedSnapshots(readyPrefix, subsetHistory)
+    const upToDateOnly: typeof subsetPublishes = [[], []]
+    expect(subsetPublishes).not.toEqual(upToDateOnly)
+
+    for (const syncMode of [`eager`, `on-demand`, `progressive`] as const) {
+      const callbackActual = await runTrace(
+        `design-callback-atomic-${syncMode}`,
+        syncMode,
+        [],
+        callbackHistory,
+      )
+      expect(callbackActual.rows).toEqual(callbackAtomic)
+
+      const subsetActual = await runTrace(
+        `design-subset-publication-${syncMode}`,
+        syncMode,
+        readyPrefix,
+        subsetHistory,
+      )
+      expect(subsetActual.snapshots).toEqual(subsetPublishes)
+    }
+  }
+  async function runSchedulerPermutationWitness(): Promise<void> {
+    const events: Array<SchedulerEvent> = [
+      `startup-promise`,
+      `hydration`,
+      `snapshot-available`,
+      `release-persistence-apply`,
+      `cleanup`,
+    ]
+    let permutationIndex = 0
+    const outcomes = new Set<`resolved` | `aborted`>()
+    let sawAcknowledgementBeforeDurability = false
+    for (const order of permutations(events)) {
+      const currentIndex = permutationIndex++
+      try {
+        const result = await runSchedulerPermutation(
+          `scheduler-permutation-${currentIndex}`,
+          order,
+        )
+        outcomes.add(result.outcome)
+        sawAcknowledgementBeforeDurability ||= result.acknowledgedBeforeDurable
+      } catch (error) {
+        throw new Error(
+          `scheduler permutation ${currentIndex} failed: ${order.join(` → `)}`,
+          { cause: error },
+        )
+      }
+    }
+    expect(outcomes).toEqual(new Set([`resolved`, `aborted`]))
+    expect(sawAcknowledgementBeforeDurability).toBe(true)
+  }
+  async function runAuthoredHttpTranscriptWitness(): Promise<void> {
+    const { ShapeStream: RealShapeStream } = await vi.importActual<{
+      ShapeStream: typeof ShapeStream
+    }>(`@electric-sql/client`)
+    const ready: Message<OracleRow> = {
+      headers: { control: `up-to-date`, global_last_seen_lsn: `2` },
+    }
+    const authored: Array<Array<Message<OracleRow>>> = [
+      [
+        change(`insert`, 1, `old`),
+        { headers: { control: `up-to-date`, global_last_seen_lsn: `1` } },
+      ],
+      [mustRefetch],
+      [
+        change(`insert`, 2, `replacement`),
         subsetEnd,
-        mustRefetch,
-      ]
-      expect(isSdkResetFramedPartition([[mustRefetch]])).toBe(true)
-      for (const neighbor of neighbors) {
-        for (const messages of [
-          [neighbor, mustRefetch],
-          [mustRefetch, neighbor],
-        ]) {
-          expect(
-            isSdkResetFramedPartition([messages]),
-            JSON.stringify(messages),
-          ).toBe(false)
-          expect(
-            isSdkResetFramedPartition(messages.map((message) => [message])),
-          ).toBe(true)
-        }
-      }
-    },
-  )
-
-  oracleReplayTest(it)(
-    `distinguishes callback-atomic and subset publication semantics`,
-    async () => {
-      oracleRoute(`case`)
-      const callbackHistory = [
-        [
-          change(`insert`, 1, `before-control`),
-          upToDate,
-          change(`update`, 1, `after-control`),
-        ],
-      ]
-      const callbackAtomic = recomputeCommittedRows(callbackHistory)
-      const freezeAtControl: typeof callbackAtomic = [
-        [1, `before-control`, `stable-1`],
-      ]
-      expect(callbackAtomic).toEqual([[1, `after-control`, `stable-1`]])
-      expect(callbackAtomic).not.toEqual(freezeAtControl)
-      expect(isSdkResetFramedPartition([[upToDate, mustRefetch]])).toBe(false)
-      expect(
-        isSdkResetFramedPartition([[mustRefetch, subsetEnd, mustRefetch]]),
-      ).toBe(false)
-
-      const readyPrefix = [[upToDate]]
-      const subsetHistory = [
-        [change(`insert`, 1, `subset-publication`)],
-        [subsetEnd],
-      ]
-      const subsetPublishes = recomputedSnapshots(readyPrefix, subsetHistory)
-      const upToDateOnly: typeof subsetPublishes = [[], []]
-      expect(subsetPublishes).not.toEqual(upToDateOnly)
-
-      for (const syncMode of [`eager`, `on-demand`, `progressive`] as const) {
-        const callbackActual = await runTrace(
-          `design-callback-atomic-${syncMode}`,
-          syncMode,
+        change(`insert`, 3, `after-control`),
+        ready,
+      ],
+    ]
+    // These complete snapshots are authored directly, not computed by either
+    // reference reducer or from any adapter result. A post-control row belongs
+    // to the same delivered callback's atomic publication.
+    const complete: TraceResult[`snapshots`] = [
+      [[1, `old`, `stable-1`]],
+      [[1, `old`, `stable-1`]],
+      [
+        [2, `replacement`, `stable-2`],
+        [3, `after-control`, `stable-3`],
+      ],
+    ]
+    const controller = new AbortController()
+    const headers = {
+      'electric-handle': `authored-old`,
+      'electric-offset': `1_0`,
+      // Without this completion header the SDK can prefetch the next chunk;
+      // a positional mock-response queue would not describe the live request.
+      'electric-up-to-date': `true`,
+      'electric-schema': JSON.stringify({
+        id: { type: `int4` },
+        name: { type: `text` },
+        stable: { type: `text` },
+      }),
+    }
+    const wire = (messages: Array<Message<OracleRow>>) =>
+      JSON.stringify(
+        messages.map((message) =>
+          `value` in message
+            ? {
+                ...message,
+                value: { ...message.value, id: String(message.value.id) },
+              }
+            : message,
+        ),
+      )
+    const responses = [
+      new Response(wire(authored[0]!), { headers }),
+      new Response(wire(authored[1]!), {
+        status: 409,
+        headers: { 'electric-handle': `authored-new` },
+      }),
+      new Response(wire(authored[2]!), {
+        headers: {
+          ...headers,
+          'electric-handle': `authored-new`,
+          'electric-offset': `2_0`,
+          'electric-cursor': `1`,
+        },
+      }),
+    ]
+    const received: Array<Array<Message<OracleRow>>> = []
+    const stream = new RealShapeStream<OracleRow>({
+      url: `http://test-url/v1/authored-publication-transcript`,
+      params: { table: `rows` },
+      signal: controller.signal,
+      fetchClient: () => {
+        const response = responses.shift()
+        if (response) return Promise.resolve(response)
+        return new Promise<Response>((_resolve, reject) => {
+          if (controller.signal.aborted) reject(controller.signal.reason)
+          else
+            controller.signal.addEventListener(
+              `abort`,
+              () => reject(controller.signal.reason),
+              { once: true },
+            )
+        })
+      },
+    })
+    const unsubscribe = stream.subscribe((messages) => {
+      received.push(structuredClone(messages))
+    })
+    try {
+      await vi.waitFor(() =>
+        expect(
+          received,
+          JSON.stringify({ received, remainingResponses: responses.length }),
+        ).toHaveLength(3),
+      )
+      expect(received).toEqual(authored)
+      expect(isSdkResetFramedPartition(received)).toBe(true)
+      // This validates this installed SDK's controlled-HTTP antecedent only.
+      // It is not proof that all servers or SSE streams emit this transcript.
+      for (const mode of [`eager`, `on-demand`, `progressive`] as const) {
+        const direct = await runTrace(
+          `authored-direct-${mode}`,
+          mode,
           [],
-          callbackHistory,
+          structuredClone(received),
         )
-        expect(callbackActual.rows).toEqual(callbackAtomic)
-
-        const subsetActual = await runTrace(
-          `design-subset-publication-${syncMode}`,
-          syncMode,
-          readyPrefix,
-          subsetHistory,
+        const persisted = await runPersistedTrace(
+          `authored-persisted-${mode}`,
+          mode,
+          structuredClone(received),
+          complete,
         )
-        expect(subsetActual.snapshots).toEqual(subsetPublishes)
+        expect(direct.snapshots).toEqual(complete)
+        expect(persisted.snapshots).toEqual(complete)
+        expect(persisted.durableRows).toEqual(complete[2])
       }
+      const query = await runQueryTrace(
+        `authored-query`,
+        structuredClone(received),
+        complete,
+      )
+      expect(query.snapshots).toEqual(complete)
+    } finally {
+      unsubscribe()
+      controller.abort()
+    }
+  }
+  const designWitnesses = {
+    [`distinguishes plausible unseen-update and reset-visibility semantics`]:
+      runUnseenUpdateAndResetVisibilityWitness,
+    [`distinguishes callback-atomic and subset publication semantics`]:
+      runCallbackAtomicAndSubsetPublicationWitness,
+    [`settles every startup, hydration, snapshot availability, persistence-apply release, and cleanup permutation`]:
+      runSchedulerPermutationWitness,
+    [`checks an authored HTTP transcript and separate complete Query snapshots`]:
+      runAuthoredHttpTranscriptWitness,
+  }
+  type DesignWitness = keyof typeof designWitnesses
+  oracleProperty({
+    id: `electric.design-witnesses`,
+    law: {
+      statement: `operational and denotational reference designs agree before checking production`,
+      authority: `The named independent Electric model/comparison passed to electricHistoryOptions and its adjacent contract prose.`,
+      limits: `Four authored witnesses: unseen-update and reset visibility, callback-atomic and subset publication, every scheduler permutation of five events, and one installed-SDK HTTP transcript with authored complete snapshots.`,
     },
-  )
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: Object.keys(designWitnesses) as Array<DesignWitness>,
+    label: (name) => name,
+    ...existingElectricComparison(
+      `electric.design-witnesses`,
+      (name: DesignWitness) => designWitnesses[name](),
+    ),
+    check: checkExistingElectricComparison,
+    timeout: 30_000,
+  })
 
-  oracleReplayTest(it)(
-    `settles every startup, hydration, snapshot availability, persistence-apply release, and cleanup permutation`,
-    async () => {
-      oracleRoute(`case`)
-      const events: Array<SchedulerEvent> = [
-        `startup-promise`,
-        `hydration`,
-        `snapshot-available`,
-        `release-persistence-apply`,
-        `cleanup`,
-      ]
-      let permutationIndex = 0
-      const outcomes = new Set<`resolved` | `aborted`>()
-      let sawAcknowledgementBeforeDurability = false
-      for (const order of permutations(events)) {
-        const currentIndex = permutationIndex++
-        try {
-          const result = await runSchedulerPermutation(
-            `scheduler-permutation-${currentIndex}`,
-            order,
-          )
-          outcomes.add(result.outcome)
-          sawAcknowledgementBeforeDurability ||=
-            result.acknowledgedBeforeDurable
-        } catch (error) {
-          throw new Error(
-            `scheduler permutation ${currentIndex} failed: ${order.join(` → `)}`,
-            { cause: error },
-          )
-        }
-      }
-      expect(outcomes).toEqual(new Set([`resolved`, `aborted`]))
-      expect(sawAcknowledgementBeforeDurability).toBe(true)
-    },
-    30_000,
-  )
-
-  electricHistoryProperty(
+  const electricHistoryRegistration7 = electricHistoryOptions(
     `electric.synthetic-batch-partition`,
     `synthetic batch partition is invariant across Electric modes and phases`,
     fc.tuple(
@@ -3425,8 +3349,19 @@ describe(`Electric adapter laws`, () => {
     },
     30_000,
   )
+  oracleProperty({
+    ...electricHistoryRegistration7,
+    id: `electric.synthetic-batch-partition`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration7.histories,
+      runs: 10,
+      fixedSeeds: [42_718],
+    },
+    check: checkExistingElectricComparison,
+  })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration8 = electricHistoryOptions(
     `electric.valid-batch-partition`,
     `generated valid histories are invariant under every batch partition`,
     fc.array(
@@ -3461,6 +3396,17 @@ describe(`Electric adapter laws`, () => {
       }
     },
   )
+  oracleProperty({
+    ...electricHistoryRegistration8,
+    id: `electric.valid-batch-partition`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration8.histories,
+      runs: 20,
+      fixedSeeds: [42_719],
+    },
+    check: checkExistingElectricComparison,
+  })
 
   const publicationEpochTokensArbitrary = fc.array(designTokenArb, {
     minLength: 1,
@@ -3490,183 +3436,35 @@ describe(`Electric adapter laws`, () => {
     ],
   ]
 
-  oracleReplayTest(it).each(publicationEpochExamples)(
-    `reconstructs the authored publication-epoch history`,
-    (...args) => {
-      oracleRoute(`case`)
-      return assertPublicationEpochHistory(...args)
-    },
-    30_000,
-  )
-
-  const publicationEpochTokensFixedSeed = oracleFixedSeed(42714, {
-    numRuns: oracleRuns(20),
-  })
-  oracleReplayTest(fcTest).prop(
-    [publicationEpochTokensArbitrary, publicationEpochPartitionArbitrary],
-    publicationEpochTokensFixedSeed,
-  )(
-    `Electric drivers converge with the denotational reference and model-fed Query projection across publication epochs (fixed)`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(publicationEpochTokensFixedSeed))
-      return assertPublicationEpochHistory(...args)
-    },
-    30_000,
-  )
-
-  const publicationEpochTokensCampaign = oraclePropertyOptions(
-    20,
+  const electricHistoryRegistration9 = electricHistoryOptions(
     `electric.publication-epoch-convergence`,
-  )
-  oracleReplayTest(fcTest, `electric.publication-epoch-convergence`).prop(
-    [publicationEpochTokensArbitrary, publicationEpochPartitionArbitrary],
-    publicationEpochTokensCampaign,
-  )(
-    `Electric drivers converge with the denotational reference and model-fed Query projection across publication epochs (random or replayed)`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(publicationEpochTokensCampaign))
-      return assertPublicationEpochHistory(...args)
-    },
+    `Electric drivers converge with the denotational reference and model-fed Query projection across publication epochs`,
+    fc.tuple(
+      publicationEpochTokensArbitrary,
+      publicationEpochPartitionArbitrary,
+    ),
+    20,
+    42714,
+    (args) => assertPublicationEpochHistory(...args),
     30_000,
   )
-
-  oracleReplayTest(it)(
-    `checks an authored HTTP transcript and separate complete Query snapshots`,
-    async () => {
-      oracleRoute(`fixed history`)
-      const { ShapeStream: RealShapeStream } = await vi.importActual<{
-        ShapeStream: typeof ShapeStream
-      }>(`@electric-sql/client`)
-      const ready: Message<OracleRow> = {
-        headers: { control: `up-to-date`, global_last_seen_lsn: `2` },
-      }
-      const authored: Array<Array<Message<OracleRow>>> = [
-        [
-          change(`insert`, 1, `old`),
-          { headers: { control: `up-to-date`, global_last_seen_lsn: `1` } },
-        ],
-        [mustRefetch],
-        [
-          change(`insert`, 2, `replacement`),
-          subsetEnd,
-          change(`insert`, 3, `after-control`),
-          ready,
-        ],
-      ]
-      // These complete snapshots are authored directly, not computed by either
-      // reference reducer or from any adapter result. A post-control row belongs
-      // to the same delivered callback's atomic publication.
-      const complete: TraceResult[`snapshots`] = [
-        [[1, `old`, `stable-1`]],
-        [[1, `old`, `stable-1`]],
-        [
-          [2, `replacement`, `stable-2`],
-          [3, `after-control`, `stable-3`],
-        ],
-      ]
-      const controller = new AbortController()
-      const headers = {
-        'electric-handle': `authored-old`,
-        'electric-offset': `1_0`,
-        // Without this completion header the SDK can prefetch the next chunk;
-        // a positional mock-response queue would not describe the live request.
-        'electric-up-to-date': `true`,
-        'electric-schema': JSON.stringify({
-          id: { type: `int4` },
-          name: { type: `text` },
-          stable: { type: `text` },
-        }),
-      }
-      const wire = (messages: Array<Message<OracleRow>>) =>
-        JSON.stringify(
-          messages.map((message) =>
-            `value` in message
-              ? {
-                  ...message,
-                  value: { ...message.value, id: String(message.value.id) },
-                }
-              : message,
-          ),
-        )
-      const responses = [
-        new Response(wire(authored[0]!), { headers }),
-        new Response(wire(authored[1]!), {
-          status: 409,
-          headers: { 'electric-handle': `authored-new` },
-        }),
-        new Response(wire(authored[2]!), {
-          headers: {
-            ...headers,
-            'electric-handle': `authored-new`,
-            'electric-offset': `2_0`,
-            'electric-cursor': `1`,
-          },
-        }),
-      ]
-      const received: Array<Array<Message<OracleRow>>> = []
-      const stream = new RealShapeStream<OracleRow>({
-        url: `http://test-url/v1/authored-publication-transcript`,
-        params: { table: `rows` },
-        signal: controller.signal,
-        fetchClient: () => {
-          const response = responses.shift()
-          if (response) return Promise.resolve(response)
-          return new Promise<Response>((_resolve, reject) => {
-            if (controller.signal.aborted) reject(controller.signal.reason)
-            else
-              controller.signal.addEventListener(
-                `abort`,
-                () => reject(controller.signal.reason),
-                { once: true },
-              )
-          })
-        },
-      })
-      const unsubscribe = stream.subscribe((messages) => {
-        received.push(structuredClone(messages))
-      })
-      try {
-        await vi.waitFor(() =>
-          expect(
-            received,
-            JSON.stringify({ received, remainingResponses: responses.length }),
-          ).toHaveLength(3),
-        )
-        expect(received).toEqual(authored)
-        expect(isSdkResetFramedPartition(received)).toBe(true)
-        // This validates this installed SDK's controlled-HTTP antecedent only.
-        // It is not proof that all servers or SSE streams emit this transcript.
-        for (const mode of [`eager`, `on-demand`, `progressive`] as const) {
-          const direct = await runTrace(
-            `authored-direct-${mode}`,
-            mode,
-            [],
-            structuredClone(received),
-          )
-          const persisted = await runPersistedTrace(
-            `authored-persisted-${mode}`,
-            mode,
-            structuredClone(received),
-            complete,
-          )
-          expect(direct.snapshots).toEqual(complete)
-          expect(persisted.snapshots).toEqual(complete)
-          expect(persisted.durableRows).toEqual(complete[2])
-        }
-        const query = await runQueryTrace(
-          `authored-query`,
-          structuredClone(received),
-          complete,
-        )
-        expect(query.snapshots).toEqual(complete)
-      } finally {
-        unsubscribe()
-        controller.abort()
-      }
+  oracleProperty({
+    ...electricHistoryRegistration9,
+    id: `electric.publication-epoch-convergence`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration9.histories,
+      runs: 20,
+      fixedSeeds: [42714],
+      fixed: publicationEpochExamples.map((history, index) => ({
+        name: `reconstructs the authored publication-epoch history ${index}`,
+        history,
+      })),
     },
-  )
+    check: checkExistingElectricComparison,
+  })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration10 = electricHistoryOptions(
     `electric.invalid-resume-partition`,
     `generated invalid resume transitions fail under every batch partition`,
     fc.tuple(
@@ -3724,6 +3522,17 @@ describe(`Electric adapter laws`, () => {
       }
     },
   )
+  oracleProperty({
+    ...electricHistoryRegistration10,
+    id: `electric.invalid-resume-partition`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration10.histories,
+      runs: 20,
+      fixedSeeds: [42_720],
+    },
+    check: checkExistingElectricComparison,
+  })
 
   const reentryHistory = fc.record({
     txid: fc.integer({ min: 1, max: 10000 }),
@@ -3826,30 +3635,25 @@ describe(`Electric adapter laws`, () => {
     }
   }
 
-  const reentryHistoryFixedSeed = oracleFixedSeed(42713, {
-    numRuns: oracleRuns(10),
-  })
-  oracleReplayTest(fcTest).prop([reentryHistory], reentryHistoryFixedSeed)(
-    `replacement sync runs reject evidence from callback reentry histories (fixed)`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(reentryHistoryFixedSeed))
-      return runReentryHistory(...args)
-    },
-  )
-  const reentryHistoryCampaign = oraclePropertyOptions(
-    10,
+  const electricHistoryRegistration11 = electricHistoryOptions(
     `electric.match-reentry`,
+    `replacement sync runs reject evidence from callback reentry histories`,
+    reentryHistory,
+    10,
+    42713,
+    runReentryHistory,
   )
-  oracleReplayTest(fcTest, `electric.match-reentry`).prop(
-    [reentryHistory],
-    reentryHistoryCampaign,
-  )(
-    `replacement sync runs reject evidence from callback reentry histories (random)`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(reentryHistoryCampaign))
-      return runReentryHistory(...args)
+  oracleProperty({
+    ...electricHistoryRegistration11,
+    id: `electric.match-reentry`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration11.histories,
+      runs: 10,
+      fixedSeeds: [42713],
     },
-  )
+    check: checkExistingElectricComparison,
+  })
 
   /**
    * ## Does a source that still tries ever look failed?
@@ -3983,31 +3787,55 @@ describe(`Electric adapter laws`, () => {
 
   // EVID-2: a wait started after the run stopped rejects. The states name
   // each way the model stops a run before cleanup.
-  const retryReach = createOracleReach(`electric.retry-decision`, [
+  // Retain the old per-history census alongside the unchanged retry model.
+  // These counts describe the existing fixed/random language; they do not
+  // claim the stronger constructed-history guarantees of a new reach design.
+  const retryStates = [
     `late-wait-after-loading-failure`,
     `late-wait-after-ready-give-up`,
     `late-wait-after-abort-after-ready`,
     `late-wait-during-deferred-abort`,
-  ])
+  ]
+  const retryHistoriesByState = new Map(
+    retryStates.map((state) => [state, new Set<number>()]),
+  )
   // Only the retry-decision campaigns owe this reach.
   afterAll(() => {
     if (retryHistoryRun === 0) return
-    retryReach.assertReached()
+    if (!oracleReplayRequested())
+      expect(
+        [...retryHistoriesByState].filter(
+          ([, histories]) => histories.size < 1,
+        ),
+      ).toEqual([])
     console.info(
       `electric.retry-decision reach`,
-      Object.fromEntries(retryReach.counts()),
+      Object.fromEntries(
+        [...retryHistoriesByState].map(([state, histories]) => [
+          state,
+          histories.size,
+        ]),
+      ),
     )
   })
   const reachLateWait = (model: RetryModel) => {
     if (model.cleanedUp) return
     if (model.failed !== undefined) {
-      retryReach.reach(`late-wait-after-loading-failure`)
+      retryHistoriesByState
+        .get(`late-wait-after-loading-failure`)!
+        .add(retryHistoryRun)
     } else if (model.aborted && !model.ready && model.committed) {
-      retryReach.reach(`late-wait-during-deferred-abort`)
+      retryHistoriesByState
+        .get(`late-wait-during-deferred-abort`)!
+        .add(retryHistoryRun)
     } else if (model.aborted && model.ready) {
-      retryReach.reach(`late-wait-after-abort-after-ready`)
+      retryHistoriesByState
+        .get(`late-wait-after-abort-after-ready`)!
+        .add(retryHistoryRun)
     } else if (model.gaveUpAfterReady) {
-      retryReach.reach(`late-wait-after-ready-give-up`)
+      retryHistoriesByState
+        .get(`late-wait-after-ready-give-up`)!
+        .add(retryHistoryRun)
     }
   }
 
@@ -4250,296 +4078,356 @@ describe(`Electric adapter laws`, () => {
   }
 
   let retryHistoryRun = 0
-  electricHistoryProperty(
+  const checkRetryHistory = async (history: RetryHistory) => {
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const consoleWarn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    try {
+      resetElectricOracleMocks()
+      await runRetryHistory(history, `retry-decision-${++retryHistoryRun}`)
+    } finally {
+      consoleError.mockRestore()
+      consoleWarn.mockRestore()
+    }
+  }
+  const retryExamples = [
+    // Named fixed histories: a retried provider error while a transaction holds the
+    // recovered snapshot, for each wait, with and without a hold (this
+    // replaces the former fixed "renews full recovery demand" case); a
+    // held snapshot whose stream aborts before the hold settles; an
+    // asynchronous retry decision with a waiting and a new demand; an
+    // asynchronous give-up; a retry, then a give-up; a throwing onError;
+    // an Electric client give-up; and an abort during a decision.
+    ...([`full-log`, `progressive`] as const).flatMap((wait) =>
+      [false, true].map((held): [RetryHistory] => [
+        {
+          wait,
+          hasOnError: true,
+          steps: [
+            ...(held ? [{ kind: `hold` as const }] : []),
+            { kind: `demand` },
+            { kind: `error`, decision: `sync-retry` },
+            { kind: `up-to-date` },
+            { kind: `demand` },
+            ...(held ? [{ kind: `release` as const }] : []),
+          ],
+        },
+      ]),
+    ),
+    [
+      {
+        wait: `full-log`,
+        hasOnError: false,
+        steps: [
+          { kind: `demand` },
+          { kind: `hold` },
+          { kind: `up-to-date` },
+          { kind: `abort` },
+          { kind: `release` },
+        ],
+      },
+    ],
+    [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `error`, decision: `async-retry` },
+          { kind: `demand` },
+          { kind: `decide` },
+          { kind: `up-to-date` },
+        ],
+      },
+    ],
+    [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `error`, decision: `async-give-up` },
+          { kind: `demand` },
+          { kind: `decide` },
+        ],
+      },
+    ],
+    [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `error`, decision: `sync-retry` },
+          { kind: `error`, decision: `sync-give-up` },
+        ],
+      },
+    ],
+    [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [{ kind: `demand` }, { kind: `error`, decision: `throw` }],
+      },
+    ],
+    [
+      {
+        wait: `progressive`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `error`, decision: `sync-retry` },
+          { kind: `client-give-up` },
+        ],
+      },
+    ],
+    [
+      {
+        wait: `progressive`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `error`, decision: `async-retry` },
+          { kind: `abort` },
+          { kind: `decide` },
+        ],
+      },
+    ],
+    // The external signal is already aborted when sync starts, for each
+    // wait; a status listener that cleans up inside a give-up and inside an
+    // external abort; and the eager and changes-only sources, which have no
+    // established-snapshot wait.
+    ...([`full-log`, `progressive`, `eager`, `changes-only`] as const).map(
+      (wait): [RetryHistory] => [
+        { wait, hasOnError: true, abortedAtStart: true, steps: [] },
+      ],
+    ),
+    [
+      {
+        wait: `full-log`,
+        hasOnError: false,
+        cleanupOnError: true,
+        steps: [{ kind: `demand` }, { kind: `error`, decision: `sync-retry` }],
+      },
+    ],
+    [
+      {
+        wait: `progressive`,
+        hasOnError: true,
+        cleanupOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `error`, decision: `async-retry` },
+          { kind: `abort` },
+        ],
+      },
+    ],
+    ...([`eager`, `changes-only`] as const).map((wait): [RetryHistory] => [
+      {
+        wait,
+        hasOnError: true,
+        steps: [
+          { kind: `hold` },
+          { kind: `error`, decision: `async-retry` },
+          { kind: `decide` },
+          { kind: `up-to-date` },
+          { kind: `release` },
+        ],
+      },
+    ]),
+    ...([`eager`, `changes-only`] as const).map((wait): [RetryHistory] => [
+      {
+        wait,
+        hasOnError: true,
+        steps: [
+          { kind: `error`, decision: `async-give-up` },
+          { kind: `decide` },
+        ],
+      },
+    ]),
+    // A final give-up after the first up-to-date is committed but before
+    // its acceptance settles is a post-ready failure: the Collection
+    // becomes ready when the snapshot is accepted, with its rows, and the
+    // demands it covers settle. One replay per give-up.
+    ...(
+      [
+        [false, { kind: `error`, decision: `sync-give-up` }],
+        [true, { kind: `error`, decision: `sync-give-up` }],
+        [true, { kind: `error`, decision: `throw` }],
+        [true, { kind: `client-give-up` }],
+        [true, { kind: `abort` }],
+      ] as Array<[boolean, RetryStep]>
+    ).map(([hasOnError, giveUp]): [RetryHistory] => [
+      {
+        wait: `full-log`,
+        hasOnError,
+        steps: [
+          { kind: `demand` },
+          { kind: `hold-acceptance` },
+          { kind: `up-to-date` },
+          giveUp,
+          { kind: `accept` },
+        ],
+      },
+    ]),
+    [
+      {
+        wait: `progressive`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `hold-acceptance` },
+          { kind: `up-to-date` },
+          { kind: `error`, decision: `async-give-up` },
+          { kind: `decide` },
+          { kind: `demand` },
+          { kind: `accept` },
+        ],
+      },
+    ],
+    // While the first snapshot's acceptance is pending: a retry, then the
+    // acceptance, then a final give-up; a retry, then a give-up, then the
+    // acceptance; and an acceptance that fails, with and without an earlier
+    // external abort.
+    [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `hold-acceptance` },
+          { kind: `up-to-date` },
+          { kind: `error`, decision: `sync-retry` },
+          { kind: `accept` },
+          { kind: `error`, decision: `sync-give-up` },
+        ],
+      },
+    ],
+    [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `hold-acceptance` },
+          { kind: `up-to-date` },
+          { kind: `error`, decision: `async-retry` },
+          { kind: `decide` },
+          { kind: `client-give-up` },
+          { kind: `accept` },
+        ],
+      },
+    ],
+    ...[false, true].map((aborted): [RetryHistory] => [
+      {
+        wait: `full-log`,
+        hasOnError: true,
+        steps: [
+          { kind: `demand` },
+          { kind: `hold-acceptance` },
+          { kind: `up-to-date` },
+          ...(aborted ? [{ kind: `abort` as const }] : []),
+          { kind: `accept-fails` },
+        ],
+      },
+    ]),
+  ] satisfies Array<[RetryHistory]> as Array<[RetryHistory]>
+  // The former fast-check examples include authored retry schedules outside
+  // the mapped arbitrary's shrink domain. Keep the same shared comparison and
+  // both former campaign executions without changing the random generator.
+  oracleProperty({
+    id: `electric.retry-decision-fixed`,
+    law: {
+      statement: `a source that still tries stays loading, and only a give-up fails its waits`,
+      authority: `The named independent Electric model/comparison passed to electricHistoryOptions and its adjacent contract prose.`,
+      limits: `The authored retry schedules above, each under both former campaign names, through the same checkRetryHistory comparison as electric.retry-decision.`,
+    },
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: [`fixed`, `random`].flatMap((campaign) =>
+      retryExamples.map(([history], index) => ({
+        campaign,
+        index,
+        history,
+      })),
+    ),
+    label: ({ campaign, index }) =>
+      `electric.retry-decision: retained ${campaign} history ${index}`,
+    ...existingElectricComparison(
+      `electric.retry-decision-fixed`,
+      ({
+        history,
+      }: {
+        campaign: string
+        index: number
+        history: RetryHistory
+      }) => checkRetryHistory(history),
+    ),
+    check: checkExistingElectricComparison,
+    timeout: 60_000,
+  })
+  const electricHistoryRegistration12 = electricHistoryOptions(
     `electric.retry-decision`,
     `a source that still tries stays loading, and only a give-up fails its waits`,
     retryHistoryArb,
     30,
     42_731,
-    async (history) => {
-      const consoleError = vi
-        .spyOn(console, `error`)
-        .mockImplementation(() => {})
-      const consoleWarn = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      try {
-        resetElectricOracleMocks()
-        retryReach.beginHistory()
-        await runRetryHistory(history, `retry-decision-${++retryHistoryRun}`)
-      } finally {
-        consoleError.mockRestore()
-        consoleWarn.mockRestore()
-      }
-    },
+    checkRetryHistory,
     60_000,
-    [
-      // Named fixed histories: a retried provider error while a transaction holds the
-      // recovered snapshot, for each wait, with and without a hold (this
-      // replaces the former fixed "renews full recovery demand" case); a
-      // held snapshot whose stream aborts before the hold settles; an
-      // asynchronous retry decision with a waiting and a new demand; an
-      // asynchronous give-up; a retry, then a give-up; a throwing onError;
-      // an Electric client give-up; and an abort during a decision.
-      ...([`full-log`, `progressive`] as const).flatMap((wait) =>
-        [false, true].map((held): [RetryHistory] => [
-          {
-            wait,
-            hasOnError: true,
-            steps: [
-              ...(held ? [{ kind: `hold` as const }] : []),
-              { kind: `demand` },
-              { kind: `error`, decision: `sync-retry` },
-              { kind: `up-to-date` },
-              { kind: `demand` },
-              ...(held ? [{ kind: `release` as const }] : []),
-            ],
-          },
-        ]),
-      ),
-      [
-        {
-          wait: `full-log`,
-          hasOnError: false,
-          steps: [
-            { kind: `demand` },
-            { kind: `hold` },
-            { kind: `up-to-date` },
-            { kind: `abort` },
-            { kind: `release` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `async-retry` },
-            { kind: `demand` },
-            { kind: `decide` },
-            { kind: `up-to-date` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `async-give-up` },
-            { kind: `demand` },
-            { kind: `decide` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `sync-retry` },
-            { kind: `error`, decision: `sync-give-up` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [{ kind: `demand` }, { kind: `error`, decision: `throw` }],
-        },
-      ],
-      [
-        {
-          wait: `progressive`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `sync-retry` },
-            { kind: `client-give-up` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `progressive`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `async-retry` },
-            { kind: `abort` },
-            { kind: `decide` },
-          ],
-        },
-      ],
-      // The external signal is already aborted when sync starts, for each
-      // wait; a status listener that cleans up inside a give-up and inside an
-      // external abort; and the eager and changes-only sources, which have no
-      // established-snapshot wait.
-      ...([`full-log`, `progressive`, `eager`, `changes-only`] as const).map(
-        (wait): [RetryHistory] => [
-          { wait, hasOnError: true, abortedAtStart: true, steps: [] },
-        ],
-      ),
-      [
-        {
-          wait: `full-log`,
-          hasOnError: false,
-          cleanupOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `sync-retry` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `progressive`,
-          hasOnError: true,
-          cleanupOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `error`, decision: `async-retry` },
-            { kind: `abort` },
-          ],
-        },
-      ],
-      ...([`eager`, `changes-only`] as const).map((wait): [RetryHistory] => [
-        {
-          wait,
-          hasOnError: true,
-          steps: [
-            { kind: `hold` },
-            { kind: `error`, decision: `async-retry` },
-            { kind: `decide` },
-            { kind: `up-to-date` },
-            { kind: `release` },
-          ],
-        },
-      ]),
-      ...([`eager`, `changes-only`] as const).map((wait): [RetryHistory] => [
-        {
-          wait,
-          hasOnError: true,
-          steps: [
-            { kind: `error`, decision: `async-give-up` },
-            { kind: `decide` },
-          ],
-        },
-      ]),
-      // A final give-up after the first up-to-date is committed but before
-      // its acceptance settles is a post-ready failure: the Collection
-      // becomes ready when the snapshot is accepted, with its rows, and the
-      // demands it covers settle. One replay per give-up.
-      ...(
-        [
-          [false, { kind: `error`, decision: `sync-give-up` }],
-          [true, { kind: `error`, decision: `sync-give-up` }],
-          [true, { kind: `error`, decision: `throw` }],
-          [true, { kind: `client-give-up` }],
-          [true, { kind: `abort` }],
-        ] as Array<[boolean, RetryStep]>
-      ).map(([hasOnError, giveUp]): [RetryHistory] => [
-        {
-          wait: `full-log`,
-          hasOnError,
-          steps: [
-            { kind: `demand` },
-            { kind: `hold-acceptance` },
-            { kind: `up-to-date` },
-            giveUp,
-            { kind: `accept` },
-          ],
-        },
-      ]),
-      [
-        {
-          wait: `progressive`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `hold-acceptance` },
-            { kind: `up-to-date` },
-            { kind: `error`, decision: `async-give-up` },
-            { kind: `decide` },
-            { kind: `demand` },
-            { kind: `accept` },
-          ],
-        },
-      ],
-      // While the first snapshot's acceptance is pending: a retry, then the
-      // acceptance, then a final give-up; a retry, then a give-up, then the
-      // acceptance; and an acceptance that fails, with and without an earlier
-      // external abort.
-      [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `hold-acceptance` },
-            { kind: `up-to-date` },
-            { kind: `error`, decision: `sync-retry` },
-            { kind: `accept` },
-            { kind: `error`, decision: `sync-give-up` },
-          ],
-        },
-      ],
-      [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `hold-acceptance` },
-            { kind: `up-to-date` },
-            { kind: `error`, decision: `async-retry` },
-            { kind: `decide` },
-            { kind: `client-give-up` },
-            { kind: `accept` },
-          ],
-        },
-      ],
-      ...[false, true].map((aborted): [RetryHistory] => [
-        {
-          wait: `full-log`,
-          hasOnError: true,
-          steps: [
-            { kind: `demand` },
-            { kind: `hold-acceptance` },
-            { kind: `up-to-date` },
-            ...(aborted ? [{ kind: `abort` as const }] : []),
-            { kind: `accept-fails` },
-          ],
-        },
-      ]),
-    ] satisfies Array<[RetryHistory]> as Array<[RetryHistory]>,
   )
-
-  oracleReplayTest(it)(
-    `does not advance durable Electric resume metadata past a rejected row commit`,
-    async () => {
-      oracleRoute(`case`)
-      await runRejectedDurablePrefixWitness(`durable-prefix-fixed`, [
-        `first`,
-        `second`,
-      ])
+  oracleProperty({
+    ...electricHistoryRegistration12,
+    id: `electric.retry-decision`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration12.histories,
+      runs: 30,
+      fixedSeeds: [42_731],
     },
-  )
+    check: checkExistingElectricComparison,
+  })
 
-  oracleReplayTest(it)(
-    `retains an accepted Electric source prefix when the next row commit rejects`,
-    async () => {
-      oracleRoute(`case`)
-      await runRejectedDurablePrefixWitness(
-        `durable-prefix-after-success`,
-        [`accepted`, `rejected`],
-        true,
-      )
+  // The authored witnesses keep their own collection ids, and the second
+  // accepts a prefix first, which the generated property does not draw.
+  oracleProperty({
+    id: `electric.durable-prefix-fixed`,
+    law: {
+      statement: `a rejected initial Electric row commit creates no durable source prefix`,
+      authority: `The named independent Electric model/comparison passed to electricHistoryOptions and its adjacent contract prose.`,
+      limits: `Two authored row-commit histories, one rejecting the first commit and one rejecting after an accepted prefix, through the same driver as the generated durable-prefix property.`,
     },
-  )
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: [
+      {
+        name: `does not advance durable Electric resume metadata past a rejected row commit`,
+        id: `durable-prefix-fixed`,
+        names: [`first`, `second`],
+        acceptedPrefix: false,
+      },
+      {
+        name: `retains an accepted Electric source prefix when the next row commit rejects`,
+        id: `durable-prefix-after-success`,
+        names: [`accepted`, `rejected`],
+        acceptedPrefix: true,
+      },
+    ],
+    label: ({ name }) => name,
+    ...existingElectricComparison(
+      `electric.durable-prefix-fixed`,
+      ({
+        id,
+        names,
+        acceptedPrefix,
+      }: {
+        name: string
+        id: string
+        names: Array<string>
+        acceptedPrefix: boolean
+      }) =>
+        acceptedPrefix
+          ? runRejectedDurablePrefixWitness(id, names as [string, string], true)
+          : runRejectedDurablePrefixWitness(id, names as [string, string]),
+    ),
+    check: checkExistingElectricComparison,
+  })
 
   const durablePrefixArbitrary = fc.tuple(
     fc.string({ maxLength: 12 }),
@@ -4551,66 +4439,73 @@ describe(`Electric adapter laws`, () => {
       names,
     )
   }
-  const durablePrefixCampaign = durablePrefixPropertyOptions(`fixed`)
-  oracleReplayTest(fcTest).prop(
-    [durablePrefixArbitrary],
-    durablePrefixCampaign,
-  )(
-    `a rejected initial Electric row commit creates no durable source prefix (fixed)`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(durablePrefixCampaign))
-      return checkDurablePrefix(...args)
-    },
+  const electricHistoryRegistration13 = electricHistoryOptions(
+    durablePrefixProperty,
+    `a rejected initial Electric row commit creates no durable source prefix`,
+    durablePrefixArbitrary,
+    10,
+    20260921,
+    checkDurablePrefix,
   )
-  // A shared campaign seed reseeds this random campaign; a path replay selects it by property.
-  const durablePrefixCampaign2 = durablePrefixPropertyOptions(`random`)
-  oracleReplayTest(fcTest, durablePrefixProperty).prop(
-    [durablePrefixArbitrary],
-    durablePrefixCampaign2,
-  )(
-    `a rejected initial Electric row commit creates no durable source prefix (random)`,
-    (...args) => {
-      oracleRoute(oracleRouteOf(durablePrefixCampaign2))
-      return checkDurablePrefix(...args)
+  oracleProperty({
+    ...electricHistoryRegistration13,
+    id: durablePrefixProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration13.histories,
+      runs: 10,
+      fixedSeeds: [20260921],
     },
-  )
-
-  const fixedCampaign = oracleFixedSeed(20260922, { numRuns: 20 })
-  oracleReplayTest(fcTest).prop(
-    [
-      fc.uniqueArray(fc.integer({ min: 1, max: 20 }), {
-        minLength: 2,
-        maxLength: 6,
-      }),
-    ],
-    fixedCampaign,
-  )(`append-only resume judgment rejects a missing committed row`, (ids) => {
-    oracleRoute(`fixed seed`)
-    const events: Array<SourceLedgerEvent> = ids.map((id) => ({
-      type: `source-commit`,
-      offset: `${id}_0`,
-      mutations: [
-        {
-          type: `set`,
-          row: { id, name: `row-${id}`, stable: `stable-${id}` },
-        },
-      ],
-    }))
-    const expected = rowsFromMap(
-      foldSourceLedgerThrough(events, events.at(-1)!.offset),
-    )
-    // An intermediate durable checkpoint contains exactly its source prefix.
-    const prefix = rowsFromMap(
-      foldSourceLedgerThrough(events, events[0]!.offset),
-    )
-    expect(prefix).toEqual(expected.filter(([key]) => key === ids[0]))
-    // An offset outside the append-only ledger cannot justify resume state.
-    expect(() => foldSourceLedgerThrough(events, `absent_0`)).toThrow(
-      /absent from source ledger/,
-    )
+    check: checkExistingElectricComparison,
   })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration14 = electricHistoryOptions(
+    `electric.source-ledger-calibration`,
+    `append-only source-ledger folds preserve prefixes and reject absent offsets`,
+    fc.uniqueArray(fc.integer({ min: 1, max: 20 }), {
+      minLength: 2,
+      maxLength: 6,
+    }),
+    20,
+    20260922,
+    (ids) => {
+      const events: Array<SourceLedgerEvent> = ids.map((id) => ({
+        type: `source-commit`,
+        offset: `${id}_0`,
+        mutations: [
+          {
+            type: `set`,
+            row: { id, name: `row-${id}`, stable: `stable-${id}` },
+          },
+        ],
+      }))
+      const expected = rowsFromMap(
+        foldSourceLedgerThrough(events, events.at(-1)!.offset),
+      )
+      // An intermediate durable checkpoint contains exactly its source prefix.
+      const prefix = rowsFromMap(
+        foldSourceLedgerThrough(events, events[0]!.offset),
+      )
+      expect(prefix).toEqual(expected.filter(([key]) => key === ids[0]))
+      // An offset outside the append-only ledger cannot justify resume state.
+      expect(() => foldSourceLedgerThrough(events, `absent_0`)).toThrow(
+        /absent from source ledger/,
+      )
+    },
+  )
+  oracleProperty({
+    ...electricHistoryRegistration14,
+    id: `electric.source-ledger-calibration`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration14.histories,
+      runs: 20,
+      fixedSeeds: [20260922],
+    },
+    check: checkExistingElectricComparison,
+  })
+
+  const electricHistoryRegistration15 = electricHistoryOptions(
     `electric.subset-request-row-validity`,
     `subset request invocation preserves row validity through generated stream histories without response delivery`,
     fc.array(
@@ -4700,8 +4595,19 @@ describe(`Electric adapter laws`, () => {
       ],
     ],
   )
+  oracleProperty({
+    ...electricHistoryRegistration15,
+    id: `electric.subset-request-row-validity`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration15.histories,
+      runs: 40,
+      fixedSeeds: [42_721],
+    },
+    check: checkExistingElectricComparison,
+  })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration16 = electricHistoryOptions(
     `electric.resume-metadata-merge`,
     `resume metadata merge is commutative and reset-safe on timestamp ties`,
     fc.tuple(
@@ -4790,8 +4696,19 @@ describe(`Electric adapter laws`, () => {
       }
     },
   )
+  oracleProperty({
+    ...electricHistoryRegistration16,
+    id: `electric.resume-metadata-merge`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration16.histories,
+      runs: 50,
+      fixedSeeds: [42_722],
+    },
+    check: checkExistingElectricComparison,
+  })
 
-  electricHistoryProperty(
+  const electricHistoryRegistration17 = electricHistoryOptions(
     `electric.metadata-merge-complete-state`,
     `metadata merge preserves complete selected state and nonempty transaction evidence`,
     fc.tuple(
@@ -4937,168 +4854,35 @@ describe(`Electric adapter laws`, () => {
       [[[8], [1]]],
     ],
   )
-
-  oracleReplayTest(it)(
-    `reconstructs persistence-interleaving campaigns and rejects ablated, out-of-range, and foreign histories`,
-    () => {
-      const campaigns = fc.sample(persistenceInterleavingCampaignArbitrary, {
-        seed: 18_530_601,
-        numRuns: 20,
-      })
-      for (const campaign of campaigns) {
-        oracleRoute(`fixed seed`)
-        expect(reconstructPersistenceInterleavingCampaign(campaign)).toEqual(
-          campaign,
-        )
-        oracleRoute(`calibration`)
-        expect(() =>
-          reconstructPersistenceInterleavingCampaign({
-            names: campaign.names,
-          }),
-        ).toThrow()
-        expect(() =>
-          reconstructPersistenceInterleavingCampaign({
-            histories: campaign.histories,
-          }),
-        ).toThrow()
-        expect(() =>
-          reconstructPersistenceInterleavingCampaign({
-            ...campaign,
-            histories: [`open-transaction-hydration`, `foreign`],
-          }),
-        ).toThrow()
-        expect(() =>
-          reconstructPersistenceInterleavingCampaign({
-            ...campaign,
-            names: [``, campaign.names[1]],
-          }),
-        ).toThrow()
-      }
+  oracleProperty({
+    ...electricHistoryRegistration17,
+    id: `electric.metadata-merge-complete-state`,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration17.histories,
+      runs: 30,
+      fixedSeeds: [42_723],
     },
-  )
-
-  oracleReplayTest(it)(
-    `rejects named wrong answers for persistence interleavings`,
-    () => {
-      oracleRoute(`calibration`)
-      const names: [string, string] = [`before`, `after`]
-      expect(() =>
-        expectPersistenceInterleavingObservation(
-          {
-            kind: `open-transaction-hydration`,
-            hydrationStartedBeforeCommit: true,
-            hydrationOutcomeBeforeRelease: `AbortError`,
-            cachedRowBeforeRelease: true,
-            hydrationOutcome: `fulfilled`,
-            publicRowsAtHydrationSettlement: [],
-            deliveryErrors: [`InvalidPersistedCollectionConfigError`],
-            publicRows: [],
-            durableRows: [],
-            status: `ready`,
-            publicError: undefined,
-          },
-          names,
-        ),
-      ).toThrow()
-      expect(() =>
-        expectPersistenceInterleavingObservation(
-          {
-            kind: `subset-supersedes-absence`,
-            publicRows: [],
-            durableRows: [],
-            status: `ready`,
-            publicError: undefined,
-          },
-          names,
-        ),
-      ).toThrow()
-    },
-  )
-
-  const persistenceInterleavingCampaignFixedSeed = oracleFixedSeed(18_530_601, {
-    numRuns: oracleRuns(4),
+    check: checkExistingElectricComparison,
   })
-  oracleReplayTest(fcTest).prop(
-    [persistenceInterleavingCampaignArbitrary],
-    persistenceInterleavingCampaignFixedSeed,
-  )(`preserves persisted Electric interleavings (fixed)`, (...args) => {
-    oracleRoute(oracleRouteOf(persistenceInterleavingCampaignFixedSeed))
-    return runPersistenceInterleavingCampaign(...args)
-  })
-})
 
-// Each random campaign has its own suite. An ordinary run runs it
-// beside the adapter laws. A path replay of its property runs only it.
-oracleReplayTest(describe, persistenceInterleavingProperty)(
-  `persisted Electric interleaving campaign`,
-  () => {
-    beforeEach(resetElectricOracleMocks)
-
-    const persistenceInterleavingCampaignCampaign = oraclePropertyOptions(
-      4,
-      persistenceInterleavingProperty,
-    )
-    fcTest.prop(
-      [persistenceInterleavingCampaignArbitrary],
-      persistenceInterleavingCampaignCampaign,
-    )(`preserves persisted Electric interleavings (random)`, (...args) => {
-      oracleRoute(oracleRouteOf(persistenceInterleavingCampaignCampaign))
-      return runPersistenceInterleavingCampaign(...args)
-    })
-  },
-)
-
-oracleReplayTest(describe, queuedPresenceProperty)(
-  `Electric queued-presence campaign`,
-  () => {
-    beforeEach(resetElectricOracleMocks)
-
-    const randomCampaign6 = queuedPresencePropertyOptions(`random`)
-    fcTest.prop(queuedPresenceArbitraries, randomCampaign6)(
-      `generated queued Electric histories preserve staged presence and reset fences (random)`,
-      (...args) => {
-        oracleRoute(oracleRouteOf(randomCampaign6))
-        return runQueuedPresenceCampaign(...args)
-      },
-    )
-  },
-)
-
-// The checks run a history through production and compare each observation
-// with the model (or the authored snapshots they are given). The models are
-// independent folds of the same histories. The grammar generates the queued
-// presence and persistence interleaving campaigns.
-declareOracle({
-  check: [
-    checkMutationConfirmation,
-    runProcessGrammar,
-    runQueuedPresenceCampaign,
-    expectQueuedPresenceAtDurabilityHold,
-    checkInitialMoveOut,
-    runRejectedDurablePrefixWitness,
-    runPublicationBeforePersistenceWitness,
-    runPersistenceFailureCrashOnlyWitness,
-    assertPublicationEpochHistory,
-    runSchedulerPermutation,
-    runPersistenceInterleavingCampaign,
-    expectPersistenceInterleavingObservation,
-  ],
-  model: [
-    expectedSnapshots,
-    recomputeCommittedRows,
-    recomputedSnapshots,
-    expectedQueuedPresenceRows,
-    foldSourceLedgerThrough,
-    isSdkResetFramedPartition,
-    applyReferenceBatch,
-    createRetryModel,
-    applyRetryModel,
-    expectedRetryObservation,
-    expectedInitialMoveOutSnapshots,
-  ],
-  grammar: [
-    queuedPresenceArbitraries,
+  const electricHistoryRegistration18 = electricHistoryOptions(
+    persistenceInterleavingProperty,
+    `preserves persisted Electric interleavings`,
     persistenceInterleavingCampaignArbitrary,
-  ],
-  owns: [`src/electric.ts#electricCollectionOptions`],
+    4,
+    18_530_601,
+    runPersistenceInterleavingCampaign,
+  )
+  oracleProperty({
+    ...electricHistoryRegistration18,
+    id: persistenceInterleavingProperty,
+    owns: [`src/electric.ts#electricCollectionOptions`],
+    histories: {
+      ...electricHistoryRegistration18.histories,
+      runs: 4,
+      fixedSeeds: [18_530_601],
+    },
+    check: checkExistingElectricComparison,
+  })
 })

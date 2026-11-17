@@ -25,9 +25,13 @@ import {
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, test } from 'vitest'
-import { oracleRoute } from '../packages/db/tests/oracle-config.js'
-import { declareOracle } from '../packages/db/tests/oracle-declaration.js'
+import { afterAll } from 'vitest'
+import { oracleProperty } from '../packages/db/tests/oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../packages/db/tests/oracle-assertion-adapter.js'
 
 // The grammar authors structured releases before serializing Markdown. Removing
 // version suffixes loses the reported RC witness; removing neighboring sections
@@ -777,11 +781,6 @@ if (args[0] === 'api' && args[1] === 'graphql') {
 // Owns nothing: comment-on-release.ts is a repository script outside any
 // package, and the driver runs it in a child process, where the gap report
 // cannot place mutants.
-declareOracle({
-  model: [expectedNotifications],
-  check: [checkNotifications],
-  grammar: [histories],
-})
 const replay = process.env.TANSTACK_DB_RELEASE_COMMENT_CASE
 if (
   replay !== undefined &&
@@ -790,13 +789,30 @@ if (
   throw new Error(
     'TANSTACK_DB_RELEASE_COMMENT_CASE must name an existing history index',
   )
-for (const [index, input] of histories.entries()) {
-  if (replay !== undefined && Number(replay) !== index) continue
-  test(`release-comments case ${index}: ${input.version}, reverse ${input.reverse}, issues ${Object.keys(input.edges).length}, packages ${input.packages.length}`, () => {
-    oracleRoute(`case`)
-    return exercise(input)
-  })
-}
+const RELEASE_COMMENTS_LAW =
+  'Each contributing PR and linked issue of the exact published version receives one aggregated notification; lookup and comment-check failures warn without suppressing unrelated notifications.'
+oracleProperty({
+  id: `scripts.release-comments`,
+  law: {
+    statement: RELEASE_COMMENTS_LAW,
+    authority:
+      "The shared release-comment action's README and the maintainer's 2026-11-06 decisions documented above.",
+    limits:
+      'Selection and aggregation at the gh command boundary only; no GitHub authentication, delivery, linked-issue pagination beyond ten, retries, or concurrent releases.',
+  },
+  histories: histories.flatMap((input, index) =>
+    replay !== undefined && Number(replay) !== index ? [] : [{ index, input }],
+  ),
+  label: ({ index, input }) =>
+    `release-comments case ${index}: ${input.version}, reverse ${input.reverse}, issues ${Object.keys(input.edges).length}, packages ${input.packages.length}`,
+  resolve: (releaseCase) => ({ releaseCase }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(RELEASE_COMMENTS_LAW, plan, observe, () =>
+      exercise(plan.releaseCase.input),
+    ),
+  check: forwardAssertionJudgment,
+})
 afterAll(() => {
   process.stdout.write(
     `release-comments reach ${JSON.stringify(Object.fromEntries(reach))}\n`,

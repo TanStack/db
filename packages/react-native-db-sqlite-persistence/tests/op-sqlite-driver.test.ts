@@ -8,9 +8,11 @@
  */
 import { existsSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { fc } from '@fast-check/vitest'
 import { afterEach, expect, it } from 'vitest'
 import {
   oracleRandomParameters,
+  oracleRoute,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
@@ -23,12 +25,16 @@ import {
   activeCleanupFns,
   createColumnarDriverHarness,
   createTempSqlitePath,
+  expectExactAliasRows,
   expectExactRows,
   queryInjectedResult,
   readAliasOracleRuns,
   runActiveCleanupFns,
+  statementResultAliasNames,
+  statementResultFieldNames,
   withColumnarDriver,
 } from './op-sqlite-driver-support'
+import { aliasQueryCase } from './op-sqlite-alias-oracle'
 import type { OpSQLiteDatabaseLike } from '../src/op-sqlite-driver'
 
 afterEach(runActiveCleanupFns)
@@ -970,3 +976,93 @@ runSQLiteDriverContractSuite(
   `op-sqlite executeAsync columnar driver`,
   createColumnarDriverHarness,
 )
+
+const reservedAliasWrongAnswers = (() => {
+  const aliases = [`rows`, `rowsAffected`, `ordinary_name`]
+  const { expected } = aliasQueryCase(aliases)
+  const first = expected[0]!
+  const second = expected[1]!
+  return [
+    { name: `silently empty result`, actual: [] },
+    {
+      name: `missing reserved alias`,
+      actual: [
+        Object.fromEntries(
+          Object.entries(first).filter(([alias]) => alias !== `rowsAffected`),
+        ),
+        second,
+      ],
+    },
+    {
+      name: `swapped reserved values`,
+      actual: [
+        { ...first, rows: first.rowsAffected, rowsAffected: first.rows },
+        second,
+      ],
+    },
+    { name: `duplicated first row`, actual: [first, first] },
+  ]
+})()
+
+it.each(reservedAliasWrongAnswers)(
+  `reserved-alias checker rejects wrong answer: $name`,
+  ({ actual }) => {
+    oracleRoute(`calibration`)
+    const { expected } = aliasQueryCase([
+      `rows`,
+      `rowsAffected`,
+      `ordinary_name`,
+    ])
+    expect(() => expectExactAliasRows(actual, expected)).toThrow(
+      `op-sqlite reserved-alias exact-row law violated`,
+    )
+  },
+)
+
+it(`reserved-alias checker accepts the independent reference rows`, () => {
+  oracleRoute(`calibration`)
+  const { expected } = aliasQueryCase([`rows`, `rowsAffected`, `ordinary_name`])
+  expectExactAliasRows(expected, expected)
+})
+
+it(`reserved-alias checker shrinks and replays the same row-law violation`, () => {
+  oracleRoute(`calibration`)
+  const challenge = (aliases: ReadonlyArray<string>) => {
+    const { expected } = aliasQueryCase(aliases)
+    expectExactAliasRows([], expected)
+  }
+  const originalAliases = statementResultFieldNames
+  expect(() => challenge(originalAliases)).toThrow(
+    `op-sqlite reserved-alias exact-row law violated`,
+  )
+
+  const property = fc.property(
+    fc.uniqueArray(fc.constantFrom(...statementResultAliasNames), {
+      minLength: 1,
+      maxLength: statementResultAliasNames.length,
+    }),
+    challenge,
+  )
+  const original = fc.check(property, { seed: 165903, numRuns: 20 })
+  expect(original.failed).toBe(true)
+  expect(String(original.errorInstance)).toContain(
+    `op-sqlite reserved-alias exact-row law violated`,
+  )
+  if (original.counterexamplePath === null) {
+    throw new Error(`Missing reserved-alias calibration replay path`)
+  }
+  const reduced = fc.check(property, {
+    seed: original.seed,
+    path: original.counterexamplePath,
+    numRuns: 1,
+    endOnFailure: true,
+  })
+  expect(reduced.failed).toBe(true)
+  expect(String(reduced.errorInstance)).toContain(
+    `op-sqlite reserved-alias exact-row law violated`,
+  )
+  expect(reduced.counterexample).toEqual(original.counterexample)
+  expect(reduced.counterexample?.[0].length).toBeLessThan(
+    originalAliases.length,
+  )
+})

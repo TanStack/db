@@ -3,22 +3,28 @@
  * The shared documentation grammar and mutation judgment own all expectations.
  * queryFn response delivery is held before it returns server rows; no automatic
  * fetch is supplied by the fixture. This is a controlled backend receiver.
+ *
+ * Each of the 134 authored Query histories is one enumerated history of the
+ * native property. The shared model owes the cuts each history must reach and
+ * the server ledger; the shared check judges every recorded cut. This file
+ * supplies only the Query receiver and names the production code it owns.
  */
 import { resolve } from 'node:path'
-import { afterAll, test, vi } from 'vitest'
+import { vi } from 'vitest'
 import { QueryClient } from '@tanstack/query-core'
 import { createCollection } from '@tanstack/db'
 import { queryCollectionOptions } from '../src/query'
 import { createDeferred } from '../../db/src/deferred'
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-config'
 import {
-  checkDocumentedMutation,
+  checkDocumentedMutationTrace,
+  documentedMutationCalibrations,
   documentedMutationHistories,
+  modelDocumentedMutation,
 } from '../../db/tests/documented-mutations-oracle'
 import {
-  createDocumentedReach,
-  runDocumentedMutation,
+  documentedMutationLaw,
+  recordDocumentedMutation,
   selectDocumentedHistories,
 } from '../../db/tests/documented-mutations-support'
 import type { DocumentedRow } from '../../db/tests/documented-mutations-oracle'
@@ -27,15 +33,21 @@ import type { QueryCollectionConfig } from '../src/query'
 const histories = selectDocumentedHistories(
   documentedMutationHistories(`query`),
 )
-const reach = createDocumentedReach(`query`, histories)
-afterAll(() => reach.finish())
 
-oracleReplayTest(test).each(histories)(
-  `runs the actual documented handler: $id`,
-  async (history) => {
-    oracleRoute(`case`)
-    reach.begin(history.id)
-    await runDocumentedMutation(
+// What this oracle owns: the documented Query handlers run through
+// queryCollectionOptions, whose mutation confirmation and refetch wrappers the
+// documentation grammar judges.
+oracleProperty({
+  id: `documented-mutations.query`,
+  law: documentedMutationLaw,
+  owns: [`src/query.ts#queryCollectionOptions`],
+  histories,
+  label: (history) => history.id,
+  model: modelDocumentedMutation,
+  check: checkDocumentedMutationTrace,
+  calibrations: documentedMutationCalibrations,
+  driver: (history, observe) =>
+    recordDocumentedMutation(
       history,
       resolve(process.cwd(), `../..`),
       (controls) => {
@@ -104,16 +116,6 @@ oracleReplayTest(test).each(histories)(
           },
         }
       },
-      reach.reach,
-    )
-  },
-)
-
-// What this oracle owns: the documented Query handlers run through
-// queryCollectionOptions, whose mutation confirmation and refetch wrappers the
-// documentation grammar judges.
-declareOracle({
-  owns: [`src/query.ts#queryCollectionOptions`],
-  check: [checkDocumentedMutation],
-  grammar: [documentedMutationHistories],
+      observe,
+    ),
 })

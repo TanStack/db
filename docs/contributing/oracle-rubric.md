@@ -299,10 +299,36 @@ presence of a preferred heading, class, comment template, or helper.
   bug-class repair.
 - **Obligation:** The property MUST declare the states that its changed or
   cited laws depend on, and MUST fail when generated histories reach a declared
-  state fewer times than its stated minimum. Use
-  [`createOracleReach`](../../packages/db/tests/oracle-reach.ts) or an
-  equivalent counter that fails the property. A passing run count does not
-  satisfy this requirement.
+  state fewer times than its stated minimum. Declare the states with
+  `histories.states` in `oracleProperty` and supply `histories.constructed`
+  builders that splice them into generated histories. The pinned API has no
+  numeric minimum option. Enforce a normal campaign minimum of N with at least
+  N randomized constructed builders that each list the state in `enters` and
+  reach it. With multiple builders in the pinned API, their results MUST have
+  distinct object identities or provably disjoint primitive values. Prefer a
+  fresh object or array from each invocation. A single primitive-valued builder
+  does not have this collision.
+  Repeated primitive values or shared objects can replace an earlier builder
+  in the framework's history-to-builder map and bypass its state checks. Each
+  normal campaign checks one seed-derived construction from every builder.
+  Confirm every builder's named state checks with missing-state controls, and
+  verify that the reported counts meet N. These checks enforce the minimum.
+  The pinned framework also invokes builders during generated runs, but it
+  does not associate their fresh objects with their `enters` obligations.
+  The property MUST separately check each builder's generated outputs against
+  its named states, using the same production driver and state observations.
+  A missing-state control MUST show that this check rejects a generated
+  construction that omits a required state. Printed counts and additional
+  random hits alone do not enforce either obligation.
+  Literal fixed histories do not count toward required reach. A passing run
+  count does not satisfy this requirement.
+  An enumerated source runs every history, so it declares its states with
+  `histories: { enumerated, states }` and needs no constructed history. Its
+  `reach` test fails when no enumerated history enters a declared state
+  (maintainer decision, 2026-11-10, in the `oracleProperty` contract).
+  Every campaign uses `oracleProperty`. The framework removed the
+  `legacyCampaigns` exemption list, and the vendored legacy reach helpers are
+  deleted.
 - **Acceptance evidence:** The pull request reports each declared state and how
   many histories reached it in the normal test run. A state that only a larger
   run budget reaches is reported as such.
@@ -395,35 +421,36 @@ state model, differential or metamorphic comparison, or reusable law checker.
 A separate module that defines that model, checker, or its history grammar also
 qualifies. Identify the mechanism in the code before applying the name.
 
-An oracle file holds only oracle tests. It names its parts with
-`declareOracle({ check: [...], model: [...], grammar: [...] })` from
-[`oracle-declaration.ts`](../../packages/db/tests/oracle-declaration.ts), which
-imports nothing so that browser and native-app modules can use it: the check
-compares production observations with the model or with a second
-formulation, and the grammar is the generators that produce legal histories.
-Each part is optional. Every test in the file uses a declared part, directly
-or through a production driver:
+An oracle file holds only oracle tests, and it registers them only through
+`oracleProperty` (maintainer decision, 2026-11-11). The property takes the
+parts: the check compares production observations with the model or with a
+second formulation, and the grammar is the generators that produce legal
+histories. Each kind of oracle test has its place in the property:
 
-- A generated property or a fixed history runs through the check.
-- A fixed history steps the model and checks one rule against its authority.
-- A calibration shows that the check rejects a wrong answer (ORC-006).
+- A generated history runs through the check in the property's campaigns.
+- A fixed history, such as a fixed regression, is a `histories.fixed` entry.
+  When the grammar cannot produce it, it is a history of an enumerated
+  property with the same driver, model, and check, and that property's
+  limits say so.
+- A case of a finite table is an enumerated history.
+- A calibration shows that the check rejects a wrong answer (ORC-006). It is
+  a `calibrations` entry: a corrupted trace or a mutant driver.
 - A grammar calibration shows that the generators reach the states that the
-  laws need (ORC-004, ORC-015).
-- A generated property can state its law inline: its predicate relates
-  production to inputs that nobody wrote down. A property whose arbitraries
-  are all constants, or whose predicate ignores its input, checks written
-  values instead.
-- A type-level test compares an inferred type with a type model. A type has no
-  value to pass, so the file names its model types in
-  `declareOracle({ typeModel: [...] })`. Each name is a type alias or
-  interface in the same file, and a type built from one counts as using it.
+  laws need (ORC-004, ORC-015). It is a declared state, in `states` with a
+  constructed history, or in `measured`.
+- A type-level law runs the type checker in the property's driver, over
+  generated TypeScript inputs.
 
-A test that uses none of them compares production with a hand-written value. It
-is a unit test, even when it asserts a contract, and it belongs in an
-ordinary test file beside the oracle. A finite table of hand-written expected
-values selected by a test's parameters is not a model. The `oracle/no-unit-test` lint rule
-reports such a test. Files named `oracle-*`, such as `oracle-config.ts`, are
-the shared oracle machinery and declare no parts.
+Any other test is an ordinary test, even when it asserts a contract, and it
+belongs in an ordinary test file beside the oracle. That includes a test that
+compares production with a hand-written value, and a model-rule expectation
+that steps the model and checks one rule against its authority: it runs no
+production, so it can never kill a production mutant. A finite table of
+hand-written expected values selected by a test's parameters is not a model.
+The `oracle/no-unit-test` lint rule reports every registration in an oracle
+file other than a complete `oracleProperty` call. Files named `oracle-*`,
+such as `oracle-config.ts`, are the shared oracle machinery and register no
+oracle.
 
 An oracle file also registers no test through a helper from an ordinary module.
 The rule reports a call to such a helper, because the helper's tests then appear
@@ -432,6 +459,25 @@ shared suite a registrar when the suite needs one. A helper from an oracle-named
 module is linted on its own, so the rule does not report a call to it. An
 `oracle-` machinery module, such as `oracle-config.ts`, is not linted, so the
 rule judges a call to its helpers as it judges an ordinary module's.
+
+An oracle file names the production code that it judges in the `owns` list of
+each `oracleProperty` call: `oracleProperty({ id, law, owns: [...], ... })`.
+An entry is a source path relative to the package (`src/x.ts`), or one of its
+functions with its static call tree (`src/x.ts#fn`, `src/x.ts#Class.method`).
+The gap report (`pnpm gap-report`) reads the list without running the file, so
+write it in the call as a non-empty array of string or template literals,
+under the key `owns`: no spread, variable, computed list, or quoted key. A
+file with several calls repeats the
+list on each call; the gap report judges ownership per file, as the union of
+its lists. A file that registers through a wrapper, such as a shared
+conformance suite, passes the list in the wrapper call's options literal
+(`registerX({ property, owns: [...], ... })`). The gap report reads `owns`
+from an object-literal argument of any call, and the wrapper forwards it
+unchanged to `oracleProperty`.
+
+A law has no owner field. Code ownership by people and teams belongs to
+CODEOWNERS (maintainer decision, 2026-11-10). The coverage map's oracle owner
+is a different concept: the file that owns a law's judgment.
 
 ORC-016 keeps ordinary unit tests and concrete type assertions out of oracle
 files. Fixed regressions run through the shared law; supplemental examples live
@@ -767,6 +813,15 @@ When replay inputs are present, run only the requested replay. Do not spend
 time on the fixed campaign before reaching the failure the developer asked to
 reproduce.
 
+The pinned `oracleProperty` registers each constructed history and the generated
+histories as separate campaign units. A generated source's path replay also
+requires `TANSTACK_DB_ORACLE_UNIT`, copied from the failure's `Replay:` line.
+For example, `random seed: generated` selects the generated histories; a named
+construction has its own unit. A path belongs to that unit's stream. Adding a
+unit to an older command can require translating its path; retain the original
+coordinates as historical evidence. Enumerated sources and direct fast-check
+receiving witnesses do not use these generated-unit coordinates.
+
 The fixed and random campaigns must use the same property, generators,
 observation recorder, refinement check, and run budget. Only their seed source
 may differ. This keeps a random failure eligible for promotion into a fixed
@@ -776,8 +831,9 @@ history or the fixed-seed campaign.
 shows this shape. Its fixed-seed campaign preserves one scheduler campaign. Its
 second campaign uses a random campaign seed by default. To replay its recorded
 failure, set `TANSTACK_DB_ORACLE_PROPERTY=offline.fifo-retry` with
-`TANSTACK_DB_ORACLE_SEED` and `TANSTACK_DB_ORACLE_PATH`. The fixed-seed campaign
-stands aside, and the random campaign runs the recorded path once. The offline
+`TANSTACK_DB_ORACLE_SEED`, `TANSTACK_DB_ORACLE_PATH`, and the reported
+`TANSTACK_DB_ORACLE_UNIT`. The fixed-seed campaign stands aside, and the selected
+random unit runs the recorded path once. The offline
 oracle owners' other properties use the same variables and name their own
 properties, such as `offline.leadership.stale-read` and
 `offline.settlement.retry-decision`.
@@ -983,7 +1039,7 @@ supply the entry point, access-handle control, database names, and result
 reporting. The Node driver also generates random histories from the same
 grammar. Neither production driver states expected results, and both feed the
 same comparison. The
-[Chromium spec](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-request-order-oracle.opfs.spec.ts)
+[Chromium spec](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-request-order-witness.opfs.spec.ts)
 checks for page errors, a completed run, one result per example, and no
 violations. It states no expected results either. A witness that restates
 expected results needs the record that ORC-014 describes.

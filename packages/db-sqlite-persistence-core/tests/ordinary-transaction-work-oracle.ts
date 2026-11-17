@@ -1,13 +1,13 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it, vi } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { describe, expect, vi } from 'vitest'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from '../../db/tests/oracle-assertion-adapter'
 import { createPersistedTableName } from '../src'
 import {
   Temporal,
@@ -33,7 +33,6 @@ import type {
   Tx,
   WriteCounts,
 } from './ordinary-transaction-work-support'
-
 /**
  * # Can an ordinary committed SQLite transaction persist many rows in bounded work?
  *
@@ -108,10 +107,15 @@ import type {
  * retains full replacement and schema-migration laws; this fixture adds ordinary
  * write work and does not replace driver admission or host receiving witnesses.
  */
-
 // The model replays semantic actions from their contract, never from SQL.
-function modelAfter(history: ReadonlyArray<Tx>): Observation {
-  const rows = new Map<string, { value: Row; metadata?: unknown }>()
+export function modelAfter(history: ReadonlyArray<Tx>): Observation {
+  const rows = new Map<
+    string,
+    {
+      value: Row
+      metadata?: unknown
+    }
+  >()
   const tombstones = new Map<string, Tombstone>()
   const collectionMetadata = new Map<string, unknown>()
   const applied: Observation['applied'] = []
@@ -119,7 +123,6 @@ function modelAfter(history: ReadonlyArray<Tx>): Observation {
   let rowVersion = 0
   let term = 0
   let seq = 0
-
   for (const tx of history) {
     const positionId = `${tx.term}:${tx.seq}`
     if (appliedPositions.has(positionId)) continue
@@ -174,7 +177,6 @@ function modelAfter(history: ReadonlyArray<Tx>): Observation {
     applied,
   }
 }
-
 type Case = {
   name: string
   cap: number
@@ -183,7 +185,6 @@ type Case = {
   workSize?: number
   workFamilies?: number
 }
-
 const workCases: Array<Case> = [0, 1, 24, 25, 26, 99, 100, 101, 205].map(
   (size) => ({
     name: `unique-${size}`,
@@ -349,7 +350,7 @@ workCases.push({
   candidate: insertRows(10000),
   workSize: 10000,
 })
-const semanticCases: Array<Case> = [
+export const semanticCases: Array<Case> = [
   {
     name: 'existing-insert-keeps-metadata',
     cap: 100,
@@ -464,14 +465,15 @@ const semanticCases: Array<Case> = [
     ),
   },
 ]
-
 // A deliberate wrong answer control: a fast writer that drops prior metadata
 // passes a row-count check, but the complete observation comparison rejects it.
-function sameObservation(actual: Observation, expected: Observation): boolean {
+export function sameObservation(
+  actual: Observation,
+  expected: Observation,
+): boolean {
   return JSON.stringify(actual) === JSON.stringify(expected)
 }
-
-type GeneratedScenario =
+export type GeneratedScenario =
   | 'repeated-key'
   | 'delete-reinsert'
   | 'partial-update'
@@ -489,7 +491,7 @@ type RowMetadataAction = NonNullable<Tx['rowMetadataMutations']>[number]
 type CollectionMetadataAction = NonNullable<
   Tx['collectionMetadataMutations']
 >[number]
-type GeneratedHistory = {
+export type GeneratedHistory = {
   scenario: GeneratedScenario
   target: 'a' | 'b'
   prefix: Array<ActionSpec>
@@ -498,61 +500,59 @@ type GeneratedHistory = {
   rollback: boolean
   followup: boolean
 }
-
 const generatedActionArbitrary: fc.Arbitrary<ActionSpec> = fc.record({
   kind: fc.constantFrom<ActionSpec['kind']>('insert', 'update', 'delete'),
   key: fc.constantFrom<'a' | 'b'>('a', 'b'),
   version: fc.integer({ min: 0, max: 9 }),
   metadata: fc.constantFrom<ActionSpec['metadata']>('keep', 'set', 'clear'),
 })
-
-const generatedHistoryArbitrary: fc.Arbitrary<GeneratedHistory> = fc.record({
-  scenario: fc.constantFrom<GeneratedScenario>(
-    'repeated-key',
-    'delete-reinsert',
-    'partial-update',
-    'metadata-present-set',
-    'metadata-present-delete',
-    'metadata-absent-set',
-    'metadata-absent-delete',
-  ),
-  target: fc.constantFrom<'a' | 'b'>('a', 'b'),
-  prefix: fc.oneof(
-    fc.array(generatedActionArbitrary, { maxLength: 4 }),
-    fc.array(generatedActionArbitrary, { minLength: 5, maxLength: 24 }),
-    fc.array(generatedActionArbitrary, { minLength: 25, maxLength: 60 }),
-  ),
-  rowMetadataPrefix: fc.array(
-    fc
-      .record({
-        type: fc.constantFrom<'set' | 'delete'>('set', 'delete'),
-        key: fc.constantFrom('a', 'b', 'c'),
-        version: fc.integer({ min: 0, max: 9 }),
-      })
-      .map(({ type, key, version }): RowMetadataAction =>
-        type === 'set'
-          ? { type, key, value: { source: `prefix-${version}` } }
-          : { type, key },
-      ),
-    { maxLength: 3 },
-  ),
-  collectionMetadata: fc.array(
-    fc
-      .record({
-        type: fc.constantFrom<'set' | 'delete'>('set', 'delete'),
-        key: fc.constantFrom('cursor', 'mode'),
-        version: fc.integer({ min: 0, max: 9 }),
-      })
-      .map(({ type, key, version }): CollectionMetadataAction =>
-        type === 'set' ? { type, key, value: { version } } : { type, key },
-      ),
-    { maxLength: 2 },
-  ),
-  rollback: fc.boolean(),
-  followup: fc.boolean(),
-})
-
-type IndependentWorkCase = {
+export const generatedHistoryArbitrary: fc.Arbitrary<GeneratedHistory> =
+  fc.record({
+    scenario: fc.constantFrom<GeneratedScenario>(
+      'repeated-key',
+      'delete-reinsert',
+      'partial-update',
+      'metadata-present-set',
+      'metadata-present-delete',
+      'metadata-absent-set',
+      'metadata-absent-delete',
+    ),
+    target: fc.constantFrom<'a' | 'b'>('a', 'b'),
+    prefix: fc.oneof(
+      fc.array(generatedActionArbitrary, { maxLength: 4 }),
+      fc.array(generatedActionArbitrary, { minLength: 5, maxLength: 24 }),
+      fc.array(generatedActionArbitrary, { minLength: 25, maxLength: 60 }),
+    ),
+    rowMetadataPrefix: fc.array(
+      fc
+        .record({
+          type: fc.constantFrom<'set' | 'delete'>('set', 'delete'),
+          key: fc.constantFrom('a', 'b', 'c'),
+          version: fc.integer({ min: 0, max: 9 }),
+        })
+        .map(({ type, key, version }): RowMetadataAction =>
+          type === 'set'
+            ? { type, key, value: { source: `prefix-${version}` } }
+            : { type, key },
+        ),
+      { maxLength: 3 },
+    ),
+    collectionMetadata: fc.array(
+      fc
+        .record({
+          type: fc.constantFrom<'set' | 'delete'>('set', 'delete'),
+          key: fc.constantFrom('cursor', 'mode'),
+          version: fc.integer({ min: 0, max: 9 }),
+        })
+        .map(({ type, key, version }): CollectionMetadataAction =>
+          type === 'set' ? { type, key, value: { version } } : { type, key },
+        ),
+      { maxLength: 2 },
+    ),
+    rollback: fc.boolean(),
+    followup: fc.boolean(),
+  })
+export type IndependentWorkCase = {
   shape:
     | 'insert-later-metadata'
     | 'insert-inline-metadata'
@@ -563,20 +563,19 @@ type IndependentWorkCase = {
   size: number
   cap: 100 | 999
 }
-
-const independentWorkArbitrary: fc.Arbitrary<IndependentWorkCase> = fc.record({
-  shape: fc.constantFrom<IndependentWorkCase['shape']>(
-    'insert-later-metadata',
-    'insert-inline-metadata',
-    'partial-update',
-    'delete',
-    'row-metadata-only',
-    'collection-metadata-only',
-  ),
-  size: fc.integer({ min: 0, max: 60 }),
-  cap: fc.constantFrom<100 | 999>(100, 999),
-})
-
+export const independentWorkArbitrary: fc.Arbitrary<IndependentWorkCase> =
+  fc.record({
+    shape: fc.constantFrom<IndependentWorkCase['shape']>(
+      'insert-later-metadata',
+      'insert-inline-metadata',
+      'partial-update',
+      'delete',
+      'row-metadata-only',
+      'collection-metadata-only',
+    ),
+    size: fc.integer({ min: 0, max: 60 }),
+    cap: fc.constantFrom<100 | 999>(100, 999),
+  })
 function independentTransactions(input: IndependentWorkCase): {
   seed?: Tx
   candidate: Tx
@@ -662,7 +661,6 @@ function independentTransactions(input: IndependentWorkCase): {
       }
   }
 }
-
 async function assertIndependentWork(
   input: IndependentWorkCase,
   extraMeasuredCalls = 0,
@@ -698,16 +696,21 @@ async function assertIndependentWork(
       host,
       'independent-key candidate checkpoint',
     )
-    expect(
-      await observe(host.adapter, host.driver, collectionId),
-      'independent-key durable checkpoint',
-    ).toEqual(modelAfter(history))
+    ;((observedBeforeComparison0) =>
+      oracleAssertion('existing comparison at 697', () =>
+        expect(
+          observedBeforeComparison0,
+          'independent-key durable checkpoint',
+        ).toEqual(modelAfter(history)),
+      ))(await observe(host.adapter, host.driver, collectionId))
     const chunk = Math.min(125, Math.floor(input.cap / 4))
     const bound = 12 + 6 * Math.ceil(input.size / chunk)
-    expect(
-      counts.query + counts.run,
-      'independent-key work checkpoint',
-    ).toBeLessThanOrEqual(bound)
+    oracleAssertion('existing comparison at 703', () =>
+      expect(
+        counts.query + counts.run,
+        'independent-key work checkpoint',
+      ).toBeLessThanOrEqual(bound),
+    )
   } catch (error) {
     primary = error
   }
@@ -724,7 +727,6 @@ async function assertIndependentWork(
   }
   if (primary !== undefined) throw primary
 }
-
 function generatedTransactions(input: GeneratedHistory): {
   seed: Tx
   candidate: Tx
@@ -825,21 +827,24 @@ function generatedTransactions(input: GeneratedHistory): {
     ]),
   }
 }
-
 function expectGeneratedWork(candidate: Tx, counts: WriteCounts): void {
-  const uniqueKeys = (actions: ReadonlyArray<{ key: string }>): number =>
-    new Set(actions.map((action) => action.key)).size
+  const uniqueKeys = (
+    actions: ReadonlyArray<{
+      key: string
+    }>,
+  ): number => new Set(actions.map((action) => action.key)).size
   const chunk = 25 // The generated driver permits 100 bindings, four per row.
   const workChunks =
     Math.ceil(uniqueKeys(candidate.mutations) / chunk) +
     Math.ceil(uniqueKeys(candidate.rowMetadataMutations ?? []) / chunk) +
     Math.ceil(uniqueKeys(candidate.collectionMetadataMutations ?? []) / chunk)
-  expect(
-    counts.query + counts.run,
-    'generated repeated-key work checkpoint',
-  ).toBeLessThanOrEqual(12 + 6 * workChunks)
+  oracleAssertion('existing comparison at 833', () =>
+    expect(
+      counts.query + counts.run,
+      'generated repeated-key work checkpoint',
+    ).toBeLessThanOrEqual(12 + 6 * workChunks),
+  )
 }
-
 async function assertGeneratedHistory(
   input: GeneratedHistory,
   corruptCandidateMetadata = false,
@@ -865,19 +870,23 @@ async function assertGeneratedHistory(
       'generated seed checkpoint',
       extraTransactionAt === 'seed' ? 1 : 0,
     )
-    expect(
-      await observe(host.adapter, host.driver, collectionId),
-      'seed durable checkpoint',
-    ).toEqual(modelAfter(history))
+    ;((observedBeforeComparison0) =>
+      oracleAssertion('existing comparison at 864', () =>
+        expect(observedBeforeComparison0, 'seed durable checkpoint').toEqual(
+          modelAfter(history),
+        ),
+      ))(await observe(host.adapter, host.driver, collectionId))
     if (input.rollback) {
       host.failRunMatching(/INSERT INTO applied_tx/)
       beginMeasuredWrite(host)
-      await expect(
-        host.adapter.applyCommittedTx(
-          { kind: `eager`, collectionId: collectionId },
-          candidate,
-        ),
-      ).rejects.toThrow('injected late bookkeeping failure')
+      await oracleAssertion('existing comparison at 871', () =>
+        expect(
+          host.adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: collectionId },
+            candidate,
+          ),
+        ).rejects.toThrow('injected late bookkeeping failure'),
+      )
       const counts = finishMeasuredWrite(
         host,
         'generated rollback checkpoint',
@@ -885,10 +894,13 @@ async function assertGeneratedHistory(
       )
       expectGeneratedWork(candidate, counts)
       host.failRunMatching(undefined)
-      expect(
-        await observe(host.adapter, host.driver, collectionId),
-        'rollback durable checkpoint',
-      ).toEqual(modelAfter(history))
+      ;((observedBeforeComparison0) =>
+        oracleAssertion('existing comparison at 884', () =>
+          expect(
+            observedBeforeComparison0,
+            'rollback durable checkpoint',
+          ).toEqual(modelAfter(history)),
+        ))(await observe(host.adapter, host.driver, collectionId))
     } else {
       host.corruptRowMetadata(corruptCandidateMetadata)
       history.push(clone(candidate))
@@ -903,10 +915,13 @@ async function assertGeneratedHistory(
         extraTransactionAt === 'candidate' ? 1 : 0,
       )
       expectGeneratedWork(candidate, counts)
-      expect(
-        await observe(host.adapter, host.driver, collectionId),
-        'candidate durable checkpoint',
-      ).toEqual(modelAfter(history))
+      ;((observedBeforeComparison0) =>
+        oracleAssertion('existing comparison at 902', () =>
+          expect(
+            observedBeforeComparison0,
+            'candidate durable checkpoint',
+          ).toEqual(modelAfter(history)),
+        ))(await observe(host.adapter, host.driver, collectionId))
       if (input.followup) {
         history.push(clone(followup))
         beginMeasuredWrite(host)
@@ -919,10 +934,13 @@ async function assertGeneratedHistory(
           'generated followup checkpoint',
           extraTransactionAt === 'followup' ? 1 : 0,
         )
-        expect(
-          await observe(host.adapter, host.driver, collectionId),
-          'followup durable checkpoint',
-        ).toEqual(modelAfter(history))
+        ;((observedBeforeComparison0) =>
+          oracleAssertion('existing comparison at 918', () =>
+            expect(
+              observedBeforeComparison0,
+              'followup durable checkpoint',
+            ).toEqual(modelAfter(history)),
+          ))(await observe(host.adapter, host.driver, collectionId))
       }
     }
   } catch (error) {
@@ -941,378 +959,401 @@ async function assertGeneratedHistory(
   }
   if (primary !== undefined) throw primary
 }
-
 // The check runs a fixed or generated history through the production adapter,
 // then compares each durable checkpoint with modelAfter, the independent model of
 // committed work. The generated histories and independent-key cases come from
 // the grammars, and the work bound is the write-count law at each checkpoint.
-declareOracle({
-  owns: [`src/sqlite-core-adapter.ts`],
-  check: [assertGeneratedHistory, assertIndependentWork],
-  model: [modelAfter],
-  grammar: [generatedHistoryArbitrary, independentWorkArbitrary],
-})
-
 export function runOrdinaryTransactionWorkOracle(): void {
   describe('ordinary SQLite committed transaction oracle', () => {
     // The native dimension reuses the existing action model and work counter.
     // At settlement compare intrinsic kind/text; empty-object equality is not
     // evidence of a successful native write. No new transaction model is added.
-    it.each(
-      temporalFamilies.flatMap((family) =>
-        [false, true].map((rollback) => ({ family, rollback })),
-      ),
-    )(
-      `preserves native values through repeated actions / $family.name / rollback=$rollback`,
-      async ({ family, rollback }) => {
-        vi.stubGlobal(`Temporal`, Temporal)
-        const host = fixture(100)
-        try {
-          const first = temporalValue(family, 0)
-          const last = temporalValue(family, 2)
-          const seed = transaction(`seed`, 1, [
-            { type: `insert`, key: `a`, value: { stamp: first } },
-          ])
-          const candidate = transaction(
-            `candidate`,
-            2,
-            [
-              {
-                type: `update`,
-                key: `a`,
-                value: { stamp: temporalValue(family, 1) },
-                metadataChanged: true,
-                metadata: first,
-              },
-              { type: `update`, key: `a`, value: { stamp: last } },
-            ],
-            [{ type: `set`, key: `a`, value: last }],
-            [{ type: `set`, key: `cursor`, value: first }],
-          )
-          await host.adapter.applyCommittedTx(
-            { kind: `eager`, collectionId: `native-actions` },
-            seed,
-          )
-          if (rollback) host.failRunMatching(/INSERT INTO applied_tx/)
-          beginMeasuredWrite(host)
-          const pending = host.adapter.applyCommittedTx(
-            { kind: `eager`, collectionId: `native-actions` },
-            candidate,
-          )
-          if (rollback)
-            await expect(pending).rejects.toThrow(
+    const ordinaryLaw = {
+      statement: `The existing independent ordinary-write model judges durable rows and metadata at every original checkpoint, with the unchanged distinct-key work bound.`,
+      authority: `PersistedTx semantics and the ordinary-transaction work contract stated above.`,
+    }
+    const ordinaryJudgment = `ordinary write semantics and work`
+
+    // A calibration witness's own failure fails the calibration, as it failed
+    // the old test: it is rethrown without a cause chain, so the adapter cannot
+    // read a marked comparison inside it as the check rejecting the mutant.
+    const witnessFailure = (error: unknown): Error =>
+      Object.assign(
+        new Error(
+          `calibration witness failed: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+        { witnessFailure: error },
+      )
+    // Exactly the old `.rejects.toThrow(message)` matcher: the mutant must
+    // reject, with an error whose message contains `message` when one is given.
+    async function expectMutantRejects(
+      run: () => Promise<void>,
+      message?: string,
+    ): Promise<Error> {
+      try {
+        await run()
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          (message === undefined || error.message.includes(message))
+        )
+          return error
+        throw witnessFailure(error)
+      }
+      throw witnessFailure(
+        `the mutant did not reject${message ? ` with "${message}"` : ``}`,
+      )
+    }
+
+    // The native dimension reuses the existing action model and work counter.
+    // At settlement compare intrinsic kind/text; empty-object equality is not
+    // evidence of a successful native write. No new transaction model is added.
+    async function runNativeActions({
+      family,
+      rollback,
+    }: {
+      family: (typeof temporalFamilies)[number]
+      rollback: boolean
+    }): Promise<void> {
+      vi.stubGlobal(`Temporal`, Temporal)
+      const host = fixture(100)
+      try {
+        const first = temporalValue(family, 0)
+        const last = temporalValue(family, 2)
+        const seed = transaction(`seed`, 1, [
+          { type: `insert`, key: `a`, value: { stamp: first } },
+        ])
+        const candidate = transaction(
+          `candidate`,
+          2,
+          [
+            {
+              type: `update`,
+              key: `a`,
+              value: { stamp: temporalValue(family, 1) },
+              metadataChanged: true,
+              metadata: first,
+            },
+            { type: `update`, key: `a`, value: { stamp: last } },
+          ],
+          [{ type: `set`, key: `a`, value: last }],
+          [{ type: `set`, key: `cursor`, value: first }],
+        )
+        await host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: `native-actions` },
+          seed,
+        )
+        if (rollback) host.failRunMatching(/INSERT INTO applied_tx/)
+        beginMeasuredWrite(host)
+        const pending = host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: `native-actions` },
+          candidate,
+        )
+        if (rollback)
+          await oracleAssertion('existing comparison at 999', () =>
+            expect(pending).rejects.toThrow(
               `injected late bookkeeping failure`,
-            )
-          else await pending
-          const work = finishMeasuredWrite(host, `native actions`)
-          expect(work.query + work.run).toBeLessThanOrEqual(30)
-          const expected = observeTemporal(
-            modelAfter(rollback ? [seed] : [seed, candidate]),
+            ),
           )
-          const actual = observeTemporal(
-            await observe(host.adapter, host.driver, `native-actions`),
-          )
-          expect(actual).toEqual(expected)
+        else await pending
+        const work = finishMeasuredWrite(host, `native actions`)
+        oracleAssertion('existing comparison at 1004', () =>
+          expect(work.query + work.run).toBeLessThanOrEqual(30),
+        )
+        const expected = observeTemporal(
+          modelAfter(rollback ? [seed] : [seed, candidate]),
+        )
+        const actual = observeTemporal(
+          await observe(host.adapter, host.driver, `native-actions`),
+        )
+        oracleAssertion('existing comparison at 1011', () =>
+          expect(actual).toEqual(expected),
+        )
+        oracleAssertion('existing comparison at 1012', () =>
           expect(
             observeTemporal(structuredClone({ stamp: first })),
-          ).not.toEqual(observeTemporal({ stamp: first }))
-          host.failRunMatching(undefined)
-          vi.stubGlobal(`Temporal`, undefined)
-          const invalid = transaction(`invalid`, 3, [
-            { type: `update`, key: `a`, value: { stamp: first } },
-            { type: `update`, key: `a`, value: { stamp: `overwritten` } },
-          ])
-          await expect(
+          ).not.toEqual(observeTemporal({ stamp: first })),
+        )
+        host.failRunMatching(undefined)
+        vi.stubGlobal(`Temporal`, undefined)
+        const invalid = transaction(`invalid`, 3, [
+          { type: `update`, key: `a`, value: { stamp: first } },
+          { type: `update`, key: `a`, value: { stamp: `overwritten` } },
+        ])
+        await oracleAssertion('existing comparison at 1021', () =>
+          expect(
             host.adapter.applyCommittedTx(
               { kind: `eager`, collectionId: `native-actions` },
               invalid,
             ),
-          ).rejects.toThrow(/Temporal/)
-          vi.stubGlobal(`Temporal`, Temporal)
-          expect(
-            observeTemporal(
-              await observe(host.adapter, host.driver, `native-actions`),
+          ).rejects.toThrow(/Temporal/),
+        )
+        vi.stubGlobal(`Temporal`, Temporal)
+        ;((observedBeforeComparison0) =>
+          oracleAssertion('existing comparison at 1028', () =>
+            expect(observeTemporal(observedBeforeComparison0)).toEqual(
+              expected,
             ),
-          ).toEqual(expected)
-        } finally {
-          vi.unstubAllGlobals()
-          host.close()
-        }
+          ))(await observe(host.adapter, host.driver, `native-actions`))
+      } finally {
+        vi.unstubAllGlobals()
+        host.close()
+      }
+    }
+    oracleProperty({
+      id: `sqlite-ordinary.native-values`,
+      law: {
+        ...ordinaryLaw,
+        limits: `The bounded Temporal families of temporal-value-oracle.ts, each committed or rolled back through repeated actions.`,
       },
-    )
-
-    it('reconstructs the bounded generated action-history axes', () => {
-      const samples = fc.sample(
-        generatedHistoryArbitrary,
-        oracleFixedSeed(1992, { numRuns: 120 }),
-      )
-      expect(new Set(samples.map((sample) => sample.scenario))).toEqual(
-        new Set<GeneratedScenario>([
-          'repeated-key',
-          'delete-reinsert',
-          'partial-update',
-          'metadata-present-set',
-          'metadata-present-delete',
-          'metadata-absent-set',
-          'metadata-absent-delete',
-        ]),
-      )
-      expect(new Set(samples.map((sample) => sample.rollback))).toEqual(
-        new Set([true, false]),
-      )
-      expect(new Set(samples.map((sample) => sample.followup))).toEqual(
-        new Set([true, false]),
-      )
-      expect(
-        new Set(
-          samples.map((sample) => `${sample.scenario}:${sample.rollback}`),
-        ).size,
-      ).toBe(14)
-      expect(new Set(samples.map((sample) => sample.target))).toEqual(
-        new Set(['a', 'b']),
-      )
-      expect(
-        samples.some(
-          (sample) =>
-            sample.prefix.length > 0 && sample.rowMetadataPrefix.length > 0,
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: temporalFamilies.flatMap((family) =>
+        [false, true].map((rollback) => ({ family, rollback })),
+      ),
+      label: ({ family, rollback }) =>
+        `preserves native values through repeated actions / ${family.name} / rollback=${rollback}`,
+      resolve: (history) => ({ history }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(ordinaryJudgment, plan, observe, () =>
+          runNativeActions(plan.history),
         ),
-      ).toBe(true)
-      expect(
-        samples.every(
-          (sample) =>
-            sample.prefix.length <= 60 &&
-            sample.rowMetadataPrefix.length <= 3 &&
-            sample.collectionMetadata.length <= 2,
+      check: forwardAssertionJudgment,
+    })
+
+    // The fixed generated-grammar histories that the old mutant witnesses used.
+    // Each runs clean through the generated driver; the calibrations run the
+    // driver's own wrong designs and extra-transaction faults on them.
+    const partialUpdate: GeneratedHistory = {
+      scenario: 'partial-update',
+      target: 'a',
+      prefix: [],
+      rowMetadataPrefix: [],
+      collectionMetadata: [],
+      rollback: false,
+      followup: false,
+    }
+    const partialUpdateWithFollowup: GeneratedHistory = {
+      ...partialUpdate,
+      followup: true,
+    }
+    oracleProperty({
+      id: `sqlite-ordinary.write-history-fixed`,
+      law: {
+        ...ordinaryLaw,
+        limits: `Two fixed partial-update histories of the generated grammar, with and without the dependent follow-up.`,
+      },
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: [partialUpdate, partialUpdateWithFollowup],
+      label: (history) =>
+        history.followup ? `partial-update with follow-up` : `partial-update`,
+      resolve: (history) => ({ history }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(ordinaryJudgment, plan, observe, () =>
+          assertGeneratedHistory(plan.history),
         ),
-      ).toBe(true)
-      expect(samples.some((sample) => sample.prefix.length >= 25)).toBe(true)
+      check: forwardAssertionJudgment,
+      calibrations: [
+        {
+          name: `rejects a wrong metadata-preservation design in the generated driver`,
+          law: ordinaryJudgment,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              ordinaryJudgment,
+              plan,
+              observe,
+              async () => {
+                if (plan.history.followup) return
+                const error = await expectMutantRejects(() =>
+                  assertGeneratedHistory(plan.history, true),
+                )
+                rejectAt(`calibration metadata-preservation`, error)
+              },
+            ),
+        },
+        {
+          name: `rejects extra transactions at every generated write checkpoint`,
+          law: ordinaryJudgment,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              ordinaryJudgment,
+              plan,
+              observe,
+              async () => {
+                if (!plan.history.followup) return
+                for (const checkpoint of [
+                  'seed',
+                  'candidate',
+                  'followup',
+                ] as const) {
+                  await expectMutantRejects(
+                    () =>
+                      assertGeneratedHistory(plan.history, false, checkpoint),
+                    `generated ${checkpoint} checkpoint`,
+                  )
+                }
+                const error = await expectMutantRejects(
+                  () =>
+                    assertGeneratedHistory(
+                      { ...plan.history, rollback: true },
+                      false,
+                      'candidate',
+                    ),
+                  'generated rollback checkpoint',
+                )
+                rejectAt(`calibration extra transactions`, error)
+              },
+            ),
+        },
+      ],
     })
 
-    it('reconstructs independent-key work shapes and host caps', () => {
-      const samples = fc.sample(
-        independentWorkArbitrary,
-        oracleFixedSeed(31992, { numRuns: 120 }),
-      )
-      expect(new Set(samples.map((sample) => sample.shape))).toEqual(
-        new Set<IndependentWorkCase['shape']>([
-          'insert-later-metadata',
-          'insert-inline-metadata',
-          'partial-update',
-          'delete',
-          'row-metadata-only',
-          'collection-metadata-only',
-        ]),
-      )
-      expect(new Set(samples.map((sample) => sample.cap))).toEqual(
-        new Set([100, 999]),
-      )
-      expect(
-        samples.every((sample) => sample.size >= 0 && sample.size <= 60),
-      ).toBe(true)
-    })
-
-    // Each campaign registers the route of its parameters in every run.
-    const routed =
-      <TArgs extends Array<unknown>, TResult>(
-        parameters: Parameters<typeof oracleRouteOf>[0],
-        check: (...args: TArgs) => TResult,
-      ) =>
-      (...args: TArgs): TResult => {
-        oracleRoute(oracleRouteOf(parameters))
-        return check(...args)
-      }
-
-    const independentWorkFixedSeed = oracleFixedSeed(31992, {
-      numRuns: oracleRuns(24),
-    })
-    fcTest.prop([independentWorkArbitrary], independentWorkFixedSeed)(
-      'bounds independent-key write work (fixed)',
-      routed(independentWorkFixedSeed, assertIndependentWork),
-    )
-
-    const independentWorkCampaign = oraclePropertyOptions(
-      24,
-      'sqlite-ordinary.independent-work',
-    )
-    fcTest.prop([independentWorkArbitrary], independentWorkCampaign)(
-      'bounds independent-key write work (random or replayed)',
-      routed(independentWorkCampaign, assertIndependentWork),
-    )
-
-    const generatedHistoryFixedSeed = oracleFixedSeed(1992, {
-      numRuns: oracleRuns(24),
-    })
-    fcTest.prop([generatedHistoryArbitrary], generatedHistoryFixedSeed)(
-      'preserves bounded ordinary write histories (fixed)',
-      routed(generatedHistoryFixedSeed, assertGeneratedHistory),
-    )
-
-    const generatedHistoryCampaign = oraclePropertyOptions(
-      24,
-      'sqlite-ordinary.write-history',
-    )
-    fcTest.prop([generatedHistoryArbitrary], generatedHistoryCampaign)(
-      'preserves bounded ordinary write histories (random or replayed)',
-      routed(generatedHistoryCampaign, assertGeneratedHistory),
-    )
-
-    it('rejects a wrong metadata-preservation design in the generated driver', async () => {
-      await expect(
-        assertGeneratedHistory(
-          {
-            scenario: 'partial-update',
-            target: 'a',
-            prefix: [],
-            rowMetadataPrefix: [],
-            collectionMetadata: [],
-            rollback: false,
-            followup: false,
-          },
-          true,
+    const caseWithOneRow: IndependentWorkCase = {
+      shape: 'insert-later-metadata',
+      size: 1,
+      cap: 100,
+    }
+    oracleProperty({
+      id: `sqlite-ordinary.independent-work-fixed`,
+      law: {
+        ...ordinaryLaw,
+        limits: `One fixed one-row independent-key case of the generated grammar.`,
+      },
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: [caseWithOneRow],
+      label: ({ shape, size, cap }) => `${shape} / ${size} / cap ${cap}`,
+      resolve: (history) => ({ history }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(ordinaryJudgment, plan, observe, () =>
+          assertIndependentWork(plan.history),
         ),
-      ).rejects.toThrow()
+      check: forwardAssertionJudgment,
+      calibrations: [
+        {
+          name: `rejects extra measured row calls at the independent-key work checkpoint`,
+          law: ordinaryJudgment,
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              ordinaryJudgment,
+              plan,
+              observe,
+              async () => {
+                const error = await expectMutantRejects(
+                  () => assertIndependentWork(plan.history, 20),
+                  'independent-key work checkpoint',
+                )
+                rejectAt(`calibration extra row calls`, error)
+              },
+            ),
+        },
+      ],
     })
 
-    it('rejects extra transactions at every generated write checkpoint', async () => {
-      const history: GeneratedHistory = {
-        scenario: 'partial-update',
-        target: 'a',
-        prefix: [],
-        rowMetadataPrefix: [],
-        collectionMetadata: [],
-        rollback: false,
-        followup: true,
-      }
-      await assertGeneratedHistory(history)
-      for (const checkpoint of ['seed', 'candidate', 'followup'] as const) {
-        await expect(
-          assertGeneratedHistory(history, false, checkpoint),
-        ).rejects.toThrow(`generated ${checkpoint} checkpoint`)
-      }
-      await expect(
-        assertGeneratedHistory(
-          { ...history, rollback: true },
-          false,
-          'candidate',
-        ),
-      ).rejects.toThrow('generated rollback checkpoint')
-    })
-
-    it('rejects extra measured row calls at the independent-key work checkpoint', async () => {
-      const caseWithOneRow: IndependentWorkCase = {
-        shape: 'insert-later-metadata',
-        size: 1,
-        cap: 100,
-      }
-      await assertIndependentWork(caseWithOneRow)
-      await expect(assertIndependentWork(caseWithOneRow, 20)).rejects.toThrow(
-        'independent-key work checkpoint',
-      )
-    })
-
-    it('calibrates the complete-observation comparison', () => {
-      const expected = modelAfter([
-        semanticCases[0]!.seed!,
-        semanticCases[0]!.candidate,
-      ])
-      const wrong = clone(expected)
-      wrong.rows[0]!.metadata = undefined
-      expect(sameObservation(expected, expected)).toBe(true)
-      expect(sameObservation(wrong, expected)).toBe(false)
-    })
-
-    it('refines durable semantics for the bounded process and design grammar; ordinary large writes are chunk-bounded', async () => {
-      const workObservations: Array<{
-        case: string
-        calls: number
-        bound: number
-        maxParams: number
-      }> = []
-      for (const item of [
-        ...workCases,
-        ...additionalWorkCases,
-        ...semanticCases,
-      ]) {
-        const host = fixture(item.cap)
-        const collectionId = `oracle-${item.name}`
-        let primary: unknown
-        try {
-          await host.adapter.loadResumeSnapshot({
-            kind: `eager`,
-            collectionId: collectionId,
-          }) // schema setup outside work count
-          const history: Array<Tx> = []
-          if (item.seed) {
-            history.push(clone(item.seed))
-            await host.adapter.applyCommittedTx(
-              { kind: `eager`, collectionId: collectionId },
-              item.seed,
-            )
-          }
-          host.counts.query = 0
-          host.counts.run = 0
-          host.counts.transactions = 0
-          host.counts.maxParams = 0
-          history.push(clone(item.candidate))
+    // The fixed process and design cases, each through the real adapter and
+    // the model, then the work bound over all of them, so the RED identifies
+    // work after every semantic comparison.
+    // The fixed size, parameter-cap, and semantic cases, each its own
+    // enumerated history through its own adapter. A case's work is checked
+    // after its semantic comparisons, so a RED names the semantic failure
+    // first; a size at the parameter cap also checks its call count and
+    // largest parameter list.
+    const fixedCases = [...workCases, ...additionalWorkCases, ...semanticCases]
+    const capChecks: Record<string, { calls: number; maxParams: number }> = {
+      'unique-124-500-parameter-cap': { calls: 10, maxParams: 496 },
+      'unique-125-500-parameter-cap': { calls: 10, maxParams: 500 },
+      'unique-126-500-parameter-cap': { calls: 15, maxParams: 500 },
+    }
+    for (const name of Object.keys(capChecks))
+      if (!fixedCases.some((item) => item.name === name))
+        throw new Error(`parameter-cap check names no fixed case: ${name}`)
+    async function refineFixedCase(item: Case): Promise<void> {
+      let work:
+        | { case: string; calls: number; bound: number; maxParams: number }
+        | undefined
+      const host = fixture(item.cap)
+      const collectionId = `oracle-${item.name}`
+      let primary: unknown
+      try {
+        await host.adapter.loadResumeSnapshot({
+          kind: `eager`,
+          collectionId: collectionId,
+        }) // schema setup outside work count
+        const history: Array<Tx> = []
+        if (item.seed) {
+          history.push(clone(item.seed))
           await host.adapter.applyCommittedTx(
             { kind: `eager`, collectionId: collectionId },
-            item.candidate,
+            item.seed,
           )
-          const calls = host.counts.query + host.counts.run
-          const candidateTransactions = host.counts.transactions
-          const maxParams = host.counts.maxParams
-          const actual = await observe(host.adapter, host.driver, collectionId)
-          const expected = modelAfter(history)
+        }
+        host.counts.query = 0
+        host.counts.run = 0
+        host.counts.transactions = 0
+        host.counts.maxParams = 0
+        history.push(clone(item.candidate))
+        await host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          item.candidate,
+        )
+        const calls = host.counts.query + host.counts.run
+        const candidateTransactions = host.counts.transactions
+        const maxParams = host.counts.maxParams
+        const actual = await observe(host.adapter, host.driver, collectionId)
+        const expected = modelAfter(history)
+        oracleAssertion('existing comparison at 1245', () =>
           expect(actual, `${item.name}: complete durable observation`).toEqual(
             expected,
-          )
+          ),
+        )
+        oracleAssertion('existing comparison at 1248', () =>
           expect(
             candidateTransactions,
             `${item.name}: one SQLite transaction`,
-          ).toBe(1)
-          if (item.workSize !== undefined) {
-            const chunk = Math.min(125, Math.floor(item.cap / 4))
-            const bound =
-              12 +
-              6 * (item.workFamilies ?? 1) * Math.ceil(item.workSize / chunk)
-            workObservations.push({ case: item.name, calls, bound, maxParams })
-          }
-        } catch (error) {
-          primary = error
+          ).toBe(1),
+        )
+        if (item.workSize !== undefined) {
+          const chunk = Math.min(125, Math.floor(item.cap / 4))
+          const bound =
+            12 + 6 * (item.workFamilies ?? 1) * Math.ceil(item.workSize / chunk)
+          work = { case: item.name, calls, bound, maxParams }
         }
-        try {
-          host.close()
-        } catch (cleanup) {
-          if (primary !== undefined)
-            throw new AggregateError(
-              [primary, cleanup],
-              `${item.name}: primary and cleanup failed`,
-              { cause: primary },
-            )
-          throw cleanup
-        }
-        if (primary !== undefined) throw primary
+      } catch (error) {
+        primary = error
       }
-      // Check work after every semantic comparison, so the RED identifies work.
-      console.log('ORDINARY_SQLITE_WORK', JSON.stringify(workObservations))
-      for (const row of workObservations) {
+      try {
+        host.close()
+      } catch (cleanup) {
+        if (primary !== undefined)
+          throw new AggregateError(
+            [primary, cleanup],
+            `${item.name}: primary and cleanup failed`,
+            { cause: primary },
+          )
+        throw cleanup
+      }
+      if (primary !== undefined) throw primary
+      if (work === undefined) return
+      const row = work
+      console.log('ORDINARY_SQLITE_WORK', JSON.stringify(row))
+      oracleAssertion('existing comparison at 1278', () =>
         expect(row.calls, `${row.case}: work checkpoint`).toBeLessThanOrEqual(
           row.bound,
-        )
-      }
-      const atSize = (size: number) =>
-        workObservations.find(
-          (row) => row.case === `unique-${size}-500-parameter-cap`,
-        )!
-      expect(atSize(124).calls).toBeLessThanOrEqual(10)
-      expect(atSize(124).maxParams).toBe(496)
-      expect(atSize(125).calls).toBeLessThanOrEqual(10)
-      expect(atSize(125).maxParams).toBe(500)
-      expect(atSize(126).calls).toBeLessThanOrEqual(15)
-      expect(atSize(126).maxParams).toBe(500)
-    })
-
-    it('rejects a writer that discards existing metadata while batching', async () => {
+        ),
+      )
+      const cap = capChecks[row.case]
+      if (cap === undefined) return
+      oracleAssertion('existing comparison at 1286', () =>
+        expect(row.calls).toBeLessThanOrEqual(cap.calls),
+      )
+      oracleAssertion('existing comparison at 1287', () =>
+        expect(row.maxParams).toBe(cap.maxParams),
+      )
+    }
+    // A hostile writer that discards existing metadata while batching: the
+    // model must reject its durable rows.
+    async function judgeMetadataDiscardingWriter(): Promise<void> {
       const host = fixture(100)
       const collectionId = 'oracle-hostile-metadata'
       let primary: unknown
@@ -1330,9 +1371,15 @@ export function runOrdinaryTransactionWorkOracle(): void {
         )
         const actual = await observe(host.adapter, host.driver, collectionId)
         const expected = modelAfter(history)
-        expect(actual.rows[0]?.metadata).toBeUndefined()
-        expect(actual).not.toEqual(expected)
-        expect(sameObservation(actual, expected)).toBe(false)
+        oracleAssertion('existing comparison at 1312', () =>
+          expect(actual.rows[0]?.metadata).toBeUndefined(),
+        )
+        oracleAssertion('existing comparison at 1313', () =>
+          expect(actual).not.toEqual(expected),
+        )
+        oracleAssertion('existing comparison at 1314', () =>
+          expect(sameObservation(actual, expected)).toBe(false),
+        )
       } catch (error) {
         primary = error
       }
@@ -1348,9 +1395,10 @@ export function runOrdinaryTransactionWorkOracle(): void {
         throw cleanup
       }
       if (primary !== undefined) throw primary
-    })
-
-    it('rejects a low-call replacement that loses metadata', async () => {
+    }
+    // A test-only low-call replacement that loses metadata: the model must
+    // reject its durable rows.
+    async function judgeLowCallReplacement(): Promise<void> {
       const host = fixture(100)
       const collectionId = 'oracle-hostile-batch'
       let primary: unknown
@@ -1389,15 +1437,27 @@ export function runOrdinaryTransactionWorkOracle(): void {
             )
           }
         })
-        expect(host.counts.run).toBe(2)
-        expect(host.counts.maxParams).toBeLessThanOrEqual(100)
+        oracleAssertion('existing comparison at 1371', () =>
+          expect(host.counts.run).toBe(2),
+        )
+        oracleAssertion('existing comparison at 1372', () =>
+          expect(host.counts.maxParams).toBeLessThanOrEqual(100),
+        )
         const actual = await observe(host.adapter, host.driver, collectionId)
         const expected = modelAfter([clone(seed), clone(candidate)])
-        expect(actual.rows.map((row) => row.value)).toEqual(
-          expected.rows.map((row) => row.value),
+        oracleAssertion('existing comparison at 1375', () =>
+          expect(actual.rows.map((row) => row.value)).toEqual(
+            expected.rows.map((row) => row.value),
+          ),
         )
-        expect(actual.rows.some((row) => row.metadata === undefined)).toBe(true)
-        expect(actual.rows).not.toEqual(expected.rows)
+        oracleAssertion('existing comparison at 1378', () =>
+          expect(actual.rows.some((row) => row.metadata === undefined)).toBe(
+            true,
+          ),
+        )
+        oracleAssertion('existing comparison at 1379', () =>
+          expect(actual.rows).not.toEqual(expected.rows),
+        )
       } catch (error) {
         primary = error
       }
@@ -1413,9 +1473,8 @@ export function runOrdinaryTransactionWorkOracle(): void {
         throw cleanup
       }
       if (primary !== undefined) throw primary
-    })
-
-    it('treats a repeated committed position as an idempotent write', async () => {
+    }
+    async function judgeIdempotentPosition(): Promise<void> {
       const host = fixture(100)
       const collectionId = 'oracle-idempotent-position'
       let primary: unknown
@@ -1439,9 +1498,10 @@ export function runOrdinaryTransactionWorkOracle(): void {
           { kind: `eager`, collectionId: collectionId },
           candidate,
         )
-        expect(await observe(host.adapter, host.driver, collectionId)).toEqual(
-          modelAfter(history),
-        )
+        ;((observedBeforeComparison0) =>
+          oracleAssertion('existing comparison at 1421', () =>
+            expect(observedBeforeComparison0).toEqual(modelAfter(history)),
+          ))(await observe(host.adapter, host.driver, collectionId))
       } catch (error) {
         primary = error
       }
@@ -1457,9 +1517,8 @@ export function runOrdinaryTransactionWorkOracle(): void {
         throw cleanup
       }
       if (primary !== undefined) throw primary
-    })
-
-    it('rolls back a fault after row and metadata statements but before applied position', async () => {
+    }
+    async function judgeLateBookkeepingFault(): Promise<void> {
       const host = fixture(100)
       const collectionId = 'oracle-late-bookkeeping-fault'
       let primary: unknown
@@ -1484,17 +1543,22 @@ export function runOrdinaryTransactionWorkOracle(): void {
           [{ type: 'set', key: 'anchor', value: { source: 'new' } }],
           [{ type: 'set', key: 'cursor', value: { offset: 2 } }],
         )
-        await expect(
-          host.adapter.applyCommittedTx(
-            { kind: `eager`, collectionId: collectionId },
-            candidate,
-          ),
-        ).rejects.toThrow('injected late bookkeeping failure')
-        host.failRunMatching(undefined)
-        expect(await observe(host.adapter, host.driver, collectionId)).toEqual(
-          before,
+        await oracleAssertion('existing comparison at 1466', () =>
+          expect(
+            host.adapter.applyCommittedTx(
+              { kind: `eager`, collectionId: collectionId },
+              candidate,
+            ),
+          ).rejects.toThrow('injected late bookkeeping failure'),
         )
-        expect(before).toEqual(modelAfter([clone(seed)]))
+        host.failRunMatching(undefined)
+        ;((observedBeforeComparison0) =>
+          oracleAssertion('existing comparison at 1473', () =>
+            expect(observedBeforeComparison0).toEqual(before),
+          ))(await observe(host.adapter, host.driver, collectionId))
+        oracleAssertion('existing comparison at 1476', () =>
+          expect(before).toEqual(modelAfter([clone(seed)])),
+        )
       } catch (error) {
         primary = error
       }
@@ -1510,9 +1574,8 @@ export function runOrdinaryTransactionWorkOracle(): void {
         throw cleanup
       }
       if (primary !== undefined) throw primary
-    })
-
-    it('rolls back rows, metadata, evidence and position after a later row-write fault', async () => {
+    }
+    async function judgeLaterRowWriteFault(): Promise<void> {
       const host = fixture(100)
       const collectionId = 'oracle-later-fault'
       let primary: unknown
@@ -1553,16 +1616,22 @@ export function runOrdinaryTransactionWorkOracle(): void {
           [{ type: 'set', key: 'anchor', value: { source: 'new' } }],
           [{ type: 'set', key: 'cursor', value: { offset: 2 } }],
         )
-        await expect(
-          host.adapter.applyCommittedTx(
-            { kind: `eager`, collectionId: collectionId },
-            candidate,
-          ),
-        ).rejects.toThrow('injected later row-write failure')
+        await oracleAssertion('existing comparison at 1535', () =>
+          expect(
+            host.adapter.applyCommittedTx(
+              { kind: `eager`, collectionId: collectionId },
+              candidate,
+            ),
+          ).rejects.toThrow('injected later row-write failure'),
+        )
         host.failAfterRowWriteCount(undefined)
         const after = await observe(host.adapter, host.driver, collectionId)
-        expect(after).toEqual(before)
-        expect(after).toEqual(modelAfter([seed]))
+        oracleAssertion('existing comparison at 1543', () =>
+          expect(after).toEqual(before),
+        )
+        oracleAssertion('existing comparison at 1544', () =>
+          expect(after).toEqual(modelAfter([seed])),
+        )
       } catch (error) {
         primary = error
       }
@@ -1578,6 +1647,168 @@ export function runOrdinaryTransactionWorkOracle(): void {
         throw cleanup
       }
       if (primary !== undefined) throw primary
+    }
+    oracleProperty({
+      id: `sqlite-ordinary.fixed-cases`,
+      law: {
+        ...ordinaryLaw,
+        limits: `The fixed size, parameter-cap, and semantic cases, each through its own adapter, with its work bound.`,
+      },
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: fixedCases.map((item) => item.name),
+      label: (name) =>
+        `refines durable semantics and bounds the work of ${name}`,
+      resolve: (name) => ({ item: fixedCases.find((c) => c.name === name)! }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(ordinaryJudgment, plan, observe, () =>
+          refineFixedCase(plan.item),
+        ),
+      check: forwardAssertionJudgment,
+    })
+    oracleProperty({
+      id: `sqlite-ordinary.metadata-discarding-writer`,
+      law: {
+        ...ordinaryLaw,
+        limits: `The first semantic case with a writer that discards existing metadata while batching.`,
+      },
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: [
+        {
+          name: `rejects a writer that discards existing metadata while batching`,
+        },
+      ],
+      label: ({ name }) => name,
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(ordinaryJudgment, plan, observe, () =>
+          judgeMetadataDiscardingWriter(),
+        ),
+      check: forwardAssertionJudgment,
+    })
+    oracleProperty({
+      id: `sqlite-ordinary.low-call-replacement`,
+      law: {
+        ...ordinaryLaw,
+        limits: `A 26-row replacement through a test-only writer that bypasses applyCommittedTx.`,
+      },
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: [
+        { name: `rejects a low-call replacement that loses metadata` },
+      ],
+      label: ({ name }) => name,
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(ordinaryJudgment, plan, observe, () =>
+          judgeLowCallReplacement(),
+        ),
+      check: forwardAssertionJudgment,
+    })
+    oracleProperty({
+      id: `sqlite-ordinary.idempotent-position`,
+      law: {
+        ...ordinaryLaw,
+        limits: `One delete reapplied at the same committed position.`,
+      },
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: [
+        { name: `treats a repeated committed position as an idempotent write` },
+      ],
+      label: ({ name }) => name,
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(ordinaryJudgment, plan, observe, () =>
+          judgeIdempotentPosition(),
+        ),
+      check: forwardAssertionJudgment,
+    })
+    oracleProperty({
+      id: `sqlite-ordinary.late-bookkeeping-fault`,
+      law: {
+        ...ordinaryLaw,
+        limits: `One fault after the row and metadata statements, before the applied position.`,
+      },
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: [
+        {
+          name: `rolls back a fault after row and metadata statements but before applied position`,
+        },
+      ],
+      label: ({ name }) => name,
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(ordinaryJudgment, plan, observe, () =>
+          judgeLateBookkeepingFault(),
+        ),
+      check: forwardAssertionJudgment,
+    })
+    oracleProperty({
+      id: `sqlite-ordinary.later-row-write-fault`,
+      law: {
+        ...ordinaryLaw,
+        limits: `One 51-row transaction that fails after 25 row writes.`,
+      },
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: [
+        {
+          name: `rolls back rows, metadata, evidence and position after a later row-write fault`,
+        },
+      ],
+      label: ({ name }) => name,
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(ordinaryJudgment, plan, observe, () =>
+          judgeLaterRowWriteFault(),
+        ),
+      check: forwardAssertionJudgment,
+    })
+    oracleProperty({
+      id: `sqlite-ordinary.independent-work`,
+      law: {
+        statement: `The existing independent ordinary-write model judges durable rows and metadata at every original checkpoint, with the unchanged distinct-key work bound.`,
+        authority: `PersistedTx semantics and the ordinary-transaction work contract stated above.`,
+        limits: `The existing bounded node:sqlite history grammar; no new host, concurrency, or universal work claim.`,
+      },
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: {
+        arbitrary: independentWorkArbitrary,
+        runs: 24,
+        fixedSeeds: [31992],
+      },
+      resolve: (history) => ({ history }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(
+          `ordinary write semantics and work`,
+          plan,
+          observe,
+          () => assertIndependentWork(plan.history),
+        ),
+      check: forwardAssertionJudgment,
+    })
+    oracleProperty({
+      id: `sqlite-ordinary.write-history`,
+      law: {
+        statement: `The existing independent ordinary-write model judges durable rows and metadata at every original checkpoint, with the unchanged distinct-key work bound.`,
+        authority: `PersistedTx semantics and the ordinary-transaction work contract stated above.`,
+        limits: `The existing bounded node:sqlite history grammar; no new host, concurrency, or universal work claim.`,
+      },
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: {
+        arbitrary: generatedHistoryArbitrary,
+        runs: 24,
+        fixedSeeds: [1992],
+      },
+      resolve: (history) => ({ history }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(
+          `ordinary write semantics and work`,
+          plan,
+          observe,
+          () => assertGeneratedHistory(plan.history),
+        ),
+      check: forwardAssertionJudgment,
     })
   })
 }

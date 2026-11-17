@@ -13,9 +13,13 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import electronPath from 'electron'
-import { expect, it, onTestFinished } from 'vitest'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { expect, onTestFinished } from 'vitest'
+import { oracleProperty } from '../../db/tests/oracle-property.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter.js'
 
 const fixture = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -141,17 +145,9 @@ function expectReloadClassLawsHold(result: Result): void {
   ).toEqual([])
 }
 
-declareOracle({
-  owns: [
-    `src/main.ts#exposeElectronSQLitePersistence`,
-    `src/renderer.ts#createElectronSQLitePersistence`,
-    `src/electron-coordinator.ts`,
-  ],
-  check: [expectReloadClassLawsHold],
-})
-
-it(`real Electron reload is free of avoidable work ahead of its reads`, async () => {
-  oracleRoute(`fixed history`)
+// The real-Electron checkpoint: bundle the app, run every fixed reload history
+// in one app, and apply the app's comparison to the published result.
+async function runRealElectronReload(): Promise<void> {
   const out = mkdtempSync(join(tmpdir(), `reload-class-app-`))
   const databases = mkdtempSync(join(tmpdir(), `reload-class-db-`))
   onTestFinished(() => {
@@ -162,4 +158,34 @@ it(`real Electron reload is free of avoidable work ahead of its reads`, async ()
   const result = await runApp(out, databases)
   if (process.env.RELOAD_ORACLE_DEBUG) console.log(JSON.stringify(result))
   expectReloadClassLawsHold(result)
-}, 600_000)
+}
+
+// One fixed history: the app's run of every fixed reload history. The adapter
+// transports the judgment of expectReloadClassLawsHold.
+const realElectronReloadLaw = `real Electron reload class`
+oracleProperty({
+  id: `sqlite-reload.class.electron-app`,
+  law: {
+    statement: `A real Electron app reload does no avoidable work ahead of its reads: every fixed reload history reports, and none fails before its checkpoint or reports a violation of the reload class oracle.`,
+    authority: `The reload class law in packages/db-sqlite-persistence-core/tests/reload-class-oracle.ts.`,
+    limits: `The fixed reload histories, run once in one real Electron app; the generated campaign belongs to reload-class-oracle.test.ts.`,
+  },
+  owns: [
+    `src/main.ts#exposeElectronSQLitePersistence`,
+    `src/renderer.ts#createElectronSQLitePersistence`,
+    `src/electron-coordinator.ts`,
+  ],
+  histories: [
+    {
+      name: `real Electron reload is free of avoidable work ahead of its reads`,
+    },
+  ],
+  label: ({ name }) => name,
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(realElectronReloadLaw, plan, observe, () =>
+      runRealElectronReload(),
+    ),
+  check: forwardAssertionJudgment,
+  timeout: 600_000,
+})

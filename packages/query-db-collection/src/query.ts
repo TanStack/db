@@ -1674,11 +1674,20 @@ export function queryCollectionOptions(
 
       const ownedRows = new Set<string | number>()
       const hydratedOwners = Array.from(
-        collection._state.syncedData.keys(),
-        (rowKey) => [rowKey, getPersistedOwners(rowKey)] as const,
+        collection._state.acceptedSyncedEntries(),
+        ([rowKey]) => [rowKey, getPersistedOwners(rowKey)] as const,
       )
       for (const [rowKey, owners] of hydratedOwners) {
         if (owners.size === 0) {
+          // An eager result covers every row. A restored direct-write row has
+          // no owner or same-run write position; its omission is authoritative.
+          // Same-run direct writes keep their fetch-generation precedence.
+          if (
+            syncMode === `eager` &&
+            persistence !== null &&
+            !unownedDirectWritePositions.has(rowKey)
+          )
+            ownedRows.add(rowKey)
           continue
         }
 
@@ -2570,8 +2579,8 @@ export function queryCollectionOptions(
           ? queryCollectionSuccessfulFetchStarts.get(currentQuery)
           : undefined
       if (syncMode === `eager`) {
-        // A new complete snapshot replaces direct rows without subset owners.
-        // Hydrated rows with no claim are not necessarily this Query's rows.
+        // A later complete fetch also settles same-run ownerless direct rows.
+        // Restored ownerless rows are included in the hydrated baseline above.
         unownedDirectWritePositions.forEach((directPosition, key) => {
           if (
             currentSyncedItems.has(key) &&
@@ -2726,9 +2735,8 @@ export function queryCollectionOptions(
         }
 
         previouslyOwnedRows.forEach((key) => {
-          const oldItem = shouldUsePersistedBaseline
-            ? persistedBaseline.get(key)?.value
-            : currentSyncedItems.get(key)
+          const oldItem =
+            persistedBaseline?.get(key)?.value ?? currentSyncedItems.get(key)
           const newItem = newItemsMap.get(key)
           if (!newItem) {
             const directPosition = unownedDirectWritePositions.get(key)
@@ -2779,13 +2787,16 @@ export function queryCollectionOptions(
           } else if (
             !previouslyOwnedRows.has(key) &&
             (result.isFetchedAfterMount ||
+              (syncMode === `eager` &&
+                persistence !== null &&
+                directPosition === undefined) ||
               (directPosition !== undefined &&
                 cachedRemoteFetchStart !== undefined &&
                 cachedRemoteFetchStart > directPosition)) &&
             !deepEquals(currentSyncedItems.get(key), newItem)
           ) {
-            // A fetched row can first claim a directly inserted key. That
-            // claim also replaces the direct value with the server value.
+            // A result that first claims a restored peer row must apply its
+            // returned value too. Same-run direct rows retain fetch precedence.
             write({ type: `update`, value: newItem })
           }
           if (addsOwner || insertsRow) {
@@ -2874,6 +2885,14 @@ export function queryCollectionOptions(
       }
     }
 
+    // The first eager result can arrive before persisted restore publishes.
+    // Its ownership baseline must include durable rows still absent in memory.
+    const needsPersistedBaseline = (queryHash: string) =>
+      retainedQueriesPendingRevalidation.has(queryHash) ||
+      (syncMode === `eager` &&
+        persistence !== null &&
+        !queryToRows.has(queryHash))
+
     const reconcileSuccessfulResult = async (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
@@ -2888,10 +2907,19 @@ export function queryCollectionOptions(
       const validatedItems =
         selectedItems ??
         validateSuccessfulResultItemsForApplication(queryKey, result)
-      const persistedBaseline = await loadPersistedBaselineForQuery(
-        hashedQueryKey,
-        validatedItems.length === 0,
-      )
+      // Eager restore already owns the complete row read and its key evidence.
+      // Await its acceptance before diffing, rather than scanning it again.
+      // A persisting optimistic transaction can still hold its application.
+      const useHydratedBaseline =
+        syncMode === `eager` &&
+        !retainedQueriesPendingRevalidation.has(hashedQueryKey)
+      if (useHydratedBaseline) await persistence?.hydrateBaseline()
+      const persistedBaseline = useHydratedBaseline
+        ? undefined
+        : await loadPersistedBaselineForQuery(
+            hashedQueryKey,
+            validatedItems.length === 0,
+          )
       if (
         collection.status === `cleaned-up` ||
         resultApplicationControllers.get(hashedQueryKey) !== applicationToken
@@ -3220,7 +3248,7 @@ export function queryCollectionOptions(
                     hashedQueryKey,
                     result,
                     (signal, token) =>
-                      retainedQueriesPendingRevalidation.has(hashedQueryKey)
+                      needsPersistedBaseline(hashedQueryKey)
                         ? reconcileSuccessfulResult(
                             queryKey,
                             result,
@@ -3286,23 +3314,26 @@ export function queryCollectionOptions(
               return
             }
             if (result.isFetching) return
-
-            enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
-              reconcileSuccessfulResult(
-                queryKey,
-                result,
-                token,
-                signal,
-                undefined,
-                fetchStartGenerations.get(hashedQueryKey) ??
-                  directWriteGeneration,
-              ),
-            )
-          } else {
-            enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
-              applySuccessfulResult(queryKey, result, token, undefined, signal),
-            )
           }
+          enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
+            needsPersistedBaseline(hashedQueryKey)
+              ? reconcileSuccessfulResult(
+                  queryKey,
+                  result,
+                  token,
+                  signal,
+                  undefined,
+                  fetchStartGenerations.get(hashedQueryKey) ??
+                    directWriteGeneration,
+                )
+              : applySuccessfulResult(
+                  queryKey,
+                  result,
+                  token,
+                  undefined,
+                  signal,
+                ),
+          )
         }
 
         if (

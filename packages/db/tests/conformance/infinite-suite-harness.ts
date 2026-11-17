@@ -5,7 +5,7 @@
  *
  * This module declares no oracle part. Its registry self-test checks the
  * harness's own bookkeeping, not a law. The laws are in
- * infinite-suite-oracle.ts, and the hand-written scenarios are in
+ * infinite-suite.ts, and the hand-written scenarios are in
  * infinite-suite-cases.ts.
  */
 import { expect, it } from 'vitest'

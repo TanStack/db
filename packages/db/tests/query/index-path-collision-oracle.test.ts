@@ -35,15 +35,19 @@
  * nullish values, custom collation, or incremental publication histories.
  * Lazy demand target deduplication has a separate compiler-boundary witness.
  */
-import { expect, it, vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { add, and, gt, lt, lte } from '../../src/query/builder/functions.js'
 import { PropRef } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { mockSyncCollectionOptions } from '../utils.js'
-import { declareOracle } from '../oracle-declaration.js'
-import { oracleRoute } from '../oracle-config.js'
+import { oracleProperty } from '../oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import { checkWithCleanup } from './index-path-collision-support.js'
 import type { Release } from './index-path-collision-support.js'
 import type { BasicExpression } from '../../src/query/ir.js'
@@ -105,15 +109,6 @@ function modelSelectedOrder(): Array<string> {
 
 const expectedKeys = modelKeys((row) => row[`a.b`] > 5 && row.a.b < 20)
 
-declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/indexes/btree-index.ts',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
-  model: [modelKeys, modelSelectedOrder],
-})
-
 const cases: Array<{
   name: string
   where: BasicExpression<boolean>
@@ -141,54 +136,49 @@ const cases: Array<{
   },
 ]
 
-it.each(cases)(
-  `keeps dotted scalar and nested predicates distinct: $name`,
-  async ({ name, where, accepts }) => {
-    oracleRoute(`case`)
-    await checkWithCleanup(async (register) => {
-      const collection = await readyCollection(name, register)
-      const expected = modelKeys(accepts)
-      const queryKeys = () =>
-        collection
-          .currentStateAsChanges({ where })!
-          .map((change) => change.key)
-          .sort()
+async function runPredicateCase({
+  name,
+  where,
+  accepts,
+}: (typeof cases)[number]): Promise<void> {
+  await checkWithCleanup(async (register) => {
+    const collection = await readyCollection(name, register)
+    const expected = modelKeys(accepts)
+    const queryKeys = () =>
+      collection
+        .currentStateAsChanges({ where })!
+        .map((change) => change.key)
+        .sort()
 
-      expect(queryKeys(), `scan result`).toEqual(expected)
-      const index = collection.createIndex((row) => row.a.b)
-      const lookup = vi.spyOn(index, `lookup`)
-      expect(queryKeys(), `indexed result`).toEqual(expected)
-      expect(lookup, `indexed path reached`).toHaveBeenCalled()
-    })
-  },
-)
+    expect(queryKeys(), `scan result`).toEqual(expected)
+    const index = collection.createIndex((row) => row.a.b)
+    const lookup = vi.spyOn(index, `lookup`)
+    expect(queryKeys(), `indexed result`).toEqual(expected)
+    expect(lookup, `indexed path reached`).toHaveBeenCalled()
+  })
+}
 
-it.each([false, true])(
-  `preserves distinct fields in a Collection subscription callback (indexed=%s)`,
-  async (indexed) => {
-    oracleRoute(`case`)
-    await checkWithCleanup(async (register) => {
-      const collection = await readyCollection(
-        `subscription-${indexed}`,
-        register,
-      )
-      if (indexed) collection.createIndex((row) => row.a.b)
-      const changes: Array<string | number> = []
-      const subscription = collection.subscribeChanges(
-        (batch) => changes.push(...batch.map((change) => change.key)),
-        {
-          includeInitialState: true,
-          where: (row) => and(gt(row[`a.b`], 5), lt(row.a.b, 20)),
-        },
-      )
-      register(() => subscription.unsubscribe())
-      expect(changes.sort()).toEqual(expectedKeys)
-    })
-  },
-)
+async function runSubscriptionCase(indexed: boolean): Promise<void> {
+  await checkWithCleanup(async (register) => {
+    const collection = await readyCollection(
+      `subscription-${indexed}`,
+      register,
+    )
+    if (indexed) collection.createIndex((row) => row.a.b)
+    const changes: Array<string | number> = []
+    const subscription = collection.subscribeChanges(
+      (batch) => changes.push(...batch.map((change) => change.key)),
+      {
+        includeInitialState: true,
+        where: (row) => and(gt(row[`a.b`], 5), lt(row.a.b, 20)),
+      },
+    )
+    register(() => subscription.unsubscribe())
+    expect(changes.sort()).toEqual(expectedKeys)
+  })
+}
 
-it(`keeps selected dotted and nested paths distinct in a public order`, async () => {
-  oracleRoute(`fixed history`)
+async function runSelectedOrderHistory(): Promise<void> {
   await checkWithCleanup(async (register) => {
     const collection = await readyCollection(`selected-order`, register)
     const result = createLiveQueryCollection({
@@ -210,29 +200,123 @@ it(`keeps selected dotted and nested paths distinct in a public order`, async ()
     const expected = modelSelectedOrder()
     expect(result.toArray.map((row) => row.id)).toEqual(expected)
   })
+}
+
+async function runLiveQueryCase(indexed: boolean): Promise<void> {
+  await checkWithCleanup(async (register) => {
+    const collection = await readyCollection(`live-query-${indexed}`, register)
+    if (indexed) collection.createIndex((row) => row.a.b)
+    const result = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ item: collection })
+          .where(({ item }) => and(gt(item[`a.b`], 5), lt(item.a.b, 20)))
+          .select(({ item }) => ({ id: item.id })),
+      startSync: true,
+    })
+    register(() => result.cleanup())
+    await result.stateWhenReady()
+    expect(result.toArray.map((row) => row.id).sort()).toEqual(expectedKeys)
+  })
+}
+
+// Each production path above runs as its own property. The rows of `cases`
+// hold functions, so a predicate history is the case's name.
+const pathLaw = {
+  statement: `A source row matches an AND predicate according to each complete property path, so a scalar property named a.b and a nested a.b property are distinct fields; adding an index may change work, but not public rows.`,
+  authority: `docs/guides/live-queries.md (AND filters, selected fields, computed orderBy values) and the live-query architecture's treatment of an index as a physical query detail.`,
+}
+const casesByName = new Map(cases.map((row) => [row.name, row]))
+
+oracleProperty({
+  id: `index-path-collision.predicate`,
+  law: {
+    ...pathLaw,
+    limits: `The four bounded predicate shapes, scanned and then indexed, through currentStateAsChanges.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: cases.map(({ name }) => name),
+  label: (name) =>
+    `keeps dotted scalar and nested predicates distinct: ${name}`,
+  resolve: (name) => ({ row: casesByName.get(name)! }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`distinct field paths`, plan, observe, () =>
+      runPredicateCase(plan.row),
+    ),
+  check: forwardAssertionJudgment,
 })
 
-it.each([false, true])(
-  `preserves distinct fields in a live-query callback (indexed=%s)`,
-  async (indexed) => {
-    oracleRoute(`case`)
-    await checkWithCleanup(async (register) => {
-      const collection = await readyCollection(
-        `live-query-${indexed}`,
-        register,
-      )
-      if (indexed) collection.createIndex((row) => row.a.b)
-      const result = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ item: collection })
-            .where(({ item }) => and(gt(item[`a.b`], 5), lt(item.a.b, 20)))
-            .select(({ item }) => ({ id: item.id })),
-        startSync: true,
-      })
-      register(() => result.cleanup())
-      await result.stateWhenReady()
-      expect(result.toArray.map((row) => row.id).sort()).toEqual(expectedKeys)
-    })
+oracleProperty({
+  id: `index-path-collision.subscription`,
+  law: {
+    ...pathLaw,
+    limits: `A Collection subscription callback with and without the nested-field index.`,
   },
-)
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: [false, true],
+  label: (indexed) =>
+    `preserves distinct fields in a Collection subscription callback (indexed=${indexed})`,
+  resolve: (indexed) => ({ indexed }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`distinct field paths`, plan, observe, () =>
+      runSubscriptionCase(plan.indexed),
+    ),
+  check: forwardAssertionJudgment,
+})
+
+oracleProperty({
+  id: `index-path-collision.selected-order`,
+  law: {
+    ...pathLaw,
+    limits: `One selected-field ordering through the public $selected callback proxy.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: [
+    `keeps selected dotted and nested paths distinct in a public order`,
+  ],
+  label: (name) => name,
+  resolve: (name) => ({ name }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`distinct field paths`, plan, observe, () =>
+      runSelectedOrderHistory(),
+    ),
+  check: forwardAssertionJudgment,
+})
+
+oracleProperty({
+  id: `index-path-collision.live-query`,
+  law: {
+    ...pathLaw,
+    limits: `A live-query callback with and without the nested-field index.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: [false, true],
+  label: (indexed) =>
+    `preserves distinct fields in a live-query callback (indexed=${indexed})`,
+  resolve: (indexed) => ({ indexed }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`distinct field paths`, plan, observe, () =>
+      runLiveQueryCase(plan.indexed),
+    ),
+  check: forwardAssertionJudgment,
+})

@@ -32,15 +32,19 @@
  */
 import { StrictMode, Suspense, useLayoutEffect } from 'react'
 import { act, render, renderHook, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect } from 'vitest'
 import {
   BTreeIndex,
   createCollection,
   createLiveQueryCollection,
 } from '@tanstack/db'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveQuery } from '../src/useLiveQuery'
 import {
@@ -53,10 +57,25 @@ import {
 import type { Row } from './infinite-query-render-cuts-support'
 import type { ReactNode } from 'react'
 
-afterEach(async () => {
-  // Unmount hooks before cleaning up the sources they read.
+// Unmount hooks before cleaning up the sources they read.
+async function runCleanups(): Promise<void> {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
-})
+}
+
+afterEach(runCleanups)
+
+// Each history drains its own cleanups, so a property test that runs several
+// histories in turn, such as the determinism test, unmounts each history's
+// hooks and sources before the next one starts.
+async function withHistoryCleanups(run: () => Promise<void>): Promise<void> {
+  try {
+    await run()
+  } finally {
+    await runCleanups()
+  }
+}
+
+const RENDER_CUTS_LAW = `React infinite-query pre-commit cut`
 
 type HookName = `live` | `infinite`
 type InputForm = `query` | `supplied`
@@ -184,36 +203,55 @@ async function checkAbandonedRenderAcquisitions(
   )
 }
 
-declareOracle({
-  owns: [
-    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
-    `src/useLiveQuery.ts#useLiveQuery`,
-  ],
-  check: [checkAbandonedRenderAcquisitions],
-})
+async function checkStrictModeFirstWindow(): Promise<void> {
+  const reference = await firstWindowLoadsForStrictMount(`live`)
+  // No provider work before commit: the on-demand window is unpublished.
+  expect(reference.firstCommit).toEqual({ status: `loading`, ids: [] })
+  // React 19 keeps refs across the double render, so both hooks request the
+  // first window once, after commit. React 18 does not; see the coverage map.
+  expect(reference.loads).toBe(1)
+  expect(await firstWindowLoadsForStrictMount(`infinite`)).toEqual(reference)
+}
+
+type OnDemandHistory =
+  | { law: `abandoned render`; form: InputForm; wrapped: boolean }
+  | { law: `StrictMode double render` }
+
+function runOnDemandHistory(history: OnDemandHistory): Promise<void> {
+  return history.law === `abandoned render`
+    ? checkAbandonedRenderAcquisitions(history.form, history.wrapped)
+    : checkStrictModeFirstWindow()
+}
 
 describe(`on-demand sources match useLiveQuery`, () => {
-  it.each([
-    { form: `query` as const, wrapped: false },
-    { form: `query` as const, wrapped: true },
-    { form: `supplied` as const, wrapped: true },
-  ])(
-    `starts no acquisition attempt for a render that never commits, as useLiveQuery does (%o)`,
-    async ({ form, wrapped }) => {
-      oracleRoute(`case`)
-      await checkAbandonedRenderAcquisitions(form, wrapped)
+  oracleProperty({
+    id: `react.infinite-query-render-cuts.on-demand`,
+    law: {
+      statement: `A render that never commits starts no acquisition attempt on an on-demand source, and a StrictMode double render requests the first window once after commit with a loading first commit, as useLiveQuery does.`,
+      authority: `The pre-commit cut laws documented above; useLiveQuery under the same history is the reference.`,
+      limits: `Query-callback, wrapped and supplied on-demand reads, and one StrictMode mount, under React 19; React 18 ref retention is recorded in the coverage map.`,
     },
-  )
-
-  it(`requests the first window and commits the first value as useLiveQuery does across a StrictMode double render`, async () => {
-    oracleRoute(`fixed history`)
-    const reference = await firstWindowLoadsForStrictMount(`live`)
-    // No provider work before commit: the on-demand window is unpublished.
-    expect(reference.firstCommit).toEqual({ status: `loading`, ids: [] })
-    // React 19 keeps refs across the double render, so both hooks request the
-    // first window once, after commit. React 18 does not; see the coverage map.
-    expect(reference.loads).toBe(1)
-    expect(await firstWindowLoadsForStrictMount(`infinite`)).toEqual(reference)
+    owns: [
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+    ],
+    histories: [
+      { law: `abandoned render`, form: `query`, wrapped: false },
+      { law: `abandoned render`, form: `query`, wrapped: true },
+      { law: `abandoned render`, form: `supplied`, wrapped: true },
+      { law: `StrictMode double render` },
+    ] satisfies Array<OnDemandHistory>,
+    label: (history: OnDemandHistory) =>
+      history.law === `abandoned render`
+        ? `starts no acquisition attempt for a render that never commits, as useLiveQuery does ({ form: '${history.form}', wrapped: ${history.wrapped} })`
+        : `requests the first window and commits the first value as useLiveQuery does across a StrictMode double render`,
+    resolve: (history: OnDemandHistory) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(RENDER_CUTS_LAW, plan, observe, () =>
+        withHistoryCleanups(() => runOnDemandHistory(plan.history)),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
 
@@ -226,45 +264,65 @@ function expectedReadyFirstCommit(count: number): {
   return { status: `ready`, ids: rows(count).map((row) => row.id) }
 }
 
-declareOracle({ model: [expectedReadyFirstCommit] })
+async function checkSyncFirstCommitAgreement(): Promise<void> {
+  const source = makeSyncSource(10)
+  const firstCommit = (
+    useResult: () => { status: string; data: Array<Row> },
+  ) => {
+    const commits: Array<{ status: string; ids: Array<string> }> = []
+    const hook = renderHook(() => {
+      const result = useResult()
+      useLayoutEffect(() => {
+        commits.push({
+          status: result.status,
+          ids: result.data.map((row) => row.id),
+        })
+      })
+      return result
+    })
+    cleanups.push(() => hook.unmount())
+    return commits
+  }
+
+  const live = firstCommit(() =>
+    useLiveQuery((q) =>
+      q.from({ row: source }).orderBy(({ row }) => row.rank, `desc`),
+    ),
+  )
+  const infinite = firstCommit(() =>
+    useLiveInfiniteQuery(
+      (q) => q.from({ row: source }).orderBy(({ row }) => row.rank, `desc`),
+      { pageSize: 20 },
+    ),
+  )
+  await waitFor(() => expect(infinite.length).toBeGreaterThan(0))
+
+  const expected = expectedReadyFirstCommit(10)
+  expect(live[0]).toEqual(expected)
+  expect(infinite[0]).toEqual(expected)
+}
 
 describe(`agreement with useLiveQuery`, () => {
-  it(`commits the same ready rows first as useLiveQuery for a synchronous source`, async () => {
-    oracleRoute(`fixed history`)
-    const source = makeSyncSource(10)
-    const firstCommit = (
-      useResult: () => { status: string; data: Array<Row> },
-    ) => {
-      const commits: Array<{ status: string; ids: Array<string> }> = []
-      const hook = renderHook(() => {
-        const result = useResult()
-        useLayoutEffect(() => {
-          commits.push({
-            status: result.status,
-            ids: result.data.map((row) => row.id),
-          })
-        })
-        return result
-      })
-      cleanups.push(() => hook.unmount())
-      return commits
-    }
-
-    const live = firstCommit(() =>
-      useLiveQuery((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank, `desc`),
+  oracleProperty({
+    id: `react.infinite-query-render-cuts.sync-agreement`,
+    law: {
+      statement: `For the same synchronous source, useLiveInfiniteQuery and useLiveQuery commit the same ready rows first, in source order.`,
+      authority: `The agreement law documented above; expectedReadyFirstCommit.`,
+      limits: `One ten-row synchronous source and one mount of each hook.`,
+    },
+    owns: [
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+    ],
+    histories: [{ source: `synchronous` }],
+    label: () =>
+      `commits the same ready rows first as useLiveQuery for a synchronous source`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(RENDER_CUTS_LAW, plan, observe, () =>
+        withHistoryCleanups(checkSyncFirstCommitAgreement),
       ),
-    )
-    const infinite = firstCommit(() =>
-      useLiveInfiniteQuery(
-        (q) => q.from({ row: source }).orderBy(({ row }) => row.rank, `desc`),
-        { pageSize: 20 },
-      ),
-    )
-    await waitFor(() => expect(infinite.length).toBeGreaterThan(0))
-
-    const expected = expectedReadyFirstCommit(10)
-    expect(live[0]).toEqual(expected)
-    expect(infinite[0]).toEqual(expected)
+    check: forwardAssertionJudgment,
   })
 })

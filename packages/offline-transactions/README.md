@@ -226,7 +226,7 @@ mutation function after restart; an unmarked row may replay.
 - `removeFromOutbox(id)` - Manually remove transaction from outbox
 - `clearOutbox()` - Manually remove all outbox transactions
 - `peekOutbox()` - View all pending transactions
-- `dispose()` - Clean up resources
+- `dispose()` - Stop new processing and release executor resources. Pending durable transactions and optimistic state on surviving Collections remain live.
 
 An acknowledged `removeFromOutbox(id)` or `clearOutbox()` while a named
 mutation function is running does not cancel that call. If the call later
@@ -299,6 +299,26 @@ On the offline-execution path, successful settlement means the configured
 It means the server confirmed or exposed the write only when that
 `mutationFn` explicitly waits for the provider's acknowledgement, read-back, or
 sync observation before returning.
+
+Disposing an executor does not cancel its admitted transactions or reject their
+callers. Their optimistic state stays on surviving Collections. If you replace
+the executor over the same outbox and retain every configured Collection object
+under its existing registry key in this runtime, its replay settles the original
+`commit()`, `when('settled')`, and per-ID waiters with each transaction's outcome.
+Storage adapter objects may
+change. An already-issued provider call can also finish after disposal.
+Disposal alone supplies no outcome if nothing resumes the work. This promise
+does not transport JavaScript promises across tabs or a page reload, and a
+different Collection object does not inherit those callers through an unchanged
+ancillary Collection. Core's conflicting-transaction rollback rules still apply
+to pending restored snapshots. Dispose and clean up account-scoped Collections
+separately when ending an account's UI lifetime;
+decide separately what to do with that account's durable outbox.
+
+Copying or migrating pending rows between independent outboxes is outside this
+handoff guarantee. The executor has no durable outbox identity. Replaying a copied
+row with the same transaction ID and Collection objects can settle the original
+callers while the original outbox still retains its copy.
 
 After `mutationFn` returns, the executor records a `deletion-pending` outbox
 phase before removing the row. If recording that phase or removing the row

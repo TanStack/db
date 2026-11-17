@@ -15,12 +15,16 @@
  * Genuine immutable native values retain their type and value. Production
  * serializers and comparators do not supply the model's expected classes.
  */
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { IR, coalesce } from '../src'
 import { collections, createSource } from './collection-index-value-fixture.js'
-import { oracleRoute } from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty } from './oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 
 afterEach(async () => {
   await Promise.all(
@@ -44,16 +48,9 @@ function expectSignatureClasses(
   }
 }
 
-// What this oracle owns: the gap report judges the index metadata and its
-// signatures in collection/indexes.ts by this file's tests. The signature
-// check compares every fixture pair's class with its signature.
-declareOracle({
-  owns: [`src/collection/indexes.ts`],
-  check: [expectSignatureClasses],
-})
-
-it(`distinguishes native literals from ordinary tags in index signatures`, () => {
-  oracleRoute(`case`)
+// The original case, unchanged: it creates one index per fixture and compares
+// the signatures with the fixtures' classes.
+function runSignatureClassCase(): void {
   const instant = Temporal.Instant.from(`2026-01-02T00:00:00Z`)
   const date = Temporal.PlainDate.from(`2026-01-02`)
   const tag = { __type: `Temporal.Instant`, value: String(instant) }
@@ -83,4 +80,38 @@ it(`distinguishes native literals from ordinary tags in index signatures`, () =>
       coalesce(row.stamp, new IR.Value(fixture.value)),
     )
   expectSignatureClasses(fixtures, source.getIndexMetadata())
+}
+
+// The fixtures hold Temporal values, which are not history data, so the one
+// enumerated history is the case's name.
+const signatureCases = new Map([
+  [
+    `distinguishes native literals from ordinary tags in index signatures`,
+    runSignatureClassCase,
+  ],
+])
+
+// What this oracle owns: the gap report judges the index metadata and its
+// signatures in collection/indexes.ts by this file's tests. The signature
+// check compares every fixture pair's class with its signature.
+oracleProperty({
+  id: `collection-index.signature-classes`,
+  law: {
+    statement: `Index signatures from getIndexMetadata are equal exactly when the indexed literals belong to the same independently assigned equivalence class.`,
+    authority: `The public createIndex/getIndexMetadata contract stated above`,
+    limits: `The bounded fixture classes above: native Temporal values, ordinary records shaped like native tags, nested combinations, and reordered record keys.`,
+  },
+  owns: [`src/collection/indexes.ts`],
+  histories: [...signatureCases.keys()],
+  label: (name) => name,
+  resolve: (name) => ({ name, run: signatureCases.get(name)! }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(
+      `collection-index.signature-classes`,
+      plan,
+      observe,
+      () => plan.run(),
+    ),
+  check: forwardAssertionJudgment,
 })

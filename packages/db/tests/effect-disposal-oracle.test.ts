@@ -1,9 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createCollection, createEffect } from '../src/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { captureMicrotaskErrors, flushPromises } from './utils.js'
-import { oracleRoute } from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty } from './oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
+import type { Verdict } from './oracle-config.js'
 
 /**
  * # What does concurrent effect disposal mean?
@@ -75,129 +80,148 @@ function expectUncaughtReports(
   )
 }
 
-// What this oracle owns: the gap report judges every function in
-// query/effect.ts by this file's disposal matrix.
-declareOracle({
-  owns: [`src/query/effect.ts`],
-  check: [expectCallerOutcomes, expectUncaughtReports],
-  model: [expectedUncaughtReports],
-})
+// The original disposal case, unchanged: it drives one scenario through a
+// real Effect and its source and compares every caller and report with the
+// model above.
+async function runDisposalScenario({
+  reentry,
+  pendingHandler,
+  outcome,
+}: (typeof scenarios)[number]): Promise<void> {
+  const failure = new Error(`release failed`)
+  // The thrown value the model expects to see reported, if any.
+  const reported = expectedUncaughtReports(outcome, failure)
+  const uncaught = captureMicrotaskErrors()
+  const handler = createDeferred<void>()
+  let nested: Promise<void> | undefined
+  let batches = 0
+  let releases = 0
+  const source = createCollection<{ id: number }>({
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            begin()
+            write({ type: `insert`, value: { id: 1 } })
+            commit()
+            return true
+          },
+          unloadSubset: () => {
+            releases++
+            if (reentry === `release`) nested = effect.dispose()
+            if (outcome === `error`) throw failure
+            if (outcome === `undefined`) throw undefined
+          },
+        }
+      },
+    },
+  })
+  const effect: ReturnType<typeof createEffect> = createEffect({
+    query: (q) => q.from({ row: source }),
+    onBatch: (_events, { signal }) => {
+      batches++
+      if (reentry === `abort`)
+        signal.addEventListener(
+          `abort`,
+          () => {
+            nested = effect.dispose()
+          },
+          { once: true },
+        )
+      return pendingHandler ? handler.promise : undefined
+    },
+  })
+  let primaryFailure: { error: unknown } | undefined
+  try {
+    await flushPromises()
+    expect(batches).toBeGreaterThan(0)
+    const outer = effect.dispose()
+    const joined = effect.dispose()
+    // Attach rejection observers before an assertion can interrupt the case.
+    const results = Promise.allSettled([outer, nested, joined])
+    expect(nested).toBeDefined()
+    const callers = [outer, nested!, joined]
+    // Record each caller separately: an aggregate can stay pending after
+    // one caller settles too soon.
+    const settled = callers.map(() => false)
+    callers.forEach((caller, index) => {
+      void caller.then(
+        () => {
+          settled[index] = true
+        },
+        () => {
+          settled[index] = true
+        },
+      )
+    })
+    expect(effect.disposed).toBe(true)
+    expect(source.subscriberCount).toBe(0)
+    expect(releases).toBe(1)
+    if (pendingHandler) {
+      await flushPromises()
+      expect([...settled]).toEqual([false, false, false])
+    }
+    handler.resolve()
+    const observed = await results
+    expectCallerOutcomes(observed)
+    await flushPromises()
+    expectUncaughtReports(uncaught.errors, reported)
+    // A finished attempt does not make the acquisition lease retryable.
+    await effect.dispose()
+    await flushPromises()
+    expect(releases).toBe(1)
+    expect(uncaught.errors).toHaveLength(reported.length)
+  } catch (error) {
+    primaryFailure = { error }
+  }
+  handler.resolve()
+  uncaught.restore()
+  const cleanupFailures: Array<unknown> = []
+  try {
+    await Promise.allSettled([nested, effect.dispose()])
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  try {
+    await source.cleanup()
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(
+      cleanupFailures,
+      `Effect disposal oracle cleanup failed`,
+      { cause: primaryFailure?.error },
+    )
+  }
+  if (primaryFailure) throw primaryFailure.error
+}
 
 describe(`Effect disposal outcome oracle`, () => {
-  it.each(scenarios)(
-    `joins all callers to one attempt: %j`,
-    async ({ reentry, pendingHandler, outcome }) => {
-      oracleRoute(`case`)
-      const failure = new Error(`release failed`)
-      // The thrown value the model expects to see reported, if any.
-      const reported = expectedUncaughtReports(outcome, failure)
-      const uncaught = captureMicrotaskErrors()
-      const handler = createDeferred<void>()
-      let nested: Promise<void> | undefined
-      let batches = 0
-      let releases = 0
-      const source = createCollection<{ id: number }>({
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            markReady()
-            return {
-              loadSubset: () => {
-                begin()
-                write({ type: `insert`, value: { id: 1 } })
-                commit()
-                return true
-              },
-              unloadSubset: () => {
-                releases++
-                if (reentry === `release`) nested = effect.dispose()
-                if (outcome === `error`) throw failure
-                if (outcome === `undefined`) throw undefined
-              },
-            }
-          },
-        },
-      })
-      const effect: ReturnType<typeof createEffect> = createEffect({
-        query: (q) => q.from({ row: source }),
-        onBatch: (_events, { signal }) => {
-          batches++
-          if (reentry === `abort`)
-            signal.addEventListener(
-              `abort`,
-              () => {
-                nested = effect.dispose()
-              },
-              { once: true },
-            )
-          return pendingHandler ? handler.promise : undefined
-        },
-      })
-      let primaryFailure: { error: unknown } | undefined
-      try {
-        await flushPromises()
-        expect(batches).toBeGreaterThan(0)
-        const outer = effect.dispose()
-        const joined = effect.dispose()
-        // Attach rejection observers before an assertion can interrupt the case.
-        const results = Promise.allSettled([outer, nested, joined])
-        expect(nested).toBeDefined()
-        const callers = [outer, nested!, joined]
-        // Record each caller separately: an aggregate can stay pending after
-        // one caller settles too soon.
-        const settled = callers.map(() => false)
-        callers.forEach((caller, index) => {
-          void caller.then(
-            () => {
-              settled[index] = true
-            },
-            () => {
-              settled[index] = true
-            },
-          )
-        })
-        expect(effect.disposed).toBe(true)
-        expect(source.subscriberCount).toBe(0)
-        expect(releases).toBe(1)
-        if (pendingHandler) {
-          await flushPromises()
-          expect([...settled]).toEqual([false, false, false])
-        }
-        handler.resolve()
-        const observed = await results
-        expectCallerOutcomes(observed)
-        await flushPromises()
-        expectUncaughtReports(uncaught.errors, reported)
-        // A finished attempt does not make the acquisition lease retryable.
-        await effect.dispose()
-        await flushPromises()
-        expect(releases).toBe(1)
-        expect(uncaught.errors).toHaveLength(reported.length)
-      } catch (error) {
-        primaryFailure = { error }
-      }
-      handler.resolve()
-      uncaught.restore()
-      const cleanupFailures: Array<unknown> = []
-      try {
-        await Promise.allSettled([nested, effect.dispose()])
-      } catch (error) {
-        cleanupFailures.push(error)
-      }
-      try {
-        await source.cleanup()
-      } catch (error) {
-        cleanupFailures.push(error)
-      }
-      if (cleanupFailures.length > 0) {
-        throw new AggregateError(
-          cleanupFailures,
-          `Effect disposal oracle cleanup failed`,
-          { cause: primaryFailure?.error },
-        )
-      }
-      if (primaryFailure) throw primaryFailure.error
+  oracleProperty<(typeof scenarios)[number], Verdict>({
+    id: `effect-disposal.joined-callers`,
+    law: {
+      statement: `Every dispose() call during one cleanup attempt stays pending until the handler settles, then fulfills with the same outcome; the source is released once, and a release that throws is reported uncaught once with its own identity.`,
+      authority: `The public Effect.dispose contract in src/query/effect.ts and the Collection acquisition lease contract, as stated above`,
+      limits: `The finite matrix of two reentry sites, a pending or synchronous batch handler, and a release that succeeds, throws an Error, or throws undefined.`,
     },
-  )
+    // What this oracle owns: the gap report judges every function in
+    // query/effect.ts by this file's disposal matrix.
+    owns: [`src/query/effect.ts`],
+    histories: scenarios,
+    label: (scenario) =>
+      `joins all callers to one attempt: ${JSON.stringify(scenario)}`,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `effect-disposal.joined-callers`,
+        plan,
+        observe,
+        () => runDisposalScenario(plan),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

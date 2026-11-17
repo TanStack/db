@@ -1,17 +1,13 @@
-import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
 import { reduce } from '../../src/operators/reduce.js'
 import { output } from '../../src/operators/output.js'
-import { oracleRoute, oracleRuns } from '../../../db/tests/oracle-config.js'
-import { declareOracle } from '../../../db/tests/oracle-declaration'
-
-// What this oracle owns: the gap report judges these entries, and their
-// reference trees within the package, by this file's tests.
-declareOracle({
-  owns: [`src/operators/reduce.ts#reduce`],
-})
+import {
+  differs,
+  oracleProperty,
+  pass,
+} from '../../../db/tests/oracle-property.js'
 
 /**
  * # Does the reduce fast path emit what the general path emits?
@@ -133,21 +129,39 @@ const stepArbitrary: fc.Arbitrary<Step> = fc.record({
   multiplicity: fc.constantFrom(-1, 1, 2),
 })
 
-describe(`reduce fast path`, () => {
-  it(`emits the general path's entries after every run`, () => {
-    // No seed: a random campaign.
-    oracleRoute(`random seed`)
-    fc.assert(
-      fc.property(
-        fc.array(fc.array(stepArbitrary, { minLength: 1, maxLength: 4 }), {
-          minLength: 1,
-          maxLength: 6,
-        }),
-        (runs) => {
-          expect(emitted(runs, false)).toEqual(emitted(runs, true))
-        },
-      ),
-      { numRuns: oracleRuns(1000) },
+oracleProperty({
+  id: `ivm.reduce-fast-path`,
+  law: {
+    statement: `After every graph run the fast path emits exactly the general path's unordered entries, including multiplicities and Object.is value identity.`,
+    authority: `Existing reduce path equivalence contract documented above.`,
+    limits: `One to six runs of one to four signed changes, two keys and the existing finite output domain. The general path is the established differential reference.`,
+  },
+  // What this oracle owns: the gap report judges these entries, and their
+  // reference trees within the package, by this file's tests.
+  owns: [`src/operators/reduce.ts#reduce`],
+  histories: {
+    arbitrary: fc.array(
+      fc.array(stepArbitrary, { minLength: 1, maxLength: 4 }),
+      { minLength: 1, maxLength: 6 },
+    ),
+    runs: 1000,
+    // The original owner has only a fresh campaign; preserve that scope.
+    fixedSeeds: [],
+  },
+  // The forced general path is the existing differential reference. Its
+  // independently executed entries supply the expected observation.
+  model: (_runs, trace) =>
+    trace.find((entry) => entry.checkpoint === `general path`)?.value,
+  driver: (runs, observe) => {
+    observe(`fast path`, emitted(runs, false))
+    observe(`general path`, emitted(runs, true))
+  },
+  check: (_runs, trace, expected) => {
+    const actual = trace.find((entry) => entry.checkpoint === `fast path`)
+    const reference = trace.find((entry) => entry.checkpoint === `general path`)
+    if (!actual || !reference) return pass
+    return (
+      differs(`fast path`, `path equivalence`, actual.value, expected) ?? pass
     )
-  })
+  },
 })

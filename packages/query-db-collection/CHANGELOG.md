@@ -1,5 +1,11 @@
 # @tanstack/query-db-collection
 
+## 1.5.2
+
+### Patch Changes
+
+- Remove obsolete persisted rows when an eager source's first complete result overlaps SQLite restore. Query Collection also reconciles ownerless saved rows and returned values from initial data, cached results and direct writes while preserving peer ownership, including when an optimistic transaction holds publication. PowerSync preserves its startup batch commits; RxDB preserves its existing source commit. Both delete only restored omissions and retain atomic reload snapshots. RxDB and PowerSync reject incomplete persistence capabilities. TrailBase accepts a sync boundary without the optional metadata API. ([#2394](https://github.com/TanStack/db/pull/2394))
+
 ## 1.5.1
 
 ### Patch Changes

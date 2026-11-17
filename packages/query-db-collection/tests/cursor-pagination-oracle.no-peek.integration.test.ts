@@ -19,11 +19,15 @@ import {
   createCollection,
   createLiveQueryCollection,
 } from '@tanstack/db'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import { createLiveQueryWindowController } from '../../db/src/live-query-window-controller.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
-import { oracleRoute } from '../../db/tests/oracle-config.js'
+import { oracleProperty } from '../../db/tests/oracle-property.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import { expectedWindow } from './cursor-pagination/model-oracle.js'
 import { createNoPeekDemandModel } from './cursor-pagination/no-peek.js'
 import { createFactTransport } from './cursor-pagination/no-peek-transport.js'
@@ -31,12 +35,6 @@ import type { Row } from './cursor-pagination/model-oracle.js'
 import type { PrefixPublication } from './cursor-pagination/no-peek.js'
 
 const scope = { group: undefined, descending: false }
-
-// What this oracle owns: nothing in src/. The candidate under test is the
-// test-only experiment in cursor-pagination/no-peek.ts, and the live-query window
-// controller it drives belongs to the db package. The file declares its
-// model only; its tests are enumerated fixed cases.
-declareOracle({ model: [expectedWindow] })
 
 /** Narrow bridge for one immutable source ordered by unique id. Facts are kept
  * outside production and admitted only after the real setWindow/preload gate.
@@ -146,95 +144,146 @@ function createGraphFixture(
   }
 }
 
-describe(`no-peek bridge at real graph publication`, () => {
-  it.each([0, 3, 4, 9])(
-    `matches peek-ahead output with %s remote rows`,
-    async (count) => {
-      oracleRoute(`case`)
-      const candidate = createGraphFixture(count, 3)
-      const baseline = createGraphFixture(count, 3)
-      const model = createNoPeekDemandModel(candidate.acquire)
-      const controller = createLiveQueryWindowController(baseline.live, {
-        pageSize: 3,
-      })
-      const unsubscribe = controller.subscribe(() => {})
-      try {
-        model.retainDemand(`a`, 3)
-        await model.refresh()
-        await controller.preload()
-        expect(model.get(`a`)).toEqual(expectedWindow(candidate.rows, scope, 3))
-        expect(controller.getSnapshot().hasNextPage).toBe(
-          model.get(`a`)?.hasNextPage,
-        )
-        expect(controller.getSnapshot().data.map(({ id }) => id)).toEqual(
-          model.get(`a`)?.rows.map(({ id }) => id),
-        )
-        expect(candidate.transport.requests[0]).toBe(3)
-        expect(baseline.transport.requests[0]).toBe(4)
-        expect(candidate.transport.backend.calls).toHaveLength(1)
-        expect(baseline.transport.backend.calls).toHaveLength(count > 3 ? 2 : 1)
-      } finally {
-        unsubscribe()
-        controller.dispose()
-        await candidate.cleanup()
-        await baseline.cleanup()
-      }
-    },
-  )
-
-  it(`holds continuation behind actual source and graph publication`, async () => {
-    oracleRoute(`case`)
-    const fixture = createGraphFixture(9, 3, true)
-    const model = createNoPeekDemandModel(fixture.acquire)
-    model.retainDemand(`a`, 3)
-    let notifications = 0
-    model.subscribe(() => notifications++)
-    const pending = model.refresh()
-    const observed = pending.then(
-      () => undefined,
-      (error: unknown) => error,
-    )
-    try {
-      await fixture.received.promise
-      expect(fixture.fact()?.fact?.hasMore).toBe(true)
-      expect(fixture.live.toArray).toEqual([])
-      expect(model.get(`a`)).toBeUndefined()
-      expect(notifications).toBe(0)
-      fixture.release.resolve()
-      expect(await observed).toBeUndefined()
-      expect(model.get(`a`)).toEqual(expectedWindow(fixture.rows, scope, 3))
-      expect(notifications).toBe(1)
-    } finally {
-      fixture.release.resolve()
-      await observed
-      await fixture.cleanup()
-    }
+// Compares the candidate's rows and continuation with the full-relation
+// reference and with the current peek-ahead controller.
+async function matchPeekAheadOutput(count: number): Promise<void> {
+  const candidate = createGraphFixture(count, 3)
+  const baseline = createGraphFixture(count, 3)
+  const model = createNoPeekDemandModel(candidate.acquire)
+  const controller = createLiveQueryWindowController(baseline.live, {
+    pageSize: 3,
   })
-
-  it(`falls back for a local filter even though the order is unchanged`, async () => {
-    oracleRoute(`case`)
-    const fixture = createGraphFixture(9, 3, false, true)
-    const model = createNoPeekDemandModel(fixture.acquire, false)
+  const unsubscribe = controller.subscribe(() => {})
+  try {
     model.retainDemand(`a`, 3)
-    try {
-      const rawPrefix = await createFactTransport(fixture.rows, 3, scope).read(
+    await model.refresh()
+    await controller.preload()
+    expect(model.get(`a`)).toEqual(expectedWindow(candidate.rows, scope, 3))
+    expect(controller.getSnapshot().hasNextPage).toBe(
+      model.get(`a`)?.hasNextPage,
+    )
+    expect(controller.getSnapshot().data.map(({ id }) => id)).toEqual(
+      model.get(`a`)?.rows.map(({ id }) => id),
+    )
+    expect(candidate.transport.requests[0]).toBe(3)
+    expect(baseline.transport.requests[0]).toBe(4)
+    expect(candidate.transport.backend.calls).toHaveLength(1)
+    expect(baseline.transport.backend.calls).toHaveLength(count > 3 ? 2 : 1)
+  } finally {
+    unsubscribe()
+    controller.dispose()
+    await candidate.cleanup()
+    await baseline.cleanup()
+  }
+}
+
+// The candidate must not publish or notify before the held source batch
+// reaches the graph; then it publishes the reference window once.
+async function holdContinuationBehindPublication(): Promise<void> {
+  const fixture = createGraphFixture(9, 3, true)
+  const model = createNoPeekDemandModel(fixture.acquire)
+  model.retainDemand(`a`, 3)
+  let notifications = 0
+  model.subscribe(() => notifications++)
+  const pending = model.refresh()
+  const observed = pending.then(
+    () => undefined,
+    (error: unknown) => error,
+  )
+  try {
+    await fixture.received.promise
+    expect(fixture.fact()?.fact?.hasMore).toBe(true)
+    expect(fixture.live.toArray).toEqual([])
+    expect(model.get(`a`)).toBeUndefined()
+    expect(notifications).toBe(0)
+    fixture.release.resolve()
+    expect(await observed).toBeUndefined()
+    expect(model.get(`a`)).toEqual(expectedWindow(fixture.rows, scope, 3))
+    expect(notifications).toBe(1)
+  } finally {
+    fixture.release.resolve()
+    await observed
+    await fixture.cleanup()
+  }
+}
+
+// An opaque local filter makes the candidate request the extra row through
+// the full-source path; its window is the reference over the filtered rows.
+async function fallBackForLocalFilter(): Promise<void> {
+  const fixture = createGraphFixture(9, 3, false, true)
+  const model = createNoPeekDemandModel(fixture.acquire, false)
+  model.retainDemand(`a`, 3)
+  try {
+    const rawPrefix = await createFactTransport(fixture.rows, 3, scope).read(3)
+    expect(rawPrefix.fact?.hasMore).toBe(true)
+    await model.refresh()
+    expect(model.get(`a`)).toEqual(
+      expectedWindow(
+        fixture.rows.filter((row) => row.id < 3),
+        scope,
         3,
-      )
-      expect(rawPrefix.fact?.hasMore).toBe(true)
-      await model.refresh()
-      expect(model.get(`a`)).toEqual(
-        expectedWindow(
-          fixture.rows.filter((row) => row.id < 3),
-          scope,
-          3,
-        ),
-      )
-      expect(fixture.windows).toEqual([4])
-      expect(model.get(`a`)?.hasNextPage).toBe(false)
-      // An opaque local filter requires the existing full-source loading path.
-      expect(fixture.transport.requests[0]).toBe(10)
-    } finally {
-      await fixture.cleanup()
-    }
+      ),
+    )
+    expect(fixture.windows).toEqual([4])
+    expect(model.get(`a`)?.hasNextPage).toBe(false)
+    // An opaque local filter requires the existing full-source loading path.
+    expect(fixture.transport.requests[0]).toBe(10)
+  } finally {
+    await fixture.cleanup()
+  }
+}
+
+type NoPeekCase =
+  | { name: string; kind: `peek-ahead`; count: number }
+  | { name: string; kind: `held` }
+  | { name: string; kind: `filtered` }
+
+const noPeekCases: Array<NoPeekCase> = [
+  ...[0, 3, 4, 9].map((count): NoPeekCase => ({
+    name: `matches peek-ahead output with ${count} remote rows`,
+    kind: `peek-ahead`,
+    count,
+  })),
+  {
+    name: `holds continuation behind actual source and graph publication`,
+    kind: `held`,
+  },
+  {
+    name: `falls back for a local filter even though the order is unchanged`,
+    kind: `filtered`,
+  },
+]
+
+function runNoPeekCase(noPeekCase: NoPeekCase): Promise<void> {
+  switch (noPeekCase.kind) {
+    case `peek-ahead`:
+      return matchPeekAheadOutput(noPeekCase.count)
+    case `held`:
+      return holdContinuationBehindPublication()
+    case `filtered`:
+      return fallBackForLocalFilter()
+  }
+}
+
+describe(`no-peek bridge at real graph publication`, () => {
+  // What this oracle owns: nothing in src/. The candidate under test is the
+  // test-only experiment in cursor-pagination/no-peek.ts, and the live-query
+  // window controller it drives belongs to the db package.
+  oracleProperty({
+    id: `cursor-pagination.no-peek-bridge`,
+    law: {
+      statement: `The no-peek candidate replaces the extra output row only with a fact that names the same complete publication and output prefix; its rows and hasNextPage equal the full-relation reference at each named settlement and fallback cut.`,
+      authority: `cursor-pagination/NO-PEEK-RESULTS.md, the candidate rule; the full-relation model in cursor-pagination/model-oracle.ts.`,
+      limits: `Fixed histories over an immutable unique-id ordered source; no second graph publication, generic compiler eligibility or public API claim.`,
+    },
+    histories: noPeekCases,
+    label: ({ name }) => name,
+    resolve: (noPeekCase) => ({ noPeekCase }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`no-peek bridge`, plan, observe, () =>
+        runNoPeekCase(plan.noPeekCase),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
