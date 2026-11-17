@@ -14,11 +14,12 @@
  * 900-member suffix. Fixed cases cover constant-bearing coalesce indexes,
  * BigInt ranges/IN within SQLite's signed-integer domain, and indexed numeric
  * comparisons with tagged values, null, missing, and text controls. Fixed
- * filters include safe-integer equality on a top-level and a nested field,
- * whose candidate also admits a Date's ISO text. The number-equality property
- * below generates that law: its own section states the grammar. Fractional equality,
- * lower-wrapped BigInt IN, lone-surrogate coalesce, Date ranges, strftime,
- * and add keep full reads where SQLite could exclude a JavaScript match.
+ * filters include safe-integer equality on a top-level field, whose candidate
+ * also admits a Date's ISO text. The number-equality property below generates
+ * that law: its own section states the grammar. Fractional and nested
+ * numeric equality, lower-wrapped BigInt IN, lone-surrogate coalesce, Date
+ * ranges, strftime, and add keep full reads where SQLite could exclude a
+ * JavaScript match.
  * Integer threshold checks include adjacent fractional values.
  * Fixed candidate-superset cases cover large Number versus BigInt bounds,
  * numeric object keys and array indexes through three digit segments, and
@@ -887,11 +888,6 @@ describe(`SQLite expression-index oracle`, () => {
         target: 7,
         distractors: [8, 70],
       } satisfies OracleCase,
-      {
-        path: [`meta`, `order`],
-        target: -3,
-        distractors: [0, 3],
-      } satisfies OracleCase,
     ],
 
     driver: (plan: OracleCase, observe) =>
@@ -906,26 +902,29 @@ describe(`SQLite expression-index oracle`, () => {
   })
 
   /**
-   * Safe-integer equality and membership on an indexed field.
+   * Safe-integer equality and membership on an indexed top-level field.
    *
    * Law: the row evaluator equates a Date with its epoch milliseconds and any
    * other value only with an identical one, while SQLite stores a Date as its
-   * ISO text. An `eq` or `in` of safe integers on an indexed path returns the
-   * rows that the evaluator keeps, its SQL candidate holds exactly those rows,
-   * and SQLite answers it by a search of the named expression index.
+   * ISO text. An `eq` or `in` of safe integers on an indexed top-level field
+   * returns the rows that the evaluator keeps, its SQL candidate holds exactly
+   * those rows, and SQLite answers it by a search of the named expression
+   * index. A nested ref keeps a full read, because it can read a JavaScript
+   * property that the stored JSON lacks, such as an array's `length`; the
+   * core ordered-page oracle owns that law.
    *
    * Model: `numberMatches` walks each stored row's path with `readPath` and
    * applies that equality. It does not call the SQL compiler or the
    * evaluator.
    *
-   * Grammar: a path of one root and up to three identifier or digit
-   * segments, a target in -10,000..10,000, `eq` or `in` (the target and the
+   * Grammar: a top-level field named by an identifier, a target in
+   * -10,000..10,000, `eq` or `in` (the target and the
    * target plus two), and a target stored as a number, a Date, or both. Every
    * history also stores the target plus one as a number and a Date, the
    * target plus two, and the target as text, which neither law nor candidate
    * may keep. Declared states: a Date equals an `eq` literal, and a Date equals
    * an `in` literal. One constructed history per state sets the operator and
-   * stores a Date at the target, keeping the generated path, target and
+   * stores a Date at the target, keeping the generated field, target and
    * whether the number is stored too.
    *
    * Driver and checkpoint: the real adapter over BetterSqlite3 captures the
@@ -938,7 +937,6 @@ describe(`SQLite expression-index oracle`, () => {
    */
   type NumberEqualityHistory = {
     root: string
-    tail: Array<string>
     target: number
     operator: `eq` | `in`
     stored: `number` | `date` | `both`
@@ -967,9 +965,6 @@ describe(`SQLite expression-index oracle`, () => {
   const numberEqualityArbitrary: fc.Arbitrary<NumberEqualityHistory> =
     fc.record({
       root: fc.constantFrom(`a`, `meta`, `priority`, `t0`, `xb1`),
-      tail: fc.array(fc.constantFrom(`order`, `n`, `e1`, `0`, `2`), {
-        maxLength: 3,
-      }),
       target: fc.integer({ min: -10_000, max: 10_000 }),
       operator: fc.constantFrom(`eq` as const, `in` as const),
       stored: fc.constantFrom(
@@ -982,7 +977,7 @@ describe(`SQLite expression-index oracle`, () => {
   function resolveNumberEquality(
     history: NumberEqualityHistory,
   ): NumberEqualityPlan {
-    const path = [history.root, ...history.tail]
+    const path = [history.root]
     const { target } = history
     const stored: Array<[string, unknown]> = [
       ...(history.stored === `date`
@@ -1147,9 +1142,9 @@ describe(`SQLite expression-index oracle`, () => {
   oracleProperty({
     id: `sqlite-persistence.expression-index.number-equality`,
     law: {
-      statement: `An eq or in of safe integers on an indexed path returns the rows whose value equals a literal, a Date equal to its epoch milliseconds; the SQL candidate holds exactly those rows, and SQLite searches the named expression index for it.`,
+      statement: `An eq or in of safe integers on an indexed top-level field returns the rows whose value equals a literal, a Date equal to its epoch milliseconds; the SQL candidate holds exactly those rows, and SQLite searches the named expression index for it.`,
       authority: `RFC #1659 invariant 8 and SQLite expression-index matching; the row evaluator's equality, which equates a Date with its epoch milliseconds (PR #1997).`,
-      limits: `Paths of up to four identifier or digit segments, targets in -10,000..10,000, and the real BetterSqlite3 adapter in one process; fractional and unsafe numbers keep a full read and are outside this law.`,
+      limits: `Top-level fields, targets in -10,000..10,000, and the real BetterSqlite3 adapter in one process; fractional and unsafe numbers keep a full read and are outside this law.`,
     },
     owns: [`src/node-driver.ts`],
     histories: {

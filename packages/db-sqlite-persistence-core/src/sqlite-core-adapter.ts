@@ -1002,11 +1002,16 @@ function refAndLiteral(
   return field && literal.type === `val` ? { field, literal } : undefined
 }
 
-/** The JSON path of a field ref whose segments are all identifiers. */
+/**
+ * The JSON path of a ref to one top-level field named by an identifier. The
+ * row evaluator reads that field's stored JSON member; a nested ref reads a
+ * JavaScript property, such as an array's `length` or a Temporal getter,
+ * that SQLite sees as NULL.
+ */
 function plainFieldPath(expression: IR.BasicExpression): string | undefined {
   if (expression.type !== `ref`) return undefined
   const path = IR.getPropRefPropertyPath(expression).map(String)
-  return path.every((segment) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(segment))
+  return path.length === 1 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(path[0]!)
     ? (createJsonPath(path) ?? undefined)
     : undefined
 }
@@ -1605,7 +1610,9 @@ function compileSafeSqlPrefilter(
         return compiled
       }
       const numberValues =
-        operands && numberEqualityCandidates(operands.literal.value)
+        operands &&
+        plainFieldPath(operands.field) &&
+        numberEqualityCandidates(operands.literal.value)
       if (numberValues)
         return {
           supported: true,
@@ -1651,6 +1658,7 @@ function compileSafeSqlPrefilter(
         return compileFieldMembership(left, right.value)
       const numberValues = right.value.map(numberEqualityCandidates)
       if (
+        plainFieldPath(left) &&
         numberValues.every(
           (values): values is Array<number | string> => values !== undefined,
         )
