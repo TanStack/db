@@ -4050,7 +4050,7 @@ generated units failed the work law, and no history violated the page or
 filter law. The grammar's `and()` shape was also RED on the first version of
 this change, which read every row for an empty conjunction; the adapter now
 pages it as it pages an absent where. `scripts/sqlite-page-mutants.mjs` runs
-thirteen production mutants nightly, and twelve fail a named law: SQL null
+thirteen production mutants, and twelve fail a named law: SQL null
 placement that ignores the in-memory sort's `desc` negation, the
 irregular-rows probe skipped, a field that mixes numbers and text, text under
 a locale or custom sort, high keys and an ignored offset fail `page`; the kind
