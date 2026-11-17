@@ -907,22 +907,27 @@ describe(`SQLite expression-index oracle`, () => {
    * Law: the row evaluator equates a Date with its epoch milliseconds and any
    * other value only with an identical one, while SQLite stores a Date as its
    * ISO text. An `eq` or `in` of safe integers on an indexed top-level field
-   * returns the rows that the evaluator keeps, its SQL candidate holds exactly
-   * those rows, and SQLite answers it by a search of the named expression
-   * index. A nested ref keeps a full read, because it can read a JavaScript
-   * property that the stored JSON lacks, such as an array's `length`; the
-   * core ordered-page oracle owns that law.
+   * returns the rows that the evaluator keeps. Its SQL candidate holds those
+   * rows and, beside them, exactly the rows that SQLite reads as equal and
+   * JavaScript drops: a literal stored as a BigInt, `true` for 1 and `false`
+   * for 0, and the literal's Date ISO text stored as a string. SQLite answers
+   * it by a search of the named expression index. A nested ref keeps a full
+   * read, because it can read a JavaScript property that the stored JSON
+   * lacks, such as an array's `length`; the core ordered-page oracle owns that
+   * law.
    *
    * Model: `numberMatches` walks each stored row's path with `readPath` and
-   * applies that equality. It does not call the SQL compiler or the
-   * evaluator.
+   * applies that equality; `numberCandidates` adds the rows that hold a
+   * literal as a BigInt, a boolean or the ISO text. Neither calls the SQL
+   * compiler or the evaluator.
    *
    * Grammar: a top-level field named by an identifier, a target in
    * -10,000..10,000, `eq` or `in` (the target and the
    * target plus two), and a target stored as a number, a Date, or both. Every
    * history also stores the target plus one as a number and a Date, the
-   * target plus two, and the target as text, which neither law nor candidate
-   * may keep. Declared states: a Date equals an `eq` literal, and a Date equals
+   * target plus two, the target as text, which neither law nor candidate may
+   * keep, and the target as a BigInt and as its Date ISO text, and `true` and
+   * `false`, which only the candidate keeps. Declared states: a Date equals an `eq` literal, and a Date equals
    * an `in` literal. One constructed history per state sets the operator and
    * stores a Date at the target, keeping the generated field, target and
    * whether the number is stored too.
@@ -933,7 +938,8 @@ describe(`SQLite expression-index oracle`, () => {
    *
    * Calibration: a driver that binds the number in place of the Date's ISO
    * text loses the Date match, and trace mutants drop it from the candidate,
-   * scan the table, or omit a constructed state.
+   * narrow the candidate to the rows JavaScript keeps, scan the table, or omit
+   * a constructed state.
    */
   type NumberEqualityHistory = {
     root: string
@@ -990,6 +996,10 @@ describe(`SQLite expression-index oracle`, () => {
       [`date-next`, new Date(target + 1)],
       [`number-second`, target + 2],
       [`text-target`, String(target)],
+      [`bigint-target`, BigInt(target)],
+      [`iso-target`, new Date(target).toISOString()],
+      [`true`, true],
+      [`false`, false],
     ]
     return {
       history,
@@ -997,7 +1007,7 @@ describe(`SQLite expression-index oracle`, () => {
       literals: history.operator === `eq` ? [target] : [target, target + 2],
       rows: stored.map(([key, value]) => ({
         key,
-        value: createNestedRow(path, value as OracleScalar),
+        value: createNestedRow(path, value as OracleScalar | bigint),
       })),
       requiredStates: numberConstructionStates.get(history) ?? [],
     }
@@ -1015,6 +1025,23 @@ describe(`SQLite expression-index oracle`, () => {
       })
       .map((row) => row.key)
       .sort()
+  }
+
+  // SQLite reads a BigInt, a boolean and a Date's ISO text as the number they
+  // stand for, so the candidate also keeps them; JavaScript drops them.
+  function numberCandidates(plan: NumberEqualityPlan): Array<string> {
+    const coerced = plan.rows
+      .filter((row) => {
+        const value = readPath(row.value, plan.path)
+        return plan.literals.some(
+          (literal) =>
+            (typeof value === `bigint` && value === BigInt(literal)) ||
+            (typeof value === `boolean` && Number(value) === literal) ||
+            value === new Date(literal).toISOString(),
+        )
+      })
+      .map((row) => row.key)
+    return [...numberMatches(plan), ...coerced].sort()
   }
 
   const numberEqualityStatesOf = (plan: NumberEqualityPlan) =>
@@ -1054,7 +1081,11 @@ describe(`SQLite expression-index oracle`, () => {
   function checkNumberEquality(
     plan: NumberEqualityPlan,
     trace: ReadonlyArray<Observation>,
-    expected: { keys: Array<string>; requiredStates: ReadonlyArray<string> },
+    expected: {
+      keys: Array<string>
+      candidates: Array<string>
+      requiredStates: ReadonlyArray<string>
+    },
   ): Verdict {
     const read = trace.find(({ checkpoint }) => checkpoint === `loadSubset`)
       ?.value as NumberEqualityRead | undefined
@@ -1076,10 +1107,10 @@ describe(`SQLite expression-index oracle`, () => {
       ) ??
       differs(
         `predicate query`,
-        `exact candidate`,
+        `candidate`,
         read.directSqlKeys,
-        expected.keys,
-        `the SQL candidate holds other rows than the model's equality`,
+        expected.candidates,
+        `the SQL candidate holds other rows than the matches and the values SQLite reads as equal`,
       ) ??
       differs(
         `query plan`,
@@ -1142,7 +1173,7 @@ describe(`SQLite expression-index oracle`, () => {
   oracleProperty({
     id: `sqlite-persistence.expression-index.number-equality`,
     law: {
-      statement: `An eq or in of safe integers on an indexed top-level field returns the rows whose value equals a literal, a Date equal to its epoch milliseconds; the SQL candidate holds exactly those rows, and SQLite searches the named expression index for it.`,
+      statement: `An eq or in of safe integers on an indexed top-level field returns the rows whose value equals a literal, a Date equal to its epoch milliseconds; the SQL candidate holds exactly those rows and the rows that hold a literal as a BigInt, a boolean or its Date's ISO text, which JavaScript drops; and SQLite searches the named expression index for it.`,
       authority: `RFC #1659 invariant 8 and SQLite expression-index matching; the row evaluator's equality, which equates a Date with its epoch milliseconds (PR #1997).`,
       limits: `Top-level fields, targets in -10,000..10,000, and the real BetterSqlite3 adapter in one process; fractional and unsafe numbers keep a full read and are outside this law.`,
     },
@@ -1172,6 +1203,7 @@ describe(`SQLite expression-index oracle`, () => {
     resolve: resolveNumberEquality,
     model: (plan) => ({
       keys: numberMatches(plan),
+      candidates: numberCandidates(plan),
       requiredStates: plan.requiredStates,
     }),
     driver: (plan, observe) => driveNumberEquality(plan, observe),
@@ -1192,8 +1224,18 @@ describe(`SQLite expression-index oracle`, () => {
           driveNumberEquality(plan, observe, numberInPlaceOfDate),
       },
       {
+        name: `the candidate holds only the rows JavaScript keeps`,
+        law: `candidate`,
+        history: { constructed: `a Date equals an eq literal` },
+        corrupt: (trace) =>
+          mapLoad(trace, (read) => ({
+            ...read,
+            directSqlKeys: read.adapterKeys,
+          })),
+      },
+      {
         name: `the candidate drops the Date match`,
-        law: `exact candidate`,
+        law: `candidate`,
         history: { constructed: `a Date equals an eq literal` },
         corrupt: (trace) =>
           mapLoad(trace, (read) => ({
