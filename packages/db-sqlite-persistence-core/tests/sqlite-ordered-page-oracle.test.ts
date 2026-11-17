@@ -1343,6 +1343,25 @@ const constructions = [
     },
   ),
   constructed(
+    `page in SQL under a text membership`,
+    [`page in SQL`],
+    (generated) => {
+      const history = onePlainTerm(generated, leadOf(generated))
+      // Two rows match and a third does not, so a page of one row reads
+      // fewer stored rows only through the membership's SQL candidate.
+      const rows = withRows(history, 3).rows
+      return {
+        ...history,
+        rows: withRow(
+          withRow(withRow(rows, 0, { title: `a` }), 1, { title: `b` }),
+          2,
+          { title: `c` },
+        ),
+        where: [{ op: `in`, field: `title`, values: [`a`, `b`] }],
+      }
+    },
+  ),
+  constructed(
     `page in SQL over non-ASCII titles and keys`,
     [`page in SQL`],
     (generated) => {
