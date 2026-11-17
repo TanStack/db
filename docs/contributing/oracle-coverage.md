@@ -3924,19 +3924,12 @@ model compares public keys while a `node:sqlite` driver records SQL and raw row
 work. The 1,336-case matrix and paired fixed and unseeded campaigns cover root
 arity 0–3, one nested operator, boolean and nonboolean operands, safe selective
 predicates, and sound candidate supersets for unsafe predicates. Number
-equality and membership atoms read a field that stores Dates beside numbers.
-Safe-integer equality emits a candidate that admits both the number and the
-Date's ISO text. Coerced twins add stored `1n`, `true`, `'1'`, the epoch's ISO
-text, `NaN`, `1.5`, and null, which SQL may admit and JavaScript rejects. The
-generated campaigns declare two states: a number atom decides some row of a
-pushable selective predicate, and a coerced atom decides some row. Two
-constructed histories per state splice the atom at the root or into a nested
-group of a generated predicate, and the check rejects a construction that
-missed its state. On the prior compiler (`21c52a07`) every construction of the
-first state failed row work (no `WHERE`), as did 62 matrix cases and both
-direct cases; the coerced constructions passed, because their public rows did
-not change. The file now names `src/sqlite-core-adapter.ts` in `owns`, so the
-gap report counts its kills. Fractional and unsafe numbers keep a full read. Eight direct cases challenge Unicode `ilike`
+equality and membership atoms read a field that stores Dates beside numbers,
+and coerced twins read stored `1n`, `true`, `'1'`, the epoch's ISO text, `NaN`,
+`1.5`, and null, which SQL may admit and JavaScript rejects. The generated
+campaigns declare reach for both: a number atom decides some row of a pushable
+selective predicate, and a coerced atom decides some row, with two constructed
+histories each. Fractional and unsafe numbers keep a full read. Eight direct cases challenge Unicode `ilike`
 and `like` patterns, tagged `NaN` comparison, lone-surrogate equality, and
 null-vs-missing under `not`. Paired- and lone-surrogate equality controls
 retain SQL row-work reduction.
@@ -3973,17 +3966,12 @@ candidate keys, public keys, and named-index plan. Its generated indexed
 grammar uses string equality, BigInt membership, numeric range, and string
 conjunction. Its number-equality property
 (`sqlite-persistence.expression-index.number-equality`) generates safe-integer
-`eq` and `in` on paths of up to four identifier or digit segments, with the
-target stored as a number, a Date, or both, beside the next number and Date and
-the target as text. A stored `Date(1)` matches numeric `1` in the row evaluator
-and is ISO text in the SQLite expression index, so the number candidate admits
-both encodings. It declares a Date matching an `eq` literal and an `in`
-literal, one constructed history each, and checks public keys, exact candidate
-keys, and a search of the named index. On the prior compiler, which sent no
-number predicate to SQLite, every construction failed the exact-candidate law;
-a driver that binds the number in place of the ISO text fails the public-rows
-law. The fixed-filter property keeps two fixed number cases. Fractional
-numbers keep the JavaScript fallback path. Fixed lower-wrapped BigInt membership and lone-surrogate coalesce witnesses also
+`eq` and `in` on an indexed path whose target is stored as a number, a Date, or
+both. A stored `Date(1)` matches numeric `1` in the row evaluator and is ISO
+text in the SQLite expression index, so the number candidate admits both
+encodings. The property declares a Date matching an `eq` literal and an `in`
+literal, and checks public keys, exact candidate keys, and a search of the
+named index. Fractional numbers keep the JavaScript fallback path. Fixed lower-wrapped BigInt membership and lone-surrogate coalesce witnesses also
 retain fallback: SQLite converts the former to text and encodes the latter's
 inline fallback differently from a JSON-extracted binding. Integer-bound
 range cases include adjacent fractional values and tagged or mixed scalars;
@@ -4006,9 +3994,9 @@ concatenation. A typed-field contract or a separate indexed representation is
 needed before those forms can gain a generally sound selective candidate.
 
 The owner does not establish arbitrary depth or arity, every equality or LIKE
-pattern, all cursor shapes, order or value/metadata semantics, index-expression
-compilation, native hosts, OPFS, or multi-process execution. The ordered-page
-owner below covers limit and offset after filtering. The existing SQLite owners above retain their separate reset/resume,
+pattern, limit/offset after filtering, all cursor shapes, order or value/metadata
+semantics, index-expression compilation, native hosts, OPFS, or multi-process
+execution. The existing SQLite owners above retain their separate reset/resume,
 order, driver, and host contracts. Broader class closure needs witnesses at those
 remaining paths.
 
@@ -4050,31 +4038,12 @@ every order field has an ensured expression index whose values are all integers
 and booleans, or all text below U+D800 under lexical sort, with keys of that
 text.
 
-Its grammar draws up to twelve rows and one request: the order fields `rank`
-and `title`, mostly integers, booleans, plain text, null or nothing, sometimes
-a value that breaks the work law's premise (a Date, BigInt, NaN, fraction,
-object or text in `rank`; U+E000, an astral character, a lone surrogate, U+FFFD
-or NUL in `title`); a `status` field that stores 1, a Date of epoch 1, `1n`,
-`true`, `'1'`, the epoch's ISO text and a Date at the latest valid epoch; keys
-with an optional U+E000 or astral character; zero to two `eq`, `in`, range or
-constant leaves (`true` or `eq(1, 1)`) over five fields, with lone-surrogate, mixed-kind and
-latest-epoch literals, joined without `and`, always under `and` (`and()`
-included), or with a nested `and`; one or two order terms over `rank`, `title`,
-the unindexed `due` or a constant, with each direction, null placement and
-default, lexical, locale or custom string sort; a limit of 0..8 or one
-million; and no offset or one of 0..8. The driver ensures the indexes best
-effort, as the persisted wrapper does, so a page whose index was lost meets the
-work law; a load that rejects is observed and breaks the filter or page law. Its declared states are `page in SQL` (the work
-law's premise holds) and `page in memory`. Four constructed histories splice
-`page in SQL` into a generated history, one of them at a zero limit or offset,
-and four splice `page in memory` with one break each: an irregular order
-value, two tied rows with high keys, an inexact leaf, or an unindexed,
-constant or non-lexical order. Each builder records its state, the check
-rejects a construction that missed it, and a missing-state calibration per
-builder shows the rejection. A normal run of 100 generated histories per
-campaign reaches each state at least four times; with fixed seed 1116 they are
-26 and 82. Sixteen fixed histories keep the datasets that rejected the
-production mutants below and an exact equality of each literal kind.
+The oracle file states its grammar of up to twelve rows and one request. Its
+declared states are `page in SQL` (the work law's premise holds) and `page in
+memory`. Four constructed histories splice each state into a generated
+history, the check rejects a construction that missed its state, and a normal
+run of 100 generated histories per campaign reaches each state at least four
+times.
 
 On the prior adapter (`21c52a07`) every `page in SQL` construction and both
 generated units failed the work law, and no history violated the page or
@@ -4089,15 +4058,10 @@ guards dropped, a zero bound kept in memory, an empty conjunction kept in
 memory and the original full read fail `work`; and a number candidate without
 the Date's ISO text, or with no number candidate, fails boolean-arity's work
 check. The thirteenth, a membership whose literals mix kinds counted as exact,
-survives: the prefilter gives a mixed list a candidate only for text that
-mixes plain characters with a lone surrogate, U+FFFD or NUL, and the SQLite
-builds of node:sqlite (3.54.1) and better-sqlite3 (3.53.2) decode such a
-JSON-bound list without loss. That gap stays open and needs a maintainer
-allowance; the review record `2026-11-16-sqlite-ordered-page.md` lists it with
-the other open gaps of the changed functions. Bound calibrations reject a
-dropped Date match (filter), an ignored offset (page), a page that reads every
-match (work), and a driver that pages the unpaged request's SQL read (page) on
-mixed numbers and text and on coerced candidates.
+survives on node:sqlite and better-sqlite3. That gap stays open and needs a
+maintainer allowance; the
+[review record](oracle-reviews/2026-11-16-sqlite-ordered-page.md) lists it with
+the other open gaps of the changed functions.
 `sqlite-ordered-page.test.ts` checks that an irregular-rows index from another
 release keeps the in-memory path until `ensureIndex` rebuilds it, and that it
 is dropped with its field index.
