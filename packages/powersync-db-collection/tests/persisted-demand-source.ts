@@ -132,6 +132,13 @@ export function nativePowerSyncPersistedDemandSource(
     return {
       collection,
       answer: async (rows: ReadonlyArray<DemandRow>) => {
+        // Record the authored provider input before its asynchronous delivery.
+        // SDK startup and write-lock completion can otherwise reorder these
+        // input facts. No observation cut occurs until delivery is drained.
+        input.events.push({
+          type: `rows`,
+          rows: rows.map((row) => [row.id, { ...row }]),
+        })
         await database.writeTransaction(async (transaction) => {
           for (const row of rows) {
             const previous = await transaction.getOptional<{ id: string }>(
@@ -149,10 +156,6 @@ export function nativePowerSyncPersistedDemandSource(
                 [row.id, row.group, row.rank, row.value],
               )
           }
-        })
-        input.events.push({
-          type: `rows`,
-          rows: rows.map((row) => [row.id, { ...row }]),
         })
         mode = `answer`
         for (const entry of [...pending]) entry.answer()
