@@ -9,7 +9,7 @@ import fc from 'fast-check'
 import { OracleMismatch, equal } from './cross-tab-oracle'
 
 export type CampaignReceipt = { reach: Set<string> }
-function failure(error: unknown): {
+export function campaignFailure(error: unknown): {
   law: string
   checkpoint: string
   detail: string
@@ -17,7 +17,7 @@ function failure(error: unknown): {
   actual?: unknown
 } {
   if (error instanceof AggregateError && error.cause !== undefined)
-    return failure(error.cause)
+    return campaignFailure(error.cause)
   if (error instanceof OracleMismatch)
     return {
       law: error.law,
@@ -38,25 +38,24 @@ function failure(error: unknown): {
       : {}),
   }
 }
-export async function runCampaign<T>(
+export function createCampaignRecorder<T>(
   name: string,
   arbitrary: fc.Arbitrary<T>,
   run: (history: T, receipt: CampaignReceipt) => Promise<void>,
-  options: { runs: number; seed?: number; path?: string; environment?: string },
 ) {
-  type Failed = ReturnType<typeof failure> & {
+  type Failed = ReturnType<typeof campaignFailure> & {
     history: T
     reach: Array<string>
   }
   const failures: Array<Failed> = []
   let original: Failed | undefined
-  const property = fc.asyncProperty(arbitrary, async (history) => {
+  const record = async (history: T): Promise<void> => {
     const receipt: CampaignReceipt = { reach: new Set() }
     try {
       await run(history, receipt)
     } catch (error) {
       const captured = {
-        ...failure(error),
+        ...campaignFailure(error),
         history: structuredClone(history),
         reach: [...receipt.reach],
       }
@@ -69,7 +68,8 @@ export async function runCampaign<T>(
       )
         throw error
     }
-  })
+  }
+  const property = fc.asyncProperty(arbitrary, record)
   function replayOnce(seed: number | undefined, path: string) {
     if (seed === undefined) throw new Error('Replay requires an explicit seed')
     // check() can visit the remaining shrink siblings after a repaired input
@@ -84,72 +84,100 @@ export async function runCampaign<T>(
       endOnFailure: true,
     })
   }
+  return {
+    run: record,
+    async complete(result: fc.RunDetails<[T]>, options: CampaignOptions) {
+      const selectedPath = options.path ?? result.counterexamplePath
+      let reproduction:
+        | {
+            inputReconstructed: boolean
+            premiseReached: boolean
+            sameFailure: boolean
+          }
+        | undefined
+      if (result.failed) {
+        const replayOffset = failures.length
+        const replay = await replayOnce(result.seed, selectedPath!)
+        const replayFailure = failures[replayOffset]
+        reproduction = {
+          inputReconstructed: equal(
+            result.counterexample,
+            replay.counterexample,
+          ),
+          premiseReached:
+            replayFailure !== undefined &&
+            original!.reach.every((premise) =>
+              replayFailure.reach.includes(premise),
+            ),
+          sameFailure:
+            replay.failed &&
+            replayFailure?.law === original!.law &&
+            replayFailure.checkpoint === original!.checkpoint,
+        }
+      }
+      let head = 'unknown'
+      let headError: string | undefined
+      try {
+        head = execFileSync('git', ['rev-parse', 'HEAD'], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }).trim()
+      } catch (error) {
+        headError = String(error)
+      }
+      const report = {
+        name,
+        head,
+        headError,
+        fastCheck: fc.__version,
+        environment:
+          options.environment ?? 'fake-indexeddb + controlled Channel',
+        seed: result.seed,
+        path: selectedPath,
+        runs: result.numRuns,
+        failed: result.failed,
+        original,
+        reduced: result.counterexample,
+        reproduction,
+        failures,
+      }
+      await mkdir('test-results/oracles', { recursive: true })
+      await writeFile(
+        `test-results/oracles/${name}-${result.seed}-${crypto.randomUUID()}.json`,
+        JSON.stringify(report, null, 2),
+      )
+      if (result.failed)
+        throw new Error(
+          `${name} failed: seed=${result.seed} path=${selectedPath}; replay=${JSON.stringify(reproduction)}\n${String(result.errorInstance)}`,
+        )
+      if (result.numRuns !== (options.path === undefined ? options.runs : 1))
+        throw new Error('Campaign did not execute its declared budget')
+    },
+    replayOnce,
+  }
+}
+
+type CampaignOptions = {
+  runs: number
+  seed?: number
+  path?: string
+  environment?: string
+}
+
+export async function runCampaign<T>(
+  name: string,
+  arbitrary: fc.Arbitrary<T>,
+  run: (history: T, receipt: CampaignReceipt) => Promise<void>,
+  options: CampaignOptions,
+) {
+  const recorder = createCampaignRecorder(name, arbitrary, run)
+  const property = fc.asyncProperty(arbitrary, recorder.run)
   const result =
     options.path === undefined
       ? await fc.check(property, {
           numRuns: options.runs,
           ...(options.seed === undefined ? {} : { seed: options.seed }),
         })
-      : await replayOnce(options.seed, options.path)
-  const selectedPath = options.path ?? result.counterexamplePath
-  let reproduction:
-    | {
-        inputReconstructed: boolean
-        premiseReached: boolean
-        sameFailure: boolean
-      }
-    | undefined
-  if (result.failed) {
-    const replayOffset = failures.length
-    const replay = await replayOnce(result.seed, selectedPath!)
-    const replayFailure = failures[replayOffset]
-    reproduction = {
-      inputReconstructed: equal(result.counterexample, replay.counterexample),
-      premiseReached:
-        replayFailure !== undefined &&
-        original!.reach.every((premise) =>
-          replayFailure.reach.includes(premise),
-        ),
-      sameFailure:
-        replay.failed &&
-        replayFailure?.law === original!.law &&
-        replayFailure.checkpoint === original!.checkpoint,
-    }
-  }
-  let head = 'unknown'
-  let headError: string | undefined
-  try {
-    head = execFileSync('git', ['rev-parse', 'HEAD'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim()
-  } catch (error) {
-    headError = String(error)
-  }
-  const report = {
-    name,
-    head,
-    headError,
-    fastCheck: fc.__version,
-    environment: options.environment ?? 'fake-indexeddb + controlled Channel',
-    seed: result.seed,
-    path: selectedPath,
-    runs: result.numRuns,
-    failed: result.failed,
-    original,
-    reduced: result.counterexample,
-    reproduction,
-    failures,
-  }
-  await mkdir('test-results/oracles', { recursive: true })
-  await writeFile(
-    `test-results/oracles/${name}-${result.seed}-${crypto.randomUUID()}.json`,
-    JSON.stringify(report, null, 2),
-  )
-  if (result.failed)
-    throw new Error(
-      `${name} failed: seed=${result.seed} path=${selectedPath}; replay=${JSON.stringify(reproduction)}\n${result.error}`,
-    )
-  if (result.numRuns !== (options.path === undefined ? options.runs : 1))
-    throw new Error('Campaign did not execute its declared budget')
+      : await recorder.replayOnce(options.seed, options.path)
+  await recorder.complete(result, options)
 }

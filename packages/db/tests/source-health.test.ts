@@ -26,7 +26,7 @@ import type {
 import type { PooledView, Row, SyncParams } from './source-health-support.js'
 
 // ---------------------------------------------------------------------------
-// Request lane
+// Request grammar
 // ---------------------------------------------------------------------------
 
 /**
@@ -57,7 +57,7 @@ import type { PooledView, Row, SyncParams } from './source-health-support.js'
  * reload's promise follow the same rules as for an `Error`, and the node's
  * problem keeps the value as its `cause`. A value that cannot describe
  * itself (no prototype, a throwing getter) shows the generic message. The
- * lane crosses each call site with each kind of value.
+ * grammar crosses each call site with each kind of value.
  */
 describe(`problem values`, () => {
   const values: Record<string, () => unknown> = {
@@ -827,7 +827,7 @@ describe(`crash recovery`, () => {
 
 // A query whose first load failed waits for `reload()`: another source
 // becoming ready does not restart it, and its failed load is not retried. The
-// main grammar fails only sources, so this lane supplies the query's own
+// main grammar fails only sources, so this grammar supplies the query's own
 // failure.
 describe(`a query's own failed first load`, () => {
   it(`does not restart when an unrelated source becomes ready`, async () => {
@@ -1538,7 +1538,7 @@ describe(`lazy join demand grammar`, () => {
 })
 
 // ---------------------------------------------------------------------------
-// Effect lane
+// Effect grammar
 // ---------------------------------------------------------------------------
 
 /**
@@ -1554,7 +1554,7 @@ describe(`lazy join demand grammar`, () => {
  * problem on the source's node: it does not dispose the Effect, and
  * `onHealthChange` receives the health tree, with one node per source alias.
  *
- * The lane crosses `skipInitial`, the source mode, and when the source fails.
+ * The grammar crosses `skipInitial`, the source mode, and when the source fails.
  * Before initial-query readiness, an eager source has not called `markReady()`, and an
  * on-demand source still has its first load pending. After it, the
  * source calls `fail()`, which fails the first load of an on-demand source
@@ -1867,7 +1867,7 @@ describe(`effect healthy gate`, () => {
   })
 })
 
-// The Effect lane above creates the Effect first. A source can already be in
+// The Effect grammar above creates the Effect first. A source can already be in
 // `error` (its first load failed) or `crashed` when the Effect subscribes.
 // No status change follows, so the Effect must read the status when it
 // subscribes. Model: the Effect never reaches its gate, so either status ends
@@ -1943,7 +1943,7 @@ describe(`effect over a source that already stopped`, () => {
  * An Effect has no request errors: a load that fails after its gate, as
  * before it, ends the Effect through `onSourceError`, and no tree it reported
  * shows the failure. The parents lead the Effect, and a lazy join loads the
- * children each new parent row reaches. The lane crosses `skipInitial` with
+ * children each new parent row reaches. The grammar crosses `skipInitial` with
  * the parents' source mode.
  */
 describe(`effect load failures`, () => {

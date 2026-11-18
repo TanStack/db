@@ -63,8 +63,14 @@ source row directly, such as `({ user }) => user`. A new object, including
 `({ user }) => ({ ...user })`, receives the live-query Collection's metadata.
 Identical field values do not establish which source authored that object.
 These rules also apply to Collection-valued include rows. Inline `toArray()`
-and `materialize()` results keep their selected shape. Rename application data fields that collide with these names before
-selecting them as row roots.
+and `materialize()` results keep their selected shape.
+
+Intermediate subquery projections and downstream functional callback inputs
+also keep authored fields. An explicit `$collectionId: 'application'` override
+remains that string through `.fn.select()`, `.fn.where()` and `.fn.having()`.
+The same applies to Effect outputs. Only publication as an actual Collection
+row supplies computed metadata. Rename colliding application fields when you
+need to preserve them on a published row root.
 
 ## Wait for transaction settlement
 

@@ -15,7 +15,7 @@ import {
 import { mockSyncCollectionOptions } from '../utils.js'
 
 describe(`aggregate select shapes`, () => {
-  // Pinned witness: a group key that holds a literal object or NaN matches a
+  // Fixed history: a group key that holds a literal object or NaN matches a
   // select value that builds the same literal again.
   it(`matches group keys holding array, Date and NaN literals`, async () => {
     const source = createCollection(

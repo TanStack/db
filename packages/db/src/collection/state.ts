@@ -150,6 +150,9 @@ export class CollectionStateManager<
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
+  // Transactions whose rows cleanup discarded. They keep their hold, but they
+  // never overlay this Collection again, even after a restart.
+  private discardedTransactions = new WeakSet<Transaction<any>>()
   public pendingSyncedTransactions: Array<
     PendingSyncedTransaction<TOutput, TKey>
   > = []
@@ -709,8 +712,13 @@ export class CollectionStateManager<
         continue
       }
       // Settlement can outlive cleanup. Keep pruning settled transactions,
-      // but do not republish a sibling from the discarded sync run.
-      if (this.lifecycle.hasStartedCleanup()) continue
+      // but do not republish a sibling from the discarded sync run, or any
+      // write that arrives while that cleanup is still running.
+      if (
+        this.lifecycle.isCleaningUp() ||
+        this.discardedTransactions.has(transaction)
+      )
+        continue
       for (const mutation of transaction.mutations) {
         if (mutation.collection !== this.collection) continue
         this.pendingLocalChanges.add(mutation.key)
@@ -1647,6 +1655,8 @@ export class CollectionStateManager<
    */
   public cleanup(): void {
     this.syncRunGeneration++
+    for (const transaction of this.transactions.values())
+      this.discardedTransactions.add(transaction)
     for (const transaction of this.pendingSyncedTransactions) {
       transaction.applied.reject(new SyncTransactionAbortedError())
     }

@@ -516,7 +516,7 @@ describe(`query API type algebra`, () => {
           expectTypeOf(nullableObject).toEqualTypeOf<Ref<
             { label: string },
             true,
-            true
+            false
           > | null>()
           return { nullableNumber, nullableText, nullableObject }
         },

@@ -40,7 +40,6 @@
  * below runs explicit-key hook paths for rejection causes that remain valid. This does not assert a
  * process-wide Collection registry or other explicit-key semantics.
  */
-
 import {
   act,
   cleanup as cleanupReact,
@@ -57,14 +56,19 @@ import {
   eq,
   gt,
 } from '@tanstack/db'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { Suspense } from 'react'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
-import { declareOracle } from '../../db/tests/oracle-declaration'
-import { createOracleReach } from '../../db/tests/oracle-reach'
+import { oracleProperty } from '../../db/tests/oracle-config'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import {
   boundOptionHistories,
   captureBoundOptions,
@@ -72,13 +76,17 @@ import {
 } from '../../db/tests/live-query-bound-options-oracle'
 import { withOracleCleanup } from '../../db/tests/utils'
 import { TestErrorBoundary, source } from './source-id-reuse-support'
+import {
+  checkReleaseObservation,
+  expectedReleaseObservation,
+} from './source-id-reuse-release-oracle'
 import type {
   Collection,
   InitialQueryBuilder,
   NonSingleResult,
 } from '@tanstack/db'
 import type { Row } from './source-id-reuse-support'
-
+import type { ReleaseObservation } from './source-id-reuse-release-oracle'
 /**
  * A render may allocate getKey/schema closures without changing the query.
  * Maintainer decision: options bind until the query or explicit queryKey changes.
@@ -87,117 +95,172 @@ import type { Row } from './source-id-reuse-support'
  * renders, a source update and identity replacement. A render budget catches a
  * loop. React is the real receiving host; other frameworks are not claimed here.
  */
-
-it.each(
-  [`live`, `suspense`].flatMap((hook) =>
-    boundOptionHistories.map((history) => ({ hook, ...history })),
-  ),
-)(
-  `retains inline options until identity changes: %j`,
-  async ({ hook, option, identity }) => {
-    const rows = source(
-      `inline-options-${hook}-${option}-${identity}`,
-      `before`,
+const inlineOptionHistories = [`live`, `suspense`].flatMap((hook) =>
+  boundOptionHistories.map((history) => ({ hook, ...history })),
+)
+const inlineStates = [`rerender`, `source-update`, `identity-change`] as const
+async function checkInlineOptions(
+  { hook, option, identity }: (typeof inlineOptionHistories)[number],
+  observe: (checkpoint: string, value: unknown) => void,
+) {
+  const rows = source(`inline-options-${hook}-${option}-${identity}`, `before`)
+  let renders = 0
+  const reached = new Set<(typeof inlineStates)[number]>()
+  const reach = {
+    reach: (state: (typeof inlineStates)[number]) => {
+      reached.add(state)
+      observe(`reach`, state)
+    },
+  }
+  const { result, rerender, unmount } = renderHook(
+    ({ revision }) => {
+      if (++renders > 30)
+        throw new Error(`inline options rebuilt on every render`)
+      const getKey = (row: Row) => row.id
+      const schema = {
+        '~standard': {
+          version: 1 as const,
+          vendor: `identity-oracle`,
+          validate: (value: unknown) => ({ value: value as Row }),
+        },
+      }
+      const config = {
+        query: (q: InitialQueryBuilder) =>
+          q
+            .from({ row: rows })
+            .where(({ row }) =>
+              gt(row.rank, identity === `query` ? -revision : 0),
+            ),
+        ...(identity === `queryKey` ? { queryKey: [revision] } : {}),
+        ...(option !== `schema` ? { getKey } : {}),
+      }
+      // Exercise schema at the JavaScript config boundary: its current
+      // public TS declaration is `never`, independently of runtime identity.
+      if (option !== `getKey`) Object.assign(config, { schema })
+      if (hook === `suspense`) return useLiveSuspenseQuery(config)
+      return useLiveQuery(config)
+    },
+    { initialProps: { revision: 0 } },
+  )
+  const collections = new Set<{
+    cleanup: () => Promise<void>
+  }>()
+  await withOracleCleanup(async () => {
+    await waitFor(() =>
+      oracleAssertion(
+        'expect(result.current.collection.status).toBe(`ready`)',
+        () => expect(result.current.collection.status).toBe(`ready`),
+      ),
     )
-    let renders = 0
-    const reach = createOracleReach(`inline options ${hook}`, [
-      `rerender`,
-      `source-update`,
-      `identity-change`,
-    ])
-    reach.beginHistory()
-    const { result, rerender, unmount } = renderHook(
-      ({ revision }) => {
-        if (++renders > 30)
-          throw new Error(`inline options rebuilt on every render`)
-        const getKey = (row: Row) => row.id
-        const schema = {
-          '~standard': {
-            version: 1 as const,
-            vendor: `identity-oracle`,
-            validate: (value: unknown) => ({ value: value as Row }),
-          },
-        }
-        const config = {
-          query: (q: InitialQueryBuilder) =>
-            q
-              .from({ row: rows })
-              .where(({ row }) =>
-                gt(row.rank, identity === `query` ? -revision : 0),
-              ),
-          ...(identity === `queryKey` ? { queryKey: [revision] } : {}),
-          ...(option !== `schema` ? { getKey } : {}),
-        }
-        // Exercise schema at the JavaScript config boundary: its current
-        // public TS declaration is `never`, independently of runtime identity.
-        if (option !== `getKey`) Object.assign(config, { schema })
-        if (hook === `suspense`) return useLiveSuspenseQuery(config)
-        return useLiveQuery(config)
-      },
-      { initialProps: { revision: 0 } },
-    )
-    const collections = new Set<{ cleanup: () => Promise<void> }>()
-    await withOracleCleanup(async () => {
-      await waitFor(() =>
-        expect(result.current.collection.status).toBe(`ready`),
-      )
-      const initial = result.current.collection
-      const initialBinding = captureBoundOptions(initial)
-      collections.add(initial)
-      for (let turn = 0; turn < 3; turn++) {
-        rerender({ revision: 0 })
-        // Absent options have no binding to compare; the Collection still must stay.
+    const initial = result.current.collection
+    const initialBinding = captureBoundOptions(initial)
+    collections.add(initial)
+    for (let turn = 0; turn < 3; turn++) {
+      rerender({ revision: 0 })
+      // Absent options have no binding to compare; the Collection still must stay.
+      oracleAssertion('checkBoundOptions', () =>
         checkBoundOptions(
           initialBinding,
           result.current.collection,
           false,
           option,
-        )
-        expect(result.current.data.map((row) => row.id)).toEqual([`one`])
-        reach.reach(`rerender`)
-      }
-      act(() => {
-        rows.utils.begin()
-        rows.utils.write({
-          type: `update`,
-          value: { id: `one`, value: `after`, rank: 1 },
-        })
-        rows.utils.commit()
+        ),
+      )
+      oracleAssertion(
+        'expect(result.current.data.map((row) => row.id)).toEqual([`one`])',
+        () => expect(result.current.data.map((row) => row.id)).toEqual([`one`]),
+      )
+      reach.reach(`rerender`)
+    }
+    act(() => {
+      rows.utils.begin()
+      rows.utils.write({
+        type: `update`,
+        value: { id: `one`, value: `after`, rank: 1 },
       })
-      expect(result.current.data[0]?.value).toBe(`after`)
-      expect(result.current.collection).toBe(initial)
+      rows.utils.commit()
+    })
+    oracleAssertion('expect(result.current.data[0]?.value).toBe(`after`)', () =>
+      expect(result.current.data[0]?.value).toBe(`after`),
+    )
+    oracleAssertion('expect(result.current.collection).toBe(initial)', () =>
+      expect(result.current.collection).toBe(initial),
+    )
+    oracleAssertion('checkBoundOptions', () =>
       checkBoundOptions(
         initialBinding,
         result.current.collection,
         false,
         option,
-      )
-      reach.reach(`source-update`)
-      rerender({ revision: 1 })
-      collections.add(result.current.collection)
-      await waitFor(() =>
-        expect(result.current.collection.status).toBe(`ready`),
-      )
-      // The comparison judges only configured options; absent options may be
-      // synthesized by the Collection and have no user binding contract.
-      expect(result.current.collection).not.toBe(initial)
-      checkBoundOptions(initialBinding, result.current.collection, true, option)
-      expect(result.current.data.map((row) => row.id)).toEqual([`one`])
-      reach.reach(`identity-change`)
-      reach.assertReached()
-    }, [
-      () => unmount(),
+      ),
+    )
+    reach.reach(`source-update`)
+    rerender({ revision: 1 })
+    collections.add(result.current.collection)
+    await waitFor(() =>
+      oracleAssertion(
+        'expect(result.current.collection.status).toBe(`ready`)',
+        () => expect(result.current.collection.status).toBe(`ready`),
+      ),
+    )
+    // The comparison judges only configured options; absent options may be
+    // synthesized by the Collection and have no user binding contract.
+    oracleAssertion('expect(result.current.collection).not.toBe(initial)', () =>
+      expect(result.current.collection).not.toBe(initial),
+    )
+    oracleAssertion('checkBoundOptions', () =>
+      checkBoundOptions(
+        initialBinding,
+        result.current.collection,
+        true,
+        option,
+      ),
+    )
+    oracleAssertion(
+      'expect(result.current.data.map((row) => row.id)).toEqual([`one`])',
+      () => expect(result.current.data.map((row) => row.id)).toEqual([`one`]),
+    )
+    reach.reach(`identity-change`)
+    oracleAssertion(
+      'expect(inlineStates.filter((state) => !reached.has(state))).toEqual([])',
       () =>
-        withOracleCleanup(() => {}, [
-          ...[...collections].map((collection) => () => collection.cleanup()),
-          () => rows.cleanup({ dependents: true }),
-        ]),
-    ])
+        expect(inlineStates.filter((state) => !reached.has(state))).toEqual([]),
+    )
+  }, [
+    () => unmount(),
+    () =>
+      withOracleCleanup(() => {}, [
+        ...[...collections].map((collection) => () => collection.cleanup()),
+        () => rows.cleanup({ dependents: true }),
+      ]),
+  ])
+}
+oracleProperty({
+  id: `react.source-id-inline-options`,
+  law: {
+    statement: `Inline options bind until query identity changes; unchanged renders and source publications retain the Collection and configured references.`,
+    authority: `packages/db/tests/live-query-bound-options-oracle.ts and maintainer inline-options decision, as stated by this owner.`,
+    limits: `The unchanged 12 live/Suspense × getKey/schema/both × query/queryKey histories at the JavaScript configuration boundary.`,
   },
-)
-
-type Binding = { source: ReturnType<typeof source>; client?: DbClient }
-
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
+  histories: inlineOptionHistories,
+  resolve: (history) => ({ history }),
+  model: recordedAssertionJudgment,
+  driver: (plan, observe) =>
+    recordAssertionJudgment(`inline bound options`, plan, observe, () =>
+      checkInlineOptions(plan.history, observe),
+    ),
+  check: forwardAssertionJudgment,
+})
+type Binding = {
+  source: ReturnType<typeof source>
+  client?: DbClient
+}
 // A prior source with the same ID in this client scope forbids a new object.
 // Pairwise history comparison is independent of the hook's token maps.
 function expectedCollision(history: ReadonlyArray<Binding>, next: Binding) {
@@ -208,25 +271,22 @@ function expectedCollision(history: ReadonlyArray<Binding>, next: Binding) {
       prior.source !== next.source,
   )
 }
-
 function checkRerender(
   history: ReadonlyArray<Binding>,
   next: Binding,
   rerender: () => void,
 ) {
   if (expectedCollision(history, next)) {
-    expect(rerender).toThrow(SourceCollectionIdReuseError)
+    oracleAssertion(
+      'expect(rerender).toThrow(SourceCollectionIdReuseError)',
+      () => expect(rerender).toThrow(SourceCollectionIdReuseError),
+    )
   } else {
-    expect(rerender).not.toThrow()
+    oracleAssertion('expect(rerender).not.toThrow()', () =>
+      expect(rerender).not.toThrow(),
+    )
   }
 }
-
-declareOracle({
-  check: [checkRerender, checkReleaseHistory, checkBoundOptions],
-  model: [expectedCollision],
-  grammar: [boundOptionHistories],
-})
-
 /*
  * Release law. A hook in one DbClient scope first reads only its own source,
  * then rerenders into a rejected query that also reads a shared descriptor.
@@ -240,14 +300,19 @@ declareOracle({
  * history that rejects before binding the shared source fails instead of
  * passing vacuously.
  */
-type ReleaseStep = { current: ReturnType<typeof source>; reject: boolean }
-
+type ReleaseStep = {
+  current: ReturnType<typeof source>
+  reject: boolean
+}
 const releaseCauses: Record<
   string,
   (
     shared: any,
     failing: any,
-    failures?: { factory: Error; sibling: Error },
+    failures?: {
+      factory: Error
+      sibling: Error
+    },
   ) => {
     matchesRejection?: (error: unknown) => boolean
     rejected: (step: ReleaseStep) => ReleaseStep
@@ -400,18 +465,15 @@ const releaseCauses: Record<
     rejectsIn: (hook) => !hook.suspense,
   }),
 }
-
 function orderIf(query: any, ordered: boolean) {
   return ordered ? query.orderBy(({ settings }: any) => settings.rank) : query
 }
-
 type ReleaseHook = {
   ordered: boolean
   suspense: boolean
   keyed: boolean
   use: (query: (q: any) => any, rejectedIdentity: boolean) => void
 }
-
 const releaseHooks: Record<string, ReleaseHook> = {
   'useLiveQuery with derived identity': {
     ordered: false,
@@ -419,14 +481,12 @@ const releaseHooks: Record<string, ReleaseHook> = {
     keyed: false,
     use: (query) => void useLiveQuery(query),
   },
-
   'useLiveInfiniteQuery with derived identity': {
     ordered: true,
     suspense: false,
     keyed: false,
     use: (query) => void useLiveInfiniteQuery(query, { pageSize: 1 }),
   },
-
   // A config can turn off the reclaim: gcTime 0 or Infinity disables GC, and
   // startSync false never arms it. A render that never commits must still
   // release its deferral.
@@ -455,7 +515,6 @@ const releaseHooks: Record<string, ReleaseHook> = {
     use: (query) => void useLiveSuspenseQuery(query),
   },
 }
-
 // Explicit keys skip source-ID and derived-IR guards. Factory, compiler,
 // window-shape and abandoned-render failures still owe release on these paths.
 // The key changes with the authored query; a constant key would legally retain
@@ -490,10 +549,8 @@ releaseHooks[`useLiveSuspenseQuery with queryKey`] = {
       queryKey: [`release-keyed-suspense`, rejectedIdentity],
     }),
 }
-
 type SharedReleaseCollection = Collection<Row, string, {}, never, Row> &
   NonSingleResult
-type ReleaseObservation = { starts: number; status: string; rows: Array<Row> }
 type ReleaseReader = (shared: SharedReleaseCollection) => {
   observe: () => Omit<ReleaseObservation, `starts`>
   ready?: Promise<unknown>
@@ -561,23 +618,6 @@ const releaseReaders: Record<string, ReleaseReader> = {
     }
   },
 }
-
-/** The release judgment knows authored source facts, not hook/cache machinery.
- * Independent demand starts one healthy source. A later source publication
- * replaces the row's value, and every direct reader must receive that whole row.
- * An after-hook throw/suspension can be reclaimed before or after the read; it
- * owes the same final result. No synchronous reclaim deadline is imposed.
- */
-function expectedReleaseObservation(row: Row): ReleaseObservation {
-  return { starts: 1, status: `ready`, rows: [{ ...row }] }
-}
-function checkReleaseObservation(
-  actual: ReleaseObservation,
-  expected: ReleaseObservation,
-): void {
-  expect(actual).toEqual(expected)
-}
-
 /** Every rendered history must first materialize its shared descriptor. The
  * premise is checked before independent demand, rather than inferred from final
  * rows. Initial mount and rerender are different receiving paths. The source-ID
@@ -595,13 +635,16 @@ async function checkReleaseHistory(
   hook: ReleaseHook,
   read: ReleaseReader,
   atMount: boolean,
+  observe: (checkpoint: string, value: unknown) => void,
 ) {
-  const reach = createOracleReach(`React descriptor release`, [
-    `prepared`,
-    `reader-ready`,
-    `source-update`,
-  ])
-  reach.beginHistory()
+  const states = [`prepared`, `reader-ready`, `source-update`] as const
+  const reached = new Set<(typeof states)[number]>()
+  const reach = {
+    reach: (state: (typeof states)[number]) => {
+      reached.add(state)
+      observe(`reach`, state)
+    },
+  }
   const client = new DbClient()
   const sources = new Set<ReturnType<typeof source>>()
   const id = `release-shared-${releaseSequence++}`
@@ -685,95 +728,163 @@ async function checkReleaseHistory(
     const root = render(tree(atMount ? rejected : initial))
     await act(async () => {})
     if (!atMount) root.rerender(tree(rejected))
-    expect(
-      root.getByText(cause.afterHook === `suspend` ? `Loading` : `Rejected`),
-    ).toBeDefined()
-    expect(materialized, `shared descriptor bound before rejected render`).toBe(
-      1,
-    )
-    if (cause.afterHook) expect(afterHookReached).toBeGreaterThan(0)
-    else expect(afterHookReached).toBe(0)
-    if (cause.afterHook === `suspend`) expect(rejections).toEqual([])
-    else {
+    oracleAssertion('expect(', () =>
       expect(
-        rejections.length,
-        `authored rejection reached boundary`,
-      ).toBeGreaterThan(0)
-      for (const error of rejections)
+        root.getByText(cause.afterHook === `suspend` ? `Loading` : `Rejected`),
+      ).toBeDefined(),
+    )
+    oracleAssertion(
+      'expect(materialized, `shared descriptor bound before rejected render`).toBe(',
+      () =>
         expect(
-          cause.matchesRejection?.(error),
-          `intended rejection: ${String(error)}`,
-        ).toBe(true)
+          materialized,
+          `shared descriptor bound before rejected render`,
+        ).toBe(1),
+    )
+    if (cause.afterHook)
+      oracleAssertion('expect(afterHookReached).toBeGreaterThan(0)', () =>
+        expect(afterHookReached).toBeGreaterThan(0),
+      )
+    else
+      oracleAssertion('expect(afterHookReached).toBe(0)', () =>
+        expect(afterHookReached).toBe(0),
+      )
+    if (cause.afterHook === `suspend`)
+      oracleAssertion('expect(rejections).toEqual([])', () =>
+        expect(rejections).toEqual([]),
+      )
+    else {
+      oracleAssertion('expect(', () =>
+        expect(
+          rejections.length,
+          `authored rejection reached boundary`,
+        ).toBeGreaterThan(0),
+      )
+      for (const error of rejections)
+        oracleAssertion('expect(', () =>
+          expect(
+            cause.matchesRejection?.(error),
+            `intended rejection: ${String(error)}`,
+          ).toBe(true),
+        )
     }
-    if (!cause.afterHook) expect(syncStarts).toBe(0)
+    if (!cause.afterHook)
+      oracleAssertion('expect(syncStarts).toBe(0)', () =>
+        expect(syncStarts).toBe(0),
+      )
     reach.reach(`prepared`)
     const collection = client.collection(shared)
     act(() => {
       reader = read(collection)
     })
-    if (cause.afterHook) await waitFor(() => expect(syncStarts).toBe(1))
-    else expect(syncStarts).toBe(1)
+    if (cause.afterHook)
+      await waitFor(() =>
+        oracleAssertion('expect(syncStarts).toBe(1)', () =>
+          expect(syncStarts).toBe(1),
+        ),
+      )
+    else
+      oracleAssertion('expect(syncStarts).toBe(1)', () =>
+        expect(syncStarts).toBe(1),
+      )
     await reader!.ready
     await act(async () => {})
-    checkReleaseObservation(
-      { starts: syncStarts, ...reader!.observe() },
-      expectedReleaseObservation(initialRow),
+    oracleAssertion('checkReleaseObservation', () =>
+      checkReleaseObservation(
+        { starts: syncStarts, ...reader!.observe() },
+        expectedReleaseObservation(initialRow),
+      ),
     )
     reach.reach(`reader-ready`)
     act(() => {
       publish(nextRow)
     })
     await act(async () => {})
-    checkReleaseObservation(
-      { starts: syncStarts, ...reader!.observe() },
-      expectedReleaseObservation(nextRow),
+    oracleAssertion('checkReleaseObservation', () =>
+      checkReleaseObservation(
+        { starts: syncStarts, ...reader!.observe() },
+        expectedReleaseObservation(nextRow),
+      ),
     )
     reach.reach(`source-update`)
-    reach.assertReached()
+    oracleAssertion(
+      'expect(states.filter((state) => !reached.has(state))).toEqual([])',
+      () => expect(states.filter((state) => !reached.has(state))).toEqual([]),
+    )
   }, cleanups)
 }
-
-describe(`React source ID reuse: rejected renders release deferred sync starts`, () => {
-  for (const [causeName, makeCause] of Object.entries(releaseCauses))
-    for (const [hookName, hook] of Object.entries(releaseHooks)) {
+const releaseHistories = Object.entries(releaseCauses).flatMap(
+  ([causeName, makeCause]) =>
+    Object.entries(releaseHooks).flatMap(([hookName, hook]) => {
       const probe = makeCause(undefined, undefined)
-      if (probe.rejectsIn && !probe.rejectsIn(hook)) continue
-      for (const [readerName, read] of Object.entries(releaseReaders))
-        for (const atMount of probe.requiresPriorClaim
-          ? [false]
-          : [false, true])
-          it(`after ${causeName} in ${hookName}, ${readerName} starts the shared source (${atMount ? `mount` : `rerender`})`, () =>
-            checkReleaseHistory(makeCause, hook, read, atMount))
-    }
-})
-it.each([
-  `missing-start`,
-  `extra-start`,
-  `wrong-row`,
-  `duplicate-row`,
-] as const)(`rejects wrong descriptor release observation: %s`, (fault) => {
-  const expected = expectedReleaseObservation({
-    id: `one`,
-    value: `authored`,
-    rank: 2,
+      if (probe.rejectsIn && !probe.rejectsIn(hook)) return []
+      return Object.entries(releaseReaders).flatMap(([readerName, read]) =>
+        (probe.requiresPriorClaim ? [false] : [false, true]).map((atMount) => ({
+          causeName,
+          hookName,
+          readerName,
+          makeCause,
+          hook,
+          read,
+          atMount,
+        })),
+      )
+    }),
+)
+describe(`React source ID reuse: rejected renders release deferred sync starts`, () => {
+  oracleProperty({
+    id: `react.source-id-deferred-release`,
+    law: {
+      statement: `Every rejected render releases its deferred descriptor sync starts so an independent reader starts once and receives complete initial and updated rows.`,
+      authority: `This owner's existing descriptor deferral release contract and expectedReleaseObservation independent start-and-row judgment.`,
+      limits: `The unchanged 344 applicable rejection-cause, hook, reader and mount/rerender histories; bounded React native schedules and controlled sources.`,
+    },
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
+    histories: releaseHistories.map((history, index) => ({
+      index,
+      cause: history.causeName,
+      hook: history.hookName,
+      reader: history.readerName,
+      atMount: history.atMount,
+    })),
+    resolve: ({ index }) => ({ history: releaseHistories[index]! }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `rejected render deferral release`,
+        plan,
+        observe,
+        () =>
+          checkReleaseHistory(
+            plan.history.makeCause,
+            plan.history.hook,
+            plan.history.read,
+            plan.history.atMount,
+            observe,
+          ),
+      ),
+    check: forwardAssertionJudgment,
   })
-  const actual = { ...expected, rows: expected.rows.map((row) => ({ ...row })) }
-  checkReleaseObservation(actual, expected)
-  if (fault === `missing-start`) actual.starts = 0
-  if (fault === `extra-start`) actual.starts = 2
-  if (fault === `wrong-row`) actual.rows[0]!.rank++
-  if (fault === `duplicate-row`) actual.rows.push({ ...actual.rows[0]! })
-  expect(() => checkReleaseObservation(actual, expected)).toThrow()
 })
-
-declareOracle({
-  check: [checkReleaseObservation],
-  model: [expectedReleaseObservation],
-  grammar: [releaseCauses, releaseHooks, releaseReaders],
-})
-
 describe(`React source ID reuse`, () => {
-  it(`rejects a different active source with the same ID before exposing stale rows`, async () => {
+  // Named fixed histories, each replayed through checkRerender and its
+  // expectedCollision model. The generated grammar cannot produce them, so
+  // they form one enumerated property; each name selects its former test body.
+  const liveFixedHistories = [
+    `rejects a different active source with the same ID before exposing stale rows`,
+    `rejects a previously used ID after another source and a query change`,
+    `accepts the same source object and a different source ID`,
+    `keeps a mounted hook's ID binding after source cleanup`,
+    `remembers each client scope when one mounted hook switches clients`,
+    `rejects same-ID reuse after a suspended render starts a source query`,
+  ] as const
+  type LiveFixedHistory = (typeof liveFixedHistories)[number]
+  async function checkActiveSameIdSource(): Promise<void> {
     const first = source(`settings`, `first`)
     const second = source(`settings`, `second`)
     const hook = renderHook(
@@ -781,16 +892,17 @@ describe(`React source ID reuse`, () => {
         useLiveQuery({ query: (q) => q.from({ settings: current }) }),
       { initialProps: { current: first } },
     )
-
     await waitFor(() =>
-      expect(hook.result.current.data[0]?.value).toBe(`first`),
+      oracleAssertion(
+        'expect(hook.result.current.data[0]?.value).toBe(`first`)',
+        () => expect(hook.result.current.data[0]?.value).toBe(`first`),
+      ),
     )
     checkRerender([{ source: first }], { source: second }, () =>
       hook.rerender({ current: second }),
     )
-  })
-
-  it(`rejects a previously used ID after another source and a query change`, async () => {
+  }
+  async function checkReusedIdAfterOtherSource(): Promise<void> {
     const first = source(`settings`, `first`)
     const other = source(`other`, `other`)
     const second = source(`settings`, `second`)
@@ -804,22 +916,26 @@ describe(`React source ID reuse`, () => {
         }),
       { initialProps: { current: first, minimum: 0 } },
     )
-
     await waitFor(() =>
-      expect(hook.result.current.data[0]?.value).toBe(`first`),
+      oracleAssertion(
+        'expect(hook.result.current.data[0]?.value).toBe(`first`)',
+        () => expect(hook.result.current.data[0]?.value).toBe(`first`),
+      ),
     )
     act(() => hook.rerender({ current: other, minimum: 0 }))
     await waitFor(() =>
-      expect(hook.result.current.data[0]?.value).toBe(`other`),
+      oracleAssertion(
+        'expect(hook.result.current.data[0]?.value).toBe(`other`)',
+        () => expect(hook.result.current.data[0]?.value).toBe(`other`),
+      ),
     )
     checkRerender(
       [{ source: first }, { source: other }],
       { source: second },
       () => hook.rerender({ current: second, minimum: -1 }),
     )
-  })
-
-  it(`accepts the same source object and a different source ID`, async () => {
+  }
+  async function checkSameObjectAndFreshId(): Promise<void> {
     const first = source(`settings`, `first`)
     const other = source(`other`, `other`)
     const hook = renderHook(
@@ -827,23 +943,30 @@ describe(`React source ID reuse`, () => {
         useLiveQuery({ query: (q) => q.from({ settings: current }) }),
       { initialProps: { current: first } },
     )
-
     await waitFor(() =>
-      expect(hook.result.current.data[0]?.value).toBe(`first`),
+      oracleAssertion(
+        'expect(hook.result.current.data[0]?.value).toBe(`first`)',
+        () => expect(hook.result.current.data[0]?.value).toBe(`first`),
+      ),
     )
     checkRerender([{ source: first }], { source: first }, () =>
       hook.rerender({ current: first }),
     )
-    expect(hook.result.current.data[0]?.value).toBe(`first`)
+    oracleAssertion(
+      'expect(hook.result.current.data[0]?.value).toBe(`first`)',
+      () => expect(hook.result.current.data[0]?.value).toBe(`first`),
+    )
     checkRerender([{ source: first }], { source: other }, () =>
       hook.rerender({ current: other }),
     )
     await waitFor(() =>
-      expect(hook.result.current.data[0]?.value).toBe(`other`),
+      oracleAssertion(
+        'expect(hook.result.current.data[0]?.value).toBe(`other`)',
+        () => expect(hook.result.current.data[0]?.value).toBe(`other`),
+      ),
     )
-  })
-
-  it(`keeps a mounted hook's ID binding after source cleanup`, async () => {
+  }
+  async function checkBindingAfterSourceCleanup(): Promise<void> {
     const first = source(`settings`, `first`)
     const second = source(`settings`, `second`)
     const hook = renderHook(
@@ -852,15 +975,17 @@ describe(`React source ID reuse`, () => {
       { initialProps: { current: first } },
     )
     await waitFor(() =>
-      expect(hook.result.current.data[0]?.value).toBe(`first`),
+      oracleAssertion(
+        'expect(hook.result.current.data[0]?.value).toBe(`first`)',
+        () => expect(hook.result.current.data[0]?.value).toBe(`first`),
+      ),
     )
     await act(async () => first.cleanup({ dependents: true }))
     checkRerender([{ source: first }], { source: second }, () =>
       hook.rerender({ current: second }),
     )
-  })
-
-  it(`remembers each client scope when one mounted hook switches clients`, async () => {
+  }
+  async function checkClientScopeSwitch(): Promise<void> {
     const firstClient = new DbClient()
     const secondClient = new DbClient()
     const first = source(`settings`, `first`)
@@ -874,13 +999,18 @@ describe(`React source ID reuse`, () => {
         }),
       { initialProps: { client: firstClient, current: first } },
     )
-
     await waitFor(() =>
-      expect(hook.result.current.data[0]?.value).toBe(`first`),
+      oracleAssertion(
+        'expect(hook.result.current.data[0]?.value).toBe(`first`)',
+        () => expect(hook.result.current.data[0]?.value).toBe(`first`),
+      ),
     )
     hook.rerender({ client: secondClient, current: otherScope })
     await waitFor(() =>
-      expect(hook.result.current.data[0]?.value).toBe(`other`),
+      oracleAssertion(
+        'expect(hook.result.current.data[0]?.value).toBe(`other`)',
+        () => expect(hook.result.current.data[0]?.value).toBe(`other`),
+      ),
     )
     checkRerender(
       [
@@ -890,9 +1020,8 @@ describe(`React source ID reuse`, () => {
       { source: replacement, client: firstClient },
       () => hook.rerender({ client: firstClient, current: replacement }),
     )
-  })
-
-  it(`rejects same-ID reuse after a suspended render starts a source query`, async () => {
+  }
+  async function checkSuspendedRenderClaim(): Promise<void> {
     const first = source(`first`, `first`)
     const abandoned = source(`candidate`, `abandoned`)
     const replacement = source(`candidate`, `replacement`)
@@ -915,8 +1044,11 @@ describe(`React source ID reuse`, () => {
         <View current={first} suspend={false} />
       </Suspense>,
     )
-    await waitFor(() => expect(root.getByText(`first`)).toBeDefined())
-
+    await waitFor(() =>
+      oracleAssertion('expect(root.getByText(`first`)).toBeDefined()', () =>
+        expect(root.getByText(`first`)).toBeDefined(),
+      ),
+    )
     root.rerender(
       <Suspense fallback={<div>Loading</div>}>
         <View current={abandoned} suspend={true} />
@@ -932,9 +1064,47 @@ describe(`React source ID reuse`, () => {
           </Suspense>,
         ),
     )
+  }
+  function runLiveFixedHistory(name: LiveFixedHistory): Promise<void> {
+    switch (name) {
+      case `rejects a different active source with the same ID before exposing stale rows`:
+        return checkActiveSameIdSource()
+      case `rejects a previously used ID after another source and a query change`:
+        return checkReusedIdAfterOtherSource()
+      case `accepts the same source object and a different source ID`:
+        return checkSameObjectAndFreshId()
+      case `keeps a mounted hook's ID binding after source cleanup`:
+        return checkBindingAfterSourceCleanup()
+      case `remembers each client scope when one mounted hook switches clients`:
+        return checkClientScopeSwitch()
+      case `rejects same-ID reuse after a suspended render starts a source query`:
+        return checkSuspendedRenderClaim()
+    }
+  }
+  oracleProperty({
+    id: `react.source-id-reuse-fixed`,
+    law: {
+      statement: `A mounted derived-identity hook rejects a different source object under an ID it remembers in its DbClient scope before it can return the old source rows; the same object and a fresh ID are accepted.`,
+      authority: `The source ID reuse contract documented above; expectedCollision.`,
+      limits: `Six named useLiveQuery rerender histories, including a client switch and a suspended render; no process-wide registry or explicit-key claim.`,
+    },
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
+    histories: liveFixedHistories.map((name) => ({ name })),
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`source ID reuse`, plan, observe, () =>
+        runLiveFixedHistory(plan.history.name),
+      ),
+    check: forwardAssertionJudgment,
   })
 })
-
 /**
  * ## useLiveInfiniteQuery
  *
@@ -953,22 +1123,33 @@ describe(`React source ID reuse: useLiveInfiniteQuery`, () => {
         q.from({ settings: current }).orderBy(({ settings }) => settings.rank),
       { pageSize: 1 },
     )
-
-  it(`rejects a different active source with the same ID before exposing stale rows`, async () => {
+  // Named fixed histories, each replayed through checkRerender and its
+  // expectedCollision model. The generated grammar cannot produce them, so
+  // they form one enumerated property; each name selects its former test body.
+  const infiniteFixedHistories = [
+    `rejects a different active source with the same ID before exposing stale rows`,
+    `rejects a previously used ID after another source`,
+    `accepts the same source object and a different source ID`,
+    `rejects same-ID reuse after a suspended render starts a source query`,
+  ] as const
+  type InfiniteFixedHistory = (typeof infiniteFixedHistories)[number]
+  async function checkActiveSameIdSource(): Promise<void> {
     const first = source(`settings`, `first`)
     const second = source(`settings`, `second`)
     const hook = renderHook(({ current }) => useInfinite(current), {
       initialProps: { current: first },
     })
     await waitFor(() =>
-      expect(hook.result.current.data[0]?.value).toBe(`first`),
+      oracleAssertion(
+        'expect(hook.result.current.data[0]?.value).toBe(`first`)',
+        () => expect(hook.result.current.data[0]?.value).toBe(`first`),
+      ),
     )
     checkRerender([{ source: first }], { source: second }, () =>
       hook.rerender({ current: second }),
     )
-  })
-
-  it(`rejects a previously used ID after another source`, async () => {
+  }
+  async function checkReusedIdAfterOtherSource(): Promise<void> {
     const first = source(`settings`, `first`)
     const other = source(`other`, `other`)
     const second = source(`settings`, `second`)
@@ -976,27 +1157,35 @@ describe(`React source ID reuse: useLiveInfiniteQuery`, () => {
       initialProps: { current: first },
     })
     await waitFor(() =>
-      expect(hook.result.current.data[0]?.value).toBe(`first`),
+      oracleAssertion(
+        'expect(hook.result.current.data[0]?.value).toBe(`first`)',
+        () => expect(hook.result.current.data[0]?.value).toBe(`first`),
+      ),
     )
     act(() => hook.rerender({ current: other }))
     await waitFor(() =>
-      expect(hook.result.current.data[0]?.value).toBe(`other`),
+      oracleAssertion(
+        'expect(hook.result.current.data[0]?.value).toBe(`other`)',
+        () => expect(hook.result.current.data[0]?.value).toBe(`other`),
+      ),
     )
     checkRerender(
       [{ source: first }, { source: other }],
       { source: second },
       () => hook.rerender({ current: second }),
     )
-  })
-
-  it(`accepts the same source object and a different source ID`, async () => {
+  }
+  async function checkSameObjectAndFreshId(): Promise<void> {
     const first = source(`settings`, `first`)
     const other = source(`other`, `other`)
     const hook = renderHook(({ current }) => useInfinite(current), {
       initialProps: { current: first },
     })
     await waitFor(() =>
-      expect(hook.result.current.data[0]?.value).toBe(`first`),
+      oracleAssertion(
+        'expect(hook.result.current.data[0]?.value).toBe(`first`)',
+        () => expect(hook.result.current.data[0]?.value).toBe(`first`),
+      ),
     )
     checkRerender([{ source: first }], { source: first }, () =>
       hook.rerender({ current: first }),
@@ -1005,11 +1194,13 @@ describe(`React source ID reuse: useLiveInfiniteQuery`, () => {
       hook.rerender({ current: other }),
     )
     await waitFor(() =>
-      expect(hook.result.current.data[0]?.value).toBe(`other`),
+      oracleAssertion(
+        'expect(hook.result.current.data[0]?.value).toBe(`other`)',
+        () => expect(hook.result.current.data[0]?.value).toBe(`other`),
+      ),
     )
-  })
-
-  it(`rejects same-ID reuse after a suspended render starts a source query`, async () => {
+  }
+  async function checkSuspendedRenderClaim(): Promise<void> {
     const first = source(`first`, `first`)
     const abandoned = source(`candidate`, `abandoned`)
     const replacement = source(`candidate`, `replacement`)
@@ -1030,7 +1221,11 @@ describe(`React source ID reuse: useLiveInfiniteQuery`, () => {
         <View current={first} suspend={false} />
       </Suspense>,
     )
-    await waitFor(() => expect(root.getByText(`first`)).toBeDefined())
+    await waitFor(() =>
+      oracleAssertion('expect(root.getByText(`first`)).toBeDefined()', () =>
+        expect(root.getByText(`first`)).toBeDefined(),
+      ),
+    )
     root.rerender(
       <Suspense fallback={<div>Loading</div>}>
         <View current={abandoned} suspend={true} />
@@ -1046,5 +1241,40 @@ describe(`React source ID reuse: useLiveInfiniteQuery`, () => {
           </Suspense>,
         ),
     )
+  }
+  function runInfiniteFixedHistory(name: InfiniteFixedHistory): Promise<void> {
+    switch (name) {
+      case `rejects a different active source with the same ID before exposing stale rows`:
+        return checkActiveSameIdSource()
+      case `rejects a previously used ID after another source`:
+        return checkReusedIdAfterOtherSource()
+      case `accepts the same source object and a different source ID`:
+        return checkSameObjectAndFreshId()
+      case `rejects same-ID reuse after a suspended render starts a source query`:
+        return checkSuspendedRenderClaim()
+    }
+  }
+  oracleProperty({
+    id: `react.source-id-reuse-infinite-fixed`,
+    law: {
+      statement: `useLiveInfiniteQuery rejects a different same-ID source before it can publish the old source rows, from a committed or a suspended render; the same object and a fresh ID are accepted.`,
+      authority: `The source ID reuse contract documented above; expectedCollision.`,
+      limits: `Four named useLiveInfiniteQuery rerender histories with page size one.`,
+    },
+    owns: [
+      `src/DbProvider.tsx#DbProvider`,
+      `src/useLiveQuery.ts#useLiveQuery`,
+      `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+      `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    ],
+    histories: infiniteFixedHistories.map((name) => ({ name })),
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`source ID reuse`, plan, observe, () =>
+        runInfiniteFixedHistory(plan.history.name),
+      ),
+    check: forwardAssertionJudgment,
   })
 })

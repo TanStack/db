@@ -12,6 +12,29 @@ import {
 } from './release-fixture.js'
 import { withFiniteComparison } from './finite-comparison.js'
 
+for (const jsonPosition of ['first', 'last'])
+  test(`release command fixture accepts JSON flag ${jsonPosition}`, async () => {
+    await withReleaseWorkspace(async ({ root }) => {
+      const receiver = preparePublishReceiver(root, {
+        candidate: '1.0.0-rc.1.1',
+        registry: 'stable-history',
+        failure: 'none',
+      })
+      const flags = ['--access', 'public', '--tag', 'latest', '--no-git-checks']
+      const args =
+        jsonPosition === 'first'
+          ? ['publish', '--json', ...flags]
+          : ['publish', ...flags, '--json']
+      const result = receiver.invokeCommand('pnpm', args)
+      assert.equal(result.error, undefined)
+      assert.equal(result.status, 0)
+      assert.deepEqual(
+        receiver.readRequests().map(({ args }) => args),
+        [args],
+      )
+    })
+  })
+
 for (const [label, tool, args] of [
   [
     'duplicate tag',

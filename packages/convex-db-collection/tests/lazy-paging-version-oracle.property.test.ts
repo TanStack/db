@@ -24,14 +24,26 @@
  */
 import { createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
-import { expect, it } from 'vitest'
-import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import { expect } from 'vitest'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import { rejectsAs } from '../../db/tests/calibration-rejection'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import { assertLazySourceFacts } from './lazy-paging-model-oracle'
 import { LazyVersionModel } from './lazy-paging-version-model-oracle'
 import type { LazyRow } from './lazy-paging-model-oracle'
+
+type AssertionHistory<T> = T extends fc.Arbitrary<infer H> ? H : never
+type AssertionReach = {
+  beginHistory: () => void
+  reach: (state: string) => void
+}
 
 const history = fc.record({
   size: fc.integer({ min: 8, max: 14 }),
@@ -84,7 +96,7 @@ async function runVersions(h: History, fault: Fault = `none`) {
   const publish = () => {
     const rows = [...f.source.base.values()].map((row) => ({ ...row }))
     compare(rows)
-    // Hostile publication controls run at the same observation boundary, then
+    // Mutant publication controls run at the same observation boundary, then
     // restore the correct final value. They test trace comparison, not a claim
     // that production itself emitted these deliberately injected observations.
     if (!injected && fault !== `none` && rows[0]?.text.endsWith(`revision-2`)) {
@@ -110,7 +122,10 @@ async function runVersions(h: History, fault: Fault = `none`) {
       const load = f.load({ limit: h.size })
       await f.remote.pump()
       await load.complete()
-      expect(f.remote.slots.length).toBeGreaterThan(1)
+      oracleAssertion(
+        `lazy-paging-version-oracle.property.test.ts:120:toBeGreaterThan`,
+        () => expect(f.remote.slots.length).toBeGreaterThan(1),
+      )
       model.offer(authored[0]!)
       publish()
       const observer = f.source.subscribeChanges(publish, {
@@ -130,18 +145,35 @@ async function runVersions(h: History, fault: Fault = `none`) {
       await f.remote.deliver(h.choices[0])
       await f.remote.pump()
       const first = f.receipts.length
-      expect(first).toBeGreaterThan(accepted)
+      oracleAssertion(
+        `lazy-paging-version-oracle.property.test.ts:140:toBeGreaterThan`,
+        () => expect(first).toBeGreaterThan(accepted),
+      )
       change()
       await f.remote.deliver(h.choices[1 % h.choices.length])
       await f.remote.pump()
-      expect(f.receipts.length).toBeGreaterThan(first)
-      expect(
-        f.receipts.slice(accepted).every((receipt) => receipt !== true),
-      ).toBe(true)
-      expect([...f.source.base.values()]).toEqual(
-        expect.arrayContaining(authored[0]!),
+      oracleAssertion(
+        `lazy-paging-version-oracle.property.test.ts:144:toBeGreaterThan`,
+        () => expect(f.receipts.length).toBeGreaterThan(first),
       )
-      expect(f.source.base.size).toBe(h.size)
+      oracleAssertion(
+        `lazy-paging-version-oracle.property.test.ts:145:toBe`,
+        () =>
+          expect(
+            f.receipts.slice(accepted).every((receipt) => receipt !== true),
+          ).toBe(true),
+      )
+      oracleAssertion(
+        `lazy-paging-version-oracle.property.test.ts:148:toEqual`,
+        () =>
+          expect([...f.source.base.values()]).toEqual(
+            expect.arrayContaining(authored[0]!),
+          ),
+      )
+      oracleAssertion(
+        `lazy-paging-version-oracle.property.test.ts:151:toBe`,
+        () => expect(f.source.base.size).toBe(h.size),
+      )
       release()
       await persisted
       await drain()
@@ -157,12 +189,26 @@ async function runVersions(h: History, fault: Fault = `none`) {
       }
       await drain()
       publish()
-      expect([...f.source.base.values()]).toEqual(
-        expect.arrayContaining(authored[h.revisions]!),
+      oracleAssertion(
+        `lazy-paging-version-oracle.property.test.ts:167:toEqual`,
+        () =>
+          expect([...f.source.base.values()]).toEqual(
+            expect.arrayContaining(authored[h.revisions]!),
+          ),
       )
-      expect(f.source.base.size).toBe(h.size)
-      expect(observed.length).toBeGreaterThan(2)
-      if (fault !== `none`) expect(injected).toBe(true)
+      oracleAssertion(
+        `lazy-paging-version-oracle.property.test.ts:170:toBe`,
+        () => expect(f.source.base.size).toBe(h.size),
+      )
+      oracleAssertion(
+        `lazy-paging-version-oracle.property.test.ts:171:toBeGreaterThan`,
+        () => expect(observed.length).toBeGreaterThan(2),
+      )
+      if (fault !== `none`)
+        oracleAssertion(
+          `lazy-paging-version-oracle.property.test.ts:172:toBe`,
+          () => expect(injected).toBe(true),
+        )
       if (failures.length) throw failures[0]
       load.release()
     },
@@ -175,10 +221,38 @@ async function runVersions(h: History, fault: Fault = `none`) {
   )
 }
 
-it(`checks every native publication against coherent monotone authored revisions`, async () => {
-  await runOracleCampaign(
-    `CONVEX_LAZY_VERSION_ORACLE`,
-    [
+const convex_lazy_versionHistory = history
+// This existing helper retains the independent reference, production lifecycle,
+// comparison cuts and assertions. The native adapter only transports its judgment.
+async function convex_lazy_versionJudgment(
+  h: AssertionHistory<typeof convex_lazy_versionHistory>,
+  reach: AssertionReach,
+) {
+  reach.beginHistory()
+  const fault = process.env.CONVEX_LAZY_VERSION_FAULT
+  if (fault !== undefined && fault !== `rollback` && fault !== `mixed`)
+    throw new Error(`invalid CONVEX_LAZY_VERSION_FAULT`)
+  await runVersions(h, fault)
+  reach.reach(h.react ? `react-versions` : `javascript-versions`)
+  reach.reach(`two-revisions-held`)
+  reach.reach(`post-hold-publication`)
+  reach.reach(`three-or-more-revisions`)
+  if (h.skip && h.revisions >= 4) reach.reach(`superseded-before-delivery`)
+}
+
+oracleProperty({
+  id: `convex.lazy-version`,
+  law: {
+    statement: `checks every native publication against coherent monotone authored revisions`,
+    authority: `docs/collections/convex-collection.md; the existing model and contract stated above and named in docs/contributing/oracle-coverage.md.`,
+    limits: `The unchanged bounded grammar, receiving paths and observation cuts described above; registration migration adds no product coverage.`,
+  },
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+  histories: {
+    arbitrary: convex_lazy_versionHistory,
+    runs: 50,
+    fixedSeeds: [20261027],
+    states: [
       `javascript-versions`,
       `react-versions`,
       `two-revisions-held`,
@@ -186,33 +260,11 @@ it(`checks every native publication against coherent monotone authored revisions
       `three-or-more-revisions`,
       `superseded-before-delivery`,
     ] as const,
-    (reach, parameters) =>
-      fc.assert(
-        fc.asyncProperty(history, async (h) => {
-          reach.beginHistory()
-          const fault = process.env.CONVEX_LAZY_VERSION_FAULT
-          if (fault !== undefined && fault !== `rollback` && fault !== `mixed`)
-            throw new Error(`invalid CONVEX_LAZY_VERSION_FAULT`)
-          await runVersions(h, fault)
-          reach.reach(h.react ? `react-versions` : `javascript-versions`)
-          reach.reach(`two-revisions-held`)
-          reach.reach(`post-hold-publication`)
-          reach.reach(`three-or-more-revisions`)
-          if (h.skip && h.revisions >= 4)
-            reach.reach(`superseded-before-delivery`)
-        }),
-        { numRuns: oracleRuns(50), ...parameters },
-      ),
-    { fixedSeed: 20261027 },
-  )
-}, 60000)
-
-it.each([`rollback`, `mixed`] as const)(
-  `rejects a transient %s publication even with the correct final revision`,
-  async (fault) => {
-    await expect(
-      runVersions(
-        {
+    // The transient-publication calibrations below corrupt this history.
+    fixed: [
+      {
+        name: `four held revisions of eight rows with supersession`,
+        history: {
           size: 8,
           pageSize: 2,
           descending: false,
@@ -222,18 +274,64 @@ it.each([`rollback`, `mixed`] as const)(
           choices: [0, 1],
           skip: true,
         },
-        fault,
-      ),
-    ).rejects.toThrow(`lazy version`)
+      },
+    ],
+    constructed: [
+      ...([false, true] as const).map((react) => ({
+        name: react
+          ? `existing React receiver`
+          : `existing JavaScript receiver`,
+        enters: (
+          [
+            `javascript-versions`,
+            `react-versions`,
+            `two-revisions-held`,
+            `post-hold-publication`,
+            `three-or-more-revisions`,
+            `superseded-before-delivery`,
+          ] as const
+        ).filter(
+          (state) =>
+            state !== (react ? `javascript-versions` : `react-versions`),
+        ),
+        build: (
+          generated: AssertionHistory<typeof convex_lazy_versionHistory>,
+        ) => ({
+          ...generated,
+          react,
+          skip: true,
+          revisions: Math.max(generated.revisions, 4),
+        }),
+      })),
+    ],
   },
-)
-
-it(`allows stuttering, skipped and observationally identical revisions`, () => {
-  const a = [{ id: `a`, rank: 0, text: `first` }]
-  const b = [{ id: `a`, rank: 0, text: `middle` }]
-  const c = [{ id: `a`, rank: 0, text: `last` }]
-  const model = new LazyVersionModel()
-  for (const rows of [a, a, b, c]) model.offer(rows)
-  for (const rows of [a, a, c, c]) model.observe(rows)
-  expect(() => model.observe(a)).toThrow(`lazy version`)
+  resolve: (generated) => ({ history: generated }),
+  model: recordedAssertionJudgment,
+  check: forwardAssertionJudgment,
+  driver: async (plan, observe) =>
+    recordAssertionJudgment(`convex.lazy-version`, plan, observe, () =>
+      convex_lazy_versionJudgment(plan.history, {
+        beginHistory: () => {},
+        reach: (state) => observe(`reach`, state),
+      }),
+    ),
+  calibrations: ([`rollback`, `mixed`] as const).map((fault) => ({
+    name: `rejects a transient ${fault} publication even with the correct final revision`,
+    law: `convex.lazy-version`,
+    driver: async (
+      plan: { history: History },
+      observe: (checkpoint: string, value: unknown) => void,
+    ) =>
+      recordAssertionJudgment(`convex.lazy-version`, plan, observe, () =>
+        rejectsAs(
+          `lazy-paging-version-oracle.property.test.ts:232:toThrow`,
+          () => runVersions(plan.history, fault),
+          (failure) =>
+            expect(() => {
+              throw failure
+            }).toThrow(`lazy version`),
+        ),
+      ),
+  })),
+  timeout: 60000,
 })

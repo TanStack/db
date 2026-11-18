@@ -121,7 +121,43 @@ export const httpPublishHistories = [
       failure,
     })),
   ),
+  // The same publication ledger applies when private versioning is disabled
+  // by either config spelling, enabled explicitly, or left at its default.
+  // Runtime workspace edges and compatible peers both survive packing; none
+  // authorizes skipping a public release because another phase is hidden.
+  ...[
+    { privatePolicy: 'false' },
+    { privatePolicy: 'false', stableDependency: true, failure: 'candidate' },
+    { privatePolicy: 'default', stableDependency: true },
+    { privatePolicy: 'version' },
+  ].map((neighbor) => ({
+    candidate: '1.0.0-rc.1.10',
+    registry: 'stable-history',
+    failure: 'none',
+    tagShape: 'ordinary',
+    ...neighbor,
+  })),
 ]
+
+// pnpm's workspace protocol replaces workspace:* with the authored target
+// version when packing. Ordinary runtime/peer ranges remain byte-for-byte
+// strings; hiding a package for another phase cannot remove those edges.
+// This is the fixture's bounded workspace:* rule, not a general range model.
+export function expectedPackedDependencies(manifests, manifest) {
+  return Object.fromEntries(
+    ['dependencies', 'peerDependencies'].map((field) => [
+      field,
+      Object.fromEntries(
+        Object.entries(manifest[field] ?? {}).map(([name, range]) => [
+          name,
+          range === 'workspace:*'
+            ? manifests.find((candidate) => candidate.name === name).version
+            : range,
+        ]),
+      ),
+    ]),
+  )
+}
 
 export const seedFailureHistories = [
   'first-manifest',

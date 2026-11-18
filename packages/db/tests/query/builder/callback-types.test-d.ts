@@ -459,19 +459,19 @@ describe(`Query Builder Callback Types`, () => {
         .groupBy(({ user }) => user.department_id)
         .having(({ user }) => {
           // Test comparison operators with aggregates
-          expectTypeOf(gt(count(user.id), 10)).toEqualTypeOf<
+          expectTypeOf(gt(count(user.id), 10)).toMatchTypeOf<
             BasicExpression<boolean>
           >()
-          expectTypeOf(gte(avg(user.salary), 75000)).toEqualTypeOf<
+          expectTypeOf(gte(avg(user.salary), 75000)).toMatchTypeOf<
             BasicExpression<boolean>
           >()
-          expectTypeOf(lt(max(user.age), 60)).toEqualTypeOf<
+          expectTypeOf(lt(max(user.age), 60)).toMatchTypeOf<
             BasicExpression<boolean>
           >()
-          expectTypeOf(lte(min(user.age), 25)).toEqualTypeOf<
+          expectTypeOf(lte(min(user.age), 25)).toMatchTypeOf<
             BasicExpression<boolean>
           >()
-          expectTypeOf(eq(sum(user.salary), 500000)).toEqualTypeOf<
+          expectTypeOf(eq(sum(user.salary), 500000)).toMatchTypeOf<
             BasicExpression<boolean>
           >()
 

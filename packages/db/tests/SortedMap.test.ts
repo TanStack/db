@@ -1,6 +1,6 @@
 /**
  * Unit tests for SortedMap: ordering edge cases, bulk-sync movement bounds, and
- * key iteration details that pin hand-written results. The law that every
+ * key iteration details that fix hand-written results. The law that every
  * ordering observation must refine a full recomputation is owned by
  * SortedMap-oracle.test.ts.
  */
@@ -14,7 +14,7 @@ import type { SyncConfig } from '../src/types.js'
 import type { ModelKey, Row } from './sorted-map-support'
 
 // Supplemental examples for SortedMap. The generated law lives in
-// SortedMap-oracle.test.ts; these pin scale, scan reuse, and public
+// SortedMap-oracle.test.ts; these check scale, scan reuse, and public
 // Collection sync paths that its small histories do not reach.
 
 async function countDisplacedSlots(

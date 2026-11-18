@@ -176,6 +176,15 @@ export class TransactionExecutor {
     transaction: OfflineTransaction,
     error: Error,
   ): Promise<void> {
+    // Development-only oracle probes read this. The published build removes
+    // this guard and its probes (scripts/strip-oracle-probes.mjs). A bundler
+    // that sets NODE_ENV and bundles these sources folds it to `false` and
+    // removes them; the typeof check keeps an unbundled module from throwing
+    // where `process` does not exist.
+    const probing =
+      typeof process === `undefined`
+        ? false
+        : process.env.NODE_ENV !== `production`
     let shouldRetry: boolean
     let hookFailure: Error | undefined
     if (error instanceof NonRetriableError) {
@@ -224,6 +233,16 @@ export class TransactionExecutor {
       } else {
         console.warn(`Transaction ${transaction.id} failed permanently:`, error)
       }
+      // Development-only oracle probe; a production build removes it.
+      probing &&
+        (
+          globalThis as {
+            __oracleProbe?: (name: string, condition: unknown) => void
+          }
+        ).__oracleProbe?.(
+          `offline-transactions#permanent-failure-before-peer`,
+          this.scheduler.getPendingCount() > 1,
+        )
       try {
         await this.removeSettledTransaction(rejectionPending, true)
       } catch (storageError) {
@@ -250,6 +269,16 @@ export class TransactionExecutor {
       },
     }
 
+    // Development-only oracle probe; a production build removes it.
+    probing &&
+      (
+        globalThis as {
+          __oracleProbe?: (name: string, condition: unknown) => void
+        }
+      ).__oracleProbe?.(
+        `offline-transactions#retry-before-peer`,
+        this.scheduler.getPendingCount() > 1,
+      )
     this.scheduler.updateTransaction(updatedTransaction)
 
     try {
@@ -273,19 +302,44 @@ export class TransactionExecutor {
     transaction: OfflineTransaction,
     persistMarker: boolean,
   ): Promise<void> {
+    // Read by this function's development-only oracle probes, as above.
+    const probing =
+      typeof process === `undefined`
+        ? false
+        : process.env.NODE_ENV !== `production`
     try {
       if (persistMarker) {
         try {
           await this.outbox.update(transaction.id, transaction)
         } catch (error) {
           // A public removal can finish while the provider is still running.
-          if (!(error instanceof OutboxTransactionNotFoundError)) throw error
+          if (!(error instanceof OutboxTransactionNotFoundError)) {
+            // Development-only oracle probe; a production build removes it.
+            probing &&
+              (
+                globalThis as {
+                  __oracleProbe?: (name: string, condition: unknown) => void
+                }
+              ).__oracleProbe?.(`offline-transactions#phase-write-fault`, true)
+            throw error
+          }
         }
       }
       await this.outbox.remove(transaction.id)
       this.scheduler.markCompleted(transaction)
     } catch (error) {
       const storageError = toError(error)
+      // Development-only oracle probe; a production build removes it. The
+      // failed transaction is still pending, so any other pending one is a peer.
+      probing &&
+        (
+          globalThis as {
+            __oracleProbe?: (name: string, condition: unknown) => void
+          }
+        ).__oracleProbe?.(
+          `offline-transactions#fault-before-peer`,
+          this.scheduler.getPendingCount() > 1,
+        )
       this.fatalError = storageError
       this.scheduler.markFailed(transaction)
       this.clearRetryTimer()

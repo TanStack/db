@@ -15,8 +15,6 @@
  * not judge ordering, rendering before flush, or changes to mounted options.
  */
 import { expect } from 'vitest'
-import { createOracleReach } from '../oracle-reach'
-import { declareOracle } from '../oracle-declaration'
 import { expectUnorderedRows } from './result-laws'
 import { ScenarioLifetime } from './scenario-lifetime'
 import type { Collection, CollectionConfig } from '@tanstack/db'
@@ -138,20 +136,9 @@ function expectIndexing(
   }
 }
 
-declareOracle({
-  grammar: [
-    indexConfigurations,
-    indexConfigurationPairs,
-    indexOptionAbsencePairs,
-  ],
-  model: [expectedIndexing],
-  check: [
-    expectIndexing,
-    expectIndexingAdmission,
-    expectIndexingConfiguration,
-    expectIndependentIndexingOutputs,
-  ],
-})
+// Owns no production entry in packages/db: this module checks the public
+// observations that each framework driver passes it, so the framework packages
+// that run it own the entries it judges.
 
 export function registerIndexingConfigScenarios(
   driver: LiveQueryDriver,
@@ -164,11 +151,9 @@ export function registerIndexingConfigScenarios(
       `hook config applies output indexing ${label}`,
       async () => {
         const expected = expectedIndexing(settings)
-        const reach = createOracleReach(
-          `hook.output-indexing/${driver.name}/${label}`,
-          [expected.rejects ? `rejected` : `output-read`],
-        )
-        reach.beginHistory()
+        // Each finite configuration has one required admission checkpoint.
+        const requiredState = expected.rejects ? `rejected` : `output-read`
+        const observedStates = new Set<string>()
         const rows: Array<Row> = [
           { id: `1`, name: `Alice`, age: 30, team: `a` },
           { id: `2`, name: `Bob`, age: 25, team: `b` },
@@ -207,13 +192,13 @@ export function registerIndexingConfigScenarios(
               admission.error = caught
             }
             expectIndexingAdmission(admission, settings)
-            reach.reach(`rejected`)
+            observedStates.add(`rejected`)
           } else {
             handle = mount()
             await handle.flush()
             output = handle.collection()
             expect(output).not.toBeNull()
-            reach.reach(`output-read`)
+            observedStates.add(`output-read`)
             child = driver.mount((q) =>
               q
                 .from({ row: output! })
@@ -236,7 +221,10 @@ export function registerIndexingConfigScenarios(
             sourceConfig.constructor,
           )
           expect(source.collection.indexes.size).toBe(0)
-          reach.assertReached()
+          expect(
+            [...observedStates],
+            `${driver.name}/${label} admission checkpoint`,
+          ).toEqual([requiredState])
         })
       },
     )

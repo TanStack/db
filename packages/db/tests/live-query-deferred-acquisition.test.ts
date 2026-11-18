@@ -635,7 +635,7 @@ describe(`preload answered by a DbClient stream`, () => {
  * A subscriber that survives is still a subscriber in the next sync run, so a
  * restarted live-query Collection acquires for it at once instead of
  * deferring until another subscriber or preload arrives. The finite command
- * histories above unsubscribe before cleanup. This block pins the history: subscribe,
+ * histories above unsubscribe before cleanup. This block covers the history: subscribe,
  * clean up while subscribed, restart, then settle.
  */
 describe(`a subscriber that outlives cleanup`, () => {

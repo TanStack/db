@@ -1,7 +1,7 @@
 // Shared cleanup harness for the virtual row field tests. It runs a check,
 // then every cleanup, and reports the check's failure as the cause.
 export async function checkWithCleanup(
-  check: () => Promise<void>,
+  check: () => void | Promise<void>,
   cleanups: ReadonlyArray<() => Promise<void>>,
 ): Promise<void> {
   let primaryFailure: unknown

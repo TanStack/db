@@ -298,7 +298,7 @@ const solidDriver: LiveQueryDriver = {
   // rather than exposing a readable isLoadingError flag. That's a framework idiom, not a
   // gap — the error-status scenario is parametrized to assert it via the boundary.
   errorSurface: `throw`,
-  knownGaps: [],
+  limits: [],
   features: { serverSnapshot: false, suspense: true, pooledEqFilters: true },
 }
 

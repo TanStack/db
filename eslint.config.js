@@ -1,5 +1,9 @@
 import { tanstackConfig } from '@tanstack/eslint-config'
-import oraclePlugin from './scripts/eslint-plugin-oracle/index.js'
+import oraclePlugin from '@tanstack/eslint-plugin-oracles'
+import {
+  oracleLintSettings,
+  registrationExceptionConfig,
+} from './scripts/oracle-lint-settings.mjs'
 
 export default [
   ...tanstackConfig,
@@ -11,6 +15,9 @@ export default [
       `**/.nitro/**`,
       `**/traildepot/**`,
       `examples/angular/**`,
+      // The gap report CLI's evidence store and workspace bundles.
+      `**/.oracle-gaps/**`,
+      `**/.oracle-gaps-*`,
       `packages/db-collection-e2e/vite.config.ts`,
       // Third-party adapter source vendored unchanged as a conformance fixture.
       `packages/db-adapter-conformance/tests/neon/vendor/**`,
@@ -49,5 +56,35 @@ export default [
       'import/no-cycle': `error`,
     },
   },
+  // The oracle rules come from @tanstack/eslint-plugin-oracles; the settings
+  // give it TanStack DB's environment prefix and framework modules.
+  { settings: oracleLintSettings },
   oraclePlugin.configs.recommended,
+  oraclePlugin.configs.production,
+  // The reviewed exception list: see scripts/oracle-lint-settings.mjs.
+  registrationExceptionConfig,
+  // Receiving witnesses for runtimes that are not Vitest on Node (maintainer
+  // decision, 2026-11-11). oracleProperty registers through Vitest and its
+  // main entry is Node-only, so Playwright specs and the shared suites that
+  // the Capacitor and Tauri WebView apps bundle keep their plain tests. Each
+  // compares production with the shared check of its Vitest oracle owner.
+  // They are not oracle files, so oracle/no-unit-test does not apply; every
+  // other oracle rule does.
+  {
+    name: `db/receiving-witnesses`,
+    files: [
+      `packages/db-collection-e2e/src/suites/*-witness.suite.ts`,
+      `packages/db/e2e/**/*-witness.spec.ts`,
+      `packages/browser-db-sqlite-persistence/e2e/*-witness.*.ts`,
+    ],
+    plugins: { oracle: oraclePlugin },
+    linterOptions: { noInlineConfig: true },
+    rules: {
+      'oracle/no-disabled': `error`,
+      'oracle/no-oracle-disable': `error`,
+      'oracle/oracle-property-only': `error`,
+      'oracle/pure-model': `error`,
+      'oracle/replayable-seed': `error`,
+    },
+  },
 ]

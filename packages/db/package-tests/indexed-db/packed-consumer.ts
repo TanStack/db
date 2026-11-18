@@ -1,7 +1,7 @@
 /** Packaging mechanics only. Pack the candidate and its installed dependency
  * closure, then install those tarballs in a disposable consumer. File overrides
- * keep this lane offline and deterministic; they never point at workspace source
- * or dist directories. No build runs here: the package/CI lane builds first.
+ * keep this path offline and deterministic; they never point at workspace source
+ * or dist directories. No build runs here: the package/CI job builds first.
  */
 import { execFileSync } from 'node:child_process'
 import {

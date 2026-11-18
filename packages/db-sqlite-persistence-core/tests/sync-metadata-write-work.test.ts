@@ -4,9 +4,9 @@ import { fc } from '@fast-check/vitest'
 import {
   keptMetadataDurabilityHistoriesArbitrary,
   modelCheckpoints,
-  persistedPeerFullLane,
-  persistedPeerLane,
-  persistedPeerOnDemandLane,
+  persistedPeerFullGrammar,
+  persistedPeerGrammar,
+  persistedPeerOnDemandGrammar,
   queuedMetadataRepairHistoriesArbitrary,
 } from '../../db/tests/sync-metadata-session-oracle'
 import { persistedCollectionOptions } from '../src'
@@ -46,9 +46,9 @@ it(`constructs every declared metadata premise as a legal history`, async () => 
           history.filter((action) => action.type === `commit`),
         ).toHaveLength(2)
         expect(history.some((action) => action.type === `rowSet`)).toBe(true)
-        expect((await modelCheckpoints(persistedPeerLane, history)).size).toBe(
-          history.length,
-        )
+        expect(
+          (await modelCheckpoints(persistedPeerGrammar, history)).size,
+        ).toBe(history.length)
       }
     }
     for (const batch of fc.sample(keptMetadataDurabilityHistoriesArbitrary, {
@@ -87,12 +87,12 @@ it(`constructs every declared metadata premise as a legal history`, async () => 
         )
         const depth = prefix.filter((action) => action.type === `begin`).length
         expect(depth).toBe(write === `inner-reinsert` ? 2 : 1)
-        for (const lane of [
-          persistedPeerLane,
-          persistedPeerFullLane,
-          persistedPeerOnDemandLane,
+        for (const productionPath of [
+          persistedPeerGrammar,
+          persistedPeerFullGrammar,
+          persistedPeerOnDemandGrammar,
         ])
-          expect((await modelCheckpoints(lane, history)).size).toBe(
+          expect((await modelCheckpoints(productionPath, history)).size).toBe(
             history.length,
           )
       }

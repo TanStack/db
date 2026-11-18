@@ -675,6 +675,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   signal,
   isCleanupAbort,
   beforeSnapshot,
+  afterSnapshot,
 }: {
   stream: ShapeStream<T>
   syncMode: ElectricSyncMode
@@ -704,6 +705,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   signal: AbortSignal
   isCleanupAbort: () => boolean
   beforeSnapshot?: () => Promise<void>
+  afterSnapshot: () => SyncAppliedReceipt
 }): DeduplicatedLoadSubset | null {
   if (syncMode === `eager`) {
     return null
@@ -730,6 +732,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 
   const loadSubset = async (opts: LoadSubsetOptions) => {
     const commitCursor = getCommitCursor()
+    const snapshotReceipts: Array<Promise<void>> = []
     const throwIfAborted = () => {
       if (signal.aborted) throw abortReason(signal)
       if (opts.signal?.aborted) throw abortReason(opts.signal)
@@ -742,9 +745,18 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     const requestSnapshotInOrder = (
       params: Parameters<typeof stream.requestSnapshot>[0],
     ) => {
-      const invoke = () => {
+      const invoke = async () => {
         throwIfAborted()
-        return stream.requestSnapshot(params)
+        await stream.requestSnapshot(params)
+        // The SDK advances its accepted cursor after subscriber delivery.
+        // Stage it before another snapshot can advance that shared cursor.
+        const applied = afterSnapshot()
+        if (applied !== true) {
+          snapshotReceipts.push(applied)
+          // A demand may abort while its physical request still completes.
+          // Retain the receipt for success, without an unhandled late error.
+          void applied.catch(() => undefined)
+        }
       }
       const request = snapshotTail ? snapshotTail.then(invoke) : invoke()
       snapshotTail = request.then(
@@ -871,7 +883,12 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     }
     if (opts.signal?.aborted) throw abortReason(opts.signal)
     if (stopAfterStreamAbort()) return
-    await waitForDemandOrAbort(waitForCommitsAfter(commitCursor), opts.signal)
+    // Persistence may wait behind an optimistic handler. It cannot hold the
+    // SDK request queue, because a later request may supply its acknowledgement.
+    await waitForDemandOrAbort(
+      Promise.all([waitForCommitsAfter(commitCursor), ...snapshotReceipts]),
+      opts.signal,
+    )
     if (opts.signal?.aborted) throw abortReason(opts.signal)
     if (stopAfterStreamAbort()) return
   }
@@ -2213,7 +2230,7 @@ function createElectricSync<T extends Row<unknown>>(
     )
     let resumeInvalid = false
 
-    const stageResumeMetadata = () => {
+    const currentResumeState = (): ElectricResumeState | undefined => {
       if (
         !isActiveLifecycle() ||
         resumeInvalid ||
@@ -2228,7 +2245,7 @@ function createElectricSync<T extends Row<unknown>>(
         return
       }
 
-      const resumeState: ElectricResumeState = {
+      return {
         kind: `resume`,
         offset: lastOffset,
         handle: shapeHandle,
@@ -2236,6 +2253,9 @@ function createElectricSync<T extends Row<unknown>>(
         updatedAt: Date.now(),
         requiresTagState: tagState.hasTags(),
       }
+    }
+    const stageResumeMetadata = (resumeState = currentResumeState()) => {
+      if (!resumeState) return
       if (expectSourceProgress) {
         expectSourceProgress({ key: progressKey, previous: sourceProgress })
         sourceProgress = progressToken(resumeState)
@@ -2386,6 +2406,18 @@ function createElectricSync<T extends Row<unknown>>(
       beforeSnapshot: scopedRecoveryPromise
         ? () => scopedRecoveryPromise
         : undefined,
+      afterSnapshot: () => {
+        if (!metadata || isResettingSnapshot || abortController.signal.aborted)
+          return true
+        const resumeState = currentResumeState()
+        if (!resumeState) return true
+        // This separate metadata transaction leaves stream transaction and
+        // pending-presence bookkeeping intact. Successful demand settlement
+        // waits for its applied receipt as well as the delivered rows.
+        begin()
+        stageResumeMetadata(resumeState)
+        return commit()
+      },
     })
 
     const resumeKeysPromise =

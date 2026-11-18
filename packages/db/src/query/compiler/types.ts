@@ -6,7 +6,11 @@ import type { CompilationResult } from './index.js'
  */
 export type QueryCache = WeakMap<
   QueryIR,
-  [authored?: CompilationResult, source?: CompilationResult]
+  [
+    authoredRoot?: CompilationResult,
+    published?: CompilationResult,
+    source?: CompilationResult,
+  ]
 >
 
 /**

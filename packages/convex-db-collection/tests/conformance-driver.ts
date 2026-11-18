@@ -75,7 +75,7 @@ const VALUE_KINDS: ReadonlyArray<ValueKind> = [
   `object`,
 ]
 
-const rowsQuery = makeFunctionReference<
+export const rowsQuery = makeFunctionReference<
   `query`,
   Record<string, never>,
   Array<ConformanceRow>
@@ -113,9 +113,9 @@ class Socket {
 }
 
 function timestamp(value: number): string {
-  const bytes = Buffer.alloc(8)
-  bytes.writeBigUInt64LE(BigInt(value))
-  return bytes.toString(`base64`)
+  const bytes = new Uint8Array(8)
+  new DataView(bytes.buffer).setBigUint64(0, BigInt(value), true)
+  return btoa(String.fromCharCode(...bytes))
 }
 
 const turn = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -124,7 +124,7 @@ const turn = () => new Promise((resolve) => setTimeout(resolve, 0))
 const hasDuplicateKey = (rows: ReadonlyArray<ConformanceRow>) =>
   new Set(rows.map((row) => row.id)).size !== rows.length
 
-class ConvexProvider implements ControlledProvider {
+export class ConvexProvider implements ControlledProvider {
   readonly client: ConvexClient | ConvexReactClient
   private socketOrUndefined: Socket | undefined
   private readonly registrations: Array<{ releases: number }> = []

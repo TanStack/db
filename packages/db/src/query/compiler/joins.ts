@@ -31,15 +31,20 @@ import { getLazyLoadTargets } from './lazy-targets.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
 import { queriesMatchForCaching } from './query-equivalence.js'
 import {
-  CALLBACK_INPUT,
+  INCLUDES_PUBLIC_KEY,
   attachRouteMetadata,
   attachRouteMetadataToResult,
-  getCallbackInput,
   getNamespacedRouteMetadata,
+  mergeSourceContext,
   wrapInputRow,
 } from './route-metadata.js'
+import type { RowMetadata } from './route-metadata.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
-import type { CompilationResult, IncludesCompilationResult } from './index.js'
+import type {
+  CompilationResult,
+  IncludesCompilationResult,
+  SourceInclude,
+} from './index.js'
 import type {
   BasicExpression,
   CollectionSourceRef,
@@ -93,7 +98,7 @@ function parameterizeJoinInputByParentRoutes(
   return crossJoinParentRoutes(
     input,
     parentKeyStream,
-    (rowKey, row, correlationKey, parentContext, callbackValue) => {
+    (rowKey, row, correlationKey, parentContext, metadata) => {
       return [
         serializeValue([
           valueIdentity.equality(rowKey),
@@ -107,7 +112,7 @@ function parameterizeJoinInputByParentRoutes(
           correlationKey,
           parentContext,
         ),
-        callbackValue,
+        metadata,
       ] as unknown as [unknown, unknown]
     },
   )
@@ -202,6 +207,7 @@ export function processJoins(
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
   mainSourceIsParentFiltered: boolean,
   valueIdentity: ValueIdentity,
+  sourceIncludes: Array<SourceInclude>,
   parentKeyStream?: KeyedStream,
 ): NamespacedAndKeyedStream {
   const localBindings = new Set(
@@ -254,6 +260,7 @@ export function processJoins(
       alias: processedJoinedSource,
       input: joinedInput,
       collectionId: joinedCollectionId,
+      includes,
     } = processSource(
       joinClause.from,
       allInputs,
@@ -273,6 +280,10 @@ export function processJoins(
 
     // Add the joined source to the sources map
     sources[joinedSource] = joinedInput
+    if (includes)
+      sourceIncludes.push(
+        ...includes.map((include) => ({ sourceAlias: joinedSource, include })),
+      )
 
     const mainCollection = collections[mainCollectionId]
     const joinedCollection = collections[joinedCollectionId]
@@ -320,10 +331,15 @@ export function processJoins(
     )
 
     let joinedPipeline = joinedInput.pipe(
-      map(([currentKey, row, callbackValue]: [...InputRow, unknown?]) =>
+      map(([currentKey, row, metadata]: [...InputRow, unknown?]) =>
         keyJoinInput(
           currentKey,
-          wrapInputRow(joinedSource, row, callbackValue),
+          wrapInputRow(
+            joinedSource,
+            row,
+            metadata as RowMetadata | null | undefined,
+            routeJoinedSource || joinClause.from.type === `queryRef`,
+          ),
           joinedSource,
           `joined`,
           compiledJoinedExpressions,
@@ -441,7 +457,11 @@ export function processJoins(
 
     return mainPipeline.pipe(
       joinOperator(joinedPipeline, joinClause.type as JoinType),
-      processJoinResults(joinedSource, mainAliases),
+      processJoinResults(
+        joinedSource,
+        mainAliases,
+        parentKeyStream !== undefined,
+      ),
     )
   }
 
@@ -617,11 +637,11 @@ export function processSource(
               correlationKey,
               parentContext,
               publicKey,
-              callbackValue,
+              metadata,
             ],
           ] = data
           if (sourceKind === `join` && !parentKeyStream) {
-            return [key, value, callbackValue] as unknown as InputRow
+            return [key, value, metadata] as unknown as InputRow
           }
           return [
             key,
@@ -633,7 +653,7 @@ export function processSource(
               parentContext,
               publicKey,
             ),
-            callbackValue,
+            metadata,
           ] as unknown as InputRow
         }),
       )
@@ -663,6 +683,7 @@ function encodeNonFiniteKey(_: string, value: unknown): unknown {
 function processJoinResults(
   joinedSource: string,
   mainAliases: ReadonlyArray<string>,
+  parentRouted: boolean,
 ): (
   pipeline: IStreamBuilder<
     [key: string, [JoinInputValue | undefined, JoinInputValue | undefined]]
@@ -679,32 +700,19 @@ function processJoinResults(
 
         // The main side owns inherited parent aliases. Missing local sides
         // must not expose an ancestor with the same alias.
-        const mergeRows = (
-          mainRow: NamespacedRow | undefined,
-          joinedRow: NamespacedRow | undefined,
-        ): NamespacedRow => {
-          const row = { ...(mainRow ?? joinedRow) } as NamespacedRow
-          if (main == null) for (const alias of mainAliases) delete row[alias]
-          if (joinedRow) row[joinedSource] = joinedRow[joinedSource]!
-          else delete row[joinedSource]
-          return row
-        }
-        const mergedNamespacedRow = mergeRows(
+        const mergedNamespacedRow = {
+          ...(mainNamespacedRow ?? joinedNamespacedRow),
+        } as NamespacedRow & Record<PropertyKey, unknown>
+        if (main == null)
+          for (const alias of mainAliases) delete mergedNamespacedRow[alias]
+        if (joinedNamespacedRow)
+          mergedNamespacedRow[joinedSource] = joinedNamespacedRow[joinedSource]!
+        else delete mergedNamespacedRow[joinedSource]
+        mergeSourceContext(
+          mergedNamespacedRow,
           mainNamespacedRow,
           joinedNamespacedRow,
         )
-        const mainView =
-          mainNamespacedRow && getCallbackInput(mainNamespacedRow)
-        const joinedView =
-          joinedNamespacedRow && getCallbackInput(joinedNamespacedRow)
-        if (
-          mainView !== mainNamespacedRow ||
-          joinedView !== joinedNamespacedRow
-        ) {
-          Object.assign(mergedNamespacedRow, {
-            [CALLBACK_INPUT]: mergeRows(mainView, joinedView),
-          })
-        }
 
         // Combine the main and joined keys without ambiguity: keys may contain
         // delimiters, numbers and strings may print alike, and a missing outer
@@ -714,6 +722,24 @@ function processJoinResults(
           encodeNonFiniteKey,
         )
 
+        // A join contributes one row per pair, including an absent outer side.
+        // Inherited source keys name only one member of that pair.
+        if (parentRouted)
+          mergedNamespacedRow[INCLUDES_PUBLIC_KEY] = JSON.stringify(
+            [
+              (mainNamespacedRow as Record<PropertyKey, unknown> | undefined)?.[
+                INCLUDES_PUBLIC_KEY
+              ] ??
+                mainKey ??
+                null,
+              (
+                joinedNamespacedRow as Record<PropertyKey, unknown> | undefined
+              )?.[INCLUDES_PUBLIC_KEY] ??
+                joinedKey ??
+                null,
+            ],
+            encodeNonFiniteKey,
+          )
         return [resultKey, mergedNamespacedRow] as [string, NamespacedRow]
       }),
     )

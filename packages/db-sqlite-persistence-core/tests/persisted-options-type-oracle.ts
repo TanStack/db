@@ -28,15 +28,14 @@ import { fileURLToPath } from 'node:url'
 import { setImmediate } from 'node:timers/promises'
 import fc from 'fast-check'
 import ts from 'typescript'
-import { it } from 'vitest'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import { readOracleRunConfig } from '../../db/tests/oracle-config'
 import {
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRuns,
-  readOracleRunConfig,
-} from '../../db/tests/oracle-config.js'
-import { createOracleReach } from '../../db/tests/oracle-reach.js'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
 import type {
   PersistedCollectionPersistence,
   PersistenceAdapter,
@@ -395,7 +394,7 @@ function collectionSource(shape: Shape, cell: Cell): string {
  * A supplemental transparency relation preserves the full payload across the
  * wrapper; QueryObserverResult internals have no independent model here.
  * This single model replaces standalone fixed refetch/nonexistent-method calls.
- * Exact namespace equality pins the current API. An intentional documented
+ * Exact namespace equality checks the current API. An intentional documented
  * utility addition must update this model; closure does not prohibit additions.
  */
 function querySource(shape: Shape): string {
@@ -611,6 +610,10 @@ const typeProperties = {
   core: `persisted-options.types.core`,
   browser: `persisted-options.types.browser`,
 } as const satisfies Record<Receiver, string>
+const fixedTypeProperties = {
+  core: `persisted-options.types.core-fixed`,
+  browser: `persisted-options.types.browser-fixed`,
+} as const satisfies Record<Receiver, string>
 const utilityProperties = {
   core: `persisted-options.utilities.core`,
   browser: `persisted-options.utilities.browser`,
@@ -620,20 +623,20 @@ const utilityProperties = {
  * Every generated history crosses the structurally required forms. Reach is
  * recorded only after the generated consumer passes compilation. A replay uses
  * the shared seed/path/property interface: it runs the random campaign alone,
- * without the pinned shapes.
+ * without the fixed shapes.
  * Fixed and fresh-seed campaigns use the identical grammar, budget, and check.
  */
 export function registerPersistedOptionsTypeOracle(receiver: Receiver): void {
   const propertyName = typeProperties[receiver]
-  const { multiplier } = readOracleRunConfig()
+  const timeout = 120_000 * readOracleRunConfig().multiplier
   const compile = createCompiler(receiver)
-  const runCampaign = async (campaign: `fixed` | `random`) => {
-    const reach = createOracleReach(
-      propertyName,
-      states.filter(
-        (state) => receiver === `browser` || state !== `query-adapter`,
-      ),
-    )
+  const typeStates = states.filter(
+    (state) => receiver === `browser` || state !== `query-adapter`,
+  )
+  const judgeShape = async (
+    inputShape: Shape,
+    observe: (checkpoint: string, value: unknown) => void,
+  ) => {
     const check = (shape: Shape) => {
       const witnesses: Array<{
         source: string
@@ -784,40 +787,55 @@ export function registerPersistedOptionsTypeOracle(receiver: Receiver): void {
         `)
       return witnesses.flatMap((witness) => witness.states)
     }
-    const property = fc.asyncProperty(shapeArbitrary, async (shape) => {
-      reach.beginHistory()
-      for (const state of check(shape)) reach.reach(state)
-      // Let Vitest service worker RPC between CPU-bound compiler histories.
-      await setImmediate()
-    })
-    const parameters =
-      campaign === `fixed`
-        ? { numRuns: oracleRuns(12), seed: 2259 }
-        : oraclePropertyOptions(12, propertyName)
-    await fc.assert(property, parameters)
-    // Replays use the same check but do not inflate generated reach. An
-    // explicitly requested seed/path goes directly to its generated history.
-    if (!oracleReplayRequested()) {
-      for (const shape of replayShapes) check(shape)
-    }
-    reach.assertReached()
-    console.info(
-      `${propertyName} ${campaign} reach`,
-      Object.fromEntries(reach.counts()),
-    )
+    for (const state of check(inputShape)) observe(`reach`, state)
+    await setImmediate()
   }
-  // The fixed campaign stands aside during every replay; the random campaign
-  // runs as this property's replay.
-  oracleReplayTest(it)(
-    `preserves generated option types through ${receiver} (fixed)`,
-    () => runCampaign(`fixed`),
-    120_000 * multiplier,
-  )
-  oracleReplayTest(it, propertyName)(
-    `preserves generated option types through ${receiver} (random)`,
-    () => runCampaign(`random`),
-    120_000 * multiplier,
-  )
+  oracleProperty({
+    id: propertyName,
+    law: {
+      statement: `Persistence wrapping preserves each generated caller's public row, input, key, utility, and option types.`,
+      authority: `SQLite persistence, schemas, and VirtualRowProps contracts stated above.`,
+      limits: `The existing legal generated consumer shapes through the source entry; no native runtime or published-package resolution claim.`,
+    },
+    histories: {
+      arbitrary: shapeArbitrary,
+      states: typeStates,
+      constructed: [
+        {
+          name: `all admitted type forms`,
+          enters: typeStates,
+          build: (history) => history,
+        },
+      ],
+      runs: 12,
+      fixedSeeds: [2259],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`caller type preservation`, plan, observe, () =>
+        judgeShape(plan.history, observe),
+      ),
+    check: forwardAssertionJudgment,
+    timeout,
+  })
+  oracleProperty({
+    id: fixedTypeProperties[receiver],
+    law: {
+      statement: `Persistence wrapping preserves the retained consumer regression shapes through the same independent compiler judgment.`,
+      authority: `The public persistence, schema, and virtual-row contracts stated above.`,
+      limits: `These retained optional-field consumer fixtures are supplemental to the generated grammar.`,
+    },
+    histories: replayShapes,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`caller type preservation`, plan, observe, () =>
+        judgeShape(plan.history, () => {}),
+      ),
+    check: forwardAssertionJudgment,
+    timeout,
+  })
 }
 
 /**
@@ -863,189 +881,206 @@ export function registerPersistedUtilityAdmissionOracle(
   construct: typeof persistedCollectionOptions,
 ): void {
   const propertyName = utilityProperties[receiver]
-  const runCampaign = (campaign: `fixed` | `random`) => {
-    const reach = createOracleReach(propertyName, [
-      ...reservedUtilityNames,
-      `local-ordinary`,
-      `synced-collision`,
-      `multiple-names`,
-      `undefined-value`,
-      `non-enumerable`,
-      `inherited`,
-      `schema-collision`,
-    ])
-    fc.assert(
-      fc.property(utilityAdmissionArbitrary, ({ token, extraNames, names }) => {
-        reach.beginHistory()
-        const schemas: Array<StandardSchemaV1<{ id: string }> | undefined> = [
-          {
-            '~standard': {
-              version: 1,
-              vendor: `oracle`,
-              validate: (value) => ({ value: value as { id: string } }),
-            },
-          },
-          undefined,
-        ]
-        for (const schema of schemas) {
-          for (const selected of [
-            [],
-            ...reservedUtilityNames.map((name) => [name]),
-            reservedUtilityNames,
-            names,
-          ]) {
-            for (const synced of [false, true]) {
-              for (const descriptor of [
-                `enumerable`,
-                `non-enumerable`,
-                `inherited`,
-              ] as const) {
-                for (const defined of [false, true]) {
-                  let resolverCalls = 0
-                  let callerCalls = 0
-                  const caller = () => {
-                    callerCalls++
-                    return token
-                  }
-                  const utils: Record<string, unknown> = Object.fromEntries(
-                    extraNames.map((name) => [name, caller]),
-                  )
-                  const properties = Object.fromEntries(
-                    selected.map((name) => [
-                      name,
-                      {
-                        value: defined ? caller : undefined,
-                        enumerable: descriptor === `enumerable`,
-                      },
-                    ]),
-                  )
-                  if (descriptor === `inherited`)
-                    Object.setPrototypeOf(
-                      utils,
-                      Object.defineProperties({}, properties),
-                    )
-                  else Object.defineProperties(utils, properties)
-                  const adapter: PersistenceAdapter = {
-                    loadSubset: () => Promise.resolve([]),
-                    loadResumeSnapshot: () =>
-                      Promise.resolve({
-                        rows: [],
-                        keySet: { status: `consistent` },
-                        collectionMetadata: [],
-                        latestTerm: 0,
-                        latestSeq: 0,
-                        latestRowVersion: 0,
-                        resetEpoch: 0,
-                      }),
-                    applyCommittedTx: async () => {},
-                    ensureIndex: async () => {},
-                  }
-                  const persistence: PersistedCollectionPersistence = {
-                    adapter,
-                    resolvePersistenceForCollection: () => {
-                      resolverCalls++
-                      return { adapter }
-                    },
-                  }
-                  const options = {
-                    id: `utility-admission`,
-                    getKey: (row: { id: string }) => row.id,
-                    utils,
-                    persistence,
-                  }
-                  const rejected =
-                    !synced &&
-                    selected.some((name) => reservedUtilityNames.includes(name))
-                  let accepted = false
-                  let errorName: string | undefined
-                  let preserved = false
-                  try {
-                    const result = schema
-                      ? synced
-                        ? construct({
-                            ...options,
-                            schema,
-                            sync: { sync: () => {} },
-                          })
-                        : construct({ ...options, schema })
-                      : synced
-                        ? construct({
-                            ...options,
-                            sync: { sync: () => {} },
-                          })
-                        : construct(options)
-                    accepted = true
-                    preserved = [...extraNames, ...selected].every(
-                      (name) =>
-                        result.utils !== undefined &&
-                        name in result.utils &&
-                        result.utils[name] === utils[name],
-                    )
-                  } catch (error) {
-                    errorName =
-                      error instanceof Error ? error.name : `non-error`
-                  }
-                  assert.deepEqual(
-                    {
-                      accepted,
-                      errorName,
-                      resolverCalls,
-                      callerCalls,
-                      preserved,
-                    },
-                    {
-                      accepted: !rejected,
-                      errorName: rejected
-                        ? `InvalidPersistedCollectionConfigError`
-                        : undefined,
-                      resolverCalls: rejected ? 0 : 1,
-                      callerCalls: 0,
-                      preserved: !rejected,
-                    },
-                    JSON.stringify({
-                      names: selected,
-                      synced,
-                      descriptor,
-                      defined,
-                      schema: schema !== undefined,
-                    }),
-                  )
-                  if (!synced && selected.length === 0)
-                    reach.reach(`local-ordinary`)
-                  if (synced && selected.length > 0)
-                    reach.reach(`synced-collision`)
-                  if (selected.length > 1) reach.reach(`multiple-names`)
-                  if (schema && !synced && selected.length > 0)
-                    reach.reach(`schema-collision`)
-                  if (selected.length > 0) {
-                    for (const name of selected) reach.reach(name)
-                    if (!defined) reach.reach(`undefined-value`)
-                    if (descriptor !== `enumerable`) reach.reach(descriptor)
-                  }
-                }
+  const admissionStates = [
+    ...reservedUtilityNames,
+    `local-ordinary`,
+    `synced-collision`,
+    `multiple-names`,
+    `undefined-value`,
+    `non-enumerable`,
+    `inherited`,
+    `schema-collision`,
+  ]
+  const judgeAdmission = (
+    {
+      token,
+      extraNames,
+      names,
+    }: {
+      token: string
+      extraNames: Array<string>
+      names: Array<(typeof reservedUtilityNames)[number]>
+    },
+    observe: (checkpoint: string, value: unknown) => void,
+  ) => {
+    const schemas: Array<StandardSchemaV1<{ id: string }> | undefined> = [
+      {
+        '~standard': {
+          version: 1,
+          vendor: `oracle`,
+          validate: (value) => ({ value: value as { id: string } }),
+        },
+      },
+      undefined,
+    ]
+    for (const schema of schemas) {
+      for (const selected of [
+        [],
+        ...reservedUtilityNames.map((name) => [name]),
+        reservedUtilityNames,
+        names,
+      ]) {
+        for (const synced of [false, true]) {
+          for (const descriptor of [
+            `enumerable`,
+            `non-enumerable`,
+            `inherited`,
+          ] as const) {
+            for (const defined of [false, true]) {
+              let resolverCalls = 0
+              let callerCalls = 0
+              const caller = () => {
+                callerCalls++
+                return token
+              }
+              const utils: Record<string, unknown> = Object.fromEntries(
+                extraNames.map((name) => [name, caller]),
+              )
+              const properties = Object.fromEntries(
+                selected.map((name) => [
+                  name,
+                  {
+                    value: defined ? caller : undefined,
+                    enumerable: descriptor === `enumerable`,
+                  },
+                ]),
+              )
+              if (descriptor === `inherited`)
+                Object.setPrototypeOf(
+                  utils,
+                  Object.defineProperties({}, properties),
+                )
+              else Object.defineProperties(utils, properties)
+              const adapter: PersistenceAdapter = {
+                loadSubset: () => Promise.resolve([]),
+                loadResumeSnapshot: () =>
+                  Promise.resolve({
+                    rows: [],
+                    keySet: { status: `consistent` },
+                    collectionMetadata: [],
+                    latestTerm: 0,
+                    latestSeq: 0,
+                    latestRowVersion: 0,
+                    resetEpoch: 0,
+                  }),
+                applyCommittedTx: async () => {},
+                ensureIndex: async () => {},
+              }
+              const persistence: PersistedCollectionPersistence = {
+                adapter,
+                resolvePersistenceForCollection: () => {
+                  resolverCalls++
+                  return { adapter }
+                },
+              }
+              const options = {
+                id: `utility-admission`,
+                getKey: (row: { id: string }) => row.id,
+                utils,
+                persistence,
+              }
+              const rejected =
+                !synced &&
+                selected.some((name) => reservedUtilityNames.includes(name))
+              let accepted = false
+              let errorName: string | undefined
+              let preserved = false
+              try {
+                const result = schema
+                  ? synced
+                    ? construct({
+                        ...options,
+                        schema,
+                        sync: { sync: () => {} },
+                      })
+                    : construct({ ...options, schema })
+                  : synced
+                    ? construct({
+                        ...options,
+                        sync: { sync: () => {} },
+                      })
+                    : construct(options)
+                accepted = true
+                preserved = [...extraNames, ...selected].every(
+                  (name) =>
+                    result.utils !== undefined &&
+                    name in result.utils &&
+                    result.utils[name] === utils[name],
+                )
+              } catch (error) {
+                errorName = error instanceof Error ? error.name : `non-error`
+              }
+              oracleAssertion(`utility admission`, () =>
+                assert.deepEqual(
+                  {
+                    accepted,
+                    errorName,
+                    resolverCalls,
+                    callerCalls,
+                    preserved,
+                  },
+                  {
+                    accepted: !rejected,
+                    errorName: rejected
+                      ? `InvalidPersistedCollectionConfigError`
+                      : undefined,
+                    resolverCalls: rejected ? 0 : 1,
+                    callerCalls: 0,
+                    preserved: !rejected,
+                  },
+                  JSON.stringify({
+                    names: selected,
+                    synced,
+                    descriptor,
+                    defined,
+                    schema: schema !== undefined,
+                  }),
+                ),
+              )
+              if (!synced && selected.length === 0)
+                observe(`reach`, `local-ordinary`)
+              if (synced && selected.length > 0)
+                observe(`reach`, `synced-collision`)
+              if (selected.length > 1) observe(`reach`, `multiple-names`)
+              if (schema && !synced && selected.length > 0)
+                observe(`reach`, `schema-collision`)
+              if (selected.length > 0) {
+                for (const name of selected) observe(`reach`, name)
+                if (!defined) observe(`reach`, `undefined-value`)
+                if (descriptor !== `enumerable`) observe(`reach`, descriptor)
               }
             }
           }
         }
-      }),
-      campaign === `fixed`
-        ? { numRuns: oracleRuns(12), seed: 2259 }
-        : oraclePropertyOptions(12, propertyName),
-    )
-    reach.assertReached()
-    console.info(
-      `${propertyName} ${campaign} reach`,
-      Object.fromEntries(reach.counts()),
-    )
+      }
+    }
   }
-  // The fixed campaign stands aside during every replay; the random campaign
-  // runs as this property's replay.
-  oracleReplayTest(it)(
-    `rejects reserved local utility names through ${receiver} (fixed)`,
-    () => runCampaign(`fixed`),
-  )
-  oracleReplayTest(it, propertyName)(
-    `rejects reserved local utility names through ${receiver} (random)`,
-    () => runCampaign(`random`),
-  )
+  oracleProperty({
+    id: propertyName,
+    law: {
+      statement: `Local persistence rejects every reserved caller utility name before resolution, while admitted options preserve the caller utilities.`,
+      authority: `The maintainer's reserved-utility admission rule and public wrapper contract stated above.`,
+      limits: `The existing core/browser wrapper source entries, descriptors, schemas and sync modes; no Collection execution or native SQLite claim.`,
+    },
+    histories: {
+      arbitrary: utilityAdmissionArbitrary,
+      states: admissionStates,
+      constructed: [
+        {
+          name: `all utility admission forms`,
+          enters: admissionStates,
+          build: (history) => history,
+        },
+      ],
+      runs: 12,
+      fixedSeeds: [2259],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`utility admission`, plan, observe, () =>
+        judgeAdmission(plan.history, observe),
+      ),
+    check: forwardAssertionJudgment,
+  })
 }

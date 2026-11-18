@@ -21,7 +21,6 @@
  * supply native receiving drivers for the same judgment.
  */
 import { expect } from 'vitest'
-import { declareOracle } from './oracle-declaration'
 
 export type DescriptorStartHistory = {
   acquired: number
@@ -108,9 +107,3 @@ export function checkDescriptorStart(
 ): void {
   expect(actual, cut).toEqual(expectedDescriptorStart(history, cut))
 }
-
-declareOracle({
-  check: [checkDescriptorStart],
-  model: [expectedDescriptorStart],
-  grammar: [descriptorStartHistories],
-})

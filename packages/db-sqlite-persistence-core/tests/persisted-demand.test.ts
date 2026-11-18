@@ -2377,7 +2377,7 @@ describe(`persistedCollectionOptions`, () => {
 
         // The earlier history law cancelled only after remote acquisition had
         // begun. Holding the real adapter hydration seam exposes the distinct
-        // post-hydration transfer boundary. `retain` is the hostile control:
+        // post-hydration transfer boundary. `retain` is the mutant control:
         // the cancellation guard must not suppress live demand.
         expect({
           ensures: ensure.mock.calls.length,

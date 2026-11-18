@@ -1,12 +1,7 @@
 import { fc } from '@fast-check/vitest'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
-import { declareOracle } from '../../db/tests/oracle-declaration'
+import { afterEach, vi } from 'vitest'
+import { differs, oracleProperty, pass } from '../../db/tests/oracle-property'
+import type { Observation, Verdict } from '../../db/tests/oracle-property'
 import type {
   BrowserOPFSWorkerRequest,
   BrowserOPFSWorkerResponse,
@@ -126,7 +121,7 @@ function referenceResponse(input: DiagnosticInput): {
 
 async function initialize(
   input: DiagnosticInput,
-): Promise<BrowserOPFSWorkerResponse> {
+): Promise<{ response: BrowserOPFSWorkerResponse; opens: number }> {
   const primary = input.failsAt === `open` ? makePrimary(input) : null
   const cause = input.failsAt === `open` ? makeCause(input) : null
   let receive:
@@ -172,11 +167,7 @@ async function initialize(
   } as MessageEvent<BrowserOPFSWorkerRequest>)
 
   const result = await response
-  // Reach: SQLite open runs exactly when the model says it is reached.
-  expect(mocks.open).toHaveBeenCalledTimes(
-    referenceResponse(input).opens ? 1 : 0,
-  )
-  return result
+  return { response: result, opens: mocks.open.mock.calls.length }
 }
 
 afterEach(() => {
@@ -295,10 +286,6 @@ const diagnosticExamples: Array<[DiagnosticInput]> = [
   ],
 ]
 
-async function checkDiagnostic(input: DiagnosticInput): Promise<void> {
-  expect(await initialize(input)).toEqual(referenceResponse(input).response)
-}
-
 /*
 Law/source: the README Notes section promises that SQLite open failures include
 the underlying VFS error name/message when available; without one, the primary
@@ -321,52 +308,99 @@ class, and two storage-root examples include WebKit's exact UnknownError. A
 non-Error cause is outside this promise. Removing either class or the absent
 case loses one of those fixed witnesses.
 Challenge/replay: the present-cause examples reject a response that drops the
-cause; the absent-cause examples reject an invented cause. Pinned examples run
+cause; the absent-cause examples reject an invented cause. Fixed histories run
 separately so both generated campaigns share one property and budget, and a
 reported shrink path selects its generated case directly. Verbose FastCheck
 output retains original/reduced traces. Set
+Copy the complete printed Replay: coordinates, including TANSTACK_DB_ORACLE_UNIT,
 TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
 TANSTACK_DB_ORACLE_PROPERTY=opfs-worker.diagnostics for direct replay.
 TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the generated campaign.
 */
-declareOracle({ check: [checkDiagnostic], model: [referenceMessage] })
+// The formatter and admission relation keep the same independent judgment;
+// native registration supplies fixed/random scheduling and direct replay.
+function checkNative(
+  _input: DiagnosticInput,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof referenceResponse>,
+): Verdict {
+  return (
+    differs(
+      `worker init response`,
+      `diagnostic response and open reach`,
+      trace.find((entry) => entry.checkpoint === `worker init response`)?.value,
+      { response: expected.response, opens: expected.opens ? 1 : 0 },
+    ) ?? pass
+  )
+}
 
-describe(`OPFS worker diagnostics oracle`, () => {
-  if (!oracleReplayRequested()) {
-    it.each(diagnosticExamples)(
-      `preserves the pinned open-failure diagnostic (%#)`,
-      checkDiagnostic,
-    )
-  }
+oracleProperty({
+  id: diagnosticProperty,
+  law: {
+    statement: `Worker initialization preserves the primary diagnostic and exposed VFS cause; storage-root capability failures report unavailability before SQLite opens.`,
+    authority: `README Notes and the worker protocol's INTERNAL and PERSISTENCE_UNAVAILABLE classifications.`,
+    limits: `Mocked wa-sqlite and OPFS boundaries; no native lock or handle-release claim.`,
+  },
+  owns: [`src/opfs-worker.ts`],
+  histories: {
+    arbitrary: diagnosticInput,
+    runs: diagnosticRuns,
+    fixedSeeds: [1846],
+  },
+  model: referenceResponse,
+  driver: async (input, observe) => {
+    observe(`worker init response`, await initialize(input))
+  },
+  check: checkNative,
+  timeout: 15_000,
+})
 
-  it.skipIf(oracleReplayRequested())(
-    `rejects a diagnostic that drops an exposed VFS cause`,
-    async () => {
-      const input = diagnosticExamples[6]![0] as OpenFailure
-      const response = await initialize(input)
-      const expected = referenceResponse(input).response
-
-      expect(response).toEqual(expected)
-      expect({ ...response, error: input.primaryMessage }).not.toEqual(expected)
+// These retained real-browser messages exceed the generated message alphabet's
+// length bound, so run them as the same finite judgment, without widening it.
+oracleProperty({
+  id: `opfs-worker.diagnostics-fixed`,
+  law: {
+    statement: `The retained initialization failures preserve exact diagnostic fields and SQLite-open admission.`,
+    authority: `README Notes and worker response protocol.`,
+    limits: `The eight retained mocked initialization inputs, including WebKit's long UnknownError message.`,
+  },
+  owns: [`src/opfs-worker.ts`],
+  histories: diagnosticExamples.map(([history]) => history),
+  label: (_history) =>
+    String(diagnosticExamples.findIndex(([history]) => history === _history)),
+  model: referenceResponse,
+  driver: async (input, observe) => {
+    observe(`worker init response`, await initialize(input))
+  },
+  check: checkNative,
+  // A present-cause example rejects a response that drops the cause: the
+  // check must reject the retained example's real response with its error
+  // replaced by the primary message alone. The framework runs it only where
+  // the clean response and open reach match the model.
+  calibrations: [
+    {
+      name: `rejects a diagnostic that drops an exposed VFS cause`,
+      law: `diagnostic response and open reach`,
+      corrupt: (trace, input) => {
+        if (input !== diagnosticExamples[6]![0]) return undefined
+        return trace.map((entry) => {
+          if (entry.checkpoint !== `worker init response`) return entry
+          const { response, opens } = entry.value as Awaited<
+            ReturnType<typeof initialize>
+          >
+          return {
+            ...entry,
+            value: {
+              response: {
+                ...response,
+                error: (input as OpenFailure).primaryMessage,
+              },
+              opens,
+            },
+          }
+        })
+      },
     },
-  )
-
-  const checkDiagnostics = (options: { numRuns: number; seed?: number }) =>
-    fc.assert(fc.asyncProperty(diagnosticInput, checkDiagnostic), {
-      ...options,
-      verbose: true,
-    })
-  oracleReplayTest(it)(
-    `matches the independent diagnostic formatter (fixed campaign)`,
-    () => checkDiagnostics({ seed: 1846, numRuns: oracleRuns(diagnosticRuns) }),
-    15_000,
-  )
-  oracleReplayTest(it, diagnosticProperty)(
-    `matches the independent diagnostic formatter (random campaign)`,
-    () =>
-      checkDiagnostics(
-        oraclePropertyOptions(diagnosticRuns, diagnosticProperty),
-      ),
-    15_000,
-  )
+  ],
+  timeout: 15_000,
 })

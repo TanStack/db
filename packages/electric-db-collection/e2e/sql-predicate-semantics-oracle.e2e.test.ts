@@ -1,10 +1,32 @@
 import { fc } from '@fast-check/vitest'
 import electricClientPackage from '@electric-sql/client/package.json'
 import { IR } from '@tanstack/db'
-import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  inject,
+} from 'vitest'
 import { makePgClient } from '../../db-collection-e2e/support/global-setup'
 import { compileSQL } from '../src/sql-compiler'
-import { declareOracle } from '../../db/tests/oracle-declaration'
+import {
+  isFixedOracleCampaign,
+  isGeneratedOracleCampaign,
+  oracleReplayRequested,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-property'
+import {
+  recordAssertionJudgment,
+  rejectAt,
+} from '../../db/tests/oracle-assertion-adapter'
+import {
+  checkExistingElectricComparison,
+  existingElectricComparison,
+} from '../tests/electric-property-oracle'
 import type { Client } from 'pg'
 
 type Row = {
@@ -256,11 +278,12 @@ function evaluate(value: Predicate, row: Row): Truth {
   return actual <= value.value
 }
 
-declareOracle({ model: [evaluate] })
-
 describe(`Electric predicate compiler semantics`, () => {
   let client: Client
   let table: string
+  let postgresVersion: string | undefined
+  let executedCells = 0
+  const reached = new Set<string>()
 
   beforeAll(async () => {
     client = makePgClient()
@@ -278,6 +301,10 @@ describe(`Electric predicate compiler semantics`, () => {
         required_role VARCHAR(16)
       )`,
     )
+    const version = await client.query<{ server_version: string }>(
+      `SHOW server_version`,
+    )
+    postgresVersion = version.rows[0]?.server_version
   })
 
   afterAll(async () => {
@@ -285,100 +312,44 @@ describe(`Electric predicate compiler semantics`, () => {
     await client.end()
   })
 
-  it(`matches PostgreSQL over finite row worlds`, async () => {
-    let executedCells = 0
-    const reached = new Set<string>()
-    const version = await client.query<{ server_version: string }>(
-      `SHOW server_version`,
-    )
-    await fc.assert(
-      fc.asyncProperty(
-        rows,
-        predicate(3),
-        async (world, generatedPredicate) => {
-          recordRowReach(world, reached)
-          recordPredicateReach(generatedPredicate, reached)
-          await client.query(`TRUNCATE "${table}"`)
-          for (const row of world) {
-            await client.query(
-              `INSERT INTO "${table}" (id, count, label, enabled) VALUES ($1, $2, $3, $4)`,
-              [row.id, row.count, row.label, row.enabled],
-            )
-          }
-          const compiled = compileSQL({
-            where: toExpression(generatedPredicate),
-          })
-          const params = Object.entries(compiled.params ?? {})
-            .sort(([left], [right]) => Number(left) - Number(right))
-            .map(([, value]) => value)
-          const result = await client.query<{ id: number }>(
-            `SELECT id FROM "${table}" WHERE ${compiled.where} ORDER BY id`,
-            params,
-          )
-          const expected = world
-            .filter((row) => evaluate(generatedPredicate, row) === true)
-            .map(({ id }) => id)
-            .sort((left, right) => left - right)
-          expect(result.rows.map(({ id }) => id)).toEqual(expected)
-          executedCells++
-        },
-      ),
+  const examples: Array<[Array<Row>, Predicate]> = [
+    ...([`eq`, `in`, `isNull`] as const).map((op): [Array<Row>, Predicate] => [
+      [
+        { id: 1, count: 4, label: null, enabled: true },
+        { id: 2, count: 2, label: `a`, enabled: false },
+        { id: 3, count: null, label: `O'Reilly`, enabled: null },
+      ],
       {
-        seed: 1814,
-        numRuns: 50,
-        // Compound booleans are values too: cross comparison, membership, and
-        // null tests, including NOT with both possible membership values.
-        examples: [
-          ...([`eq`, `in`, `isNull`] as const).map(
-            (op): [Array<Row>, Predicate] => [
-              [
-                { id: 1, count: 4, label: null, enabled: true },
-                { id: 2, count: 2, label: `a`, enabled: false },
-                { id: 3, count: null, label: `O'Reilly`, enabled: null },
-              ],
-              {
-                type: `test`,
-                op,
-                expected: true,
-                both: true,
-                value:
-                  op === `in`
-                    ? {
-                        type: `not`,
-                        value: {
-                          type: `compare`,
-                          op: `eq`,
-                          column: `enabled`,
-                          value: true,
-                        },
-                      }
-                    : { type: `compare`, op: `gt`, column: `count`, value: 3 },
-              },
-            ],
-          ),
-          [
-            [{ id: 1, count: 0, label: `O'Reilly`, enabled: null }],
-            { type: `compare`, op: `eq`, column: `label`, value: `O'Reilly` },
-          ],
-        ],
+        type: `test`,
+        op,
+        expected: true,
+        both: true,
+        value:
+          op === `in`
+            ? {
+                type: `not`,
+                value: {
+                  type: `compare`,
+                  op: `eq`,
+                  column: `enabled`,
+                  value: true,
+                },
+              }
+            : { type: `compare`, op: `gt`, column: `count`, value: 3 },
       },
-    )
-    expect(executedCells).toBe(50)
-    expect([...reached].sort()).toEqual(
-      expect.arrayContaining([...requiredReach]),
-    )
-    console.info(
-      `Electric predicate semantics: PostgreSQL ${version.rows[0]?.server_version}; Electric client ${electricClientVersion}; 50 generated cells; ${reached.size} reached categories`,
-    )
-  })
+    ]),
+    [
+      [{ id: 1, count: 0, label: `O'Reilly`, enabled: null }],
+      { type: `compare`, op: `eq`, column: `label`, value: `O'Reilly` },
+    ],
+  ]
 
-  it(`rejects representative compiler faults against PostgreSQL`, async () => {
-    const world: Array<Row> = [
-      { id: 1, count: 2, label: null, enabled: true },
-      { id: 2, count: 2, label: null, enabled: false },
-      { id: 3, count: null, label: null, enabled: true },
-      { id: 4, count: 0, label: null, enabled: true },
-    ]
+  async function checkPostgresPredicate([world, generatedPredicate]: [
+    Array<Row>,
+    Predicate,
+  ]): Promise<void> {
+    recordRowReach(world, reached)
+    recordPredicateReach(generatedPredicate, reached)
     await client.query(`TRUNCATE "${table}"`)
     for (const row of world) {
       await client.query(
@@ -386,56 +357,170 @@ describe(`Electric predicate compiler semantics`, () => {
         [row.id, row.count, row.label, row.enabled],
       )
     }
-    const faultControlPredicate: Predicate = {
-      type: `and`,
-      left: {
-        type: `or`,
-        left: { type: `compare`, op: `gt`, column: `count`, value: 1 },
-        right: { type: `isNull`, column: `count` },
-      },
-      right: { type: `compare`, op: `eq`, column: `enabled`, value: true },
-    }
-    const expected = world
-      .filter((row) => evaluate(faultControlPredicate, row) === true)
-      .map(({ id }) => id)
-    const compiled = compileSQL({ where: toExpression(faultControlPredicate) })
-    const compiledResult = await client.query<{ id: number }>(
+    const compiled = compileSQL({
+      where: toExpression(generatedPredicate),
+    })
+    const params = Object.entries(compiled.params ?? {})
+      .sort(([left], [right]) => Number(left) - Number(right))
+      .map(([, value]) => value)
+    const result = await client.query<{ id: number }>(
       `SELECT id FROM "${table}" WHERE ${compiled.where} ORDER BY id`,
-      Object.values(compiled.params ?? {}),
+      params,
     )
-    expect(compiledResult.rows.map(({ id }) => id)).toEqual(expected)
+    const expected = world
+      .filter((row) => evaluate(generatedPredicate, row) === true)
+      .map(({ id }) => id)
+      .sort((left, right) => left - right)
+    expect(result.rows.map(({ id }) => id)).toEqual(expected)
+    executedCells++
+  }
 
-    const faults = [
-      {
-        name: `wrong bound`,
-        sql: `("count" > $1 OR "count" IS NULL) AND "enabled" = $2`,
-        params: [`2`, `true`],
-      },
-      {
-        name: `lost predicate`,
-        sql: `"count" > $1 OR "count" IS NULL`,
-        params: [`1`],
-      },
-      {
-        name: `incorrect null handling`,
-        sql: `"count" > $1 AND "enabled" = $2`,
-        params: [`1`, `true`],
-      },
-      {
-        name: `swapped comparison direction`,
-        sql: `("count" < $1 OR "count" IS NULL) AND "enabled" = $2`,
-        params: [`1`, `true`],
-      },
-    ]
-    for (const fault of faults) {
-      const result = await client.query<{ id: number }>(
-        `SELECT id FROM "${table}" WHERE ${fault.sql} ORDER BY id`,
-        fault.params,
+  beforeEach(async ({ task }) => {
+    if (task.suite?.name !== `electric.sql-predicate-semantics`) return
+    reached.clear()
+    executedCells = 0
+    if (oracleReplayRequested()) return
+    if (!isFixedOracleCampaign(task.name)) return
+    // The authored SQL fixtures exceed the random grammar's numeric bounds.
+    // Keep them on the same PostgreSQL/model path before the fixed campaign,
+    // without broadening or reweighting the existing arbitrary.
+    for (const history of examples) await checkPostgresPredicate(history)
+    executedCells = 0
+  })
+  afterEach(({ task }) => {
+    if (
+      task.suite?.name !== `electric.sql-predicate-semantics` ||
+      task.result?.errors?.length ||
+      oracleReplayRequested()
+    )
+      return
+    if (!isGeneratedOracleCampaign(task.name)) return
+    expect(executedCells).toBe(oracleRuns(50))
+    // The original fixed seed owned this category census. The native API adds
+    // a fresh campaign, whose inputs still receive the full SQL comparison.
+    if (isFixedOracleCampaign(task.name))
+      expect([...reached].sort()).toEqual(
+        expect.arrayContaining([...requiredReach]),
       )
-      expect(
-        result.rows.map(({ id }) => id),
-        fault.name,
-      ).not.toEqual(expected)
-    }
+    console.info(
+      `Electric predicate semantics: PostgreSQL ${postgresVersion}; Electric client ${electricClientVersion}; ${oracleRuns(50)} generated cells; ${reached.size} reached categories`,
+    )
+  })
+
+  oracleProperty({
+    id: `electric.sql-predicate-semantics`,
+    law: {
+      statement: `Emitted SQL and serialized parameters select the rows permitted by independent three-valued predicate semantics.`,
+      authority: `The compiler contract inventory above, PostgreSQL three-valued semantics, and this owner's separately specified finite evaluator.`,
+      limits: `The unchanged finite numeric, Boolean, text-equality and null domain, received through real PostgreSQL; stable wire text, name mapping and unsupported expressions keep their focused owners.`,
+    },
+    owns: [`src/sql-compiler.ts#compileSQL`],
+    histories: {
+      arbitrary: fc.tuple(rows, predicate(3)),
+      runs: 50,
+      fixedSeeds: [1814],
+    },
+    ...existingElectricComparison(
+      `electric.sql-predicate-semantics`,
+      checkPostgresPredicate,
+    ),
+    check: checkExistingElectricComparison,
+    timeout: 30000,
+  })
+
+  // The fault calibrations replace the compiled SQL of exactly this world and
+  // predicate with hand-written wrong SQL, so the pair runs as its own
+  // enumerated case through checkPostgresPredicate; each fault must select
+  // rows that the independent evaluator does not permit.
+  const faultControlWorld: Array<Row> = [
+    { id: 1, count: 2, label: null, enabled: true },
+    { id: 2, count: 2, label: null, enabled: false },
+    { id: 3, count: null, label: null, enabled: true },
+    { id: 4, count: 0, label: null, enabled: true },
+  ]
+  const faultControlPredicate: Predicate = {
+    type: `and`,
+    left: {
+      type: `or`,
+      left: { type: `compare`, op: `gt`, column: `count`, value: 1 },
+      right: { type: `isNull`, column: `count` },
+    },
+    right: { type: `compare`, op: `eq`, column: `enabled`, value: true },
+  }
+  const faults = [
+    {
+      name: `wrong bound`,
+      sql: `("count" > $1 OR "count" IS NULL) AND "enabled" = $2`,
+      params: [`2`, `true`],
+    },
+    {
+      name: `lost predicate`,
+      sql: `"count" > $1 OR "count" IS NULL`,
+      params: [`1`],
+    },
+    {
+      name: `incorrect null handling`,
+      sql: `"count" > $1 AND "enabled" = $2`,
+      params: [`1`, `true`],
+    },
+    {
+      name: `swapped comparison direction`,
+      sql: `("count" < $1 OR "count" IS NULL) AND "enabled" = $2`,
+      params: [`1`, `true`],
+    },
+  ]
+  const FAULT_LAW = `electric.sql-predicate-semantics-faults`
+  type FaultPlan = { history: [Array<Row>, Predicate] }
+  oracleProperty({
+    id: `electric.sql-predicate-semantics-faults`,
+    law: {
+      statement: `Emitted SQL and serialized parameters select the rows permitted by independent three-valued predicate semantics.`,
+      authority: `The compiler contract inventory above, PostgreSQL three-valued semantics, and this owner's separately specified finite evaluator.`,
+      limits: `The one fault-control world and predicate, received through real PostgreSQL, that the representative compiler-fault calibrations replace.`,
+    },
+    owns: [`src/sql-compiler.ts#compileSQL`],
+    histories: [[faultControlWorld, faultControlPredicate]],
+    label: () => `a nullable bound conjunction over four rows`,
+    ...existingElectricComparison(FAULT_LAW, checkPostgresPredicate),
+    check: checkExistingElectricComparison,
+    calibrations: faults.map((fault) => ({
+      name: `rejects representative compiler faults against PostgreSQL: ${fault.name}`,
+      law: FAULT_LAW,
+      driver: (
+        plan: FaultPlan,
+        observe: (checkpoint: string, value: unknown) => void,
+      ) =>
+        recordAssertionJudgment(FAULT_LAW, plan, observe, async () => {
+          const [world, faultPredicate] = plan.history
+          await client.query(`TRUNCATE "${table}"`)
+          for (const row of world) {
+            await client.query(
+              `INSERT INTO "${table}" (id, count, label, enabled) VALUES ($1, $2, $3, $4)`,
+              [row.id, row.count, row.label, row.enabled],
+            )
+          }
+          const expected = world
+            .filter((row) => evaluate(faultPredicate, row) === true)
+            .map(({ id }) => id)
+          const result = await client.query<{ id: number }>(
+            `SELECT id FROM "${table}" WHERE ${fault.sql} ORDER BY id`,
+            fault.params,
+          )
+          const selected = result.rows.map(({ id }) => id)
+          // Exactly the old matcher: the fault's rows differ from the model's.
+          try {
+            expect(selected, fault.name).not.toEqual(expected)
+          } catch {
+            return
+          }
+          rejectAt(
+            fault.name,
+            new Error(
+              `${fault.name}: selected ${JSON.stringify(selected)}, but the evaluator permits ${JSON.stringify(expected)}`,
+            ),
+          )
+        }),
+    })),
+    timeout: 30000,
   })
 })

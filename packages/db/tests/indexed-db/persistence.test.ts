@@ -1,5 +1,5 @@
 // Ordinary tests for the settled-history owner in persistence-oracle.test.ts.
-// They pin legacy version-metadata semantics and reject wrong snapshots with
+// They check legacy version-metadata semantics and reject wrong snapshots with
 // literal values. The law they support is that version tokens, not wall-clock
 // timestamps, order changes, and that assertRows distinguishes typed keys and
 // extra fields. The model and check that the owner declares are in

@@ -66,6 +66,9 @@ export interface Context {
   result?: any
   // Whether select/fn.select has been called
   hasResult?: true
+  // Grouping generates a missing intermediate $key before publication.
+  hasGrouping?: true
+  hasAggregate?: boolean
   // Single result only (if findOne has been called)
   singleResult?: boolean
 }
@@ -445,75 +448,66 @@ export type ResultTypeFromSelect<TSelectObject> =
               TSelectObject[K]
             > extends true
               ? ExtractExpressionType<TSelectObject[K]>
-              : TSelectObject[K] extends ToArrayWrapper<infer T>
-                ? Array<T>
+              : TSelectObject[K] extends
+                    | ToArrayWrapper<unknown>
+                    | MaterializeWrapper<unknown, boolean>
+                ? ResultTypeFromSelectValue<TSelectObject[K]>
                 : TSelectObject[K] extends ConcatToArrayWrapper<any>
                   ? string
-                  : // materialize() — Array<T> for multi-row, T | undefined for findOne()
-                    TSelectObject[K] extends MaterializeWrapper<
-                        infer T,
-                        infer IsSingle
-                      >
-                    ? IsSingle extends true
-                      ? T | undefined
-                      : Array<T>
-                    : TSelectObject[K] extends {
-                          readonly __brand: `CaseWhenWrapper`
-                          readonly _result?: infer T
-                        }
-                      ? ResultTypeFromCaseWhen<T>
-                      : // include() subquery — produces a child Collection
-                        TSelectObject[K] extends IncludeWrapper<
-                            infer TChildContext
-                          >
-                        ? Collection<GetResult<TChildContext>>
-                        : // Ref (full object ref or spread with RefBrand) - recursively process properties
-                          TSelectObject[K] extends AnyRef<infer _T>
-                          ? ExtractRef<TSelectObject[K]>
-                          : // RefLeaf (simple property ref like user.name)
-                            TSelectObject[K] extends RefLeaf<infer T>
-                            ? IsNullableRef<TSelectObject[K]> extends true
-                              ? T | undefined
-                              : T
-                            : // RefLeaf | undefined (schema-optional field)
-                              TSelectObject[K] extends
-                                  RefLeaf<infer T> | undefined
-                              ? T | undefined
-                              : // RefLeaf | null (schema-nullable field)
-                                TSelectObject[K] extends RefLeaf<infer T> | null
-                                ? IsNullableRef<
-                                    Exclude<TSelectObject[K], null>
-                                  > extends true
-                                  ? T | null | undefined
-                                  : T | null
-                                : // Nullable and/or optional object-type schema field
-                                  TSelectObject[K] extends
-                                      AnyRef<infer _T> | null | undefined
-                                  ? | ExtractRef<
-                                        Exclude<
-                                          TSelectObject[K],
-                                          null | undefined
-                                        >
-                                      >
-                                    | Extract<
+                  : TSelectObject[K] extends {
+                        readonly __brand: `CaseWhenWrapper`
+                        readonly _result?: infer T
+                      }
+                    ? ResultTypeFromCaseWhen<T>
+                    : // include() subquery — produces a child Collection
+                      TSelectObject[K] extends IncludeWrapper<
+                          infer TChildContext
+                        >
+                      ? Collection<GetResult<TChildContext>>
+                      : // Ref (full object ref or spread with RefBrand) - recursively process properties
+                        TSelectObject[K] extends AnyRef<infer _T>
+                        ? ExtractRef<TSelectObject[K]>
+                        : // RefLeaf (simple property ref like user.name)
+                          TSelectObject[K] extends RefLeaf<infer T>
+                          ? IsNullableRef<TSelectObject[K]> extends true
+                            ? T | undefined
+                            : T
+                          : // RefLeaf | undefined (schema-optional field)
+                            TSelectObject[K] extends
+                                RefLeaf<infer T> | undefined
+                            ? T | undefined
+                            : // RefLeaf | null (schema-nullable field)
+                              TSelectObject[K] extends RefLeaf<infer T> | null
+                              ? IsNullableRef<
+                                  Exclude<TSelectObject[K], null>
+                                > extends true
+                                ? T | null | undefined
+                                : T | null
+                              : // Nullable and/or optional object-type schema field
+                                TSelectObject[K] extends
+                                    AnyRef<infer _T> | null | undefined
+                                ? | ExtractRef<
+                                      Exclude<
                                         TSelectObject[K],
                                         null | undefined
                                       >
-                                  : TSelectObject[K] extends Aggregate<infer T>
-                                    ? T
-                                    : TSelectObject[K] extends
-                                          | string
-                                          | number
-                                          | boolean
-                                          | null
-                                          | undefined
-                                      ? TSelectObject[K]
-                                      : TSelectObject[K] extends Record<
-                                            string,
-                                            any
-                                          >
-                                        ? ResultTypeFromSelect<TSelectObject[K]>
-                                        : never
+                                    >
+                                  | Extract<TSelectObject[K], null | undefined>
+                                : TSelectObject[K] extends Aggregate<infer T>
+                                  ? T
+                                  : TSelectObject[K] extends
+                                        | string
+                                        | number
+                                        | boolean
+                                        | null
+                                        | undefined
+                                    ? TSelectObject[K]
+                                    : TSelectObject[K] extends Record<
+                                          string,
+                                          any
+                                        >
+                                      ? ResultTypeFromSelect<TSelectObject[K]>
+                                      : never
           }>
         >
 
@@ -646,9 +640,20 @@ export type CompareOptions = StringCollationConfig & {
  *
  * Example: `(refs) => refs.orders.status`
  */
-export type GroupByCallback<TContext extends Context> = (
+export type GroupByCallback<TContext extends Context, TKeys = any> = (
   refs: RefsForContext<TContext>,
-) => any
+) => TKeys
+
+// A declared list can admit an empty value. Preserve earlier definite grouping
+// while recording that this call alone may contribute no grouping expressions.
+export type WithGrouping<TContext extends Context, TKeys> =
+  IsAny<TKeys> extends true
+    ? TContext & { hasGrouping: true }
+    : [TKeys] extends [ReadonlyArray<never>]
+      ? TContext
+      : [] extends TKeys
+        ? TContext & { hasGrouping?: true }
+        : TContext & { hasGrouping: true }
 
 /**
  * A callback that an operator value receives before the query supplies its
@@ -721,7 +726,7 @@ type ValueOfUnion<T, K extends PropertyKey> = T extends unknown
   : never
 type RefForContextValue<T, Nullable extends boolean = false> = T extends unknown
   ? IsPlainObject<T> extends true
-    ? Ref<T, Nullable, true>
+    ? Ref<T, Nullable>
     : RefLeaf<T, Nullable>
   : never
 type RefsSchemaForContext<TContext extends Context> =
@@ -805,7 +810,7 @@ export type RefsForContext<TContext extends Context> = {
     IsNullableContextKey<TContext, K>
   >
 } & (TContext[`hasResult`] extends true
-  ? { $selected: Ref<TContext[`result`], false, true> }
+  ? { $selected: Ref<TContext[`result`]> }
   : {}) &
   BranchUnionResultRefs<TContext> &
   JoinedRefsForContext<TContext>
@@ -1107,16 +1112,13 @@ type WithVirtualPropsIfAttachable<TResult> = TResult extends unknown
     : TResult
   : never
 
-// An unmatched whole-row selection has optional, absent virtual fields.
-// Publication supplies metadata on that empty row instead of intersecting
-// required metadata with those absent fields and losing the empty alternative.
-type WithRequiredVirtualProps<T extends object> =
-  Extract<OptionalKeys<T>, keyof VirtualRowProps> extends never
-    ? WithVirtualProps<T, string | number>
-    : WithVirtualProps<
-        Omit<T, Extract<OptionalKeys<T>, keyof VirtualRowProps>>,
-        string | number
-      >
+// Publication replaces every reserved field, including authored collisions and
+// absent fields from unmatched whole-row selections. Intersecting would turn
+// an authored incompatible field into never instead of publishing metadata.
+type WithRequiredVirtualProps<T extends object> = WithVirtualProps<
+  Omit<T, keyof VirtualRowProps>,
+  string | number
+>
 
 type OptionalKeys<T> = {
   [K in keyof T]-?: {} extends Pick<T, K> ? K : never
@@ -1204,14 +1206,32 @@ type ResultValue<TContext extends Context> = TContext[`hasResult`] extends true
  * The `Prettify` wrapper ensures clean type display in IDEs by flattening
  * complex intersection types into readable object types.
  */
-export type GetRawResult<TContext extends Context> = ResultValue<TContext>
+// QueryRef sources and inline materialization expose the authored selection.
+// Grouping alone contributes a missing public key; it supplies no Collection
+// attribution and never replaces an explicitly authored field.
+type WithGroupKey<T, Optional extends boolean = false> = T extends object
+  ? `$key` extends keyof T
+    ? T
+    : T &
+        (Optional extends true
+          ? { readonly $key?: string | number }
+          : { readonly $key: string | number })
+  : T
+
+export type GetRawResult<TContext extends Context> =
+  TContext[`hasResult`] extends true
+    ? TContext[`hasGrouping`] extends true
+      ? WithGroupKey<TContext[`result`]>
+      : TContext[`hasAggregate`] extends true
+        ? WithGroupKey<TContext[`result`]>
+        : `hasGrouping` extends keyof TContext
+          ? WithGroupKey<TContext[`result`], true>
+          : TContext[`result`]
+    : ResultValue<TContext>
 
 // Inline materialization bypasses a child Collection, so selected child values
 // do not pass through Collection enrichment and must keep their runtime shape.
-export type GetInlineResult<TContext extends Context> =
-  TContext[`hasResult`] extends true
-    ? TContext[`result`]
-    : GetRawResult<TContext>
+export type GetInlineResult<TContext extends Context> = GetRawResult<TContext>
 
 export type GetResult<TContext extends Context> = Prettify<
   ResultValue<TContext>
@@ -1401,11 +1421,62 @@ export type MergeContextForJoinCallback<
  * The double `Prettify` ensures both the overall context and the nested
  * result type display cleanly in IDEs.
  */
-export type WithResult<TContext extends Context, TResult> = Prettify<
-  Omit<TContext, `result` | `hasResult`> &
+// Stop at query helpers and expressions: their internals are not fields of
+// this selection. Aggregates in nested structured projections belong to it.
+type SameAggregateAncestor<T, TAncestors extends ReadonlyArray<unknown>> = {
+  [K in keyof TAncestors]: (<U>() => U extends T ? 1 : 2) extends <
+    U,
+  >() => U extends TAncestors[K] ? 1 : 2
+    ? true
+    : false
+}[number]
+
+export type ContainsAggregate<
+  T,
+  TAncestors extends ReadonlyArray<unknown> = [],
+> =
+  IsAny<T> extends true
+    ? false
+    : T extends Aggregate
+      ? true
+      : T extends BasicExpression | CaseWhenWrapper
+        ? T extends { readonly __hasAggregate: true }
+          ? true
+          : false
+        : typeof RefBrand extends keyof T
+          ? false
+          : T extends {
+                readonly __brand:
+                  | `IncludeWrapper`
+                  | `ToArrayWrapper`
+                  | `ConcatToArrayWrapper`
+                  | `MaterializeWrapper`
+                  | `CaseWhenWrapper`
+              }
+            ? false
+            : true extends SameAggregateAncestor<T, TAncestors>
+              ? false
+              : T extends ReadonlyArray<infer TItem>
+                ? ContainsAggregate<TItem, [...TAncestors, T]>
+                : IsPlainObject<T> extends true
+                  ? true extends ContainsAggregate<
+                      T[keyof T],
+                      [...TAncestors, T]
+                    >
+                    ? true
+                    : false
+                  : false
+
+export type WithResult<
+  TContext extends Context,
+  TResult,
+  TSelection = unknown,
+> = Prettify<
+  Omit<TContext, `result` | `hasResult` | `hasAggregate`> &
     Pick<TContext, `baseSchema` | `schema` | `fromSourceName`> & {
       result: PrettifyIfPlainObject<TResult>
       hasResult: true
+      hasAggregate: ContainsAggregate<TSelection>
     }
 >
 

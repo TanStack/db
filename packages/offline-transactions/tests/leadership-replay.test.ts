@@ -1,5 +1,5 @@
 // Leadership replay cases whose expectations are written by hand: a fixed
-// outbox restart, pinned admission and retry-hook histories, stale reads,
+// outbox restart, fixed admission and retry-hook histories, stale reads,
 // and failed deletions. The leadership and replay laws they illustrate are
 // owned by leadership-replay-oracle.property.test.ts.
 import { expect, it, vi } from 'vitest'

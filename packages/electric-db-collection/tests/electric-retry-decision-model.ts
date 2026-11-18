@@ -1,7 +1,7 @@
 /**
  * The independent model for the Electric retry-decision law. It is shared by
  * the retry-decision oracle in `electric-oracle.property.test.ts`, which
- * drives a controlled ShapeStream, and by the installed-client lane in
+ * drives a controlled ShapeStream, and by the installed-client receiving path in
  * `electric-sdk-delivery-oracle.property.test.ts`. It reads no production
  * state. The law and its history grammar are documented beside the
  * retry-decision oracle.
@@ -282,7 +282,7 @@ export function createRetryModel(
   wait: RetryWait | boolean,
   cleanupOnError = false,
 ): RetryModel {
-  // The boolean form is the installed-client lane's full-log wait (`false`)
+  // The boolean form is the installed-client path's full-log wait (`false`)
   // or a progressive wait (`true`).
   const resolved: RetryWait =
     typeof wait === `boolean` ? (wait ? `progressive` : `full-log`) : wait

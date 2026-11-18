@@ -1,4 +1,5 @@
 import { expect, vi } from 'vitest'
+import { oracleAssertion } from '../oracle-assertion-adapter'
 import {
   createCollection,
   createIndexedDB,
@@ -127,7 +128,9 @@ export function assertRows(
   expected: Iterable<Row>,
   cut: string,
 ) {
-  expect(sorted(actual), cut).toEqual(sorted(expected))
+  const observed = sorted(actual)
+  const wanted = sorted(expected)
+  oracleAssertion(cut, () => expect(observed, cut).toEqual(wanted))
 }
 
 // Raw IndexedDB requests keep the durable observation independent of the

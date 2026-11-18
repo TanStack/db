@@ -30,7 +30,7 @@
  * open tab catches up, the durable rows and every open tab show the server
  * head, however earlier lagging commits left them. When a lagging tab
  * commits an older row and then closes for good, nothing redelivers the head
- * to the faster tab, so this law fails today. That history is pinned with
+ * to the faster tab, so this law fails today. That history is a fixed history run with
  * `it.fails` until #2209 orders source writes by server position; generated
  * histories never close a tab for good.
  *
@@ -79,7 +79,7 @@
  *
  * The generated histories below judge Laws 1, 3, 4, and 5 over interleaved
  * server changes, deploys, deliveries, stops, and recoveries, against a
- * model of the durable rows. One known gap is left out of them and pinned:
+ * model of the durable rows. One known limit is left out of them and kept as a fixed history:
  * a resumed tab that lags behind a peer can receive an update for a row the
  * peer already deleted, and Electric's resume check then puts it in `error`.
  *
@@ -98,18 +98,20 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { createCollection } from '@tanstack/db'
-import { createOracleReach } from '../../db/tests/oracle-reach.js'
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRuns,
-} from '../../db/tests/oracle-config'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../../db/tests/oracle-assertion-adapter'
+import { oracleRoute } from '../../db/tests/oracle-config'
+import { oracleProperty } from '../../db/tests/oracle-property'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../../electric-db-collection/src/electric'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import { createBrowserWASQLitePersistence } from '../src/browser-persistence'
+import { requiredBrowserObservations } from './browser-required-observations'
+import { registerBrowserProperty } from './browser-property-registration-oracle'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
 import { sourceHeadViolation } from './electric-convergence-oracle'
 import type {
@@ -148,63 +150,82 @@ type ControlledStream = {
 
 const streams: Array<ControlledStream> = []
 
-vi.mock(
-  `../../electric-db-collection/node_modules/@electric-sql/client`,
-  async (importOriginal) => {
-    const actual = await importOriginal<Record<string, unknown>>()
-    return {
-      ...actual,
-      ShapeStream: vi.fn(function (options: {
-        headers?: Record<string, string>
-        offset?: string
-        handle?: string
-        onError?: (error: unknown) => unknown
-      }) {
-        const stream: ControlledStream = {
-          tab: options.headers?.[`x-tab`] ?? `unknown`,
-          startedAt: {
-            handle: options.handle,
-            offset: options.offset ?? `-1`,
-          },
-          stopped: false,
-          shapeHandle: options.handle,
-          lastOffset: options.offset ?? `-1`,
-          send: () => {
-            throw new Error(`stream for tab ${stream.tab} is not subscribed`)
-          },
-          onError: (error) => options.onError?.(error),
-          giveUp: () => {
-            throw new Error(`stream for tab ${stream.tab} is not subscribed`)
-          },
-        }
-        streams.push(stream)
-        return {
-          subscribe: (
-            send: ControlledStream[`send`],
-            giveUp: ControlledStream[`giveUp`],
-          ) => {
-            stream.send = send
-            stream.giveUp = giveUp
-            return () => undefined
-          },
-          unsubscribeAll: () => {
-            stream.stopped = true
-          },
-          requestSnapshot: vi.fn().mockResolvedValue(undefined),
-          fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
-          forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
-          isUpToDate: false,
-          get shapeHandle() {
-            return stream.shapeHandle
-          },
-          get lastOffset() {
-            return stream.lastOffset
-          },
-        }
-      }),
-    }
-  },
-)
+// The module the Electric collection imports, found through the client's
+// `import` export from the electric package, which is where the collection
+// resolves it. Vite's module id is the file this resolves to.
+const electricClientModule = await vi.hoisted(async () => {
+  const { readFileSync } = await import(`node:fs`)
+  const { dirname, join: joinPath } = await import(`node:path`)
+  const { fileURLToPath } = await import(`node:url`)
+  const manifestPath = fileURLToPath(
+    new URL(
+      `../../electric-db-collection/node_modules/@electric-sql/client/package.json`,
+      import.meta.url,
+    ),
+  )
+  const manifest = JSON.parse(readFileSync(manifestPath, `utf8`))
+  // The `import` condition, as the collection's ESM import resolves it. A
+  // string export and a condition object with `default` are both accepted.
+  const importExport = manifest.exports[`.`].import
+  const entry =
+    typeof importExport === `string` ? importExport : importExport.default
+  return joinPath(dirname(manifestPath), entry)
+})
+
+vi.mock(electricClientModule, async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  return {
+    ...actual,
+    ShapeStream: vi.fn(function (options: {
+      headers?: Record<string, string>
+      offset?: string
+      handle?: string
+      onError?: (error: unknown) => unknown
+    }) {
+      const stream: ControlledStream = {
+        tab: options.headers?.[`x-tab`] ?? `unknown`,
+        startedAt: {
+          handle: options.handle,
+          offset: options.offset ?? `-1`,
+        },
+        stopped: false,
+        shapeHandle: options.handle,
+        lastOffset: options.offset ?? `-1`,
+        send: () => {
+          throw new Error(`stream for tab ${stream.tab} is not subscribed`)
+        },
+        onError: (error) => options.onError?.(error),
+        giveUp: () => {
+          throw new Error(`stream for tab ${stream.tab} is not subscribed`)
+        },
+      }
+      streams.push(stream)
+      return {
+        subscribe: (
+          send: ControlledStream[`send`],
+          giveUp: ControlledStream[`giveUp`],
+        ) => {
+          stream.send = send
+          stream.giveUp = giveUp
+          return () => undefined
+        },
+        unsubscribeAll: () => {
+          stream.stopped = true
+        },
+        requestSnapshot: vi.fn().mockResolvedValue(undefined),
+        fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
+        forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
+        isUpToDate: false,
+        get shapeHandle() {
+          return stream.shapeHandle
+        },
+        get lastOffset() {
+          return stream.lastOffset
+        },
+      }
+    }),
+  }
+})
 
 const upToDate: Message<Item> = { headers: { control: `up-to-date` } }
 const mustRefetch: Message<Item> = { headers: { control: `must-refetch` } }
@@ -516,14 +537,15 @@ async function openWarmTabs(host: Host, count: number, syncMode: SyncMode) {
     for (let task = 0; task < 400 && !tab.hasStream(); task++) {
       await new Promise((resolve) => setTimeout(resolve, 2))
     }
-    expect(tab.hasStream()).toBe(true)
+    oracleAssertion('openWarmTabs', () => expect(tab.hasStream()).toBe(true))
     tabs.push(tab)
   }
   return tabs
 }
 
 // Generated-history campaigns (ORC-007): a fixed seed and a random seed
-// with the same property and budget. TANSTACK_DB_ORACLE_SEED with
+// with the same property and budget. Copy the complete printed Replay:
+// coordinates, including TANSTACK_DB_ORACLE_UNIT. TANSTACK_DB_ORACLE_SEED with
 // TANSTACK_DB_ORACLE_PATH and TANSTACK_DB_ORACLE_PROPERTY=
 // browser.multi-tab-reserved-history replays one recorded counterexample;
 // TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the budget.
@@ -535,7 +557,7 @@ async function waitForStream(tab: Tab, count: number) {
   for (let task = 0; task < 400 && tab.streamCount() < count; task++) {
     await new Promise((resolve) => setTimeout(resolve, 2))
   }
-  expect(tab.streamCount()).toBe(count)
+  oracleAssertion('waitForStream', () => expect(tab.streamCount()).toBe(count))
 }
 
 // The server after the deploy, answering a new stream from where it starts:
@@ -691,7 +713,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
       | `peer commit announced during the stopped tab's open transaction`
       | `a source stopped while its transaction was open`
       | `restarted tab opened a new stream`
-    const reach = createOracleReach<RefetchReach>(
+    const reach = requiredBrowserObservations<RefetchReach>(
       `browser.multi-tab-reserved-refetch`,
       [
         ...(arrival === `storm`
@@ -808,13 +830,15 @@ describe(`multi-tab Electric over one persisted database`, () => {
           ? { sourceError: tab.collection.health.error !== null }
           : {}),
       }))
-    expect(observe(judgesRowsBeforeRestart)).toEqual(
-      tabs.map((tab) => ({
-        tab: tab.tab,
-        status: tab === stoppedTab ? stoppedStatus : `ready`,
-        ...(judgesRowsBeforeRestart(tab) ? { rows: afterDeploy } : {}),
-        ...(judgesSourceError(tab) ? { sourceError: true } : {}),
-      })),
+    oracleAssertion('runStormHistory', () =>
+      expect(observe(judgesRowsBeforeRestart)).toEqual(
+        tabs.map((tab) => ({
+          tab: tab.tab,
+          status: tab === stoppedTab ? stoppedStatus : `ready`,
+          ...(judgesRowsBeforeRestart(tab) ? { rows: afterDeploy } : {}),
+          ...(judgesSourceError(tab) ? { sourceError: true } : {}),
+        })),
+      ),
     )
 
     // Checkpoint 2, after the application recovers the stopped tab and the
@@ -837,25 +861,44 @@ describe(`multi-tab Electric over one persisted database`, () => {
       const restartedAt = recovered.startedAt()
       await serveHead(host, recovered, restartedAt)
       if (stop === `resume invalidated`) {
-        expect(restartedAt).toEqual({ handle: undefined, offset: `-1` })
+        oracleAssertion('runStormHistory', () =>
+          expect(restartedAt).toEqual({ handle: undefined, offset: `-1` }),
+        )
       }
       // The new sync run starts without the retired run's problems.
-      expect(observe(() => syncMode === `eager`)).toEqual(
-        tabs.map((tab) => ({
-          tab: tab.tab,
-          status: `ready`,
-          ...(syncMode === `eager` ? { rows: afterDeploy } : {}),
-          ...(judgesSourceError(tab) ? { sourceError: false } : {}),
-        })),
+      oracleAssertion('runStormHistory', () =>
+        expect(observe(() => syncMode === `eager`)).toEqual(
+          tabs.map((tab) => ({
+            tab: tab.tab,
+            status: `ready`,
+            ...(syncMode === `eager` ? { rows: afterDeploy } : {}),
+            ...(judgesSourceError(tab) ? { sourceError: false } : {}),
+          })),
+        ),
       )
     }
     reach.assertReached()
   }
-  it.each(stormHistories)(
-    `commits every reserved refetch across tabs ($tabCount tabs, $syncMode, $finisher finishes first, $arrival, open $open, stop: $stop, recovery: $recovery)`,
-    runStormHistory,
-    30_000,
-  )
+  oracleProperty({
+    id: `browser.multi-tab-refetch-storm`,
+    law: {
+      statement: `Every tab's reserved refetch commits across a refetch storm, no Collection enters error, and once every stream has delivered the new snapshot every tab shows it (Law 1); a stopped tab's recovery brings it to the head.`,
+      authority: `SyncPersistenceCapabilityV1 reserveCommitTurn (packages/db/src/types.ts), widened by maintainer decision on issue #2226 to every persisted hydration.`,
+      limits: `The enumerated storm cells: two or three tabs, eager or on-demand, each finisher, arrival, open, stop, and recovery; a controlled stream in one process.`,
+    },
+    owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
+    histories: stormHistories,
+    label: ({ tabCount, syncMode, finisher, arrival, open, stop, recovery }) =>
+      `commits every reserved refetch across tabs (${tabCount} tabs, ${syncMode}, ${finisher} finishes first, ${arrival}, open ${open}, stop: ${stop}, recovery: ${recovery})`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`multi-tab refetch storm`, plan, observe, () =>
+        runStormHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+    timeout: 30_000,
+  })
 
   // Law 1 and Law 3, generated histories. The enumerated grammar above fixes
   // one refetch storm and one stopped tab. These histories interleave, in any
@@ -906,7 +949,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
     | { kind: `advance`; tab: number; pick: number }
     | { kind: `catch up`; tab: number; pick: number }
     // A tab that closes for good. Generated histories never close a tab;
-    // only the pinned #2209 replay does (see below).
+    // only the fixed #2209 regression does (see below).
     | { kind: `close`; tab: number }
     | { kind: `stop`; tab: number; pick: number }
     | {
@@ -978,7 +1021,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // reset/stop suffix of 4 + 2*tabCount steps (8 or 10), or a lagging-commit
   // suffix of 6 + 3*tabCount steps (12 or 15). Removing
   // the open delivery, stop, or peer commit loses the law's premise; recovering
-  // before the peer commit would test a different boundary. Existing pinned
+  // before the peer commit would test a different boundary. Existing fixed
   // histories still use the same driver without this prefix.
   const generatedHistory = fc
     .record({
@@ -1147,7 +1190,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
 
   const runGeneratedHistory = async (
     { tabCount, steps }: GeneratedHistory,
-    onKnownGap: () => void,
+    onKnownLimit: () => void,
     onRecovery?: (
       divergentBeforeRecovery: boolean,
       how: `restart` | `reload`,
@@ -1283,9 +1326,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
       // Electric's updates carry only changed columns (the shape's default
       // replica), so an update cannot create a row the tab does not hold,
       // and Electric drops it. The tab holds the durable rows, or, inside a
-      // refetch, the snapshot it has received. Known gap: a resumed tab
+      // refetch, the snapshot it has received. Known limit: a resumed tab
       // instead reports an unseen row and fails (issue #2267). Generated
-      // campaigns leave that history out; the pinned replay below keeps it.
+      // campaigns leave that history out; the fixed regression below keeps it.
       const held = new Set<number>(model.truncates ? [] : durable.keys())
       const track = (message: Message<Item>) => {
         if (!(`key` in message)) return
@@ -1300,7 +1343,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
           message.headers.operation === `update` &&
           !held.has(message.value.id)
         ) {
-          if (model.resumed && !model.truncates) onKnownGap()
+          if (model.resumed && !model.truncates) onKnownLimit()
           return false
         }
         track(message)
@@ -1432,10 +1475,12 @@ describe(`multi-tab Electric over one persisted database`, () => {
             : undefined,
         ),
       )
-      expect(
-        actual,
-        `${label}\nactual   ${JSON.stringify(actual)}\nexpected ${JSON.stringify(expected)}\nerrors   ${JSON.stringify(errors.filter(Boolean))}`,
-      ).toEqual(expected)
+      oracleAssertion('runGeneratedHistory', () =>
+        expect(
+          actual,
+          `${label}\nactual   ${JSON.stringify(actual)}\nexpected ${JSON.stringify(expected)}\nerrors   ${JSON.stringify(errors.filter(Boolean))}`,
+        ).toEqual(expected),
+      )
     }
 
     // Warm start: every tab delivers the snapshot and commits it.
@@ -1639,15 +1684,16 @@ describe(`multi-tab Electric over one persisted database`, () => {
     }
     await check(`after every tab caught up`, rowsOf(log.rows))
     if (models.every((model) => !model.closed)) {
-      expect(
-        sourceHeadViolation(rowsOf(log.rows), {
-          durableRows: await activeHost.durableRows(),
-          tabs: tabs.map((tab) => ({
-            status: tab.collection.status,
-            rows: tab.publicRows(),
-          })),
-        }),
-      ).toBeUndefined()
+      const sourceHeadComparison = sourceHeadViolation(rowsOf(log.rows), {
+        durableRows: await activeHost.durableRows(),
+        tabs: tabs.map((tab) => ({
+          status: tab.collection.status,
+          rows: tab.publicRows(),
+        })),
+      })
+      oracleAssertion('runGeneratedHistory', () =>
+        expect(sourceHeadComparison).toBeUndefined(),
+      )
     }
   }
 
@@ -1685,128 +1731,140 @@ describe(`multi-tab Electric over one persisted database`, () => {
       `now`,
     ),
   })
-  const runSourcePrefixCampaign = async (
-    parameters: ReturnType<typeof oraclePropertyOptions>,
-  ) => {
-    const states = [
-      `present/empty`,
-      `present/disjoint`,
-      `absent/empty`,
-      `absent/disjoint`,
-      `drained before recovery`,
-      `missing progress at recovery`,
-      `foreign progress at recovery`,
-      `divergent source restart`,
-      `divergent source reload`,
-      `explicit resume at divergent recovery`,
-      `explicit now at divergent recovery`,
-      `explicit initial offset at recovery`,
-      `explicit handle at recovery`,
-      `interrupted reset before explicit resume recovery`,
-      `interrupted reset before explicit now recovery`,
-    ] as const
-    const reach = createOracleReach(`browser.electric-source-prefix`, states)
-    await fc.assert(
-      fc.asyncProperty(sourcePrefixHistory, async (history) => {
-        const slowTab = 1 - history.fastTab
-        // Keep every original history, then repeat it with a recovery that
-        // stops before its first source delivery. The first start writes its
-        // reset marker through production; the second must still recover.
-        // Pairing both paths preserves the uninterrupted domain and gives
-        // every generated cursor form an interrupted neighbor.
-        for (const interrupted of [false, true]) {
-          reach.beginHistory()
-          const steps: Array<HistoryStep> = [
-            ...Array.from({ length: history.pairs * 2 }, (): HistoryStep => ({
-              kind: `server change`,
-              key: history.key,
-              pick: 0,
-            })),
-            { kind: `catch up`, tab: history.fastTab, pick: 0 },
-            { kind: `catch up`, tab: slowTab, pick: 1 },
-            ...(history.advancingBatch === `disjoint`
-              ? [{ kind: `server change` as const, key: 2, pick: 1 }]
-              : []),
-            { kind: `catch up`, tab: history.fastTab, pick: 0 },
-            ...(history.drain
-              ? [{ kind: `catch up` as const, tab: slowTab, pick: 0 }]
-              : []),
-            ...(history.recovery === 0
-              ? [{ kind: `stop` as const, tab: slowTab, pick: 0 }]
-              : []),
-            ...(interrupted
-              ? [
-                  {
-                    kind: `recover` as const,
-                    tab: slowTab,
-                    pick: history.recovery,
-                    callerCursor: `none` as const,
-                  },
-                  { kind: `stop` as const, tab: slowTab, pick: 0 },
-                ]
-              : []),
-            { kind: `recover`, tab: slowTab, pick: history.recovery },
-          ]
-          let primary: { error: unknown } | undefined
-          try {
-            await runGeneratedHistory(
-              { tabCount: 2, steps },
-              () => fc.pre(false),
-              (divergent, how, cursor, hadResetMarker) => {
-                if (history.drain && !divergent)
-                  reach.reach(`drained before recovery`)
-                if (!history.drain && divergent) {
-                  if (cursor === `resume`)
-                    reach.reach(`explicit resume at divergent recovery`)
-                  if (cursor === `now`)
-                    reach.reach(`explicit now at divergent recovery`)
-                  if (
-                    interrupted &&
-                    hadResetMarker &&
-                    (cursor === `resume` || cursor === `now`)
-                  )
-                    reach.reach(
-                      `interrupted reset before explicit ${cursor} recovery`,
-                    )
-                  reach.reach(`divergent source ${how}`)
-                  reach.reach(
-                    `${history.key === 1 ? `present` : `absent`}/${history.advancingBatch}`,
-                  )
-                }
-                if (history.progressFormat !== `current`) {
-                  reach.reach(`${history.progressFormat} progress at recovery`)
-                }
-                if (cursor === `initial-offset`)
-                  reach.reach(`explicit initial offset at recovery`)
-                if (cursor === `handle`)
-                  reach.reach(`explicit handle at recovery`)
-              },
-              history.progressFormat,
-              history.callerCursor,
-            )
-          } catch (error) {
-            primary = { error }
-          } finally {
-            await finishHistory(primary)
-          }
-        }
-      }),
-      parameters,
-    )
-    console.info(`source prefix reach`, Object.fromEntries(reach.counts()))
-    reach.assertReached()
-  }
-  it.skipIf(oracleReplayRequested())(
-    `converges after interleaved source prefixes (fixed seed)`,
-    () => runSourcePrefixCampaign({ numRuns: oracleRuns(80), seed: 2281 }),
-    600_000,
+  const states = [
+    `present/empty`,
+    `present/disjoint`,
+    `absent/empty`,
+    `absent/disjoint`,
+    `drained before recovery`,
+    `missing progress at recovery`,
+    `foreign progress at recovery`,
+    `divergent source restart`,
+    `divergent source reload`,
+    `explicit resume at divergent recovery`,
+    `explicit now at divergent recovery`,
+    `explicit initial offset at recovery`,
+    `explicit handle at recovery`,
+    `interrupted reset before explicit resume recovery`,
+    `interrupted reset before explicit now recovery`,
+  ] as const
+  let sourcePrefixReach = requiredBrowserObservations(
+    'browser.electric-source-prefix',
+    states,
   )
-  oracleReplayTest(it, `browser.electric-source-prefix`)(
-    `converges after interleaved source prefixes (random or replayed)`,
-    () =>
-      runSourcePrefixCampaign(
-        oraclePropertyOptions(80, `browser.electric-source-prefix`),
-      ),
+  const judgeSourcePrefix = async (
+    history: typeof sourcePrefixHistory extends fc.Arbitrary<infer T>
+      ? T
+      : never,
+  ) => {
+    const slowTab = 1 - history.fastTab
+    // Keep every original history, then repeat it with a recovery that
+    // stops before its first source delivery. The first start writes its
+    // reset marker through production; the second must still recover.
+    // Pairing both paths preserves the uninterrupted domain and gives
+    // every generated cursor form an interrupted neighbor.
+    for (const interrupted of [false, true]) {
+      sourcePrefixReach.beginHistory()
+      const steps: Array<HistoryStep> = [
+        ...Array.from({ length: history.pairs * 2 }, (): HistoryStep => ({
+          kind: `server change`,
+          key: history.key,
+          pick: 0,
+        })),
+        { kind: `catch up`, tab: history.fastTab, pick: 0 },
+        { kind: `catch up`, tab: slowTab, pick: 1 },
+        ...(history.advancingBatch === `disjoint`
+          ? [{ kind: `server change` as const, key: 2, pick: 1 }]
+          : []),
+        { kind: `catch up`, tab: history.fastTab, pick: 0 },
+        ...(history.drain
+          ? [{ kind: `catch up` as const, tab: slowTab, pick: 0 }]
+          : []),
+        ...(history.recovery === 0
+          ? [{ kind: `stop` as const, tab: slowTab, pick: 0 }]
+          : []),
+        ...(interrupted
+          ? [
+              {
+                kind: `recover` as const,
+                tab: slowTab,
+                pick: history.recovery,
+                callerCursor: `none` as const,
+              },
+              { kind: `stop` as const, tab: slowTab, pick: 0 },
+            ]
+          : []),
+        { kind: `recover`, tab: slowTab, pick: history.recovery },
+      ]
+      let primary: { error: unknown } | undefined
+      try {
+        await runGeneratedHistory(
+          { tabCount: 2, steps },
+          () => fc.pre(false),
+          (divergent, how, cursor, hadResetMarker) => {
+            if (history.drain && !divergent)
+              sourcePrefixReach.reach(`drained before recovery`)
+            if (!history.drain && divergent) {
+              if (cursor === `resume`)
+                sourcePrefixReach.reach(`explicit resume at divergent recovery`)
+              if (cursor === `now`)
+                sourcePrefixReach.reach(`explicit now at divergent recovery`)
+              if (
+                interrupted &&
+                hadResetMarker &&
+                (cursor === `resume` || cursor === `now`)
+              )
+                sourcePrefixReach.reach(
+                  `interrupted reset before explicit ${cursor} recovery`,
+                )
+              sourcePrefixReach.reach(`divergent source ${how}`)
+              sourcePrefixReach.reach(
+                `${history.key === 1 ? `present` : `absent`}/${history.advancingBatch}`,
+              )
+            }
+            if (history.progressFormat !== `current`) {
+              sourcePrefixReach.reach(
+                `${history.progressFormat} progress at recovery`,
+              )
+            }
+            if (cursor === `initial-offset`)
+              sourcePrefixReach.reach(`explicit initial offset at recovery`)
+            if (cursor === `handle`)
+              sourcePrefixReach.reach(`explicit handle at recovery`)
+          },
+          history.progressFormat,
+          history.callerCursor,
+        )
+      } catch (error) {
+        primary = { error }
+      } finally {
+        await finishHistory(primary)
+      }
+    }
+  }
+  registerBrowserProperty(
+    sourcePrefixHistory,
+    {
+      id: 'browser.electric-source-prefix',
+      owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
+      runs: 80,
+      fixedSeed: 2281,
+      beforeCampaign: () => {
+        sourcePrefixReach = requiredBrowserObservations(
+          'browser.electric-source-prefix',
+          states,
+        )
+      },
+      afterCampaign: () => {
+        console.info(
+          'source prefix reach',
+          Object.fromEntries(sourcePrefixReach.counts()),
+        )
+        sourcePrefixReach.assertReached()
+      },
+    },
+    'converges after interleaved source prefixes',
+    judgeSourcePrefix,
     600_000,
   )
 
@@ -1829,82 +1887,81 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // The storm driver and the generated-history driver are the checks; the
   // generated driver folds committed batches into its own model of durable
   // rows. The storm cells and the generated-history arbitrary are the grammar.
-  declareOracle({
-    check: [runStormHistory, runGeneratedHistory],
-    grammar: [stormHistories, generatedHistory, sourcePrefixHistory],
-  })
 
   const createGeneratedReach = () =>
-    createOracleReach<GeneratedReach>(`browser.multi-tab-reserved-history`, [
-      `stopped source restarted during final catch-up`,
-      `durable divergence repaired during final catch-up`,
-      `lagging commit rewritten during final catch-up`,
-      `must-refetch delivered`,
-      `peer commit during an open reserved transaction`,
-      `source stopped with an open transaction`,
-      `tab recovered`,
-      `durable rows behind the server`,
-      `peer commit while a tab was not ready`,
-      `peer commit after error without retry mid-transaction`,
-      `peer commit after SDK gives up mid-transaction`,
-      `peer commit after signal aborted mid-transaction`,
-      `peer reset abandoned an open transaction`,
-      `reset-abandoned commit put the Collection in error`,
-      `reset-abandoned source recovered during final catch-up`,
-    ])
+    requiredBrowserObservations<GeneratedReach>(
+      `browser.multi-tab-reserved-history`,
+      [
+        `stopped source restarted during final catch-up`,
+        `durable divergence repaired during final catch-up`,
+        `lagging commit rewritten during final catch-up`,
+        `must-refetch delivered`,
+        `peer commit during an open reserved transaction`,
+        `source stopped with an open transaction`,
+        `tab recovered`,
+        `durable rows behind the server`,
+        `peer commit while a tab was not ready`,
+        `peer commit after error without retry mid-transaction`,
+        `peer commit after SDK gives up mid-transaction`,
+        `peer commit after signal aborted mid-transaction`,
+        `peer reset abandoned an open transaction`,
+        `reset-abandoned commit put the Collection in error`,
+        `reset-abandoned source recovered during final catch-up`,
+      ],
+    )
   let generatedReach = createGeneratedReach()
 
-  const runGeneratedCampaign = async (
-    parameters: ReturnType<typeof oraclePropertyOptions>,
-  ) => {
-    generatedReach = createGeneratedReach()
-    await fc.assert(
-      fc.asyncProperty(generatedHistory, async (history) => {
-        let primary: { error: unknown } | undefined
-        try {
-          // fc.pre discards a history that reaches the known gap.
-          await runGeneratedHistory(history, () => fc.pre(false))
-        } catch (error) {
-          primary = { error }
-        } finally {
-          await finishHistory(primary)
-        }
-      }),
-      parameters,
-    )
-    console.info(
-      `multi-tab generated reach`,
-      Object.fromEntries(generatedReach.counts()),
-    )
-    generatedReach.assertReached()
-  }
-  it.skipIf(oracleReplayRequested())(
-    `keeps reserved commits lawful across generated multi-tab histories (fixed seed)`,
-    () =>
-      runGeneratedCampaign({
-        numRuns: oracleRuns(GENERATED_RUNS),
-        seed: GENERATED_FIXED_SEED,
-      }),
-    600_000,
-  )
-  oracleReplayTest(it, GENERATED_PROPERTY)(
-    `keeps reserved commits lawful across generated multi-tab histories (random or replayed)`,
-    () =>
-      runGeneratedCampaign(
-        oraclePropertyOptions(GENERATED_RUNS, GENERATED_PROPERTY),
-      ),
+  registerBrowserProperty(
+    generatedHistory,
+    {
+      id: GENERATED_PROPERTY,
+      owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
+      runs: GENERATED_RUNS,
+      fixedSeed: GENERATED_FIXED_SEED,
+      beforeCampaign: () => {
+        generatedReach = createGeneratedReach()
+      },
+      afterCampaign: () => {
+        console.info(
+          'multi-tab generated reach',
+          Object.fromEntries(generatedReach.counts()),
+        )
+        generatedReach.assertReached()
+      },
+    },
+    'keeps reserved commits lawful across generated multi-tab histories',
+    async (history) => {
+      let primary: { error: unknown } | undefined
+      try {
+        // fc.pre discards a history that reaches the known limit.
+        await runGeneratedHistory(history, () => fc.pre(false))
+      } catch (error) {
+        primary = { error }
+      } finally {
+        await finishHistory(primary)
+      }
+    },
     600_000,
   )
 
-  // Known gap #2267, pinned: the shrunk generated history in which a resumed tab
+  // Fixed histories replay through the same generated-history driver and
+  // checks, with the known-limit detector off. Each names the behavior it
+  // proves, and one enumerated property below runs them all.
+  const multiTabFixedHistories: Array<{
+    name: string
+    history: GeneratedHistory
+  }> = []
+
+  // Known limit #2267, as a fixed history: the shrunk generated history in which a resumed tab
   // that lags behind its peer receives an update for a row the peer already
-  // deleted. It replays through the same driver and checks with the known-gap
+  // deleted. It replays through the same driver and checks with the known-limit
   // detector off. Remove `fails` when Electric's resume check stops treating
   // rows from peers' commits as this stream's evidence.
   it.fails(
     `keeps a resumed lagging tab out of error when a peer deleted the row it updates`,
-    () =>
-      runGeneratedHistory(
+    () => {
+      oracleRoute(`calibration`)
+      return runGeneratedHistory(
         {
           tabCount: 2,
           steps: [
@@ -1917,93 +1974,79 @@ describe(`multi-tab Electric over one persisted database`, () => {
           ],
         },
         () => undefined,
-      ),
+      )
+    },
     60_000,
   )
 
   // The final delivery can be the first attempt to commit a transaction
   // abandoned by the reset. The driver must observe its failure, recover,
   // and only then judge convergence. This replays the original issue trace.
-  it(
-    `recovers a reset-abandoned source that fails during final catch-up`,
-    () =>
-      runGeneratedHistory(
-        {
-          tabCount: 2,
-          steps: [
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `advance`, tab: 1, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `advance`, tab: 0, pick: 0 },
-            { kind: `peer reset` },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `deploy` },
-            { kind: `deploy` },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-          ],
-        },
-        () => undefined,
-      ),
-    60_000,
-  )
+  multiTabFixedHistories.push({
+    name: `recovers a reset-abandoned source that fails during final catch-up`,
+    history: {
+      tabCount: 2,
+      steps: [
+        { kind: `server change`, key: 1, pick: 0 },
+        { kind: `advance`, tab: 1, pick: 0 },
+        { kind: `server change`, key: 1, pick: 0 },
+        { kind: `advance`, tab: 0, pick: 0 },
+        { kind: `peer reset` },
+        { kind: `server change`, key: 1, pick: 0 },
+        { kind: `deploy` },
+        { kind: `deploy` },
+        { kind: `server change`, key: 1, pick: 0 },
+        { kind: `server change`, key: 1, pick: 0 },
+      ],
+    },
+  })
 
   // The later no-deploy reset trace reaches the same final-delivery failure
   // from a reloaded tab. Recovery must happen after that failed commit too.
   // Seed -1371495859, path 75:0:0:0:0:0:0:1:1:0:0.
-  it(
-    `recovers a reloaded source whose final commit was abandoned by a peer reset`,
-    () =>
-      runGeneratedHistory(
-        {
-          tabCount: 2,
-          steps: [
-            { kind: `recover`, tab: 0, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `advance`, tab: 0, pick: 0 },
-            { kind: `advance`, tab: 1, pick: 0 },
-            { kind: `advance`, tab: 0, pick: 0 },
-            { kind: `peer reset` },
-            { kind: `advance`, tab: 0, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-          ],
-        },
-        () => undefined,
-      ),
-    60_000,
-  )
+  multiTabFixedHistories.push({
+    name: `recovers a reloaded source whose final commit was abandoned by a peer reset`,
+    history: {
+      tabCount: 2,
+      steps: [
+        { kind: `recover`, tab: 0, pick: 0 },
+        { kind: `server change`, key: 1, pick: 0 },
+        { kind: `advance`, tab: 0, pick: 0 },
+        { kind: `advance`, tab: 1, pick: 0 },
+        { kind: `advance`, tab: 0, pick: 0 },
+        { kind: `peer reset` },
+        { kind: `advance`, tab: 0, pick: 0 },
+        { kind: `server change`, key: 1, pick: 0 },
+      ],
+    },
+  })
 
   // A discontinuous source prefix does not corrupt the cached key set. Keep
   // durable rows visible during reload while a fresh source snapshot repairs
   // continuation. This is a reduced random history, replayed by the same law.
-  it(
-    `keeps cached rows visible while recovering a discontinuous source`,
-    () =>
-      runGeneratedHistory(
-        {
-          tabCount: 2,
-          steps: [
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `catch up`, tab: 1, pick: 1 },
-            { kind: `catch up`, tab: 0, pick: 0 },
-            { kind: `recover`, tab: 0, pick: 0 },
-            { kind: `recover`, tab: 0, pick: 0 },
-            { kind: `stop`, tab: 0, pick: 0 },
-            { kind: `peer reset` },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `catch up`, tab: 0, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `advance`, tab: 0, pick: 0 },
-          ],
-        },
-        () => undefined,
-      ),
-    60_000,
-  )
+  multiTabFixedHistories.push({
+    name: `keeps cached rows visible while recovering a discontinuous source`,
+    history: {
+      tabCount: 2,
+      steps: [
+        { kind: `server change`, key: 1, pick: 0 },
+        { kind: `server change`, key: 1, pick: 0 },
+        { kind: `catch up`, tab: 1, pick: 1 },
+        { kind: `catch up`, tab: 0, pick: 0 },
+        { kind: `recover`, tab: 0, pick: 0 },
+        { kind: `recover`, tab: 0, pick: 0 },
+        { kind: `stop`, tab: 0, pick: 0 },
+        { kind: `peer reset` },
+        { kind: `server change`, key: 1, pick: 0 },
+        { kind: `server change`, key: 1, pick: 0 },
+        { kind: `catch up`, tab: 0, pick: 0 },
+        { kind: `server change`, key: 1, pick: 0 },
+        { kind: `advance`, tab: 0, pick: 0 },
+      ],
+    },
+  })
 
-  // Known gap #2209, pinned: tab A commits v1 and v2; tab B's lagging stream
+  // Known limit #2209, as a fixed history: tab A commits v1 and v2; tab B's lagging stream
   // then commits only v1, so the durable row falls back to v1, and B closes
   // for good. Nothing redelivers the head to A, so Law 2's final check fails.
   // Generated histories never close a tab for good, which leaves this
@@ -2011,8 +2054,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // Remove `fails` when source writes are ordered by server position.
   it.fails(
     `converges an open tab to the head after a lagging tab commits an older row and closes`,
-    () =>
-      runGeneratedHistory(
+    () => {
+      oracleRoute(`calibration`)
+      return runGeneratedHistory(
         {
           tabCount: 2,
           steps: [
@@ -2025,7 +2069,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
           ],
         },
         () => undefined,
-      ),
+      )
+    },
     60_000,
   )
 
@@ -2034,30 +2079,25 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // tabs catch up, but after tab B stops, tab A catches up, and tab A stops,
   // the durable rows lose row 1. Law 2 expects every open tab and the durable
   // rows to show the head. The source-progress repair forces a fresh snapshot.
-  // It replays through the same driver and checks with the known-gap detector
+  // It replays through the same driver and checks with the known-limit detector
   // off. The generated source-prefix campaign extends this same law.
-  it(
-    `keeps a durable row after both tabs catch up to it and then stop`,
-    () =>
-      runGeneratedHistory(
-        {
-          tabCount: 2,
-          steps: [
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `catch up`, tab: 0, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `catch up`, tab: 0, pick: 0 },
-            { kind: `catch up`, tab: 1, pick: 1 },
-            { kind: `catch up`, tab: 0, pick: 0 },
-            { kind: `stop`, tab: 1, pick: 0 },
-            { kind: `catch up`, tab: 0, pick: 0 },
-            { kind: `stop`, tab: 0, pick: 0 },
-          ],
-        },
-        () => undefined,
-      ),
-    60_000,
-  )
+  multiTabFixedHistories.push({
+    name: `keeps a durable row after both tabs catch up to it and then stop`,
+    history: {
+      tabCount: 2,
+      steps: [
+        { kind: `server change`, key: 1, pick: 0 },
+        { kind: `catch up`, tab: 0, pick: 0 },
+        { kind: `server change`, key: 1, pick: 0 },
+        { kind: `catch up`, tab: 0, pick: 0 },
+        { kind: `catch up`, tab: 1, pick: 1 },
+        { kind: `catch up`, tab: 0, pick: 0 },
+        { kind: `stop`, tab: 1, pick: 0 },
+        { kind: `catch up`, tab: 0, pick: 0 },
+        { kind: `stop`, tab: 0, pick: 0 },
+      ],
+    },
+  })
 
   // Issue #2281 reduces to the same six-step history for both membership
   // directions. A stores two server changes; B stores only the first. A's
@@ -2080,49 +2120,69 @@ describe(`multi-tab Electric over one persisted database`, () => {
     const reopenPeer: HistoryStep = { kind: `recover`, tab: 1, pick: 0 }
 
     // Keeping only the maximum cursor does not repair these rows.
-    it(
-      `${behavior} after a cursor-only commit and a lagging tab reload`,
-      () =>
-        runGeneratedHistory(
-          {
-            tabCount: 2,
-            steps: [...stalePrefix, publishCursor, reopenPeer],
-          },
-          () => undefined,
-        ),
-      60_000,
-    )
+    multiTabFixedHistories.push({
+      name: `${behavior} after a cursor-only commit and a lagging tab reload`,
+      history: {
+        tabCount: 2,
+        steps: [...stalePrefix, publishCursor, reopenPeer],
+      },
+    })
 
     // A peer that drains its backlog supplies the missing change itself.
-    it(
-      `${behavior} when the lagging stream drains before reloading`,
-      () =>
-        runGeneratedHistory(
-          {
-            tabCount: 2,
-            steps: [
-              ...stalePrefix,
-              publishCursor,
-              { kind: `catch up`, tab: 1, pick: 0 },
-              reopenPeer,
-            ],
-          },
-          () => undefined,
-        ),
-      60_000,
-    )
+    multiTabFixedHistories.push({
+      name: `${behavior} when the lagging stream drains before reloading`,
+      history: {
+        tabCount: 2,
+        steps: [
+          ...stalePrefix,
+          publishCursor,
+          { kind: `catch up`, tab: 1, pick: 0 },
+          reopenPeer,
+        ],
+      },
+    })
 
     // Without A's cursor-only commit, B resumes from its older position and
     // receives the missing change. This distinguishes cursor advancement
     // from reload or lag alone as the cause of the permanent mismatch.
-    it(
-      `${behavior} when the lagging tab reloads before the cursor advances`,
-      () =>
-        runGeneratedHistory(
-          { tabCount: 2, steps: [...stalePrefix, reopenPeer] },
-          () => undefined,
-        ),
-      60_000,
-    )
+    multiTabFixedHistories.push({
+      name: `${behavior} when the lagging tab reloads before the cursor advances`,
+      history: { tabCount: 2, steps: [...stalePrefix, reopenPeer] },
+    })
   }
+
+  oracleProperty({
+    id: `browser.multi-tab-reserved-history-fixed`,
+    law: {
+      statement: `Reserved commits stay lawful in each named multi-tab history: every open tab and the durable rows converge to the server head once the streams catch up (Law 2), and a source that a peer reset abandoned recovers before convergence is judged.`,
+      authority: `The coverage map's eventual-consistency note for persisted multi-tab Collections (issue #2209), and the reserved-commit capability of issue #2226.`,
+      limits: `The named regressions of the generated campaign, including issue #2281's six-step histories, each replayed through the same driver and checks with the known-limit detector off.`,
+    },
+    owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
+    histories: multiTabFixedHistories,
+    label: ({ name }) => name,
+    resolve: ({ history }) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `multi-tab fixed history`,
+        plan,
+        observe,
+        async () => {
+          // Each history releases its host, as the afterEach hook did after
+          // each fixed test and as the generated campaign does, so a
+          // determinism rerun starts from a fresh host.
+          let primary: { error: unknown } | undefined
+          try {
+            await runGeneratedHistory(plan.history, () => undefined)
+          } catch (error) {
+            primary = { error }
+          } finally {
+            await finishHistory(primary)
+          }
+        },
+      ),
+    check: forwardAssertionJudgment,
+    timeout: 60_000,
+  })
 })

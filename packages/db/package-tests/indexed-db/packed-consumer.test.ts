@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** Published runtime smoke tests supplement portable-declarations.test.ts.
  * Actual tarballs and Node's ESM/CJS loaders judge export paths; a persisted
- * row survives cleanup and a new descriptor. This fixed integration lane does
+ * row survives cleanup and a new descriptor. This fixed integration path does
  * not model Collection histories or claim every package-manager configuration.
  * e2e/indexed-db/packed-consumer.spec.ts runs the same consumer through a browser bundler.
  */

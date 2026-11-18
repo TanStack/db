@@ -20,7 +20,7 @@
  * Observations: the records of both sessions, judged by the shared judge
  * (`persisted-demand-coverage-model-oracle.ts`) at each session 2 checkpoint.
  *
- * Limits: No device runs here. The helper backs the driver with better-sqlite3 unless a runtime factory is supplied (`TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE`). The emulator runtime lane (`TANSTACK_DB_EXPO_RUNTIME_PLATFORM`) skips this witness, as it skips the conformance suite, because that lane runs the native driver through its own app. The sessions are two driver instances in one process over one file, not an app restart.
+ * Limits: No device runs here. The helper backs the driver with better-sqlite3 unless a runtime factory is supplied (`TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE`). The emulator runtime production path (`TANSTACK_DB_EXPO_RUNTIME_PLATFORM`) skips this witness, as it skips the conformance suite, because that production path runs the native driver through its own app. The sessions are two driver instances in one process over one file, not an app restart.
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -44,7 +44,7 @@ afterEach(() => {
 
 const DESCRIBE = `expo persisted demand coverage (receiving witness)`
 
-// The emulator lane runs the native driver; this witness runs the shimmed driver.
+// The emulator production path runs the native driver; this witness runs the shimmed driver.
 const runtimePlatform = process.env.TANSTACK_DB_EXPO_RUNTIME_PLATFORM?.trim()
 const describeShimmedDriver = runtimePlatform ? describe.skip : describe
 

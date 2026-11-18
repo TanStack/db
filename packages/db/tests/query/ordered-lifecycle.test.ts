@@ -110,7 +110,7 @@ describe(`synchronous initial settlement refinement`, () => {
   // initial load installs every source row. #2055's hazard needs a bounded read
   // that left an eligible row out; after a full read the window can always
   // reach the next eligible row, even when a distant row entered through a live
-  // update first. This pins that the synchronous initial load keeps that
+  // update first. This checks that the synchronous initial load keeps that
   // property through later changes.
   it(`keeps the first eligible joined rows after a synchronous full-source load`, async () => {
     type Row = { id: number; rank: number; label: string }

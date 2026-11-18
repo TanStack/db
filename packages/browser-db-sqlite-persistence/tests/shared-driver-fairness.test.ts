@@ -7,10 +7,10 @@ import {
 } from './shared-driver-fairness-config'
 
 // Configuration tests for the shared BrowserWASQLiteDriver fairness oracle in
-// `shared-driver-fairness-oracle.test.ts`, which owns the law. These pin the replay
+// `shared-driver-fairness-oracle.test.ts`, which owns the law. These check the replay
 // and calibration environment parsing.
 describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
-  it(`selects fixed and seedless lanes by default and only replay when requested`, () => {
+  it(`selects fixed-seed and random campaigns by default and replays only when requested`, () => {
     expect(createFairnessPropertyModes(readFairnessReplayConfig({}))).toEqual([
       { label: `fixed-seed`, seed: FIXED_SEED },
       { label: `seedless-random` },

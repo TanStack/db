@@ -1,5 +1,5 @@
 // Ordinary unit tests for direct writes that interleave with refetches, and for
-// the oracle harness's failure reporting. Their expected rows are pinned by
+// the oracle harness's failure reporting. Their expected rows are fixed by
 // hand from the precedence rules in each test's comments. The matrix and ordering
 // laws are owned by persisted-direct-write-window.oracle.test.ts.
 import { describe, expect, it, vi } from 'vitest'
@@ -65,7 +65,7 @@ describe(`the oracle harness keeps the primary failure`, () => {
  *    stores nothing.
  *
  * Each case below states its expected rows from these rules. The histories
- * are finite and pinned. Rule 4 is observed inside the refetch's fulfillment
+ * are finite and fixed. Rule 4 is observed inside the refetch's fulfillment
  * callback, not after a later flush, because a later flush hides a refetch
  * that settles early.
  */

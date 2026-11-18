@@ -4,7 +4,7 @@ import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { ReactNode } from 'react'
 
 // Shared fixtures for the React source ID reuse tests. The reuse law is owned by
-// source-id-reuse-oracle.test.tsx; ordinary pinned tests live in source-id-reuse.test.tsx.
+// source-id-reuse-oracle.test.tsx; ordinary fixed tests live in source-id-reuse.test.tsx.
 export type Row = { id: string; value: string; rank: number }
 
 export class TestErrorBoundary extends Component<

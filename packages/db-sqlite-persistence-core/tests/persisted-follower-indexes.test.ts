@@ -210,7 +210,7 @@ describe(`persistedCollectionOptions`, () => {
         await vi.advanceTimersByTimeAsync(200)
         // The old matrix supplied an AbortError or explicitly unloaded demand,
         // but never aborted an already-queued retry. The signal row owns that
-        // distinct boundary; offline is its hostile liveness control.
+        // distinct boundary; offline is its mutant liveness control.
         expect(result).toBe(failure)
         expect(followerUpstreamLoad).not.toHaveBeenCalled()
         if (action === `offline`) {
@@ -232,7 +232,7 @@ describe(`persistedCollectionOptions`, () => {
   // This extends the persisted owner with construction work, not elapsed time.
   // The controlled coordinator calls the real wire encoder; browser/Electron
   // owners separately establish actual transport and local lifecycle delivery.
-  it.sequential.each(
+  it.each(
     [
       `follower`,
       `leader-to-follower`,
@@ -1169,7 +1169,7 @@ describe(`persistedCollectionOptions`, () => {
         // Earlier laws covered external-sync commit classification and a
         // successful follower mutation acknowledgement. They never varied a
         // serialized applyLocalMutations failure by route. The elected-leader
-        // and non-durability rows are hostile controls for topology parity and
+        // and non-durability rows are mutant controls for topology parity and
         // for avoiding an over-broad fail-stop classifier.
         if (expectedDurabilityError) {
           expect(rejection).toMatchObject({
@@ -1692,7 +1692,7 @@ describe(`persistedCollectionOptions`, () => {
     await vi.waitFor(() => expect(sourceLoads).toBe(2))
   })
 
-  // This deliberately wrong global-eviction message is a hostile control for
+  // This deliberately wrong global-eviction message is a mutant control for
   // the two-run Browser generation-routing oracle. A global full reload makes
   // the warm run lose a valid source row, so it cannot implement cache
   // retirement. This driver checks that the public-row comparison detects

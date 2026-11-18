@@ -128,6 +128,7 @@ export function captureMetadataInput(value: unknown): MetadataInputSnapshot {
       ? (value as Record<string, unknown>)
       : undefined
   return {
+    symbols: Object.getOwnPropertySymbols(record ?? {}),
     present: record !== undefined,
     ordinary: Object.fromEntries(
       Object.getOwnPropertyNames(record ?? {})
@@ -256,8 +257,15 @@ export async function runMetadataCallbackHistory(
     // context. It is not an ordinary field of the source value being judged.
     // Capture reserved fields before removing that known context from ordinary
     // fields; spreading first could hide inherited or nonenumerable metadata.
-    if (union && enteredCallback === `having`)
+    if (union && enteredCallback === `having`) {
+      // $selected is a documented context field, but its value is public too.
+      // Preserve private-symbol evidence before omitting that context from the
+      // authored source comparison. The fixture authors no user symbols.
+      const selected = (row as Record<string, unknown>).$selected
+      if (selected !== null && typeof selected === `object`)
+        observed.symbols.push(...Object.getOwnPropertySymbols(selected))
       delete observed.ordinary.$selected
+    }
     captures.push({ cut, callback: enteredCallback, input: observed })
     return { id, observed }
   }
@@ -368,6 +376,10 @@ export async function runMetadataCallbackHistory(
     // not the receiver's production path or expected source facts.
     return authored
   }
+  // Only a flat union at the root Collection boundary replaces its own
+  // reserved fields. A nested `value` remains authored data even in a root row.
+  // Effects expose query values without creating a Collection row boundary.
+  const publishedUnion = union && receiver === `root` && !selects
   const observeRows = (rows: ReadonlyArray<object>): Array<Output> =>
     selects
       ? outputRows(rows)
@@ -376,21 +388,20 @@ export async function runMetadataCallbackHistory(
           const observed = captureMetadataInput(union ? row : record.value)
           return {
             id: record.id as string | number,
-            observed: receiver.startsWith(`inline-child`)
-              ? observed
-              : expectedMetadataRecord(
-                  observed.present ? observed.ordinary : undefined,
-                ),
+            observed: publishedUnion
+              ? expectedMetadataRecord(observed.ordinary)
+              : observed,
           }
         })
-  const expectedOutput = (fact: MetadataSourceFact) =>
-    selects
-      ? expectedMetadataInput(fact, description)
-      : receiver.startsWith(`inline-child`)
-        ? expectedMetadataInput(fact, description, true)
-        : expectedMetadataRecord(
-            expectedMetadataInput(fact, description, true).ordinary,
-          )
+  const expectedOutput = (fact: MetadataSourceFact) => {
+    const input = expectedMetadataInput(fact, description)
+    return publishedUnion ? expectedMetadataRecord(input.ordinary) : input
+  }
+  // The fixture's predicate rejects an authored key collision. Determine
+  // membership from independent authored facts, not the observed callback.
+  const accepts = (fact: MetadataSourceFact) =>
+    callbackKind === `select` ||
+    expectedMetadataInput(fact, description).fields.$key?.value !== `spoof-$key`
   const query =
     receiver === `root` || receiver === `effect`
       ? makeQuery()
@@ -525,7 +536,9 @@ export async function runMetadataCallbackHistory(
         : `select`
     const callbacksEntered =
       current.some((capture) => capture.callback === requiredCallback) &&
-      (!selects || current.some((capture) => capture.callback === `select`))
+      (!selects ||
+        !facts.some(accepts) ||
+        current.some((capture) => capture.callback === `select`))
     if (!callbacksEntered)
       report.violations.push({
         cut,
@@ -546,7 +559,7 @@ export async function runMetadataCallbackHistory(
           expected: permitted,
         })
     }
-    const expected = facts.map((fact) => ({
+    const expected = facts.filter(accepts).map((fact) => ({
       id: fact.row.id,
       observed: expectedOutput(fact),
     }))
@@ -569,11 +582,7 @@ export async function runMetadataCallbackHistory(
       const permitted = allowed.flatMap((observed) => [
         {
           id: observed.ordinary.id,
-          observed: selects
-            ? observed
-            : expectedMetadataRecord(
-                observed.present ? observed.ordinary : undefined,
-              ),
+          observed,
         },
       ])
       if (path === `joined-source`)
@@ -795,7 +804,7 @@ export async function runInlineMetadataCallbackHistory(
         children: rowsFromSnapshots(
           facts
             .filter((fact) => path === `direct` || fact.row.id === parent.id)
-            .map((fact) => expectedMetadataInput(fact, description, true)),
+            .map((fact) => expectedMetadataInput(fact, description)),
         ),
       }),
     )

@@ -422,11 +422,11 @@ describe(`unionAll types`, () => {
       Array<
         OutputWithVirtual<
           | {
-              message: OutputWithVirtual<{
+              message: {
                 id: number
                 timestamp: number
                 userName: string
-              }>
+              }
               toolCall?: undefined
             }
           | {

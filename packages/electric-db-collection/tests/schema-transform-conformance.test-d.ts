@@ -50,7 +50,7 @@ const synchronizedOutput = {
  * at `string | number`; it does not infer the schema's branded ID type.
  *
  * The assertions observe those production type paths after overload
- * resolution. Hostile controls reject an untransformed shape row at the sync
+ * resolution. Mutant controls reject an untransformed shape row at the sync
  * boundary and an invalid value at the mutation boundary. This partial oracle
  * does not execute Shape parsing, network I/O, or mutation-handler timing.
  */

@@ -248,9 +248,9 @@ export async function observeCachedSchemaState(
  * compares the entire projected schema state; the held boundary and reset epoch
  * are reach witnesses, while compatible reopen and recertifying truncate cases
  * prevent an oracle that merely rejects every resume.
- * A separate generated startup lane holds the runtime between its metadata and
+ * A separate generated startup grammar holds the runtime between its metadata and
  * hydration snapshots, then crosses no write, a managed public insert, and a
- * hostile raw deletion over one-to-three baseline rows. Its independent model
+ * mutant raw deletion over one-to-three baseline rows. Its independent model
  * preserves every managed row but fails closed for unsupported raw loss.
  * The focused work law first executes one controlled expected-key table read to
  * prove its SQL observer can detect the forbidden membership work, then resets

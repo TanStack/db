@@ -14,10 +14,17 @@ import type { SyncConfig } from '../../src/types.js'
 import type {
   BucketFacadeRef,
   BucketRow,
+  ValueResolver,
 } from '../../src/query/live/materialized-pipeline.js'
 import type { Context } from '../../src/query/builder/types.js'
 
 type FacadeSync = Parameters<SyncConfig<Record<string, unknown>>[`sync`]>[0]
+
+// These direct component fixtures have flat rows and root facade references,
+// with no nested include paths or compiler metadata to clean. Keep their
+// resolver in the driver; unused generic helpers are absent from built dist.
+const resolveFlatFacadeValue: ValueResolver = (value, resolveFacade) =>
+  resolveFacade(value)
 
 class ThrowingBuildIndex extends BasicIndex<number> {
   throwBeforeBuild = false
@@ -77,6 +84,7 @@ describe(`BucketFacadeAdapter`, () => {
           },
         ],
         () => {},
+        resolveFlatFacadeValue,
       )
       graph.finalize()
       const ref: BucketFacadeRef = {
@@ -140,6 +148,7 @@ describe(`BucketFacadeAdapter`, () => {
           },
         ],
         () => {},
+        resolveFlatFacadeValue,
       )
       graph.finalize()
       const bucketKey = `group`
@@ -226,6 +235,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
+      resolveFlatFacadeValue,
     )
     graph.finalize()
 
@@ -279,6 +289,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
+      resolveFlatFacadeValue,
     )
     graph.finalize()
 
@@ -454,6 +465,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
+      resolveFlatFacadeValue,
     )
     graph.finalize()
 
@@ -549,6 +561,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
+      resolveFlatFacadeValue,
     )
     graph.finalize()
 

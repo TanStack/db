@@ -5,11 +5,26 @@ export class KeyScheduler {
   private activeTransactionId: string | undefined
 
   schedule(transaction: OfflineTransaction): boolean {
-    if (
-      this.pendingTransactions.some((pending) => pending.id === transaction.id)
-    ) {
-      return false
-    }
+    // Development-only oracle probes read this. The published build removes
+    // this guard and its probes (scripts/strip-oracle-probes.mjs). A bundler
+    // that sets NODE_ENV and bundles these sources folds it to `false` and
+    // removes them; the typeof check keeps an unbundled module from throwing
+    // where `process` does not exist.
+    const probing =
+      typeof process === `undefined`
+        ? false
+        : process.env.NODE_ENV !== `production`
+    const duplicate = this.pendingTransactions.some(
+      (pending) => pending.id === transaction.id,
+    )
+    // Development-only oracle probe; a production build removes it.
+    probing &&
+      (
+        globalThis as {
+          __oracleProbe?: (name: string, condition: unknown) => void
+        }
+      ).__oracleProbe?.(`offline-transactions#duplicate-schedule`, duplicate)
+    if (duplicate) return false
     this.pendingTransactions.push(transaction)
     // Sort by creation time to maintain FIFO order
     this.pendingTransactions.sort(

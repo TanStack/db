@@ -194,3 +194,31 @@ it(`preserves sparse arrays and locked lengths while removing private keys`, () 
   )
   expect(input[2][privateKey]).toBe(true)
 })
+
+it(`does not read accessors when a public container needs no copy`, () => {
+  let reads = 0
+  const input = {
+    get value() {
+      reads++
+      return { nested: true }
+    },
+  }
+  expect(transformPublicContainers(input, (value) => value, new Set())).toBe(
+    input,
+  )
+  expect(reads).toBe(0)
+})
+
+it(`sanitizes private state below enumerable named array properties`, () => {
+  const privateKey = Symbol(`private`)
+  const child = { value: 1, [privateKey]: true }
+  const input = Object.assign([], { detail: child })
+  const result = transformPublicContainers(
+    input,
+    (value) => value,
+    new Set([privateKey]),
+  ) as typeof input
+  expect(Array.isArray(result)).toBe(true)
+  expect(result.detail).toEqual({ value: 1 })
+  expect(child[privateKey]).toBe(true)
+})

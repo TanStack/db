@@ -1,7 +1,7 @@
 /**
  * Scenario checks for the OPFS page lifecycle: open deadlines, abort during open,
  * and abort during option evaluation. `opfs-page-lifecycle-oracle.test.ts` owns
- * the lifecycle law and its generated histories; these tests pin single timing
+ * the lifecycle law and its generated histories; these tests check single timing
  * scenarios with hand-written expectations.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'

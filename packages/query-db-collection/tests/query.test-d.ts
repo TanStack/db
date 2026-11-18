@@ -508,7 +508,7 @@ describe(`Query collection type resolution tests`, () => {
      * types at compile time.
      *
      * Observations: `select` input, output-row keys, delete keys, collection
-     * reads, and mutation inputs. The paired configs are the hostile control:
+     * reads, and mutation inputs. The paired configs are the mutant control:
      * they differ only in whether `select` returns schema output or input.
      * Runtime schema parsing and result publication are outside this oracle.
      */

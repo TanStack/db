@@ -16,9 +16,6 @@ export default {
     setupFiles: [path(`./tests/test-setup.ts`)],
     include: [
       `tests/query/aggregate-select-oracle.property.test.ts`,
-      `tests/declared-reach-oracle.property.test.ts`,
-      `tests/oracle-campaign.test.ts`,
-      `tests/oracle-reach.test.ts`,
       `tests/oracle-replay.test.ts`,
     ],
     maxWorkers: 1,

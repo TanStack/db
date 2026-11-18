@@ -33,11 +33,22 @@ Live query results include computed, read-only virtual properties on every row:
 
 - `$hasPendingWrites`: `true` while a pending local optimistic mutation affects the row; otherwise `false`. It is always `false` for local-only collections. It does not indicate server acknowledgement.
 - `$origin`: Collection attribution for the current row. Optimistic rows are `"local"`; source rows use key and timing, not a source client ID. A peer write can be `"local"`. A truncate does not consume an active mutation's attribution for an untouched key. See [VirtualOrigin](../reference/type-aliases/VirtualOrigin.md) for settlement, truncate, and overlap rules. Local-only Collections always use `"local"`.
-- `$key`: the row key for the result.
+- `$key`: the row key for the result. Joined rows use a composite key for each
+  pair, including whole-source selections and spreads. An explicit `getKey`
+  replaces that key. Source-attributed selections retain the other source fields.
 - `$collectionId`: the selected source Collection's ID for a whole-row `.select` or a `.select` projection that spreads a source row, including a joined row. With multiple source spreads, the last spread supplies the metadata. Other projections receive the live-query Collection's ID, regardless of selected virtual field names. A functional `.fn.select()` retains source metadata only when it returns a source row directly. A new object, including a spread, receives the live-query Collection's metadata.
 
 These props can be used in `where`, `select`, and `orderBy` clauses. They are added to
 query outputs automatically and should not be persisted back to storage.
+
+These metadata rules apply to published Collection row roots, including
+Collection-valued includes. Intermediate subquery projections, `.fn.select()`,
+`.fn.where()` and `.fn.having()` inputs, inline includes and Effect outputs keep
+their authored fields. For example, an intermediate projection with
+`$collectionId: 'application'` exposes that string to a downstream callback.
+Publishing that value as a Collection row supplies genuine computed metadata.
+Read source metadata before projection when you need the source's attribution.
+
 
 ## Table of Contents
 

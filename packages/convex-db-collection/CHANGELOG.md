@@ -1,5 +1,21 @@
 # @tanstack/convex-db-collection
 
+## 1.0.0-rc.1.5
+
+### Patch Changes
+
+- Updated dependencies [[`522f657`](https://github.com/TanStack/db/commit/522f65777a42673a1befcb8169854002894d15c0), [`a86aa43`](https://github.com/TanStack/db/commit/a86aa430418572a4834972aa60b7d6a18e2e08ba), [`0e1a1c1`](https://github.com/TanStack/db/commit/0e1a1c116ecd055acefcee85b3862de2cf5c102a), [`6ec538e`](https://github.com/TanStack/db/commit/6ec538ecd3c8a966e6a1e93d88b82023021a47a4)]:
+  - @tanstack/db@1.0.0-rc.1.5
+  - @tanstack/offline-transactions@1.2.1
+
+## 1.0.0-rc.1.4
+
+### Patch Changes
+
+- Updated dependencies [[`bfb660a`](https://github.com/TanStack/db/commit/bfb660a1e8074064cd1fd93a645273c17aaec98c)]:
+  - @tanstack/db@1.0.0-rc.1.4
+  - @tanstack/offline-transactions@1.2.0
+
 ## 1.0.0-rc.1.3
 
 ### Patch Changes

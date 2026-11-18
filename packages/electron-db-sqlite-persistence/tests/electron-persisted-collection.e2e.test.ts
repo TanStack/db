@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, afterEach, beforeAll } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe } from 'vitest'
 import { BTreeIndex, createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '@tanstack/db-sqlite-persistence-core'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
@@ -356,7 +356,9 @@ const conformanceMode = isElectronFullE2EEnabled()
   ? `real electron ipc`
   : `in-process invoke`
 
-runPersistedCollectionConformanceSuite(
-  `electron persisted collection conformance (${conformanceMode})`,
-  getConfig,
-)
+describe(`Electron persisted collection satisfies the shared persisted collection conformance contract`, () => {
+  runPersistedCollectionConformanceSuite(
+    `electron persisted collection conformance (${conformanceMode})`,
+    getConfig,
+  )
+})

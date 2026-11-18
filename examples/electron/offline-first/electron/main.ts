@@ -1,11 +1,15 @@
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { BrowserWindow, Menu, app, ipcMain } from 'electron'
-import Database from 'better-sqlite3'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
 import { exposeElectronSQLitePersistence } from '@tanstack/electron-db-sqlite-persistence'
+import type BetterSqlite3 from 'better-sqlite3'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const Database = createRequire(
+  new URL('../.electron-native/package.json', import.meta.url),
+)('better-sqlite3') as typeof BetterSqlite3
 
 // Open SQLite database in Electron's user data directory
 const dbPath = path.join(app.getPath('userData'), 'todos.sqlite')

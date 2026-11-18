@@ -238,6 +238,14 @@ export async function withHttpPublishReceiver(root, history, body) {
     throw new Error(
       'HTTP release receiver requires POSIX process-group cleanup',
     )
+  const configPath = join(root, '.changeset', 'config.json')
+  const config = readJson(configPath)
+  if (history.privatePolicy === 'false') config.privatePackages = false
+  if (history.privatePolicy === 'default') delete config.privatePackages
+  if (history.privatePolicy === 'version')
+    config.privatePackages = { version: true, tag: false }
+  // Distinguish exact-byte restoration from parse-and-reformat restoration.
+  writeFileSync(configPath, `${JSON.stringify(config, null, '\t')}\n\n`)
   writeFileSync(
     join(root, 'pnpm-workspace.yaml'),
     readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8') +
@@ -286,6 +294,7 @@ export async function withHttpPublishReceiver(root, history, body) {
   for (const [owner, name, target] of [
     ['db', 'release-private', 'private'],
     ['react', packageNames.db, 'db'],
+    ['offline', packageNames.db, 'db'],
   ]) {
     const directory = join(root, 'packages', owner, 'node_modules')
     mkdirSync(join(directory, name.startsWith('@') ? name.split('/')[0] : ''), {
@@ -458,7 +467,9 @@ export async function withHttpPublishReceiver(root, history, body) {
       bytes: () =>
         Object.fromEntries(
           [
+            '.changeset/config.json',
             '.changeset/pre.json',
+            'packages/private/package.json',
             ...Object.keys(packageNames).map(
               (key) => `packages/${key}/package.json`,
             ),

@@ -185,11 +185,13 @@ export type AliasOracleEnvironment = Record<string, string | undefined>
 
 export function readAliasOracleRuns(
   environment: AliasOracleEnvironment = process.env,
+  { scale = true }: { scale?: boolean } = {},
 ): number {
   // A run-count control, not a replay coordinate. Its default is the shared
   // base count, so TANSTACK_DB_ORACLE_RUNS_MULTIPLIER still scales it.
   const runsText =
-    environment.TANSTACK_DB_OP_SQLITE_ORACLE_RUNS ?? String(oracleRuns(50))
+    environment.TANSTACK_DB_OP_SQLITE_ORACLE_RUNS ??
+    String(scale ? oracleRuns(50) : 50)
   const runs = Number(runsText)
   if (runsText.trim() === `` || !Number.isSafeInteger(runs) || runs < 1) {
     throw new Error(

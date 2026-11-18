@@ -2,7 +2,6 @@
   "truncateReplayState": "o",
   "subsetDemands": "C",
   "sortedValues": "J",
-  "currentWindow": "L",
   "activeFetchPromise": "Q",
   "stagedContinuation": "S",
   "isSyncRunGenerationCurrent": "Z",
@@ -242,7 +241,6 @@
   "warnedPlans": "eO",
   "abandonTruncateReplay": "eP",
   "captureEntries": "eQ",
-  "cleanupRetiredEntries": "eR",
   "comparisonOpts": "eS",
   "createSyncMetadataApi": "eT",
   "pendingSourceRecovery": "eV",
@@ -347,9 +345,7 @@
   "publishReplayRows": "gy",
   "afterPreloadMark": "gz",
   "resumeSubscriber": "gA",
-  "beginWrite": "gB",
   "detach": "gC",
-  "copyRows": "gD",
   "attach": "gF",
   "sortedExactValues": "gG",
   "retiringSupersededAcquisitions": "l",
@@ -431,5 +427,10 @@
   "grownPrefixRows": "gZ",
   "ownPrefixEnd": "he",
   "sourceListenerCleanups": "cb",
-  "cachedRows": "dB"
+  "cachedRows": "dB",
+  "currentWindow": "a1",
+  "valueResolverCache": "a2",
+  "settledSourcePrefix": "b1",
+  "resolveRoot": "b2",
+  "resolveFacade": "D"
 }

@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -15,12 +15,24 @@ import {
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
 import {
+  oracleFixedSeed,
+  oracleProperty,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
+import {
+  expectReleaseReentryObservation,
+  expectScheduledDemandObservation,
+} from './includes-temporal-check-oracle.js'
 import {
   correlationKeys,
   createColdPosts,
@@ -32,6 +44,7 @@ import {
   nextCollectionId,
   startPreload,
 } from './includes-temporal-support.js'
+import type { ScheduledDemandObservation } from './includes-temporal-check-oracle.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { Deferred } from '../../src/deferred.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
@@ -83,7 +96,7 @@ import type {
  * imply one physical acquisition or one provider transport. The fast/late
  * phase is a fixture clock around source startup, not an ordered query window.
  * fast-check schedules current and obsolete completions in new orders, while
- * fixed scheduler orders pin both directions.
+ * fixed scheduler orders cover both directions.
  *
  * The production drivers use real Collections, compiled includes, applied
  * receipts, release callbacks, replay barriers, and source writes. They observe
@@ -355,29 +368,6 @@ async function expectScheduledAcquisitionsRespectCurrentDemand(
   ])
 }
 
-type ScheduledDemandObservation = {
-  completed: Array<string>
-  ready: boolean
-  rows: Array<{ id: number; comments: Array<{ id: number; body: string }> }>
-}
-
-// The public row depends on whether the current acquisition's promise fulfilled.
-// An obsolete acquisition's settlement alone cannot add its child row.
-function expectScheduledDemandObservation(
-  observation: ScheduledDemandObservation,
-  index: number,
-): void {
-  expect(observation.completed).toHaveLength(index + 1)
-  const currentCompleted = observation.completed.includes(`demand-1`)
-  expect(observation.rows).toEqual([
-    {
-      id: 1,
-      comments: currentCompleted ? [{ id: 200, body: `current` }] : [],
-    },
-  ])
-  if (currentCompleted) expect(observation.ready).toBe(true)
-}
-
 async function expectDemandReactivationRetriesAfterReleaseFailure(
   keys: ReadonlyArray<number>,
 ): Promise<void> {
@@ -456,26 +446,6 @@ async function expectDemandReactivationRetriesAfterReleaseFailure(
   ])
 }
 
-type ReleaseReentryObservation = {
-  changed: boolean
-  empty: boolean
-  loadCount: number
-  requestedKeys: Array<Array<number>>
-}
-
-function expectReleaseReentryObservation(
-  observed: ReleaseReentryObservation,
-  keys: ReadonlyArray<number>,
-): void {
-  const expectedKeys = [...keys].sort((left, right) => left - right)
-  expect(observed).toEqual({
-    changed: true,
-    empty: false,
-    loadCount: 2,
-    requestedKeys: [expectedKeys, expectedKeys],
-  })
-}
-
 // Model D: source Collection readiness gates initial-query readiness only for
 // an eager source.
 //
@@ -486,7 +456,7 @@ function expectReleaseReentryObservation(
 // "the first query loads immediately (on-demand)" (TanStack DB 0.5 release
 // post). An eager source serves no subset demand, so its Collection readiness
 // is the only evidence. The architecture's initial-readiness law states this
-// rule; this lane is its executable owner.
+// rule; this oracle is its oracle owner.
 //
 // The law has three kinds of consumer. A live-query Collection becomes ready,
 // and its preload settles, at initial-query readiness. A one-shot read resolves
@@ -529,7 +499,7 @@ function expectReleaseReentryObservation(
 // The live-query shapes put the lagging source at a direct root, a
 // single-result root, an ordered root window, a correlated include child,
 // the lazy side of a join, an eager root that sets `syncMode: 'eager'`, and
-// an eager root that leaves `syncMode` at its default. The Effect lane uses
+// an eager root that leaves `syncMode` at its default. The Effect production path uses
 // the direct, lazy-join, and both eager-root shapes; Effects over an ordered
 // window or an include are not covered here. The eager roots are the nearby
 // witnesses: a design that ignores source readiness entirely completes them
@@ -552,7 +522,7 @@ function expectReleaseReentryObservation(
 // and controlled source writes. Each step is followed by a timer turn. Each
 // checkpoint compares the consumer's observation and the number of
 // acquisitions; the ordered shape records only that it acquired. A rejected acquisition, source error, and later demand changes
-// are outside this lane; Models A to C, the Effect disposal oracle, and the
+// are outside this grammar; Models A to C, the Effect disposal oracle, and the
 // subscription lifecycle oracle own them. The Electric live-query tests hold
 // the receiving witnesses for a real progressive source and for an on-demand
 // source that is ready before its subset loads.
@@ -1276,14 +1246,14 @@ async function expectLaggingSourceTraceMatches(
   })
 }
 
-// Each generated lane uses one grammar and one check in both campaigns. A
-// seed-and-path replay selects only its requested random lane.
+// Each generated campaign uses one grammar and one check in both campaigns. A
+// seed-and-path replay selects only its requested random campaign.
 function temporalCampaigns(property: string, fixedSeed: number) {
   return [
     {
       label: `fixed seed ${fixedSeed}`,
       test: oracleReplayTest(fcTest),
-      options: { numRuns: oracleRuns(20), seed: fixedSeed },
+      options: oracleFixedSeed(fixedSeed, { numRuns: oracleRuns(20) }),
     },
     {
       label: `random or replayed seed`,
@@ -1293,32 +1263,23 @@ function temporalCampaigns(property: string, fixedSeed: number) {
   ]
 }
 
-declareOracle({
-  check: [
-    expectReadinessMatches,
-    expectScheduledDemandObservation,
-    expectReleaseReentryObservation,
-    expectLaggingSourceTraceMatches,
-  ],
-  model: [
-    expectedReadinessObservation,
-    expectedLiveQueryObservation,
-    expectedReadObservation,
-    expectedEffectObservation,
-  ],
-})
+const readinessLaw = `Initial preload completes when every reachable demand is covered by a settled request: an empty outer relation does not wait for an undemanded child, and a demanded child loads before readiness.`
+const demandSchedulingLaw = `An obsolete acquisition's settlement cannot add its child row or settle current readiness, in either completion order.`
+const releaseReentryLaw = `A failed adapter release never suppresses the reacquisition of a later demand incarnation.`
+const laggingSourceLaw = `Source Collection readiness gates initial-query readiness only for an eager source; an on-demand source's settled demand is the evidence.`
 
-describe(`includes temporal oracle`, () => {
-  it(`an empty outer does not wait for an undemanded child`, () =>
-    expectReadinessMatches([]))
-
-  it(`loads a demanded child before becoming ready`, async () => {
-    await expectReadinessMatches([
+const readinessFixedHistories = [
+  { name: `an empty outer does not wait for an undemanded child`, posts: [] },
+  {
+    name: `loads a demanded child before becoming ready`,
+    posts: [
       { id: 1, authorId: `selected`, title: `one` },
       { id: 2, authorId: `selected`, title: `two` },
-    ])
-  })
+    ],
+  },
+]
 
+describe(`includes temporal oracle`, () => {
   // Grammar: one route is retired and reactivated, leaving one obsolete and
   // one current acquisition. The scheduler permutes their two completions.
   // Retire, reactivate, and completion order each distinguish the stale-demand
@@ -1333,44 +1294,101 @@ describe(`includes temporal oracle`, () => {
   )) {
     campaign.test.prop([demandScheduler], campaign.options)(
       `acquisition settlements preserve current demand with ${campaign.label}`,
-      expectScheduledAcquisitionsRespectCurrentDemand,
+      (
+        ...args: Parameters<
+          typeof expectScheduledAcquisitionsRespectCurrentDemand
+        >
+      ) => {
+        oracleRoute(oracleRouteOf(campaign.options))
+        return expectScheduledAcquisitionsRespectCurrentDemand(...args)
+      },
     )
   }
 
-  it.each([{ order: [1, 2] }, { order: [2, 1] }])(
-    `observes every completion in fixed scheduler order $order`,
-    ({ order }) =>
-      expectScheduledAcquisitionsRespectCurrentDemand(fc.schedulerFor(order)),
-  )
-
-  it(`rejects an obsolete child row at the first scheduled checkpoint`, () => {
-    expect(() =>
-      expectScheduledDemandObservation(
-        {
-          completed: [`demand-0`],
-          ready: false,
-          rows: [{ id: 1, comments: [{ id: 100, body: `obsolete` }] }],
-        },
-        0,
+  oracleProperty({
+    id: `includes-temporal.demand-scheduling-orders`,
+    law: {
+      statement: demandSchedulingLaw,
+      authority: `The demand, cancellation, progressive timing, and source readiness contracts in packages/db/src/query/live/ARCHITECTURE.md (initial readiness, stale demand, and applied settlement laws), stated at the start of this owner.`,
+      limits: `The two enumerated completion orders of one obsolete and one current acquisition.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/effect.ts#createEffect`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/subset-demand-controller.ts`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: [{ order: [1, 2] }, { order: [2, 1] }],
+    label: ({ order }) =>
+      `observes every completion in fixed scheduler order [ ${order.join(`, `)} ]`,
+    resolve: (history) => ({ ...history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(demandSchedulingLaw, plan, observe, () =>
+        expectScheduledAcquisitionsRespectCurrentDemand(
+          fc.schedulerFor(plan.order),
+        ),
       ),
-    ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
+    check: forwardAssertionJudgment,
   })
 
-  it(`reactivated demand retries after its prior release fails`, () =>
-    expectDemandReactivationRetriesAfterReleaseFailure([1]))
-
-  it(`rejects a failed release that suppresses reacquisition`, () => {
-    expect(() =>
-      expectReleaseReentryObservation(
-        {
-          changed: false,
-          empty: false,
-          loadCount: 1,
-          requestedKeys: [[1]],
-        },
-        [1],
+  oracleProperty({
+    id: `includes-temporal.readiness-fixed`,
+    law: {
+      statement: readinessLaw,
+      authority: `The demand, cancellation, progressive timing, and source readiness contracts in packages/db/src/query/live/ARCHITECTURE.md (initial readiness, stale demand, and applied settlement laws), stated at the start of this owner.`,
+      limits: `Two named outer relations: an empty outer and two rows demanding one selected child.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/effect.ts#createEffect`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/subset-demand-controller.ts`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: readinessFixedHistories,
+    label: ({ name }) => name,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(readinessLaw, plan, observe, () =>
+        expectReadinessMatches(plan.history.posts),
       ),
-    ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `includes-temporal.release-reentry-fixed`,
+    law: {
+      statement: releaseReentryLaw,
+      authority: `The demand, cancellation, progressive timing, and source readiness contracts in packages/db/src/query/live/ARCHITECTURE.md (initial readiness, stale demand, and applied settlement laws), stated at the start of this owner.`,
+      limits: `The single-key fixed witness, the smallest history of the release-reentry grammar.`,
+    },
+    owns: [
+      `src/collection/index.ts#createCollection`,
+      `src/indexes/basic-index.ts`,
+      `src/query/effect.ts#createEffect`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+      `src/query/live/subset-demand-controller.ts`,
+      `src/query/query-once.ts#queryOnce`,
+    ],
+    histories: [
+      {
+        name: `reactivated demand retries after its prior release fails`,
+        keys: [1],
+      },
+    ],
+    label: ({ name }) => name,
+    resolve: (history) => ({ ...history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(releaseReentryLaw, plan, observe, () =>
+        expectDemandReactivationRetriesAfterReleaseFailure(plan.keys),
+      ),
+    check: forwardAssertionJudgment,
   })
 
   // Grammar: a nonempty unique key set is acquired, retired through a failed
@@ -1392,7 +1410,14 @@ describe(`includes temporal oracle`, () => {
   )) {
     campaign.test.prop([releaseKeys], campaign.options)(
       `failed release never suppresses a later demand incarnation with ${campaign.label}`,
-      expectDemandReactivationRetriesAfterReleaseFailure,
+      (
+        ...args: Parameters<
+          typeof expectDemandReactivationRetriesAfterReleaseFailure
+        >
+      ) => {
+        oracleRoute(oracleRouteOf(campaign.options))
+        return expectDemandReactivationRetriesAfterReleaseFailure(...args)
+      },
     )
   }
 
@@ -1425,9 +1450,36 @@ describe(`includes temporal oracle`, () => {
         })),
       ),
     )
-    it.each(cells)(`$consumer $shape: $history`, ({ consumer, shape, steps }) =>
-      expectLaggingSourceTraceMatches(consumer, shape, steps),
-    )
+    oracleProperty({
+      id: `includes-temporal.lagging-source`,
+      law: {
+        statement: laggingSourceLaw,
+        authority: `The demand, cancellation, progressive timing, and source readiness contracts in packages/db/src/query/live/ARCHITECTURE.md (initial readiness, stale demand, and applied settlement laws), stated at the start of this owner.`,
+        limits: `The enumerated consumer, shape, and disturbed-history cells over controlled source Collections.`,
+      },
+      owns: [
+        `src/collection/index.ts#createCollection`,
+        `src/indexes/basic-index.ts`,
+        `src/query/effect.ts#createEffect`,
+        `src/query/live-query-collection.ts#createLiveQueryCollection`,
+        `src/query/live/subset-demand-controller.ts`,
+        `src/query/query-once.ts#queryOnce`,
+      ],
+      histories: cells,
+      label: ({ consumer, shape, history }) =>
+        `${consumer} ${shape}: ${history}`,
+      resolve: (cell) => ({ ...cell }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(laggingSourceLaw, plan, observe, () =>
+          expectLaggingSourceTraceMatches(
+            plan.consumer,
+            plan.shape,
+            plan.steps,
+          ),
+        ),
+      check: forwardAssertionJudgment,
+    })
   })
 
   // Grammar: one parent receives 2..4 distinct-key children while its acquisition
@@ -1450,6 +1502,7 @@ describe(`includes temporal oracle`, () => {
     campaign.test.prop([partialBodies], campaign.options)(
       `publishes each partial child prefix before the acquisition promise fulfills with ${campaign.label}`,
       async (bodies) => {
+        oracleRoute(oracleRouteOf(campaign.options))
         for (const form of [`array`, `materialized`] as const) {
           const parents = createMutablePosts([
             { id: 1, authorId: `selected`, title: `Receiving children` },
