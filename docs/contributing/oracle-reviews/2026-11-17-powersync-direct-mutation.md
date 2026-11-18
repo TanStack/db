@@ -142,4 +142,3 @@ The tables record generated-unit counts from the passing normal runs. Constructe
 | `operation:insert` | 12 | 11 | 12 | 11 |
 | `operation:update` | 10 | 10 | 10 | 7 |
 | `requested-after-backend` | 30 | 30 | 30 | 30 |
-

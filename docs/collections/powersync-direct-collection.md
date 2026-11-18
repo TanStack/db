@@ -17,7 +17,7 @@ The `@tanstack/powersync-direct-collection` package allows you to create collect
 - Leverage PowerSync's built-in [consistency guarantees](https://docs.powersync.com/architecture/consistency)
 - Enable real-time synchronization with PostgreSQL, MongoDB, MySQL or SQL Server backends
 
-Compared to the [SQLite-based collection](./powersync-collection.md) (which is 1MB+ including WebAssembly modules and workers), this option is much more lightweight. 
+Compared to the [SQLite-based collection](./powersync-collection.md) (which is 1MB+ including WebAssembly modules and workers), this option is much more lightweight.
 As all data is kept in memory, it is a good fit when all of the following apply:
 
 - You're syncing small data sizes that can be fetched every time the page is opened.
