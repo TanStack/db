@@ -1,13 +1,17 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
 import { Temporal } from 'temporal-polyfill'
 import { expect } from 'vitest'
 import { SQLiteCorePersistenceAdapter } from '../src'
 import { harnessScope } from './contracts/harness-scope'
 import type { SQLInputValue } from 'node:sqlite'
 import type { SQLiteDriver } from '../src'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
+type DatabaseSync = InstanceType<typeof DatabaseSync>
 
 // Fixtures for the SQLite typed-value oracle and its ordinary scenario tests. The
 // oracle in `sqlite-temporal-value-oracle.test.ts` owns the typed-value law.

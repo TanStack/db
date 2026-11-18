@@ -1,4 +1,3 @@
-import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/query-core'
 import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
@@ -11,6 +10,10 @@ import { createSerializedNodeSqliteDriver as createDriver } from '../../db-sqlit
 import type { Collection, LoadSubsetOptions } from '@tanstack/db'
 import type { SQLiteDriver } from '../../db-sqlite-persistence-core/src'
 import type { QueryCollectionUtils } from '../src/query'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
 
 /**
  * # Does an offline on-demand Query DB query settle on its rows from SQLite?

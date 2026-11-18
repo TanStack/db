@@ -1,4 +1,3 @@
-import { DatabaseSync } from 'node:sqlite'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { IR, createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
@@ -16,6 +15,11 @@ import type {
   SQLiteDriver,
 } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
+type DatabaseSync = InstanceType<typeof DatabaseSync>
 
 type Item = Row & { id: number; name: string }
 type Subscriber = (messages: Array<Message<Item>>) => void

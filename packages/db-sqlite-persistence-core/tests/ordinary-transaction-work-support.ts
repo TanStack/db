@@ -1,11 +1,14 @@
 // Shared fixtures and helpers for the ordinary SQLite committed-transaction tests.
 // The law and its independent model live in ordinary-transaction-work-oracle.ts.
-import { DatabaseSync } from 'node:sqlite'
 import { expect } from 'vitest'
 import { oracleAssertion } from '../../db/tests/oracle-assertion-adapter'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
 import { Temporal } from './temporal-value-oracle'
 import type { PersistedTx, SQLiteDriver } from '../src'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
 
 export type Row = Record<
   string,

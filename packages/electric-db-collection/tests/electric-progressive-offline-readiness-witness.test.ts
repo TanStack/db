@@ -1,4 +1,3 @@
-import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
@@ -18,6 +17,10 @@ import type { Message, Row } from '@electric-sql/client'
 import type { Collection, LoadSubsetOptions, SyncConfig } from '@tanstack/db'
 import type { SQLiteDriver } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
 
 /**
  * # What does a persisted progressive Electric query show while offline?

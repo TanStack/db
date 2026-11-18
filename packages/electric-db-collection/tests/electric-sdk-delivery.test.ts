@@ -4,7 +4,6 @@
 // restarts that quarantine uncertified cache rows. The delivery laws they
 // illustrate are owned by
 // electric-sdk-delivery-oracle.property.test.ts.
-import { DatabaseSync } from 'node:sqlite'
 import { expect, it, vi } from 'vitest'
 import {
   IR,
@@ -38,6 +37,10 @@ import type { Item, Request } from './electric-sdk-delivery-support'
 import type { SyncPersistenceCapabilityV1 } from '@tanstack/db'
 import type { TestRow } from './electric-persistence-fixture'
 import type { ElectricCollectionUtils } from '../src/electric'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
 
 let sequence = 0
 

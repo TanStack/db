@@ -1,4 +1,3 @@
-import { DatabaseSync } from 'node:sqlite'
 import { isDeepStrictEqual } from 'node:util'
 import { beforeEach, describe, expect, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
@@ -37,6 +36,11 @@ import type {
   Item,
   PersistedRestartObservation,
 } from './electric-recovery-support'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
+type DatabaseSync = InstanceType<typeof DatabaseSync>
 
 /**
  * # What remains visible while a persisted Electric replica repairs itself?
