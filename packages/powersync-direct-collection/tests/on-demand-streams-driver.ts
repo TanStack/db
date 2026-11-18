@@ -67,7 +67,10 @@ export function directOnDemandStreamsAdapter({
       const relation = ownerSubscriptions(h)
       const mapperFailure = new Error(`mapping-${h.coordinate}`)
       let mapperThrown = false
-      const leases = new Set<{ streams: Array<string>; release: () => void }>()
+      const streamLeases = new Set<{
+        streams: Array<string>
+        release: () => void
+      }>()
       let errors = 0
       const identities = new Set<unknown>()
       let fulfilled = 0
@@ -75,7 +78,7 @@ export function directOnDemandStreamsAdapter({
       const acquire = client.acquireStreams.bind(client)
       client.acquireStreams = (streams, options = {}) => {
         acquired++
-        const actual = input.lease(
+        const actual = input.receiveStreamLease(
           acquire(streams, {
             ...options,
             onError: (error) => {
@@ -89,10 +92,10 @@ export function directOnDemandStreamsAdapter({
           streams: streams.map(authoredStreamIdentity),
           release: () => actual.release(),
         }
-        leases.add(record)
+        streamLeases.add(record)
         return {
           release: () => {
-            leases.delete(record)
+            streamLeases.delete(record)
             actual.release()
           },
           waitForSync: (signal) => {
@@ -143,7 +146,7 @@ export function directOnDemandStreamsAdapter({
         version: number,
       ) => {
         const before = errors
-        const notifications = [...leases].filter((lease) =>
+        const notifications = [...streamLeases].filter((lease) =>
           lease.streams.some((stream) => failed.includes(stream)),
         ).length
         // These two histories deliberately hold application behind a local
@@ -221,7 +224,8 @@ export function directOnDemandStreamsAdapter({
             ? authoredStreamIdentity(cause.stream)
             : `connection`,
         providerState: () => client.status.state,
-        activeStreams: () => [...leases].flatMap((lease) => lease.streams),
+        activeStreams: () =>
+          [...streamLeases].flatMap((lease) => lease.streams),
         acquiredLeases: () => acquired,
         emptyMappingCut: wrapped?.emptyMappingCut ?? `provider-wait`,
         forwardedSubscriptions: () =>
@@ -253,7 +257,7 @@ export function directOnDemandStreamsAdapter({
         dispose: async () => {
           // Completed public cuts already expose a leaked provider session.
           // Release any remaining real leases only during fixture teardown.
-          for (const lease of leases) lease.release()
+          for (const lease of streamLeases) lease.release()
           await untilOnDemandStream(
             () => client.status.state === `idle`,
             `Collection cleanup released SDK resources`,

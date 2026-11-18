@@ -104,7 +104,7 @@ test(`warm input keeps the primary error and attempts both failing cleanups`, as
       acquireStreams: () => ({
         waitForSync: () => Promise.resolve(),
         release: () => {
-          attempted.push(`lease`)
+          attempted.push(`stream-lease`)
           throw release
         },
       }),
@@ -118,7 +118,7 @@ test(`warm input keeps the primary error and attempts both failing cleanups`, as
     release,
     listener,
   ])
-  expect(attempted).toEqual([`lease`, `listener`])
+  expect(attempted).toEqual([`stream-lease`, `listener`])
 })
 
 test(`completed decoder mismatches survive final cleanup failures`, async () => {

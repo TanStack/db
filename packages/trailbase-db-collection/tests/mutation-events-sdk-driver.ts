@@ -121,7 +121,7 @@ export async function observeMutationEvent(
     // Event identity cannot depend on wall-clock advancement. The service's
     // premise deadline uses performance.now(), so freezing this clock cannot
     // turn a missing request into an unbounded driver wait.
-    if (h.clock === `fixed`) Date.now = () => h.coordinate
+    if (h.clockMode === `fixed`) Date.now = () => h.coordinate
     await collection.preload()
     await query?.preload()
     const beforePriming = commits
@@ -186,7 +186,7 @@ export async function observeMutationEvent(
       h.operation,
       h.mode,
       h.first === `response` ? `response-first` : `event-first`,
-      h.clock === `fixed` ? `fixed-clock` : `system-clock`,
+      h.clockMode === `fixed` ? `fixed-clock` : `system-clock`,
     ]
     if (h.first === `response` && consumed && (!h.previousEvent || primed))
       reached.push(
@@ -195,7 +195,7 @@ export async function observeMutationEvent(
           : `fresh-event-response-first`,
       )
     if (
-      h.clock === `fixed` &&
+      h.clockMode === `fixed` &&
       h.previousEvent &&
       primed &&
       h.first === `response`

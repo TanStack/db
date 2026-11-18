@@ -112,7 +112,7 @@ export const createQueryPersistedDemandSource: DemandReceivingFactory = (
     consumed: boolean
     acknowledge: () => void
     acknowledgment: Promise<void>
-    detach: () => void
+    removeAbortListener: () => void
   }
   const calls: Array<Request> = []
   let rows: ReadonlyArray<DemandRow> | undefined
@@ -128,7 +128,7 @@ export const createQueryPersistedDemandSource: DemandReceivingFactory = (
     )
       return
     request.delivered = true
-    request.detach()
+    request.removeAbortListener()
     if (refusing) request.reject(failure)
     else {
       try {
@@ -185,7 +185,7 @@ export const createQueryPersistedDemandSource: DemandReceivingFactory = (
         let acknowledge!: () => void
         const acknowledgment = new Promise<void>((done) => (acknowledge = done))
         const abort = () => {
-          call.detach()
+          call.removeAbortListener()
           call.consumed = true
           acknowledge()
           reject(context.signal.reason)
@@ -199,7 +199,8 @@ export const createQueryPersistedDemandSource: DemandReceivingFactory = (
           consumed: false,
           acknowledge,
           acknowledgment,
-          detach: () => context.signal.removeEventListener(`abort`, abort),
+          removeAbortListener: () =>
+            context.signal.removeEventListener(`abort`, abort),
         }
         calls.push(call)
         context.signal.addEventListener(`abort`, abort, { once: true })
@@ -258,7 +259,7 @@ export const createQueryPersistedDemandSource: DemandReceivingFactory = (
       disposed = true
       unsubscribe()
       client.clear()
-      for (const call of calls) call.detach()
+      for (const call of calls) call.removeAbortListener()
       return Promise.resolve()
     },
   })

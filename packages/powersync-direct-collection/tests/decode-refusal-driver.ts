@@ -207,7 +207,7 @@ export const directDecodeAdapter: DecodeAdapter = {
       const request = mappedRequests.get(args[0])
       if (h.mode === `on-demand` && !request)
         throw new Error(`Decode lease has no actual core request mapping`)
-      const lease = input.lease(acquire(...args))
+      const lease = input.receiveStreamLease(acquire(...args))
       return {
         waitForSync: lease.waitForSync.bind(lease),
         release: retained(`stream-lease`, lease.release.bind(lease), request),

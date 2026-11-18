@@ -182,7 +182,7 @@ export function createDirectInputLedger({
     snapshot,
     receipt: (actual: SyncAppliedReceipt) =>
       observe(`source receipt`, `commit`, () => actual),
-    lease: (actual: StreamLease): StreamLease => {
+    receiveStreamLease: (actual: StreamLease): StreamLease => {
       let released = false
       revision++
       return {

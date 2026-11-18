@@ -71,7 +71,7 @@ export function registerMutationEventConformance(
             mode: `eager`,
             first: `response`,
             previousEvent: true,
-            clock: `fixed`,
+            clockMode: `fixed`,
             peer: true,
             coordinate: 7,
           },

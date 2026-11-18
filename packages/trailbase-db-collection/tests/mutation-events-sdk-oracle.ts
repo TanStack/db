@@ -28,7 +28,7 @@ export type MutationEventHistory = {
   mode: `eager` | `on-demand`
   first: `response` | `event`
   previousEvent: boolean
-  clock: `fixed` | `system`
+  clockMode: `fixed` | `system`
   peer: boolean
   coordinate: number
 }
@@ -38,7 +38,7 @@ export const mutationEventHistoryArb: fc.Arbitrary<MutationEventHistory> =
     mode: fc.constantFrom(`eager`, `on-demand`),
     first: fc.constantFrom(`response`, `event`),
     previousEvent: fc.boolean(),
-    clock: fc.constantFrom(`fixed`, `system`),
+    clockMode: fc.constantFrom(`fixed`, `system`),
     peer: fc.boolean(),
     coordinate: fc.integer({ min: 1, max: 10_000 }),
   })
@@ -137,11 +137,11 @@ export function constructMutationEvent(
     return { ...h, operation: state }
   if (state === `eager` || state === `on-demand`) return { ...h, mode: state }
   if (state === `fixed-clock` || state === `system-clock`)
-    return { ...h, clock: state === `fixed-clock` ? `fixed` : `system` }
+    return { ...h, clockMode: state === `fixed-clock` ? `fixed` : `system` }
   if (state === `same-clock-prior-event`)
     return {
       ...h,
-      clock: `fixed`,
+      clockMode: `fixed`,
       previousEvent: true,
       first: `response`,
       operation: `update`,

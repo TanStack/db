@@ -50,7 +50,7 @@ test(`SDK observation forwards the original promise, signal and lease receiver`,
       releases++
     },
   }
-  const lease = input.lease(actual)
+  const lease = input.receiveStreamLease(actual)
   expect(lease.waitForSync(controller.signal)).toBe(pending.promise)
   expect(input.snapshot().pendingSDK).toBe(1)
   lease.release()
@@ -71,7 +71,10 @@ test(`an aborted SDK wait supplies no further provider-input obligation`, async 
   const controller = new AbortController()
   const pending = deferred<void>()
   input
-    .lease({ waitForSync: () => pending.promise, release: () => {} })
+    .receiveStreamLease({
+      waitForSync: () => pending.promise,
+      release: () => {},
+    })
     .waitForSync(controller.signal)
   controller.abort()
   await input.drain(`provider`)

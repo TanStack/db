@@ -290,7 +290,7 @@ export function source(
   // Observe production's exact lease and waits; add no acquisition or wait.
   const acquireStreams = client.acquireStreams.bind(client)
   client.acquireStreams = (streams, leaseOptions) =>
-    input.lease(acquireStreams(streams, leaseOptions))
+    input.receiveStreamLease(acquireStreams(streams, leaseOptions))
   let markedReady = false
   let emptyMapperCalls = 0
   let finished = 0
