@@ -28,8 +28,7 @@ import type { PersistedStartupObservation } from '../../db-adapter-conformance/t
 let browser: Awaited<ReturnType<typeof startAdapterChromium>> | undefined
 beforeAll(async () => {
   browser = await startAdapterChromium({
-    entry:
-      `/packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.html`,
+    entry: `/packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.html`,
     ready: `runDirectPersistedStartup`,
   })
 }, 120_000)
@@ -40,7 +39,9 @@ afterAll(async () => {
 let sequence = 0
 oracleProperty({
   id: `adapter.powersync-direct.persisted-startup.chromium-opfs`,
-  owns: [`../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`],
+  owns: [
+    `../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`,
+  ],
   law: {
     statement: `A complete eager source result replaces its persisted baseline and is durable before refresh; network-first fallback preserves the saved snapshot.`,
     authority: `Shared persisted-startup-oracle.ts, READY-3/PUB-7 and durable acceptance; docs/guides/sqlite-persistence.md, Use with a sync adapter.`,
@@ -56,8 +57,7 @@ oracleProperty({
     if (!active) throw new Error(`Chromium receiving host did not start`)
     const result = await captureBrowserHistory(active, () =>
       active.page.evaluate(
-        ({ history: input, id }) =>
-          window.runDirectPersistedStartup(input, id),
+        ({ history: input, id }) => window.runDirectPersistedStartup(input, id),
         { history, id: `direct-startup-browser-${sequence++}` },
       ),
     )
@@ -73,7 +73,11 @@ oracleProperty({
       )
     const completed = trace.find(({ checkpoint }) => checkpoint === `completed`)
     if (!completed)
-      return violation(`completed`, `Missing browser startup observation`, `persisted startup`)
+      return violation(
+        `completed`,
+        `Missing browser startup observation`,
+        `persisted startup`,
+      )
     const differences = persistedStartupViolations(
       history,
       `collection`,
@@ -83,10 +87,20 @@ oracleProperty({
       return violation(`completed`, differences.join(`\n`), `persisted startup`)
     const artifacts = trace.find(({ checkpoint }) => checkpoint === `artifacts`)
     if (!artifacts || (artifacts.value as Array<string>).length)
-      return violation(`cleanup`, `OPFS fixture files remain`, `receiving cleanup`)
-    const errors = trace.find(({ checkpoint }) => checkpoint === `browserErrors`)
+      return violation(
+        `cleanup`,
+        `OPFS fixture files remain`,
+        `receiving cleanup`,
+      )
+    const errors = trace.find(
+      ({ checkpoint }) => checkpoint === `browserErrors`,
+    )
     return !errors || (errors.value as Array<string>).length
-      ? violation(`browser errors`, JSON.stringify(errors?.value), `detached browser errors`)
+      ? violation(
+          `browser errors`,
+          JSON.stringify(errors?.value),
+          `detached browser errors`,
+        )
       : pass
   },
   timeout: 120_000,

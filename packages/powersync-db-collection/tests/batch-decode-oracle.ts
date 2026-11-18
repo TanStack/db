@@ -227,8 +227,7 @@ export function nativeDecodeViolations(
         (c.laterSubsetLoads.length !== 2 ||
           c.laterSubsetLoads.some(
             (load, index) =>
-              load.empty !== (index === 1) ||
-              load.outcome !== `rejected`,
+              load.empty !== (index === 1) || load.outcome !== `rejected`,
           ))
       )
         errors.push(`fatal sync run admitted a later subset request`)

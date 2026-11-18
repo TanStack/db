@@ -41,28 +41,29 @@ describe(`eager reload observation projection`, () => {
     let cleaned = false
     let disposed = false
     const adapter: EagerReloadAdapter = {
-      open: (_initial, id) => Promise.resolve({
-        options: {
-          id,
-          getKey: (row) => row.id,
-          sync: {
-            sync: () => () => {
-              cleaned = true
+      open: (_initial, id) =>
+        Promise.resolve({
+          options: {
+            id,
+            getKey: (row) => row.id,
+            sync: {
+              sync: () => () => {
+                cleaned = true
+              },
             },
           },
-        },
-        replace: () => Promise.resolve(),
-        propagate: () => {
-          // This is a provider fact. Neither tested Collection readiness nor
-          // a commit exists in this deliberately incomplete adapter.
-          completed = true
-          return Promise.resolve()
-        },
-        dispose: () => {
-          disposed = true
-          return Promise.resolve()
-        },
-      }),
+          replace: () => Promise.resolve(),
+          propagate: () => {
+            // This is a provider fact. Neither tested Collection readiness nor
+            // a commit exists in this deliberately incomplete adapter.
+            completed = true
+            return Promise.resolve()
+          },
+          dispose: () => {
+            disposed = true
+            return Promise.resolve()
+          },
+        }),
     }
     const history: EagerReloadHistory = {
       start: `fresh`,
@@ -70,7 +71,11 @@ describe(`eager reload observation projection`, () => {
       next: 0,
       mutation: false,
     }
-    const raw = await observeEagerReload(adapter, history, `empty-missing-ready`)
+    const raw = await observeEagerReload(
+      adapter,
+      history,
+      `empty-missing-ready`,
+    )
     expect(completed).toBe(true)
     expect(raw.settledAfterSource).toBe(false)
     expect(eagerReloadViolations(history, raw)).toContain(
