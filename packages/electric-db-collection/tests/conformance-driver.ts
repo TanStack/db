@@ -191,6 +191,7 @@ function failureResponse(error: Error, status: number): Response {
 }
 
 class ElectricProvider implements ControlledProvider {
+  private readonly identity = crypto.randomUUID()
   private readonly queued: Array<Request> = []
   private readonly sessions: Array<Session> = []
   private rows = new Map<number, ConformanceRow>()
@@ -272,7 +273,7 @@ class ElectricProvider implements ControlledProvider {
         session.latest?.signal?.aborted === true
       ) {
         session = {
-          handle: `shape-${this.sessions.length + 1}`,
+          handle: `shape-${this.identity}-${this.sessions.length + 1}`,
           latest: undefined,
           stopped: false,
         }
@@ -569,7 +570,7 @@ export function electricConformanceDriver({
         electricCollectionOptions<ElectricRow>({
           id: `electric-conformance-${++sequence}`,
           shapeOptions: {
-            url: `http://conformance/shape-${sequence}`,
+            url: `https://conformance/shape-${sequence}`,
             params: { table: `rows` },
             fetchClient: provider.fetchClient,
             parser: { timestamptz: (value: string) => new Date(value) },

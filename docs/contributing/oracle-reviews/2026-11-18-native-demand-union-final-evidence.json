@@ -1,0 +1,1171 @@
+{
+  "head": "92a1493e0f45dbfd1fc3a51460ccb9228d8f787d",
+  "sources": {
+    "packages/powersync-db-collection/src/powersync.ts": "80ce907bea803b76cb5270071aff48636122e58cb6b758ff9744dbf1a927cb55",
+    "packages/powersync-db-collection/tests/demand-union-oracle.ts": "73c14242059600b1032f70a8922e2fcd2f2c197bc5ff155c7ae531a01a4f4ad4",
+    "packages/powersync-db-collection/tests/demand-union-driver.ts": "798703e56a2337de11231161963c11319020addf6d7b55fd19a353a2da814904",
+    "packages/powersync-db-collection/tests/demand-union-oracle-suite.ts": "d70bed253b72c67441d477758121e3d3a87e224481b185f599eef83b662216f6",
+    "packages/powersync-db-collection/tests/demand-union-conformance-oracle.property.test.ts": "b67e32ddb21f69f0c0aed6ef17bf9751d849541f4c0df1b8abaec2768d4a7722",
+    "packages/browser-db-sqlite-persistence/e2e/native-powersync-union-oracle.browser.test.ts": "02b3b7f603fad65fc3eae87cd5eb3cd61d52d5ed91cd06346df92b206759c0e6",
+    "packages/browser-db-sqlite-persistence/e2e/native-powersync-union.opfs.ts": "30df204b5e9e88883920185eaaee658035278db4b74679574c98c96361d2e1f6",
+    "packages/browser-db-sqlite-persistence/e2e/native-powersync-union.opfs.html": "1e6252556970df0afd12dd93536ecfce2a548ac9b7a3e57de7247ad1702c106a",
+    "packages/powersync-db-collection/package.json": "f72a75eaa0cca7f1d8bac6a3d9409d8f77b5b654648aaaf11e6bba1217443919"
+  },
+  "pre_production_gate": {
+    "path": "docs/contributing/oracle-reviews/2026-11-17-native-demand-union-pre-edit-evidence.json",
+    "sha256": "b93aa96990b451249b98f8e4d3f4fab51d4062f8a4b3eab29b57102010439bfe",
+    "approval": "oracle_diff_enforcement approved before source normalization; native source7781cf083, model77f76c8e, driver2a1afd60, suite679f8246"
+  },
+  "publication_amendment_chronology": "Correct normalized source80ce907b first GREEN81 per host, then isolated release-only narrowing RED at every-publication comparison; no further production change.",
+  "logs": {
+    "native-union-node-gate.log": {
+      "path": ".review-2377/native-union-node-gate.log",
+      "sha256": "2bd87b3757221bd029d025eb220ff281520d3ac7f3bdb9c29fbfe4b705ecc408",
+      "summary": "Tests  38 failed | 34 passed (72)",
+      "calibration_clean_baseline_failures": 13,
+      "semantic_failures": 25,
+      "observed_violation_checkpoints": [
+        "acquired all",
+        "changed values 1"
+      ]
+    },
+    "native-union-chromium-gate.log": {
+      "path": ".review-2377/native-union-chromium-gate.log",
+      "sha256": "424c7acd9b4ab3dc0fd1f434f148b2dba3c9f9e861b520f12fb24471ef2bbea2",
+      "summary": "Tests  38 failed | 34 passed (72)",
+      "calibration_clean_baseline_failures": 13,
+      "semantic_failures": 25,
+      "observed_violation_checkpoints": [
+        "acquired all",
+        "changed values 1"
+      ]
+    },
+    "native-union-replay-red.log": {
+      "path": ".review-2377/native-union-replay-red.log",
+      "sha256": "bf2e1def1873a83fa284e11fa4c390848ac31fea3dc5f23e1c165d946e201cc4",
+      "summary": "Tests  1 failed | 71 skipped (72)",
+      "calibration_clean_baseline_failures": 0,
+      "semantic_failures": 1,
+      "observed_violation_checkpoints": [
+        "changed values 1"
+      ]
+    },
+    "native-union-replay-green.log": {
+      "path": ".review-2377/native-union-replay-green.log",
+      "sha256": "b36b25a3227315db5be450bdd6fd60caae9fb2d2573aada9546dc60c2d4c0866",
+      "summary": "Tests  1 passed | 71 skipped (72)"
+    },
+    "native-union-publication-node-green.log": {
+      "path": ".review-2377/native-union-publication-node-green.log",
+      "sha256": "09df8f350477ea6e4cc795bd69c7d5bc1d495eeb10798414441e4336f4eb3a08",
+      "summary": "Tests  81 passed (81)"
+    },
+    "native-union-publication-chromium-green.log": {
+      "path": ".review-2377/native-union-publication-chromium-green.log",
+      "sha256": "eb6720c285d6cc4cb5f09f67f7597700fc623461930ae2a6209e71a5d56b4474",
+      "summary": "Tests  81 passed (81)"
+    },
+    "native-union-original-mutant-node.log": {
+      "path": ".review-2377/native-union-original-mutant-node.log",
+      "sha256": "3dca0cc5a228a0cb89733a1fa09ed96586b3008eebaf6bdd01ab7731ad6aeb3d",
+      "summary": "Tests  38 failed | 34 passed (72)",
+      "calibration_clean_baseline_failures": 13,
+      "semantic_failures": 25,
+      "observed_violation_checkpoints": [
+        "acquired all",
+        "changed values 1"
+      ]
+    },
+    "native-union-original-mutant-chromium.log": {
+      "path": ".review-2377/native-union-original-mutant-chromium.log",
+      "sha256": "6631d0a67eebe982e1bcf457408d49a2702bdf2927ee72b745e1f857024134a7",
+      "summary": "Tests  39 failed | 33 passed (72)",
+      "calibration_clean_baseline_failures": 13,
+      "semantic_failures": 26,
+      "observed_violation_checkpoints": [
+        "acquired all",
+        "changed values 1"
+      ]
+    },
+    "native-union-release-drop-node.log": {
+      "path": ".review-2377/native-union-release-drop-node.log",
+      "sha256": "32cccdb9673f0144c6d3601f0e2c5e3e2e210aaec47497a0cbfe4a29fe02528b",
+      "summary": "Tests  72 passed (72)"
+    },
+    "native-union-release-drop-chromium.log": {
+      "path": ".review-2377/native-union-release-drop-chromium.log",
+      "sha256": "92d0c13bd4306a2a378562ffb00a9974747f9d3c09f478205a63f27f0ca07159",
+      "summary": "Tests  72 passed (72)"
+    },
+    "native-union-publication-release-drop-node.log": {
+      "path": ".review-2377/native-union-publication-release-drop-node.log",
+      "sha256": "fc6a82f6d8a900d7c53193eb7ad613793491f2e6700c43edccd1649f75d9dd9e",
+      "summary": "Tests  24 failed | 57 passed (81)",
+      "calibration_clean_baseline_failures": 7,
+      "semantic_failures": 17,
+      "observed_violation_checkpoints": [
+        "third retirement publication"
+      ]
+    },
+    "native-union-publication-release-drop-chromium.log": {
+      "path": ".review-2377/native-union-publication-release-drop-chromium.log",
+      "sha256": "c6c0bc6c78343b4f007f8cac6151efebe4a0146f34a999d984e05c62a914ae4c",
+      "summary": "Tests  24 failed | 57 passed (81)",
+      "calibration_clean_baseline_failures": 7,
+      "semantic_failures": 17,
+      "observed_violation_checkpoints": [
+        "third retirement publication"
+      ]
+    },
+    "native-union-publication-exact-old-release-node.log": {
+      "path": ".review-2377/native-union-publication-exact-old-release-node.log",
+      "sha256": "fa046f4ac4923c5c9b9aef49f0f72a80f370cf6a43a8beda70f9eafd1f5ffcbb",
+      "summary": "Tests  81 passed (81)"
+    },
+    "native-union-publication-exact-old-release-chromium.log": {
+      "path": ".review-2377/native-union-publication-exact-old-release-chromium.log",
+      "sha256": "e08b1d2804cee73f476dc9cd4952ea804a9fb0aff61ee25b967ab8a8136a466b",
+      "summary": "Tests  81 passed (81)"
+    },
+    "native-union-publication-original-node.log": {
+      "path": ".review-2377/native-union-publication-original-node.log",
+      "sha256": "a3594b47a9cfe7620449c565f65094d0891039f6edd289d9f964c3841b631ebc",
+      "summary": "Tests  1 failed | 1 passed | 79 skipped (81)",
+      "calibration_clean_baseline_failures": 0,
+      "semantic_failures": 1,
+      "observed_violation_checkpoints": [
+        "changed values 1"
+      ]
+    },
+    "native-union-publication-original-chromium.log": {
+      "path": ".review-2377/native-union-publication-original-chromium.log",
+      "sha256": "67a533baeaac19444da7cca334e782c8fba9a4b51c2444c7d492957fba3b4b51",
+      "summary": "Tests  1 failed | 1 passed | 79 skipped (81)",
+      "calibration_clean_baseline_failures": 0,
+      "semantic_failures": 1,
+      "observed_violation_checkpoints": [
+        "changed values 1"
+      ]
+    },
+    "native-union-on-demand-neighbors.log": {
+      "path": ".review-2377/native-union-on-demand-neighbors.log",
+      "sha256": "e3e5d1cbc32b1f7e46be6ea91c09db4e112d68a0b9048f459f22154982799553",
+      "summary": "Tests  74 passed (74)"
+    },
+    "native-union-publication-replay-green.log": {
+      "path": ".review-2377/native-union-publication-replay-green.log",
+      "sha256": "d99381125ea39b7bfc8b771381b6aebbe8f562bd6d9f2de53a5d7ce23088538d",
+      "summary": "Tests  1 passed | 80 skipped (81)"
+    },
+    "native-union-full-native-neighbors.log": {
+      "path": ".review-2377/native-union-full-native-neighbors.log",
+      "sha256": "2d4648167af82e8d8c466143cf2e364a293d5821666a7d8c1828f547327bcd4b",
+      "summary": "Tests  1684 passed (1684)"
+    },
+    "native-union-publication-types.log": {
+      "path": ".review-2377/native-union-publication-types.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": "successful static command: no test summary"
+    },
+    "native-union-publication-lint.log": {
+      "path": ".review-2377/native-union-publication-lint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": "successful static command: no test summary"
+    },
+    "native-union-publication-lint-changed.log": {
+      "path": ".review-2377/native-union-publication-lint-changed.log",
+      "sha256": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168",
+      "summary": "successful static command: no test summary"
+    },
+    "native-union-independent-release-publication-red.log": {
+      "path": ".review-2377/native-union-independent-release-publication-red.log",
+      "sha256": "978025496e8eafa610df939b3fddab10bcf7879deacdaf85d1d8ff99927663d8",
+      "summary": "Tests  1 failed | 1 passed | 79 skipped (81)",
+      "calibration_clean_baseline_failures": 0,
+      "semantic_failures": 1,
+      "observed_violation_checkpoints": [
+        "third retirement publication"
+      ]
+    },
+    "native-union-independent-publication-restore-green.log": {
+      "path": ".review-2377/native-union-independent-publication-restore-green.log",
+      "sha256": "9d46a2bdbf119e55ca4aa967fa7e3134ed0c845f46672f7d3c2a73b87c93a157",
+      "summary": "Tests  3 passed | 78 skipped (81)"
+    }
+  },
+  "reach": {
+    "node": {
+      "fixed seed 2377": {
+        "campaign_unit_count": 19,
+        "states": {
+          "broad-first": 15,
+          "broad-last": 6,
+          "broad-retired-narrow-remains": 21,
+          "changed-values": 26,
+          "limited-broad": 13,
+          "narrow-only-disjoint": 2,
+          "narrow-only-overlap": 3,
+          "third-retired-broad-remains": 21,
+          "third-retirement-observed": 21
+        },
+        "units": {
+          "fixed seed 2377: generated broad-first 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated broad-first 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated broad-last 1": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated broad-last 2": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated narrow-only-disjoint 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "fixed seed 2377: generated narrow-only-disjoint 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "fixed seed 2377: generated narrow-only-overlap 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "fixed seed 2377: generated narrow-only-overlap 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "fixed seed 2377: generated third-retired-broad-remains 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated third-retired-broad-remains 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated broad-retired-narrow-remains 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated broad-retired-narrow-remains 2": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated changed-values 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated changed-values 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "fixed seed 2377: generated limited-broad 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated limited-broad 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated third-retirement-observed 1": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated third-retirement-observed 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated": {
+            "broad-first": 6,
+            "broad-last": 2,
+            "broad-retired-narrow-remains": 8,
+            "changed-values": 8,
+            "limited-broad": 5,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 8,
+            "third-retirement-observed": 8
+          }
+        }
+      },
+      "random seed": {
+        "campaign_unit_count": 19,
+        "states": {
+          "broad-first": 9,
+          "broad-last": 10,
+          "broad-retired-narrow-remains": 19,
+          "changed-values": 26,
+          "limited-broad": 12,
+          "narrow-only-disjoint": 4,
+          "narrow-only-overlap": 3,
+          "third-retired-broad-remains": 19,
+          "third-retirement-observed": 19
+        },
+        "units": {
+          "random seed: generated broad-first 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated broad-first 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated broad-last 1": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated broad-last 2": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated narrow-only-disjoint 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "random seed: generated narrow-only-disjoint 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "random seed: generated narrow-only-overlap 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "random seed: generated narrow-only-overlap 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "random seed: generated third-retired-broad-remains 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated third-retired-broad-remains 2": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated broad-retired-narrow-remains 1": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated broad-retired-narrow-remains 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated changed-values 1": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated changed-values 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "random seed: generated limited-broad 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated limited-broad 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated third-retirement-observed 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated third-retirement-observed 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated": {
+            "broad-first": 1,
+            "broad-last": 5,
+            "broad-retired-narrow-remains": 6,
+            "changed-values": 8,
+            "limited-broad": 4,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 6,
+            "third-retirement-observed": 6
+          }
+        }
+      }
+    },
+    "chromium": {
+      "fixed seed 2377": {
+        "campaign_unit_count": 19,
+        "states": {
+          "broad-first": 15,
+          "broad-last": 6,
+          "broad-retired-narrow-remains": 21,
+          "changed-values": 26,
+          "limited-broad": 13,
+          "narrow-only-disjoint": 2,
+          "narrow-only-overlap": 3,
+          "third-retired-broad-remains": 21,
+          "third-retirement-observed": 21
+        },
+        "units": {
+          "fixed seed 2377: generated broad-first 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated broad-first 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated broad-last 1": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated broad-last 2": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated narrow-only-disjoint 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "fixed seed 2377: generated narrow-only-disjoint 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "fixed seed 2377: generated narrow-only-overlap 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "fixed seed 2377: generated narrow-only-overlap 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "fixed seed 2377: generated third-retired-broad-remains 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated third-retired-broad-remains 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated broad-retired-narrow-remains 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated broad-retired-narrow-remains 2": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated changed-values 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated changed-values 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "fixed seed 2377: generated limited-broad 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated limited-broad 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated third-retirement-observed 1": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated third-retirement-observed 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "fixed seed 2377: generated": {
+            "broad-first": 6,
+            "broad-last": 2,
+            "broad-retired-narrow-remains": 8,
+            "changed-values": 8,
+            "limited-broad": 5,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 8,
+            "third-retirement-observed": 8
+          }
+        }
+      },
+      "random seed": {
+        "campaign_unit_count": 19,
+        "states": {
+          "broad-first": 9,
+          "broad-last": 8,
+          "broad-retired-narrow-remains": 17,
+          "changed-values": 26,
+          "limited-broad": 10,
+          "narrow-only-disjoint": 4,
+          "narrow-only-overlap": 5,
+          "third-retired-broad-remains": 17,
+          "third-retirement-observed": 17
+        },
+        "units": {
+          "random seed: generated broad-first 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated broad-first 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated broad-last 1": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated broad-last 2": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated narrow-only-disjoint 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "random seed: generated narrow-only-disjoint 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "random seed: generated narrow-only-overlap 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "random seed: generated narrow-only-overlap 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "random seed: generated third-retired-broad-remains 1": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated third-retired-broad-remains 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated broad-retired-narrow-remains 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated broad-retired-narrow-remains 2": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated changed-values 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0,
+            "third-retirement-observed": 0
+          },
+          "random seed: generated changed-values 2": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated limited-broad 1": {
+            "broad-first": 0,
+            "broad-last": 1,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated limited-broad 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated third-retirement-observed 1": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated third-retirement-observed 2": {
+            "broad-first": 1,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 1,
+            "changed-values": 1,
+            "limited-broad": 1,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 1,
+            "third-retirement-observed": 1
+          },
+          "random seed: generated": {
+            "broad-first": 2,
+            "broad-last": 2,
+            "broad-retired-narrow-remains": 4,
+            "changed-values": 8,
+            "limited-broad": 2,
+            "narrow-only-disjoint": 2,
+            "narrow-only-overlap": 2,
+            "third-retired-broad-remains": 4,
+            "third-retirement-observed": 4
+          }
+        }
+      }
+    }
+  },
+  "commands": {
+    "node_green": {
+      "cwd": "packages/powersync-db-collection",
+      "command": "/Users/kyle.mathews/.npm/_npx/bac97da9607b7ef2/node_modules/node/bin/node ../../node_modules/vitest/vitest.mjs run --config ../../.review-2377/native-union.config.ts --maxWorkers=1"
+    },
+    "chromium_green": {
+      "cwd": "packages/browser-db-sqlite-persistence",
+      "command": "/Users/kyle.mathews/.npm/_npx/bac97da9607b7ef2/node_modules/node/bin/node ../../node_modules/vitest/vitest.mjs run --config vitest.adapter-oracles.config.ts e2e/native-powersync-union-oracle.browser.test.ts --maxWorkers=1"
+    },
+    "node_mutant": {
+      "cwd": "packages/powersync-db-collection",
+      "command": "NATIVE_UNION_MUTANT=<original-mapper|release-drop-universal|exact-old-release> /Users/kyle.mathews/.npm/_npx/bac97da9607b7ef2/node_modules/node/bin/node ../../node_modules/vitest/vitest.mjs run --config ../../.review-2377/native-union-mutant.config.ts --maxWorkers=1"
+    },
+    "chromium_mutant": {
+      "cwd": ".",
+      "command": "NATIVE_UNION_MUTANT=<original-mapper|release-drop-universal|exact-old-release> /Users/kyle.mathews/.npm/_npx/bac97da9607b7ef2/node_modules/node/bin/node node_modules/vitest/vitest.mjs run --config .review-2377/native-union-mutant-browser.config.ts"
+    },
+    "original_mapper_final_fixed_selector": "-t unrestricted owner keeps updates outside its filtered sibling",
+    "native_package_neighbors": {
+      "cwd": "packages/powersync-db-collection",
+      "command": "/Users/kyle.mathews/.npm/_npx/bac97da9607b7ef2/node_modules/node/bin/node ../../node_modules/vitest/vitest.mjs run --coverage.enabled=false tests/batch-decode-conformance-oracle.property.test.ts tests/demand-union-conformance-oracle.property.test.ts tests/eager-live-source-conformance-oracle.property.test.ts tests/eager-reload-conformance-oracle.property.test.ts tests/hook-lifecycle-conformance-oracle.property.test.ts tests/initial-receipt-conformance-oracle.property.test.ts tests/persisted-baseline-lifecycle-oracle.test.ts tests/persisted-capability-conformance-oracle.test.ts tests/persisted-startup-conformance-oracle.property.test.ts --maxWorkers=1"
+    },
+    "ordinary_on_demand_neighbors": {
+      "cwd": "packages/powersync-db-collection",
+      "command": "/Users/kyle.mathews/.npm/_npx/bac97da9607b7ef2/node_modules/node/bin/node ../../node_modules/vitest/vitest.mjs run --coverage.enabled=false --typecheck.enabled=false tests/on-demand-sync.test.ts --maxWorkers=1"
+    },
+    "checks": [
+      "pnpm exec tsc --noEmit --project packages/powersync-db-collection/tsconfig.json",
+      "pnpm exec eslint packages/powersync-db-collection/src/powersync.ts packages/powersync-db-collection/tests/demand-union-oracle.ts packages/powersync-db-collection/tests/demand-union-driver.ts packages/powersync-db-collection/tests/demand-union-oracle-suite.ts packages/powersync-db-collection/tests/demand-union-conformance-oracle.property.test.ts packages/browser-db-sqlite-persistence/e2e/native-powersync-union-oracle.browser.test.ts packages/browser-db-sqlite-persistence/e2e/native-powersync-union.opfs.ts",
+      "pnpm lint:changed"
+    ]
+  },
+  "independent_shared_receiver": {
+    "path": ".review-2377/native-demand-values-repaired-evidence.json",
+    "sha256": "2a0914510e85d43499105f2be6a657268cf5bed13a27a216035121a1e57eaae0",
+    "summary": "30/30 Node and30/30 Chromium; all13 declared states; enforcement acknowledged source80ce907b/shared97aca6b9/00acd4ca"
+  },
+  "mutants": {
+    "original-mapper": {
+      "source_snapshot": ".review-2377/native-union-original-mapper-source.ts",
+      "sha256": "885df45301194779e044e21d19b16370b33373040a4dd3d471ec45c854cee4e4",
+      "application": "isolated Vite pre-transform; canonical production unchanged",
+      "classification": "semantic original defect rejected at changed values1/acquired all; final fixed replay rejects changed values1 per host"
+    },
+    "release-drop-universal": {
+      "source_snapshot": ".review-2377/native-union-release-drop-universal-source.ts",
+      "sha256": "f42ef064406ba95d1e19820aaf8099120563edd76fd039b80683f65ed69f7711",
+      "application": "isolated Vite pre-transform; canonical production unchanged",
+      "classification": "prior settled-only72 checks survived; expanded81 checks reject transient third retirement publication;17 semantic failures plus7 invalid calibration baselines per host"
+    },
+    "exact-old-release": {
+      "source_snapshot": ".review-2377/native-union-exact-old-release-source.ts",
+      "sha256": "e0da953776f40799df3bc8f3773dbbf3af30b853737be4fcda2abf7932fd7832",
+      "application": "isolated Vite pre-transform; canonical production unchanged",
+      "classification": "81GREEN per host; equivalent in tested domain: with universal remaining support, departing AND NOT(NULL OR P) selects no eviction rows, as departing AND NOT(TRUE) does; no positive tracking equivalence claim"
+    }
+  },
+  "limits": [
+    "fixed rank membership with same-id value changes; no insert/delete/predicate move",
+    "source Collection union, not individual live-query window membership",
+    "intermediate publications only while third owner retires and broad support remains",
+    "no remote transport, persistence readiness, reload, pending hooks, optimistic holds or arbitrary expression trees"
+  ],
+  "mutation_tools": {
+    ".review-2377/native-union-mutants.ts": "4953bb2958f87af38d88a2f9a61f1067dd6643f7cb28a6a7b15d67da6321ac3b",
+    ".review-2377/native-union-mutant.config.ts": "8662acac45011fa67a479be1bd11176416b5ee3fcd734e79fa2a12dfa7e6d9aa",
+    ".review-2377/native-union-mutant-browser.test.ts": "67fa7d46dd6ece63d9869681c751e341ab677c83709c6c6add83a72cb27f3a85",
+    ".review-2377/native-union-mutant-browser.config.ts": "86d26e660c785291f9c310db9fed59b7a30b337e676409351dc4a3788a55bcf6"
+  }
+}

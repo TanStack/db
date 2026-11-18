@@ -42,6 +42,7 @@ export function subscribePages<TQuery extends FunctionReference<`query`>, TRow>(
   let scheduled = false
   let flushing = false
   let result: ReadonlyArray<TRow> | undefined
+  let isCurrentRowInScope = (_row: object): boolean => false
   let error: unknown
   const waiters = new Set<{
     resolve: () => void
@@ -216,6 +217,21 @@ export function subscribePages<TQuery extends FunctionReference<`query`>, TRow>(
       error = undefined
       result = rows
       publishedPages = new Set(pages)
+      if (queryOrder) {
+        const { field, direction } = queryOrder
+        const boundary = rows.at(-1)?.[field]
+        // A finite cursor can end inside its last leading-value tie. Only
+        // earlier values, or exhaustion, disprove an unknown restored row.
+        isCurrentRowInScope = (row) => {
+          const value = (row as Record<string, unknown>)[field]
+          return (
+            exhausted ||
+            (typeof value === `number` &&
+              typeof boundary === `number` &&
+              (direction === `asc` ? value < boundary : value > boundary))
+          )
+        }
+      }
       receive(rows)
       for (const demand of demands.values())
         if (demand.pending) {
@@ -244,6 +260,7 @@ export function subscribePages<TQuery extends FunctionReference<`query`>, TRow>(
   return {
     ...(queryOrder
       ? {
+          isCurrentRowInScope: (row: object) => isCurrentRowInScope(row),
           loadSubset: (request: LoadSubsetOptions): true | Promise<void> => {
             if (!active || request.signal?.aborted)
               return Promise.reject(abortError())

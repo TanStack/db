@@ -38,7 +38,9 @@
     "test:docs": "node scripts/verify-links.ts",
     "test:doc-snippets": "node scripts/check-doc-snippets.mjs",
     "test:sherif": "sherif -i zod -p offline-transactions-react-native -p shopping-list-react-native",
-    "generate-docs": "node scripts/generate-error-docs.mjs && node scripts/generate-docs.ts"
+    "generate-docs": "node scripts/generate-error-docs.mjs && node scripts/generate-docs.ts",
+    "test:collection-adapters:oracles": "node scripts/run-collection-adapter-oracles.mjs",
+    "test:collection-adapters:oracles:browser": "node scripts/run-collection-adapter-oracles.mjs --browser"
   },
   "devDependencies": {
     "@changesets/apply-release-plan": "7.1.1",

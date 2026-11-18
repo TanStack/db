@@ -1,0 +1,1892 @@
+{
+  "baseHead": "92a1493e0f45dbfd1fc3a51460ccb9228d8f787d",
+  "node": "v24.19.0",
+  "productionDiff": "",
+  "sha256": {
+    "packages/browser-db-sqlite-persistence/tests/adapter-chromium-host.ts": "e0e1e06b91f388cff7c87bdc5883ec486c3ec88a6cc551a2e5f15ea27b012f5f",
+    "packages/db-adapter-conformance/src/eager-live-source-oracle.ts": "4cf5d868ee8ec99c678b51b30c456653ebaf58e498f9735ccd2ba79c5390626d",
+    "packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts": "84f11150cc8cf5e4a3ff08267a6701ef570cb5acf52618622605740803bfe71e",
+    "packages/db-adapter-conformance/tests/eager-live-source-property-oracle.ts": "7ee215071e06d4181cb81034c0cbbcdcff30d154715a4308f71c9971f410ea57",
+    "packages/db-adapter-conformance/tests/eager-reload-driver.ts": "3e178cd5823a690646f98301701fb84b4eee8fb6cbd7cde0f8b2a70ba6e96b0e",
+    "packages/db-adapter-conformance/tests/eager-reload-oracle-suite.ts": "fea78064cacbb60db6e8668fb04350cd9723618e64b125f3dd0aff6c1dc4cf6c",
+    "packages/db-adapter-conformance/tests/eager-reload-oracle.ts": "f77417e0111a8db3716208061dce81cdc53dff63096b12bde71ba79bc1fda3cb",
+    "packages/db/tests/mutation-confirmation-oracle.ts": "5923b7dfc9899becf743c7cd652b14d8c135546d969cd03538ffc8011afd9e54",
+    "packages/db/tests/oracle-cleanup.ts": "62e00759270c5376ffadcde8eefb8a68763e5c79ca66729268aad9eea3802e61",
+    "packages/electric-db-collection/package.json": "e5a93aba557d82f82ed614be32e4f02b615e818479226c691a7c70b7f46999d5",
+    "packages/electric-db-collection/src/electric.ts": "e78caac9bf4f12c72f4ce7227c55480b8a11dd25ae4c9f37ae89ee6aefc751b5",
+    "packages/electric-db-collection/src/errors.ts": "e374a2a33291948b5048af82ef0dd20391013bd5d85fcc5febee432678ade01f",
+    "packages/electric-db-collection/src/index.ts": "0c636bcfb5efa458286ef04089dad8585b1f053e3d0926b9e0d35f9fd39dda31",
+    "packages/electric-db-collection/src/pg-serializer.ts": "bf65345890cb7e0d0706c38cb9b0ec9274330d77016dba953e516c15081a6431",
+    "packages/electric-db-collection/src/sql-compiler.ts": "d2c0c77bf75762b79186a2bda1020289e96f216c9300c2c37dabc3dc7bb86199",
+    "packages/electric-db-collection/src/tag-index.ts": "6abee71921a89e653b38e38a03c4ccca073dede217a9b48857f67a649805c761",
+    "packages/electric-db-collection/tests/conformance-driver.ts": "2c51c2402e1a14bc09ef1f0d80ef71c4dc6520e1e60ac954ce65273992e044e1",
+    "packages/electric-db-collection/tests/cross-adapter-gate-driver.ts": "1de447fb54f7bf0ade8bbdd9f869781f030710496b42e8ead9023f3b02aa7436",
+    "packages/electric-db-collection/tests/cross-adapter-gate-oracle.property.test.ts": "7c52233f898aeed65f65feb40698baae4a1ed73999f95da85e25a63bd0d837b2",
+    "packages/electric-db-collection/tests/cross-adapter-http.ts": "f322bcca6b63732412eee48949ad07131f8e8fc0cfd4ceabbdfd10723c8755b6",
+    "packages/electric-db-collection/tests/cross-adapter-mutation-driver.ts": "2c7ae339245878f62b38d8b278379544cdca77b184ffa3bc4cd7677d1f47c313",
+    "packages/electric-db-collection/tests/cross-adapter-mutation-oracle.property.test.ts": "a15533830ac179f54d3105c96fb2fda88195c6b326d44cf3bdc971060965dea3",
+    "packages/electric-db-collection/tests/cross-adapter-mutation-registration-oracle.ts": "d7e296acf2b9996650d4535f3b715338d501903a75c69b2b85c33a738975ace3",
+    "packages/electric-db-collection/tests/cross-adapter-receipt-driver.ts": "3489dde4cbb932eca0ede01e1797e131b916b17c3f83903e4542420dba54d766",
+    "packages/electric-db-collection/tests/cross-adapter-receipt-node-driver.ts": "db13be33d6846fdea22cd9cf75c2ad606a774a5ba0c77b2c98b86f4596abebbc",
+    "packages/electric-db-collection/tests/cross-adapter-receipt-oracle.property.test.ts": "8b4881dcc4643e9895cede820c64a5c20ac9f79d14a637bdbafcaf166b2f9c50",
+    "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts": "b2d7e94b458647362642b7c301f83cd091b7af27ed5f0ce598f95c9fd7fc27c9",
+    "packages/electric-db-collection/tests/cross-adapter-receipt.tsconfig.json": "7ea314b49d46bb43b3747d9498e7db88874e599c95328d7083ca9f1a21bfb88d",
+    "packages/electric-db-collection/tests/cross-adapter-receiving-oracle.browser.test.ts": "d83c336f3f859d8d9c18afb86f9629a7c619d51bf1a6950d8bb95426604a7d5d",
+    "packages/electric-db-collection/tests/cross-adapter-receiving.html": "f0adb83c4007a40d078a5b262bf8f34e50259085bf25cb9860fde3a793498941",
+    "packages/electric-db-collection/tests/cross-adapter-receiving.ts": "13c1d6437c0bab760e0a10e5c8f10ee9c15162f655cf2239664953846422cfbd",
+    "packages/electric-db-collection/tests/cross-adapter-reload-driver.ts": "c6509dfb27eba0416380aa66577470b0994d8b0b67e9cfec18875e170ae1dc90",
+    "packages/electric-db-collection/tests/cross-adapter-reload-oracle.property.test.ts": "170ecaa8c6118dc13e56a3e96ce0f7a09b764ec89e7e19e2d8b478a215d1576a",
+    "packages/electric-db-collection/tests/cross-adapter-rows.ts": "7a755248a260f144bb9f4779b1f84f2be518ed6c083d1b80b584df6a5857212e",
+    "packages/electric-db-collection/tests/cross-adapter.tsconfig.json": "f8a3e4d8bc4ddfa07566d274f465810df3ee32928f7cda3a7faf077b982afe84",
+    "packages/electric-db-collection/tests/electric-oracle-lifecycle.ts": "e51f51647ac93fc617f9bf42810e09bbbe02d9278c4fc3dfa64c76fa471a322b",
+    "packages/electric-db-collection/tests/electric-oracle-values.ts": "978a4801b0f33f959b95a10cf84a150215698fa96693813c7c21da543a991e7b",
+    "packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts": "897d6a3e105e3e0821575c322f9e07ca5b06372a58562ff0cda7b0955987067a",
+    "packages/electric-db-collection/tests/electric-sdk-delivery-support.ts": "ddd3c7aa7c55ab744b547d4dfa9494a77939ef6ed8a391d8f5b3dbb7c9cf13c1",
+    "packages/electric-db-collection/tests/sdk-decoder-driver.ts": "bbfc0cb9598c8bec028cadb644a68007474260bce884e1f2ebaadc5f318e0549",
+    "packages/electric-db-collection/tests/sdk-decoder-oracle-suite.ts": "b947fe487c87e43bb07c9e149ab2703faf0c45798f982f5629ebd7ebdd20da59",
+    "packages/electric-db-collection/tests/sdk-decoder-oracle.ts": "5a76da814da874fba73c061b4edf5f909ef6689642a41700e399d6e48caa99e7",
+    "packages/electric-db-collection/tests/sdk-http.ts": "78cd4d01a6159d5d96638bbfd3752661279465b5bc92ef5ca868557c1872a4dc",
+    "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts": "af2ca140c7ad4b485542b018be14618ca0a1eb566b50c2def1ea8dd30ac5473e",
+    "packages/electric-db-collection/tests/sdk-snapshot-receiving-oracle-suite.ts": "385ecfee053ff0b0c54bccc9f6d87a52ffd468aa2f74ac50d7871618a84161ad",
+    "packages/electric-db-collection/tsconfig.json": "6508b787300f729f6016ac03119893da8028803a59c2a28cb212edb6cdc0b213",
+    "packages/electric-db-collection/vite.config.ts": "a01a0df0ca4bea2574083b212c3c32e4f45d62c1c0c03c1efaffac1cea51ea5c",
+    "packages/electric-db-collection/vitest.cross-adapter.config.ts": "6571e9ba90f0f1ddae2b1982f037b0a061841a4b3b8aecb5df8280c85d7dc53e",
+    "packages/powersync-direct-collection/tests/initial-receipt-oracle-suite.ts": "5dad5ea2a99124612e3399c5b0e71ecb350c151ef275b7ae521238a85876489e",
+    "packages/powersync-direct-collection/tests/initial-receipt-oracle.ts": "c75895abae5fe1e8485b8bcae83e25681cfddcce8f8883ba3b1b281cec79b4c1"
+  },
+  "amendments": [
+    {
+      "reason": "Required provider consumption barrier before any readiness/commit wait; actual empty-result missing commit+ready calibration",
+      "sha256Changes": {
+        "packages/db-adapter-conformance/tests/eager-reload-driver.ts": [
+          "c7ecabfb9981254872362ec73af663c828fa2827c603ae1712318855c1c29327",
+          "3e178cd5823a690646f98301701fb84b4eee8fb6cbd7cde0f8b2a70ba6e96b0e"
+        ],
+        "packages/electric-db-collection/tests/cross-adapter-reload-driver.ts": [
+          "eb750b522d9a0d7a5438f110f846d572379672df00cc89e43b83472293ca70ad",
+          "c6509dfb27eba0416380aa66577470b0994d8b0b67e9cfec18875e170ae1dc90"
+        ]
+      }
+    }
+  ],
+  "runs": [
+    {
+      "name": "eager-startup-final",
+      "command": "pnpm exec vitest run tests/eager-live-source-conformance-oracle.property.test.ts tests/persisted-startup-conformance-oracle.property.test.ts --maxWorkers=1 --coverage.enabled=false --typecheck.enabled=false",
+      "cwd": "packages/electric-db-collection",
+      "exit": 0,
+      "testResult": "533 passed (533)",
+      "log": ".review-2377/cross-electric-eager-final.log",
+      "logSha256": "bc673816e58d21e3d38565474b0889bfb4d556cc8435ad64e2a8729a35fee5ad",
+      "generatedReach": {
+        "adapter-conformance.eager-live-source.electric fixed seed 2118: generated": {
+          "change-batch": 215,
+          "failure-after-ready": 67,
+          "failure-before-ready": 67,
+          "field-removed": 29,
+          "field:array:change": 183,
+          "field:array:load": 305,
+          "field:bigint:change": 183,
+          "field:bigint:load": 305,
+          "field:boolean:change": 183,
+          "field:boolean:load": 305,
+          "field:date:change": 183,
+          "field:date:load": 305,
+          "field:float:change": 183,
+          "field:float:load": 305,
+          "field:integer:change": 183,
+          "field:integer:load": 305,
+          "field:negative-zero:change": 183,
+          "field:negative-zero:load": 305,
+          "field:object:change": 183,
+          "field:object:load": 305,
+          "field:string:change": 183,
+          "field:string:load": 305,
+          "first-ready": 327,
+          "multi-change-batch": 98,
+          "outage-count-reset": 45,
+          "outage-reported-after-batch": 35,
+          "outage-reported-again": 35,
+          "outage-reported-in-later-run": 19,
+          "replacing-snapshot": 129,
+          "restart": 162,
+          "restart-after-failure": 33,
+          "transient-failure-below-threshold": 183,
+          "transient-failure-recovered": 95,
+          "transient-failure-repeated": 51,
+          "transient-failure-reported": 121,
+          "transient:http-400-retried": 76,
+          "transient:http-429": 85,
+          "transient:http-503": 111,
+          "transient:network": 77,
+          "wait-before-evidence-fulfilled": 53,
+          "wait-on-retired-evidence": 77,
+          "wait-rejected-at-retirement": 127,
+          "wait-timed-out": 102
+        },
+        "adapter-conformance.eager-live-source.electric random seed: generated": {
+          "change-batch": 195,
+          "failure-after-ready": 70,
+          "failure-before-ready": 76,
+          "field-removed": 26,
+          "field:array:change": 157,
+          "field:array:load": 298,
+          "field:bigint:change": 157,
+          "field:bigint:load": 298,
+          "field:boolean:change": 157,
+          "field:boolean:load": 298,
+          "field:date:change": 157,
+          "field:date:load": 298,
+          "field:float:change": 157,
+          "field:float:load": 298,
+          "field:integer:change": 157,
+          "field:integer:load": 298,
+          "field:negative-zero:change": 157,
+          "field:negative-zero:load": 298,
+          "field:object:change": 157,
+          "field:object:load": 298,
+          "field:string:change": 157,
+          "field:string:load": 298,
+          "first-ready": 315,
+          "multi-change-batch": 89,
+          "outage-count-reset": 42,
+          "outage-reported-after-batch": 34,
+          "outage-reported-again": 25,
+          "outage-reported-in-later-run": 24,
+          "replacing-snapshot": 127,
+          "restart": 157,
+          "restart-after-failure": 29,
+          "transient-failure-below-threshold": 174,
+          "transient-failure-recovered": 80,
+          "transient-failure-repeated": 60,
+          "transient-failure-reported": 118,
+          "transient:http-400-retried": 80,
+          "transient:http-429": 84,
+          "transient:http-503": 117,
+          "transient:network": 78,
+          "wait-before-evidence-fulfilled": 33,
+          "wait-on-retired-evidence": 68,
+          "wait-rejected-at-retirement": 112,
+          "wait-timed-out": 112
+        },
+        "adapter-conformance.eager-live-source.electric.no-on-error fixed seed 2118: generated": {
+          "change-batch": 207,
+          "failure-after-ready": 71,
+          "failure-before-ready": 61,
+          "field-removed": 34,
+          "field:array:change": 172,
+          "field:array:load": 309,
+          "field:bigint:change": 172,
+          "field:bigint:load": 309,
+          "field:boolean:change": 172,
+          "field:boolean:load": 309,
+          "field:date:change": 172,
+          "field:date:load": 309,
+          "field:float:change": 172,
+          "field:float:load": 309,
+          "field:integer:change": 172,
+          "field:integer:load": 309,
+          "field:negative-zero:change": 172,
+          "field:negative-zero:load": 309,
+          "field:object:change": 172,
+          "field:object:load": 309,
+          "field:string:change": 172,
+          "field:string:load": 309,
+          "first-ready": 320,
+          "multi-change-batch": 89,
+          "outage-count-reset": 45,
+          "outage-reported-after-batch": 44,
+          "outage-reported-again": 42,
+          "outage-reported-in-later-run": 33,
+          "replacing-snapshot": 139,
+          "restart": 157,
+          "restart-after-failure": 31,
+          "transient-failure-below-threshold": 187,
+          "transient-failure-recovered": 97,
+          "transient-failure-repeated": 63,
+          "transient-failure-reported": 127,
+          "transient:http-429": 103,
+          "transient:http-503": 134,
+          "transient:network": 96,
+          "wait-before-evidence-fulfilled": 46,
+          "wait-on-retired-evidence": 65,
+          "wait-rejected-at-retirement": 127,
+          "wait-timed-out": 94
+        },
+        "adapter-conformance.eager-live-source.electric.no-on-error random seed: generated": {
+          "change-batch": 210,
+          "failure-after-ready": 71,
+          "failure-before-ready": 75,
+          "field-removed": 41,
+          "field:array:change": 187,
+          "field:array:load": 303,
+          "field:bigint:change": 187,
+          "field:bigint:load": 303,
+          "field:boolean:change": 187,
+          "field:boolean:load": 303,
+          "field:date:change": 187,
+          "field:date:load": 303,
+          "field:float:change": 187,
+          "field:float:load": 303,
+          "field:integer:change": 187,
+          "field:integer:load": 303,
+          "field:negative-zero:change": 187,
+          "field:negative-zero:load": 303,
+          "field:object:change": 187,
+          "field:object:load": 303,
+          "field:string:change": 187,
+          "field:string:load": 303,
+          "first-ready": 320,
+          "multi-change-batch": 105,
+          "outage-count-reset": 48,
+          "outage-reported-after-batch": 48,
+          "outage-reported-again": 45,
+          "outage-reported-in-later-run": 31,
+          "replacing-snapshot": 125,
+          "restart": 157,
+          "restart-after-failure": 46,
+          "transient-failure-below-threshold": 189,
+          "transient-failure-recovered": 84,
+          "transient-failure-repeated": 76,
+          "transient-failure-reported": 120,
+          "transient:http-429": 116,
+          "transient:http-503": 140,
+          "transient:network": 115,
+          "wait-before-evidence-fulfilled": 44,
+          "wait-on-retired-evidence": 73,
+          "wait-rejected-at-retirement": 105,
+          "wait-timed-out": 91
+        },
+        "adapter.electric.persisted-startup fixed seed 2367: generated": {
+          "empty-baseline": 6,
+          "empty-result": 39,
+          "network-first-fallback": 23,
+          "network-first-source-result": 52,
+          "omitted-row": 63,
+          "overlapping-update": 27,
+          "persisting-mutation": 69,
+          "response-before-restore": 42,
+          "restore-before-response": 38
+        },
+        "adapter.electric.persisted-startup random seed: generated": {
+          "empty-baseline": 8,
+          "empty-result": 33,
+          "network-first-fallback": 23,
+          "network-first-source-result": 52,
+          "omitted-row": 60,
+          "overlapping-update": 38,
+          "persisting-mutation": 68,
+          "response-before-restore": 40,
+          "restore-before-response": 40
+        }
+      }
+    },
+    {
+      "name": "sdk-and-cross-adapter",
+      "command": "pnpm exec vitest run tests/electric-sdk-delivery-oracle.property.test.ts tests/cross-adapter-*.property.test.ts --maxWorkers=1 --coverage.enabled=false --typecheck.enabled=false",
+      "cwd": "packages/electric-db-collection",
+      "exit": 0,
+      "testResult": "626 passed (626)",
+      "log": ".review-2377/cross-electric-node-final.log",
+      "logSha256": "8371ac10b1dd9cab492dac999eaba882242cd565b5f215f21304f849af1c5050",
+      "generatedReach": {
+        "electric.sdk-decoder-delivery fixed seed 2377: generated": {
+          "eager:initial:throw": 8,
+          "eager:initial:valid": 6,
+          "eager:live:throw": 1,
+          "eager:live:valid": 4,
+          "on-demand:initial:throw": 4,
+          "on-demand:initial:valid": 2,
+          "on-demand:live:throw": 1,
+          "on-demand:live:valid": 4,
+          "prefix-before-refusal": 8,
+          "valid-transformed-key": 16
+        },
+        "electric.sdk-decoder-delivery random seed: generated": {
+          "eager:initial:throw": 6,
+          "eager:initial:valid": 4,
+          "eager:live:throw": 3,
+          "eager:live:valid": 3,
+          "on-demand:initial:throw": 3,
+          "on-demand:initial:valid": 4,
+          "on-demand:live:throw": 4,
+          "on-demand:live:valid": 3,
+          "prefix-before-refusal": 11,
+          "valid-transformed-key": 14
+        },
+        "electric.sdk-snapshot-delivery fixed seed 20260917: generated": {
+          "live-outage": 23,
+          "live-outage-crossed-by-throw": 22,
+          "live-outage-led-by-throw": 23,
+          "live-outage-with-synchronous-throws": 23,
+          "live-pauses-past-threshold": 30,
+          "retired-evidence-after-restart": 40,
+          "subset-attempts-past-threshold": 33
+        },
+        "electric.sdk-snapshot-delivery random seed: generated": {
+          "live-outage": 25,
+          "live-outage-crossed-by-throw": 21,
+          "live-outage-led-by-throw": 24,
+          "live-outage-with-synchronous-throws": 25,
+          "live-pauses-past-threshold": 29,
+          "retired-evidence-after-restart": 40,
+          "subset-attempts-past-threshold": 30
+        },
+        "electric.sdk-dnf-membership fixed seed 20260918: generated": {},
+        "electric.sdk-dnf-membership random seed: generated": {},
+        "electric.sdk-rotation-release fixed seed 20261026: generated": {},
+        "electric.sdk-rotation-release random seed: generated": {},
+        "electric.sdk-source-release fixed seed 20261024: generated": {},
+        "electric.sdk-source-release random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.false.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.false.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.false.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.false.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.false.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.false.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.true.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.true.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.true.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.true.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.true.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.true.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.false.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.false.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.false.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.false.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.false.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.false.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.true.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.true.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.true.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.true.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.true.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.true.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.cursor.false.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.cursor.false.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.cursor.true.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.cursor.true.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.false.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.false.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.false.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.false.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.false.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.false.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.true.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.true.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.true.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.true.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.true.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.true.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.false.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.false.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.false.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.false.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.false.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.false.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.true.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.true.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.true.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.true.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.true.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.true.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.cursor.false.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.cursor.false.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.cursor.true.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.cursor.true.hold random seed: generated": {},
+        "adapter.electric.initial-receipt.controlled fixed seed 2377: generated": {
+          "after-application": 6,
+          "empty-source": 4,
+          "held-receipt": 6,
+          "nonempty-source": 8
+        },
+        "adapter.electric.initial-receipt.controlled random seed: generated": {
+          "after-application": 9,
+          "empty-source": 2,
+          "held-receipt": 3,
+          "nonempty-source": 10
+        },
+        "adapter.electric.initial-receipt.node-sqlite fixed seed 2377: generated": {
+          "after-application": 6,
+          "empty-source": 4,
+          "held-receipt": 6,
+          "nonempty-source": 8
+        },
+        "adapter.electric.initial-receipt.node-sqlite random seed: generated": {
+          "after-application": 6,
+          "empty-source": 2,
+          "held-receipt": 6,
+          "nonempty-source": 10
+        },
+        "adapter.electric.initial-receipt.applied.controlled fixed seed 2377: generated": {
+          "after-application": 6,
+          "empty-source": 4,
+          "held-receipt": 6,
+          "nonempty-source": 8
+        },
+        "adapter.electric.initial-receipt.applied.controlled random seed: generated": {
+          "after-application": 7,
+          "empty-source": 1,
+          "held-receipt": 5,
+          "nonempty-source": 11
+        },
+        "adapter.electric.initial-receipt.applied.node-sqlite fixed seed 2377: generated": {
+          "after-application": 6,
+          "empty-source": 4,
+          "held-receipt": 6,
+          "nonempty-source": 8
+        },
+        "adapter.electric.initial-receipt.applied.node-sqlite random seed: generated": {
+          "after-application": 7,
+          "empty-source": 3,
+          "held-receipt": 5,
+          "nonempty-source": 9
+        },
+        "adapter.electric.eager-reload fixed seed 2367: generated": {
+          "changed-overlap": 17,
+          "empty-result": 14,
+          "fresh": 21,
+          "fresh-held": 14,
+          "no-mutation": 34,
+          "omitted-row": 22,
+          "persisting-mutation": 46,
+          "reload-empty": 28,
+          "reload-empty-held": 13,
+          "reload-retained": 31,
+          "reload-retained-held": 19
+        },
+        "adapter.electric.eager-reload random seed: generated": {
+          "changed-overlap": 22,
+          "empty-result": 15,
+          "fresh": 21,
+          "fresh-held": 10,
+          "no-mutation": 36,
+          "omitted-row": 28,
+          "persisting-mutation": 44,
+          "reload-empty": 19,
+          "reload-empty-held": 10,
+          "reload-retained": 40,
+          "reload-retained-held": 24
+        },
+        "adapter.electric.eager-gate-failure fixed seed 2377: generated": {
+          "return:fresh": 13,
+          "return:fresh:recovery": 4,
+          "return:reload": 9,
+          "return:reload:recovery": 5,
+          "throw:fresh": 5,
+          "throw:fresh:recovery": 1,
+          "throw:reload": 3,
+          "throw:reload:recovery": 1
+        },
+        "adapter.electric.eager-gate-failure random seed: generated": {
+          "return:fresh": 6,
+          "return:fresh:recovery": 2,
+          "return:reload": 2,
+          "return:reload:recovery": 1,
+          "throw:fresh": 11,
+          "throw:fresh:recovery": 5,
+          "throw:reload": 11,
+          "throw:reload:recovery": 8
+        }
+      }
+    },
+    {
+      "name": "sdk-after-snapshot-amendment",
+      "command": "pnpm exec vitest run tests/electric-sdk-delivery-oracle.property.test.ts --maxWorkers=1 --coverage.enabled=false --typecheck.enabled=false",
+      "cwd": "packages/electric-db-collection",
+      "exit": 0,
+      "testResult": "312 passed (312)",
+      "log": ".review-2377/cross-electric-sdk-amendment-final.log",
+      "logSha256": "c6dcf747b728b69be1cb8086036b7da0d68cae52b1b6210b3101b981694b5ecd",
+      "generatedReach": {
+        "electric.sdk-decoder-delivery fixed seed 2377: generated": {
+          "eager:initial:throw": 8,
+          "eager:initial:valid": 6,
+          "eager:live:throw": 1,
+          "eager:live:valid": 4,
+          "on-demand:initial:throw": 4,
+          "on-demand:initial:valid": 2,
+          "on-demand:live:throw": 1,
+          "on-demand:live:valid": 4,
+          "prefix-before-refusal": 8,
+          "valid-transformed-key": 16
+        },
+        "electric.sdk-decoder-delivery random seed: generated": {
+          "eager:initial:throw": 6,
+          "eager:initial:valid": 5,
+          "eager:live:throw": 2,
+          "eager:live:valid": 4,
+          "on-demand:initial:throw": 3,
+          "on-demand:initial:valid": 2,
+          "on-demand:live:throw": 5,
+          "on-demand:live:valid": 3,
+          "prefix-before-refusal": 8,
+          "valid-transformed-key": 14
+        },
+        "electric.sdk-snapshot-delivery fixed seed 20260917: generated": {
+          "live-outage": 23,
+          "live-outage-crossed-by-throw": 22,
+          "live-outage-led-by-throw": 23,
+          "live-outage-with-synchronous-throws": 23,
+          "live-pauses-past-threshold": 30,
+          "retired-evidence-after-restart": 40,
+          "subset-attempts-past-threshold": 33
+        },
+        "electric.sdk-snapshot-delivery random seed: generated": {
+          "live-outage": 22,
+          "live-outage-crossed-by-throw": 21,
+          "live-outage-led-by-throw": 20,
+          "live-outage-with-synchronous-throws": 22,
+          "live-pauses-past-threshold": 27,
+          "retired-evidence-after-restart": 40,
+          "subset-attempts-past-threshold": 27
+        },
+        "electric.sdk-dnf-membership fixed seed 20260918: generated": {},
+        "electric.sdk-dnf-membership random seed: generated": {},
+        "electric.sdk-rotation-release fixed seed 20261026: generated": {},
+        "electric.sdk-rotation-release random seed: generated": {},
+        "electric.sdk-source-release fixed seed 20261024: generated": {},
+        "electric.sdk-source-release random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.false.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.false.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.false.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.false.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.false.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.false.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.true.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.true.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.true.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.true.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.true.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.direct.true.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.false.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.false.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.false.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.false.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.false.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.false.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.true.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.true.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.true.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.true.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.true.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.live-query.true.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.cursor.false.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.cursor.false.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.false.cursor.true.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.false.cursor.true.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.false.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.false.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.false.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.false.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.false.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.false.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.true.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.true.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.true.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.true.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.true.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.direct.true.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.false.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.false.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.false.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.false.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.false.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.false.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.true.apply fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.true.apply random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.true.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.true.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.true.reject fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.live-query.true.reject random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.cursor.false.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.cursor.false.hold random seed: generated": {},
+        "electric.sdk-resume-checkpoint.true.cursor.true.hold fixed seed 20261109: generated": {},
+        "electric.sdk-resume-checkpoint.true.cursor.true.hold random seed: generated": {}
+      }
+    },
+    {
+      "name": "decoder-final",
+      "command": "pnpm exec vitest run tests/electric-sdk-delivery-oracle.property.test.ts -t electric.sdk-decoder-delivery --maxWorkers=1 --coverage.enabled=false --typecheck.enabled=false",
+      "cwd": "packages/electric-db-collection",
+      "exit": 0,
+      "testResult": "55 passed | 259 skipped (314)",
+      "log": ".review-2377/cross-electric-decoder-result-final.log",
+      "logSha256": "0f4dd3b00c3fbac55ed9d9422056f6cd951f79cf04736f1883fef7d79f4eb7fa",
+      "generatedReach": {
+        "electric.sdk-decoder-delivery fixed seed 2377: generated": {
+          "eager:initial:throw": 8,
+          "eager:initial:valid": 6,
+          "eager:live:throw": 1,
+          "eager:live:valid": 4,
+          "on-demand:initial:throw": 4,
+          "on-demand:initial:valid": 2,
+          "on-demand:live:throw": 1,
+          "on-demand:live:valid": 4,
+          "prefix-before-refusal": 8,
+          "valid-transformed-key": 16
+        },
+        "electric.sdk-decoder-delivery random seed: generated": {
+          "eager:initial:throw": 3,
+          "eager:initial:valid": 2,
+          "eager:live:throw": 2,
+          "eager:live:valid": 6,
+          "on-demand:initial:throw": 3,
+          "on-demand:initial:valid": 4,
+          "on-demand:live:throw": 4,
+          "on-demand:live:valid": 6,
+          "prefix-before-refusal": 3,
+          "valid-transformed-key": 18
+        }
+      }
+    },
+    {
+      "name": "chromium-complete-before-amendments",
+      "command": "pnpm exec vitest run --config vitest.cross-adapter.config.ts --maxWorkers=1 --coverage.enabled=false --typecheck.enabled=false",
+      "cwd": "packages/electric-db-collection",
+      "exit": 1,
+      "testResult": "1 failed | 653 passed (654)",
+      "log": ".review-2377/cross-electric-browser-final.log",
+      "logSha256": "4d0178958b1bb9fa637a8da9cb80e4b362a14a98fe7282566a47f97d0cde241d",
+      "generatedReach": {
+        "electric.sdk-snapshot-delivery.chromium fixed seed 20260917: generated": {
+          "live-outage": 23,
+          "live-outage-crossed-by-throw": 22,
+          "live-outage-led-by-throw": 23,
+          "live-outage-with-synchronous-throws": 23,
+          "live-pauses-past-threshold": 30,
+          "retired-evidence-after-restart": 40,
+          "subset-attempts-past-threshold": 33
+        },
+        "electric.sdk-snapshot-delivery.chromium random seed: generated": {
+          "live-outage": 25,
+          "live-outage-crossed-by-throw": 22,
+          "live-outage-led-by-throw": 22,
+          "live-outage-with-synchronous-throws": 25,
+          "live-pauses-past-threshold": 32,
+          "retired-evidence-after-restart": 40,
+          "subset-attempts-past-threshold": 32
+        },
+        "adapter-conformance.eager-live-source.electric.chromium random seed: generated": {
+          "change-batch": 222,
+          "failure-after-ready": 69,
+          "failure-before-ready": 75,
+          "field-removed": 34,
+          "field:array:change": 185,
+          "field:array:load": 321,
+          "field:bigint:change": 185,
+          "field:bigint:load": 321,
+          "field:boolean:change": 185,
+          "field:boolean:load": 321,
+          "field:date:change": 185,
+          "field:date:load": 321,
+          "field:float:change": 185,
+          "field:float:load": 321,
+          "field:integer:change": 185,
+          "field:integer:load": 321,
+          "field:negative-zero:change": 185,
+          "field:negative-zero:load": 321,
+          "field:object:change": 185,
+          "field:object:load": 321,
+          "field:string:change": 185,
+          "field:string:load": 321,
+          "first-ready": 335,
+          "multi-change-batch": 99,
+          "outage-count-reset": 44,
+          "outage-reported-after-batch": 37,
+          "outage-reported-again": 29,
+          "outage-reported-in-later-run": 21,
+          "replacing-snapshot": 146,
+          "restart": 172,
+          "restart-after-failure": 50,
+          "transient-failure-below-threshold": 196,
+          "transient-failure-recovered": 93,
+          "transient-failure-repeated": 65,
+          "transient-failure-reported": 130,
+          "transient:http-400-retried": 92,
+          "transient:http-429": 105,
+          "transient:http-503": 134,
+          "transient:network": 98,
+          "wait-before-evidence-fulfilled": 45,
+          "wait-on-retired-evidence": 73,
+          "wait-rejected-at-retirement": 134,
+          "wait-timed-out": 103
+        },
+        "adapter-conformance.eager-live-source.electric.no-on-error.chromium fixed seed 2118: generated": {
+          "change-batch": 207,
+          "failure-after-ready": 71,
+          "failure-before-ready": 61,
+          "field-removed": 34,
+          "field:array:change": 172,
+          "field:array:load": 309,
+          "field:bigint:change": 172,
+          "field:bigint:load": 309,
+          "field:boolean:change": 172,
+          "field:boolean:load": 309,
+          "field:date:change": 172,
+          "field:date:load": 309,
+          "field:float:change": 172,
+          "field:float:load": 309,
+          "field:integer:change": 172,
+          "field:integer:load": 309,
+          "field:negative-zero:change": 172,
+          "field:negative-zero:load": 309,
+          "field:object:change": 172,
+          "field:object:load": 309,
+          "field:string:change": 172,
+          "field:string:load": 309,
+          "first-ready": 320,
+          "multi-change-batch": 89,
+          "outage-count-reset": 45,
+          "outage-reported-after-batch": 44,
+          "outage-reported-again": 42,
+          "outage-reported-in-later-run": 33,
+          "replacing-snapshot": 139,
+          "restart": 157,
+          "restart-after-failure": 31,
+          "transient-failure-below-threshold": 187,
+          "transient-failure-recovered": 97,
+          "transient-failure-repeated": 63,
+          "transient-failure-reported": 127,
+          "transient:http-429": 103,
+          "transient:http-503": 134,
+          "transient:network": 96,
+          "wait-before-evidence-fulfilled": 46,
+          "wait-on-retired-evidence": 65,
+          "wait-rejected-at-retirement": 127,
+          "wait-timed-out": 94
+        },
+        "adapter-conformance.eager-live-source.electric.no-on-error.chromium random seed: generated": {
+          "change-batch": 205,
+          "failure-after-ready": 77,
+          "failure-before-ready": 88,
+          "field-removed": 30,
+          "field:array:change": 174,
+          "field:array:load": 302,
+          "field:bigint:change": 174,
+          "field:bigint:load": 302,
+          "field:boolean:change": 174,
+          "field:boolean:load": 302,
+          "field:date:change": 174,
+          "field:date:load": 302,
+          "field:float:change": 174,
+          "field:float:load": 302,
+          "field:integer:change": 174,
+          "field:integer:load": 302,
+          "field:negative-zero:change": 174,
+          "field:negative-zero:load": 302,
+          "field:object:change": 174,
+          "field:object:load": 302,
+          "field:string:change": 174,
+          "field:string:load": 302,
+          "first-ready": 317,
+          "multi-change-batch": 94,
+          "outage-count-reset": 40,
+          "outage-reported-after-batch": 30,
+          "outage-reported-again": 27,
+          "outage-reported-in-later-run": 22,
+          "replacing-snapshot": 123,
+          "restart": 175,
+          "restart-after-failure": 52,
+          "transient-failure-below-threshold": 172,
+          "transient-failure-recovered": 68,
+          "transient-failure-repeated": 56,
+          "transient-failure-reported": 104,
+          "transient:http-429": 96,
+          "transient:http-503": 124,
+          "transient:network": 96,
+          "wait-before-evidence-fulfilled": 44,
+          "wait-on-retired-evidence": 67,
+          "wait-rejected-at-retirement": 114,
+          "wait-timed-out": 106
+        },
+        "electric.sdk-decoder-delivery.chromium fixed seed 2377: generated": {
+          "eager:initial:throw": 8,
+          "eager:initial:valid": 6,
+          "eager:live:throw": 1,
+          "eager:live:valid": 4,
+          "on-demand:initial:throw": 4,
+          "on-demand:initial:valid": 2,
+          "on-demand:live:throw": 1,
+          "on-demand:live:valid": 4,
+          "prefix-before-refusal": 8,
+          "valid-transformed-key": 16
+        },
+        "electric.sdk-decoder-delivery.chromium random seed: generated": {
+          "eager:initial:throw": 2,
+          "eager:initial:valid": 2,
+          "eager:live:throw": 5,
+          "eager:live:valid": 2,
+          "on-demand:initial:throw": 6,
+          "on-demand:initial:valid": 6,
+          "on-demand:live:throw": 2,
+          "on-demand:live:valid": 5,
+          "prefix-before-refusal": 6,
+          "valid-transformed-key": 15
+        },
+        "adapter.electric.eager-reload.chromium fixed seed 2367: generated": {
+          "changed-overlap": 17,
+          "empty-result": 14,
+          "fresh": 21,
+          "fresh-held": 14,
+          "no-mutation": 34,
+          "omitted-row": 22,
+          "persisting-mutation": 46,
+          "reload-empty": 28,
+          "reload-empty-held": 13,
+          "reload-retained": 31,
+          "reload-retained-held": 19
+        },
+        "adapter.electric.eager-reload.chromium random seed: generated": {
+          "changed-overlap": 23,
+          "empty-result": 15,
+          "fresh": 19,
+          "fresh-held": 10,
+          "no-mutation": 39,
+          "omitted-row": 20,
+          "persisting-mutation": 41,
+          "reload-empty": 28,
+          "reload-empty-held": 14,
+          "reload-retained": 33,
+          "reload-retained-held": 17
+        },
+        "adapter.electric.initial-receipt.chromium fixed seed 2377: generated": {
+          "after-application": 6,
+          "empty-source": 4,
+          "held-receipt": 6,
+          "nonempty-source": 8
+        },
+        "adapter.electric.initial-receipt.chromium random seed: generated": {
+          "after-application": 6,
+          "empty-source": 3,
+          "held-receipt": 6,
+          "nonempty-source": 9
+        },
+        "adapter.electric.initial-receipt.applied.chromium fixed seed 2377: generated": {
+          "after-application": 6,
+          "empty-source": 4,
+          "held-receipt": 6,
+          "nonempty-source": 8
+        },
+        "adapter.electric.initial-receipt.applied.chromium random seed: generated": {
+          "after-application": 7,
+          "empty-source": 4,
+          "held-receipt": 5,
+          "nonempty-source": 8
+        },
+        "adapter.electric.eager-gate-failure.chromium fixed seed 2377: generated": {
+          "return:fresh": 13,
+          "return:fresh:recovery": 4,
+          "return:reload": 9,
+          "return:reload:recovery": 5,
+          "throw:fresh": 5,
+          "throw:fresh:recovery": 1,
+          "throw:reload": 3,
+          "throw:reload:recovery": 1
+        },
+        "adapter.electric.eager-gate-failure.chromium random seed: generated": {
+          "return:fresh": 9,
+          "return:fresh:recovery": 3,
+          "return:reload": 8,
+          "return:reload:recovery": 5,
+          "throw:fresh": 9,
+          "throw:fresh:recovery": 4,
+          "throw:reload": 4,
+          "throw:reload:recovery": 3
+        }
+      }
+    },
+    {
+      "name": "chromium-snapshot-and-timeout-amendments",
+      "command": "pnpm exec vitest run --config vitest.cross-adapter.config.ts -t 'electric\\.sdk-snapshot-delivery\\.chromium|adapter-conformance\\.eager-live-source\\.electric\\.chromium.*fixed seed 2118: generated' --maxWorkers=1 --coverage.enabled=false --typecheck.enabled=false",
+      "cwd": "packages/electric-db-collection",
+      "exit": 0,
+      "testResult": "19 passed | 637 skipped (656)",
+      "log": ".review-2377/cross-electric-browser-amendment-final.log",
+      "logSha256": "45ac2af236e05dbcccc0be3d40ee4ceb21d7765b752e7c3c5993fe7b9c6cf8fe",
+      "generatedReach": {
+        "electric.sdk-snapshot-delivery.chromium fixed seed 20260917: generated": {
+          "live-outage": 23,
+          "live-outage-crossed-by-throw": 22,
+          "live-outage-led-by-throw": 23,
+          "live-outage-with-synchronous-throws": 23,
+          "live-pauses-past-threshold": 30,
+          "retired-evidence-after-restart": 40,
+          "subset-attempts-past-threshold": 33
+        },
+        "electric.sdk-snapshot-delivery.chromium random seed: generated": {
+          "live-outage": 19,
+          "live-outage-crossed-by-throw": 18,
+          "live-outage-led-by-throw": 18,
+          "live-outage-with-synchronous-throws": 19,
+          "live-pauses-past-threshold": 28,
+          "retired-evidence-after-restart": 40,
+          "subset-attempts-past-threshold": 27
+        },
+        "adapter-conformance.eager-live-source.electric.chromium fixed seed 2118: generated": {
+          "change-batch": 215,
+          "failure-after-ready": 67,
+          "failure-before-ready": 67,
+          "field-removed": 29,
+          "field:array:change": 183,
+          "field:array:load": 305,
+          "field:bigint:change": 183,
+          "field:bigint:load": 305,
+          "field:boolean:change": 183,
+          "field:boolean:load": 305,
+          "field:date:change": 183,
+          "field:date:load": 305,
+          "field:float:change": 183,
+          "field:float:load": 305,
+          "field:integer:change": 183,
+          "field:integer:load": 305,
+          "field:negative-zero:change": 183,
+          "field:negative-zero:load": 305,
+          "field:object:change": 183,
+          "field:object:load": 305,
+          "field:string:change": 183,
+          "field:string:load": 305,
+          "first-ready": 327,
+          "multi-change-batch": 98,
+          "outage-count-reset": 45,
+          "outage-reported-after-batch": 35,
+          "outage-reported-again": 35,
+          "outage-reported-in-later-run": 19,
+          "replacing-snapshot": 129,
+          "restart": 162,
+          "restart-after-failure": 33,
+          "transient-failure-below-threshold": 183,
+          "transient-failure-recovered": 95,
+          "transient-failure-repeated": 51,
+          "transient-failure-reported": 121,
+          "transient:http-400-retried": 76,
+          "transient:http-429": 85,
+          "transient:http-503": 111,
+          "transient:network": 77,
+          "wait-before-evidence-fulfilled": 53,
+          "wait-on-retired-evidence": 77,
+          "wait-rejected-at-retirement": 127,
+          "wait-timed-out": 102
+        }
+      }
+    },
+    {
+      "name": "chromium-decoder-final",
+      "command": "pnpm exec vitest run --config vitest.cross-adapter.config.ts -t electric.sdk-decoder-delivery.chromium --maxWorkers=1 --coverage.enabled=false --typecheck.enabled=false",
+      "cwd": "packages/electric-db-collection",
+      "exit": 0,
+      "testResult": "55 passed | 604 skipped (659)",
+      "log": ".review-2377/cross-electric-decoder-result-browser-final.log",
+      "logSha256": "09730a1d5c37abbe0ab8d81002f7e9f625ec67fb4c7ab4de823b33edf320a546",
+      "generatedReach": {
+        "electric.sdk-decoder-delivery.chromium fixed seed 2377: generated": {
+          "eager:initial:throw": 8,
+          "eager:initial:valid": 6,
+          "eager:live:throw": 1,
+          "eager:live:valid": 4,
+          "on-demand:initial:throw": 4,
+          "on-demand:initial:valid": 2,
+          "on-demand:live:throw": 1,
+          "on-demand:live:valid": 4,
+          "prefix-before-refusal": 8,
+          "valid-transformed-key": 16
+        },
+        "electric.sdk-decoder-delivery.chromium random seed: generated": {
+          "eager:initial:throw": 5,
+          "eager:initial:valid": 4,
+          "eager:live:throw": 4,
+          "eager:live:valid": 4,
+          "on-demand:initial:throw": 4,
+          "on-demand:initial:valid": 2,
+          "on-demand:live:throw": 4,
+          "on-demand:live:valid": 3,
+          "prefix-before-refusal": 11,
+          "valid-transformed-key": 13
+        }
+      }
+    },
+    {
+      "name": "reload-gate-final",
+      "command": "pnpm exec vitest run tests/cross-adapter-reload-oracle.property.test.ts tests/cross-adapter-gate-oracle.property.test.ts --maxWorkers=1 --coverage.enabled=false --typecheck.enabled=false",
+      "cwd": "packages/electric-db-collection",
+      "exit": 0,
+      "testResult": "153 passed (153)",
+      "log": ".review-2377/cross-electric-reload-gate-final.log",
+      "logSha256": "88f27fe22575494180ed85c56c24127d7c3375d749cc928f2ac3b3168effd31b",
+      "generatedReach": {
+        "adapter.electric.eager-reload fixed seed 2367: generated": {
+          "changed-overlap": 17,
+          "empty-result": 14,
+          "fresh": 21,
+          "fresh-held": 14,
+          "no-mutation": 34,
+          "omitted-row": 22,
+          "persisting-mutation": 46,
+          "reload-empty": 28,
+          "reload-empty-held": 13,
+          "reload-retained": 31,
+          "reload-retained-held": 19
+        },
+        "adapter.electric.eager-reload random seed: generated": {
+          "changed-overlap": 19,
+          "empty-result": 16,
+          "fresh": 21,
+          "fresh-held": 13,
+          "no-mutation": 32,
+          "omitted-row": 28,
+          "persisting-mutation": 48,
+          "reload-empty": 24,
+          "reload-empty-held": 15,
+          "reload-retained": 35,
+          "reload-retained-held": 20
+        },
+        "adapter.electric.eager-gate-failure fixed seed 2377: generated": {
+          "return:fresh": 13,
+          "return:fresh:recovery": 4,
+          "return:reload": 9,
+          "return:reload:recovery": 5,
+          "throw:fresh": 5,
+          "throw:fresh:recovery": 1,
+          "throw:reload": 3,
+          "throw:reload:recovery": 1
+        },
+        "adapter.electric.eager-gate-failure random seed: generated": {
+          "return:fresh": 10,
+          "return:fresh:recovery": 7,
+          "return:reload": 7,
+          "return:reload:recovery": 3,
+          "throw:fresh": 9,
+          "throw:fresh:recovery": 5,
+          "throw:reload": 4,
+          "throw:reload:recovery": 1
+        }
+      }
+    },
+    {
+      "name": "chromium-reload-gate-final",
+      "command": "pnpm exec vitest run --config vitest.cross-adapter.config.ts -t 'adapter.electric.eager-reload.chromium|adapter.electric.eager-gate-failure.chromium' --maxWorkers=1 --coverage.enabled=false --typecheck.enabled=false",
+      "cwd": "packages/electric-db-collection",
+      "exit": 0,
+      "testResult": "153 passed | 506 skipped (659)",
+      "log": ".review-2377/cross-electric-reload-gate-browser-final.log",
+      "logSha256": "d3a8cf20071dd7e1a35ad90541007bfb0023392d180d552f129a8db99c30843f",
+      "generatedReach": {
+        "adapter.electric.eager-reload.chromium fixed seed 2367: generated": {
+          "changed-overlap": 17,
+          "empty-result": 14,
+          "fresh": 21,
+          "fresh-held": 14,
+          "no-mutation": 34,
+          "omitted-row": 22,
+          "persisting-mutation": 46,
+          "reload-empty": 28,
+          "reload-empty-held": 13,
+          "reload-retained": 31,
+          "reload-retained-held": 19
+        },
+        "adapter.electric.eager-reload.chromium random seed: generated": {
+          "changed-overlap": 20,
+          "empty-result": 12,
+          "fresh": 27,
+          "fresh-held": 14,
+          "no-mutation": 35,
+          "omitted-row": 15,
+          "persisting-mutation": 45,
+          "reload-empty": 25,
+          "reload-empty-held": 14,
+          "reload-retained": 28,
+          "reload-retained-held": 17
+        },
+        "adapter.electric.eager-gate-failure.chromium fixed seed 2377: generated": {
+          "return:fresh": 13,
+          "return:fresh:recovery": 4,
+          "return:reload": 9,
+          "return:reload:recovery": 5,
+          "throw:fresh": 5,
+          "throw:fresh:recovery": 1,
+          "throw:reload": 3,
+          "throw:reload:recovery": 1
+        },
+        "adapter.electric.eager-gate-failure.chromium random seed: generated": {
+          "return:fresh": 9,
+          "return:fresh:recovery": 3,
+          "return:reload": 7,
+          "return:reload:recovery": 5,
+          "throw:fresh": 7,
+          "throw:fresh:recovery": 2,
+          "throw:reload": 7,
+          "throw:reload:recovery": 5
+        }
+      }
+    }
+  ],
+  "replays": [
+    {
+      "property": "adapter.electric.eager-reload",
+      "host": "node",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-reload-oracle.property.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "adapter.electric.eager-reload",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-adapter.electric.eager-reload.log",
+      "logSha256": "105728a3f0f837a305aa371b51e7e270677a325f198b84ebe9e0eaf6513ffb07"
+    },
+    {
+      "property": "adapter.electric.eager-gate-failure",
+      "host": "node",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-gate-oracle.property.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "adapter.electric.eager-gate-failure",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-adapter.electric.eager-gate-failure.log",
+      "logSha256": "b2153b0651929e5cc795be9bdfafa98a0247b6664d38c4adee30b7e8aff80b56"
+    },
+    {
+      "property": "adapter.electric.initial-receipt.controlled",
+      "host": "node",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-receipt-oracle.property.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "adapter.electric.initial-receipt.controlled",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-adapter.electric.initial-receipt.controlled.log",
+      "logSha256": "8a1fbe802b264b9ca0022de64fb2c50a202b669592f8cfb8df31b6591514a27d"
+    },
+    {
+      "property": "adapter.electric.initial-receipt.node-sqlite",
+      "host": "node",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-receipt-oracle.property.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "adapter.electric.initial-receipt.node-sqlite",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-adapter.electric.initial-receipt.node-sqlite.log",
+      "logSha256": "c3d35d83facc84d85bd02e087edeb3266c872416063caf256fe73aeb7fa0a9a6"
+    },
+    {
+      "property": "adapter.electric.initial-receipt.applied.controlled",
+      "host": "node",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-receipt-oracle.property.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "adapter.electric.initial-receipt.applied.controlled",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-adapter.electric.initial-receipt.applied.controlled.log",
+      "logSha256": "391d87a825dfe84b25c9cabcc5e6044bc4e9a6cb243cfafd8ea00bc077d01ea5"
+    },
+    {
+      "property": "adapter.electric.initial-receipt.applied.node-sqlite",
+      "host": "node",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-receipt-oracle.property.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "adapter.electric.initial-receipt.applied.node-sqlite",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-adapter.electric.initial-receipt.applied.node-sqlite.log",
+      "logSha256": "0a9ed42f68938d935138bf6f1945d7f6ade7ad3682e649199ebf845715479ecb"
+    },
+    {
+      "property": "electric.sdk-decoder-delivery",
+      "host": "node",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/electric-sdk-delivery-oracle.property.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "electric.sdk-decoder-delivery",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-electric.sdk-decoder-delivery.log",
+      "logSha256": "27885b7e633d9e441a2916be85df06bdfda527db9fc5bb9c78b45762f95cf271"
+    },
+    {
+      "property": "electric.sdk-snapshot-delivery",
+      "host": "node",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/electric-sdk-delivery-oracle.property.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "electric.sdk-snapshot-delivery",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-electric.sdk-snapshot-delivery.log",
+      "logSha256": "8a48500b4fb6dd076061e3531209268ba7a5a9668a5237c3c3f392effd987b37"
+    },
+    {
+      "property": "adapter-conformance.eager-live-source.electric.chromium",
+      "host": "browser",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--config",
+        "vitest.cross-adapter.config.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-receiving-oracle.browser.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "adapter-conformance.eager-live-source.electric.chromium",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-adapter-conformance.eager-live-source.electric.chromium.log",
+      "logSha256": "76918bb39af1cdbb2987d3c57a546bb0e4ecd30e74b486292d72f6b7084345cb"
+    },
+    {
+      "property": "adapter-conformance.eager-live-source.electric.no-on-error.chromium",
+      "host": "browser",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--config",
+        "vitest.cross-adapter.config.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-receiving-oracle.browser.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "adapter-conformance.eager-live-source.electric.no-on-error.chromium",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-adapter-conformance.eager-live-source.electric.no-on-error.chromium.log",
+      "logSha256": "3024ee105d619dabf6343c5837d7a856728307c490bd306121e5326e4a192ee4"
+    },
+    {
+      "property": "electric.sdk-snapshot-delivery.chromium",
+      "host": "browser",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--config",
+        "vitest.cross-adapter.config.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-receiving-oracle.browser.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "electric.sdk-snapshot-delivery.chromium",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-electric.sdk-snapshot-delivery.chromium.log",
+      "logSha256": "937e10307fe0f5b6359c29d153d355104c93c522209840e1732ef2cc443cf0d5"
+    },
+    {
+      "property": "electric.sdk-decoder-delivery.chromium",
+      "host": "browser",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--config",
+        "vitest.cross-adapter.config.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-receiving-oracle.browser.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "electric.sdk-decoder-delivery.chromium",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-electric.sdk-decoder-delivery.chromium.log",
+      "logSha256": "5da105096880f8fda383ae57220d5ea59e82208fda0370a1624598908279644e"
+    },
+    {
+      "property": "adapter.electric.eager-reload.chromium",
+      "host": "browser",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--config",
+        "vitest.cross-adapter.config.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-receiving-oracle.browser.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "adapter.electric.eager-reload.chromium",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-adapter.electric.eager-reload.chromium.log",
+      "logSha256": "ddce5ed5072273320ff926da7229e5b12a96ade4685e34d88d9d18f5bad72c7c"
+    },
+    {
+      "property": "adapter.electric.eager-gate-failure.chromium",
+      "host": "browser",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--config",
+        "vitest.cross-adapter.config.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-receiving-oracle.browser.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "adapter.electric.eager-gate-failure.chromium",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-adapter.electric.eager-gate-failure.chromium.log",
+      "logSha256": "f36a2e181b40aaeaac4c65cd2634558375dd0b714c4bd102da99a5ac69854325"
+    },
+    {
+      "property": "adapter.electric.initial-receipt.chromium",
+      "host": "browser",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--config",
+        "vitest.cross-adapter.config.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-receiving-oracle.browser.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "adapter.electric.initial-receipt.chromium",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-adapter.electric.initial-receipt.chromium.log",
+      "logSha256": "025f80009cbc2d895bebe50428fe55ce89b9e187e091a79c58dc3f19edddaadd"
+    },
+    {
+      "property": "adapter.electric.initial-receipt.applied.chromium",
+      "host": "browser",
+      "seed": 2377,
+      "path": "0",
+      "unit": "random seed: generated",
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "../db/tests/oracle-replay.ts",
+        "--config",
+        "vitest.cross-adapter.config.ts",
+        "--maxWorkers=1",
+        "--coverage.enabled=false",
+        "--typecheck.enabled=false",
+        "tests/cross-adapter-receiving-oracle.browser.test.ts"
+      ],
+      "exit": 0,
+      "witnessMode": "async",
+      "executions": 1,
+      "witnesses": [
+        {
+          "property": "adapter.electric.initial-receipt.applied.chromium",
+          "seed": 2377,
+          "path": "0",
+          "numRuns": 1,
+          "failed": false
+        }
+      ],
+      "log": ".review-2377/electric-replay-adapter.electric.initial-receipt.applied.chromium.log",
+      "logSha256": "0c3ec815da06b813cf48d6c0b7aa2eee53d058df7207e5c12e7954f9b029c20a"
+    }
+  ],
+  "mutantReplay": {
+    "fault": "TANSTACK_DB_ELECTRIC_SDK_DELIVERY_FAULT=snapshot-rows",
+    "classification": "assertion failure at intended semantic comparison",
+    "checkpoint": "snapshot 0 applied rows",
+    "productionRed": false,
+    "property": "electric.sdk-snapshot-delivery",
+    "seed": 2377,
+    "path": "0",
+    "executions": 1,
+    "witnesses": [
+      {
+        "property": "electric.sdk-snapshot-delivery",
+        "seed": 2377,
+        "path": "0",
+        "numRuns": 1,
+        "failed": true
+      }
+    ],
+    "log": ".review-2377/cross-electric-snapshot-mutant-replay.log",
+    "logSha256": "18ebc9db2deb52745d2c42682148b4908f2586fff86a3ac36cf2eb51f3dd1670"
+  },
+  "staticChecks": {
+    "scopedTypes": {
+      "output": "",
+      "log": ".review-2377/cross-electric-scoped-types-final.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scopedEslint": {
+      "output": "",
+      "log": ".review-2377/cross-electric-lint-final.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "decoderEslint": {
+      "output": "",
+      "log": ".review-2377/cross-electric-lint-decoder-delivery.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "reloadBarrierEslint": {
+      "output": "",
+      "log": ".review-2377/cross-electric-lint-reload-barrier.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lintChanged": {
+      "output": "$ node scripts/agent-lint-feedback.mjs\n",
+      "log": ".review-2377/cross-electric-lint-changed-final.log",
+      "logSha256": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168"
+    },
+    "packageTypes": {
+      "output": "packages/db-collection-e2e/src/suites/moves-oracle.suite.ts(11,43): error TS2307: Cannot find module '@tanstack/electric-db-collection' or its corresponding type declarations.\npackages/db-collection-e2e/src/suites/moves-oracle.suite.ts(23,46): error TS2307: Cannot find module '@tanstack/electric-db-collection' or its corresponding type declarations.\npackages/db-collection-e2e/src/suites/progressive.suite.ts(16,46): error TS2307: Cannot find module '@tanstack/electric-db-collection' or its corresponding type declarations.\n",
+      "log": ".review-2377/cross-electric-package-types-final.log",
+      "logSha256": "e9fa67631543493c59e5e13f5f2c095b9fbb0fa56d0fc5aeb63fb881ef8f9db7"
+    }
+  },
+  "dependencyVersions": {
+    "electricClient": "1.5.28"
+  },
+  "reloadEmptyLivenessCalibration": {
+    "script": ".review-2377/electric-empty-liveness.ts",
+    "source": "import assert from 'node:assert/strict'\nimport { observeEagerReload } from '../packages/db-adapter-conformance/tests/eager-reload-driver'\nimport { eagerReloadViolations } from '../packages/db-adapter-conformance/tests/eager-reload-oracle'\nimport { crossElectricReloadAdapter } from '../packages/electric-db-collection/tests/cross-adapter-reload-driver'\nimport { startAdapterChromium } from '../packages/browser-db-sqlite-persistence/tests/adapter-chromium-host'\n\nasync function main() {\n  const browser = process.argv.includes('--browser')\n  const mutant = !process.argv.includes('--clean')\n  const host = browser ? await startAdapterChromium({\n    entry: '/packages/electric-db-collection/tests/cross-adapter-receiving.html',\n    ready: 'runElectricEagerReload',\n  }) : undefined\n  try {\n    // tsx preserves function names in serialized callbacks with this helper.\n    if (host) await host.page.evaluate('globalThis.__name = (value) => value')\n    const probe = async (observe: typeof observeEagerReload, violations: typeof eagerReloadViolations, adapter: typeof crossElectricReloadAdapter) => {\n      const history = { start: 'fresh' as const, previous: 0, next: 0, mutation: false }\n      const raw = await observe({\n        async open(initial, id) {\n          const sdk = await adapter.open(initial, id)\n          const source = sdk.options.sync.sync\n          sdk.options = {\n            ...sdk.options,\n            sync: {\n              ...sdk.options.sync,\n              sync: (params) => source(mutant ? { ...params, commit: () => true, markReady: () => {} } : params),\n            },\n          }\n          return sdk\n        },\n      }, history, `electric-empty-no-ready-${crypto.randomUUID()}`)\n      return { raw, violations: violations(history, raw) }\n    }\n    const result = host ? await host.page.evaluate(async (mutant) => {\n      const driverUrl = '/packages/db-adapter-conformance/tests/eager-reload-driver.ts'\n      const oracleUrl = '/packages/db-adapter-conformance/tests/eager-reload-oracle.ts'\n      const adapterUrl = '/packages/electric-db-collection/tests/cross-adapter-reload-driver.ts'\n      const { observeEagerReload: observe } = await import(driverUrl)\n      const { eagerReloadViolations: violations } = await import(oracleUrl)\n      const { crossElectricReloadAdapter: adapter } = await import(adapterUrl)\n      const history = { start: 'fresh', previous: 0, next: 0, mutation: false }\n      const raw = await observe({\n        async open(initial: Array<{id:string;value:number}>, id: string) {\n          const sdk = await adapter.open(initial, id)\n          const source = sdk.options.sync.sync\n          sdk.options = { ...sdk.options, sync: { ...sdk.options.sync,\n            sync: (params: Record<string, unknown>) => source(mutant ? { ...params, commit: () => true, markReady: () => {} } : params),\n          } }\n          return sdk\n        },\n      }, history, `electric-empty-no-ready-${crypto.randomUUID()}`)\n      return { raw, violations: violations(history, raw) }\n    }, mutant) : await probe(observeEagerReload, eagerReloadViolations, crossElectricReloadAdapter)\n    if (mutant) {\n      assert.equal(result.raw.submittedCommits, 0)\n      assert.equal(result.raw.sourceReadyCalls, 0)\n      assert.equal(result.raw.settledAfterSource, false)\n      assert(result.violations.length > 0)\n    } else assert.equal(result.violations.length, 0)\n    console.log(JSON.stringify({host:browser?'chromium':'node',mutant,classification:mutant?'assertion failure at intended semantic comparison':'clean neighbor passes shared comparison',...result},null,2))\n  } finally { await host?.close() }\n}\nmain().catch(error=>{console.error(error);process.exitCode=1})\n",
+    "scriptSha256": "778134f81344e3a491cfdfb8a2728cce0fd9f83b46168ebe96bc9dc001145c13",
+    "productionRed": false,
+    "runs": [
+      {
+        "command": [
+          "node",
+          "--import",
+          "tsx",
+          ".review-2377/electric-empty-liveness.ts"
+        ],
+        "exit": 0,
+        "result": {
+          "host": "node",
+          "mutant": true,
+          "classification": "assertion failure at intended semantic comparison",
+          "raw": {
+            "before": [],
+            "beforeStatus": "loading",
+            "settledBeforeSource": false,
+            "settledAfterSource": false,
+            "submittedRows": 0,
+            "submittedCommits": 0,
+            "sourceReadyCalls": 0,
+            "acceptedCommits": 0,
+            "atFulfillment": [],
+            "mutationReleasedBeforeFulfillment": false,
+            "mutationSettledBeforeFulfillment": false,
+            "final": []
+          },
+          "violations": [
+            "load pending after complete source application",
+            "complete source submission not reached"
+          ]
+        },
+        "log": ".review-2377/cross-electric-empty-liveness-node.log",
+        "logSha256": "323a5d5b992db08666eecafd397ceaf6f3d80185bc60da774b62febeec82a9fa"
+      },
+      {
+        "command": [
+          "node",
+          "--import",
+          "tsx",
+          ".review-2377/electric-empty-liveness.ts",
+          "--clean"
+        ],
+        "exit": 0,
+        "result": {
+          "host": "node",
+          "mutant": false,
+          "classification": "clean neighbor passes shared comparison",
+          "raw": {
+            "before": [],
+            "beforeStatus": "loading",
+            "settledBeforeSource": false,
+            "settledAfterSource": true,
+            "submittedRows": 0,
+            "submittedCommits": 1,
+            "sourceReadyCalls": 1,
+            "acceptedCommits": 1,
+            "atFulfillment": [],
+            "mutationReleasedBeforeFulfillment": false,
+            "mutationSettledBeforeFulfillment": true,
+            "final": []
+          },
+          "violations": []
+        },
+        "log": ".review-2377/cross-electric-empty-liveness-clean-node.log",
+        "logSha256": "c1eedfaf7f5a08730dd4dbbb1a2b6d19bf0cb3d4c95fb59b7c84cb2d225b1ef4"
+      },
+      {
+        "command": [
+          "node",
+          "--import",
+          "tsx",
+          ".review-2377/electric-empty-liveness.ts",
+          "--browser"
+        ],
+        "exit": 0,
+        "result": {
+          "host": "chromium",
+          "mutant": true,
+          "classification": "assertion failure at intended semantic comparison",
+          "raw": {
+            "before": [],
+            "beforeStatus": "loading",
+            "settledBeforeSource": false,
+            "settledAfterSource": false,
+            "submittedRows": 0,
+            "submittedCommits": 0,
+            "sourceReadyCalls": 0,
+            "acceptedCommits": 0,
+            "atFulfillment": [],
+            "mutationReleasedBeforeFulfillment": false,
+            "mutationSettledBeforeFulfillment": false,
+            "final": []
+          },
+          "violations": [
+            "load pending after complete source application",
+            "complete source submission not reached"
+          ]
+        },
+        "log": ".review-2377/cross-electric-empty-liveness-browser.log",
+        "logSha256": "f325ace6edbf618c38c707ad6fe2cdf48639fc2a5951248204f5acb2bb1a75d7"
+      },
+      {
+        "command": [
+          "node",
+          "--import",
+          "tsx",
+          ".review-2377/electric-empty-liveness.ts",
+          "--browser",
+          "--clean"
+        ],
+        "exit": 0,
+        "result": {
+          "host": "chromium",
+          "mutant": false,
+          "classification": "clean neighbor passes shared comparison",
+          "raw": {
+            "before": [],
+            "beforeStatus": "loading",
+            "settledBeforeSource": false,
+            "settledAfterSource": true,
+            "submittedRows": 0,
+            "submittedCommits": 1,
+            "sourceReadyCalls": 1,
+            "acceptedCommits": 1,
+            "atFulfillment": [],
+            "mutationReleasedBeforeFulfillment": false,
+            "mutationSettledBeforeFulfillment": true,
+            "final": []
+          },
+          "violations": []
+        },
+        "log": ".review-2377/cross-electric-empty-liveness-clean-browser.log",
+        "logSha256": "1014b52197f3711250a43ef203b699fb6607f4e0152ff7699b91a059b42b5e41"
+      }
+    ]
+  },
+  "independentReviews": {
+    "sourceMapSha256": "68df481da15f72bf090ab7a66936e55cf5198af6d436d0abcb8e22e77d286a04",
+    "lawReview": {
+      "verdict": "Approved the receiving slice at all 50 current source hashes; the reload amendment received a separate narrow approval after the preceding 50-file verdict.",
+      "reviewer": "oracle_diff_laws"
+    },
+    "enforcementReview": {
+      "verdict": "Approved three decoder files and the reload receiving barrier with shared driver 3e178c; aggregate approval remains bounded by the earlier reviews.",
+      "reviewer": "oracle_diff_enforcement"
+    },
+    "logs": [
+      {
+        "log": ".review-2377/electric-laws-snapshot-browser.log",
+        "logSha256": "61c6f2ef197219d7730872a5963e6110315662973bba8b13ff8a661753b5a21e"
+      },
+      {
+        "log": ".review-2377/electric-laws-decoder-boundary-node.log",
+        "logSha256": "d2fde77a0a5870b58b879c5750a554fdd8af5fbc91dcabd984ebfff1435a3b4c"
+      },
+      {
+        "log": ".review-2377/electric-laws-decoder-boundary-browser.log",
+        "logSha256": "e241c82d44b9647ed72e5019e9811a55edbec3df7ebc0ed6c8b81f2014047fcc"
+      },
+      {
+        "log": ".review-2377/electric-laws-empty-liveness-node.log",
+        "logSha256": "323a5d5b992db08666eecafd397ceaf6f3d80185bc60da774b62febeec82a9fa"
+      },
+      {
+        "log": ".review-2377/electric-laws-empty-liveness-clean-node.log",
+        "logSha256": "c1eedfaf7f5a08730dd4dbbb1a2b6d19bf0cb3d4c95fb59b7c84cb2d225b1ef4"
+      },
+      {
+        "log": ".review-2377/electric-laws-empty-liveness-browser.log",
+        "logSha256": "0f6f68d811c3d060a909ba0f363ac4311a0e1b2debca72dc29add20c02d78799"
+      },
+      {
+        "log": ".review-2377/electric-laws-empty-liveness-clean-browser.log",
+        "logSha256": "34a6e59f1db081a357509ca6b30c3cb4393572818dd00d60e7764f5975c8e5b2"
+      },
+      {
+        "log": ".review-2377/enforcement-electric-decoder-amended-node.log",
+        "logSha256": "8a867c931eb14a7d33f3d37e7956b213ef6f374cd1f5476dbc64402b62a0e453"
+      },
+      {
+        "log": ".review-2377/enforcement-electric-decoder-amended-browser.log",
+        "logSha256": "d1e56540934ab5cad40824c5da45eeff04cb9b03325e0cb39851b793bf47cde3"
+      },
+      {
+        "log": ".review-2377/enforcement-electric-empty-liveness-node.log",
+        "logSha256": "6da803c0a7cc2ab367a1544b43026a36dbaa528b6fb25e0af70db26ba62ec5c6"
+      },
+      {
+        "log": ".review-2377/enforcement-electric-empty-liveness-browser.log",
+        "logSha256": "f50890927cd3b48474dcc280c337147f5f2c905c00f5f31e4bff0b75ed65448b"
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "manifestSha256": "e51e6ce9fb811314f7a0c518ac51313bd1aeeeabaf8d01599bab936113312dbc",
+  "files": {
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-driver.ts": "6e6efd4ae47f285df81e0b91e5ab065e1308042f87bd6d54c18def6510c39604",
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-history-oracle.ts": "2a9371d461784d3aeda9c6d29b54101f4df3d064158c1c27a084005b9a99b9dc",
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-oracle-suite.ts": "bd230758a3aaafc5342a13767863393876b29b48f049fb9e4a1ca7e3c8444a94",
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-oracle.property.test.ts": "d622e10d81de28933105a1878c2bc1ef2f0641dc4eca0c96da37db0c5f0c4504",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-cursor-persisted-demand-oracle.browser.test.ts": "c75109c31021fc93f1b11732ebb6e2ed55ff4aa1a5b4f540559d3375ce3f3036",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-cursor-persisted-demand.opfs.ts": "08634dc9adec8f9a152a75f0cf87a9f695718e048b6c37505d6af4b8095d08a3",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-cursor-persisted-demand.opfs.html": "f99caaa1809dfd131d7948c8086b7d47f7a87771d18b2bde1c186e0f80e6c8bd",
+    "packages/powersync-direct-collection/tests/persisted-demand-driver.ts": "befe280de25a596cc4b40564b624dade6d79744d80b7afbf776627da3b02d754",
+    "packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts": "ac569ff5f1177e8ddace08e8298970c362f42b9f504828c345cd1a534add692c",
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-cleanup.test.ts": "8fb21064a9786f0c58fb4f2e707b0cb11bacc37fd62b4411be4ce1459e3d521c",
+    "packages/db/tests/oracle-cleanup.ts": "15317e3871120de3840160b070d902e765989fe070112fbbf3d14d87b84bf6bc"
+  },
+  "originalSource": {
+    "packages/powersync-direct-collection/src/index.ts": "a30e71beb96fade6c5714a300ea76628386dd0b9b1ea04ad60ccf3ee9ae074fa",
+    "packages/powersync-direct-collection/src/subsets.ts": "00fb4cb1976ec8b384d01e1fbb483768204bc40b69a3dcc19ed21b4356b3e380"
+  },
+  "carryFrom": "2026-11-17-powersync-direct-persisted-cursor-v5-snapshot.json",
+  "amendment": "Exception-only cleanup repair: shared total reason formatter preserves completed observations and lets all cleanups execute. Both cursor cleanup paths share recordCursorDemandCleanup; raw primary/secondary failures remain AggregateError cause/items. No history/model/normal observation change. Ordinary poison controls RED two TypeErrors/one pass, GREEN three pass; tsc/eslint pass."
+}

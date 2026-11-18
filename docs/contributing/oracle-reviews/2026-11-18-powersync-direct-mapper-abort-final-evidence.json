@@ -1,0 +1,2337 @@
+{
+  "snapshot": "docs/contributing/oracle-reviews/2026-11-18-powersync-direct-mapper-abort-final-v4-snapshot.json",
+  "snapshotSHA256": "9ab4adb78610d7c418eb785437c4f76e5e5ad795cfa6fdc9ca5eac1ea0858ca8",
+  "fullCampaignSnapshot": "2026-11-18-powersync-direct-mapper-abort-final-v3-snapshot.json",
+  "carry": "Only shared driver local mapped\u2192requestedBeforeStart rename after full campaigns; no behavior or diagnostic-node change. Scoped ESLint repeats after rename.",
+  "runtime": {
+    "Node": "26",
+    "standaloneSDK": "0.1.1"
+  },
+  "green": {
+    "Node": 1353,
+    "ChromiumAndOPFS": 902
+  },
+  "original": {
+    "Node": {
+      "passed": 342,
+      "semanticFailures": 33,
+      "invalidCleanRunCalibrations": 15,
+      "unselected": 963
+    },
+    "ChromiumAndOPFS": {
+      "passed": 228,
+      "semanticFailures": 22,
+      "invalidCleanRunCalibrations": 10,
+      "unselected": 642
+    }
+  },
+  "mutant": {
+    "description": "Remove only options.signal?.throwIfAborted immediately after post-mapper assertActive; preserve first guard, active fence and cache repair.",
+    "indexSHA256": "1ec1defd6f1584be75b647f243c820f31db0b1e03eaa7fabaf3185b27c4076c1",
+    "subsetsSHA256": "07f180d43102a271723d5d4e2b5e3a4ee0fc1e23e41f8d5f99bdb20fd3fa91af",
+    "Node": {
+      "passed": 216,
+      "semanticFailures": 33,
+      "invalidCleanRunCalibrations": 15
+    },
+    "ChromiumAndOPFS": {
+      "passed": 144,
+      "semanticFailures": 22,
+      "invalidCleanRunCalibrations": 10
+    }
+  },
+  "constructedReach": {
+    "adapter.powersync-direct.on-demand-streams.persisted-controlled": {
+      "fixed seed 2377": {
+        "constructed": {
+          "shared-error-retained": 5,
+          "independent-error-retired": 5,
+          "partial-overlap-retired": 5,
+          "stream-error-before-sync": 5,
+          "stream-error-before-application": 5,
+          "confirmed-empty-baseline": 5,
+          "stream-error-after-application": 5,
+          "error-identity-changed": 5,
+          "stream-recovered": 5,
+          "mapping-cleanup": 5,
+          "loaded-cleanup": 5,
+          "parameter-equal-retained": 5,
+          "parameter-distinct-retired": 5,
+          "priority-requested": 5,
+          "empty-mapping-applied": 5,
+          "throwing-mapper-retried": 5,
+          "request-pre-aborted": 5,
+          "request-mapper-aborted": 5,
+          "request-post-mapper-aborted": 5,
+          "request-healthy": 5
+        },
+        "generated": {
+          "confirmed-empty-baseline": 6,
+          "empty-mapping-applied": 2,
+          "error-identity-changed": 11,
+          "independent-error-retired": 10,
+          "loaded-cleanup": 4,
+          "mapping-cleanup": 7,
+          "parameter-distinct-retired": 2,
+          "parameter-equal-retained": 6,
+          "partial-overlap-retired": 0,
+          "priority-requested": 4,
+          "request-healthy": 2,
+          "request-mapper-aborted": 2,
+          "request-post-mapper-aborted": 1,
+          "request-pre-aborted": 1,
+          "shared-error-retained": 10,
+          "stream-error-after-application": 6,
+          "stream-error-before-application": 6,
+          "stream-error-before-sync": 1,
+          "stream-recovered": 7,
+          "throwing-mapper-retried": 4
+        }
+      },
+      "random seed": {
+        "constructed": {
+          "shared-error-retained": 5,
+          "independent-error-retired": 5,
+          "partial-overlap-retired": 5,
+          "stream-error-before-sync": 5,
+          "stream-error-before-application": 5,
+          "confirmed-empty-baseline": 5,
+          "stream-error-after-application": 5,
+          "error-identity-changed": 5,
+          "stream-recovered": 5,
+          "mapping-cleanup": 5,
+          "loaded-cleanup": 5,
+          "parameter-equal-retained": 5,
+          "parameter-distinct-retired": 5,
+          "priority-requested": 5,
+          "empty-mapping-applied": 5,
+          "throwing-mapper-retried": 5,
+          "request-pre-aborted": 5,
+          "request-mapper-aborted": 5,
+          "request-post-mapper-aborted": 5,
+          "request-healthy": 5
+        },
+        "generated": {
+          "confirmed-empty-baseline": 4,
+          "empty-mapping-applied": 4,
+          "error-identity-changed": 9,
+          "independent-error-retired": 13,
+          "loaded-cleanup": 2,
+          "mapping-cleanup": 2,
+          "parameter-distinct-retired": 4,
+          "parameter-equal-retained": 7,
+          "partial-overlap-retired": 2,
+          "priority-requested": 1,
+          "request-healthy": 3,
+          "request-mapper-aborted": 4,
+          "request-post-mapper-aborted": 2,
+          "request-pre-aborted": 3,
+          "shared-error-retained": 10,
+          "stream-error-after-application": 0,
+          "stream-error-before-application": 4,
+          "stream-error-before-sync": 1,
+          "stream-recovered": 8,
+          "throwing-mapper-retried": 5
+        }
+      }
+    },
+    "adapter.powersync-direct.on-demand-streams.persisted-node-sqlite": {
+      "fixed seed 2377": {
+        "constructed": {
+          "shared-error-retained": 5,
+          "independent-error-retired": 5,
+          "partial-overlap-retired": 5,
+          "stream-error-before-sync": 5,
+          "stream-error-before-application": 5,
+          "confirmed-empty-baseline": 5,
+          "stream-error-after-application": 5,
+          "error-identity-changed": 5,
+          "stream-recovered": 5,
+          "mapping-cleanup": 5,
+          "loaded-cleanup": 5,
+          "parameter-equal-retained": 5,
+          "parameter-distinct-retired": 5,
+          "priority-requested": 5,
+          "empty-mapping-applied": 5,
+          "throwing-mapper-retried": 5,
+          "request-pre-aborted": 5,
+          "request-mapper-aborted": 5,
+          "request-post-mapper-aborted": 5,
+          "request-healthy": 5
+        },
+        "generated": {
+          "confirmed-empty-baseline": 6,
+          "empty-mapping-applied": 2,
+          "error-identity-changed": 11,
+          "independent-error-retired": 10,
+          "loaded-cleanup": 4,
+          "mapping-cleanup": 7,
+          "parameter-distinct-retired": 2,
+          "parameter-equal-retained": 6,
+          "partial-overlap-retired": 0,
+          "priority-requested": 4,
+          "request-healthy": 2,
+          "request-mapper-aborted": 2,
+          "request-post-mapper-aborted": 1,
+          "request-pre-aborted": 1,
+          "shared-error-retained": 10,
+          "stream-error-after-application": 6,
+          "stream-error-before-application": 6,
+          "stream-error-before-sync": 1,
+          "stream-recovered": 7,
+          "throwing-mapper-retried": 4
+        }
+      },
+      "random seed": {
+        "constructed": {
+          "shared-error-retained": 5,
+          "independent-error-retired": 5,
+          "partial-overlap-retired": 5,
+          "stream-error-before-sync": 5,
+          "stream-error-before-application": 5,
+          "confirmed-empty-baseline": 5,
+          "stream-error-after-application": 5,
+          "error-identity-changed": 5,
+          "stream-recovered": 5,
+          "mapping-cleanup": 5,
+          "loaded-cleanup": 5,
+          "parameter-equal-retained": 5,
+          "parameter-distinct-retired": 5,
+          "priority-requested": 5,
+          "empty-mapping-applied": 5,
+          "throwing-mapper-retried": 5,
+          "request-pre-aborted": 5,
+          "request-mapper-aborted": 5,
+          "request-post-mapper-aborted": 5,
+          "request-healthy": 5
+        },
+        "generated": {
+          "confirmed-empty-baseline": 9,
+          "empty-mapping-applied": 5,
+          "error-identity-changed": 13,
+          "independent-error-retired": 11,
+          "loaded-cleanup": 0,
+          "mapping-cleanup": 4,
+          "parameter-distinct-retired": 4,
+          "parameter-equal-retained": 9,
+          "partial-overlap-retired": 3,
+          "priority-requested": 2,
+          "request-healthy": 1,
+          "request-mapper-aborted": 1,
+          "request-post-mapper-aborted": 2,
+          "request-pre-aborted": 1,
+          "shared-error-retained": 13,
+          "stream-error-after-application": 1,
+          "stream-error-before-application": 9,
+          "stream-error-before-sync": 5,
+          "stream-recovered": 11,
+          "throwing-mapper-retried": 2
+        }
+      }
+    },
+    "adapter.powersync-direct.on-demand-streams": {
+      "fixed seed 2377": {
+        "constructed": {
+          "shared-error-retained": 5,
+          "independent-error-retired": 5,
+          "partial-overlap-retired": 5,
+          "stream-error-before-sync": 5,
+          "stream-error-before-application": 5,
+          "confirmed-empty-baseline": 5,
+          "stream-error-after-application": 5,
+          "error-identity-changed": 5,
+          "stream-recovered": 5,
+          "mapping-cleanup": 5,
+          "loaded-cleanup": 5,
+          "parameter-equal-retained": 5,
+          "parameter-distinct-retired": 5,
+          "priority-requested": 5,
+          "empty-mapping-applied": 5,
+          "throwing-mapper-retried": 5,
+          "request-pre-aborted": 5,
+          "request-mapper-aborted": 5,
+          "request-post-mapper-aborted": 5,
+          "request-healthy": 5
+        },
+        "generated": {
+          "confirmed-empty-baseline": 6,
+          "empty-mapping-applied": 2,
+          "error-identity-changed": 11,
+          "independent-error-retired": 10,
+          "loaded-cleanup": 4,
+          "mapping-cleanup": 7,
+          "parameter-distinct-retired": 2,
+          "parameter-equal-retained": 6,
+          "partial-overlap-retired": 0,
+          "priority-requested": 4,
+          "request-healthy": 2,
+          "request-mapper-aborted": 2,
+          "request-post-mapper-aborted": 1,
+          "request-pre-aborted": 1,
+          "shared-error-retained": 10,
+          "stream-error-after-application": 6,
+          "stream-error-before-application": 6,
+          "stream-error-before-sync": 1,
+          "stream-recovered": 7,
+          "throwing-mapper-retried": 4
+        }
+      },
+      "random seed": {
+        "constructed": {
+          "shared-error-retained": 5,
+          "independent-error-retired": 5,
+          "partial-overlap-retired": 5,
+          "stream-error-before-sync": 5,
+          "stream-error-before-application": 5,
+          "confirmed-empty-baseline": 5,
+          "stream-error-after-application": 5,
+          "error-identity-changed": 5,
+          "stream-recovered": 5,
+          "mapping-cleanup": 5,
+          "loaded-cleanup": 5,
+          "parameter-equal-retained": 5,
+          "parameter-distinct-retired": 5,
+          "priority-requested": 5,
+          "empty-mapping-applied": 5,
+          "throwing-mapper-retried": 5,
+          "request-pre-aborted": 5,
+          "request-mapper-aborted": 5,
+          "request-post-mapper-aborted": 5,
+          "request-healthy": 5
+        },
+        "generated": {
+          "confirmed-empty-baseline": 6,
+          "empty-mapping-applied": 3,
+          "error-identity-changed": 8,
+          "independent-error-retired": 7,
+          "loaded-cleanup": 1,
+          "mapping-cleanup": 3,
+          "parameter-distinct-retired": 6,
+          "parameter-equal-retained": 8,
+          "partial-overlap-retired": 3,
+          "priority-requested": 3,
+          "request-healthy": 2,
+          "request-mapper-aborted": 3,
+          "request-post-mapper-aborted": 2,
+          "request-pre-aborted": 2,
+          "shared-error-retained": 10,
+          "stream-error-after-application": 4,
+          "stream-error-before-application": 6,
+          "stream-error-before-sync": 6,
+          "stream-recovered": 6,
+          "throwing-mapper-retried": 5
+        }
+      }
+    },
+    "adapter.powersync-direct.on-demand-streams.persisted-chromium-opfs": {
+      "fixed seed 2377": {
+        "constructed": {
+          "shared-error-retained": 5,
+          "independent-error-retired": 5,
+          "partial-overlap-retired": 5,
+          "stream-error-before-sync": 5,
+          "stream-error-before-application": 5,
+          "confirmed-empty-baseline": 5,
+          "stream-error-after-application": 5,
+          "error-identity-changed": 5,
+          "stream-recovered": 5,
+          "mapping-cleanup": 5,
+          "loaded-cleanup": 5,
+          "parameter-equal-retained": 5,
+          "parameter-distinct-retired": 5,
+          "priority-requested": 5,
+          "empty-mapping-applied": 5,
+          "throwing-mapper-retried": 5,
+          "request-pre-aborted": 5,
+          "request-mapper-aborted": 5,
+          "request-post-mapper-aborted": 5,
+          "request-healthy": 5
+        },
+        "generated": {
+          "confirmed-empty-baseline": 6,
+          "empty-mapping-applied": 2,
+          "error-identity-changed": 11,
+          "independent-error-retired": 10,
+          "loaded-cleanup": 4,
+          "mapping-cleanup": 7,
+          "parameter-distinct-retired": 2,
+          "parameter-equal-retained": 6,
+          "partial-overlap-retired": 0,
+          "priority-requested": 4,
+          "request-healthy": 2,
+          "request-mapper-aborted": 2,
+          "request-post-mapper-aborted": 1,
+          "request-pre-aborted": 1,
+          "shared-error-retained": 10,
+          "stream-error-after-application": 6,
+          "stream-error-before-application": 6,
+          "stream-error-before-sync": 1,
+          "stream-recovered": 7,
+          "throwing-mapper-retried": 4
+        }
+      },
+      "random seed": {
+        "constructed": {
+          "shared-error-retained": 5,
+          "independent-error-retired": 5,
+          "partial-overlap-retired": 5,
+          "stream-error-before-sync": 5,
+          "stream-error-before-application": 5,
+          "confirmed-empty-baseline": 5,
+          "stream-error-after-application": 5,
+          "error-identity-changed": 5,
+          "stream-recovered": 5,
+          "mapping-cleanup": 5,
+          "loaded-cleanup": 5,
+          "parameter-equal-retained": 5,
+          "parameter-distinct-retired": 5,
+          "priority-requested": 5,
+          "empty-mapping-applied": 5,
+          "throwing-mapper-retried": 5,
+          "request-pre-aborted": 5,
+          "request-mapper-aborted": 5,
+          "request-post-mapper-aborted": 5,
+          "request-healthy": 5
+        },
+        "generated": {
+          "confirmed-empty-baseline": 6,
+          "empty-mapping-applied": 4,
+          "error-identity-changed": 7,
+          "independent-error-retired": 14,
+          "loaded-cleanup": 2,
+          "mapping-cleanup": 4,
+          "parameter-distinct-retired": 4,
+          "parameter-equal-retained": 4,
+          "partial-overlap-retired": 1,
+          "priority-requested": 2,
+          "request-healthy": 1,
+          "request-mapper-aborted": 1,
+          "request-post-mapper-aborted": 3,
+          "request-pre-aborted": 0,
+          "shared-error-retained": 10,
+          "stream-error-after-application": 4,
+          "stream-error-before-application": 6,
+          "stream-error-before-sync": 6,
+          "stream-recovered": 6,
+          "throwing-mapper-retried": 1
+        }
+      }
+    },
+    "adapter.powersync-direct.on-demand-streams.chromium": {
+      "fixed seed 2377": {
+        "constructed": {
+          "shared-error-retained": 5,
+          "independent-error-retired": 5,
+          "partial-overlap-retired": 5,
+          "stream-error-before-sync": 5,
+          "stream-error-before-application": 5,
+          "confirmed-empty-baseline": 5,
+          "stream-error-after-application": 5,
+          "error-identity-changed": 5,
+          "stream-recovered": 5,
+          "mapping-cleanup": 5,
+          "loaded-cleanup": 5,
+          "parameter-equal-retained": 5,
+          "parameter-distinct-retired": 5,
+          "priority-requested": 5,
+          "empty-mapping-applied": 5,
+          "throwing-mapper-retried": 5,
+          "request-pre-aborted": 5,
+          "request-mapper-aborted": 5,
+          "request-post-mapper-aborted": 5,
+          "request-healthy": 5
+        },
+        "generated": {
+          "confirmed-empty-baseline": 6,
+          "empty-mapping-applied": 2,
+          "error-identity-changed": 11,
+          "independent-error-retired": 10,
+          "loaded-cleanup": 4,
+          "mapping-cleanup": 7,
+          "parameter-distinct-retired": 2,
+          "parameter-equal-retained": 6,
+          "partial-overlap-retired": 0,
+          "priority-requested": 4,
+          "request-healthy": 2,
+          "request-mapper-aborted": 2,
+          "request-post-mapper-aborted": 1,
+          "request-pre-aborted": 1,
+          "shared-error-retained": 10,
+          "stream-error-after-application": 6,
+          "stream-error-before-application": 6,
+          "stream-error-before-sync": 1,
+          "stream-recovered": 7,
+          "throwing-mapper-retried": 4
+        }
+      },
+      "random seed": {
+        "constructed": {
+          "shared-error-retained": 5,
+          "independent-error-retired": 5,
+          "partial-overlap-retired": 5,
+          "stream-error-before-sync": 5,
+          "stream-error-before-application": 5,
+          "confirmed-empty-baseline": 5,
+          "stream-error-after-application": 5,
+          "error-identity-changed": 5,
+          "stream-recovered": 5,
+          "mapping-cleanup": 5,
+          "loaded-cleanup": 5,
+          "parameter-equal-retained": 5,
+          "parameter-distinct-retired": 5,
+          "priority-requested": 5,
+          "empty-mapping-applied": 5,
+          "throwing-mapper-retried": 5,
+          "request-pre-aborted": 5,
+          "request-mapper-aborted": 5,
+          "request-post-mapper-aborted": 5,
+          "request-healthy": 5
+        },
+        "generated": {
+          "confirmed-empty-baseline": 5,
+          "empty-mapping-applied": 2,
+          "error-identity-changed": 9,
+          "independent-error-retired": 10,
+          "loaded-cleanup": 4,
+          "mapping-cleanup": 7,
+          "parameter-distinct-retired": 2,
+          "parameter-equal-retained": 4,
+          "partial-overlap-retired": 4,
+          "priority-requested": 1,
+          "request-healthy": 3,
+          "request-mapper-aborted": 2,
+          "request-post-mapper-aborted": 3,
+          "request-pre-aborted": 0,
+          "shared-error-retained": 10,
+          "stream-error-after-application": 1,
+          "stream-error-before-application": 7,
+          "stream-error-before-sync": 5,
+          "stream-recovered": 7,
+          "throwing-mapper-retried": 1
+        }
+      }
+    }
+  },
+  "sourceLoads": {
+    "direct-mapper-warm-original-node-loads.jsonl": [
+      {
+        "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/packages/powersync-direct-collection/src/index.ts",
+        "saved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/direct-demand-pre-repair-index.ts",
+        "sha256": "a30e71beb96fade6c5714a300ea76628386dd0b9b1ea04ad60ccf3ee9ae074fa"
+      },
+      {
+        "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/packages/powersync-direct-collection/src/subsets.ts",
+        "saved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/direct-demand-pre-repair-subsets.ts",
+        "sha256": "00fb4cb1976ec8b384d01e1fbb483768204bc40b69a3dcc19ed21b4356b3e380"
+      }
+    ],
+    "direct-mapper-warm-original-browser-loads.jsonl": [
+      {
+        "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/packages/powersync-direct-collection/src/index.ts",
+        "saved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/direct-demand-pre-repair-index.ts",
+        "sha256": "a30e71beb96fade6c5714a300ea76628386dd0b9b1ea04ad60ccf3ee9ae074fa"
+      },
+      {
+        "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/packages/powersync-direct-collection/src/subsets.ts",
+        "saved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/direct-demand-pre-repair-subsets.ts",
+        "sha256": "00fb4cb1976ec8b384d01e1fbb483768204bc40b69a3dcc19ed21b4356b3e380"
+      },
+      {
+        "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/packages/powersync-direct-collection/src/index.ts",
+        "saved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/direct-demand-pre-repair-index.ts",
+        "sha256": "a30e71beb96fade6c5714a300ea76628386dd0b9b1ea04ad60ccf3ee9ae074fa"
+      },
+      {
+        "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/packages/powersync-direct-collection/src/subsets.ts",
+        "saved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/direct-demand-pre-repair-subsets.ts",
+        "sha256": "00fb4cb1976ec8b384d01e1fbb483768204bc40b69a3dcc19ed21b4356b3e380"
+      }
+    ],
+    "direct-mapper-no-guard-final-node-loads.jsonl": [
+      {
+        "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/packages/powersync-direct-collection/src/index.ts",
+        "saved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/direct-mapper-no-guard-index.ts",
+        "sha256": "1ec1defd6f1584be75b647f243c820f31db0b1e03eaa7fabaf3185b27c4076c1"
+      },
+      {
+        "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/packages/powersync-direct-collection/src/subsets.ts",
+        "saved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/direct-mapper-no-guard-subsets.ts",
+        "sha256": "07f180d43102a271723d5d4e2b5e3a4ee0fc1e23e41f8d5f99bdb20fd3fa91af"
+      }
+    ],
+    "direct-mapper-no-guard-final-browser-loads.jsonl": [
+      {
+        "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/packages/powersync-direct-collection/src/index.ts",
+        "saved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/direct-mapper-no-guard-index.ts",
+        "sha256": "1ec1defd6f1584be75b647f243c820f31db0b1e03eaa7fabaf3185b27c4076c1"
+      },
+      {
+        "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/packages/powersync-direct-collection/src/subsets.ts",
+        "saved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/direct-mapper-no-guard-subsets.ts",
+        "sha256": "07f180d43102a271723d5d4e2b5e3a4ee0fc1e23e41f8d5f99bdb20fd3fa91af"
+      },
+      {
+        "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/packages/powersync-direct-collection/src/index.ts",
+        "saved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/direct-mapper-no-guard-index.ts",
+        "sha256": "1ec1defd6f1584be75b647f243c820f31db0b1e03eaa7fabaf3185b27c4076c1"
+      },
+      {
+        "id": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/packages/powersync-direct-collection/src/subsets.ts",
+        "saved": "/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/direct-mapper-no-guard-subsets.ts",
+        "sha256": "07f180d43102a271723d5d4e2b5e3a4ee0fc1e23e41f8d5f99bdb20fd3fa91af"
+      }
+    ]
+  },
+  "actualInputTraces": {
+    "node": [
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 2,
+        "quietTurns": 4
+      },
+      {
+        "name": "receipt-held",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "common-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 2,
+        "quietTurns": 4
+      },
+      {
+        "event": "before release",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "common-23"
+        ],
+        "errors": 1
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 2,
+        "quietTurns": 4
+      },
+      {
+        "name": "failed-visible-load",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "common-23"
+        ],
+        "errors": 1,
+        "status": "ready"
+      },
+      {
+        "name": "source-cleaned-up",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "cleaned-up"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 2,
+        "quietTurns": 4
+      },
+      {
+        "name": "empty-baseline-confirmed",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "right-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 3,
+        "quietTurns": 4
+      },
+      {
+        "name": "empty-baseline-retired",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 4,
+        "quietTurns": 4
+      },
+      {
+        "name": "receipt-held",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 4,
+        "quietTurns": 4
+      },
+      {
+        "event": "before release",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 1
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 4,
+        "quietTurns": 4
+      },
+      {
+        "name": "failed-visible-load",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 1,
+        "status": "ready"
+      },
+      {
+        "name": "source-cleaned-up",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "cleaned-up"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 2,
+        "quietTurns": 4
+      },
+      {
+        "name": "receipt-held",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "common-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 2,
+        "quietTurns": 4
+      },
+      {
+        "event": "before release",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "common-23"
+        ],
+        "errors": 1
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 2,
+        "quietTurns": 4
+      },
+      {
+        "name": "failed-visible-load",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "common-23"
+        ],
+        "errors": 1,
+        "status": "ready"
+      },
+      {
+        "name": "source-cleaned-up",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "cleaned-up"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 2,
+        "quietTurns": 4
+      },
+      {
+        "name": "receipt-held",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "common-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 2,
+        "quietTurns": 4
+      },
+      {
+        "event": "before release",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "common-23"
+        ],
+        "errors": 1
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 2,
+        "quietTurns": 4
+      },
+      {
+        "name": "failed-visible-load",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "common-23"
+        ],
+        "errors": 1,
+        "status": "ready"
+      },
+      {
+        "name": "source-cleaned-up",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "cleaned-up"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 2,
+        "quietTurns": 4
+      },
+      {
+        "name": "empty-baseline-confirmed",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "right-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 3,
+        "quietTurns": 4
+      },
+      {
+        "name": "empty-baseline-retired",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 4,
+        "quietTurns": 4
+      },
+      {
+        "name": "receipt-held",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 4,
+        "quietTurns": 4
+      },
+      {
+        "event": "before release",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 1
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 4,
+        "quietTurns": 4
+      },
+      {
+        "name": "failed-visible-load",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 1,
+        "status": "ready"
+      },
+      {
+        "name": "source-cleaned-up",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "cleaned-up"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 2,
+        "quietTurns": 4
+      },
+      {
+        "name": "empty-baseline-confirmed",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "right-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 3,
+        "quietTurns": 4
+      },
+      {
+        "name": "empty-baseline-retired",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 4,
+        "quietTurns": 4
+      },
+      {
+        "name": "receipt-held",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 4,
+        "quietTurns": 4
+      },
+      {
+        "event": "before release",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 1
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 4,
+        "quietTurns": 4
+      },
+      {
+        "name": "failed-visible-load",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 1,
+        "status": "ready"
+      },
+      {
+        "name": "source-cleaned-up",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "cleaned-up"
+      }
+    ],
+    "browser": [
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 3,
+        "quietTurns": 4
+      },
+      {
+        "name": "receipt-held",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 2,
+        "streams": [],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 3,
+        "quietTurns": 4
+      },
+      {
+        "event": "before release",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 2,
+        "streams": [],
+        "errors": 0
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 5,
+        "quietTurns": 4
+      },
+      {
+        "name": "failed-visible-load",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "ready"
+      },
+      {
+        "name": "source-cleaned-up",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "cleaned-up"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 4,
+        "quietTurns": 4
+      },
+      {
+        "name": "empty-baseline-confirmed",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "right-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 5,
+        "quietTurns": 4
+      },
+      {
+        "name": "empty-baseline-retired",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 6,
+        "quietTurns": 4
+      },
+      {
+        "name": "receipt-held",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 6,
+        "quietTurns": 4
+      },
+      {
+        "event": "before release",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 1
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 6,
+        "quietTurns": 4
+      },
+      {
+        "name": "failed-visible-load",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 1,
+        "status": "ready"
+      },
+      {
+        "name": "source-cleaned-up",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "cleaned-up"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 3,
+        "quietTurns": 4
+      },
+      {
+        "name": "receipt-held",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 2,
+        "streams": [],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 3,
+        "quietTurns": 4
+      },
+      {
+        "event": "before release",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 2,
+        "streams": [],
+        "errors": 0
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 5,
+        "quietTurns": 4
+      },
+      {
+        "name": "failed-visible-load",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "ready"
+      },
+      {
+        "name": "source-cleaned-up",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "cleaned-up"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 3,
+        "quietTurns": 4
+      },
+      {
+        "name": "receipt-held",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 2,
+        "streams": [],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 3,
+        "quietTurns": 4
+      },
+      {
+        "event": "before release",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 2,
+        "streams": [],
+        "errors": 0
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 5,
+        "quietTurns": 4
+      },
+      {
+        "name": "failed-visible-load",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "ready"
+      },
+      {
+        "name": "source-cleaned-up",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "cleaned-up"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 4,
+        "quietTurns": 4
+      },
+      {
+        "name": "empty-baseline-confirmed",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "right-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 5,
+        "quietTurns": 4
+      },
+      {
+        "name": "empty-baseline-retired",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 6,
+        "quietTurns": 4
+      },
+      {
+        "name": "receipt-held",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 6,
+        "quietTurns": 4
+      },
+      {
+        "event": "before release",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 1
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 6,
+        "quietTurns": 4
+      },
+      {
+        "name": "failed-visible-load",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 1,
+        "status": "ready"
+      },
+      {
+        "name": "source-cleaned-up",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "cleaned-up"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 4,
+        "quietTurns": 4
+      },
+      {
+        "name": "empty-baseline-confirmed",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "right-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 5,
+        "quietTurns": 4
+      },
+      {
+        "name": "empty-baseline-retired",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 6,
+        "quietTurns": 4
+      },
+      {
+        "name": "receipt-held",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 0,
+        "status": "ready"
+      },
+      {
+        "event": "received",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "provider",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 1,
+        "deliveredRequest": 6,
+        "quietTurns": 4
+      },
+      {
+        "event": "before release",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 1,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 1
+      },
+      {
+        "event": "continued",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "cut": "applied",
+        "pendingSDK": 0,
+        "pendingStorage": [],
+        "pendingReceipts": 0,
+        "deliveredRequest": 6,
+        "quietTurns": 4
+      },
+      {
+        "name": "failed-visible-load",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [
+          "left-23"
+        ],
+        "errors": 1,
+        "status": "ready"
+      },
+      {
+        "name": "source-cleaned-up",
+        "history": {
+          "coordinate": 23,
+          "rowCount": 1,
+          "value": 5,
+          "kind": "settlement",
+          "timing": "before-application",
+          "baseline": "confirmed-empty"
+        },
+        "pendingReceipts": 0,
+        "streams": [],
+        "errors": 1,
+        "status": "cleaned-up"
+      }
+    ]
+  },
+  "artifactsSHA256": {
+    ".review-2377/direct-mapper-abort-full-final-v3-node26.log": "e357f24eece23e3044a98c5e51fe3344d9c67609cfa80f63382f341d524d371d",
+    ".review-2377/direct-mapper-abort-full-final-v3-browser.log": "5fb5181474efa8b3558d5834e79cb5cc868f7e91946865bf711ffe84923abea3",
+    ".review-2377/direct-mapper-warm-original-node26.log": "02d271d29e4818f13be1c620851ac23a735713d33113ded5748c0fbc73c33519",
+    ".review-2377/direct-mapper-warm-original-browser.log": "498736c07682b8499ceed74e43398d711780f024481babe82bd1a7400797c208",
+    ".review-2377/direct-mapper-no-guard-final-node26.log": "12133a3459b7658f36a0b8156473687a0442c14df42b70ff1022be60e89962fd",
+    ".review-2377/direct-mapper-no-guard-final-browser.log": "f7086ad5d881d931af67c51ddfc31bf55a7987ef46cc0992fe78f201b9e2da96",
+    ".review-2377/direct-mapper-handoff-cold-warm-node.log": "127446378d89c8c678700e81fd6367eb75cd86e0d69e762064579b0b8effc93a",
+    ".review-2377/direct-mapper-handoff-cold-warm-browser.log": "034123a736b57eb28fb1b1224b3411d80c9ae51b61ee2f88faa3592010d2c8d9",
+    ".review-2377/direct-saved-source.config.ts": "332010ab64845f970c91359e844add3847edf3071eed4442ebef12722113ce6e",
+    ".review-2377/direct-mapper-browser-source.config.ts": "3d80db6f4ea15847470701a1a0488e07891b95171c2d3c68b5f276826d24a617",
+    ".review-2377/direct-mapper-browser-source-plugin.ts": "7731c5e184c23b2ddb75b10493f2184c5af2f2942b6908e5088b5082d00a2a14",
+    ".review-2377/direct-mapper-trace-plugin.ts": "0e28e880c95203502cca39b939925c5a0e88cd333131acdb29d2c5193648f681",
+    ".review-2377/direct-mapper-trace-v5-plugin.ts": "9edaf1be6d56a7fa43c9b57c2c5d8c817e46e79869f06e9db59ac67ed7b971b8",
+    ".review-2377/direct-mapper-source-v5-plugin.ts": "53eb0a75a44538f9df1f35ab865948b431ce2a3f72d35980fc90666f2c61000d",
+    ".review-2377/direct-mapper-trace-v5-node.config.ts": "3db2af5cacba23d01656b55dd599e12d3b79eaba3c5e13370c06f10081223ace",
+    ".review-2377/direct-mapper-trace-v5-browser.config.ts": "4b0c9d93db72adc53b0fb6942b40028ccd6588a55e8e9dea12769bdc5a579932"
+  }
+}

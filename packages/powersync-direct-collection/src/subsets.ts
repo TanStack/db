@@ -15,7 +15,7 @@ export type GetSubscriptions = (
   options: LoadSubsetOptions,
 ) => ReadonlyArray<StreamSubscription>
 
-/** Reports stream errors of subsets that have loaded, by their lease. */
+/** Reports stream errors after provider synchronization, by their lease. */
 export interface SubsetErrors {
   onError: (lease: StreamLease, error: StreamError) => void
   /** The lease was released, so its stream errors no longer apply. */
@@ -26,18 +26,21 @@ export interface SubsetErrors {
 export function createSubsetHandlers(
   client: PowerSyncClient,
   getSubscriptions: GetSubscriptions,
-  applied: () => SyncAppliedReceipt,
+  applied: (streams?: ReadonlyArray<StreamSubscription>) => SyncAppliedReceipt,
   errors: SubsetErrors,
 ): SyncConfigRes & { cleanup: CleanupFn } {
   type Acquisition = {
     streamLease: StreamLease
     abort: AbortController
-    loaded: boolean
+    synced: boolean
     loading?: Promise<void>
     removeListener: () => void
   }
   const acquisitions = new Map<LoadSubsetOptions, Acquisition>()
   let active = true
+  const assertActive = () => {
+    if (!active) throw new Error('PowerSync collection is not syncing')
+  }
   // Releases only this acquisition: a later load of the same options may
   // have replaced it.
   const release = (options: LoadSubsetOptions, acquisition?: Acquisition) => {
@@ -51,7 +54,7 @@ export function createSubsetHandlers(
   const unloadSubset = (options: LoadSubsetOptions) =>
     release(options, acquisitions.get(options))
   const loadSubset = (options: LoadSubsetOptions): Promise<void> => {
-    if (!active) throw new Error('PowerSync collection is not syncing')
+    assertActive()
     options.signal?.throwIfAborted()
     // Loads of the same options share one acquisition: a later load waits for
     // the current one, and acquires again only if that one failed.
@@ -59,10 +62,12 @@ export function createSubsetHandlers(
     if (current) return current.catch(() => loadSubset(options))
     // Mapping failures occur before taking ownership of resources.
     const streams = getSubscriptions(options)
+    assertActive()
+    options.signal?.throwIfAborted()
     const streamLease = client.acquireStreams(streams, {
       // A failing load rejects loadSubset instead.
       onError: (error) => {
-        if (acquisition.loaded) errors.onError(streamLease, error)
+        if (acquisition.synced) errors.onError(streamLease, error)
       },
     })
     const abort = new AbortController()
@@ -70,7 +75,7 @@ export function createSubsetHandlers(
     const acquisition: Acquisition = {
       streamLease,
       abort,
-      loaded: false,
+      synced: false,
       removeListener: () =>
         options.signal?.removeEventListener('abort', onAbort),
     }
@@ -80,11 +85,12 @@ export function createSubsetHandlers(
     return (acquisition.loading = (async () => {
       try {
         await queued
+        abort.signal.throwIfAborted()
+        acquisition.synced = true
         // Unlike confirmWrites(), loadSubset promises visible data. Never await
         // this receipt in the stream delivery callback itself.
-        await applied()
+        await applied(streams)
         abort.signal.throwIfAborted()
-        acquisition.loaded = true
       } catch (error) {
         // A shared collection commit cannot be canceled by just one observer.
         // If it was already queued, let it become visible before settling the

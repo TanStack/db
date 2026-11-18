@@ -1,0 +1,66 @@
+{
+  "scope": "RxDB actual persisted initial-receipt receiving; test-only baseline",
+  "source_sha256": "c78f7409f9e539a6bf575718f36a91309c191b18638be29a7d87b481914e65f7",
+  "files": [
+    {
+      "path": "packages/db-adapter-conformance/tests/persisted-startup-host.ts",
+      "sha256": "181bdd316e64db99c0c9a779eb3d712817dfc47c7d1f92d8b51ad6bd18741e0a"
+    },
+    {
+      "path": "packages/powersync-direct-collection/tests/initial-receipt-oracle-suite.ts",
+      "sha256": "8235a59f906073dea22f6f66f679353bb5c7cda9a88d849ab9d713fc2afc20f3"
+    },
+    {
+      "path": "packages/powersync-direct-collection/tests/initial-receipt-oracle.ts",
+      "sha256": "c75895abae5fe1e8485b8bcae83e25681cfddcce8f8883ba3b1b281cec79b4c1"
+    },
+    {
+      "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-driver.ts",
+      "sha256": "a00f29653ccaae8c3be8eb67f64ccf5fa81f77b4555d4ef94b210d3fe59314d0"
+    },
+    {
+      "path": "packages/rxdb-db-collection/src/rxdb.ts",
+      "sha256": "c78f7409f9e539a6bf575718f36a91309c191b18638be29a7d87b481914e65f7"
+    },
+    {
+      "path": "packages/rxdb-db-collection/tests/eager-reload-driver.ts",
+      "sha256": "f68c08cb1b959e14135dc07d90dda3b0d5386c451db4c743f2dde5f2421b2374"
+    },
+    {
+      "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-driver.ts",
+      "sha256": "0ec129d65209849214ad25b5bac472c3364183cc2e79f48b3662108f22869977"
+    },
+    {
+      "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-node-driver.ts",
+      "sha256": "f7bd9e7f4df17358b702f266bb47097f364718c2a9ae2b9eb3c5ce5cfda0bb49"
+    },
+    {
+      "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-oracle.browser.test.ts",
+      "sha256": "cfc54e6215a5cb24264d2837ef4d65609075ba5e330dc4c166ee414b62a214c9"
+    },
+    {
+      "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-oracle.property.test.ts",
+      "sha256": "a2f2084cbc8a1a9826d6c211ea14bce468f89e7a2dc0873b14f8de3b3c2c579c"
+    },
+    {
+      "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+      "sha256": "affa370a5bdbc85f5b976176b4722e8edb6c21c8c55f1c0ea28ffda4c50d16f9"
+    },
+    {
+      "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.html",
+      "sha256": "1976df534cc024a527ca2c43b08d68621aca35b6b1d06202343b52f0766e9b78"
+    },
+    {
+      "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+      "sha256": "cc5eaa98f117f7428b26226a804ef6c1e058cc337b05484dfbbd8bed99fd71b2"
+    },
+    {
+      "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.tsconfig.json",
+      "sha256": "d62d528ee92a25f873b853f2a7f7e2a60bbaa177be13e1b99f74a6c9cd903cff"
+    },
+    {
+      "path": "packages/rxdb-db-collection/vitest.browser-oracles.config.ts",
+      "sha256": "3e3af9b24c33b14ab18701c2d012bb8f6e60c5f164450c138ac5bf9a6f495c9c"
+    }
+  ]
+}

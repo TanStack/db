@@ -1,0 +1,78 @@
+{
+  "stage": "Pre-edit v4 original gate; source remains unchanged at separately approved earlier repairs. Both receiving hosts run all31 histories and reject28 by semantic OracleViolation. Initial browser sandbox bind failure is not semantic evidence.",
+  "recordedAt": "2026-11-17T17:23:58.154943+00:00",
+  "manifest": "docs/contributing/oracle-reviews/2026-11-17-powersync-direct-persisted-demand-test-snapshot-v4.json",
+  "manifestSha256": "3a9f82aa91f12b25b219e1b0679711c4770112ba906f23592eee57ba1477100b",
+  "productionSources": {
+    "packages/powersync-direct-collection/src/index.ts": "a30e71beb96fade6c5714a300ea76628386dd0b9b1ea04ad60ccf3ee9ae074fa",
+    "packages/powersync-direct-collection/src/subsets.ts": "00fb4cb1976ec8b384d01e1fbb483768204bc40b69a3dcc19ed21b4356b3e380"
+  },
+  "receivers": {
+    "node-sqlite": {
+      "log": ".review-2377/direct-demand-node-refresh-v4-original-gate.log",
+      "exit": 1,
+      "tests": 40,
+      "passed": 12,
+      "semanticMismatches": 28,
+      "instrumentFailures": 0,
+      "seconds": 30.63,
+      "mismatchesByCheckpointAndLaw": {
+        "before deadline / persisted demand coverage": 7,
+        "before deadline / persisted demand durability": 20,
+        "after deadline / persisted demand coverage": 1
+      },
+      "reach": {
+        "covered offline": 8,
+        "uncovered offline": 20,
+        "covered but short of rows": 3,
+        "window covered offline": 6,
+        "window holds other rows": 3,
+        "tie-boundary load uncovered": 2,
+        "covered load waits for the deadline": 5,
+        "uncovered load fails with its upstream": 6,
+        "completed exact first load": 16,
+        "completed empty first load": 3,
+        "pending exact first load": 3,
+        "failed exact first load": 3,
+        "overlapping first load": 9,
+        "closed and reopened storage": 31,
+        "exact remote refresh omits a saved row": 2,
+        "other demand checkpoint after saved load": 2,
+        "coverage recorded twice": 2
+      }
+    },
+    "chromium-opfs": {
+      "log": ".review-2377/direct-demand-browser-refresh-v4-original-gate-escalated.log",
+      "exit": 1,
+      "tests": 38,
+      "passed": 10,
+      "semanticMismatches": 28,
+      "instrumentFailures": 0,
+      "seconds": 47.66,
+      "mismatchesByCheckpointAndLaw": {
+        "before deadline / persisted demand coverage": 7,
+        "before deadline / persisted demand durability": 20,
+        "after deadline / persisted demand coverage": 1
+      },
+      "reach": {
+        "covered offline": 8,
+        "uncovered offline": 20,
+        "covered but short of rows": 3,
+        "window covered offline": 6,
+        "window holds other rows": 3,
+        "tie-boundary load uncovered": 2,
+        "covered load waits for the deadline": 5,
+        "uncovered load fails with its upstream": 6,
+        "completed exact first load": 16,
+        "completed empty first load": 3,
+        "pending exact first load": 3,
+        "failed exact first load": 3,
+        "overlapping first load": 9,
+        "closed and reopened storage": 31,
+        "exact remote refresh omits a saved row": 2,
+        "other demand checkpoint after saved load": 2,
+        "coverage recorded twice": 2
+      }
+    }
+  }
+}

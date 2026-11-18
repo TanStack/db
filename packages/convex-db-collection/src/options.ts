@@ -45,6 +45,7 @@ export function createConvexOptions<
   const sync: SyncConfig<TItem, TKey> = {
     rowUpdateMode: `full`,
     sync: ({
+      collection,
       begin,
       write,
       commit,
@@ -76,6 +77,9 @@ export function createConvexOptions<
       // A subscription may fail before any caller asks to await its source.
       void firstResult.catch(() => {})
       const accepting = new Set<Promise<void>>()
+      // A wrapping sync may defer whole proposals before core accepts them.
+      // Keep their ordered keyed effects, including deletes, until handoff.
+      const proposals = new Set<Map<TKey, TItem | undefined>>()
       const fail = (error: unknown, terminal = false): void => {
         if (!active || stopped) return
         syncError = error
@@ -123,44 +127,72 @@ export function createConvexOptions<
           }
           next.set(key, row)
         }
-        if (
-          initialized &&
-          next.size === previous.size &&
-          [...next].every(([key, row]) => previous.get(key) === row)
-        ) {
+        const baseline =
+          syncMode === `on-demand`
+            ? new Map(collection._state.acceptedSyncedEntries())
+            : previous
+        if (syncMode === `on-demand`)
+          for (const proposal of proposals)
+            for (const [key, row] of proposal)
+              if (row === undefined) baseline.delete(key)
+              else baseline.set(key, row)
+        const changes = new Map<TKey, TItem | undefined>()
+        for (const [key, row] of next)
+          if (!initialized || !previous.has(key) || baseline.get(key) !== row)
+            changes.set(key, row)
+        for (const [key, row] of baseline)
+          if (
+            !next.has(key) &&
+            (syncMode !== `on-demand` ||
+              previous.has(key) ||
+              subscription?.isCurrentRowInScope?.(row))
+          )
+            changes.set(key, undefined)
+        if (initialized && changes.size === 0) {
+          previous = next
           syncError = undefined
           if (ready) reportHealthy()
           if (visible === true) markValidReady()
           return
         }
         begin()
-        // A restarted run replaces retained or hydrated data, including an
-        // empty first result. Later results use keyed changes.
-        if (!initialized) truncate()
-        for (const [key, row] of next) {
-          if (!previous.has(key) || !initialized) {
-            write({ type: `insert`, value: row })
-          } else if (previous.get(key) !== row) {
-            write({ type: `update`, value: row })
-          }
-        }
-        for (const key of previous.keys()) {
-          if (!next.has(key)) write({ type: `delete`, key })
+        const replace = !initialized && syncMode !== `on-demand`
+        if (replace) truncate()
+        for (const [key, row] of changes) {
+          if (row === undefined) write({ type: `delete`, key })
+          else
+            write({
+              type: replace || !baseline.has(key) ? `insert` : `update`,
+              value: row,
+            })
         }
         previous = next
         initialized = true
         syncError = undefined
         if (ready) reportHealthy()
-        const receipt = commit()
+        // Register before commit: publishing can reenter with a newer result.
+        if (syncMode === `on-demand`) proposals.add(changes)
+        let receipt: ReturnType<typeof commit>
+        try {
+          receipt = commit()
+        } catch (error) {
+          proposals.delete(changes)
+          throw error
+        }
         visible = receipt
         // Never await visibility from a mutation handler: DB may hold it until
         // that same optimistic transaction settles.
         const accepted = whenSyncAccepted(receipt)
-        if (accepted !== true) {
+        if (accepted === true) proposals.delete(changes)
+        else {
           accepting.add(accepted)
           void accepted.then(
-            () => accepting.delete(accepted),
+            () => {
+              proposals.delete(changes)
+              accepting.delete(accepted)
+            },
             (error) => {
+              proposals.delete(changes)
               accepting.delete(accepted)
               // Later diffs may depend on this rejected source proposal.
               // A new sync run must establish an authoritative base again.
@@ -236,9 +268,12 @@ export function createConvexOptions<
         subscription = subscribe(receive, fail)
         // A failure during subscription comes before it can be released.
         if (stopped) release()
-        // Validate subscription construction before readiness. The empty lazy
-        // run still precedes subset activation, avoiding first-page replay.
-        if (syncMode === `on-demand`) receive([] as TResult)
+        // A lazy run is ready before demand, but has no authoritative result
+        // yet. Keep restored rows until actual provider evidence supersedes them.
+        if (syncMode === `on-demand`) {
+          markValidReady()
+          resolveFirst()
+        }
         const value = subscription.getCurrentValue()
         if (value !== undefined) receive(value)
       } catch (error) {

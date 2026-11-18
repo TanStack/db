@@ -132,7 +132,7 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
       collection,
     }) => {
       const controller = new AbortController()
-      let first = true
+      let replacePending = true
       // An eager sync run shows no rows until its streams have synced: the
       // client may still hold rows from an earlier run. A run without streams
       // has nothing to wait for and shows the rows the client already holds.
@@ -143,11 +143,10 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
       let unsubscribeStatus = () => {}
       let lease: StreamLease | undefined
       let subsets: ReturnType<typeof createSubsetHandlers> | undefined
-      // The open failure of each source: the connection, and each lease. A
-      // source shows its first failure until it recovers; later failures of
-      // the same outage do not replace it.
+      // The connection keeps its first failure. Every distinct stream failure
+      // stays open until its lease recovers or releases its final claim.
       let connectionError: Error | undefined
-      const streamErrors = new Map<StreamLease, StreamError>()
+      const streamErrors = new Map<StreamLease, Set<StreamError>>()
 
       const cleanup = () => {
         if (!active) return
@@ -158,10 +157,10 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
         lease?.release()
         unlisten()
       }
-      const stop = (error: Error) => {
+      const stop = (cause: unknown) => {
         if (!active) return
         cleanup()
-        fail(error)
+        fail(cause)
       }
       // The client retries failed connections: before the first ready the
       // collection keeps loading, and after it the outage is reported.
@@ -175,14 +174,20 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
       const onStreamError = (source: StreamLease, error: StreamError) => {
         if (!active) return
         if (collection.status !== 'ready') return stop(error)
-        streamErrors.set(source, error)
+        streamErrors.set(
+          source,
+          new Set([...(streamErrors.get(source) ?? []), error]),
+        )
         reportError(error)
       }
       const clearStreamError = (source: StreamLease) => {
         const previous = streamErrors.get(source)
         if (!active || !previous) return
         streamErrors.delete(source)
-        reportHealthy(previous)
+        for (const error of previous) {
+          if ([...streamErrors.values()].every((errors) => !errors.has(error)))
+            reportHealthy(error)
+        }
       }
       // The client enters `ready` when a full checkpoint is applied after
       // (re)connecting, and each lease's `waitForSync()` then settles at once
@@ -193,12 +198,16 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
         const sources = new Set(streamErrors.keys())
         if (lease) sources.add(lease)
         Promise.all(
-          [...sources].map((source) =>
-            source.waitForSync().then(() => clearStreamError(source)),
-          ),
+          [...sources].map((source) => {
+            const previous = streamErrors.get(source)
+            return source.waitForSync().then(() => {
+              if (streamErrors.get(source) === previous)
+                clearStreamError(source)
+            })
+          }),
         ).then(
           () => {
-            if (!active || !connectionError) return
+            if (!active || !connectionError || streamErrors.size) return
             reportHealthy(connectionError)
             connectionError = undefined
           },
@@ -213,10 +222,13 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
         try {
           applyChanges(changes)
         } catch (error) {
-          stop(error instanceof Error ? error : new Error(String(error)))
+          stop(error)
         }
       }
-      const applyChanges = (changes: TableChanges) => {
+      const applyChanges = (
+        changes: TableChanges,
+        replace = replacePending && !onDemand,
+      ) => {
         const writes = [...changes].map(([id, row]) => {
           if (row == null) return { type: 'delete' as const, key: id }
           const value = options.parse({ ...row, id })
@@ -224,22 +236,48 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
             throw new Error('parse must preserve the PowerSync row id')
           return { type: 'update' as const, value }
         })
-        if (!first && !writes.length) return
+        if (!replace && !writes.length) return
+        if (replace) replacePending = false
         begin()
-        // The initial snapshot replaces earlier rows, readiness is tracked separately.
-        if (first) truncate({ markReady: false })
+        // A confirmed table replaces earlier rows; readiness stays separate.
+        if (replace) truncate({ markReady: false })
         for (const operation of writes) write(operation)
         const applied = commit(controller.signal)
         lastApplied = applied
-        first = false
         // Never block ingestion on application: TanStack can hold this receipt
         // behind a mutation handler which is itself waiting for confirmWrites().
         if (applied !== true) {
-          applied.then(undefined, (cause) =>
-            stop(cause instanceof Error ? cause : new Error(String(cause))),
-          )
+          applied.then(undefined, stop)
         }
       }
+
+      if (onDemand) {
+        subsets = createSubsetHandlers(
+          client,
+          options.getSubscriptions,
+          (streams) => {
+            if (active && replacePending && streams?.length) {
+              try {
+                applyChanges(client.tableSnapshot(options.table), true)
+              } catch (error) {
+                stop(error)
+                throw error
+              }
+            }
+            return lastApplied
+          },
+          { onError: onStreamError, onRelease: clearStreamError },
+        )
+      }
+      // Handler ownership exists before listen can synchronously refuse a
+      // cached row. Even a failed startup returns valid on-demand handlers.
+      const handlers = subsets
+        ? {
+            loadSubset: subsets.loadSubset,
+            unloadSubset: subsets.unloadSubset,
+            cleanup,
+          }
+        : cleanup
 
       // Delivers the current rows synchronously, so a parse error may already
       // have stopped the run when this returns.
@@ -249,17 +287,10 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
       })
       if (controller.signal.aborted) {
         unlisten()
-        return
+        return handlers
       }
       unsubscribeStatus = client.subscribeStatus(onCheckpointApplied)
-      if (onDemand) {
-        subsets = createSubsetHandlers(
-          client,
-          options.getSubscriptions,
-          () => lastApplied,
-          { onError: onStreamError, onRelease: clearStreamError },
-        )
-      } else {
+      if (!onDemand) {
         const eager = client.acquireStreams(options.streams ?? [], {
           onError: (error) => onStreamError(eager, error),
           includeDefaultStreams: options.includeDefaultStreams ?? false,
@@ -268,31 +299,24 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
       }
 
       if (lease) {
-        lease.waitForSync(controller.signal).then(
-          async () => {
+        lease
+          .waitForSync(controller.signal)
+          .then(async () => {
             if (controller.signal.aborted) return
             synced = true
             // The changes until now were skipped, so read the whole table.
             onChanges(client.tableSnapshot(options.table))
             await lastApplied
             if (active) markReady()
-          },
-          // Stream errors are reported through the lease, cancellation needs no handling.
-          () => {},
-        )
+          })
+          .catch(stop)
       } else {
         // Readiness for on-demand data is tracked by each loadSubset promise.
         // Starting the collection itself requires no remote table snapshot.
         markReady()
       }
 
-      return subsets
-        ? {
-            loadSubset: subsets.loadSubset,
-            unloadSubset: subsets.unloadSubset,
-            cleanup,
-          }
-        : cleanup
+      return handlers
     },
   }
 

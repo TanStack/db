@@ -1,7 +1,7 @@
 // We run tests on Node 24, which is missing these methods used by @powersync/standalone-client. This is not an exact
 // polyfill, but good enough to run the client.
 
-function defineMapMethod(name: string, implementation: any) {
+function defineMapMethod(name: string, implementation: unknown) {
   if (name in Map.prototype) return
 
   Object.defineProperty(Map.prototype, name, {

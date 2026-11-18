@@ -1,0 +1,39 @@
+{
+  "purpose": "Pre-edit RED for authoritative provider support after reference-identical public hydration; supersedes zero-batch mechanism constraint",
+  "command": "pnpm exec vitest run tests/lazy-paging-baseline-oracle.property.test.ts --coverage.enabled false --typecheck.enabled false",
+  "cwd": "packages/convex-db-collection",
+  "outcome": {
+    "semantic_failures": 4,
+    "derivative_calibration_baseline_failures": 2,
+    "passed": 74
+  },
+  "defect_property": "convex.lazy-support-baseline",
+  "neighbor_property": "convex.lazy-late-baseline",
+  "fixed_seed": 20261118,
+  "failing_random_seed": 1716152048,
+  "generated_runs_per_campaign": 12,
+  "failure_checkpoint": "provider support before later hydration",
+  "failure": "after provider confirmation, a later public hydration replaces row-100 text",
+  "receivers": [
+    "controlled javascript subscription shape",
+    "controlled react subscription shape"
+  ],
+  "authority": "docs/guides/ssr.md Initial Data; glossary hydration seed/source snapshot",
+  "premises": [
+    "actual public DbClient.applyCollectionChunk on same source Collection",
+    "every cached acquired row reference equals accepted baseline row before provider callback",
+    "provider callback is dispatched before later conflicting public hydration",
+    "row-write count is unrestricted"
+  ],
+  "retired_constraint": "Original support instrument required zero batches after identical callback; this mechanism constraint was removed before repair",
+  "sha256": {
+    "packages/convex-db-collection/src/options.ts": "5eb8da84711c5a102e4ac8521e5878c4e88ebc5cafceaa13bf0ab8060eb0ae4c",
+    "packages/convex-db-collection/src/pagination.ts": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+    "packages/convex-db-collection/src/subscription.ts": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd",
+    "packages/convex-db-collection/tests/lazy-paging-baseline-oracle.property.test.ts": "4e5c99e7d31cba191cffc11fc9be6f11d45f048947c2d117dd920fafacbc9705",
+    "packages/convex-db-collection/tests/lazy-paging-driver.ts": "d423244d181701d050aac9114e996fc1b839852f540aaad6a4715a387262d4ac",
+    "packages/convex-db-collection/tests/lazy-paging-model-oracle.ts": "9e4cd7d8bd5ba580e3e549eba89deb0c4b9dc8795707743df26b7e05c78040cd",
+    "packages/convex-db-collection/tests/lazy-paging-version-model-oracle.ts": "5aee0ba04f556d312e25f03c6077949d47daf6d0e4eae6cd3dad0a9fe9ce86a0",
+    ".review-2377/lazy-baseline-later-support-authority-red.log": "1ec28698b159e4197a82daf24a458795d31791a8809bd96cfe2ec78415f52373"
+  }
+}

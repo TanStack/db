@@ -161,6 +161,8 @@ export const todos = createCollection(
 
 A live query on an on-demand collection is ready once the streams it requested have synced. Queries using the same stream and parameters share one subscription. `parseLoadSubsetOptions` also exposes the query's sorts and limit if your streams need them.
 
+When wrapped with [SQLite persistence](../guides/sqlite-persistence.md#on-demand-collections-offline), an on-demand Collection keeps restored rows while its streams are pending or fail. The first successful load of a nonempty stream list replaces that cache with the PowerSync client's current table. This can evict rows from earlier demands and ends their saved coverage; those demands must load online again. An empty stream list does not authorize cache eviction. Later checkpoints apply their ordinary row changes.
+
 ## Writing Data
 
 PowerSync syncs data from your backend database to clients. Writes are your responsibility: TanStack DB applies them optimistically and calls your mutation handlers to upload them to your backend. After your backend has committed a write to the source database, call `confirmWrites()`. It waits until PowerSync has synced the change back, so the optimistic state is replaced with confirmed data without flickering:
@@ -223,7 +225,7 @@ Errors surface through TanStack DB's collection status and `health` tree. See [L
 
 - If the PowerSync Service rejects a stream subscription, for example because of invalid parameters, the error is a `StreamError`. Its `stream` and `messages` fields describe the problem. A collection whose stream fails before it becomes ready moves to the `error` status, and an on-demand query depending on the stream fails to load. A stream error after that is reported as a `failureReason` while the rows stay available.
 - Connection errors after the collection is ready are reported as a `failureReason` as well, and the client keeps retrying with exponential backoff. The `failureReason` clears once sync works again.
-- If `parse` throws, the collection can no longer stay consistent with the synced data, so it moves to the `error` status. Make sure your backend only produces rows that `parse` accepts.
+- If `parse` throws, synchronization stops. Before readiness the Collection moves to the `error` status; after readiness it keeps its rows and `ready` status and reports `health.error`. Make sure your backend only produces rows that `parse` accepts.
 
 ## Configuration Options
 

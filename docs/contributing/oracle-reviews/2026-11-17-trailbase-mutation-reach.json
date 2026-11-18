@@ -1,0 +1,62 @@
+{
+  "trailbase-mutation-clock-green.log": {
+    "fixed seed 2377": {
+      "delete": 18,
+      "eager": 29,
+      "event-first": 22,
+      "fixed-clock": 33,
+      "fresh-event-response-first": 17,
+      "insert": 18,
+      "old-event-response-first": 21,
+      "on-demand": 31,
+      "response-first": 38,
+      "same-clock-prior-event": 13,
+      "system-clock": 27,
+      "update": 24
+    },
+    "random seed": {
+      "delete": 15,
+      "eager": 30,
+      "event-first": 22,
+      "fixed-clock": 33,
+      "fresh-event-response-first": 17,
+      "insert": 15,
+      "old-event-response-first": 21,
+      "on-demand": 30,
+      "response-first": 38,
+      "same-clock-prior-event": 12,
+      "system-clock": 27,
+      "update": 30
+    }
+  },
+  "trailbase-mutation-clock-browser-green.log": {
+    "fixed seed 2377": {
+      "delete": 18,
+      "eager": 29,
+      "event-first": 22,
+      "fixed-clock": 33,
+      "fresh-event-response-first": 17,
+      "insert": 18,
+      "old-event-response-first": 21,
+      "on-demand": 31,
+      "response-first": 38,
+      "same-clock-prior-event": 13,
+      "system-clock": 27,
+      "update": 24
+    },
+    "random seed": {
+      "delete": 18,
+      "eager": 30,
+      "event-first": 23,
+      "fixed-clock": 32,
+      "fresh-event-response-first": 14,
+      "insert": 18,
+      "old-event-response-first": 23,
+      "on-demand": 30,
+      "response-first": 37,
+      "same-clock-prior-event": 15,
+      "system-clock": 28,
+      "update": 24
+    }
+  }
+}

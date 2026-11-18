@@ -24,12 +24,13 @@
  * - a retried failure (`retry-policy`) fails the open sync response's body,
  *   as a dropped connection does. The client passes that error to every
  *   table listener and reconnects;
- * - the driver does not declare `delivery-error`: the service reports a
- *   stream error for the whole connection, and only a reconnect with other
- *   parameters can resolve it, so no later checkpoint on the same connection
- *   clears it (see the coverage map);
+ * - a `delivery-error` is a complete checkpoint reporting a resolved-stream
+ *   error after readiness. The next healthy checkpoint on the same response
+ *   clears it, even if that checkpoint changes no row;
  * - a provider subscription is a stream lease (`acquireStreams`); its release
- *   is a call of the lease's `release` (LIFE-2, LIFE-10);
+ *   is a call of the lease's `release` (LIFE-2, LIFE-10). The separate resource
+ *   ledger also records the table and status listeners, whose lifetime the
+ *   stream lease alone cannot establish;
  * - the propagation step is the client reading the lines the driver sent
  *   (`settle`), followed by a few event-loop turns for it to apply them.
  *
@@ -81,10 +82,24 @@ class DirectProvider implements ControlledProvider {
   })
   // Release counts, one per lease the adapter acquired.
   private readonly leaseReleases: Array<number> = []
+  private syncRun = 0
+  private readonly resourceReleases: Array<{
+    name: string
+    syncRun: number
+    releases: number
+  }> = []
   // The rows the client holds in its bucket.
   private held = new Map<number, ConformanceRow>()
 
   constructor() {
+    const listen = this.client.listen.bind(this.client)
+    this.client.listen = (table, listener) =>
+      this.recordResource(`table-listener`, listen(table, listener))
+    const subscribeStatus = this.client.subscribeStatus
+    Object.defineProperty(this.client, `subscribeStatus`, {
+      value: (listener: () => void) =>
+        this.recordResource(`status-listener`, subscribeStatus(listener)),
+    })
     // Record each lease the adapter acquires and each release of it.
     const acquire = this.client.acquireStreams.bind(this.client)
     this.client.acquireStreams = (streams, options): StreamLease => {
@@ -92,15 +107,31 @@ class DirectProvider implements ControlledProvider {
       const index = this.leaseReleases.push(0) - 1
       return {
         waitForSync: lease.waitForSync,
-        release: () => {
+        release: this.recordResource(`stream-lease`, () => {
           this.leaseReleases[index]!++
           lease.release()
-        },
+        }),
       }
     }
   }
 
   releases = () => [...this.leaseReleases]
+  resources = () => this.resourceReleases.map((resource) => ({ ...resource }))
+
+  // A Collection sync entry names the run independently of the number or
+  // allocation order of the SDK resources that the adapter acquires in it.
+  enterSyncRun = () => {
+    this.syncRun++
+  }
+
+  private recordResource(name: string, release: () => void): () => void {
+    const resource = { name, syncRun: this.syncRun, releases: 0 }
+    this.resourceReleases.push(resource)
+    return () => {
+      resource.releases++
+      release()
+    }
+  }
 
   // Deliveries go to the open sync request; after a retried failure or a
   // restart, the client opens a new one.
@@ -159,6 +190,20 @@ class DirectProvider implements ControlledProvider {
     this.service.error(error)
   }
 
+  deliveryError = async (error: Error) => {
+    await this.connected()
+    this.service.checkpoint([BUCKET], {
+      streams: [
+        {
+          name: STREAM,
+          is_default: false,
+          errors: [{ subscription: 0, message: error.message }],
+        },
+      ],
+    })
+    this.service.complete()
+  }
+
   /** The propagation step: the client read every line, then applied it. */
   settle = async () => {
     if (this.service.live) await this.service.drained()
@@ -169,15 +214,16 @@ class DirectProvider implements ControlledProvider {
 /** Whether `message` is the oracle's message for injected failure `failure`. */
 function namesFailure(message: string, failure: number): boolean {
   return (
-    /^conformance (provider|transient) failure \d+$/.test(message) &&
-    message.endsWith(` ${failure}`)
+    /^conformance (?:(provider|transient) failure|delivery error) \d+$/.test(
+      message,
+    ) && message.endsWith(` ${failure}`)
   )
 }
 
 export function directConformanceDriver(): EagerLiveSourceDriver {
   return {
     adapter: `@tanstack/powersync-direct-collection (eager)`,
-    capabilities: new Set([`retry-policy`]),
+    capabilities: new Set([`retry-policy`, `delivery-error`]),
     changeCommits: `per-batch`,
     valueKinds: jsonValueKinds,
     // The client creates the StreamError the adapter reports for a stream
@@ -189,14 +235,18 @@ export function directConformanceDriver(): EagerLiveSourceDriver {
         : reported instanceof Error && namesFailure(reported.message, failure),
     create(): EagerLiveSourceFixture {
       const provider = new DirectProvider()
-      const collection = createCollection(
-        powerSyncCollectionOptions<DirectRow>({
-          client: provider.client,
-          table: TABLE,
-          streams: [{ name: STREAM }],
-          parse: (row) => row as DirectRow,
-        }),
-      )
+      const options = powerSyncCollectionOptions<DirectRow>({
+        client: provider.client,
+        table: TABLE,
+        streams: [{ name: STREAM }],
+        parse: (row) => row as DirectRow,
+      })
+      const sync = options.sync.sync
+      options.sync.sync = (params) => {
+        provider.enterSyncRun()
+        return sync(params)
+      }
+      const collection = createCollection(options)
       return {
         collection: observedView(collection, {
           row: ({ id, ...row }: DirectRow) => ({

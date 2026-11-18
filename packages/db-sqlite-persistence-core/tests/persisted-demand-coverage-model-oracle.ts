@@ -150,7 +150,9 @@ export type QuerySpec = FilterSpec | JoinSpec
 export type OfflineUpstream = `never answers` | `fails at once`
 
 export type QueryObservation = {
-  status: `ready` | `loading` | `error`
+  // Record every public lifecycle value, including an unexpected crash or
+  // cleanup. Mapping those values to loading would conceal a law violation.
+  status: CollectionStatus
   rows?: ReadonlyArray<string | Readonly<Record<string, unknown>>>
 }
 
@@ -325,6 +327,55 @@ const isWindow = (spec: QuerySpec) =>
 const loadsOf = (spec: QuerySpec) =>
   `join` in spec ? spec.join.children : (spec.collection ?? `source`)
 
+// Both public-readiness and durable-read observations replay the same source
+// row facts. This projection does not read coverage metadata or production
+// persistence helpers, so a saved row can be judged even for an uncovered load.
+function applySourceRows(
+  event: SourceEvent,
+  rowsIn: (collection: string) => Map<string, RowState>,
+  reach: (state: CoverageReach) => void = () => {},
+): void {
+  const rows = rowsIn(event.collection ?? `source`)
+  if (
+    event.type === `truncate` ||
+    event.type === `generation ends` ||
+    event.type === `scoped recovery starts` ||
+    event.type === `snapshot`
+  )
+    rows.clear()
+  if (event.type === `delete`) rows.delete(event.id)
+  if (event.type === `rows` || event.type === `snapshot`) {
+    for (const [id, state] of event.rows) {
+      const before = rows.get(id)
+      if (before !== undefined && before.group !== state.group)
+        reach(`row moved between demands`)
+      rows.set(id, state)
+    }
+  }
+}
+
+/** The primary model's row projection, also used by durable receiving cuts. */
+export function persistedCoverageRows(
+  events: ReadonlyArray<SourceEvent>,
+  spec: QuerySpec,
+  includeValues = false,
+): Array<string | Record<string, unknown>> {
+  const sqlite = new Map<string, Map<string, RowState>>()
+  const rowsIn = (collection: string) => {
+    let rows = sqlite.get(collection)
+    if (!rows) sqlite.set(collection, (rows = new Map()))
+    return rows
+  }
+  for (const event of events) applySourceRows(event, rowsIn)
+  const selected = readQuery(spec, rowsIn)
+  return includeValues && !(`join` in spec)
+    ? selected.map((id) => ({
+        id,
+        ...rowsIn(spec.collection ?? `source`).get(String(id)),
+      }))
+    : selected
+}
+
 /**
  * The model: replay the source log, then judge each query at the checkpoint
  * from the loads it sent.
@@ -352,25 +403,12 @@ export function expectedObservations(
   const complete = new Set<string>()
   // Demands whose only settlement since their coverage ended was aborted.
   const settledOnlyAborted = new Set<string>()
-  const writeRows = (
-    collection: string,
-    rows: ReadonlyArray<readonly [string, RowState]>,
-  ) => {
-    for (const [id, state] of rows) {
-      const before = rowsIn(collection).get(id)
-      if (before !== undefined && before.group !== state.group) {
-        reach(`row moved between demands`)
-      }
-      rowsIn(collection).set(id, state)
-    }
-  }
   // A truncate, a snapshot, and a generation change empty SQLite and end
   // every coverage record of the Collection.
   const endCoverage = (collection: string, by: CoverageReach) => {
     if ([...records.keys()].some((key) => key.startsWith(`${collection} `))) {
       reach(by)
     }
-    rowsIn(collection).clear()
     complete.delete(collection)
     for (const keys of [records, settledOnlyAborted]) {
       for (const key of [...keys.keys()]) {
@@ -380,6 +418,7 @@ export function expectedObservations(
   }
   for (const event of record.events) {
     const collection = event.collection ?? `source`
+    applySourceRows(event, rowsIn, reach)
     switch (event.type) {
       case `sync run starts`:
         recovering.delete(collection)
@@ -388,10 +427,7 @@ export function expectedObservations(
         complete.add(collection)
         break
       case `rows`:
-        writeRows(collection, event.rows)
-        break
       case `delete`:
-        rowsIn(collection).delete(event.id)
         break
       case `truncate`:
       case `generation ends`:
@@ -403,7 +439,6 @@ export function expectedObservations(
         break
       case `snapshot`:
         endCoverage(collection, `coverage ended by a snapshot`)
-        writeRows(collection, event.rows)
         break
       case `settled`: {
         settledByUpstream.add(event.load)

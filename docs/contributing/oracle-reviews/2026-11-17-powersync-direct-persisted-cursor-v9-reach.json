@@ -1,0 +1,52 @@
+{
+  "node": {
+    "summary": "Tests  115 passed (115)",
+    "logSha256": "903e0bc716b716e1ac0774290c533479b70b781bbfee53bff34325555938aeb5",
+    "campaignUnits": {
+      "fixed seed 2377": 26,
+      "random seed": 26
+    },
+    "normalCampaignReach": {
+      "fixed seed 2377": {
+        "changed cursor reopened offline": 36,
+        "confirmed cursor checkpoint after reopen": 28,
+        "same cursor reopened offline": 13,
+        "saved cursor applied": 49,
+        "saved cursor rejected after eviction": 17
+      },
+      "random seed": {
+        "changed cursor reopened offline": 36,
+        "confirmed cursor checkpoint after reopen": 29,
+        "same cursor reopened offline": 13,
+        "saved cursor applied": 49,
+        "saved cursor rejected after eviction": 16
+      }
+    },
+    "calibrationsPassed": 29
+  },
+  "browser": {
+    "summary": "Tests  115 passed (115)",
+    "logSha256": "09df99ca2fce0139dbc95d7775889b9bdb7a1fab5b018dd8587c062a8d4e9e0d",
+    "campaignUnits": {
+      "fixed seed 2377": 26,
+      "random seed": 26
+    },
+    "normalCampaignReach": {
+      "fixed seed 2377": {
+        "changed cursor reopened offline": 36,
+        "confirmed cursor checkpoint after reopen": 28,
+        "same cursor reopened offline": 13,
+        "saved cursor applied": 49,
+        "saved cursor rejected after eviction": 17
+      },
+      "random seed": {
+        "changed cursor reopened offline": 32,
+        "confirmed cursor checkpoint after reopen": 24,
+        "same cursor reopened offline": 17,
+        "saved cursor applied": 49,
+        "saved cursor rejected after eviction": 15
+      }
+    },
+    "calibrationsPassed": 29
+  }
+}

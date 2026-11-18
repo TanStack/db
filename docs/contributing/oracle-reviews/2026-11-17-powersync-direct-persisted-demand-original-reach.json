@@ -1,0 +1,81 @@
+{
+  "stage": "Original-production real receiving gates before any saved-demand repair",
+  "testSnapshot": "2026-11-17-powersync-direct-persisted-demand-test-snapshot-v2.json",
+  "testSnapshotSHA256": "7a001ec8fd0676c84678ff677564b4f7f4e3fb103b30f768cfd2b7bf2d510634",
+  "sourceSHA256": {
+    "packages/powersync-direct-collection/src/index.ts": "a30e71beb96fade6c5714a300ea76628386dd0b9b1ea04ad60ccf3ee9ae074fa",
+    "packages/powersync-direct-collection/src/subsets.ts": "00fb4cb1976ec8b384d01e1fbb483768204bc40b69a3dcc19ed21b4356b3e380"
+  },
+  "hosts": {
+    "node": {
+      "result": "semantic RED on unchanged new-class production",
+      "tests": {
+        "failed": 24,
+        "passed": 12,
+        "total": 36
+      },
+      "durationSeconds": 25.12,
+      "measuredReach": {
+        "covered offline": 6,
+        "uncovered offline": 18,
+        "covered but short of rows": 3,
+        "window covered offline": 6,
+        "window holds other rows": 3,
+        "tie-boundary load uncovered": 2,
+        "covered load waits for the deadline": 4,
+        "uncovered load fails with its upstream": 6,
+        "completed exact first load": 12,
+        "completed empty first load": 3,
+        "pending exact first load": 3,
+        "failed exact first load": 3,
+        "overlapping first load": 9,
+        "closed and reopened storage": 27
+      },
+      "failureClassification": {
+        "before deadline: persisted demand coverage": 6,
+        "before deadline: persisted demand durability": 17,
+        "after deadline: persisted demand coverage": 1
+      },
+      "setupOrPremiseFailures": 0,
+      "log": ".review-2377/direct-demand-node-amended-original-gate.log"
+    },
+    "browser": {
+      "result": "semantic RED on unchanged new-class production",
+      "tests": {
+        "failed": 24,
+        "passed": 10,
+        "total": 34
+      },
+      "durationSeconds": 41.14,
+      "measuredReach": {
+        "covered offline": 6,
+        "uncovered offline": 18,
+        "covered but short of rows": 3,
+        "window covered offline": 6,
+        "window holds other rows": 3,
+        "tie-boundary load uncovered": 2,
+        "covered load waits for the deadline": 4,
+        "uncovered load fails with its upstream": 6,
+        "completed exact first load": 12,
+        "completed empty first load": 3,
+        "pending exact first load": 3,
+        "failed exact first load": 3,
+        "overlapping first load": 9,
+        "closed and reopened storage": 27
+      },
+      "failureClassification": {
+        "before deadline: persisted demand coverage": 6,
+        "before deadline: persisted demand durability": 17,
+        "after deadline: persisted demand coverage": 1
+      },
+      "setupOrPremiseFailures": 0,
+      "log": ".review-2377/direct-demand-browser-amended-original-gate.log"
+    }
+  },
+  "limits": [
+    "Real installed SDK with controlled HTTP; no deployed-service claim.",
+    "Real disk node:sqlite and real worker/OPFS connection close/reopen; no browser page navigation or process restart.",
+    "Node26 native iterator API run does not establish supported Node24 compatibility.",
+    "No saved-demand source repair yet; the new class remains RED until independent review and production repair."
+  ]
+}

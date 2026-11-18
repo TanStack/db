@@ -128,6 +128,12 @@ export class ConvexProvider implements ControlledProvider {
   readonly client: ConvexClient | ConvexReactClient
   private socketOrUndefined: Socket | undefined
   private readonly registrations: Array<{ releases: number }> = []
+  private readonly ownedResources: Array<{
+    name: string
+    syncRun: number
+    releases: number
+  }> = []
+  private syncRun = 0
   private rows = new Map<number, ConformanceRow>()
   private time = 0
   private querySet = 0
@@ -177,8 +183,15 @@ export class ConvexProvider implements ControlledProvider {
     const counted = (unsubscribe: () => void) => {
       const registration = { releases: 0 }
       this.registrations.push(registration)
+      const resource = {
+        name: `query listener ${this.ownedResources.length + 1}`,
+        syncRun: this.syncRun,
+        releases: 0,
+      }
+      this.ownedResources.push(resource)
       return () => {
         registration.releases++
+        resource.releases++
         unsubscribe()
       }
     }
@@ -289,6 +302,11 @@ export class ConvexProvider implements ControlledProvider {
   releases = () =>
     this.registrations.map((registration) => registration.releases)
 
+  // The receiver stamps resources at actual sync entry. A client may allocate
+  // several listeners in one run, so allocation order is not a run identity.
+  enterSyncRun = () => this.syncRun++
+  resources = () => this.ownedResources.map((resource) => ({ ...resource }))
+
   deliverSnapshot = (rows: ReadonlyArray<ConformanceRow>) => {
     if (!hasDuplicateKey(rows)) this.rows = new Map(rows.map((r) => [r.id, r]))
     this.sendResult(rows)
@@ -360,18 +378,22 @@ export function convexConformanceDriver({
     fieldKinds: VALUE_KINDS,
     create(): EagerLiveSourceFixture {
       const provider = new ConvexProvider(client)
-      const collection = createCollection(
-        convexCollectionOptions({
-          id: `convex-conformance-${++sequence}`,
-          client:
-            client === `wrapped` && provider.client instanceof ConvexClient
-              ? { onUpdate: provider.client.onUpdate.bind(provider.client) }
-              : provider.client,
-          query: rowsQuery,
-          queryArgs: {},
-          getKey: (row) => row.id,
-        }),
-      )
+      const options = convexCollectionOptions({
+        id: `convex-conformance-${++sequence}`,
+        client:
+          client === `wrapped` && provider.client instanceof ConvexClient
+            ? { onUpdate: provider.client.onUpdate.bind(provider.client) }
+            : provider.client,
+        query: rowsQuery,
+        queryArgs: {},
+        getKey: (row) => row.id,
+      })
+      const source = options.sync.sync
+      options.sync.sync = (params) => {
+        provider.enterSyncRun()
+        return source(params)
+      }
+      const collection = createCollection(options)
       return {
         collection: observedView(collection, {
           row: (row) => row,

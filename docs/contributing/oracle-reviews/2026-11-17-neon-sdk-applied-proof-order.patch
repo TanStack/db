@@ -1,0 +1,21 @@
+--- a/packages/realtime/src/client/subscription.ts
++++ b/packages/realtime/src/client/subscription.ts
+@@ -277,6 +277,10 @@
+ 				this.appliedBatches.set(changes, decoded);
+ 			if (reset) this.initialized = true;
+ 			this.snapshot = this.makeSnapshot(data);
++			// Record proof only after installation, before any publication callback
++			// can close this subscription or an already-applied peer.
++			for (const batch of batches)
++				for (const txid of batch.txids) this.transactions.seen(txid);
+ 		};
+ 	}
+ 
+@@ -315,7 +319,6 @@
+ 		if (this.materialized && this.state.status === "live") {
+ 			this.notify(this.changeListeners, this.snapshot);
+ 		}
+-		for (const txid of batch.txids) this.transactions.seen(txid);
+ 	}
+ 
+ 	applyProgress(mvcc: ParsedMvccSnapshot): void {

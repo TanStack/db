@@ -1,0 +1,20 @@
+{
+  "manifestSha256": "8866f227debcc0159b40a994fab76a01f76439758b3120fba2fd40cffce3fa85",
+  "files": {
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-driver.ts": "a154ead5cbc353995fbedf8292dc8fdf9fbf634fcfe0754fbe55e69cafda9b35",
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-history-oracle.ts": "2a9371d461784d3aeda9c6d29b54101f4df3d064158c1c27a084005b9a99b9dc",
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-oracle-suite.ts": "bd230758a3aaafc5342a13767863393876b29b48f049fb9e4a1ca7e3c8444a94",
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-oracle.property.test.ts": "d622e10d81de28933105a1878c2bc1ef2f0641dc4eca0c96da37db0c5f0c4504",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-cursor-persisted-demand-oracle.browser.test.ts": "c75109c31021fc93f1b11732ebb6e2ed55ff4aa1a5b4f540559d3375ce3f3036",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-cursor-persisted-demand.opfs.ts": "08634dc9adec8f9a152a75f0cf87a9f695718e048b6c37505d6af4b8095d08a3",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-cursor-persisted-demand.opfs.html": "f99caaa1809dfd131d7948c8086b7d47f7a87771d18b2bde1c186e0f80e6c8bd",
+    "packages/powersync-direct-collection/tests/persisted-demand-driver.ts": "8317dbeb0a4d3ee91a93b74ac4da629c7cc184fe49b4973bc983af7a0e4b10bc",
+    "packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts": "ac569ff5f1177e8ddace08e8298970c362f42b9f504828c345cd1a534add692c"
+  },
+  "originalSource": {
+    "packages/powersync-direct-collection/src/index.ts": "a30e71beb96fade6c5714a300ea76628386dd0b9b1ea04ad60ccf3ee9ae074fa",
+    "packages/powersync-direct-collection/src/subsets.ts": "00fb4cb1976ec8b384d01e1fbb483768204bc40b69a3dcc19ed21b4356b3e380"
+  },
+  "carryFrom": "2026-11-17-powersync-direct-persisted-cursor-v4-snapshot.json",
+  "amendment": "Shared v11 changes only an empty-mapper diagnostic counter/accessor and main-receiver empty-map observation; cursor uses default nonempty mapper, and both independent reviewers approved carrying v4 original-source evidence. No cursor path semantics or frozen cursor files changed."
+}

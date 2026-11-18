@@ -8,7 +8,7 @@ const config = defineConfig({
     server: { deps: { inline: [`@tanstack/oracles`] } },
     name: packageJson.name,
     include: [`tests/**/*.test.ts`],
-    exclude: [`e2e/**/*`],
+    exclude: [`e2e/**/*`, `tests/*.browser.test.ts`],
     environment: `jsdom`,
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: {
@@ -20,6 +20,7 @@ const config = defineConfig({
         `tests/documented-mutations-oracle.test.ts`,
         `tests/electric-descriptor-isolation-oracle.test.ts`,
         `tests/electric-sdk-delivery-oracle.property.test.ts`,
+        `tests/cross-adapter-*.property.test.ts`,
       ],
     },
   },

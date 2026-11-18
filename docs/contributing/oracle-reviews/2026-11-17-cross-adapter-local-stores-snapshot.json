@@ -1,0 +1,75 @@
+{
+  "head": "92a1493e0f45dbfd1fc3a51460ccb9228d8f787d",
+  "node": "24.19.0",
+  "chrome": "157.0.8103.79",
+  "owned": {
+    "packages/db/tests/local-only-direct-write-oracle.test.ts": "0e268c57fc78b3d95f457f7591af5e05a6d8eea0ce30c2ac1c0703dab5b8611e",
+    "packages/db/tests/local-storage-eager-reload-driver.ts": "9e1124bae2f68f51a50c237472da2aa7f50ced51b9bff5a28441a7a07cc625f7",
+    "packages/db/tests/local-storage-eager-reload-oracle.property.test.ts": "1d8784d7a8baa6f40ca828aaad401a74859da761b255a90b1c2e2e7537e88db1",
+    "packages/db/tests/local-storage-eager-reload-oracle.browser.test.ts": "6c0e62115b3b2f712e506ce8c443f1359e5fe190c90162bc2fa5add780b087ed",
+    "packages/db/tests/local-storage-write-order-driver.ts": "d47b5bdfedec81cef2486f51293fa76ae2787e428d83eb949114882c685909fa",
+    "packages/db/tests/local-storage-write-order-oracle.ts": "71bdd246dfcb6badd8fcbc73753f79f74da6f1f54c350dfaec96838177698328",
+    "packages/db/tests/local-storage-write-order-oracle.test.ts": "5ca9d04624cc2996102173f63f0fc9169eb2af4a6ad70de515615af3d6f9174d",
+    "packages/db/e2e/local-stores-receiving.html": "69bbb6513e0711b8076435a4e4fb151c76791d2ce76d21fb83eb05dae5b39318",
+    "packages/db/e2e/local-stores-receiving.ts": "f98d5b85abd5c7b57f00aa8825a7409dcfdd89214413a7de37166e33e7771dcf",
+    "packages/db/vitest.local-stores.config.ts": "267fb29f0abce4a556411f89f5cb6385db0808288a0ed937edbb8d0d25bbd92a"
+  },
+  "sharedSnapshot": {
+    "packages/db-adapter-conformance/tests/eager-reload-driver.ts": "c8b75b6d43e270fd63ded495519d3ce7864dd7095c09d61dfe70b9a7138e2c55",
+    "packages/db-adapter-conformance/tests/eager-reload-oracle.ts": "9fb47eba5844365189bba85a3fbd6d73c94afdb32af0de6c6c3f0b9bdf47bb34",
+    "packages/db-adapter-conformance/tests/eager-reload-oracle-suite.ts": "234b1c68fd0b282499e3360250f9b795f1083a2bc1fa3adb01e48af7bcbee117",
+    "packages/db/src/local-only.ts": "fea6e26a682a80031d32f045e0141064646a55f16a8e57957c8f25e6389e054e",
+    "packages/db/src/local-storage.ts": "5d1e1e3de35ad066981e4972204e903f8de1a5c98a35c2f207eace37fb30199e"
+  },
+  "logs": {
+    ".review-2377/local-stores-node.log": "1b4580ee492ca003168b5b51565f93aa76e81f6d7b63fff516851e8082681d84",
+    ".review-2377/local-stores-browser.log": "54a6a8682779b2aaa580e73b2ce14a17978f24534ae3cee578855d06f187e8ee",
+    ".review-2377/local-stores-reload-replay.log": "8963eebc0f869d5fd94f80551030eeb410269bb7b935ea7ea3e3542ec5aef7de",
+    ".review-2377/local-stores-handler-replay.log": "6ef032e13731be67e2bd7a2ed57dae6ac8887c9538cbe7d13bc06edca995bde6",
+    ".review-2377/local-stores-browser-replay.log": "c35f5f82b53c9446ce997c4256641b550bbe7aa197fd164d971ee3de567e4120",
+    ".review-2377/local-stores-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ".review-2377/local-stores-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "postIndependentReviewRepair": {
+    "owned": {
+      "packages/db/tests/local-only-direct-write-oracle.test.ts": "0e268c57fc78b3d95f457f7591af5e05a6d8eea0ce30c2ac1c0703dab5b8611e",
+      "packages/db/tests/local-storage-eager-reload-driver.ts": "9e1124bae2f68f51a50c237472da2aa7f50ced51b9bff5a28441a7a07cc625f7",
+      "packages/db/tests/local-storage-eager-reload-oracle.property.test.ts": "1d8784d7a8baa6f40ca828aaad401a74859da761b255a90b1c2e2e7537e88db1",
+      "packages/db/tests/local-storage-eager-reload-oracle.browser.test.ts": "6c0e62115b3b2f712e506ce8c443f1359e5fe190c90162bc2fa5add780b087ed",
+      "packages/db/tests/local-storage-write-order-driver.ts": "17afd52d51823445eed952c61f7c69b624bad0960b60efcf6c65fcf4fec7e65b",
+      "packages/db/tests/local-storage-write-order-oracle.ts": "25c1b4d1878d1d709e452689dfdd8b4832af1ae604ec407b296484f274ffa45f",
+      "packages/db/tests/local-storage-write-order-oracle.test.ts": "5ca9d04624cc2996102173f63f0fc9169eb2af4a6ad70de515615af3d6f9174d",
+      "packages/db/e2e/local-stores-receiving.html": "69bbb6513e0711b8076435a4e4fb151c76791d2ce76d21fb83eb05dae5b39318",
+      "packages/db/e2e/local-stores-receiving.ts": "284f2fe04f44fb14212f708d32e1274a83cf85e5de6be2a0af951927c926e880",
+      "packages/db/vitest.local-stores.config.ts": "49f8c1ab36377053b6ada3e0182925c704214b316ccd0cba5b267e181694536d",
+      "packages/db/tests/oracle-cleanup.ts": "62e00759270c5376ffadcde8eefb8a68763e5c79ca66729268aad9eea3802e61",
+      "packages/db/tests/oracle-cleanup.test.ts": "f60d1977d555723a96fe35f0ce4fc31979ac2f7b8b4286ae3653eb85243a5ac5",
+      "packages/db/tests/local-storage-receiving-cleanup.test.ts": "fec9f9576f5cd916b6160c72ff060cb1ac7ebf7c9e6aeb11999d5cf34e818b7f",
+      "packages/db/tests/local-storage-receiving-cleanup.browser.test.ts": "50260f7fa77a2ceb03e668b9f73902a66cdbea470b954d0e217a0f40ffbf3ebf"
+    },
+    "sharedSnapshot": {
+      "packages/db-adapter-conformance/tests/eager-reload-driver.ts": "87d576816ed9dded748420b2c0b89f631eac8c7a907a8bbae8cf950c15ca960c",
+      "packages/db-adapter-conformance/tests/eager-reload-oracle.ts": "9fb47eba5844365189bba85a3fbd6d73c94afdb32af0de6c6c3f0b9bdf47bb34",
+      "packages/db-adapter-conformance/tests/eager-reload-oracle-suite.ts": "99d9a13aaa64943c288c4022bfe9d66951c8c5ab467475b47b6fde66fdcf62ab",
+      "packages/db/src/local-only.ts": "fea6e26a682a80031d32f045e0141064646a55f16a8e57957c8f25e6389e054e",
+      "packages/db/src/local-storage.ts": "5d1e1e3de35ad066981e4972204e903f8de1a5c98a35c2f207eace37fb30199e"
+    },
+    "logs": {
+      ".review-2377/local-stores-node.log": "00e3c1ecde98350e273d545408e5ff4471d87fe4a8a9d1ac34e40d23b84737da",
+      ".review-2377/local-stores-browser.log": "24df0f5c08b22c52c15aaac90d9d8a636d0e003231efd27a99ad4f481c98be25",
+      ".review-2377/local-stores-reload-replay.log": "8963eebc0f869d5fd94f80551030eeb410269bb7b935ea7ea3e3542ec5aef7de",
+      ".review-2377/local-stores-handler-replay.log": "6ef032e13731be67e2bd7a2ed57dae6ac8887c9538cbe7d13bc06edca995bde6",
+      ".review-2377/local-stores-browser-replay.log": "c35f5f82b53c9446ce997c4256641b550bbe7aa197fd164d971ee3de567e4120",
+      ".review-2377/local-stores-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      ".review-2377/local-stores-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "nodePassed": 1668,
+    "chromiumPassed": 1554
+  },
+  "packageWiring": {
+    "packages/db/package.json": "d0646c7cd4c9d9838a16a31d28b31d1b4dac8160b07d0b5672e7033c3d56f533",
+    "packages/db/tsconfig.json": "7f06e886f360a197d2e012428f9a05a25d046f71ff5cb9c814e33875fc35287e",
+    "packages/db/vite.config.ts": "484750c4b001fa813d9c513f74a40b043d5a3b3865d9da20c8d5829db3f4ae77",
+    ".review-2377/local-stores-default-exclusion.log": "52852b7dbd8a709a3315d34c49ee161ba2b1e0249c6a48e810be6cf5a6ef82b5"
+  }
+}

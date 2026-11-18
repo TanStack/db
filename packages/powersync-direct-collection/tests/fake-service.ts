@@ -1,6 +1,16 @@
-import { expect, vi } from 'vitest'
-
 type Row = Record<string, unknown>
+
+// Waiting belongs to the protocol fixture, so the same service can receive
+// shared oracle histories in Node subprocesses and actual browsers. These
+// predicates observe delivery premises; they compute no expected adapter result.
+async function waitForService(predicate: () => boolean, description: string) {
+  const deadline = Date.now() + 2_000
+  while (!predicate()) {
+    if (Date.now() >= deadline)
+      throw new Error(`PowerSync test service did not ${description}`)
+    await new Promise((resolve) => setTimeout(resolve, 1))
+  }
+}
 
 /**
  * A fake PowerSync service, delivering injectable sync lines through `/sync/stream`.
@@ -60,9 +70,9 @@ export class FakeService {
 
   /** Resolves once the client has read every line sent on the latest request. */
   async drained() {
-    await vi.waitFor(
-      () => expect(this.live ? this.#stream!.desiredSize : 0).toBe(0),
-      { interval: 1 },
+    await waitForService(
+      () => (this.live ? this.#stream!.desiredSize : 0) === 0,
+      'drain the response lines',
     )
   }
 
@@ -77,7 +87,10 @@ export class FakeService {
   }
 
   async waitForRequest(count: number) {
-    await vi.waitFor(() => expect(this.requests.length).toBe(count))
+    await waitForService(
+      () => this.requests.length === count,
+      `receive request ${count} (currently ${this.requests.length})`,
+    )
   }
 
   send(line: unknown) {

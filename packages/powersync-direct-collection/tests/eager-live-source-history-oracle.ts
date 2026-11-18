@@ -4,9 +4,11 @@
  * deliveries and live batches together carry all seven JSON value kinds on
  * both paths. A held row loses its note in the first batch. Two outages
  * follow live batches in a later run; the first has a repeated attempt, and
- * a batch ends each one. Generated coordinates choose keys, titles and
- * values, and a random generated suffix follows. The shared model owns
- * expected row truth. Every invocation returns fresh rows and arrays.
+ * a batch ends each one. Distinct delivery errors precede a changed-row
+ * recovery, and another precedes an unchanged-row recovery on the same
+ * response. Their order varies. Generated coordinates choose keys, titles,
+ * values, and recovery order. The shared model owns expected row truth.
+ * Every invocation returns fresh rows and arrays.
  */
 import { describeValue, jsonValueKinds } from '../../db-adapter-conformance/src'
 import type {
@@ -50,9 +52,14 @@ export function constructDirectEagerHistory(
       type: `upsert` as const,
       row: row(kind, index, note),
     }))
-  // Eight grammar elements; the recurring outage (two attempts, a batch, one
-  // attempt) is one. A suffix of at most four steps keeps the history within
-  // the grammar's twelve elements.
+  // The recurring outage (two attempts, a batch, one attempt) is one grammar
+  // element. Error and recovery steps use the old suffix's four slots,
+  // so this remains a twelve-element history. The independent random campaign
+  // still explores every suffix/order in the full shared grammar.
+  const unchangedRecovery = [
+    { kind: `delivery-error` as const },
+    { kind: `changes` as const, changes: [] },
+  ]
   return [
     { kind: `fail` },
     { kind: `restart` },
@@ -60,6 +67,9 @@ export function constructDirectEagerHistory(
       kind: `snapshot`,
       rows: kinds.slice(0, 4).map((kind, index) => row(kind, index, true)),
     },
+    ...(salt % 2 === 0 ? unchangedRecovery : []),
+    { kind: `delivery-error` },
+    { kind: `delivery-error` },
     // Row 0 is held with a note; this batch removes it.
     { kind: `changes`, changes: upserts(0, 3, false) },
     { kind: `transient-failure`, variant: 0 },
@@ -67,11 +77,11 @@ export function constructDirectEagerHistory(
     { kind: `changes`, changes: upserts(3, 6, true) },
     { kind: `transient-failure`, variant: 0 },
     { kind: `changes`, changes: upserts(6, 7, true) },
+    ...(salt % 2 === 1 ? unchangedRecovery : []),
     { kind: `restart` },
     {
       kind: `snapshot`,
       rows: kinds.slice(4).map((kind, index) => row(kind, index, true)),
     },
-    ...structuredClone(generated.slice(0, 4)),
   ]
 }

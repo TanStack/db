@@ -1,0 +1,24 @@
+{
+  "stage": "v4 PRE-EDIT frozen instrument. Only diagnostic Error.name/message cached once and type import sort after v3; changing-getter+other controls7/7 GREEN. v3 generated receiving semantics carry pending review. Exact per-cell raw captures executing on unchanged canonical1ec/20f. Shared helper unchanged e3ed.",
+  "at": "2026-11-18T02:31:46.174522+00:00",
+  "files": {
+    "packages/db-adapter-conformance/tests/decode-refusal-oracle.ts": "608fa7650ad11999b0b530cc1026cc62865d71f4567421521a7e9c2a8da1859b",
+    "packages/db-adapter-conformance/tests/decode-refusal-driver.ts": "64437528bf9df8b250bd411c62393400a55b5f0f0bda37eeda58f07514d9af0d",
+    "packages/db-adapter-conformance/tests/decode-refusal-oracle-suite.ts": "31fee8523fc759b4fa753291decf445c9a61e72d1bfcd0c8e1458dc40af20613",
+    "packages/powersync-direct-collection/tests/decode-refusal-driver.ts": "09a705d3c4d5fbeec145113ae02e2dc235b629a801ab5e4ffd0d0a499b3d9bac",
+    "packages/powersync-direct-collection/tests/decode-refusal-cleanup.test.ts": "b135de326fe3debdb08948a90904ede5e7bc09a391d8f0bcac95d37b18613b0d",
+    "packages/powersync-direct-collection/tests/direct-input-receiving.ts": "7c66fc31d840f38248b4605277d2b694586657776fe23f8e83ac5dc1292701f7",
+    "packages/powersync-direct-collection/tests/decode-refusal-oracle.property.test.ts": "91ceb118bcaab0c3a1acf9508c2fce96b2c669438ca46b5fb71a4ea7b5509890",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-decode-oracle.browser.test.ts": "dcd9bd11bdd049ff0ad1a1dc80afa29c83ffede472e2828111a7280a6bf44a68",
+    "packages/db/tests/oracle-cleanup.ts": "e3ed6efa8961252cd17bfe49e9675101f8211abe9a164244990563821d4a4af9",
+    "packages/powersync-direct-collection/tests/decode-refusal-model.test.ts": "22ce217bc0483fdb3fca0bbf0d538e4df0b796ec25bd7ded81819e9d5a9e26c8"
+  },
+  "sources": {
+    "packages/powersync-direct-collection/src/index.ts": "1ec1defd6f1584be75b647f243c820f31db0b1e03eaa7fabaf3185b27c4076c1",
+    "packages/powersync-direct-collection/src/subsets.ts": "20f8ed310b98099604fd05ae32a269b6554b87b937e31300f8dca3ac3a019da3"
+  },
+  "logs": {
+    ".review-2377/direct-decode-cause-cache-v4-controls.log": "db4debd5770abc7128f2e0028369d478c52db1c343222db43cd9e6e278d9fd11",
+    ".review-2377/direct-decode-v3-shared-cleanup-dynamic.log": "5e21f1896810876112b55236b6ef14fa6dabc705bd5320276cea19f2da83369f"
+  }
+}

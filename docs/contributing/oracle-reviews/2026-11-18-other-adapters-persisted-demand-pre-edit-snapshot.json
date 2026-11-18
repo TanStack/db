@@ -1,0 +1,24 @@
+{
+  "head": "92a1493e0f45dbfd1fc3a51460ccb9228d8f787d",
+  "stage": "v4 pre-production-edit instrument",
+  "node": "v24.19.0",
+  "sha256": {
+    "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-oracle.browser.test.ts": "e5ffa2d19a7824a85c8da466b27ffeb0a2205302d66557094fa10c7ed028d3b8",
+    "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand.opfs.html": "3050522213a31ca2857631aee3807a16aec8ccc58dbf9cebd6b36ea3064e7fcd",
+    "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand.opfs.ts": "25cbce03ef892e16a7b6207af96af8e40746a26ee317bb52ca03a55fd0681392",
+    "packages/convex-db-collection/src/options.ts": "8e1989d2d54605f1566c7e5ad867195cb8aa22876f9b2d5016bd992ff8a1ed81",
+    "packages/convex-db-collection/src/pagination.ts": "0308668d07db701d1f7f891d001a4aca2798973ea29bf1d4b00931eaa0e05f1d",
+    "packages/convex-db-collection/src/subscription.ts": "96db535b1f0137214b45fde220c2db2a60d0ed26a4119cb1a6a584a18bdabae5",
+    "packages/convex-db-collection/tests/persisted-demand-source.ts": "4ccdbd36c2ccf54e5b352b544369a6165c66038057b407c4a52bb8e4f3c0491b",
+    "packages/db-adapter-conformance/tests/persisted-demand-receiving-driver.ts": "1ea8c1fb69b92530ea005600aa62c218eb483c7bbbc8b1cfc1b6dea5c5fa3aae",
+    "packages/db-adapter-conformance/tests/persisted-demand-receiving-oracle-suite.ts": "b9eac8405494e87bc76ab5e53f315426c36b79d979ad6a6c4f9791570082a6a0",
+    "packages/db-adapter-conformance/tests/persisted-demand-receiving-oracle.test.ts": "ae02db32283b3d7cd9a0797acbcfe3f6572113e0422c9a0234d443b80c435078",
+    "packages/db-adapter-conformance/tests/persisted-demand-receiving-types.ts": "1eb0c6c75c746de88ee3464ad89972f9b95d690e8fbb5a8c921de51cd318ab13",
+    "packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts": "3910437e91fddd5dd90f3dd9ba03057f9df613a997ea1567d906f7463e334d90",
+    "packages/electric-db-collection/tests/persisted-demand-source.ts": "7a455e3c14d176f9d9857b45568a07b8977db6c3ca2c14a8f5e585b4185efa5b",
+    "packages/powersync-db-collection/tests/persisted-demand-source.ts": "e17cf3b453427ecae8f68368c2749b583d2a201ef5d6e18b4d4688721debe3f2",
+    "packages/query-db-collection/tests/persisted-demand-source.ts": "84bcd55b711ce70876596972a896ce326e7f397108d7305ab8ff4f45b6bd2259",
+    "packages/trailbase-db-collection/tests/persisted-demand-source.ts": "d8eb74a53aff36ef8d1d71f9b9274d64bc532a1e8ba8fd3ebb8187501d328e97",
+    "packages/trailbase-db-collection/tests/sdk-service.ts": "7a6e8532b6b0927efd919db0f2918b24e5ac6d09e204b318660e95625224c22c"
+  }
+}

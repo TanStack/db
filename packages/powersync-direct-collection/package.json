@@ -22,7 +22,8 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "test:oracles": "vitest run --coverage.enabled=false tests/cursor-persisted-demand-oracle.property.test.ts tests/decode-refusal-oracle.property.test.ts tests/eager-live-source-conformance-oracle.property.test.ts tests/eager-reload-conformance-oracle.property.test.ts tests/initial-receipt-oracle.property.test.ts tests/mutation-confirmation-cancellation-oracle.property.test.ts tests/mutation-confirmation-oracle.property.test.ts tests/on-demand-streams-conformance-oracle.property.test.ts tests/on-demand-streams-persisted-conformance-oracle.property.test.ts tests/persisted-demand-conformance-oracle.test.ts tests/persisted-initial-receipt-oracle.property.test.ts tests/persisted-startup-conformance-oracle.property.test.ts tests/shared-client-conformance-oracle.property.test.ts"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",
