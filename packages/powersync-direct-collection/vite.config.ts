@@ -10,6 +10,7 @@ const config = defineConfig({
     environment: `node`,
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: { enabled: true },
+    setupFiles: 'tests/setup.ts',
   },
 })
 
