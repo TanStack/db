@@ -194,7 +194,11 @@ describe(`Angular current-query snapshot conformance`, () => {
         {
           name: `findOne`,
           enters: [`findOne read before attach`],
-          build: (history) => ({ ...history, single: true }),
+          build: (history) => ({
+            ...history,
+            single: true,
+            selections: [0, ...history.selections.slice(1)],
+          }),
         },
         {
           name: `pooled params`,
@@ -204,6 +208,7 @@ describe(`Angular current-query snapshot conformance`, () => {
             form: `params`,
             pool: true,
             single: false,
+            selections: [0, ...history.selections.slice(1)],
           }),
         },
         {
@@ -353,8 +358,17 @@ describe(`Angular current-query snapshot conformance`, () => {
             enter(`read before attach`)
             if (history.form === `collection`)
               enter(`direct Collection read before attach`)
-            if (history.single) enter(`findOne read before attach`)
-            if (history.form === `params` && history.pool && !history.single)
+            // A disabled first selection builds no query, so neither the
+            // findOne nor the pooled path has run.
+            const initialEnabled = selectedGroup() !== null
+            if (history.single && initialEnabled)
+              enter(`findOne read before attach`)
+            if (
+              history.form === `params` &&
+              history.pool &&
+              !history.single &&
+              initialEnabled
+            )
               enter(`pooled read before attach`)
             update()
             enter(`source write before attach`)
