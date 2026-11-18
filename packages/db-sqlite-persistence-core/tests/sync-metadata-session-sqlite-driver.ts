@@ -61,7 +61,7 @@ export async function createSQLiteDriver(
   productionPath: SessionGrammar,
 ): Promise<RecoveryDriver> {
   const database = new DatabaseSync(`:memory:`)
-  const { driver, drained } = createMetadataSQLiteDriver(database)
+  const { driver, drained, dispose } = createMetadataSQLiteDriver(database)
   Object.defineProperty(driver, SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY, {
     value: {},
   })
@@ -553,7 +553,7 @@ export async function createSQLiteDriver(
       for (const coordinator of coordinators) coordinator.dispose()
       if (seedClaim)
         await adapters[0]!.releaseCacheGenerationClaim(seedClaim.claimId)
-      await drained()
+      await dispose()
       database.close()
     },
   }

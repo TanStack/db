@@ -32,6 +32,7 @@ export class MutationService {
   checkpointRequests = 0
   private stream!: ReadableStreamDefaultController<Uint8Array>
   private operation = 0
+  private replayCheckpoint?: () => void
 
   fetch: typeof fetch = async (input, init) => {
     const path = new URL(String(input)).pathname
@@ -65,6 +66,10 @@ export class MutationService {
               // The connection may have already closed.
             }
           })
+          // Query acquisition can replace its first SDK request before that
+          // request consumes the checkpoint. The successor receives the same
+          // authored provider state, rather than waiting for another write.
+          this.replayCheckpoint?.()
           this.connected.resolve()
         },
       }),
@@ -76,6 +81,7 @@ export class MutationService {
     deleted: ReadonlyArray<string> = [],
     writeCheckpoint?: string,
   ) {
+    this.replayCheckpoint = () => this.deliver(rows, deleted, writeCheckpoint)
     const send = (line: unknown) =>
       this.stream.enqueue(new TextEncoder().encode(`${JSON.stringify(line)}\n`))
     send({

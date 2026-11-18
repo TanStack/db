@@ -17,6 +17,7 @@ const config = defineConfig({
       // oracleProperty registers runtime tests that the type-test collector
       // cannot discover. These files remain in the TypeScript program.
       exclude: [
+        `tests/*.browser.test.ts`,
         `tests/documented-mutations-oracle.test.ts`,
         `tests/electric-descriptor-isolation-oracle.test.ts`,
         `tests/electric-sdk-delivery-oracle.property.test.ts`,
