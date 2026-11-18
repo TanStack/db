@@ -8994,3 +8994,16 @@ delivered table rows. It does not establish arbitrary concurrent mutations,
 cross-tab writers, arbitrary schema/value domains, every storage host or every
 DEM/MAP/P/S law. No framework-specific scheduling claim follows from source
 Collection comparisons.
+
+### Node 22 Web Locks test-host premise
+
+The SQLite metadata, Browser reload/multi-tab and Electron reload receiving
+drivers run on Node 22 with the test-only exclusive-lock polyfill in
+`packages/db-sqlite-persistence-core/tests/node-web-locks.ts`. It supplies FIFO
+exclusive requests, queued cancellation and callback settlement, calibrated by
+`node-web-locks.test.ts`; it rejects unsupported lock options. Native locks are
+kept when available. These remain in-process receiving paths, with no claim
+about native cross-context lock scheduling. The existing real Chromium OPFS
+and real Electron receiving paths keep their native host implementations,
+histories, observation checkpoints and comparisons. Maintainer decision:
+2026-11-18, use a Node 22 polyfill and retain real Chromium witnesses.

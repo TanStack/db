@@ -4,7 +4,8 @@
  * owns the law, model, histories, driver loop, and comparison.
  *
  * Each tab is a renderer: the real renderer persistence and an
- * ElectronCollectionCoordinator over Node's Web Locks and BroadcastChannel.
+ * ElectronCollectionCoordinator over Node's Web Locks and BroadcastChannel
+ * (test-only exclusive-lock polyfilling supplies Web Locks on Node 22).
  * Renderers share one main process, as windows of one app do: the real main
  * handler and Node persistence over one better-sqlite3 connection. A main
  * process starts with the first renderer of a session and closes with the

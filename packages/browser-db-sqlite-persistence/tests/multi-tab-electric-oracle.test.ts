@@ -43,7 +43,8 @@
  * coordinator, adapter, or Collection.
  *
  * Driver: each tab is a better-sqlite3 connection to one shared file, a
- * `BrowserCollectionCoordinator` (BroadcastChannel and Web Locks in Node), and
+ * `BrowserCollectionCoordinator` (BroadcastChannel and Web Locks in Node,
+ * with test-only exclusive-lock polyfilling on Node 22), and
  * `createBrowserWASQLitePersistence`. A recording `ShapeStream` stands in for
  * the Electric SDK; the test plays the server and delivers each tab's
  * messages. Checkpoints wait for host quiescence: no SQL statement and no

@@ -4,7 +4,8 @@
  * SQLite and coordinator boundaries here. The law, model, legal histories,
  * and comparison are imported from sync-metadata-session-oracle.ts. This
  * driver supplies two persisted Collections, two production coordinators over
- * Node's BroadcastChannel/Web Locks, and one node:sqlite database. Each
+ * Node's BroadcastChannel and Web Locks (the test-only exclusive-lock
+ * polyfill on Node 22), and one node:sqlite database. Each
  * Collection has its own adapter; their shared physical database supplies the
  * shared scheduler premise.
  *
