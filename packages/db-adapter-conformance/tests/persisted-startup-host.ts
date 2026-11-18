@@ -1,12 +1,15 @@
 // Controlled and real Node SQLite hosts for the same startup production path.
 // Full row reads are counted before the driver's own diagnostic durable read.
-import { DatabaseSync } from 'node:sqlite'
 import { createSQLiteCorePersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 import { inProcessSeams } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
 import { BrowserWASQLiteDriver } from '../../browser-db-sqlite-persistence/src/wa-sqlite-driver'
 import { createAdapter } from './memory-persistence'
 import { isStartupRowRead } from './persisted-startup-driver'
 import type { SQLInputValue } from 'node:sqlite'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
 
 export function createStartupHost(host: `controlled` | `node-sqlite`) {
   const database =

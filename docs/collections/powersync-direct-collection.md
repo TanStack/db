@@ -99,17 +99,18 @@ A collection includes **all** synced rows of its table, whichever collection req
 Collections work with all TanStack DB query APIs. In React:
 
 ```tsx
-import { useLiveQuery, eq } from '@tanstack/react-db'
+import { useLiveQuery, eq, type Collection } from '@tanstack/react-db'
 
-function TodoList({ listId }: { listId: string }) {
-  const { data, isLoading } = useLiveQuery(
-    (q) =>
+type Todo = { id: string; list_id: string; description: string }
+
+function TodoList({ listId, todos }: { listId: string; todos: Collection<Todo> }) {
+  const { data, isLoading } = useLiveQuery({
+    query: (q) =>
       q
         .from({ todo: todos })
         .where(({ todo }) => eq(todo.list_id, listId))
         .orderBy(({ todo }) => todo.description),
-    [listId],
-  )
+  })
 
   if (isLoading) return <p>Loading…</p>
   return (
@@ -140,6 +141,7 @@ A client can subscribe with relevant parameters:
 
 ```ts
 import { createCollection, parseLoadSubsetOptions } from '@tanstack/react-db'
+import { powerSyncCollectionOptions } from '@tanstack/powersync-direct-collection'
 
 export const todos = createCollection(
   powerSyncCollectionOptions<Todo>({
@@ -168,6 +170,9 @@ When wrapped with [SQLite persistence](../guides/sqlite-persistence.md#on-demand
 PowerSync syncs data from your backend database to clients. Writes are your responsibility: TanStack DB applies them optimistically and calls your mutation handlers to upload them to your backend. After your backend has committed a write to the source database, call `confirmWrites()`. It waits until PowerSync has synced the change back, so the optimistic state is replaced with confirmed data without flickering:
 
 ```ts
+import { createCollection } from '@tanstack/react-db'
+import { powerSyncCollectionOptions } from '@tanstack/powersync-direct-collection'
+
 export const todos = createCollection(
   powerSyncCollectionOptions<Todo>({
     client: powerSync,
