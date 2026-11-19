@@ -240,6 +240,9 @@ function entryArgs(entry) {
             ? []
             : [`--testNamePattern=${testParts[entry.part]}`]),
         ]
+  // Concurrent entries of one package must not share a coverage directory:
+  // Vitest refuses a directory that another process holds.
+  const coverage = entryLabel(entry).replace(/[^a-z0-9]+/gi, `-`)
   return [
     `--filter`,
     entry.package,
@@ -247,6 +250,7 @@ function entryArgs(entry) {
     `test`,
     ...selection,
     `--maxWorkers=1`,
+    `--coverage.reportsDirectory=coverage/ci-${coverage}`,
   ]
 }
 
@@ -318,9 +322,23 @@ if (command === `check`) {
 } else if (command === `build`) {
   // pnpm skips packages without a build script, but still builds their
   // dependencies. Keep its topological order for all selected packages.
+  //
+  // The jobs of one family (`collections-1` to `collections-3`) build every
+  // package of the family. A test type-checks against its workspace
+  // dependencies' built declarations, including those of a package that it
+  // reaches only through another package's test helpers.
+  const family = group.replace(/-\d+$/, ``)
   const packages = isDb
     ? [`@tanstack/db`]
-    : [...new Set(packageJobs[group].map((entry) => entry.package))]
+    : [
+        ...new Set(
+          Object.entries(packageJobs)
+            .filter(([name]) => name.replace(/-\d+$/, ``) === family)
+            .flatMap(([, jobEntries]) =>
+              jobEntries.map((entry) => entry.package),
+            ),
+        ),
+      ]
   execFileSync(
     `pnpm`,
     [...packages.flatMap((name) => [`--filter`, `${name}...`]), `run`, `build`],
