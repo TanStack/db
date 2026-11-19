@@ -166,7 +166,7 @@
  *   5. Reach counts the graph states that the campaign enters, and the
  *      campaigns run the same predicate with a fixed seed and a random seed.
  */
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import {
   cpSync,
   existsSync,
@@ -1442,12 +1442,31 @@ function reportedOracles(lines) {
  * hook with no report, as the exit-0 JSON that hands it to the agent. Anything
  * else, such as a crash, which exits 1 with a stack trace, fails.
  */
-function runCli(cwd, script, args, input, { launch, checkout }) {
-  const result = spawnSync(process.execPath, [script, ...args], {
-    cwd,
-    encoding: `utf8`,
-    input,
+async function runCli(cwd, script, args, input, repository) {
+  return interpretCli(
+    await spawnCli(cwd, script, args, input),
+    args,
+    repository,
+  )
+}
+
+/** Spawns a copy of the CLI and resolves with its exit status and output. */
+function spawnCli(cwd, script, args, input) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [script, ...args], { cwd })
+    const output = { stdout: ``, stderr: `` }
+    child.stdout.setEncoding(`utf8`)
+    child.stderr.setEncoding(`utf8`)
+    child.stdout.on(`data`, (chunk) => (output.stdout += chunk))
+    child.stderr.on(`data`, (chunk) => (output.stderr += chunk))
+    child.on(`error`, reject)
+    child.on(`close`, (status) => resolve({ status, ...output }))
+    child.stdin.on(`error`, () => {})
+    child.stdin.end(input)
   })
+}
+
+function interpretCli(result, args, { launch, checkout }) {
   const named = (line) =>
     line.split(checkout).join(`<checkout>`).split(launch).join(`<launch>`)
   const isNotice = (line) => line.startsWith(NOTICE_PREFIX)
@@ -1738,7 +1757,7 @@ function observedStops(launch, launchScript, repository) {
 }
 
 /** What each scope reports, from one repository. */
-function observedSelections(program) {
+async function observedSelections(program) {
   const repository = repositoryOf(program)
   const { launch, checkout, pathOf } = repository
   try {
@@ -1749,10 +1768,13 @@ function observedSelections(program) {
     const scopes = editedByScope(program)
     const own = join(checkout, `scripts`, `agent-lint-feedback.mjs`)
     const launchScript = join(launch, `scripts`, `agent-lint-feedback.mjs`)
-    const changed = runCli(checkout, own, [`--format=text`], ``, repository)
+    // The four runs read the checkouts and write nothing, so they run at once.
+    // Every run settles before the launch checkout is removed, and the first
+    // failure is thrown as before.
     // lint-staged runs the named scope once per nonempty chunk of staged
     // files; without files the script runs its changed scope instead.
-    const named =
+    const runs = await Promise.allSettled([
+      runCli(checkout, own, [`--format=text`], ``, repository),
       scopes.named.length === 0
         ? undefined
         : runCli(
@@ -1761,24 +1783,28 @@ function observedSelections(program) {
             [`--format=text`, ...scopes.named.map((name) => pathOf(name))],
             ``,
             repository,
-          )
-    const hook = runCli(
-      launch,
-      launchScript,
-      [`--format=claude`, `--event=edit`],
-      JSON.stringify({
-        cwd: checkout,
-        tool_input: { file_path: pathOf(program.hookTarget) },
-      }),
-      repository,
-    )
-    const stop = runCli(
-      launch,
-      launchScript,
-      [`--format=claude`, `--event=stop`],
-      JSON.stringify({ cwd: checkout }),
-      repository,
-    )
+          ),
+      runCli(
+        launch,
+        launchScript,
+        [`--format=claude`, `--event=edit`],
+        JSON.stringify({
+          cwd: checkout,
+          tool_input: { file_path: pathOf(program.hookTarget) },
+        }),
+        repository,
+      ),
+      runCli(
+        launch,
+        launchScript,
+        [`--format=claude`, `--event=stop`],
+        JSON.stringify({ cwd: checkout }),
+        repository,
+      ),
+    ])
+    const failure = runs.find((run) => run.status === `rejected`)
+    if (failure) throw failure.reason
+    const [changed, named, hook, stop] = runs.map((run) => run.value)
     return {
       changed,
       named,
@@ -2178,7 +2204,7 @@ oracleProperty({
   driver: async (program, observe) => {
     await setImmediate()
     recordStates(program, observe)
-    const observed = observedSelections(program)
+    const observed = await observedSelections(program)
     observe(
       `completed selections`,
       Object.fromEntries(
