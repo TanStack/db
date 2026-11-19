@@ -203,30 +203,34 @@ function mergePendingMutations<T extends object>(
   switch (incoming.type) {
     case `update`: {
       if (existing.type === `delete`) break
-      if (existing.type === `update`) {
-        // An update pair that restores the authoritative row cancels, as a
-        // restoring reinsert does.
-        const original = existing.collection._state.syncedData.get(existing.key)
-        if (
-          original !== undefined &&
-          sameRowValue(original, incoming.modified)
-        ) {
-          return null
-        }
-      }
       // An insert keeps its identity and optimistic policy. An update uses
       // the newest envelope. Both merge fields and keep the first original.
       const inserted = existing.type === `insert`
       const changes: Partial<T> = { ...existing.changes, ...incoming.changes }
       if (!inserted) {
-        // A field written back to its original value is no longer a change.
+        // A value written back is no longer a change only while the
+        // authoritative row still holds it. Another pending transaction or a
+        // sync since the first write keeps the latest write.
         const original = existing.original as T
-        for (const key of Object.keys(changes) as Array<keyof T>) {
+        const synced = existing.collection._state.syncedData.get(existing.key)
+        if (synced !== undefined) {
           if (
-            Object.hasOwn(original, key) &&
-            sameRowValue(original[key], changes[key])
+            sameRowValue(synced, original) &&
+            sameRowValue(synced, incoming.modified)
           ) {
-            delete changes[key]
+            // An update pair that restores the authoritative row cancels, as
+            // a restoring reinsert does.
+            return null
+          }
+          for (const key of Object.keys(changes) as Array<keyof T>) {
+            if (
+              Object.hasOwn(original, key) &&
+              Object.hasOwn(synced, key) &&
+              sameRowValue(original[key], changes[key]) &&
+              sameRowValue(synced[key], changes[key])
+            ) {
+              delete changes[key]
+            }
           }
         }
       }
