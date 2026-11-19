@@ -25,7 +25,8 @@ import { fileURLToPath } from 'node:url'
 // Every package with a test script, and every config, has exactly one entry
 // without a file, so a new test file runs without an edit here. Each test runs
 // exactly once. The times beside the jobs are the entries' seconds on CI
-// (TanStack/db run 44593906345), with four entries at a time; they vary
+// (TanStack/db runs 44593906345 and 44597915696), with four entries at a
+// time; they vary
 // with what runs beside them.
 const testParts = {
   fixed: `fixed seed `,
@@ -90,11 +91,10 @@ const packageJobs = {
   ],
   // About 1,100 to 1,350 entry-seconds each, no entry above about 400.
   'collections-1': [
-    pkg(conformance, reference, `other`), // 378
+    pkg(conformance, reference, `other`), // 462
     pkg(powersync, liveSource, `random`), // 288
     pkg(powersync, liveSource, `other`), // 194
     pkg(electric, liveSource, `fixed`), // 166
-    pkg(powersync), // 166
     pkg(powersync, startup, `random`), // 161
     pkg(`@tanstack/db-collection-e2e`), // 1
   ],
@@ -119,6 +119,7 @@ const packageJobs = {
   'collections-4': [
     pkg(powersync, startup, `other`), // 284
     pkg(conformance, reference, `fixed`), // 261
+    pkg(powersync), // 232
     pkg(query), // 220
     pkg(query, `tests/refetch-ordered-prefix-oracle.test.ts`), // 172
     pkg(electric), // 150
@@ -349,7 +350,7 @@ if (command === `check`) {
   // pnpm skips packages without a build script, but still builds their
   // dependencies. Keep its topological order for all selected packages.
   //
-  // The jobs of one family (`collections-1` to `collections-3`) build every
+  // The jobs of one family (`collections-1` to `collections-4`) build every
   // package of the family. A test type-checks against its workspace
   // dependencies' built declarations, including those of a package that it
   // reaches only through another package's test helpers.
