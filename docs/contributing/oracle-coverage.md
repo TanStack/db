@@ -5322,6 +5322,30 @@ the first complete source result and its durability before refresh, plus reopen.
 It also generates enabled-option responses before the deadline. Exact deadline,
 empty/failed restore, and remote-failure timing remain with this readiness owner.
 
+### Open mutant gaps: persisted demand coverage
+
+`scripts/demand-coverage-mutants.mjs` lists each mutant that the owner oracles
+do not kill with an `openGap` id from this table. These are open gaps, not
+equivalents: none of these mutants is claimed harmless. A gap is closed by the
+oracle change that kills its mutant, and that change deletes the row and its
+`openGap` entry. The list only shrinks. The script fails for a survivor with
+no entry, and for an entry whose mutant is now killed. Baseline: on `main`
+with the Vitest module cache disabled, every mutant applied and survived.
+
+| Gap id | Mutant | Owner oracle | Missing law, history, or counter | Witness that closes it |
+| --- | --- | --- | --- | --- |
+| `pdc-gap-P05` | Reset epoch ignores the reset sequence | `persisted-demand-coverage-oracle.test.ts` and its model | A reset that bumps the sequence without a truncate or lifecycle change while a forwarded load is in flight. Reachability is not yet shown. | Fixed history: reset during an in-flight forwarded load |
+| `pdc-gap-P06` | Reset epoch ignores the lifecycle generation | same | A lifecycle replacement during an in-flight load, followed by a late record | Fixed history: lifecycle replacement, then late coverage record |
+| `pdc-gap-P08` | Early `isCurrent` check removed in `recordCoverage` | same, with the campaign oracle | Cost law: the number of SQLite coverage reads a stale load makes. The driver must count them. | Driver counter of SQLite coverage reads, asserted by the model |
+| `pdc-gap-P09` | Unchanged coverage record rewritten | same | Cost law: the number of metadata commits and peer-tab publications | Driver counter of metadata commits and publications |
+| `pdc-gap-P10` | Coverage record ignores its storage generation | same | An in-run rotation that leaves a stale record in memory with an expired claim and an empty covered demand | Fixed history: rotation, expired claim, empty covered demand |
+| `pdc-gap-P18` | `onDemand` gate removed from `settleCoveredDemand` | same | Eager network-first settle law, decided 2026-11-12: "eager should work for networkTimeoutMs too". Both gates, in `settleCoveredDemand` and `forwardUpstream`, must go, and the model and glossary must change. | Behavior PR first, then an eager history; not yet started |
+| `pdc-gap-P26` | Upstream failure not noted, so no retry | `packages/browser-db-sqlite-persistence/tests/per-collection-coordinator-oracle.test.ts` (multi-tab) | Retry law: a failed acquisition attempt for a demand, not aborted, is retried later through `queueRemoteSubsetEnsure`. Reachable only with a non-single-process coordinator, which the single-process harness cannot provide. | Coordinator harness: multi-tab driver extraction (#2267, #2209) |
+| `pdc-gap-P27` | Hydrated mark set after a truncate | same | A truncate during an in-flight load, then the same demand loaded again | Fixed history: truncate during in-flight load, then reload |
+| `pdc-gap-P28` | Expired-claim guard removed from `loadHydratedSubset` | same | An expired claim with a previously hydrated demand, then a repeated load | Fixed history: expired claim, hydrated demand, repeated load |
+| `pdc-gap-P29` | Refetch guard removed from `loadHydratedSubset` | same | A refetch of an already hydrated demand | Fixed history: refetch of a hydrated demand |
+| `pdc-gap-P34` | Released acquisition still starts an upstream lease | same | A release between hydration steps, with the abort ordering | Fixed history: release between hydration steps |
+
 ## Sync metadata session
 
 [Issue #2220](https://github.com/TanStack/db/issues/2220) reports that a
