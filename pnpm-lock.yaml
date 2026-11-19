@@ -175,10 +175,10 @@ importers:
         specifier: ^20.3.35
         version: 20.3.35(@angular/common@20.3.35(@angular/core@20.3.35(@angular/compiler@20.3.35)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.35(@angular/compiler@20.3.35)(rxjs@7.8.2)(zone.js@0.15.1))(@angular/platform-browser@20.3.35(@angular/common@20.3.35(@angular/core@20.3.35(@angular/compiler@20.3.35)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.35(@angular/compiler@20.3.35)(rxjs@7.8.2)(zone.js@0.15.1)))(rxjs@7.8.2)
       '@tanstack/angular-db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/angular-db
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/db
       rxjs:
         specifier: ^7.8.2
@@ -215,19 +215,19 @@ importers:
   examples/electron/offline-first:
     dependencies:
       '@tanstack/electron-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/electron-db-sqlite-persistence
       '@tanstack/node-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/node-db-sqlite-persistence
       '@tanstack/offline-transactions':
         specifier: ^1.2.1
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.5.2
+        specifier: ^1.5.3
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.107.1
@@ -306,19 +306,19 @@ importers:
         specifier: 11.4.1
         version: 11.4.1(react-native@0.79.6(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.0.0))
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/db
       '@tanstack/offline-transactions':
         specifier: ^1.2.1
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.5.2
+        specifier: ^1.5.3
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/react-db
       '@tanstack/react-native-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/react-native-db-sqlite-persistence
       '@tanstack/react-query':
         specifier: ^5.107.1
@@ -403,19 +403,19 @@ importers:
         specifier: 11.4.1
         version: 11.4.1(react-native@0.79.6(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.0.0))
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/db
       '@tanstack/electric-db-collection':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/electric-db-collection
       '@tanstack/offline-transactions':
         specifier: ^1.2.1
         version: link:../../../packages/offline-transactions
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/react-db
       '@tanstack/react-native-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/react-native-db-sqlite-persistence
       '@tanstack/react-query':
         specifier: ^5.107.1
@@ -491,10 +491,10 @@ importers:
         specifier: ^5.107.1
         version: 5.107.1
       '@tanstack/query-db-collection':
-        specifier: ^1.5.2
+        specifier: ^1.5.3
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/react-db
       react:
         specifier: ^19.3.1
@@ -543,10 +543,10 @@ importers:
   examples/react/next-ssr-e2e:
     dependencies:
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/react-db
       next:
         specifier: ^16.4.5
@@ -577,19 +577,19 @@ importers:
   examples/react/offline-transactions:
     dependencies:
       '@tanstack/browser-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/browser-db-sqlite-persistence
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/db
       '@tanstack/offline-transactions':
         specifier: ^1.2.1
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.5.2
+        specifier: ^1.5.3
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.107.1
@@ -647,10 +647,10 @@ importers:
   examples/react/paced-mutations-demo:
     dependencies:
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/react-db
       mitt:
         specifier: ^3.0.1
@@ -687,10 +687,10 @@ importers:
         specifier: ^5.107.1
         version: 5.107.1
       '@tanstack/query-db-collection':
-        specifier: ^1.5.2
+        specifier: ^1.5.3
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.170.46
@@ -820,7 +820,7 @@ importers:
   examples/react/start-ssr-e2e:
     dependencies:
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.170.46
@@ -866,16 +866,16 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.107.1
         version: 5.107.1
       '@tanstack/query-db-collection':
-        specifier: ^1.5.2
+        specifier: ^1.5.3
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.170.46
@@ -884,7 +884,7 @@ importers:
         specifier: ^1.169.5
         version: 1.169.5(esbuild@0.28.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.18)(vite@8.3.6(@types/node@25.2.2)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.6(@types/node@25.2.2)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(webpack@5.112.2(esbuild@0.28.2))
       '@tanstack/trailbase-db-collection':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.6
@@ -987,16 +987,16 @@ importers:
   examples/solid/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.107.1
         version: 5.107.1
       '@tanstack/query-db-collection':
-        specifier: ^1.5.2
+        specifier: ^1.5.3
         version: link:../../../packages/query-db-collection
       '@tanstack/solid-db':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/solid-db
       '@tanstack/solid-router':
         specifier: ^1.170.43
@@ -1005,7 +1005,7 @@ importers:
         specifier: ^1.169.5
         version: 1.169.5(@tanstack/react-router@1.170.46(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(esbuild@0.28.2)(rolldown@1.2.16)(rollup@4.64.12)(solid-js@1.9.18)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.18)(vite@8.3.6(@types/node@25.2.2)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.6(@types/node@25.2.2)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(webpack@5.112.2(esbuild@0.28.2))
       '@tanstack/trailbase-db-collection':
-        specifier: ^1.0.0-rc.1.5
+        specifier: ^1.0.0-rc.1.6
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.6

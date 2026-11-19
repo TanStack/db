@@ -1,5 +1,11 @@
 # @tanstack/query-db-collection
 
+## 1.5.3
+
+### Patch Changes
+
+- Make the TypeScript peer dependency optional so JavaScript consumers do not automatically install the compiler. Keep the existing minimum version requirement for projects that install TypeScript. ([#2417](https://github.com/TanStack/db/pull/2417))
+
 ## 1.5.2
 
 ### Patch Changes
