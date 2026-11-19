@@ -181,7 +181,8 @@ function getTransactionAmbientScope(transaction: object): TransactionScope {
  * - (insert, update) → insert (merge changes, keep empty original)
  * - (insert, delete) → null (cancel both mutations)
  * - (update, delete) → delete (delete dominates)
- * - (update, update) → update (replace with latest, union changes)
+ * - (update, update) → null if restoring the authoritative row, otherwise
+ *   update (replace with latest, union changes)
  * - (delete, delete) → delete (replace with latest)
  * - (insert, insert) → insert (replace with latest)
  * - (delete, insert) → insert without an authoritative row, null if restoring
@@ -202,14 +203,38 @@ function mergePendingMutations<T extends object>(
   switch (incoming.type) {
     case `update`: {
       if (existing.type === `delete`) break
+      if (existing.type === `update`) {
+        // An update pair that restores the authoritative row cancels, as a
+        // restoring reinsert does.
+        const original = existing.collection._state.syncedData.get(existing.key)
+        if (
+          original !== undefined &&
+          sameRowValue(original, incoming.modified)
+        ) {
+          return null
+        }
+      }
       // An insert keeps its identity and optimistic policy. An update uses
       // the newest envelope. Both merge fields and keep the first original.
       const inserted = existing.type === `insert`
+      const changes: Partial<T> = { ...existing.changes, ...incoming.changes }
+      if (!inserted) {
+        // A field written back to its original value is no longer a change.
+        const original = existing.original as T
+        for (const key of Object.keys(changes) as Array<keyof T>) {
+          if (
+            Object.hasOwn(original, key) &&
+            sameRowValue(original[key], changes[key])
+          ) {
+            delete changes[key]
+          }
+        }
+      }
       return {
         ...(inserted ? existing : incoming),
         original: inserted ? {} : existing.original,
         modified: incoming.modified,
-        changes: { ...existing.changes, ...incoming.changes },
+        changes,
         // Merge metadata (last-write-wins)
         metadata: incoming.metadata ?? existing.metadata,
         syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
@@ -555,7 +580,8 @@ class Transaction<T extends object = Record<string, unknown>> {
    * - **insert + update** → insert (merge changes, keep empty original)
    * - **insert + delete** → removed (mutations cancel each other out)
    * - **update + delete** → delete (delete dominates)
-   * - **update + update** → update (union changes, keep first original)
+   * - **update + update** → removed if restored, otherwise update (union
+   *   changes without fields written back, keep first original)
    * - **delete + insert** → removed if restored, otherwise update
    * - **same type** → replace with latest
    *
