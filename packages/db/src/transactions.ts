@@ -175,6 +175,24 @@ function getTransactionAmbientScope(transaction: object): TransactionScope {
 }
 
 /**
+ * Whether a write from another transaction to the same row is still tracked
+ * or held, so the server may not end on the authoritative row without
+ * `existing`'s transaction.
+ */
+function hasOtherWrite(existing: PendingMutation<any>): boolean {
+  const state = existing.collection._state
+  if (state.heldOptimisticRows.has(existing.key)) return true
+  for (const transaction of state.transactions.values()) {
+    if (transaction.state === `failed`) continue
+    for (const mutation of transaction.mutations) {
+      if (mutation !== existing && mutation.globalKey === existing.globalKey)
+        return true
+    }
+  }
+  return false
+}
+
+/**
  * Merges two pending mutations for the same item within a transaction
  *
  * Merge behavior truth table:
@@ -209,28 +227,27 @@ function mergePendingMutations<T extends object>(
       const changes: Partial<T> = { ...existing.changes, ...incoming.changes }
       if (!inserted) {
         // A value written back is no longer a change only while the
-        // authoritative row still holds it. Another pending transaction or a
-        // sync since the first write keeps the latest write.
+        // authoritative row still holds it and no other transaction wrote the
+        // row. Otherwise the latest write stays.
         const original = existing.original as T
         const synced = existing.collection._state.syncedData.get(existing.key)
         if (synced !== undefined) {
-          if (
+          const restores =
             sameRowValue(synced, original) &&
             sameRowValue(synced, incoming.modified)
-          ) {
-            // An update pair that restores the authoritative row cancels, as
-            // a restoring reinsert does.
-            return null
-          }
-          for (const key of Object.keys(changes) as Array<keyof T>) {
-            if (
+          const restored = (Object.keys(changes) as Array<keyof T>).filter(
+            (key) =>
               Object.hasOwn(original, key) &&
               Object.hasOwn(synced, key) &&
               sameRowValue(original[key], changes[key]) &&
-              sameRowValue(synced[key], changes[key])
-            ) {
-              delete changes[key]
-            }
+              sameRowValue(synced[key], changes[key]),
+          )
+          // Scan other transactions only when something would be dropped.
+          if ((restores || restored.length > 0) && !hasOtherWrite(existing)) {
+            // An update pair that restores the authoritative row cancels, as
+            // a restoring reinsert does.
+            if (restores) return null
+            for (const key of restored) delete changes[key]
           }
         }
       }
