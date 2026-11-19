@@ -208,6 +208,33 @@ describe(`applyMutations merge logic`, () => {
       expect(collection.get(1)?.value).toBe(0)
     })
 
+    it(`keeps the restoring write when another transaction wrote the row in between`, () => {
+      const collection = createSyncedCollection()
+      const transaction = manualTransaction()
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 2
+        })
+      })
+
+      const other = manualTransaction()
+      other.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 1
+        })
+      })
+
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 0
+        })
+      })
+
+      expect(transaction.mutations).toHaveLength(1)
+      expect(transaction.mutations[0]!.modified).toEqual({ id: 1, value: 0 })
+      expect(transaction.mutations[0]!.changes).toEqual({ value: 0 })
+    })
+
     it(`keeps a written-back field when sync moved the row meanwhile`, () => {
       const collection = createSyncedCollection()
       const transaction = manualTransaction()
