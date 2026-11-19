@@ -235,6 +235,24 @@ describe(`applyMutations merge logic`, () => {
       expect(transaction.mutations[0]!.changes).toEqual({ value: 0 })
     })
 
+    it(`cancels a restoring pair when one batch repeats a held key`, () => {
+      const collection = createSyncedCollection()
+      const transaction = manualTransaction()
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 2
+        })
+      })
+      transaction.mutate(() => {
+        collection.update([1, 1], (drafts) => {
+          drafts[0]!.value = 3
+          drafts[1]!.value = 0
+        })
+      })
+
+      expect(transaction.mutations).toHaveLength(0)
+    })
+
     it(`keeps a written-back field when sync moved the row meanwhile`, () => {
       const collection = createSyncedCollection()
       const transaction = manualTransaction()
