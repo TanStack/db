@@ -920,8 +920,8 @@ describe(`Collection`, () => {
         insertedKey,
         { metadata: { updated: true } },
         (item) => {
-          item.value = `bar3`
-          item.newProp = `new value`
+          item.value = `bar3.2`
+          item.newProp = `new value.2`
         },
       )
     })
@@ -929,8 +929,8 @@ describe(`Collection`, () => {
     // The merged value should contain the update
     expect(getStateValue(collection, insertedKey)).toEqual({
       id: 1,
-      value: `bar3`,
-      newProp: `new value`,
+      value: `bar3.2`,
+      newProp: `new value.2`,
     })
     expect(tx55.mutations).toHaveLength(1)
 
