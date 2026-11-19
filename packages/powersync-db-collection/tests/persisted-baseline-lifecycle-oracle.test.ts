@@ -23,7 +23,17 @@ for (const { host, config } of [
   },
 ] as const) {
   registerBaselineLifecycle(
-    { ...config, owns: [`src/powersync.ts#powerSyncCollectionOptions`] },
+    {
+      ...config,
+      owns: [`src/powersync.ts#powerSyncCollectionOptions`],
+      // Each base opens a real PowerSync database: 5 fixed bases per
+      // constructed history cost about 137 s of CI time on this file. Two
+      // fixed bases keep it inside its CI job (P12), and each PR run's
+      // random-seed units build their bases from a fresh seed (register M,
+      // 2026-11-17, "2 fixed bases for three oracles" and "Random bases at
+      // today's cost for expensive oracles").
+      bases: 2,
+    },
     async (h, id) => {
       const storage = createStartupHost(host)
       return withOracleCleanup(

@@ -577,13 +577,19 @@ registerSeedReinsertReloadProperty({
  * Before this property moved to the oracle framework, each fixed campaign
  * required at least five of its random histories in each regime, and the
  * random campaign required none. A required state must not depend on the
- * seed (oracle framework, declared reach), so each campaign now requires at
- * least one constructed history per regime, beside the unchanged generated
- * runs; half of a campaign's histories are constructed. The flat property
- * was two raw fast-check campaigns of 50 histories, fixed seed 2220011 and
- * random, with a sample test that required more than five fixed-seed
- * histories in each of its four regimes. It keeps its seed and budget, and
- * its constructed histories replace that sample test.
+ * seed (oracle framework, declared reach), so the regimes are required
+ * through constructed histories instead. Each constructed history runs in
+ * its own unit on 5 bases, the framework's default: the first five draws of
+ * its own stream, each a different generated history behind the regime's
+ * prefix, and each must enter the regime (register M, 2026-11-16, "N bases
+ * per constructed history"). So every campaign, fixed or random, enters each
+ * regime at least five times, the minimum the old fixed campaigns required.
+ * The generated unit draws only from the arbitrary, with the unchanged
+ * budget, so its own regime counts are measured and not required. The flat
+ * property was two raw fast-check campaigns of 50 histories, fixed seed
+ * 2220011 and random, with a sample test that required more than five
+ * fixed-seed histories in each of its four regimes. It keeps its seed and
+ * budget, and its constructed histories replace that sample test.
  */
 for (const {
   productionPath,

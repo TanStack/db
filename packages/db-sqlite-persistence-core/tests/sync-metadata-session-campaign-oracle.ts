@@ -274,6 +274,15 @@ export function registerKeptMetadataDurabilityProperty({
           build: (input) => input,
         },
       ],
+      // The construction is the identity: every generated batch already
+      // enters every declared state, so the generated unit's 8 histories
+      // explore it, and the constructed unit only makes that reach required.
+      // One base keeps that gate. Five would replay the generated unit's
+      // grammar four more times per campaign at about 10 s each on the
+      // persisted path (register M, 2026-11-17, "Random bases at today's
+      // cost for expensive oracles"); the random-seed unit still draws its
+      // base from a fresh seed on every run.
+      bases: 1,
     },
     resolve: keptMetadataDurabilityBatch,
     model: owedRuns,
