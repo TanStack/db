@@ -8902,6 +8902,16 @@ changed membership, deletion, retention expiry, arbitrary filters/cursors or
 multi-tab saved-demand histories. Their primary persistence owner and each
 adapter's receiving driver retain that work.
 
+The [CI fixture follow-up](oracle-reviews/2026-11-18-powersync-ci-fixtures.md)
+repairs a receiving storage-ledger bypass when browser persistence lazily
+resolves its actual adapter. Both resolver routes, callable capabilities,
+original receivers and exact Promise identity have RED/GREEN helper controls.
+All five shared receivers and the Convex peer receiver pass on Node 22 and
+Chromium/OPFS. This is input-observation evidence, not a new product law or a
+claim that the intermittent native CI mismatch is closed. The browser receiver
+uses `SingleProcessCoordinator`; tracking the raw adapter separately registered
+by `BrowserCollectionCoordinator` remains outside this recorder's evidence.
+
 ## Native PowerSync demand predicate union
 
 The primary oracle owner is

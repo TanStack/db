@@ -19,7 +19,10 @@ import {
   withOracleCleanup,
 } from '../../db/tests/oracle-cleanup'
 import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
-import type { PersistedCollectionPersistence } from '../../db-sqlite-persistence-core/src'
+import type {
+  PersistedCollectionPersistence,
+  PersistenceAdapter,
+} from '../../db-sqlite-persistence-core/src'
 import type {
   CoverageRecord,
   QueryObservation,
@@ -124,44 +127,88 @@ export async function readDemandDurableRows(
   }
 }
 
-function storageLedger(persistence: PersistedCollectionPersistence) {
+export function storageLedger(persistence: PersistedCollectionPersistence) {
   const pending = new Set<Promise<unknown>>()
   const failures: Array<unknown> = []
   let revision = 0
-  const adapter = new Proxy(persistence.adapter, {
-    get(target, key) {
-      const value: unknown = Reflect.get(target, key, target)
-      if (typeof value !== `function`) return value
-      return (...args: Array<unknown>) => {
-        revision++
-        const result: unknown = Reflect.apply(value, target, args)
-        if (result instanceof Promise) {
-          pending.add(result)
-          void result.then(
-            () => {
-              pending.delete(result)
+  const adapters = new WeakMap<PersistenceAdapter, PersistenceAdapter>()
+  const copies = new WeakMap<
+    PersistedCollectionPersistence,
+    PersistedCollectionPersistence
+  >()
+  const receive = (
+    actual: PersistedCollectionPersistence,
+  ): PersistedCollectionPersistence => {
+    const previous = copies.get(actual)
+    if (previous) return previous
+    let adapter = adapters.get(actual.adapter)
+    if (!adapter) {
+      const methods = new WeakMap<object, unknown>()
+      adapter = new Proxy(actual.adapter, {
+        get(target, key) {
+          const value: unknown = Reflect.get(target, key, target)
+          if (typeof value !== `function`) return value
+          const cached = methods.get(value)
+          if (cached) return cached
+          // A callable proxy retains capabilities such as afterQueuedWork.
+          // Observe the exact returned Promise without replacing its identity.
+          const method = new Proxy(value, {
+            apply(fn, _receiver, args) {
               revision++
+              const result: unknown = Reflect.apply(fn, target, args)
+              if (result instanceof Promise) {
+                pending.add(result)
+                void result.then(
+                  () => {
+                    pending.delete(result)
+                    revision++
+                  },
+                  (error: unknown) => {
+                    pending.delete(result)
+                    failures.push(error)
+                    revision++
+                  },
+                )
+              }
+              return result
             },
-            (error: unknown) => {
-              pending.delete(result)
-              failures.push(error)
-              revision++
-            },
-          )
-        }
-        return result
-      }
-    },
-  })
+          })
+          methods.set(value, method)
+          return method
+        },
+      })
+      adapters.set(actual.adapter, adapter)
+    }
+    // Browser and Node factories select a mode-specific adapter lazily. Track
+    // that actual adapter too; wrapping only the default misses its operations.
+    const copy: PersistedCollectionPersistence = {
+      ...actual,
+      adapter,
+      ...(actual.resolvePersistenceForCollection
+        ? {
+            resolvePersistenceForCollection: (options) =>
+              receive(actual.resolvePersistenceForCollection!(options)),
+          }
+        : {}),
+      ...(actual.resolvePersistenceForMode
+        ? {
+            resolvePersistenceForMode: (mode) =>
+              receive(actual.resolvePersistenceForMode!(mode)),
+          }
+        : {}),
+    }
+    copies.set(actual, copy)
+    return copy
+  }
   return {
-    persistence: { ...persistence, adapter },
+    persistence: receive(persistence),
     diagnostic: (receipts: Set<Promise<unknown>>) => ({
       revision,
       pending: pending.size,
       receipts: receipts.size,
     }),
     async barrier(
-      source: DemandReceivingSource,
+      source: Pick<DemandReceivingSource, `barrier`>,
       receipts: Set<Promise<unknown>>,
     ) {
       // A stable input interval drains admitted storage work and allows finite

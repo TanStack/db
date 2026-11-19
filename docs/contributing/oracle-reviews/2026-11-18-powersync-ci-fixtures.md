@@ -55,6 +55,16 @@ pnpm --dir packages/browser-db-sqlite-persistence exec vitest run --config vites
 Direct TypeScript, scoped ESLint, `pnpm check:mangle`, `pnpm lint:changed` and
 `git diff --check` pass.
 
+The complete package command, `pnpm --dir packages/powersync-direct-collection
+test`, subsequently finished on Node 22 with coverage and type checking enabled:
+**2,648 passed, 177 failed**, 746.78 s, no type errors. Nineteen files pass. All
+177 failures belong to the unchanged eager live-source oracle: twelve HEALTH-2
+recovery violations and 165 calibrations unable to obtain a clean trace because
+of that defect. The minimized trace is an empty snapshot, delivery error, empty
+change batch, then empty snapshot. The old stream error remains after the healthy
+checkpoint. This is the deferred SDK defect, not a new fixture regression. The
+full log is `direct-full-node22-retry.log`.
+
 ## Reach, challenge and review
 
 The full existing generated campaigns and shared checker calibrations passed in
@@ -78,6 +88,83 @@ Reviewed SHA-256 prefixes: collection test `93d8a79b`, FakeService `2c5afd91`,
 initial worker `29b2bef8`, on-demand driver `0f0cd013`, persisted worker
 `0de0296b`, host setup `075143c9`.
 
+## Follow-up: resolved storage adapters
+
+A repeated native Chromium diagnostic exposed a separate receiving-instrument
+defect. All 50 late cuts reported storage revision zero despite durable writes.
+The ledger wrapped only the default adapter. Browser persistence lazily resolves
+a different adapter for the Collection, bypassing that wrapper. This is a
+demonstrated observation defect; it does not by itself establish the cause of
+the earlier CI query-readiness mismatch.
+
+The ledger now wraps adapters returned by both persistence resolvers, without
+resolving them early. Cached callable proxies preserve the original receiver,
+exact returned Promise and callable properties, including
+`runInRegularScope.afterQueuedWork`. Scope callbacks retain the original scoped
+adapter; their enclosing observed Promise spans all legal nested work. The
+observation barrier, including its existing continuation allowance, is unchanged.
+
+The new ordinary helper calibration runs independently from the product oracle.
+Before the repair, both resolver routes report pending/revision zero instead of
+one, and the callable capability disappears: **three failures, one passing direct
+control**. After the repair, all **four pass**. The independent oracle reviewer
+reproduced that GREEN result on Node 22 and approved driver SHA-256
+`b6ea8870a29fc0db39cc3b975da1fcecee7c7b6a0ff92ae2bb2a2dede7db5e89`,
+with no actionable findings. Restoring the old ledger is the instrument fault
+injection; no production mutant was introduced.
+
+The complete shared receiving campaigns and their checker calibrations then
+pass on unchanged production: **166 Node 22 checks** (150 across five adapters,
+12 Convex peer checks and four helper controls), **150 Chromium/OPFS checks**
+across the same five adapters, and **12 Chromium/OPFS Convex peer checks**. Every
+adapter reaches all 13 declared shared states. Each host reports the per-adapter
+state counts in its normal campaign output. TypeScript, ESLint, private-name
+checking, `lint:changed` and diff checks pass.
+
+All ten shared adapter/host campaigns report these same history counts:
+
+| Declared state | Histories |
+| --- | ---: |
+| changed-value late answer supplied after covered reopen | 1 |
+| closed and reopened storage | 23 |
+| covered load waits for the deadline | 2 |
+| first covered applied | 5 |
+| first empty applied | 3 |
+| first failed acquisition | 3 |
+| first never requested | 5 |
+| first overlap applied | 4 |
+| first pending acquisition | 3 |
+| restored source rows before deadline | 2 |
+| uncovered load fails with its upstream | 4 |
+| uncovered offline | 15 |
+| window covered offline | 8 |
+
+```sh
+pnpm --dir packages/db-adapter-conformance exec vitest run tests/persisted-demand-storage.test.ts tests/persisted-demand-receiving-oracle.test.ts tests/persisted-demand-peer-oracle.test.ts --coverage.enabled=false
+CI=true pnpm --dir packages/browser-db-sqlite-persistence exec vitest run --config vitest.adapter-oracles.config.ts e2e/adapter-persisted-demand-oracle.browser.test.ts
+CI=true pnpm --dir packages/browser-db-sqlite-persistence exec vitest run --config vitest.adapter-oracles.config.ts e2e/adapter-persisted-demand-peer-oracle.browser.test.ts
+```
+
+The corresponding logs are `demand-storage-red.log`, `demand-storage-green.log`,
+`demand-storage-node-receivers-green.log`,
+`demand-storage-browser-receivers-green.log` and
+`demand-storage-browser-peer-green.log` in the same task-local directory.
+The browser receiver uses `SingleProcessCoordinator`, which registers the wrapped
+resolved adapter. This repair does not cover `BrowserCollectionCoordinator`'s
+separately registered raw adapter route. The 50-run pre-repair diagnostic also
+recorded two histories with a different count of first-session sync-start events;
+neither reproduced the CI readiness mismatch. A concurrent post-repair stress
+attempt stopped at an OPFS worker failure before its first result and supplies
+no GREEN evidence.
+
+The subsequent serial run completed all **50** repetitions on bundled Chromium.
+Every late cut reports storage revision **34**, no pending storage or receipts,
+the same five source events, query status `ready` and fulfilled preload. This
+demonstrates actual storage observation and bounded trace stability after the
+repair. It does not turn the earlier failure into a causally isolated
+reproduction of the CI readiness mismatch. The raw log is
+`native-repeat-probe-repaired-serial.log`.
+
 ## Open boundaries
 
 - The unchanged-checkpoint recovery defect remains open under the maintainer's
@@ -94,6 +181,6 @@ initial worker `29b2bef8`, on-demand driver `0f0cd013`, persisted worker
 - The RxDB page-export discovery timeout remains intermittent: the affected
   cleanup file passes unchanged in the focused Chromium run, but a full CI retry
   is still needed. No timeout was increased.
-- Fresh CI and the complete Direct package result are not established by the
-  focused runs. CodeRabbit skipped the PR because its file count exceeds the
-  service limit; that is not reviewed-head approval.
+- Fresh CI is pending after fixture commit `fd169ed4b`. CodeRabbit skipped the
+  PR because its file count exceeds the service limit; that is not reviewed-head
+  approval.
