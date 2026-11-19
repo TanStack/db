@@ -939,6 +939,42 @@ describe(`Transactions`, () => {
     expect(transaction4.state).toBe(`failed`)
   })
 
+  it(`keeps the first original when an update is followed by a delete`, () => {
+    type Row = { id: number; a: string; b: string }
+    const collection = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: 1, a: `a`, b: `b` } })
+          commit()
+          markReady()
+        },
+      },
+    })
+    const tx = createTransaction({
+      autoCommit: false,
+      mutationFn: () => Promise.resolve(),
+    })
+    tx.mutate(() => {
+      collection.update(1, (draft) => {
+        draft.a = `a2`
+      })
+    })
+    tx.mutate(() => {
+      collection.delete(1)
+    })
+    expect(tx.mutations).toHaveLength(1)
+    const [mutation] = tx.mutations
+    expect(mutation!.type).toBe(`delete`)
+    expect(mutation!.original).toEqual({ id: 1, a: `a`, b: `b` })
+    expect(mutation!.modified).toEqual({ id: 1, a: `a2`, b: `b` })
+    expect(mutation!.changes).toEqual({ id: 1, a: `a2`, b: `b` })
+    tx.rollback()
+    tx.when(`settled`).catch(() => {})
+  })
+
   describe(`duplicate instance detection`, () => {
     it(`sets a global marker in dev mode when in browser top window`, () => {
       // The duplicate instance marker is set when the module loads in dev mode
