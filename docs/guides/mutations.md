@@ -1473,12 +1473,12 @@ When multiple mutations operate on the same item within a transaction, TanStack 
 
 The merging behavior follows a truth table based on the mutation types:
 
-| Existing → New      | Result    | Description                                       |
-| ------------------- | --------- | ------------------------------------------------- |
-| **insert + update** | `insert`  | Keeps insert type, merges changes, empty original |
-| **insert + delete** | _removed_ | Mutations cancel each other out                   |
-| **update + delete** | `delete`  | Delete dominates                                  |
-| **update + update** | `update`  | Union changes, keep first original                |
+| Existing → New      | Result    | Description                                             |
+| ------------------- | --------- | ------------------------------------------------------- |
+| **insert + update** | `insert`  | Keeps insert type, merges changes, empty original       |
+| **insert + delete** | _removed_ | Mutations cancel each other out                         |
+| **update + delete** | `delete`  | Delete dominates                                        |
+| **update + update** | `update`  | Union changes, keep first original; removed if restored |
 
 > [!NOTE]
 > Attempting to insert or delete the same item multiple times within a transaction will throw an error.
