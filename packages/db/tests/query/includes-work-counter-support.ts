@@ -6,6 +6,7 @@ import {
   createLiveQueryCollection,
   eq,
   materialize,
+  not,
 } from '../../src/query/index.js'
 import type { Collection } from '../../src/collection/index.js'
 
@@ -41,7 +42,17 @@ type FillerCounts = {
 type WorkScenario = {
   filler: FillerCounts
   joinTargets: boolean
+  joinFilter?: JoinFilter
 }
+
+// A source-local filter on one side of the target join. The optimizer pushes
+// it into that side's source. `link` filters the parent-correlated side and
+// `target` the joined side, which stays the join's lazy side either way.
+export type JoinFilter = `none` | `link` | `target`
+
+// Each filter keeps every row except one.
+const excludedLinkId = `link-1`
+const excludedTargetText = `second target`
 
 type WorkCount = {
   delivered: number
@@ -227,6 +238,7 @@ export function observeResult(
 export async function observeWork({
   filler,
   joinTargets,
+  joinFilter = `none`,
 }: WorkScenario): Promise<WorkObservation> {
   const rows = createFixtureRows(filler)
   const sources = {
@@ -282,21 +294,31 @@ export async function observeWork({
                       const selectedLinks = q
                         .from({ link: sources.links })
                         .where(({ link }) => eq(link.groupId, group.id))
+                      const keptLinks =
+                        joinFilter === `link`
+                          ? selectedLinks.where(({ link }) =>
+                              not(eq(link.id, excludedLinkId)),
+                            )
+                          : selectedLinks
+                      const joinedTargets = keptLinks.innerJoin(
+                        { target: sources.terms },
+                        ({ link, target }) => eq(link.targetId, target.id),
+                      )
+                      const keptTargets =
+                        joinFilter === `target`
+                          ? joinedTargets.where(({ target }) =>
+                              not(eq(target.text, excludedTargetText)),
+                            )
+                          : joinedTargets
 
                       return {
                         id: group.id,
                         links: joinTargets
                           ? materialize(
-                              selectedLinks
-                                .innerJoin(
-                                  { target: sources.terms },
-                                  ({ link, target }) =>
-                                    eq(link.targetId, target.id),
-                                )
-                                .select(({ link, target }) => ({
-                                  id: link.id,
-                                  text: target.text,
-                                })),
+                              keptTargets.select(({ link, target }) => ({
+                                id: link.id,
+                                text: target.text,
+                              })),
                             )
                           : materialize(
                               selectedLinks.select(({ link }) => ({
@@ -337,9 +359,28 @@ export async function observeWork({
   }
 }
 
+// The relational reference: an inner join keeps a link only when the link
+// passes the link filter and its target exists and passes the target filter.
 export function expectedResult({
   joinTargets,
-}: Pick<WorkScenario, 'joinTargets'>): WorkObservation[`result`] {
+  joinFilter = `none`,
+}: Pick<
+  WorkScenario,
+  'joinTargets' | 'joinFilter'
+>): WorkObservation[`result`] {
+  const links: Array<LinkObservation> = joinTargets
+    ? [
+        { id: `link-0`, text: `first target` },
+        { id: `link-1`, text: `second target` },
+      ].filter(
+        (link) =>
+          !(joinFilter === `link` && link.id === excludedLinkId) &&
+          !(joinFilter === `target` && link.text === excludedTargetText),
+      )
+    : [
+        { id: `link-0`, targetId: `term-1` },
+        { id: `link-1`, targetId: `term-2` },
+      ]
   return [
     {
       id: `term-0`,
@@ -349,20 +390,7 @@ export function expectedResult({
           groups: [
             {
               id: `group-0`,
-              links: [
-                joinTargets
-                  ? { id: `link-0`, text: `first target` }
-                  : { id: `link-0`, targetId: `term-1` },
-                joinTargets
-                  ? {
-                      id: `link-1`,
-                      text: `second target`,
-                    }
-                  : {
-                      id: `link-1`,
-                      targetId: `term-2`,
-                    },
-              ],
+              links,
             },
           ],
         },
