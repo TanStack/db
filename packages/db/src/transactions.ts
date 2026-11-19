@@ -175,21 +175,30 @@ function getTransactionAmbientScope(transaction: object): TransactionScope {
 }
 
 /**
- * Whether a write from another transaction to the same row is still tracked
- * or held, so the server may not end on the authoritative row without
- * `existing`'s transaction.
+ * Returns a check for whether a write from a transaction other than `owner`
+ * to the same row is still tracked or held, so the server may not end on the
+ * authoritative row without `owner`. Each collection's keys are indexed once,
+ * on first use, so one batch does not rescan every mutation per row.
  */
-function hasOtherWrite(existing: PendingMutation<any>): boolean {
-  const state = existing.collection._state
-  if (state.heldOptimisticRows.has(existing.key)) return true
-  for (const transaction of state.transactions.values()) {
-    if (transaction.state === `failed`) continue
-    for (const mutation of transaction.mutations) {
-      if (mutation !== existing && mutation.globalKey === existing.globalKey)
-        return true
+function createOtherWriteCheck(
+  owner: Transaction<any>,
+): (existing: PendingMutation<any>) => boolean {
+  const keysByCollection = new Map<object, Set<string>>()
+  return (existing) => {
+    const state = existing.collection._state
+    if (state.heldOptimisticRows.has(existing.key)) return true
+    let keys = keysByCollection.get(state)
+    if (keys === undefined) {
+      keys = new Set()
+      for (const transaction of state.transactions.values()) {
+        if (transaction === owner || transaction.state === `failed`) continue
+        for (const mutation of transaction.mutations)
+          keys.add(mutation.globalKey)
+      }
+      keysByCollection.set(state, keys)
     }
+    return keys.has(existing.globalKey)
   }
-  return false
 }
 
 /**
@@ -211,11 +220,13 @@ function hasOtherWrite(existing: PendingMutation<any>): boolean {
  *
  * @param existing - The existing mutation in the transaction
  * @param incoming - The new mutation being applied
+ * @param hasOtherWrite - Whether another transaction wrote `existing`'s row
  * @returns The merged mutation, or null if both should be removed
  */
 function mergePendingMutations<T extends object>(
   existing: PendingMutation<T>,
   incoming: PendingMutation<T>,
+  hasOtherWrite: (existing: PendingMutation<T>) => boolean,
 ): PendingMutation<T> | null {
   // Dispatch on the arriving operation without constructing a composite key.
   switch (incoming.type) {
@@ -618,6 +629,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     // in one call). Map preserves insertion order, matching the previous
     // replace-in-place / remove / append semantics.
     const merged = new Map<string, PendingMutation<any>>()
+    const hasOtherWrite = createOtherWriteCheck(this)
     for (const mutation of this.mutations) {
       merged.set(mutation.globalKey, mutation)
     }
@@ -627,7 +639,7 @@ class Transaction<T extends object = Record<string, unknown>> {
       const existingMutation = merged.get(globalKey)
 
       const mergeResult = existingMutation
-        ? mergePendingMutations(existingMutation, newMutation)
+        ? mergePendingMutations(existingMutation, newMutation, hasOtherWrite)
         : newMutation
       if (mergeResult === null) {
         // Remove the mutation (e.g., delete after insert cancels both).
