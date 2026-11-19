@@ -186,4 +186,5 @@ export const refsInclude: ScopedInclude = {
   source: `refs`,
   clientFilter: false,
   outerSelect: `spread`,
+  members: `rows`,
 }

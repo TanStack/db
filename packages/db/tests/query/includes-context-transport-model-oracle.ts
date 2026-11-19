@@ -29,8 +29,9 @@ export const checkpoints = [`initial`, `parent-update`, `child-update`] as const
 // projection; unmatched versus null correlation; immediate versus ancestor
 // scope; grouping versus aggregate placement; recursive boundary versus
 // evaluation phase; join-key side versus correlation attachment; union form;
-// derived-result boundary versus selection and nullability; user-name location
-// versus boundary and spelling; or public-surface shape. Within a family, the
+// derived-result boundary versus selection and nullability; DISTINCT relation
+// identity versus parent context and window; user-name location versus
+// boundary and spelling; or public-surface shape. Within a family, the
 // asserted parent and child changes distinguish route reuse from recomputation.
 // The fixtures bound the range to small finite source Collections, three public
 // forms, and the listed updates. New numeric values with the same relations
@@ -72,6 +73,10 @@ export const routeContextGrammar = {
     boundaries: [`from-query-ref`, `joined-query-ref`, `union-all`] as const,
     selections: [`expression`, `functional`] as const,
     domains: [`non-null`, `nullable`] as const,
+  },
+  distinctRelation: {
+    contexts: [`correlation-only`, `parent-filter`] as const,
+    windows: [`unwindowed`, `ordered-limit`] as const,
   },
   namespaceCollision: {
     locations: [`parent-alias`, `selected-field`] as const,
@@ -144,6 +149,12 @@ export type DerivedResultCell = {
   domain: (typeof routeContextGrammar.derivedResult.domains)[number]
 }
 
+export type DistinctRelationCell = {
+  family: `distinct-relation`
+  context: (typeof routeContextGrammar.distinctRelation.contexts)[number]
+  window: (typeof routeContextGrammar.distinctRelation.windows)[number]
+}
+
 export type NamespaceCollisionCell = {
   family: `namespace-collision`
   location: (typeof routeContextGrammar.namespaceCollision.locations)[number]
@@ -165,6 +176,7 @@ export type GrammarCell =
   | JoinCell
   | UnionIdentityCell
   | DerivedResultCell
+  | DistinctRelationCell
   | NamespaceCollisionCell
   | PublicSurfaceCell
   | PublicFieldCell
@@ -232,6 +244,15 @@ export const grammarCells: Array<GrammarCell> = [
       ),
     ),
   ),
+  ...routeContextGrammar.distinctRelation.contexts.flatMap((context) =>
+    routeContextGrammar.distinctRelation.windows.map(
+      (window): DistinctRelationCell => ({
+        family: `distinct-relation`,
+        context,
+        window,
+      }),
+    ),
+  ),
   ...routeContextGrammar.namespaceCollision.locations.flatMap((location) =>
     routeContextGrammar.namespaceCollision.boundaries.flatMap((boundary) =>
       routeContextGrammar.namespaceCollision.names.map(
@@ -276,6 +297,8 @@ export function grammarCellName(cell: GrammarCell): string {
       return `${cell.family} / ${String(cell.key)} / ${cell.location} / ${cell.selection} / ${cell.destination}`
     case `public-field-overlap`:
       return `${cell.family} / ${cell.destination} / ${cell.operation} / ${cell.descriptor}`
+    case `distinct-relation`:
+      return `${cell.family} / ${cell.context} / ${cell.window}`
     case `public-surface`:
       return `${cell.family} / ${cell.shape}`
   }

@@ -847,7 +847,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/includes-oracle.property.test.ts`,
     `includes`,
-    `scenario-statistics incremental-history nested-scalar-materialization alpha-renaming scoped-alpha-renaming optimistic-convergence bucket-collisions`,
+    `scenario-statistics incremental-history nested-scalar-materialization alpha-renaming scoped-alpha-renaming scoped-distinct optimistic-convergence bucket-collisions`,
   ],
   [
     `db/tests/query/includes-query-shape-oracle.test.ts`,
@@ -2073,6 +2073,7 @@ function directReplayTestName(property: string): string | undefined {
     [
       `includes.alpha-renaming`,
       `includes.scoped-alpha-renaming`,
+      `includes.scoped-distinct`,
       `includes.incremental-history`,
       `includes.nested-scalar-materialization`,
       `includes.optimistic-convergence`,
