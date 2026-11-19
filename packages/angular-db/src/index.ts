@@ -8,10 +8,7 @@ import {
 import {
   configPool,
   createLiveQueryObserver,
-  getLiveQueryStatusFlags,
-  getPublicCollection,
   isCollection,
-  isSingleResultCollection,
   resolveLiveQueryValue,
 } from '@tanstack/db'
 import type {
@@ -22,7 +19,6 @@ import type {
   InferResultType,
   InitialQueryBuilder,
   LiveQueryHookConfig,
-  LiveQuerySnapshot,
   LiveQueryStatusFlags,
   NonSingleResult,
   PooledLiveQueries,
@@ -202,82 +198,50 @@ export function injectLiveQuery(opts: any) {
     untracked(() => move?.())
   })
 
-  // The shared observer already captures one coherent view per publication.
-  // Signals project that snapshot instead of copying its rows and health again.
-  const snapshot = signal<LiveQuerySnapshot<any, string | number> | null>(null)
-  const state = computed(
-    () => (snapshot()?.state ?? new Map()) as Map<string | number, any>,
+  // Observers are inert until subscribed. A read can therefore follow the
+  // current query synchronously without acquiring an Angular-owned connection.
+  const observer = computed(() =>
+    createLiveQueryObserver(collection(), { mode: `wholesale` }),
   )
-  const status = computed(() => {
-    const value = snapshot()?.status ?? `idle`
-    return value === `idle` && !collection() ? `disabled` : value
+  const revision = signal(0)
+  const invalidate = () => revision.update((value) => value + 1)
+  const snapshot = computed(() => {
+    revision()
+    return observer().getSnapshot()
   })
-  const health = computed(() => snapshot()?.health)
-  // Every status flag comes from the shared rule; a disabled query is ready.
-  const flags = computed(() =>
-    getLiveQueryStatusFlags(status() as CollectionStatus, health()),
-  )
+  const rowState = computed(() => snapshot().state)
 
-  // Between input resolution and observer attachment, the snapshot can belong
-  // to the previous query. Reapply the current query's projection to its rows.
-  const data = computed(() => {
-    // Read the current input even when a snapshot exists: a compile rejection
-    // must propagate instead of exposing the previous query's rows.
-    const currentCollection = collection()
-    const currentSnapshot = snapshot()
-    if (
-      currentSnapshot &&
-      currentSnapshot.collection === getPublicCollection(currentCollection)
-    )
-      return currentSnapshot.data
-    // Public pooled Collections materialize when their properties are read.
-    // The captured keyed rows let us reproject without inspecting that facade.
-    const rows = Array.from(currentSnapshot?.state?.values() ?? [])
-    return currentCollection && isSingleResultCollection(currentCollection)
-      ? rows[0]
-      : rows
-  })
-
-  // The effect owns this observer through reruns and injector destruction.
   effect((onCleanup) => {
-    const currentCollection = collection()
-
-    // Handle null collection (disabled query)
-    if (!currentCollection) {
-      snapshot.set(null)
-      return
-    }
-
-    // Wholesale mode preserves Angular's loading policy: attaching requests no
-    // initial-state snapshot from the source.
-    const observer = createLiveQueryObserver(currentCollection, {
-      mode: `wholesale`,
+    const current = observer()
+    untracked(() => {
+      const unsubscribe = current.subscribe(invalidate)
+      onCleanup(() => {
+        unsubscribe()
+        current.dispose()
+      })
+      // Close the gap after an early snapshot read. Wholesale attach also
+      // suppresses notifications raised by synchronous sync startup.
+      invalidate()
     })
-
-    const syncSnapshot = () => snapshot.set(observer.getSnapshot())
-    observer.subscribe(syncSnapshot)
-    // Wholesale attach suppresses listener calls raised by synchronous sync
-    // startup. Read once after subscribe returns to capture that final state.
-    syncSnapshot()
-    onCleanup(() => observer.dispose())
   })
 
   return {
-    state,
-    data,
+    state: computed(() => new Map(rowState())),
+    // Angular keeps empty containers for disabled queries, including findOne.
+    data: computed(() =>
+      snapshot().status === `disabled` ? [] : snapshot().data,
+    ),
     // Loosely typed so the impl return stays compatible with every overload
     // (the shared `isCollection` guard narrows the computed to `Collection | null`).
-    collection: computed(() =>
-      getPublicCollection(collection()),
-    ) as Signal<any>,
-    status,
-    isLoading: computed(() => flags().isLoading),
-    isReady: computed(() => flags().isReady || status() === `disabled`),
-    isIdle: computed(() => flags().isIdle),
-    isLoadingError: computed(() => flags().isLoadingError),
-    isCrashed: computed(() => flags().isCrashed),
-    isCleanedUp: computed(() => flags().isCleanedUp),
-    isSyncError: computed(() => flags().isSyncError),
-    health,
+    collection: computed(() => snapshot().collection ?? null) as Signal<any>,
+    status: computed(() => snapshot().status),
+    isLoading: computed(() => snapshot().isLoading),
+    isReady: computed(() => snapshot().isReady),
+    isIdle: computed(() => snapshot().isIdle),
+    isLoadingError: computed(() => snapshot().isLoadingError),
+    isCrashed: computed(() => snapshot().isCrashed),
+    isCleanedUp: computed(() => snapshot().isCleanedUp),
+    isSyncError: computed(() => snapshot().isSyncError),
+    health: computed(() => snapshot().health),
   }
 }

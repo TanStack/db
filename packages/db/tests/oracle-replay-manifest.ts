@@ -24,6 +24,11 @@ const ownerGroups: ReadonlyArray<
     `contract`,
   ],
   [
+    `angular-db/tests/snapshot-conformance-oracle.test.ts`,
+    `angular`,
+    `current-snapshot`,
+  ],
+  [
     `query-db-collection/tests/documented-mutations-oracle.test.ts`,
     `documented-mutations`,
     `query`,

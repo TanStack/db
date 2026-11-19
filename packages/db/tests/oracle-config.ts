@@ -51,6 +51,7 @@ export function isOracleDeterminismUnit(name: string | undefined): boolean {
 
 const staticOracleProperties = [
   `oracle-campaign-units.contract`,
+  `angular.current-snapshot`,
   `persistence.crossed-leadership-index`,
   `persisted-options.types.core-fixed`,
   `persisted-options.types.browser-fixed`,
