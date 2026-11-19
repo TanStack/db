@@ -1,5 +1,14 @@
 # @tanstack/node-db-sqlite-persistence
 
+## 1.0.0-rc.1.6
+
+### Patch Changes
+
+- Make the TypeScript peer dependency optional so JavaScript consumers do not automatically install the compiler. Keep the existing minimum version requirement for projects that install TypeScript. ([#2417](https://github.com/TanStack/db/pull/2417))
+
+- Updated dependencies [[`83c8ebd`](https://github.com/TanStack/db/commit/83c8ebdf60d8a3bd5d2e2aa8c12870023691c634)]:
+  - @tanstack/db-sqlite-persistence-core@1.0.0-rc.1.6
+
 ## 1.0.0-rc.1.5
 
 ### Patch Changes
