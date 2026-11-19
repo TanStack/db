@@ -1418,6 +1418,11 @@ const ownerGroups: ReadonlyArray<
     `powersync`,
   ],
   [
+    `powersync-direct-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `powersync-direct`,
+  ],
+  [
     `electric-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
     `adapter-conformance.eager-live-source`,
     `electric electric.no-on-error`,

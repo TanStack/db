@@ -33,6 +33,7 @@ const groups = {
     `@tanstack/electric-db-collection`,
     `@tanstack/query-db-collection`,
     `@tanstack/powersync-db-collection`,
+    `@tanstack/powersync-direct-collection`,
     `@tanstack/rxdb-db-collection`,
     `@tanstack/trailbase-db-collection`,
     `@tanstack/db-collection-e2e`,

@@ -193,6 +193,11 @@ map and [migration log](MIGRATION.md) retain the remaining work.
   the published adapter in eager mode over a real local PowerSync database,
   with per-batch commits and a declared propagation step (`settle`). It runs
   in that package's default `pnpm test`.
+- **PowerSync (Direct)** (`packages/powersync-direct-collection/tests/conformance-driver.ts`):
+  the adapter in eager mode over the real `@powersync/standalone-client`,
+  through a fake sync service that writes the protocol's lines, with
+  per-batch commits and `retry-policy` (a failed response body). It runs in
+  that package's default `pnpm test`.
 - **TrailBase** (`packages/trailbase-db-collection/tests/conformance-driver.ts`):
   the published adapter in eager mode over a controlled `RecordApi`, with
   per-change commits, `duplicate-key-delivery` (a paged list can return one
