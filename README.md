@@ -79,18 +79,18 @@ Data loading is optimized. Interactions feel instantaneous. Your backend stays s
 <td>
 <a href="https://www.coderabbit.ai/?via=tanstack&dub_id=aCcEEdAOqqutX6OS" >
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://tanstack.com/assets/coderabbit-dark-D643Zkrv.svg" height="40" />
-  <source media="(prefers-color-scheme: light)" srcset="https://tanstack.com/assets/coderabbit-light-CIzGLYU_.svg" height="40" />
-  <img src="https://tanstack.com/assets/coderabbit-light-CIzGLYU_.svg" height="40" alt="CodeRabbit" />
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/TanStack/tanstack.com/main/src/images/coderabbit-dark.svg" height="40" />
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/TanStack/tanstack.com/main/src/images/coderabbit-light.svg" height="40" />
+  <img src="https://raw.githubusercontent.com/TanStack/tanstack.com/main/src/images/coderabbit-light.svg" height="40" alt="CodeRabbit" />
 </picture>
 </a>
 </td>
 <td>
 <a href="https://www.cloudflare.com?utm_source=tanstack">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://tanstack.com/assets/cloudflare-white-Co-Tyjbl.svg" height="60" />
-  <source media="(prefers-color-scheme: light)" srcset="https://tanstack.com/assets/cloudflare-black-6Ojsn8yh.svg" height="60" />
-  <img src="https://tanstack.com/assets/cloudflare-black-6Ojsn8yh.svg" height="60" alt="Cloudflare" />
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/TanStack/tanstack.com/main/src/images/cloudflare-white.svg" height="60" />
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/TanStack/tanstack.com/main/src/images/cloudflare-black.svg" height="60" />
+  <img src="https://raw.githubusercontent.com/TanStack/tanstack.com/main/src/images/cloudflare-black.svg" height="60" alt="Cloudflare" />
 </picture>
 </a>
 </td>
@@ -99,8 +99,8 @@ Data loading is optimized. Interactions feel instantaneous. Your backend stays s
 <td>
 <a href="https://electric-sql.com">
 <picture>
-	<source media="(prefers-color-scheme: dark)" srcset="https://tanstack.com/assets/electric-dark-Bfu2Vl2j.svg" height="60">
-	<source media="(prefers-color-scheme: light)" srcset="https://tanstack.com/assets/electric-light-C-5MDda4.svg" height="60">
+	<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/TanStack/tanstack.com/main/src/images/electric-dark.svg" height="60">
+	<source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/TanStack/tanstack.com/main/src/images/electric-light.svg" height="60">
 	<img src="https://raw.githubusercontent.com/electric-sql/meta/main/identity/ElectricSQL-logo.with-background.sm.png" height="60" alt="ElectricSQL logo"/>
 </picture>
 </a>
@@ -108,9 +108,9 @@ Data loading is optimized. Interactions feel instantaneous. Your backend stays s
 <td>
 <a href="https://www.prisma.io?utm_source=tanstack&via=tanstack">
 <picture>
-	<source media="(prefers-color-scheme: dark)" srcset="https://tanstack.com/assets/prisma-dark-DwgDxLwn.svg" height="60">
-	<source media="(prefers-color-scheme: light)" srcset="https://tanstack.com/assets/prisma-light-Cloa3Onm.svg" height="60">
-	<img src="https://tanstack.com/assets/prisma-dark-DwgDxLwn.svg" height="60" alt="Prisma"/>
+	<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/TanStack/tanstack.com/main/src/images/prisma-dark.svg" height="60">
+	<source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/TanStack/tanstack.com/main/src/images/prisma-light.svg" height="60">
+	<img src="https://raw.githubusercontent.com/TanStack/tanstack.com/main/src/images/prisma-dark.svg" height="60" alt="Prisma"/>
 </picture>
 </a>
 </td>
