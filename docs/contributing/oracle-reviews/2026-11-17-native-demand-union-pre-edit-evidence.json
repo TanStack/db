@@ -1,0 +1,1055 @@
+{
+  "stage": "pre-production-edit gate",
+  "commands": {
+    "node": "cd packages/powersync-db-collection && /Users/kyle.mathews/.npm/_npx/bac97da9607b7ef2/node_modules/node/bin/node ../../node_modules/vitest/vitest.mjs run --config ../../.review-2377/native-union.config.ts --maxWorkers=1",
+    "chromium": "cd packages/browser-db-sqlite-persistence && /Users/kyle.mathews/.npm/_npx/bac97da9607b7ef2/node_modules/node/bin/node ../../node_modules/vitest/vitest.mjs run --config vitest.adapter-oracles.config.ts e2e/native-powersync-union-oracle.browser.test.ts --maxWorkers=1"
+  },
+  "node": {
+    "log": ".review-2377/native-union-node-gate.log",
+    "sha256": "2bd87b3757221bd029d025eb220ff281520d3ac7f3bdb9c29fbfe4b705ecc408",
+    "summary": "Tests  38 failed | 34 passed (72)",
+    "campaigns": {
+      "fixed seed 2377": {
+        "actual_reach": {
+          "broad-first": 8,
+          "changed-values": 16,
+          "limited-broad": 7,
+          "third-retired-broad-remains": 11,
+          "broad-retired-narrow-remains": 11,
+          "broad-last": 3,
+          "narrow-only-disjoint": 2,
+          "narrow-only-overlap": 3
+        },
+        "histories": {
+          "fixed seed 2377: generated broad-first 1": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": -4,
+              "value": 15,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated broad-first 2": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": -4,
+              "value": 31937,
+              "limited": false
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated broad-last 1": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-last",
+              "overlap": false,
+              "pivot": 2,
+              "value": 37728,
+              "limited": false
+            },
+            "reached": [
+              "broad-last",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated broad-last 2": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-last",
+              "overlap": false,
+              "pivot": 4,
+              "value": 10,
+              "limited": true
+            },
+            "reached": [
+              "broad-last",
+              "limited-broad",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated third-retired-broad-remains 1": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": 4,
+              "value": 80180,
+              "limited": false
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated third-retired-broad-remains 2": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": 4,
+              "value": 7,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated broad-retired-narrow-remains 1": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": false,
+              "pivot": -1,
+              "value": 99992,
+              "limited": false
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated broad-retired-narrow-remains 2": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-last",
+              "overlap": false,
+              "pivot": -2,
+              "value": 30717,
+              "limited": true
+            },
+            "reached": [
+              "broad-last",
+              "limited-broad",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated changed-values 1": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": -1,
+              "value": 5,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated limited-broad 1": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": false,
+              "pivot": 2,
+              "value": 69138,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated limited-broad 2": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": -1,
+              "value": 47678,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          }
+        },
+        "failed_original_constructed_histories": 11,
+        "successful_constructed_reach": {
+          "fixed seed 2377: generated narrow-only-disjoint 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0
+          },
+          "fixed seed 2377: generated narrow-only-disjoint 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0
+          },
+          "fixed seed 2377: generated narrow-only-overlap 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0
+          },
+          "fixed seed 2377: generated narrow-only-overlap 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0
+          },
+          "fixed seed 2377: generated changed-values 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0
+          }
+        },
+        "original_constructed_histories": 16
+      },
+      "random seed": {
+        "actual_reach": {
+          "broad-first": 7,
+          "changed-values": 16,
+          "limited-broad": 6,
+          "third-retired-broad-remains": 11,
+          "broad-retired-narrow-remains": 11,
+          "broad-last": 4,
+          "narrow-only-disjoint": 3,
+          "narrow-only-overlap": 2
+        },
+        "histories": {
+          "random seed: generated broad-first 1": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": -2,
+              "value": 16,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated broad-first 2": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": false,
+              "pivot": -2,
+              "value": 98434,
+              "limited": false
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated broad-last 1": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-last",
+              "overlap": true,
+              "pivot": 2,
+              "value": 6,
+              "limited": true
+            },
+            "reached": [
+              "broad-last",
+              "limited-broad",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated broad-last 2": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-last",
+              "overlap": false,
+              "pivot": 3,
+              "value": 61338,
+              "limited": false
+            },
+            "reached": [
+              "broad-last",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated third-retired-broad-remains 1": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-last",
+              "overlap": false,
+              "pivot": -3,
+              "value": 20165,
+              "limited": true
+            },
+            "reached": [
+              "broad-last",
+              "limited-broad",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated third-retired-broad-remains 2": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-last",
+              "overlap": true,
+              "pivot": 1,
+              "value": 70057,
+              "limited": false
+            },
+            "reached": [
+              "broad-last",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated broad-retired-narrow-remains 1": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": false,
+              "pivot": -4,
+              "value": 86504,
+              "limited": false
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated broad-retired-narrow-remains 2": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": 1,
+              "value": 99989,
+              "limited": false
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated changed-values 1": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": -3,
+              "value": 72700,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated limited-broad 1": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": false,
+              "pivot": -2,
+              "value": 15,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated limited-broad 2": {
+            "property": "adapter.powersync.demand-union",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": -2,
+              "value": 7118,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          }
+        },
+        "failed_original_constructed_histories": 11,
+        "successful_constructed_reach": {
+          "random seed: generated narrow-only-disjoint 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0
+          },
+          "random seed: generated narrow-only-disjoint 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0
+          },
+          "random seed: generated narrow-only-overlap 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0
+          },
+          "random seed: generated narrow-only-overlap 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0
+          },
+          "random seed: generated changed-values 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0
+          }
+        },
+        "original_constructed_histories": 16
+      }
+    },
+    "all_receiving_executions_including_shrinks": {
+      "broad-first": 108,
+      "changed-values": 147,
+      "limited-broad": 79,
+      "third-retired-broad-remains": 146,
+      "broad-retired-narrow-remains": 146,
+      "broad-last": 38,
+      "narrow-only-overlap": 1
+    },
+    "classification": "semantic predicate-union row mismatch at exact named source cut; calibration clean-baseline semantic failures separately reported; no setup failure or timeout"
+  },
+  "chromium": {
+    "log": ".review-2377/native-union-chromium-gate.log",
+    "sha256": "424c7acd9b4ab3dc0fd1f434f148b2dba3c9f9e861b520f12fb24471ef2bbea2",
+    "summary": "Tests  38 failed | 34 passed (72)",
+    "campaigns": {
+      "fixed seed 2377": {
+        "actual_reach": {
+          "broad-first": 8,
+          "changed-values": 16,
+          "limited-broad": 7,
+          "third-retired-broad-remains": 11,
+          "broad-retired-narrow-remains": 11,
+          "broad-last": 3,
+          "narrow-only-disjoint": 2,
+          "narrow-only-overlap": 3
+        },
+        "histories": {
+          "fixed seed 2377: generated broad-first 1": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": -4,
+              "value": 15,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated broad-first 2": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": -4,
+              "value": 31937,
+              "limited": false
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated broad-last 1": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-last",
+              "overlap": false,
+              "pivot": 2,
+              "value": 37728,
+              "limited": false
+            },
+            "reached": [
+              "broad-last",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated broad-last 2": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-last",
+              "overlap": false,
+              "pivot": 4,
+              "value": 10,
+              "limited": true
+            },
+            "reached": [
+              "broad-last",
+              "limited-broad",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated third-retired-broad-remains 1": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": 4,
+              "value": 80180,
+              "limited": false
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated third-retired-broad-remains 2": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": 4,
+              "value": 7,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated broad-retired-narrow-remains 1": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": false,
+              "pivot": -1,
+              "value": 99992,
+              "limited": false
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated broad-retired-narrow-remains 2": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-last",
+              "overlap": false,
+              "pivot": -2,
+              "value": 30717,
+              "limited": true
+            },
+            "reached": [
+              "broad-last",
+              "limited-broad",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated changed-values 1": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": -1,
+              "value": 5,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated limited-broad 1": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": false,
+              "pivot": 2,
+              "value": 69138,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "fixed seed 2377: generated limited-broad 2": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": -1,
+              "value": 47678,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          }
+        },
+        "failed_original_constructed_histories": 11,
+        "successful_constructed_reach": {
+          "fixed seed 2377: generated narrow-only-disjoint 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0
+          },
+          "fixed seed 2377: generated narrow-only-disjoint 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0
+          },
+          "fixed seed 2377: generated narrow-only-overlap 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0
+          },
+          "fixed seed 2377: generated narrow-only-overlap 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0
+          },
+          "fixed seed 2377: generated changed-values 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0
+          }
+        },
+        "original_constructed_histories": 16
+      },
+      "random seed": {
+        "actual_reach": {
+          "broad-first": 6,
+          "changed-values": 16,
+          "third-retired-broad-remains": 11,
+          "broad-retired-narrow-remains": 11,
+          "limited-broad": 7,
+          "broad-last": 5,
+          "narrow-only-disjoint": 2,
+          "narrow-only-overlap": 3
+        },
+        "histories": {
+          "random seed: generated broad-first 1": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": 2,
+              "value": 11,
+              "limited": false
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated broad-first 2": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": -2,
+              "value": 78527,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated broad-last 1": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-last",
+              "overlap": false,
+              "pivot": -1,
+              "value": 100000,
+              "limited": false
+            },
+            "reached": [
+              "broad-last",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated broad-last 2": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-last",
+              "overlap": true,
+              "pivot": -2,
+              "value": 99988,
+              "limited": false
+            },
+            "reached": [
+              "broad-last",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated third-retired-broad-remains 1": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": false,
+              "pivot": 2,
+              "value": 99992,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated third-retired-broad-remains 2": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": false,
+              "pivot": -4,
+              "value": 53895,
+              "limited": false
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated broad-retired-narrow-remains 1": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": true,
+              "pivot": 2,
+              "value": 40063,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated broad-retired-narrow-remains 2": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-last",
+              "overlap": false,
+              "pivot": -2,
+              "value": 35234,
+              "limited": true
+            },
+            "reached": [
+              "broad-last",
+              "limited-broad",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated changed-values 1": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-last",
+              "overlap": true,
+              "pivot": -2,
+              "value": 1,
+              "limited": true
+            },
+            "reached": [
+              "broad-last",
+              "limited-broad",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated limited-broad 1": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-last",
+              "overlap": false,
+              "pivot": 3,
+              "value": 97132,
+              "limited": true
+            },
+            "reached": [
+              "broad-last",
+              "limited-broad",
+              "changed-values",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          },
+          "random seed: generated limited-broad 2": {
+            "property": "adapter.powersync.demand-union.chromium",
+            "history": {
+              "order": "broad-first",
+              "overlap": false,
+              "pivot": 2,
+              "value": 13,
+              "limited": true
+            },
+            "reached": [
+              "broad-first",
+              "changed-values",
+              "limited-broad",
+              "third-retired-broad-remains",
+              "broad-retired-narrow-remains"
+            ]
+          }
+        },
+        "failed_original_constructed_histories": 11,
+        "successful_constructed_reach": {
+          "random seed: generated narrow-only-disjoint 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0
+          },
+          "random seed: generated narrow-only-disjoint 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 1,
+            "narrow-only-overlap": 0,
+            "third-retired-broad-remains": 0
+          },
+          "random seed: generated narrow-only-overlap 1": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0
+          },
+          "random seed: generated narrow-only-overlap 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0
+          },
+          "random seed: generated changed-values 2": {
+            "broad-first": 0,
+            "broad-last": 0,
+            "broad-retired-narrow-remains": 0,
+            "changed-values": 1,
+            "limited-broad": 0,
+            "narrow-only-disjoint": 0,
+            "narrow-only-overlap": 1,
+            "third-retired-broad-remains": 0
+          }
+        },
+        "original_constructed_histories": 16
+      }
+    },
+    "all_receiving_executions_including_shrinks": {
+      "broad-first": 108,
+      "changed-values": 151,
+      "limited-broad": 75,
+      "third-retired-broad-remains": 148,
+      "broad-retired-narrow-remains": 148,
+      "broad-last": 40,
+      "narrow-only-overlap": 2,
+      "narrow-only-disjoint": 1
+    },
+    "classification": "semantic predicate-union row mismatch at exact named source cut; calibration clean-baseline semantic failures separately reported; no setup failure or timeout"
+  },
+  "sources": {
+    "packages/powersync-db-collection/src/powersync.ts": "7781cf0834530b48cd7be9db052261964866bf92a6a44adb2c15fe0aa6e282de",
+    "packages/powersync-db-collection/tests/demand-union-oracle.ts": "77f76c8e7d307bf1bd0e9a7e719821bc7caf9bae41d8cc3dca07acfa25ba1221",
+    "packages/powersync-db-collection/tests/demand-union-driver.ts": "2a1afd6077f1cfa99efea5ab36158f473e08343c216007bb00762f12bcd5fa5a",
+    "packages/powersync-db-collection/tests/demand-union-oracle-suite.ts": "679f82464c0683b5f6a3ba969b842155c1880b0a3971e5f7997e3448d505131a",
+    "packages/powersync-db-collection/tests/demand-union-conformance-oracle.property.test.ts": "b67e32ddb21f69f0c0aed6ef17bf9751d849541f4c0df1b8abaec2768d4a7722",
+    "packages/browser-db-sqlite-persistence/e2e/native-powersync-union-oracle.browser.test.ts": "02b3b7f603fad65fc3eae87cd5eb3cd61d52d5ed91cd06346df92b206759c0e6",
+    "packages/browser-db-sqlite-persistence/e2e/native-powersync-union.opfs.ts": "30df204b5e9e88883920185eaaee658035278db4b74679574c98c96361d2e1f6",
+    "packages/browser-db-sqlite-persistence/e2e/native-powersync-union.opfs.html": "1e6252556970df0afd12dd93536ecfce2a548ac9b7a3e57de7247ad1702c106a"
+  }
+}

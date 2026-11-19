@@ -24,7 +24,14 @@ const config = defineConfig({
   test: {
     server: { deps: { inline: [`@tanstack/oracles`] } },
     name: `@tanstack/db-adapter-conformance (neon)`,
-    include: [`tests/neon-realtime-oracle.property.test.ts`],
+    include: [
+      `tests/neon-realtime-oracle.property.test.ts`,
+      `tests/neon-sdk-oracle.property.test.ts`,
+      `tests/neon-reload-oracle.property.test.ts`,
+      `tests/neon-initial-receipt-oracle.property.test.ts`,
+      `tests/neon-shared-client-oracle.property.test.ts`,
+      `tests/neon-idempotent-removal-oracle.property.test.ts`,
+    ],
     environment: `node`,
   },
 })

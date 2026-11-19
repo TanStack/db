@@ -9,6 +9,7 @@ export default defineConfig({
       // oracleProperty registers runtime tests that the type-test collector
       // cannot discover. These files remain in the TypeScript program.
       exclude: [
+        `tests/eager-reload-conformance-oracle.property.test.ts`,
         `tests/offline-executor-refresh-oracle.test.ts`,
         `tests/ownership-lifecycle.oracle.test.ts`,
         `tests/persisted-rejected-write-cutoff-oracle.test.ts`,

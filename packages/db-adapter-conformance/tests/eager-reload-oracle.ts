@@ -111,11 +111,18 @@ export function eagerReloadReached(
   return reached
 }
 export type EagerReloadObservation = {
+  receivingErrors?: ReadonlyArray<string>
+  browserErrors?: ReadonlyArray<string>
+  cleanupErrors?: Array<string>
   before: Array<StartupRow>
   beforeStatus: string
   settledBeforeSource: boolean
+  settledAfterSource?: boolean
   submittedRows: number
   submittedCommits: number
+  // An exhausted empty source can complete via markReady() without a sync
+  // transaction. This records that provider boundary, not inferred readiness.
+  sourceReadyCalls?: number
   acceptedCommits: number
   atFulfillment: Array<StartupRow>
   mutationReleasedBeforeFulfillment: boolean
@@ -151,6 +158,8 @@ export function eagerReloadViolations(
   expected = eagerReloadModel(h),
 ): Array<string> {
   const violations: Array<string> = []
+  if (observed.receivingErrors?.length)
+    violations.push(`detached receiving errors`)
   const { initial, source: expectedRows, retained } = expected
   const equal = (a: unknown, b: unknown) =>
     JSON.stringify(a) === JSON.stringify(b)
@@ -160,11 +169,14 @@ export function eagerReloadViolations(
     violations.push(`before-source status`)
   if (observed.settledBeforeSource)
     violations.push(`settled before source entry`)
+  if (observed.settledAfterSource === false)
+    violations.push(`load pending after complete source application`)
   if (observed.error !== undefined)
     violations.push(`source failed: ${observed.error}`)
   if (
     observed.submittedRows < expectedRows.length ||
-    observed.submittedCommits === 0
+    (observed.submittedCommits === 0 &&
+      !((observed.sourceReadyCalls ?? 0) > 0 && expectedRows.length === 0))
   )
     violations.push(`complete source submission not reached`)
   if (observed.acceptedCommits !== observed.submittedCommits)
@@ -203,5 +215,146 @@ export function eagerReloadViolations(
   )
     violations.push(`pending optimistic overlay disappeared`)
   if (!equal(observed.final, expectedRows)) violations.push(`final rows`)
+  if (observed.browserErrors?.length)
+    violations.push(`browser receiving errors`)
   return violations
+}
+
+/**
+ * A terminal eager initial gate has one verdict, including during reload.
+ * A shared entry additionally requires the provider to deliver its current
+ * terminal failure as the new request's verdict. Cached errors that the
+ * provider contract ignores while awaiting a fresh result do not meet this
+ * premise; the receiving adapter's primary owner judges that distinct law.
+ * The Collection reload API requires failure to retain its rows/status and
+ * reject reload. The initial-gate contract instead ends a fresh load in error.
+ *
+ * `shared` combines a ready peer, its terminal provider failure, and a second
+ * Collection's fresh initial gate. `source` names receiving variants declared
+ * by the adapter, such as explicit/default streams. Both are grammar facts,
+ * never production-derived classifiers. Three-key masks bound retained rows;
+ * error labels and optional new-run recovery distinguish rejection fidelity
+ * and recovery from a permanently stopped or incorrectly fulfilled gate.
+ */
+export type EagerGateHistory = {
+  entry: `fresh` | `reload` | `shared`
+  source: string
+  previous: number
+  next: number
+  failure: number
+  retry: boolean
+}
+export function eagerGateHistoryArb(
+  sources: ReadonlyArray<string>,
+  entries: ReadonlyArray<EagerGateHistory[`entry`]> = [
+    `fresh`,
+    `reload`,
+    `shared`,
+  ],
+) {
+  if (!sources.length) throw new Error(`An eager gate receiver needs a source`)
+  if (!entries.length) throw new Error(`An eager gate receiver needs an entry`)
+  const suffix = {
+    source: fc.constantFrom(...sources),
+    next: fc.integer({ min: 0, max: 7 }),
+    failure: fc.integer({ min: 0, max: 9 }),
+    retry: fc.boolean(),
+  }
+  return fc.oneof(
+    ...entries.map((entry) =>
+      fc.record({
+        entry: fc.constant(entry),
+        previous:
+          entry === `fresh` ? fc.constant(0) : fc.integer({ min: 0, max: 7 }),
+        ...suffix,
+      }),
+    ),
+  )
+}
+export type EagerGateCut = {
+  outcome: `pending` | `fulfilled` | `rejected`
+  rows: Array<StartupRow>
+  status: string
+  reloading: boolean
+  errorMatches: boolean
+  stoppedErrorMatches: boolean
+  hasErrors: boolean
+}
+export type EagerGateObservation = {
+  receivingErrors?: ReadonlyArray<string>
+  cleanupErrors?: Array<string>
+  before: { rows: Array<StartupRow>; status: string }
+  failureReached: boolean
+  sharedFailureBeforeTarget: boolean
+  failure: EagerGateCut
+  retry?: EagerGateCut
+  retryRunStarted: boolean
+}
+// The expected verdict comes from the requested operation and authored source
+// failure. The adapter's callback choice and SDK's error cache are absent.
+export function eagerGateModel(h: EagerGateHistory) {
+  const rows = h.entry === `reload` ? startupRows(h.previous, 1) : []
+  return {
+    before: { rows, status: h.entry === `reload` ? `ready` : `loading` },
+    failure: {
+      rows,
+      status: h.entry === `reload` ? `ready` : `error`,
+      outcome: `rejected`,
+      reloading: false,
+      errorMatches: true,
+      stoppedErrorMatches: true,
+      hasErrors: true,
+    },
+    retry: {
+      rows: startupRows(h.next, 2),
+      status: `ready`,
+      outcome: `fulfilled`,
+      reloading: false,
+      hasErrors: false,
+    },
+  }
+}
+export function eagerGateViolations(
+  h: EagerGateHistory,
+  actual: EagerGateObservation,
+  expected = eagerGateModel(h),
+): Array<string> {
+  const errors: Array<string> = []
+  if (actual.receivingErrors?.length) errors.push(`detached receiving errors`)
+  const equal = (a: unknown, b: unknown) =>
+    JSON.stringify(a) === JSON.stringify(b)
+  if (!equal(actual.before, expected.before))
+    errors.push(`before-failure public snapshot`)
+  if (!actual.failureReached)
+    errors.push(`target terminal provider verdict not reached`)
+  if (h.entry === `shared` && !actual.sharedFailureBeforeTarget)
+    errors.push(`shared provider failure premise not reached`)
+  for (const key of [
+    `rows`,
+    `status`,
+    `outcome`,
+    `reloading`,
+    `errorMatches`,
+    `stoppedErrorMatches`,
+    `hasErrors`,
+  ] as const) {
+    if (!equal(actual.failure[key], expected.failure[key]))
+      errors.push(`terminal ${key}`)
+  }
+  if (h.retry) {
+    if (!actual.retryRunStarted) errors.push(`new sync run not entered`)
+    if (!actual.retry) errors.push(`new-run recovery unobserved`)
+    else
+      for (const key of [
+        `rows`,
+        `status`,
+        `outcome`,
+        `reloading`,
+        `hasErrors`,
+      ] as const) {
+        if (!equal(actual.retry[key], expected.retry[key]))
+          errors.push(`recovery ${key}`)
+      }
+  }
+  return errors
 }

@@ -25,6 +25,7 @@
     "e2e",
     "vite.config.ts",
     "vitest.dist.config.ts",
+    "vitest.local-stores.config.ts",
     "playwright.indexed-db.config.ts",
     "playwright.collection-gc.config.ts",
     "vite.indexed-db.browser.config.ts",

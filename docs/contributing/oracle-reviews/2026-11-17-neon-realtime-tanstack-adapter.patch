@@ -1,0 +1,81 @@
+--- a/packages/realtime-tanstack/src/collection-options.ts
++++ b/packages/realtime-tanstack/src/collection-options.ts
+@@ -152,7 +152,7 @@
+ 				commit,
+ 				truncate,
+ 				markReady,
+-				markError,
++				fail,
+ 			}) => {
+ 				let cleaned = false;
+ 				let rowIds = new Map<string, Key>();
+@@ -163,7 +163,9 @@
+ 				activeSubscription = subscription;
+ 
+ 				const reportError = (error: unknown) => {
+-					if (!cleaned) markError(error);
++					if (cleaned) return;
++					release();
++					fail(error);
+ 				};
+ 				const queryRefresh = new QueryRefreshController({
+ 					query: initialQuery,
+@@ -275,13 +277,9 @@
+ 										value: change.row,
+ 									});
+ 								}
+-							} else {
++							} else if (change.type === "remove") {
+ 								const key = nextRowIds.get(change.rowId);
+-								if (key === undefined) {
+-									throw new Error(
+-										`Realtime deleted an unknown row ID: ${change.rowId}`,
+-									);
+-								}
++								if (key === undefined) continue;
+ 								nextRowIds.delete(change.rowId);
+ 								nextKeys.delete(key);
+ 								writes.push({ type: "delete", key });
+@@ -300,31 +298,36 @@
+ 				};
+ 
+ 				const stateChanged = (state: LiveQueryState) => {
+-					if (state.status === "error") markError(state.error);
++					if (state.status === "error") reportError(state.error);
+ 					// Initial connecting maps to loading; complete rows make the
+ 					// collection ready. Reconnection and stale capability states retain
+ 					// an already-ready collection, while closed uses normal sync cleanup.
+ 				};
+ 
+ 				const unsubscribeUpdate = subscription.onUpdate((update) => {
++					if (cleaned) return;
+ 					if (update.type === "rows") installReset(update.rows);
+ 					else applyBatch(update.changes);
+ 				});
+ 				const unsubscribeState =
+ 					subscription.onStateChange(stateChanged);
+-				queryRefresh.start();
+-
+-				return () => {
++				const release = () => {
++					if (cleaned) return;
+ 					cleaned = true;
+ 					queryRefresh.stop();
+ 					unsubscribeUpdate();
+ 					unsubscribeState();
+ 					subscription.unsubscribe();
++					rowIds.clear();
++					keys.clear();
++				};
++				queryRefresh.start();
++
++				return () => {
++					release();
+ 					if (activeSubscription === subscription) {
+ 						activeSubscription = undefined;
+ 					}
+-					rowIds.clear();
+-					keys.clear();
+ 				};
+ 			},
+ 		},

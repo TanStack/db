@@ -1,0 +1,145 @@
+{
+  "snapshot": "2026-11-17-powersync-direct-persisted-demand-test-snapshot-v13.json",
+  "snapshotSha256": "29e9681a4959863e222e6dc482ccb4a82ef61c6cae20b647c741bd89b60ebf6c",
+  "classification": "35 original semantic unauthorized-reset failures per host, no setup/timeout; final all semantic histories and six calibrations GREEN; original historical five OPFS failures on old cut remain unclassified and are not retrospectively explained.",
+  "results": {
+    "original-node": {
+      "reach": {
+        "closed and reopened storage": 38,
+        "completed empty first load": 3,
+        "completed exact first load": 23,
+        "coverage ended by a snapshot": 8,
+        "coverage recorded twice": 2,
+        "covered but short of rows": 3,
+        "covered load waits for the deadline": 7,
+        "covered offline": 9,
+        "durable observation crossed the public wait deadline": 1,
+        "empty mapper after saved load": 2,
+        "exact remote refresh omits a saved row": 4,
+        "failed exact first load": 3,
+        "other demand checkpoint after saved load": 4,
+        "overlapping demands completed": 2,
+        "overlapping first load": 9,
+        "pending exact first load": 3,
+        "saved demand failed after cache eviction": 2,
+        "tie-boundary load uncovered": 2,
+        "uncovered load fails with its upstream": 8,
+        "uncovered offline": 22,
+        "window covered offline": 8,
+        "window holds other rows": 3
+      },
+      "testsSummary": "Tests  35 failed | 15 passed (50)",
+      "duration": "Duration  47.47s (tests 96%, transform 4%, import 1%)",
+      "logSha256": "9ddc3609dc70b4d04d57a6bf0b8f562c6a144ab24895511f09cdbfcb00f2e2eb"
+    },
+    "final-node": {
+      "reach": {
+        "closed and reopened storage": 38,
+        "completed empty first load": 3,
+        "completed exact first load": 23,
+        "coverage ended by a snapshot": 8,
+        "coverage recorded twice": 2,
+        "covered but short of rows": 3,
+        "covered load waits for the deadline": 6,
+        "covered offline": 9,
+        "durable observation crossed the public wait deadline": 1,
+        "empty mapper after saved load": 2,
+        "exact remote refresh omits a saved row": 4,
+        "failed exact first load": 3,
+        "other demand checkpoint after saved load": 4,
+        "overlapping demands completed": 2,
+        "overlapping first load": 9,
+        "pending exact first load": 3,
+        "saved demand failed after cache eviction": 2,
+        "tie-boundary load uncovered": 4,
+        "uncovered load fails with its upstream": 9,
+        "uncovered offline": 27,
+        "window covered offline": 5,
+        "window holds other rows": 3
+      },
+      "testsSummary": "Tests  57 passed (57)",
+      "duration": "Duration  48.39s (tests 99%, import 1%)",
+      "logSha256": "0e60038839aa9131d53ecb291a05c69302baef2dfc722dcb319bfe045648f82f"
+    },
+    "original-browser": {
+      "reach": {
+        "closed and reopened storage": 38,
+        "completed empty first load": 3,
+        "completed exact first load": 23,
+        "coverage ended by a snapshot": 8,
+        "coverage recorded twice": 2,
+        "covered but short of rows": 3,
+        "covered load waits for the deadline": 7,
+        "covered offline": 9,
+        "durable observation crossed the public wait deadline": 1,
+        "empty mapper after saved load": 2,
+        "exact remote refresh omits a saved row": 4,
+        "failed exact first load": 3,
+        "other demand checkpoint after saved load": 4,
+        "overlapping demands completed": 2,
+        "overlapping first load": 9,
+        "pending exact first load": 3,
+        "saved demand failed after cache eviction": 2,
+        "tie-boundary load uncovered": 2,
+        "uncovered load fails with its upstream": 8,
+        "uncovered offline": 22,
+        "window covered offline": 8,
+        "window holds other rows": 3
+      },
+      "testsSummary": "Tests  35 failed | 11 passed (46)",
+      "duration": "Duration  79.40s (tests 99%)",
+      "logSha256": "80a9079c0ea9cebab29f4dd25bedaccfffa67ef859956619a577b0d2ce2c2038"
+    },
+    "final-browser": {
+      "reach": {
+        "closed and reopened storage": 38,
+        "completed empty first load": 3,
+        "completed exact first load": 23,
+        "coverage ended by a snapshot": 8,
+        "coverage recorded twice": 2,
+        "covered but short of rows": 3,
+        "covered load waits for the deadline": 6,
+        "covered offline": 9,
+        "durable observation crossed the public wait deadline": 1,
+        "empty mapper after saved load": 2,
+        "exact remote refresh omits a saved row": 4,
+        "failed exact first load": 3,
+        "other demand checkpoint after saved load": 4,
+        "overlapping demands completed": 2,
+        "overlapping first load": 9,
+        "pending exact first load": 3,
+        "saved demand failed after cache eviction": 2,
+        "tie-boundary load uncovered": 4,
+        "uncovered load fails with its upstream": 9,
+        "uncovered offline": 27,
+        "window covered offline": 5,
+        "window holds other rows": 3
+      },
+      "testsSummary": "Tests  46 passed (46)",
+      "duration": "Duration  86.99s (tests 100%)",
+      "logSha256": "e6f4c086407e2b8c6dbdb5e99757ed0d284e24ab224b7e19766f9ca33d7ea243"
+    }
+  },
+  "sourceLoadWitnesses": {
+    ".review-2377/direct-demand-neutral-original-node-source.jsonl": "260ca1b45c66031b8c20ec75af0fc4bfb31550b33e2a9c2e7f9fdefa75c2d1d4",
+    ".review-2377/direct-demand-neutral-original-browser-source.jsonl": "260ca1b45c66031b8c20ec75af0fc4bfb31550b33e2a9c2e7f9fdefa75c2d1d4"
+  },
+  "mutants": {
+    "never-replace": {
+      "log": ".review-2377/direct-demand-neutral-never-replace-node.log",
+      "sha256": "d330ac2cab0824db9dbbc3c9ad7ef6c24856b9374f4d7779d0ef8a27ddea3146"
+    },
+    "empty-mapper": {
+      "log": ".review-2377/direct-demand-neutral-empty-mapper-node.log",
+      "sha256": "d9c4b4b350452823ee921f93f213554e28ae0828d2aaaa74fbc6d95e028e2850"
+    },
+    "mixed-cut": {
+      "log": ".review-2377/direct-demand-neutral-mixed-cut-node.log",
+      "sha256": "2ea61daa11accd63286796ae7cf9523a167789ecf4cc3577d55ea5769b1fa7a2"
+    },
+    "baselines": {
+      "log": ".review-2377/direct-demand-neutral-baselines-node.log",
+      "sha256": "d314c086e21aab525691496717e82225441aac927643bc1ac3f4a530e757e3be"
+    }
+  }
+}

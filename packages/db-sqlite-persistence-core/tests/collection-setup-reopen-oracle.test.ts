@@ -1,4 +1,3 @@
-import { DatabaseSync } from 'node:sqlite'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
 import {
   differs,
@@ -8,6 +7,11 @@ import {
 } from '../../db/tests/oracle-property.js'
 import type { PersistedTx, SQLiteDriver } from '../src'
 import type { Observation as TraceEntry } from '../../db/tests/oracle-property.js'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
+type DatabaseSync = InstanceType<typeof DatabaseSync>
 
 /**
  * # Does reopening a persisted Collection repair setup without redoing it?

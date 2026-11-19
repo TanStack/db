@@ -15,6 +15,8 @@ export interface ConvexSubscription<T> {
   loadSubset?: LoadSubsetFn
   unloadSubset?: UnloadSubsetFn
   getCurrentValue: () => T | undefined
+  /** Whether the latest coherent result disproves an omitted row's old value. */
+  isCurrentRowInScope?: (row: object) => boolean
   unsubscribe: () => void
   /** Wait for a complete authoritative snapshot, without waiting for DB visibility. */
   waitForCurrent?: () => Promise<void>

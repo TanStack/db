@@ -15,6 +15,12 @@
       "@tanstack/store": ["../store/src"]
     }
   },
-  "include": ["src", "tests", "vite.config.ts"],
+  "include": [
+    "src",
+    "tests",
+    "vite.config.ts",
+    "vitest.*.config.ts",
+    "../browser-db-sqlite-persistence/src/vite-env.d.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

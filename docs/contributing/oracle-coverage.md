@@ -299,6 +299,49 @@ Malformed order declarations are fixed tests in
 `packages/convex-db-collection/tests/lazy-paging.test.ts` (fixed tests; no oracle
 owner (tracked in #2264)).
 
+`tests/lazy-paging-baseline-oracle.property.test.ts` adds five controlled
+receiving profiles to these models. Applied and accepted-but-held baselines
+survive reload before equal, changed, omitting or exhausted-empty first answers.
+An old unfiltered observer retires before reload, so its legitimate whole-source
+replay does not authorize the new finite acquisition. Actual commit receipts
+select held versus immediately applied checkpoints; truncate's permitted
+immediate application is preserved. A full-source callback grammar buffers six
+complete proposals outside core, exercising absent-key add/update/delete/reinsert
+and present-key delete/reinsert before durable handoff. Every actual FIFO
+publication receives `LazyVersionModel`. A separate finite retained range drops
+old provider-supported high keys when its returned bound contracts, while a
+later suffix remains unread. Thus formerly supplied omissions differ from an
+unknown restored suffix outside current authority. Semantic observation controls
+and per-generated missing-reach controls run beside these properties.
+The later-baseline profile accepts a source answer, publicly hydrates a new key,
+then checks equal, changed, omitted and empty exhausted source answers. The
+reference-identical support profile hydrates the exact object in an installed SDK cache,
+verifies accepted object identity, and dispatches the expanded range. A later
+conflicting public hydration cannot replace the provider-confirmed row; its
+next contracted range must remove that newly supported key
+even beyond the new strict prefix. The [later-baseline record](oracle-reviews/2026-11-18-convex-late-baseline-support.md)
+binds an actual pre-edit RED for the zero-write support transition. This repair
+remains open until its corrected GREEN and source mutants are recorded.
+These profiles use both controlled SDK shapes and real Collection controls.
+They do not establish real persistence, SDK transport, saved-suffix retention,
+arbitrary hydration interleavings, commit reentry or failed durable acceptance. Those receiving
+paths remain separate. The [baseline neighbor record](oracle-reviews/2026-11-18-convex-lazy-baseline-neighbors.md)
+binds the pre-edit GREEN and its limits; it is not a production repair claim.
+
+Remaining receiving witness under the existing Convex lazy owner and
+`db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts`:
+an actual exhausted-empty SDK reply while a reopened larger demand's persisted
+restore is accepted but unapplied. The finite-prefix peer receiver does not
+exercise exhaustion or deletion. The controlled baseline owner rejects the
+public-base-instead-of-accepted mutant for held changed, omitted and empty
+answers; that kill is not an actual SDK/storage empty-result witness. A further
+unexecuted question is whether an exhausted reply invalidates durable provider
+lookahead rows outside the restored window, when those rows are absent from the
+accepted baseline. The needed experiment must compare source, query and durable
+rows using independent provider omission facts, without inventing a snapshot or
+truncate. The [bounded assessment](oracle-reviews/2026-11-18-convex-late-baseline-support.md#accepted-baseline-versus-applied-base)
+records what the current evidence establishes and leaves open.
+
 The [October 27 strengthening record](oracle-reviews/2026-10-27-convex-lazy-paging.md)
 supersedes those historical source bindings for the current files. The native
 `lazy-paging-history-oracle.property.test.ts` adds generated acquisition,
@@ -8344,9 +8387,13 @@ seeded-example association. Date and
 model and strict comparison still receive native values. Named verdicts keep
 the original conformance law and step checkpoint. The Neon Realtime receiving driver
 (`adapter-conformance.eager-live-source.neon-realtime`, `test:neon`) runs
-`@neon/realtime-tanstack` 0.1.1 vendored at neon-pkgs `7ac55e3e` and is RED on
-READY-4 and HEALTH-1 until that adapter moves to `fail()`; probes show LIFE-10
-(subscription kept open after an error state) behind them. Limits: no
+`@neon/realtime-tanstack`0.1.1 vendored at neon-pkgs`7ac55e3e`, with a local
+upstream adapter proposal for the current terminal-failure API, exact resource
+cleanup, ordered moves and idempotent raw removal. Its controlled receiver is
+GREEN. Installed SDK0.2 receiving variants remain RED on previously applied
+transaction evidence after terminal close; separate upstream SDK proposals
+pass the complete538-Node/413-Chromium portfolio. Neither upstream proposal is
+a released production fix. Limits of the shared eager owner: no
 on-demand loading, mutation handlers, or reload; publications are observed
 through `subscribeChanges` only; EVID-3 does not distinguish a timed wait
 that rejects before its timeout; FID-1 covers eleven value kinds (with `Float64Array`), not
@@ -8354,8 +8401,22 @@ Temporal, Map, Set, other typed arrays, class instances, or field identity; PUB-
 complete delivery with two rows for one key, under each driver's
 `duplicateInsert` (TrailBase `replace`, reference `error`), not malformed
 keys, undecodable rows, or FID-3 out-of-domain values; the Neon and TrailBase claims cover
-controlled providers, not real clients. Owner:
-`packages/db-adapter-conformance`. Evidence: the package README.
+controlled providers, not real clients, in those original receiving claims.
+Neon's added installed-SDK paths use actual protocol validation and decoding
+with a controlled WebSocket; they make no deployed Neon service claim. Its
+reload owner is `tests/eager-reload-oracle.ts`, shared-client judgment is
+`tests/neon/neon-shared-client-oracle.ts`, initial receipt judgment is the
+Direct initial-receipt owner, and raw absent/present removal receiving judgment
+is `tests/neon/neon-idempotent-removal-oracle.ts`, which reuses the primary eager
+model/checker. Both native hosts run every added family. The receipt path uses
+a real persisted wrapper over controlled memory storage, not SQLite durability.
+The remaining installed-SDK transaction-evidence blocker belongs to the shared
+EVID-1/EVID-2 owner and the provider's tracker/subscription; its needed witness
+is a released SDK retaining installed proof after failure and recording proof
+before callbacks can close applied subscriptions. Versioned evidence and local
+upstream patches: [Neon receiving review](oracle-reviews/2026-11-17-cross-adapter-neon.md)
+and [independent SDK review](oracle-reviews/2026-11-18-neon-sdk-evidence-independent.md).
+Owner: `packages/db-adapter-conformance`. Evidence: the package README.
 Migration goal (maintainer, 2026-10-29): every collection adapter gets a
 driver for each conformance family it declares; the plan and per-adapter
 status are in `packages/db-adapter-conformance/MIGRATION.md`. Existing
@@ -8790,3 +8851,169 @@ comparison preserves all 144 prior semantic kills among 234 baseline sites,
 checking 148 selected stable keys with zero cache reuse. Production is
 unchanged. The wider baseline's 54 survivors, 22 unowned sites, 12 crashes,
 and 2 unreached sites remain gaps; this refactor claims no closure of them.
+
+## Collection adapter receiving portfolio
+
+The [cross-adapter review](oracle-reviews/2026-11-17-cross-adapter-shared.md)
+extends the shared laws to each adapter's actual SDK boundary. Applicability
+follows the provider contract: cached Query results, separate Electric streams,
+and native SQLite hooks do not inherit Direct's stream-leasing policy.
+`pnpm test:collection-adapters:oracles` and its `:browser` counterpart discover
+the receiving campaigns. They attempt every group and retain a failing exit;
+these commands do not imply that the current portfolio is entirely GREEN.
+
+| Contract and oracle owner | Added receiving paths and observations |
+| --- | --- |
+| Complete eager replacement and initial gate: `db-adapter-conformance/tests/eager-reload-oracle.ts` | Query, Convex, Electric, RxDB, native and Direct PowerSync, TrailBase and actual Neon SDK; complete empty/change/omission results, applied receipts, optimistic settlement, terminal first loads where applicable. Provider-consumption barriers precede the comparison; missing readiness is an observed mismatch. LocalStorage receives complete replacement; local-only retains its user-owned rows under its existing owner. |
+| Initial receipt cleanup: `powersync-direct-collection/tests/initial-receipt-oracle.ts` | Actual provider and persistence boundaries for Electric, RxDB, native PowerSync and Neon, including Node SQLite and Chromium worker/OPFS where recorded. Rejected deferred receipts and application of already-admitted receipts are explicit alternative premises. Detached host failures and teardown diagnostics remain observable. |
+| Native PowerSync hooks: `powersync-db-collection/tests/hook-lifecycle-oracle.ts` | Real Node/browser SQLite; returned cleanup ownership, pending-hook retirement, subset release, and successful load settlement behind an actual held applied receipt. |
+| Native PowerSync decoding: `powersync-db-collection/tests/batch-decode-oracle.ts` | Real Node/browser SQLite pages; valid transformed keys and values, refused initial/live pages, terminal health and watcher release, corrected source data and empty/nonempty new demand in the same run, followed by explicit cleanup/restart. Earlier accepted initial pages remain legal. |
+| RxDB mutation settlement: `rxdb-db-collection/tests/mutation-source-batch-oracle.ts`, receiving `db/tests/optimistic-history-oracle.ts` | Built-in CRUD handlers and real SDK change events before/after handler settlement; whole application rows, settlement publications and detached failure observations. No invented explicit confirmation API. |
+| Electric decoding: `electric-db-collection/tests/sdk-decoder-oracle.ts` | Real ShapeStream HTTP delivery in Node and Chromium; valid transformed keys and values, parser refusal, retained health and subsequent valid delivery, using actual completed SDK subscriber delivery. |
+| TrailBase mutation confirmation: `trailbase-db-collection/tests/mutation-events-sdk-oracle.ts` | Real SDK CRUD and event delivery, one write at a time; stale same-key evidence cannot confirm a later request. Event identity supplies causality without assuming wall-clock progress. |
+| Neon exact-query client sharing: `db-adapter-conformance/tests/neon/neon-shared-client-oracle.ts` | Actual SDK client with distinct query subscriptions; either peer releases while the survivor continues. This is query-local membership, unlike Direct's shared table union. |
+| Persisted demand coverage: `db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts` | `db-adapter-conformance/tests/persisted-demand-receiving-oracle-suite.ts` receives the unchanged judgment through Query, Electric, native PowerSync, TrailBase and lazy Convex. Fresh SDKs and physically closed/reopened Node SQLite or Chromium worker/OPFS storage distinguish exact/empty saved coverage from overlap, failed, unfinished and never-requested demand. Per-load waits, early failure, public restored source rows, preload, durable rows and late online answers are checked. Direct has its separate receiver below. |
+
+Per-adapter review records name exact generated histories, host witnesses,
+observation cuts, source/test hashes and remaining gaps. This portfolio does
+not establish deployed-provider behavior, arbitrary concurrent writes, every
+schema/value domain or every framework's scheduling. Known SDK dependencies
+remain open: Direct unchanged-checkpoint recovery, standalone SDK portability
+on maintained Node versions, TrailBase exponent-number JSON decoding, and
+Neon's already-applied evidence after terminal closure. Their versioned review
+records retain the counterexamples and upstream proposals; installed SDKs are
+not patched to make receiving comparisons pass.
+
+The [other-adapter saved-demand follow-up](oracle-reviews/2026-11-18-other-adapters-persisted-demand.md)
+corrects an omitted receiving path in the earlier portfolio. Its current
+23 histories check complete public values as well as readiness, source rows
+and durable rows. They expose two genuine defects: Convex's synthetic empty
+lazy startup erases restored rows and coverage before provider authority, and
+native PowerSync narrows unrestricted support when a filtered demand joins.
+Both repairs have independent oracle/source approval. Convex's first attempt
+failed sixteen lazy neighbors; the final reconciliation preserves accepted and
+deferred baselines, prior provider authority and later hydration attribution.
+The [mutation record](oracle-reviews/2026-11-18-convex-baseline-mutations.md)
+retains the exact final source, semantic kills and bounded survivors. A separate
+real SDK/storage peer receiver checks eight histories, including tied ranks,
+where a finite prefix cannot authorize deleting a saved suffix. These results
+do not transfer eager coverage to on-demand acquisition, or claim closure of
+changed membership, deletion, retention expiry, arbitrary filters/cursors or
+multi-tab saved-demand histories. Their primary persistence owner and each
+adapter's receiving driver retain that work.
+
+The [CI fixture follow-up](oracle-reviews/2026-11-18-powersync-ci-fixtures.md)
+repairs a receiving storage-ledger bypass when browser persistence lazily
+resolves its actual adapter. Both resolver routes, callable capabilities,
+original receivers and exact Promise identity have RED/GREEN helper controls.
+All five shared receivers and the Convex peer receiver pass on Node 22 and
+Chromium/OPFS. This is input-observation evidence, not a new product law or a
+claim that the intermittent native CI mismatch is closed. The browser receiver
+uses `SingleProcessCoordinator`; tracking the raw adapter separately registered
+by `BrowserCollectionCoordinator` remains outside this recorder's evidence.
+
+## Native PowerSync demand predicate union
+
+The primary oracle owner is
+[`powersync-db-collection/tests/demand-union-oracle.ts`](../../packages/powersync-db-collection/tests/demand-union-oracle.ts),
+with the generated campaigns in `demand-union-oracle-suite.ts`. Real native
+Node SQLite and Chromium SQLite receive the same independent integer-set
+judgment through direct Collection subset subscriptions. Authority is the
+PowerSync guide's On-Demand Mode and On-Demand Mode with Sync Streams: active
+query predicates support their union. An absent predicate supports every row,
+including when its demand has a finite limit; individual live-query window
+membership is a separate observation.
+
+Generated histories acquire the unrestricted demand first or last, combine
+overlapping or disjoint filtered owners, change values at unchanged keys,
+retire a third owner while unrestricted support survives, and retire the
+unrestricted owner while filtered support survives. A filtered-only sentinel
+rejects accidental whole-source loading. Actual load settlement, real SDK
+callback completion, trigger rebuild and SQLite lock drains establish the
+source-row cuts. During third-owner retirement with unrestricted support,
+every source change callback's complete public snapshot must retain the
+unchanged union; zero callbacks are allowed. This publication observation
+rejects a release-only narrowing mutant that the settled cuts previously
+missed. Nine declared states have generated constructions and missing-state
+controls on both receiving hosts.
+
+The [review and evidence](oracle-reviews/2026-11-18-native-demand-union.md)
+preserve the pre-production-edit RED gate, the minimal predicate normalization,
+GREEN campaigns, isolated mutations and exact hashes. The persisted-demand
+receiver separately checks the original saved-row/live-value interaction.
+This owner does not establish inserts, deletes, predicate-membership changes,
+arbitrary expressions, remote transport, persistence readiness, reload,
+pending hooks, optimistic holds, or intermediate publications while only
+filtered support survives. Those paths remain with their existing subsystem
+owners and require corresponding histories before a broader claim.
+
+## Direct PowerSync receiving portfolio
+
+The receiving audit for PR #2377 starts at
+`92a1493e0f45dbfd1fc3a51460ccb9228d8f787d`. The original package suite was
+GREEN while missing the histories and observations below. These additions
+preserve the existing owners and campaign budgets. Each new receiving path
+shares its owner's model and comparison.
+
+| Contract and oracle owner | Receiving paths and observations | Evidence |
+| --- | --- | --- |
+| Eager lifecycle/health: `db-adapter-conformance/src/eager-live-source-oracle.ts` | Real standalone SDK; changed/distinct stream errors, changed/unchanged same-connection recovery, table/status/lease release at failure and cleanup | [Eager review](oracle-reviews/2026-11-17-powersync-direct-eager.md) |
+| Complete replacement and initial gate: `db-adapter-conformance/tests/eager-reload-oracle.ts` | Node and Chromium; fresh/reload/shared-failed provider, explicit/default streams, empty/nonempty rows, retry in a new run, optimistic settlement and applied receipts | [Reload review](oracle-reviews/2026-11-17-powersync-direct-reload.md) |
+| Initial receipt cleanup: `powersync-direct-collection/tests/initial-receipt-oracle.ts` | Controlled receipt, actual controlled persistence, Node SQLite and worker/OPFS; receipt created/pending/rejected, public cleanup and detached failure, with late teardown diagnostics preserved | [Reload review](oracle-reviews/2026-11-17-powersync-direct-reload.md) and [persistence review](oracle-reviews/2026-11-17-powersync-direct-persistence.md) |
+| On-demand stream ownership: `db-adapter-conformance/tests/on-demand-streams-oracle.ts` | Real source/live-query Collections across five Node/browser/persisted paths; shared/partial/disjoint incidence, parameter and priority forwarding, failure timing, independent retirement and recovery, empty/throwing mappers, mapper-triggered cleanup and public snapshot-request cancellation before/during/after mapping beside a ready peer. Cold histories remain beside a confirmed-empty distinct-donor prelude; actual SDK callbacks and held receipts establish before-application reach. | [On-demand review](oracle-reviews/2026-11-17-powersync-direct-on-demand.md), [mapper cancellation review](oracle-reviews/2026-11-18-powersync-direct-mapper-abort.md) |
+| Decode admission/refusal: `db-adapter-conformance/tests/decode-refusal-oracle.ts` | Eager and on-demand, actual SDK Node and Chromium; cold initial/live and idle cached startup; valid boolean/Date conversion, ordinary Error and three unprintable thrown-value shapes, changed id at first/middle/last row; ordered coherent source/query readiness, terminal health, every publication, valid startup handler admission, pending-query retirement and owned resource cleanup. Final 334 Node/327 Chromium GREEN; isolated cause/handler mutants rejected and actual early-readiness variant permitted; 72 declared states reached in each campaign. No persistence/reload/mutation or arbitrary remote schedule claim | [Decode review](oracle-reviews/2026-11-17-powersync-direct-decode.md) |
+| Mutation confirmation: `db/tests/mutation-confirmation-oracle.ts`; cancellation: `powersync-direct-collection/tests/mutation-confirmation-cancellation-oracle.ts` | Node and Chromium, eager and retained on-demand queries; CRUD through handlers/manual transactions, response-first/checkpoint-first pending cuts, accepted rows and settlement publications, signal/Collection cleanup cancellation | [Mutation review](oracle-reviews/2026-11-17-powersync-direct-mutation.md) |
+| Persisted startup: `db-adapter-conformance/tests/persisted-startup-oracle.ts` | Controlled persistence, Node SQLite and Chromium worker/OPFS; source/restore order, fallback, immediate public/durable rows, refresh fulfillment, local reopen and source read count | [Persistence review](oracle-reviews/2026-11-17-powersync-direct-persistence.md) |
+| Shared client: `db-adapter-conformance/tests/shared-client-oracle.ts` | Node and Chromium; two source Collections on one table/client, passive cached startup, equal/partial/disjoint row support, either peer cleanup, survivor updates and final acquired-resource release | [Shared-client review](oracle-reviews/2026-11-17-powersync-direct-shared-client.md) |
+
+The on-demand model tracks logical query-to-stream incidence, independently of
+the SDK's lease maps. Its health judgment requires a retained failing stream to
+remain represented; the SDK supplies only one failed stream per lease, so the
+oracle does not demand enumeration of errors unavailable at that boundary.
+The persisted stream receiver judges public health/readiness/rows/ownership.
+The separate saved-demand judgment belongs to
+`db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts` and
+its [Direct receiver review](oracle-reviews/2026-11-17-powersync-direct-persisted-demand.md).
+The real standalone SDK, disk SQLite reopen and Chromium worker/OPFS receiving
+paths now reach completed exact, incomplete, failed and overlapping demand,
+ordered windows, offline restore and first online refresh. Their unchanged
+production comparisons expose an initial SDK empty-table notification that
+truncates saved rows before a provider checkpoint. The saved-demand and bounded
+cursor receivers now have independent approval on their recorded instruments.
+Neutral receiving checkpoints track actual SDK successor requests, issued
+receipts and persistence operations. Mapper cancellation has independently approved five-path
+evidence. The decoder repair now covers cold and cached startup, unprintable
+throw causes and coherent readiness orderings, within its stated finite domain.
+A provider-confirmed cache eviction may end dormant coverage;
+it is not evidence that every evicted row was remotely deleted.
+
+**Open SDK event dependency (maintainer decision, 2026-11-17):** same-connection
+recovery remains RED pending a released SDK checkpoint-event API. SDK 0.1.1
+suppresses `ready` to `ready` status notifications and can deliver an unchanged
+or empty checkpoint without a table notification. Trace: complete empty result,
+stream error, healthy empty checkpoint; the source still retains its failure.
+The owner is the eager health oracle above, with the on-demand receiver supplying
+the same boundary where applicable. The maintainer selected an SDK API change
+and explicitly deferred this repair until its release. The tests retain this
+counterexample; polling and relaxed comparisons are not used.
+
+Limits: controlled legal PowerSync protocol over the real installed SDK, rather
+than a deployed PowerSync service. SDK bucket membership, resume tokens and
+bucket algorithms remain SDK responsibilities; this portfolio judges their
+delivered table rows. It does not establish arbitrary concurrent mutations,
+cross-tab writers, arbitrary schema/value domains, every storage host or every
+DEM/MAP/P/S law. No framework-specific scheduling claim follows from source
+Collection comparisons.
+
+### Node 22 Web Locks test-host premise
+
+The SQLite metadata, Browser reload/multi-tab and Electron reload receiving
+drivers run on Node 22 with the test-only exclusive-lock polyfill in
+`packages/db-sqlite-persistence-core/tests/node-web-locks.ts`. It supplies FIFO
+exclusive requests, queued cancellation and callback settlement, calibrated by
+`node-web-locks.test.ts`; it rejects unsupported lock options. Native locks are
+kept when available. These remain in-process receiving paths, with no claim
+about native cross-context lock scheduling. The existing real Chromium OPFS
+and real Electron receiving paths keep their native host implementations,
+histories, observation checkpoints and comparisons. Maintainer decision:
+2026-11-18, use a Node 22 polyfill and retain real Chromium witnesses.

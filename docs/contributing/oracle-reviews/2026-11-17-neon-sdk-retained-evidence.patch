@@ -1,0 +1,37 @@
+--- a/packages/realtime/src/client/transaction-tracker.ts
++++ b/packages/realtime/src/client/transaction-tracker.ts
+@@ -31,17 +31,17 @@
+ 				"Live-query transaction timeout must be a non-negative number",
+ 			);
+ 		}
++		if (
++			this.recent.has(normalized.text) ||
++			this.visibility?.isVisible(normalized.value)
++		)
++			return;
+ 		if (this.closed) {
+ 			throw (
+ 				this.closeError ??
+ 				new Error("Live-query subscription is closed")
+ 			);
+ 		}
+-		if (
+-			this.recent.has(normalized.text) ||
+-			this.visibility?.isVisible(normalized.value)
+-		)
+-			return;
+ 
+ 		return new Promise<void>((resolve, reject) => {
+ 			const waiter: TransactionWaiter = {
+@@ -109,9 +109,8 @@
+ 			}
+ 		}
+ 		this.waiting.clear();
+-		this.recent.clear();
+-		this.recentOrder.length = 0;
+-		this.visibility = undefined;
++		// Installed evidence remains valid after delivery stops. Retain the
++		// bounded recent IDs and MVCC visibility for response-after-failure waits.
+ 	}
+ 
+ 	private remove(txid: string, waiter: TransactionWaiter): void {

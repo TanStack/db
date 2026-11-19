@@ -1,4 +1,3 @@
-import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IR, createCollection, getLoadSubsetDemandKey } from '@tanstack/db'
 import {
@@ -17,6 +16,10 @@ import {
 } from './helpers/demand-coverage-driver.js'
 import type { Row } from './helpers/demand-coverage-driver.js'
 import type { SQLiteDriver } from '../src/index.js'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
 
 /**
  * Supplemental checks beside the persisted demand coverage oracle

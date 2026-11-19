@@ -1,0 +1,2 @@
+# Upstream patch artifacts retain their exact context whitespace and hashes.
+docs/contributing/oracle-reviews/*.patch -whitespace

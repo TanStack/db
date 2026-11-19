@@ -1,0 +1,164 @@
+{
+  "reviewedHead": "92a1493e0f45dbfd1fc3a51460ccb9228d8f787d",
+  "gate": "Native PowerSync repaired production and frozen receiving instruments; final production review pending",
+  "preEditManifestSha256": "0baa5eeb747d9d3485fbd31d274395c824e239c2eaf4d291643a94b39a1b306e",
+  "manifestSha256": "4704e028f0ae43de6751f4660e405ed766960a4873fedd911f0fd1e55744e827",
+  "files": [
+    {
+      "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-batch-decode-oracle.browser.test.ts",
+      "sha256": "3c04e5dfe539bb9734c031fd2885fdaa6171671fe4f852532907c6fff55a5b8b"
+    },
+    {
+      "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-hooks-oracle.browser.test.ts",
+      "sha256": "fa85ed49b9fd92dba28d57ec90816628f02b5972232ed2598fce5ce913a5c044"
+    },
+    {
+      "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-initial-receipt-oracle.browser.test.ts",
+      "sha256": "ac9802e6278246119e958e146dda30442f043864f4f5a9cf6899a97f22057609"
+    },
+    {
+      "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.html",
+      "sha256": "8cff1373f5c283e8e02e60374613cd07e5c679d0a69914db8fca4b13253dd46b"
+    },
+    {
+      "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+      "sha256": "9ea797f3d550b54413222060fcec242c3c3a28e8d69b053b047958dd08d0683f"
+    },
+    {
+      "path": "packages/browser-db-sqlite-persistence/vitest.adapter-oracles.config.ts",
+      "sha256": "da477e08572f2429bf2ee6bb910338c62ccf8b7008d85f5f6cefa30c164f379f"
+    },
+    {
+      "path": "packages/db/tests/oracle-cleanup.ts",
+      "sha256": "62e00759270c5376ffadcde8eefb8a68763e5c79ca66729268aad9eea3802e61"
+    },
+    {
+      "path": "packages/db/tests/oracle-config.ts",
+      "sha256": "dfec855bd6dda63e0e940e8657bfe4f4b9a96ee14f2d49beaf70f72f8acb24eb"
+    },
+    {
+      "path": "packages/db/tests/oracle-property.ts",
+      "sha256": "9627d675c7a9a5398394a9534099c7611353064a2dda3bb339b26c37435ffded"
+    },
+    {
+      "path": "packages/db/tests/oracle-replay-manifest.ts",
+      "sha256": "6830ab4e8cfd55aeb0d2ad9e0915873d7031e944d9708030a242499ec4e55534"
+    },
+    {
+      "path": "packages/db/tests/oracle-replay.test.ts",
+      "sha256": "932ccd35db12be220219afb37b6b3d57eb190933e06d031e0543f5c781137cfa"
+    },
+    {
+      "path": "packages/db-adapter-conformance/tests/decode-refusal-oracle.ts",
+      "sha256": "fcbff16b5565c99e0b7d299dec25d97f0e822bbd8fe9450a2967be2da82f6f0b"
+    },
+    {
+      "path": "packages/db-adapter-conformance/tests/persisted-startup-driver.ts",
+      "sha256": "c4c5d558cbf28ce34ac9bc552648975918a5ee85e103d6bae406b9f95bfe1e36"
+    },
+    {
+      "path": "packages/db-adapter-conformance/tests/persisted-startup-oracle.ts",
+      "sha256": "847d65f8fe99d12591662989804c6b52b98145966cf802e96cdf3bd1bcc8892e"
+    },
+    {
+      "path": "packages/powersync-db-collection/src/PowerSyncTransactor.ts",
+      "sha256": "62fc82ef7d0647651973429e289a7b12f2245f340ebf3e102ff0095ddecfb98a"
+    },
+    {
+      "path": "packages/powersync-db-collection/src/definitions.ts",
+      "sha256": "27c13705a302ab0aba2dbc0b776b3e74bdee90c4fb4487a63bc10e1fe6c11d2f"
+    },
+    {
+      "path": "packages/powersync-db-collection/src/powersync.ts",
+      "sha256": "7781cf0834530b48cd7be9db052261964866bf92a6a44adb2c15fe0aa6e282de"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/batch-decode-conformance-oracle.property.test.ts",
+      "sha256": "1e9be5e454c53c1555ee1cd4de2d8569d5f49b5a796f46f5b803e4961db3b345"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/batch-decode-driver.ts",
+      "sha256": "156c2767c2f67e7ec649f24afeb203075fed34707948ea6f26a2ccf1cb54904c"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/batch-decode-oracle-suite.ts",
+      "sha256": "9ce5229406a2f3890a92174b31c67fa7f817def604c07987b25b0468205011f9"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/batch-decode-oracle.ts",
+      "sha256": "241e6b56e3809ade1777ce52ce098159022571ee828f3fc2720d9ed6b3a5baee"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/eager-reload-common.ts",
+      "sha256": "c1231286c6fab86cf7a3035791c1c1021255e81d5028832d09b2306e26e2c32d"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/hook-lifecycle-conformance-oracle.property.test.ts",
+      "sha256": "76b7ab88875df701b7c7f195fc90ebf1276249e0dd12b65d21bd86993ad1ecff"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/hook-lifecycle-driver.ts",
+      "sha256": "1260907741a265bbed9f565dffb7111aa91ceff5dc8f21319306c52d616107bd"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/hook-lifecycle-oracle-suite.ts",
+      "sha256": "f1b7db6c96d5712ddbe76c6b67cc8e4e810206e3e5f21192c585f37e6740efb3"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/hook-lifecycle-oracle.ts",
+      "sha256": "bea8829f4729f16e0d6d67d33aec75693150fe8140cead1a222b62402975a104"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/initial-receipt-browser.ts",
+      "sha256": "f493b8e0538af714df56b86c893eb3a659b1123793643605ceec5e81f7013bd3"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/initial-receipt-common.ts",
+      "sha256": "ef9294e90a43d356a7ddb330f16c59b24220814b40c204d6bbcf7122d23259c3"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/initial-receipt-conformance-oracle.property.test.ts",
+      "sha256": "958147bbfa7bda0ef42681c486f9a31533730b7a9a2ede2e227528ecb5366e20"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/initial-receipt-driver.ts",
+      "sha256": "598931685d85eae5c5dc0613abb22cca52a1e327e6c80b3603c19c27fe3bae5b"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+      "sha256": "3b9f1cda3552013db268002b78c6c02d1815862e1caa067889855c5142712532"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/initial-receipt.tsconfig.json",
+      "sha256": "d62d528ee92a25f873b853f2a7f7e2a60bbaa177be13e1b99f74a6c9cd903cff"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/native-receiving-browser.ts",
+      "sha256": "48b8edbd763bfc7d443c03cdcec45c7c8d1132c189ffa24f2067bc6c61835d56"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/native-receiving-host.ts",
+      "sha256": "7fffa8ca0acfc493b4786535322feb7bfabeb10bdc6c2b82fc071bd34a8c2f24"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/receiving-cleanup.test.ts",
+      "sha256": "d8ed78c40d0a618f2a3bb822426f78f07bcccb27008568b408d0cd3a623f4341"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/receiving-cleanup.ts",
+      "sha256": "88cd07ce9c66de991d799082c58224202ccad809e1d36ceed4850f6d93eeeca5"
+    },
+    {
+      "path": "packages/powersync-direct-collection/tests/initial-receipt-oracle-suite.ts",
+      "sha256": "5dad5ea2a99124612e3399c5b0e71ecb350c151ef275b7ae521238a85876489e"
+    },
+    {
+      "path": "packages/powersync-direct-collection/tests/initial-receipt-oracle.ts",
+      "sha256": "c75895abae5fe1e8485b8bcae83e25681cfddcce8f8883ba3b1b281cec79b4c1"
+    },
+    {
+      "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-driver.ts",
+      "sha256": "a00f29653ccaae8c3be8eb67f64ccf5fa81f77b4555d4ef94b210d3fe59314d0"
+    }
+  ]
+}

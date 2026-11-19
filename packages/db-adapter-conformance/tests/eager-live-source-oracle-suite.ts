@@ -9,7 +9,11 @@ import {
   eagerLiveSourceVerdict,
   observeEagerLiveSourceHistory,
 } from './eager-live-source-framework-oracle'
-import type { EagerLiveSourceDriver, EagerLiveSourceHistory } from '../src'
+import type {
+  EagerLiveSourceDriver,
+  EagerLiveSourceHistory,
+  EagerLiveSourceReachState,
+} from '../src'
 import type { Observation } from '../../db/tests/oracle-property'
 
 export function eagerLiveSourceCampaign(
@@ -18,8 +22,9 @@ export function eagerLiveSourceCampaign(
     generated: EagerLiveSourceHistory,
     salt: number,
   ) => EagerLiveSourceHistory,
+  additionalStates: ReadonlyArray<EagerLiveSourceReachState> = [],
 ) {
-  const states = reachStatesFor(driver)
+  const states = [...reachStatesFor(driver), ...additionalStates]
   const required = new WeakMap<
     EagerLiveSourceHistory,
     { salt: number; states: ReadonlyArray<string> }
@@ -34,7 +39,7 @@ export function eagerLiveSourceCampaign(
     },
   }))
   const drive =
-    (corruptValues = false) =>
+    (corruption?: `values` | `delivery-errors`) =>
     async (
       history: EagerLiveSourceHistory,
       observe: (checkpoint: string, value: unknown) => void,
@@ -42,7 +47,8 @@ export function eagerLiveSourceCampaign(
       const result = await observeEagerLiveSourceHistory(
         driver,
         history,
-        corruptValues,
+        corruption,
+        additionalStates,
       )
       for (const state of result.reached) observe(`reach`, state)
       observe(`completed`, result)
@@ -55,6 +61,7 @@ export function eagerLiveSourceCampaign(
       required: required.get(history)?.states ?? [],
     }),
     driver: drive(),
+    deliveryErrorIdentityDriver: drive(`delivery-errors`),
     check: (
       _history: EagerLiveSourceHistory,
       trace: ReadonlyArray<Observation>,
@@ -64,7 +71,7 @@ export function eagerLiveSourceCampaign(
       {
         name: `shared value judgment rejects wrong public values`,
         law: `FID-1 (values)`,
-        driver: drive(true),
+        driver: drive(`values`),
       },
       ...constructed.flatMap((_builder, salt) =>
         states.map((state) => ({

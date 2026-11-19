@@ -75,5 +75,17 @@ export function createMetadataSQLiteDriver(database: DatabaseSync) {
     transaction,
     transactionWithDriver: transaction,
   }
-  return { driver, drained: () => queue }
+  return {
+    driver,
+    drained: () => queue,
+    dispose: async () => {
+      try {
+        await queue
+      } finally {
+        // Node 22 retains each enabled context in its async hook list until
+        // disable(). Thousands of completed fixtures otherwise slow every await.
+        context.disable()
+      }
+    },
+  }
 }

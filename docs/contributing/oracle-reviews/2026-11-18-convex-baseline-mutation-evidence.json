@@ -1,0 +1,1206 @@
+{
+  "date": "2026-11-18",
+  "scope": "Bounded Convex persisted-demand and lazy baseline source mutations; actual SQLite Node and Chromium receivers plus controlled lazy owner",
+  "production": {
+    "packages/convex-db-collection/src/options.ts": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+    "packages/convex-db-collection/src/pagination.ts": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+    "packages/convex-db-collection/src/subscription.ts": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+  },
+  "restorationVerified": true,
+  "sourceMutationLockReleased": true,
+  "installedDependenciesModified": false,
+  "instruments": {
+    "packages/convex-db-collection/tests/lazy-paging-baseline-oracle.property.test.ts": "4e5c99e7d31cba191cffc11fc9be6f11d45f048947c2d117dd920fafacbc9705",
+    "packages/convex-db-collection/tests/lazy-paging-driver.ts": "d423244d181701d050aac9114e996fc1b839852f540aaad6a4715a387262d4ac",
+    "packages/convex-db-collection/tests/lazy-paging-model-oracle.ts": "9e4cd7d8bd5ba580e3e549eba89deb0c4b9dc8795707743df26b7e05c78040cd",
+    "packages/convex-db-collection/tests/lazy-paging-version-model-oracle.ts": "5aee0ba04f556d312e25f03c6077949d47daf6d0e4eae6cd3dad0a9fe9ce86a0",
+    "packages/convex-db-collection/tests/lazy-paging-deferred-acceptance.ts": "d7c89a887dcdb1dcec6e4315f866465e2408c249251a2b63e8e3951114cfb409",
+    "packages/convex-db-collection/tests/lazy-paging-campaign.ts": "b5ce2662be53b5bc258a6c45776fcf4bce3a7b05fc06beaf9fa87105351b6fcb",
+    "packages/convex-db-collection/tests/persisted-demand-source.ts": "4cefb5c38d054e6464a13563ac1bd23d34faae08cb44b146b275cef28e6134ae",
+    "packages/convex-db-collection/tests/helpers.ts": "11f2c79c6872373e8f77efae62d2fabfead0e5af6673c86920ae2ef4abdb7274",
+    "packages/db-adapter-conformance/tests/persisted-demand-peer-driver.ts": "4236f406af1831d2a7a5df99208398d142d061531d33e01f834fe3950d9810a6",
+    "packages/db-adapter-conformance/tests/persisted-demand-peer-oracle-suite.ts": "786106db8b649382dac207592c968c9ded9316d87f6c8e5b0a6af3eb94d42b66",
+    "packages/db-adapter-conformance/tests/persisted-demand-peer-oracle.test.ts": "adc52fa3af646f7612bfeedefcb9be98101955841b3044fe07134b2aaec1f061",
+    "packages/db-adapter-conformance/tests/persisted-demand-receiving-driver.ts": "97aca6b9a0f09c2faf02b4fb66d638e54ce556290412cf2f5d23536418c4b959",
+    "packages/db-adapter-conformance/tests/persisted-demand-receiving-oracle-suite.ts": "00acd4ca97b89b0a457e7bfd67564750736c72e9c7ccf67c9a5d10a5ee808561",
+    "packages/db-adapter-conformance/tests/persisted-demand-receiving-types.ts": "bde18843001e39e9737101dfe614954ba1d9ba1fdcfd92f237f705e021578db6",
+    "packages/db-adapter-conformance/tests/persisted-demand-receiving-oracle.test.ts": "9ec8c8e5216a33dc4bf0c64007cc12b8b0cee95e2be8afddd2e8b1acd7265840",
+    "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-peer-oracle.browser.test.ts": "c1c38c0ad6a138a813ed87bbb8f3fcf4d3253ba40e06e3bb20edcfda053edaae",
+    "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-peer.opfs.ts": "72595297e6eca9ceca403e790b898972f45a147495bf830aecdb775dae26213b",
+    "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-oracle.browser.test.ts": "fe98baf691a72ede3df16cb643803d489e928bd83d9388454e45d1bea4dbf132",
+    "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand.opfs.ts": "25cbce03ef892e16a7b6207af96af8e40746a26ee317bb52ca03a55fd0681392",
+    "packages/browser-db-sqlite-persistence/tests/adapter-chromium-host.ts": "e0e1e06b91f388cff7c87bdc5883ec486c3ec88a6cc551a2e5f15ea27b012f5f",
+    "packages/browser-db-sqlite-persistence/vitest.adapter-oracles.config.ts": "b731d370f1b905b423dbe6ad95f578c1e51b9a2f36ff00577e3d648a254adca9",
+    "packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts": "3910437e91fddd5dd90f3dd9ba03057f9df613a997ea1567d906f7463e334d90",
+    "packages/db/tests/oracle-cleanup.ts": "e3ed6efa8961252cd17bfe49e9675101f8211abe9a164244990563821d4a4af9",
+    "packages/db/tests/oracle-config.ts": "f4a2ac5ac4cce51e459104db483c3428f897862f69342bba79eac8ec32c1cd6b",
+    "packages/db/tests/oracle-property.ts": "9627d675c7a9a5398394a9534099c7611353064a2dda3bb339b26c37435ffded",
+    "packages/db/tests/oracle-assertion-adapter.ts": "a96839eea21e6ba6b63c1bc6a45dcc6875c97dc47fe80be0c2b9c0b384b479d0",
+    "pnpm-lock.yaml": "bba31ccbabebdf46d6a93f021c16f36e7662a835da23fa0d3006d28fa5ab3f72",
+    ".review-2377/convex-mutation-campaign.py": "0082ebeb12cec77cd2f37cf3f11d2603653cb72d6b9933c6fde7058f966ba76b"
+  },
+  "unchangedInstrumentCount": 28,
+  "runs": [
+    {
+      "variant": "baseline",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "standard-node",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/persisted-demand-receiving-oracle.test.ts",
+        "--testNamePattern",
+        "adapter.convex.persisted-demand.node-sqlite",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872/baseline-standard-node.json"
+      ],
+      "cwd": "packages/db-adapter-conformance",
+      "passed": 30,
+      "failed": 0,
+      "classification": "green",
+      "semanticFailures": 0,
+      "derivativeFailures": 0,
+      "judgment": "30/30 unchanged final-source receiver checks",
+      "semanticCheckpointsInDefaultLog": {},
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872/baseline-standard-node.log",
+        "sha256": "3fb5a40a5dbf6c929fe6baf978314f6be66183d1a9995f89a1acaa98ece38dd8"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872/baseline-standard-node.json",
+        "sha256": "51a4fdb4f2d346970f23e3a5254969d85171c7999168ffb2a4003249c1e724af"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872/results.json",
+        "sha256": "8da064ffbafcb8a5c35dd1a4827e8fb280bd501f0ab2686b184e3c50225d1f3f"
+      }
+    },
+    {
+      "variant": "baseline",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "standard-browser",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "vitest.adapter-oracles.config.ts",
+        "e2e/adapter-persisted-demand-oracle.browser.test.ts",
+        "--testNamePattern",
+        "adapter.convex.persisted-demand.chromium-opfs",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872/baseline-standard-browser.json"
+      ],
+      "cwd": "packages/browser-db-sqlite-persistence",
+      "passed": 30,
+      "failed": 0,
+      "classification": "green",
+      "semanticFailures": 0,
+      "derivativeFailures": 0,
+      "judgment": "30/30 unchanged final-source receiver checks",
+      "semanticCheckpointsInDefaultLog": {},
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872/baseline-standard-browser.log",
+        "sha256": "35b603fddf5557905381bcddf3dd6d3d521ea069d4d1c5ef57b7df570f0f20db"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872/baseline-standard-browser.json",
+        "sha256": "127301123b026ca3ba4f19e8959514e42d8a2adc50966308afd07fbb9617cfe1"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872/results.json",
+        "sha256": "8da064ffbafcb8a5c35dd1a4827e8fb280bd501f0ab2686b184e3c50225d1f3f"
+      }
+    },
+    {
+      "variant": "baseline",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "peer-node",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/persisted-demand-peer-oracle.test.ts",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872/baseline-peer-node.json"
+      ],
+      "cwd": "packages/db-adapter-conformance",
+      "passed": 12,
+      "failed": 0,
+      "classification": "green",
+      "semanticFailures": 0,
+      "derivativeFailures": 0,
+      "judgment": "12/12 unchanged final-source peer checks",
+      "semanticCheckpointsInDefaultLog": {},
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872/baseline-peer-node.log",
+        "sha256": "58d816254ed7610b1cc1b224d8abec3a8f50e15c7a51a31219d45035ea9089ab"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872/baseline-peer-node.json",
+        "sha256": "a793bdba7a95d3f13d777b33c97edb5a9e06f8034428c45ee2e8e0fda7614e09"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872/results.json",
+        "sha256": "8da064ffbafcb8a5c35dd1a4827e8fb280bd501f0ab2686b184e3c50225d1f3f"
+      }
+    },
+    {
+      "variant": "baseline",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "peer-browser",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "vitest.adapter-oracles.config.ts",
+        "e2e/adapter-persisted-demand-peer-oracle.browser.test.ts",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/baseline-peer-browser.json"
+      ],
+      "cwd": "packages/browser-db-sqlite-persistence",
+      "passed": 12,
+      "failed": 0,
+      "classification": "green",
+      "semanticFailures": 0,
+      "derivativeFailures": 0,
+      "judgment": "12/12 unchanged final-source peer checks",
+      "semanticCheckpointsInDefaultLog": {},
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/baseline-peer-browser.log",
+        "sha256": "10cda59c6aca888ace559f19df05dfbdb4363ed566891724dee1f9617ad80ca0"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/baseline-peer-browser.json",
+        "sha256": "ad855fbca696431c15b3f92432417e96f4169cad4ee65f7b22dc2895f301e730"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "baseline",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "controlled-all",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/lazy-paging-baseline-oracle.property.test.ts",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/baseline-controlled-all.json"
+      ],
+      "cwd": "packages/convex-db-collection",
+      "passed": 80,
+      "failed": 0,
+      "classification": "green",
+      "semanticFailures": 0,
+      "derivativeFailures": 0,
+      "judgment": "80/80 controlled owner checks",
+      "semanticCheckpointsInDefaultLog": {},
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/baseline-controlled-all.log",
+        "sha256": "97c6e9a6d6f13f09e3f57696f3bd045d42f40a7946f3ea380a29a30d8f57d2c3"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/baseline-controlled-all.json",
+        "sha256": "85ed889cb01e8637a6178f8aa1071367a36c70a9d9594e5ea5265fe07efc42a8"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "original-synthetic-startup",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "8e1989d2d54605f1566c7e5ad867195cb8aa22876f9b2d5016bd992ff8a1ed81",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "standard-node",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/persisted-demand-receiving-oracle.test.ts",
+        "--testNamePattern",
+        "adapter.convex.persisted-demand.node-sqlite",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/original-synthetic-startup-standard-node.json"
+      ],
+      "cwd": "packages/db-adapter-conformance",
+      "passed": 14,
+      "failed": 16,
+      "classification": "semantic-kill",
+      "semanticFailures": 12,
+      "derivativeFailures": 4,
+      "judgment": "11 offline inputs applied row/readiness failures; 1 offline deadline round 1; 1 derivative reach and 3 derivative calibration failures",
+      "semanticCheckpointsInDefaultLog": {
+        "offline deadline round 1": 1,
+        "offline inputs applied": 11
+      },
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/original-synthetic-startup-standard-node.log",
+        "sha256": "df42b23d60dd435c5612d4f3e8bdacb635a2e2a509200fbb81246dd98616833e"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/original-synthetic-startup-standard-node.json",
+        "sha256": "291ef301f6bb5c2c2404254dae15879815b813c7981dad42207dae49bab16d79"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "original-synthetic-startup",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "8e1989d2d54605f1566c7e5ad867195cb8aa22876f9b2d5016bd992ff8a1ed81",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "standard-browser",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "vitest.adapter-oracles.config.ts",
+        "e2e/adapter-persisted-demand-oracle.browser.test.ts",
+        "--testNamePattern",
+        "adapter.convex.persisted-demand.chromium-opfs",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/original-synthetic-startup-standard-browser.json"
+      ],
+      "cwd": "packages/browser-db-sqlite-persistence",
+      "passed": 0,
+      "failed": 0,
+      "classification": "setup-only-not-kill",
+      "semanticFailures": 0,
+      "derivativeFailures": 0,
+      "judgment": "Vite dependency reoptimization/page.waitForFunction startup failure before histories; retained separately",
+      "semanticCheckpointsInDefaultLog": {},
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/original-synthetic-startup-standard-browser.log",
+        "sha256": "0a98f18080283ef2ae92fdfb1b097559229e71cb2177fb0ad6820f54d42b067d"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/original-synthetic-startup-standard-browser.json",
+        "sha256": "6c11490a8143016ae4cf5390aba4981725564b19d9c315ab7c6f08eaa0b8f310"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "first-actual-result-truncate",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "3f9a9a2f16a613897dab4eea4dedc72b66515bd38f523c9eae2659fae7d2b317",
+        "pagination": "0308668d07db701d1f7f891d001a4aca2798973ea29bf1d4b00931eaa0e05f1d",
+        "subscription": "96db535b1f0137214b45fde220c2db2a60d0ed26a4119cb1a6a584a18bdabae5"
+      },
+      "profile": "peer-node",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/persisted-demand-peer-oracle.test.ts",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/first-actual-result-truncate-peer-node.json"
+      ],
+      "cwd": "packages/db-adapter-conformance",
+      "passed": 2,
+      "failed": 10,
+      "classification": "semantic-kill",
+      "semanticFailures": 8,
+      "derivativeFailures": 2,
+      "judgment": "saved suffix after finite prefix applies; two derivative calibrations",
+      "semanticCheckpointsInDefaultLog": {
+        "saved suffix after finite prefix applies": 8
+      },
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/first-actual-result-truncate-peer-node.log",
+        "sha256": "8d32f3c5adbdb5d2d915e3cab630a0eae6dff160c2d181614ef1b08e109b473f"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/first-actual-result-truncate-peer-node.json",
+        "sha256": "aad4c951733075ed9e9cd4688b9fa1b9dfd61086108d4a77a6b5eae6e1a535a0"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "first-actual-result-truncate",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "3f9a9a2f16a613897dab4eea4dedc72b66515bd38f523c9eae2659fae7d2b317",
+        "pagination": "0308668d07db701d1f7f891d001a4aca2798973ea29bf1d4b00931eaa0e05f1d",
+        "subscription": "96db535b1f0137214b45fde220c2db2a60d0ed26a4119cb1a6a584a18bdabae5"
+      },
+      "profile": "peer-browser",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "vitest.adapter-oracles.config.ts",
+        "e2e/adapter-persisted-demand-peer-oracle.browser.test.ts",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/first-actual-result-truncate-peer-browser.json"
+      ],
+      "cwd": "packages/browser-db-sqlite-persistence",
+      "passed": 2,
+      "failed": 10,
+      "classification": "semantic-kill",
+      "semanticFailures": 8,
+      "derivativeFailures": 2,
+      "judgment": "saved suffix after finite prefix applies; two derivative calibrations",
+      "semanticCheckpointsInDefaultLog": {
+        "saved suffix after finite prefix applies": 8
+      },
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/first-actual-result-truncate-peer-browser.log",
+        "sha256": "09dcdb6a857a908f93ecaffa56aa3e4598a6e4a1ce7467dbe5b6167850c3350a"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/first-actual-result-truncate-peer-browser.json",
+        "sha256": "3da2f4eadb7f5b40c5c779279bee4dc04dd89706b57e8432ddeacae61cb3e01a"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "first-actual-result-truncate",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "3f9a9a2f16a613897dab4eea4dedc72b66515bd38f523c9eae2659fae7d2b317",
+        "pagination": "0308668d07db701d1f7f891d001a4aca2798973ea29bf1d4b00931eaa0e05f1d",
+        "subscription": "96db535b1f0137214b45fde220c2db2a60d0ed26a4119cb1a6a584a18bdabae5"
+      },
+      "profile": "controlled-all",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/lazy-paging-baseline-oracle.property.test.ts",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/first-actual-result-truncate-controlled-all.json"
+      ],
+      "cwd": "packages/convex-db-collection",
+      "passed": 51,
+      "failed": 29,
+      "classification": "premise-failure-not-kill",
+      "semanticFailures": 0,
+      "derivativeFailures": 0,
+      "judgment": "29 failures while establishing late-hydration/reference-identity premises; no kill attributed",
+      "semanticCheckpointsInDefaultLog": {},
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/first-actual-result-truncate-controlled-all.log",
+        "sha256": "4f156c83d40eafb36386ce120509d7281d303511d7ea4475d7cb2488f0ac52be"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/first-actual-result-truncate-controlled-all.json",
+        "sha256": "7bf301a60034067dbcce482c1c854562ff24722346fecde80663d518eee789d0"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "sweep-whole-accepted-baseline",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "628a4424e28685a5e8098acab7e53f8d1c5ae363841cabdea38a4f19b0d6c05f",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "peer-node",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/persisted-demand-peer-oracle.test.ts",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/sweep-whole-accepted-baseline-peer-node.json"
+      ],
+      "cwd": "packages/db-adapter-conformance",
+      "passed": 2,
+      "failed": 10,
+      "classification": "semantic-kill",
+      "semanticFailures": 8,
+      "derivativeFailures": 2,
+      "judgment": "saved suffix after finite prefix applies; two derivative calibrations",
+      "semanticCheckpointsInDefaultLog": {
+        "saved suffix after finite prefix applies": 8
+      },
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/sweep-whole-accepted-baseline-peer-node.log",
+        "sha256": "c699b9e73544d2787eb63aa2806cdce7048ba78b3cabd9d0ef3dbee82f002205"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/sweep-whole-accepted-baseline-peer-node.json",
+        "sha256": "73e236dd3d3b251a21a921b7c19cec5753720652f99af191022333723eb8b8cb"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "sweep-whole-accepted-baseline",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "628a4424e28685a5e8098acab7e53f8d1c5ae363841cabdea38a4f19b0d6c05f",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "peer-browser",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "vitest.adapter-oracles.config.ts",
+        "e2e/adapter-persisted-demand-peer-oracle.browser.test.ts",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/sweep-whole-accepted-baseline-peer-browser.json"
+      ],
+      "cwd": "packages/browser-db-sqlite-persistence",
+      "passed": 2,
+      "failed": 10,
+      "classification": "semantic-kill",
+      "semanticFailures": 8,
+      "derivativeFailures": 2,
+      "judgment": "saved suffix after finite prefix applies; two derivative calibrations",
+      "semanticCheckpointsInDefaultLog": {
+        "saved suffix after finite prefix applies": 8
+      },
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/sweep-whole-accepted-baseline-peer-browser.log",
+        "sha256": "3365115fafb1b9a62f049c87d76b00c39cd67bf1b1e1edbc68e08e69f0dd3831"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/sweep-whole-accepted-baseline-peer-browser.json",
+        "sha256": "016e336a3d37d89f77d04dd149e2a3470e60155e9853bf1781833992a2a69bc6"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "inclusive-last-rank",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "6af7f072f969a964f190d3a330505a67a29b11f1155f0b0d4a6ed4f6620ebbf4",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "tied-peer-node",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/persisted-demand-peer-oracle.test.ts",
+        "--testNamePattern",
+        "tied boundary",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/inclusive-last-rank-tied-peer-node.json"
+      ],
+      "cwd": "packages/db-adapter-conformance",
+      "passed": 0,
+      "failed": 4,
+      "classification": "semantic-kill",
+      "semanticFailures": 4,
+      "derivativeFailures": 0,
+      "judgment": "saved suffix after finite prefix applies; ascending tied cases only",
+      "semanticCheckpointsInDefaultLog": {
+        "saved suffix after finite prefix applies": 4
+      },
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/inclusive-last-rank-tied-peer-node.log",
+        "sha256": "201161ac415c974ba15cf59f2d4c8e822fd714233c7c4e6865b4be74393fa699"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/inclusive-last-rank-tied-peer-node.json",
+        "sha256": "31198550ca5a442731a6fed9ab6c6f43a8d1b6006ac8452df2964b75726f8c3a"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "inclusive-last-rank",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "6af7f072f969a964f190d3a330505a67a29b11f1155f0b0d4a6ed4f6620ebbf4",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "tied-peer-browser",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "vitest.adapter-oracles.config.ts",
+        "e2e/adapter-persisted-demand-peer-oracle.browser.test.ts",
+        "--testNamePattern",
+        "tied boundary",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/inclusive-last-rank-tied-peer-browser.json"
+      ],
+      "cwd": "packages/browser-db-sqlite-persistence",
+      "passed": 0,
+      "failed": 4,
+      "classification": "semantic-kill",
+      "semanticFailures": 4,
+      "derivativeFailures": 0,
+      "judgment": "saved suffix after finite prefix applies; ascending tied cases only",
+      "semanticCheckpointsInDefaultLog": {
+        "saved suffix after finite prefix applies": 4
+      },
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/inclusive-last-rank-tied-peer-browser.log",
+        "sha256": "65ab7f68e3e920a09c430b56e52462032eda7bbccd9ec78b6ac19e1e11539807"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/inclusive-last-rank-tied-peer-browser.json",
+        "sha256": "2a080ba4f7df6e0a9b2e51f8bd9db21ea2edaec5335f547abe8e2a8bb8c5186d"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "public-base-instead-of-accepted",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "2af434537a8f7e503e03359df754efdae913577a72568c5d6b13c931db23a2a7",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "peer-node",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/persisted-demand-peer-oracle.test.ts",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/public-base-instead-of-accepted-peer-node.json"
+      ],
+      "cwd": "packages/db-adapter-conformance",
+      "passed": 12,
+      "failed": 0,
+      "classification": "survived",
+      "semanticFailures": 0,
+      "derivativeFailures": 0,
+      "judgment": "12/12 peer receiving checks pass; no receiving distinction established",
+      "semanticCheckpointsInDefaultLog": {},
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/public-base-instead-of-accepted-peer-node.log",
+        "sha256": "a94f0f911910c2455dd1152674891b8d62c3160e04783ac1c6b5e19b193e8e37"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/public-base-instead-of-accepted-peer-node.json",
+        "sha256": "b5c619ba81dc0b48d94a3d3bf2ba6dbd07aab033d25a1780b438ebc1d42f2e7c"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "public-base-instead-of-accepted",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "2af434537a8f7e503e03359df754efdae913577a72568c5d6b13c931db23a2a7",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "peer-browser",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "vitest.adapter-oracles.config.ts",
+        "e2e/adapter-persisted-demand-peer-oracle.browser.test.ts",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/public-base-instead-of-accepted-peer-browser.json"
+      ],
+      "cwd": "packages/browser-db-sqlite-persistence",
+      "passed": 12,
+      "failed": 0,
+      "classification": "survived",
+      "semanticFailures": 0,
+      "derivativeFailures": 0,
+      "judgment": "12/12 peer receiving checks pass; no receiving distinction established",
+      "semanticCheckpointsInDefaultLog": {},
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/public-base-instead-of-accepted-peer-browser.log",
+        "sha256": "06e3be3ec4f380dcd8893f48cbc95e3bdca36e10289c64b943a86391be40f454"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/public-base-instead-of-accepted-peer-browser.json",
+        "sha256": "0668fd6335d1801d64eece7f6134e70f3da0cc8a92c66589c1ab19823ee22b67"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "omit-unaccepted-proposal-overlay",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "7ea1d105b976b1dde241cf4a9aa15b52b873e898593281fc3b380ad95c03c5e7",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "deferred",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/lazy-paging-baseline-oracle.property.test.ts",
+        "--testNamePattern",
+        "convex.lazy-deferred-baseline",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/omit-unaccepted-proposal-overlay-deferred.json"
+      ],
+      "cwd": "packages/convex-db-collection",
+      "passed": 4,
+      "failed": 6,
+      "classification": "semantic-kill",
+      "semanticFailures": 4,
+      "derivativeFailures": 2,
+      "judgment": "FIFO source publications: 1 publication for 6 accepted revisions; two derivative calibrations",
+      "semanticCheckpointsInDefaultLog": {
+        "FIFO source publications": 4
+      },
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/omit-unaccepted-proposal-overlay-deferred.log",
+        "sha256": "ef1c53a85a235faeed638189383ea0460d3f621170969092db725306ec9fea8c"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/omit-unaccepted-proposal-overlay-deferred.json",
+        "sha256": "25d9e52dae4bc87b774fe8c92617b3adb14f0f13b86013c0eccb4119b29a9c2f"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "ignore-proposal-tombstones",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "c9da40b172e5c55ed89f13fb7d99c57ec14b9b34d11c4eff770776a2c78ba305",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "deferred",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/lazy-paging-baseline-oracle.property.test.ts",
+        "--testNamePattern",
+        "convex.lazy-deferred-baseline",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/ignore-proposal-tombstones-deferred.json"
+      ],
+      "cwd": "packages/convex-db-collection",
+      "passed": 10,
+      "failed": 0,
+      "classification": "survived-bounded-allowed-alternative",
+      "semanticFailures": 0,
+      "derivativeFailures": 0,
+      "judgment": "10/10 successful FIFO full-row/no-metadata domain; full-row update of absent key is permitted, so write kind cannot be a kill",
+      "semanticCheckpointsInDefaultLog": {},
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/ignore-proposal-tombstones-deferred.log",
+        "sha256": "26824df708780a17129d6da3134ddac62bb7c171f78c6029212bfdd44ddff205"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/ignore-proposal-tombstones-deferred.json",
+        "sha256": "cce84bb55fb9e4e574ec3c0f166939b461f3b2e14206b56b0960c699a85a39d9"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "omit-previous-provider-authority",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "724e3eed8c0b13d956699e4c41313ad908d367e50908f0dc20c1faa617719519",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "retained",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/lazy-paging-baseline-oracle.property.test.ts",
+        "--testNamePattern",
+        "convex.lazy-retained-omission",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/omit-previous-provider-authority-retained.json"
+      ],
+      "cwd": "packages/convex-db-collection",
+      "passed": 4,
+      "failed": 6,
+      "classification": "semantic-kill",
+      "semanticFailures": 4,
+      "derivativeFailures": 2,
+      "judgment": "contracted range publication retains omitted old row-100/row-101; two derivative calibrations",
+      "semanticCheckpointsInDefaultLog": {
+        "contracted range publication": 4
+      },
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/omit-previous-provider-authority-retained.log",
+        "sha256": "51e72d12db6a010434ad96edf7e3626b2b60eb14845e9c7eba80d3223b909e6d"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/omit-previous-provider-authority-retained.json",
+        "sha256": "03ce7a8cf37aca606fb896f7e96bb3c523e930726f4dce23f19dd4d1e30fe964"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "sample-baseline-only-first-result",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "3921765b8949191875ff8f9d8f74c4067df0993dba79d8097343fe8be0b2d5d2",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "late",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/lazy-paging-baseline-oracle.property.test.ts",
+        "--testNamePattern",
+        "convex.lazy-late-baseline",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/sample-baseline-only-first-result-late.json"
+      ],
+      "cwd": "packages/convex-db-collection",
+      "passed": 7,
+      "failed": 12,
+      "classification": "semantic-kill",
+      "semanticFailures": 10,
+      "derivativeFailures": 2,
+      "judgment": "later exhausted answer retains late hydrated key; two derivative calibrations",
+      "semanticCheckpointsInDefaultLog": {
+        "later exhausted answer": 10
+      },
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/sample-baseline-only-first-result-late.log",
+        "sha256": "f858e97c3446d4a044e2dd2a230802dae7e67ad441090d86f8cce117f6fcee56"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/sample-baseline-only-first-result-late.json",
+        "sha256": "42a74d964bd30c1e707e97eca2c4af2851ec7a67544c6d0f28cc70cdd9a2bd87"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "omit-new-provider-authority-write",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "28e079a781c04fae25710d380630ec0e08ae13e793c6425d955ca0d3076c1eb6",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "support",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/lazy-paging-baseline-oracle.property.test.ts",
+        "--testNamePattern",
+        "convex.lazy-support-baseline",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-paired/omit-new-provider-authority-write-support.json"
+      ],
+      "cwd": "packages/convex-db-collection",
+      "passed": 4,
+      "failed": 6,
+      "classification": "semantic-kill",
+      "semanticFailures": 4,
+      "derivativeFailures": 2,
+      "judgment": "provider support before later hydration: later hydration replaces provider-supported value; two derivative calibrations",
+      "semanticCheckpointsInDefaultLog": {
+        "provider support before later hydration": 4
+      },
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-paired/omit-new-provider-authority-write-support.log",
+        "sha256": "7a5939ce19aecbc851bc28f79f3d4ace796ede61886e6f847df65df552963a0b"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/omit-new-provider-authority-write-support.json",
+        "sha256": "9006e7fffc8af388d7724c8595476660b9fc259b23843edd8bb890a14715d100"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-paired/results.json",
+        "sha256": "d6faae6986d32d8e10070b058f6ae39ac44c0ef11d093f4ac9a9716e34eb2636"
+      }
+    },
+    {
+      "variant": "original-synthetic-startup",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "8e1989d2d54605f1566c7e5ad867195cb8aa22876f9b2d5016bd992ff8a1ed81",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "standard-browser",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "vitest.adapter-oracles.config.ts",
+        "e2e/adapter-persisted-demand-oracle.browser.test.ts",
+        "--testNamePattern",
+        "adapter.convex.persisted-demand.chromium-opfs",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-original-browser-retry-1/original-synthetic-startup-standard-browser.json"
+      ],
+      "cwd": "packages/browser-db-sqlite-persistence",
+      "passed": 0,
+      "failed": 0,
+      "classification": "setup-only-not-kill",
+      "semanticFailures": 0,
+      "derivativeFailures": 0,
+      "judgment": "Vite dependency reoptimization/page.waitForFunction startup failure before histories; retained separately",
+      "semanticCheckpointsInDefaultLog": {},
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-original-browser-retry-1/original-synthetic-startup-standard-browser.log",
+        "sha256": "a2d7438e42785a8c3e80fe6f8a133dce5ccadfd4815d26d48fa41830b983125a"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-original-browser-retry-1/original-synthetic-startup-standard-browser.json",
+        "sha256": "75262a2bcfc049f44494c68c42e4540ba2c9c4c2ddd4333e1d17ca5c5c7dbce9"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-original-browser-retry-1/results.json",
+        "sha256": "81e1d8fcb08bca650957f600237093525be3406f3a6a2eae6b529ac444a6f97e"
+      }
+    },
+    {
+      "variant": "original-synthetic-startup",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "8e1989d2d54605f1566c7e5ad867195cb8aa22876f9b2d5016bd992ff8a1ed81",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "standard-browser",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "vitest.adapter-oracles.config.ts",
+        "e2e/adapter-persisted-demand-oracle.browser.test.ts",
+        "--testNamePattern",
+        "adapter.convex.persisted-demand.chromium-opfs",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-original-browser-retry-2/original-synthetic-startup-standard-browser.json"
+      ],
+      "cwd": "packages/browser-db-sqlite-persistence",
+      "passed": 14,
+      "failed": 16,
+      "classification": "semantic-kill",
+      "semanticFailures": 12,
+      "derivativeFailures": 4,
+      "judgment": "11 offline inputs applied row/readiness failures; 1 offline deadline round 1; 1 derivative reach and 3 derivative calibration failures",
+      "semanticCheckpointsInDefaultLog": {
+        "offline deadline round 1": 1,
+        "offline inputs applied": 11
+      },
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-original-browser-retry-2/original-synthetic-startup-standard-browser.log",
+        "sha256": "54d080164f46064c6b809971aabe2feb4e400c52f58b78ba17278d116f09908e"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-original-browser-retry-2/original-synthetic-startup-standard-browser.json",
+        "sha256": "04c3b3161627bc453bbc7811c907c882808756902788de084ce396f47a7ea99c"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-original-browser-retry-2/results.json",
+        "sha256": "13061a793d17113390726dc932ba978bce2980d0911e5a79c09ea9d7b426aff0"
+      }
+    },
+    {
+      "variant": "public-base-instead-of-accepted",
+      "base": {
+        "options": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "variantHashes": {
+        "options": "2af434537a8f7e503e03359df754efdae913577a72568c5d6b13c931db23a2a7",
+        "pagination": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+        "subscription": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+      },
+      "profile": "controlled-all",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/lazy-paging-baseline-oracle.property.test.ts",
+        "--coverage.enabled=false",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/Users/kyle.mathews/programs/tanstack-db/.worktrees/pr-2377-review/.review-2377/convex-mutants-final-872-public-base-controlled/public-base-instead-of-accepted-controlled-all.json"
+      ],
+      "cwd": "packages/convex-db-collection",
+      "passed": 72,
+      "failed": 8,
+      "classification": "semantic-kill",
+      "semanticFailures": 8,
+      "derivativeFailures": 0,
+      "judgment": "held baseline: changed answer fails health with duplicate accepted key (2); omitting/empty answers fail applied-answer rows (6)",
+      "semanticCheckpointsInDefaultLog": {
+        "applied answer": 6,
+        "health after legal first answer": 2
+      },
+      "log": {
+        "path": ".review-2377/convex-mutants-final-872-public-base-controlled/public-base-instead-of-accepted-controlled-all.log",
+        "sha256": "39c6db6eb5511d7d56583a47e0523d9f994053d29039d79c32790f80fa005e74"
+      },
+      "structuredResult": {
+        "path": ".review-2377/convex-mutants-final-872-public-base-controlled/public-base-instead-of-accepted-controlled-all.json",
+        "sha256": "c8684cdae423c36f01ca80b96a9ba16d9195b3667d1c267ef2dc83cebe7cec78"
+      },
+      "orchestrationResult": {
+        "path": ".review-2377/convex-mutants-final-872-public-base-controlled/results.json",
+        "sha256": "bd5f264d0e6f38911d7eb5b12694c3e5fce1473be94e70c479750e49040cd1df"
+      }
+    }
+  ],
+  "limits": [
+    "Public-base mutant survives the peer receiver on both hosts; its kill belongs only to the controlled primary owner.",
+    "Ignored proposal tombstones survive the tested successful FIFO full-row/no-metadata domain; full-row absent-key update is a permitted alternative under pr-1902-change-event-history.md:241. No coverage closure or universal equivalence claim.",
+    "Inclusive-rank kill is witnessed only by ascending tied boundaries; no distinct descending-tie proof.",
+    "Setup/premise/derivative failures are not semantic kills. Structured Vitest JSON loses nested OracleViolation causes; judgments use the default logs.",
+    "No deployed-service, arbitrary predicate/cursor, canceled-acceptance, sync-metadata, retention-expiry, concurrent-tab or whole-adapter completeness claim.",
+    "Baseline source hashes are exact; historical first-repair and synthetic-startup variants intentionally replace only recorded files and are not clean historical checkouts."
+  ]
+}

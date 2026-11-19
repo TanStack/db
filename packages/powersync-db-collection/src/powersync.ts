@@ -1,5 +1,6 @@
 import { DiffTriggerOperation, LogLevels, sanitizeSQL } from '@powersync/common'
 import {
+  IR,
   or,
   validateSyncPersistenceCapability,
   whenSyncAccepted,
@@ -351,6 +352,25 @@ function createPowerSyncCollectionConfig<
         params.markReady()
       }
       const abortController = new AbortController()
+      let deserializationFailure: { error: unknown } | undefined
+      const throwIfDeserializationFailed = (): void => {
+        if (deserializationFailure) throw deserializationFailure.error
+      }
+
+      // A refused SQLite row makes this run inconsistent with its source.
+      // Keep its original cause and stop tracking; only a new run can resume.
+      const deserialize = (value: TableType): OutputType => {
+        if (deserializationFailure) throw deserializationFailure.error
+        try {
+          return deserializeSyncRow(value)
+        } catch (error) {
+          deserializationFailure = { error }
+          fail(error)
+          abortController.abort()
+          void disposeTrackingAfterAbort()
+          throw error
+        }
+      }
 
       // Persisted first startup keeps ordinary batches even after timeout
       // fallback. A retained reload keeps its atomic replacement.
@@ -480,7 +500,7 @@ function createPowerSyncCollectionConfig<
                 begin({ snapshot })
                 for (const row of batches.splice(0).flat()) {
                   const type = writeType(row.id)
-                  const value = deserializeSyncRow(row)
+                  const value = deserialize(row)
                   onInitialRow?.(value)
                   write({ type, value })
                 }
@@ -513,6 +533,7 @@ function createPowerSyncCollectionConfig<
       }
 
       async function flushDiffRecords(): Promise<void> {
+        if (deserializationFailure) return
         // PowerSync can notify after creating the tracking table but before its
         // create call returns. Preserve that notification until the disposer,
         // which proves the trigger is usable, has been published.
@@ -520,7 +541,7 @@ function createPowerSyncCollectionConfig<
         if (setup) {
           await setup.catch(() => undefined)
         }
-        if (!disposeTracking) {
+        if (!disposeTracking || abortController.signal.aborted) {
           return
         }
 
@@ -544,7 +565,7 @@ function createPowerSyncCollectionConfig<
         appliedReceipts: Array<SyncAppliedReceipt>,
       ): Promise<void> {
         // There is nothing to flush if no tracking table is currently active.
-        if (!disposeTracking) {
+        if (!disposeTracking || deserializationFailure) {
           return
         }
 
@@ -557,13 +578,13 @@ function createPowerSyncCollectionConfig<
 
           for (const op of operations) {
             const { id, operation, timestamp, value } = op
-            const parsedValue = deserializeSyncRow({
+            const parsedValue = deserialize({
               id,
               ...JSON.parse(value),
             })
             const parsedPreviousValue =
               op.operation == DiffTriggerOperation.UPDATE
-                ? deserializeSyncRow({
+                ? deserialize({
                     id,
                     ...JSON.parse(op.previous_value),
                   })
@@ -833,16 +854,24 @@ function createPowerSyncCollectionConfig<
         const activeWhereExpressions = () =>
           Array.from(demands.values())
             .filter((demand) => demand.active)
-            .map((demand) => demand.options.where)
+            // A missing predicate supports every row when demands are unioned.
+            .map((demand) => demand.options.where ?? new IR.Value(true))
 
         // One reconciliation owns every queued revision so callers cannot
         // settle against a stale trigger configuration.
         // Set while a failed rebuild may have left the source untracked.
         let trackingOutage = false
         const reconcileTracking = async (): Promise<void> => {
-          while (!stopped && reconciledTrackingRevision !== trackingRevision) {
+          while (
+            !stopped &&
+            !deserializationFailure &&
+            reconciledTrackingRevision !== trackingRevision
+          ) {
             const revision = trackingRevision
-            const isCurrent = () => !stopped && trackingRevision === revision
+            const isCurrent = () =>
+              !stopped &&
+              !deserializationFailure &&
+              trackingRevision === revision
             const appliedReceipts: Array<SyncAppliedReceipt> = []
 
             await database.writeLock(async (ctx) => {
@@ -927,13 +956,14 @@ function createPowerSyncCollectionConfig<
           // New demand can join after reconciliation exits but before its
           // shared promise clears. Each waiter must check its revision again.
           while (!stopped && reconciledTrackingRevision !== trackingRevision) {
+            if (deserializationFailure) throw deserializationFailure.error
             await (rebuildPromise ??= reconcileTracking()
               .catch((error) => {
                 // A rebuild may already have removed every active diff trigger,
                 // so rows can grow stale. Later demand rebuilds again, so after
                 // Collection readiness this is a failureReason, not fail().
-                if (stopped) {
-                  // Cleanup owns the outcome.
+                if (stopped || deserializationFailure) {
+                  // Cleanup or fatal refusal already ended tracking.
                 } else if (ready) {
                   trackingOutage = true
                   reportError(error)
@@ -944,14 +974,17 @@ function createPowerSyncCollectionConfig<
                 rebuildPromise = null
               }))
           }
+          if (deserializationFailure) throw deserializationFailure.error
         }
 
         const loadSubset = async (
           options: LoadSubsetOptions,
         ): Promise<void> => {
+          throwIfDeserializationFailed()
           if (stopped) return
           // Never create a trigger that has no observer to drain its diff table.
           await startup
+          throwIfDeserializationFailed()
           if (
             // Cleanup can run while startup is pending.
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -979,6 +1012,10 @@ function createPowerSyncCollectionConfig<
             throw error
           }
 
+          if (deserializationFailure) {
+            cleanupDemand(demand)
+            throw deserializationFailure.error
+          }
           if (
             // The user hook can reenter cleanup.
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -1084,7 +1121,7 @@ function createPowerSyncCollectionConfig<
           const departingWhereSQL = toInlinedWhereClause(compiledDeparting)
           let rowsToEvict: Array<{ id: string }>
           for (;;) {
-            if (stopped) return
+            if (stopped || deserializationFailure) return
             const revision = trackingRevision
             const active = activeWhereExpressions()
             let evictionSQL: string
@@ -1104,7 +1141,7 @@ function createPowerSyncCollectionConfig<
 
             rowsToEvict = await database.getAll<{ id: string }>(evictionSQL)
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleanup can run during the query
-            if (stopped) return
+            if (stopped || deserializationFailure) return
             if (trackingRevision === revision) break
           }
           if (rowsToEvict.length > 0) {
@@ -1118,7 +1155,13 @@ function createPowerSyncCollectionConfig<
         }
 
         function scheduleReleaseDrain(delay = 0): void {
-          if (stopped || drainingReleases || releaseRetryTimer) return
+          if (
+            stopped ||
+            deserializationFailure ||
+            drainingReleases ||
+            releaseRetryTimer
+          )
+            return
           if (delay > 0) {
             releaseRetryTimer = setTimeout(() => {
               releaseRetryTimer = undefined

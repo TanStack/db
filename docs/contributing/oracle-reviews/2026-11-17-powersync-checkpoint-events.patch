@@ -1,0 +1,425 @@
+diff --git a/.changeset/complete-checkpoint-observer.md b/.changeset/complete-checkpoint-observer.md
+new file mode 100644
+index 0000000..9c54776
+--- /dev/null
++++ b/.changeset/complete-checkpoint-observer.md
+@@ -0,0 +1,5 @@
++---
++'@powersync/standalone-client': minor
++---
++
++Add `PowerSyncClient.subscribeCheckpoint()` to observe complete checkpoint applications, including unchanged and empty checkpoints on an existing connection. Integrations can use the event to recheck stream health even when sync status remains ready. Observer errors are isolated from sync and other observers.
+diff --git a/packages/standalone/README.md b/packages/standalone/README.md
+index 2f35fca..fb76351 100644
+--- a/packages/standalone/README.md
++++ b/packages/standalone/README.md
+@@ -104,6 +104,34 @@ unsubscribe();
+ 
+ You can also import `@powersync/standalone-client/react` for the `usePowerSyncStatus()` hook.
+ 
++To observe complete checkpoint applications, use `subscribeCheckpoint`. It also runs when no rows change and when
++the client stays `ready`, so integrations can detect stream recovery without waiting for a status change:
++
++```ts
++const unsubscribeCheckpoint = powerSync.subscribeCheckpoint(
++  () => {
++    void lease.waitForSync().then(
++      () => console.log('these streams are healthy'),
++      (error) => console.log('these streams still have an error', error)
++    );
++  },
++  { onError: (error) => console.error('checkpoint listener failed', error) }
++);
++
++// ...
++unsubscribeCheckpoint();
++```
++
++The callback runs after rows and current stream synchronization state are updated. It also runs for complete
++checkpoints with stream errors; use the relevant lease to check its streams. Partial checkpoints and applications
++from superseded connections do not trigger it. Subscribing does not start or keep sync running and does not invoke
++the callback immediately. Synchronous listener errors go to the optional `onError` callback; errors from that
++diagnostic callback are ignored so they cannot interrupt sync or other listeners.
++
++Subscriptions added while checkpoint observers are running begin with the next checkpoint. An observer removed before
++its turn is skipped. If a status or checkpoint observer stops or replaces the current connection, remaining checkpoint
++observers are skipped for that retired connection; rows already applied remain available.
++
+ ## Reading rows
+ 
+ As the client starts syncing after subscribing to Sync Streams, you can read materialized rows as JavaScript objects.
+diff --git a/packages/standalone/src/client.ts b/packages/standalone/src/client.ts
+index 6fc33bd..1b89fd2 100644
+--- a/packages/standalone/src/client.ts
++++ b/packages/standalone/src/client.ts
+@@ -59,6 +59,11 @@ export interface ConfirmWritesOptions {
+   signal?: AbortSignal;
+ }
+ 
++export interface CheckpointListenerOptions {
++  /** Synchronous errors thrown by the checkpoint listener. Errors thrown by this callback are ignored. */
++  onError?: (error: Error) => void;
++}
++
+ /** A local write registered through {@link PowerSyncClient.markLocalWrite}. */
+ export interface LocalWrite {
+   /**
+@@ -156,6 +161,7 @@ export class PowerSyncClient {
+ 
+   #status: SyncStatus = idle;
+   readonly #statusListeners = new Set<() => void>();
++  readonly #checkpointListeners = new Set<() => void>();
+ 
+   constructor(options: PowerSyncClientOptions) {
+     const url = new URL(options.endpoint);
+@@ -179,6 +185,35 @@ export class PowerSyncClient {
+     };
+   };
+ 
++  /**
++   * Invokes the listener after a complete checkpoint is applied for the current sync connection, including checkpoints
++   * with no row changes and checkpoints reporting stream errors. Rows and stream synchronization state are updated
++   * before notification, so a lease's {@link StreamLease.waitForSync} can determine whether its streams are healthy.
++   *
++   * Partial checkpoints and checkpoints applied from a superseded connection do not notify this listener. Subscribing
++   * does not invoke the listener immediately, start sync, or keep sync running. The returned callback unsubscribes.
++   * Listeners added during checkpoint notification start with the next checkpoint. Listeners removed before their turn,
++   * or listeners whose connection is stopped or superseded by an earlier callback, are not invoked for that checkpoint.
++   * Synchronous listener errors are passed to `options.onError`, if supplied, without interrupting sync or other listeners.
++   */
++  readonly subscribeCheckpoint = (listener: () => void, options: CheckpointListenerOptions = {}): (() => void) => {
++    const notify = () => {
++      try {
++        listener();
++      } catch (cause) {
++        try {
++          options.onError?.(toError(cause));
++        } catch {
++          // A diagnostic callback must not interrupt checkpoint application either.
++        }
++      }
++    };
++    this.#checkpointListeners.add(notify);
++    return () => {
++      this.#checkpointListeners.delete(notify);
++    };
++  };
++
+   /**
+    * Returns {@link PowerSyncClient.status}, exposed as a function for e.g. `useSyncExternalStore` in React.
+    */
+@@ -567,7 +602,13 @@ export class PowerSyncClient {
+       else waiter.resolve();
+     }
+     this.#setStatus({ state: 'ready' });
+-    return true;
++    // Status and checkpoint callbacks may synchronously retire this connection.
++    // Snapshot registrations to prevent a new subscription from joining this dispatch.
++    for (const listener of [...this.#checkpointListeners]) {
++      if (signal.aborted) return false;
++      if (this.#checkpointListeners.has(listener)) listener();
++    }
++    return !signal.aborted;
+   }
+ 
+   /**
+diff --git a/packages/standalone/src/index.ts b/packages/standalone/src/index.ts
+index 39a3492..3a6917f 100644
+--- a/packages/standalone/src/index.ts
++++ b/packages/standalone/src/index.ts
+@@ -1,5 +1,6 @@
+ export { PowerSyncClient, StreamError } from './client.js';
+ export type {
++  CheckpointListenerOptions,
+   ConfirmWritesOptions,
+   LocalWrite,
+   PowerSyncClientOptions,
+diff --git a/packages/standalone/test/client.test.ts b/packages/standalone/test/client.test.ts
+index f106f47..f1b708a 100644
+--- a/packages/standalone/test/client.test.ts
++++ b/packages/standalone/test/client.test.ts
+@@ -579,3 +579,284 @@ test('reports default stream errors once to leases including them', async ({ ser
+   await new Promise((r) => setTimeout(r, 10));
+   expect(errors).toHaveLength(1);
+ });
++
++for (const nonempty of [false, true]) {
++  test(`reports complete checkpoints and unchanged stream recovery with nonempty rows: ${nonempty}`, async ({
++    client,
++    service,
++    acquireStreams,
++    listen
++  }) => {
++    const errors: StreamError[] = [];
++    const lease = acquireStreams([{ name: 'tasks' }], { onError: (error) => errors.push(error) });
++    const { changes } = listen('tasks');
++    const statuses: string[] = [];
++    const removeStatus = client.subscribeStatus(() => statuses.push(client.status.state));
++    const snapshots: Array<{ status: string; rows: Array<[string, Row]> }> = [];
++    const verdicts: Array<Promise<string>> = [];
++    const removeCheckpoint = client.subscribeCheckpoint(() => {
++      snapshots.push({ status: client.status.state, rows: [...client.tableSnapshot('tasks')] });
++      verdicts.push(
++        lease.waitForSync().then(
++          () => 'healthy',
++          (error: Error) => error.message
++        )
++      );
++    });
++    try {
++      expect(snapshots).toEqual([]);
++      const ready = lease.waitForSync();
++      await service.waitForRequest(1);
++      service.sync('a', 'tasks', nonempty ? { '1': { title: 'one' } } : {});
++      await ready;
++      await vi.waitFor(() => expect(snapshots).toHaveLength(1));
++      const tableNotifications = changes.length;
++
++      service.checkpoint(['a'], {
++        streams: [{ name: 'tasks', is_default: false, errors: [{ subscription: 0, message: 'unavailable' }] }]
++      });
++      service.complete();
++      await vi.waitFor(() => expect(snapshots).toHaveLength(2));
++
++      // A healthy complete checkpoint can have no row changes and leave status ready.
++      service.checkpoint(['a']);
++      service.complete();
++      await vi.waitFor(() => expect(snapshots).toHaveLength(3));
++      const rows: Array<[string, Row]> = nonempty ? [['1', { title: 'one' }]] : [];
++      expect(snapshots).toEqual(Array.from({ length: 3 }, () => ({ status: 'ready', rows })));
++      expect(await Promise.all(verdicts)).toEqual(['healthy', expect.stringContaining('unavailable'), 'healthy']);
++      expect(errors).toHaveLength(1);
++      expect(changes).toHaveLength(tableNotifications);
++      expect(statuses.filter((state) => state === 'ready')).toHaveLength(1);
++      expect(service.requests).toHaveLength(1);
++    } finally {
++      removeCheckpoint();
++      removeStatus();
++    }
++  });
++}
++
++test('reports a complete checkpoint only after local writes allow it to apply', async ({
++  client,
++  service,
++  acquireStreams
++}) => {
++  const checkpoint = vi.fn();
++  const remove = client.subscribeCheckpoint(checkpoint);
++  try {
++    const ready = acquireStreams([{ name: 'tasks' }]).waitForSync();
++    await service.waitForRequest(1);
++    service.sync('a', 'tasks', {});
++    await ready;
++    expect(checkpoint).toHaveBeenCalledTimes(1);
++
++    const write = client.markLocalWrite();
++    service.checkpoint(['a']);
++    service.put('a', 'tasks', '1', { title: 'held' });
++    service.send({ partial_checkpoint_complete: { priority: 0, last_op_id: '10' } });
++    service.complete();
++    await new Promise((resolve) => setTimeout(resolve, 10));
++    expect(checkpoint).toHaveBeenCalledTimes(1);
++    expect(client.tableSnapshot('tasks').size).toBe(0);
++
++    write.release();
++    await vi.waitFor(() => expect(checkpoint).toHaveBeenCalledTimes(2));
++    expect(client.tableSnapshot('tasks').get('1')).toEqual({ title: 'held' });
++  } finally {
++    remove();
++  }
++});
++
++test('checkpoint observers do not own sync and can unsubscribe repeatedly', async ({
++  client,
++  service,
++  acquireStreams
++}) => {
++  const checkpoint = vi.fn();
++  const remove = client.subscribeCheckpoint(checkpoint);
++  await new Promise((resolve) => setTimeout(resolve, 10));
++  expect(service.requests).toHaveLength(0);
++
++  const lease = acquireStreams([{ name: 'tasks' }]);
++  const ready = lease.waitForSync();
++  await service.waitForRequest(1);
++  service.sync('a', 'tasks', {});
++  await ready;
++  expect(checkpoint).toHaveBeenCalledTimes(1);
++  lease.release();
++  expect(client.status.state).toBe('idle');
++  expect(service.aborted).toBe(true);
++
++  remove();
++  remove();
++  const next = acquireStreams([{ name: 'tasks' }]).waitForSync();
++  await service.waitForRequest(2);
++  service.sync('a', 'tasks', {});
++  await next;
++  expect(checkpoint).toHaveBeenCalledTimes(1);
++});
++
++for (const withErrorCallback of [false, true]) {
++  test(`isolates checkpoint listener exceptions with an error callback: ${withErrorCallback}`, async ({
++    client,
++    service,
++    acquireStreams
++  }) => {
++    const failure = new Error('checkpoint observer failed');
++    const onError = vi.fn(() => {
++      throw new Error('diagnostic callback failed');
++    });
++    const removeThrowing = client.subscribeCheckpoint(
++      () => {
++        throw failure;
++      },
++      withErrorCallback ? { onError } : {}
++    );
++    const healthy = vi.fn();
++    const removeHealthy = client.subscribeCheckpoint(healthy);
++    try {
++      const ready = acquireStreams([{ name: 'tasks' }]).waitForSync();
++      await service.waitForRequest(1);
++      service.sync('a', 'tasks', {});
++      await ready;
++      await vi.waitFor(() => expect(healthy).toHaveBeenCalledTimes(1));
++      service.checkpoint(['a']);
++      service.complete();
++      await vi.waitFor(() => expect(healthy).toHaveBeenCalledTimes(2));
++      expect(client.status.state).toBe('ready');
++      expect(service.requests).toHaveLength(1);
++      expect(onError).toHaveBeenCalledTimes(withErrorCallback ? 2 : 0);
++      if (withErrorCallback) expect(onError).toHaveBeenLastCalledWith(failure);
++    } finally {
++      removeThrowing();
++      removeHealthy();
++    }
++  });
++}
++
++test('does not report a superseded connection as a complete checkpoint for current streams', async ({
++  client,
++  service,
++  acquireStreams
++}) => {
++  const checkpoint = vi.fn();
++  const remove = client.subscribeCheckpoint(checkpoint);
++  try {
++    const ready = acquireStreams([{ name: 'tasks' }]).waitForSync();
++    await service.waitForRequest(1);
++    service.sync('a', 'tasks', { '1': { title: 'before' } });
++    await ready;
++    const write = client.markLocalWrite();
++    service.sync('a', 'tasks', { '1': { title: 'after' } });
++    await new Promise((resolve) => setTimeout(resolve, 10));
++
++    write.release();
++    const current = acquireStreams([{ name: 'other' }]).waitForSync();
++    await service.waitForRequest(2);
++    await vi.waitFor(() => expect(client.tableSnapshot('tasks').get('1')).toEqual({ title: 'after' }));
++    expect(checkpoint).toHaveBeenCalledTimes(1);
++
++    service.checkpoint(['a']);
++    service.complete();
++    await current;
++    expect(checkpoint).toHaveBeenCalledTimes(2);
++  } finally {
++    remove();
++  }
++});
++
++for (const trigger of ['status', 'checkpoint'] as const) {
++  for (const action of ['stop', 'restart'] as const) {
++    test(`skips retired checkpoint notifications when a ${trigger} listener causes ${action}`, async ({
++      client,
++      service,
++      acquireStreams
++    }) => {
++      const lease = acquireStreams([{ name: 'tasks' }]);
++      let replacement: StreamLease | undefined;
++      let retired = false;
++      const retire = () => {
++        if (retired) return;
++        retired = true;
++        if (action === 'stop') lease.release();
++        else replacement = acquireStreams([{ name: 'other' }]);
++      };
++      const removeRetiring =
++        trigger === 'status'
++          ? client.subscribeStatus(() => {
++              if (client.status.state === 'ready') retire();
++            })
++          : client.subscribeCheckpoint(retire);
++      const checkpoint = vi.fn();
++      const removeCheckpoint = client.subscribeCheckpoint(checkpoint);
++      try {
++        const ready = lease.waitForSync();
++        await service.waitForRequest(1);
++        service.sync('a', 'tasks', {});
++        await ready;
++        expect(retired).toBe(true);
++        expect(checkpoint).not.toHaveBeenCalled();
++        if (action === 'stop') {
++          expect(client.status.state).toBe('idle');
++          expect(service.aborted).toBe(true);
++        } else {
++          const current = replacement!.waitForSync();
++          await service.waitForRequest(2);
++          service.sync('a', 'tasks', {});
++          await current;
++          expect(checkpoint).toHaveBeenCalledTimes(1);
++        }
++      } finally {
++        removeRetiring();
++        removeCheckpoint();
++      }
++    });
++  }
++}
++
++test('defers checkpoint subscriptions registered during dispatch to the next checkpoint', async ({
++  client,
++  service,
++  acquireStreams
++}) => {
++  let calls = 0;
++  let remove = () => {};
++  const listener = () => {
++    calls++;
++    remove();
++    // Bound the hostile history so a live-set dispatcher fails an assertion
++    // instead of looping forever in a single checkpoint.
++    if (calls < 3) remove = client.subscribeCheckpoint(listener);
++  };
++  remove = client.subscribeCheckpoint(listener);
++  try {
++    const ready = acquireStreams([{ name: 'tasks' }]).waitForSync();
++    await service.waitForRequest(1);
++    service.sync('a', 'tasks', {});
++    await ready;
++    expect(calls).toBe(1);
++
++    service.checkpoint(['a']);
++    service.complete();
++    await vi.waitFor(() => expect(calls).toBe(2));
++  } finally {
++    remove();
++  }
++});
++
++test('skips checkpoint subscriptions removed by an earlier observer', async ({ client, service, acquireStreams }) => {
++  let removeLater = () => {};
++  const removeFirst = client.subscribeCheckpoint(() => removeLater());
++  const later = vi.fn();
++  removeLater = client.subscribeCheckpoint(later);
++  try {
++    const ready = acquireStreams([{ name: 'tasks' }]).waitForSync();
++    await service.waitForRequest(1);
++    service.sync('a', 'tasks', {});
++    await ready;
++    expect(later).not.toHaveBeenCalled();
++  } finally {
++    removeFirst();
++    removeLater();
++  }
++});

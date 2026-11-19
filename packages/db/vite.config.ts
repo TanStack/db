@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { transform } from 'esbuild'
-import { defineConfig, mergeConfig } from 'vitest/config'
+import { configDefaults, defineConfig, mergeConfig } from 'vitest/config'
 import { tanstackViteConfig } from '@tanstack/vite-config'
 import { commonJsDeclarations } from '../../scripts/commonjs-declarations.mjs'
 import { publishableModuleOutput } from '../../scripts/publishable-module-output.mjs'
@@ -47,6 +47,7 @@ const config = defineConfig({
   test: {
     name: packageJson.name,
     dir: `./tests`,
+    exclude: [...configDefaults.exclude, `**/*.browser.test.ts`],
     environment: `jsdom`,
     coverage: {
       enabled: true,

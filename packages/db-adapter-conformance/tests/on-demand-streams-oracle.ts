@@ -1,0 +1,897 @@
+/**
+ * # Which failed streams still belong to active queries?
+ *
+ * Retiring one query removes only its claim. Every failed stream retained by
+ * another ready query must keep source health unhealthy. Recovery removes all
+ * failures for that stream, including failures whose error identity changed.
+ * A successful subset load also waits for visible source rows. An error after
+ * provider synchronization but before that visibility cannot yield a healthy,
+ * successful initial query. Rejecting that initial query is also permitted.
+ * Cleanup from the subscription mapper invalidates the sync run before that
+ * mapper returns. It cannot leave a newly acquired provider stream behind.
+ * Stream identity includes its name and parameters; one stream's configured
+ * priority reaches the provider unchanged. An empty mapping reads cached rows
+ * only after applied settlement and retains no stream of its own. A throwing
+ * mapper rejects that request with its original error and leaves peers intact,
+ * including the source's terminal health slot. A ready status alone does not
+ * prove absence of a terminal source error.
+ * A snapshot request's signal stays live while its mapper runs. An abort
+ * before provider acquisition retains no SDK lease. An abort just after mapping
+ * releases only that request's lease. A ready peer remains usable in either
+ * case, and a later checkpoint cannot turn the canceled request into success.
+ * The request branch's right owner is a public change subscription's snapshot
+ * request; left remains a live-query Collection. This splits request admission
+ * from query construction without changing stream ownership.
+ * Settlement histories retain cold startup and also permit a completed empty
+ * right demand before the judged left demand. The distinct right demand is
+ * publicly retired first; it establishes no saved coverage for left. Its two
+ * cuts teach the same ownership law. This legal prehistory lets a later live
+ * acquisition receive an error while application is held, even when initial
+ * source confirmation legitimately retires a cold acquisition for replay.
+ *
+ * Authority: the receiving adapter's public on-demand/error contract, the
+ * glossary's logical subset owner and applied settlement, and the public
+ * reportError/reportHealthy contract in guides/error-handling.md. Receivers
+ * retain the source obligation in query/live/ARCHITECTURE.md, Source
+ * cancellation and applied settlement: an aborted caller's load rejects once
+ * accepted rows apply. Core ignoring an obsolete outcome does not waive that
+ * source obligation. Receivers opt into immediate stream-error reporting;
+ * this family does not prescribe
+ * a generic network retry threshold.
+ *
+ * Limits: two finite equality demands, at most three provider streams, one
+ * disjoint optimistic insert, one outage with optional changed errors and
+ * recovery, or cleanup during mapping/after application. Mapping additionally
+ * varies one numeric parameter tuple, one priority, cached-only settlement and
+ * synchronous throw/retry. Receiving
+ * registrations name SDK and host paths. No deployed-service, reload or
+ * restart-durability claim follows from this model's public observations.
+ */
+import fc from 'fast-check'
+
+export type StreamOwner = `left` | `right`
+type Coordinates = { coordinate: number; rowCount: number; value: number }
+export type OnDemandStreamsHistory = Coordinates &
+  (
+    | {
+        kind: `ownership`
+        overlap: `same` | `partial` | `disjoint`
+        failing: StreamOwner | `all`
+        retire: StreamOwner
+        changeError: boolean
+        recover: boolean
+        parameterization?: `equal` | `distinct`
+      }
+    | {
+        kind: `settlement`
+        timing: `before-sync` | `after-application`
+      }
+    | {
+        kind: `settlement`
+        timing: `before-application`
+        baseline?: `confirmed-empty`
+      }
+    | {
+        kind: `mapper`
+        operation: `empty` | `throw` | `priority`
+      }
+    | {
+        kind: `admission`
+        cleanup: `during-mapping` | `after-application`
+      }
+    | {
+        kind: `request`
+        abort: `before-mapping` | `during-mapping` | `after-mapping` | `none`
+      }
+  )
+
+// The branches have different legal actions. Ownership always starts with
+// ready queries; settlement places one rejection around provider/application
+// boundaries; admission ends a source during mapping or after a successful
+// load. Mapper histories add a cached-only demand, a failed mapping/retry, or
+// single-stream priority. Parameter tuples are equal or differ by one integer;
+// conflicting priorities and malformed mapping returns cannot enter this grammar.
+// Invalid timings and a third owner cannot enter this grammar.
+// Removing overlap loses shared-error retirement; removing timing loses the
+// accepted/applied distinction. Coordinates vary stream names, rows and values
+// without changing those relationships. Zero rows are excluded because a held
+// applied receipt requires a source write in this family's settlement witness.
+const coordinateArbitraries = {
+  coordinate: fc.integer({ min: 0, max: 10_000 }),
+  rowCount: fc.integer({ min: 1, max: 3 }),
+  value: fc.integer({ min: -20, max: 20 }),
+}
+export const onDemandStreamsHistoryArb: fc.Arbitrary<OnDemandStreamsHistory> =
+  fc.oneof(
+    fc.record({
+      ...coordinateArbitraries,
+      kind: fc.constant(`ownership` as const),
+      overlap: fc.constantFrom(
+        `same` as const,
+        `partial` as const,
+        `disjoint` as const,
+      ),
+      failing: fc.constantFrom(
+        `left` as const,
+        `right` as const,
+        `all` as const,
+      ),
+      retire: fc.constantFrom(`left` as const, `right` as const),
+      changeError: fc.boolean(),
+      recover: fc.boolean(),
+    }),
+    fc.record({
+      ...coordinateArbitraries,
+      kind: fc.constant(`settlement` as const),
+      timing: fc.constantFrom(
+        `before-sync` as const,
+        `before-application` as const,
+        `after-application` as const,
+      ),
+    }),
+    // Keep the cold branch above. A distinct completed empty donor changes no
+    // row baseline and cannot authorize exact persisted coverage for left.
+    fc.record({
+      ...coordinateArbitraries,
+      kind: fc.constant(`settlement` as const),
+      timing: fc.constant(`before-application` as const),
+      baseline: fc.constant(`confirmed-empty` as const),
+    }),
+    ...([`equal`, `distinct`] as const).map((parameterization) =>
+      fc.record({
+        ...coordinateArbitraries,
+        kind: fc.constant(`ownership` as const),
+        overlap: fc.constant(
+          parameterization === `equal`
+            ? (`same` as const)
+            : (`disjoint` as const),
+        ),
+        parameterization: fc.constant(parameterization),
+        failing: fc.constantFrom(
+          `left` as const,
+          `right` as const,
+          `all` as const,
+        ),
+        retire: fc.constantFrom(`left` as const, `right` as const),
+        changeError: fc.boolean(),
+        recover: fc.boolean(),
+      }),
+    ),
+    fc.record({
+      ...coordinateArbitraries,
+      kind: fc.constant(`mapper` as const),
+      operation: fc.constantFrom(
+        `empty` as const,
+        `throw` as const,
+        `priority` as const,
+      ),
+    }),
+    fc.record({
+      ...coordinateArbitraries,
+      kind: fc.constant(`admission` as const),
+      cleanup: fc.constantFrom(
+        `during-mapping` as const,
+        `after-application` as const,
+      ),
+    }),
+    fc.record({
+      ...coordinateArbitraries,
+      kind: fc.constant(`request` as const),
+      abort: fc.constantFrom(
+        `before-mapping` as const,
+        `during-mapping` as const,
+        `after-mapping` as const,
+        `none` as const,
+      ),
+    }),
+  )
+
+export type StreamRow = {
+  id: string
+  left: number
+  right: number
+  value: number
+}
+export function streamRows(h: Coordinates): Array<StreamRow> {
+  return Array.from({ length: h.rowCount }, (_, index) => ({
+    id: `row-${h.coordinate}-${index}`,
+    left: h.coordinate,
+    right: h.coordinate,
+    value: h.value + index,
+  }))
+}
+
+// This is the authored demand-to-stream relation. The model retains logical
+// claims, not SDK leases, acquisitions, caches, or error-object identities.
+// The distinction matters: retiring left removes different failed streams in
+// same, partial, and disjoint histories even with identical public rows.
+export type AuthoredStream = {
+  name: string
+  parameters?: Record<string, unknown>
+  priority?: number
+}
+
+// The identity encoding names authored stream coordinates; it is not the SDK's
+// normalization or lease classifier. This bounded domain has one parameter key,
+// so object-key ordering cannot affect equality.
+export function authoredStreamIdentity(stream: {
+  name: string
+  parameters?: Record<string, unknown>
+}): string {
+  return stream.parameters && Object.keys(stream.parameters).length
+    ? JSON.stringify([stream.name, stream.parameters])
+    : stream.name
+}
+export function ownerSubscriptions(
+  h: OnDemandStreamsHistory,
+): Record<StreamOwner, Array<AuthoredStream>> {
+  const common = `common-${h.coordinate}`
+  if (h.kind === `request`)
+    return {
+      left: [{ name: `left-${h.coordinate}` }],
+      right: [{ name: `right-${h.coordinate}` }],
+    }
+  if (
+    h.kind === `settlement` &&
+    h.timing === `before-application` &&
+    h.baseline === `confirmed-empty`
+  )
+    return {
+      left: [{ name: `left-${h.coordinate}` }],
+      right: [{ name: `right-${h.coordinate}` }],
+    }
+  if (h.kind === `ownership` && h.parameterization) {
+    const left = { name: common, parameters: { partition: h.coordinate } }
+    const right = {
+      name: common,
+      parameters: {
+        partition: h.coordinate + (h.parameterization === `distinct` ? 1 : 0),
+      },
+    }
+    return { left: [left], right: [right] }
+  }
+  if (h.kind === `mapper`) {
+    if (h.operation === `empty`) return { left: [{ name: common }], right: [] }
+    if (h.operation === `priority`)
+      return {
+        left: [{ name: common, priority: (h.coordinate % 3) + 1 }],
+        right: [],
+      }
+    return {
+      left: [{ name: `left-${h.coordinate}` }],
+      right: [{ name: `right-${h.coordinate}` }],
+    }
+  }
+  if (h.kind !== `ownership` || h.overlap === `same`)
+    return { left: [{ name: common }], right: [{ name: common }] }
+  const left = { name: `left-${h.coordinate}` }
+  const right = { name: `right-${h.coordinate}` }
+  return h.overlap === `partial`
+    ? { left: [{ name: common }, left], right: [{ name: common }, right] }
+    : { left: [left], right: [right] }
+}
+export function ownerStreams(
+  h: OnDemandStreamsHistory,
+): Record<StreamOwner, Array<string>> {
+  const streams = ownerSubscriptions(h)
+  return {
+    left: streams.left.map(authoredStreamIdentity),
+    right: streams.right.map(authoredStreamIdentity),
+  }
+}
+export function failingStreams(h: OnDemandStreamsHistory): Array<string> {
+  if (h.kind === `admission` || h.kind === `mapper` || h.kind === `request`)
+    return []
+  const streams = ownerStreams(h)
+  return h.kind === `settlement`
+    ? streams.left
+    : h.failing === `all`
+      ? [...new Set([...streams.left, ...streams.right])]
+      : streams[h.failing]
+}
+
+export type QueryOutcome =
+  `pending` | `fulfilled` | `rejected` | `retired` | `not-started`
+export type StreamRejection =
+  | { kind: `stream`; stream: string; messages: Array<string> }
+  | { kind: `mapper`; message: string }
+  | { kind: `other` }
+export type StreamCut = {
+  name: string
+  outcomes: Partial<Record<StreamOwner, QueryOutcome>>
+  problems: Array<string>
+  rows: Partial<Record<StreamOwner, Array<string>>>
+  rowValues?: Partial<Record<StreamOwner, Array<number>>>
+  queryStatuses?: Partial<Record<StreamOwner, string>>
+  providerState?: string
+  sourceStatus?: string
+  sourceError?: boolean
+  activeStreams?: Array<string>
+  forwardedSubscriptions?: Array<AuthoredStream>
+  rejections?: Partial<Record<StreamOwner, StreamRejection>>
+  request?: {
+    admitted: boolean
+    aborted: boolean
+    subscriptionStatus: string
+    mapperCalls: number
+    acquisitions: number
+    rejection?: string
+  }
+}
+export type StreamExpectation = {
+  name: string
+  outcomes: Partial<Record<StreamOwner, ReadonlyArray<QueryOutcome>>>
+  problems: Array<string>
+  /** A rejected initial query need not also report its failure on the source. */
+  rejectionMayOwnError?: boolean
+  rows?: Partial<Record<StreamOwner, Array<string>>>
+  rowValues?: Partial<Record<StreamOwner, Array<number>>>
+  queryStatuses?: Partial<Record<StreamOwner, string>>
+  providerState?: string
+  sourceStatus?: string
+  sourceError?: boolean
+  activeStreams?: Array<string>
+  forwardedSubscriptions?: Array<AuthoredStream>
+  rejections?: Partial<Record<StreamOwner, Array<StreamRejection>>>
+  request?: Partial<NonNullable<StreamCut[`request`]>>
+}
+
+// Health follows incidence, independently of how the adapter represents its
+// resources or deduplicates Error values. Multiple failures for one stream are
+// permitted. The comparison preserves their existence and rejects stale
+// failures after their final claim or recovery ends. One SDK lease may report
+// only its first failed stream, so health need not enumerate every failure.
+function expectedStreamCuts(
+  h: OnDemandStreamsHistory,
+): Array<StreamExpectation> {
+  const ids = streamRows(h)
+    .map((row) => row.id)
+    .sort()
+  if (h.kind === `request`) {
+    const streams = ownerStreams(h)
+    const before = h.abort === `before-mapping`
+    const canceled = h.abort !== `none`
+    const request = {
+      ...(h.abort === `during-mapping` ? {} : { admitted: !before }),
+      aborted: canceled,
+      mapperCalls: before ? 0 : 1,
+      ...(before ? { acquisitions: 0 } : {}),
+    }
+    // Acquisition counts remain diagnostics. The law permits an implementation
+    // to allocate and immediately release a canceled request's resource; it
+    // forbids retaining that resource or later fulfilling the canceled load.
+    // This is request ownership, not a copy of the adapter's acquisition map:
+    // an already canceled request may own no stream; a live request owns right.
+    const activeStreams = canceled
+      ? streams.left
+      : [...streams.left, ...streams.right]
+    const peer = {
+      queryStatuses: { left: `ready` },
+      sourceStatus: `ready`,
+      sourceError: false,
+      problems: [],
+      rows: { left: ids },
+    }
+    return [
+      {
+        ...peer,
+        name: `loaded`,
+        outcomes: { left: [`fulfilled`] },
+        activeStreams: streams.left,
+      },
+      {
+        ...peer,
+        name: `request-mapped`,
+        outcomes: {
+          left: [`fulfilled`],
+          right: before
+            ? [`not-started`]
+            : canceled
+              ? [`pending`, `rejected`]
+              : [`pending`],
+        },
+        activeStreams,
+        request,
+      },
+      {
+        ...peer,
+        name: `request-checkpoint`,
+        outcomes: {
+          left: [`fulfilled`],
+          right: before
+            ? [`not-started`]
+            : canceled
+              ? [`rejected`]
+              : [`fulfilled`],
+        },
+        rowValues: { left: streamRows(h).map((row) => row.value + 100) },
+        activeStreams,
+        request: { ...request, subscriptionStatus: `ready` },
+      },
+    ]
+  }
+  const failed = [...new Set(failingStreams(h))].sort()
+  // The controlled provider authors these error messages at version one.
+  // The public StreamError contract preserves their category and coordinates;
+  // it does not require a particular Error object identity or Error.name.
+  const rejections: Partial<Record<StreamOwner, Array<StreamRejection>>> = {
+    left: failed.map((stream) => ({
+      kind: `stream`,
+      stream,
+      messages: [`rejected-1-${stream}`],
+    })),
+  }
+  if (h.kind === `mapper`) {
+    const streams = ownerStreams(h)
+    const loaded: StreamExpectation = {
+      name: `loaded`,
+      outcomes: { left: [`fulfilled`] },
+      queryStatuses: { left: `ready` },
+      sourceStatus: `ready`,
+      sourceError: false,
+      problems: [],
+      rows: { left: ids },
+      activeStreams: streams.left,
+    }
+    if (h.operation === `priority`)
+      return [{ ...loaded, forwardedSubscriptions: ownerSubscriptions(h).left }]
+    if (h.operation === `empty`)
+      return [
+        loaded,
+        {
+          name: `empty-receipt-held`,
+          queryStatuses: { left: `ready` },
+          sourceStatus: `ready`,
+          sourceError: false,
+          outcomes: { left: [`fulfilled`], right: [`pending`] },
+          problems: [],
+          activeStreams: streams.left,
+        },
+        {
+          name: `empty-cached`,
+          queryStatuses: { left: `ready`, right: `ready` },
+          sourceStatus: `ready`,
+          sourceError: false,
+          outcomes: { left: [`fulfilled`], right: [`fulfilled`] },
+          problems: [],
+          rows: { left: ids, right: ids },
+          rowValues: {
+            left: streamRows(h).map((row) => row.value + 100),
+            right: streamRows(h).map((row) => row.value + 100),
+          },
+          activeStreams: streams.left,
+        },
+        {
+          name: `donor-retired`,
+          queryStatuses: { right: `ready` },
+          sourceStatus: `ready`,
+          sourceError: false,
+          outcomes: { left: [`retired`], right: [`fulfilled`] },
+          problems: [],
+          rows: { right: ids },
+          rowValues: { right: streamRows(h).map((row) => row.value + 100) },
+          activeStreams: [],
+        },
+      ]
+    return [
+      loaded,
+      {
+        name: `mapper-rejected`,
+        queryStatuses: { left: `ready` },
+        sourceStatus: `ready`,
+        sourceError: false,
+        outcomes: { left: [`fulfilled`], right: [`rejected`] },
+        rejections: {
+          right: [{ kind: `mapper`, message: `mapping-${h.coordinate}` }],
+        },
+        problems: [],
+        rows: { left: ids },
+        activeStreams: streams.left,
+      },
+      {
+        name: `mapper-retried`,
+        queryStatuses: { left: `ready`, right: `ready` },
+        sourceStatus: `ready`,
+        sourceError: false,
+        outcomes: { left: [`fulfilled`], right: [`fulfilled`] },
+        problems: [],
+        rows: { left: ids, right: ids },
+        activeStreams: [...streams.left, ...streams.right],
+      },
+      {
+        name: `retry-retired`,
+        queryStatuses: { left: `ready` },
+        sourceStatus: `ready`,
+        sourceError: false,
+        outcomes: { left: [`fulfilled`], right: [`retired`] },
+        problems: [],
+        rows: { left: ids },
+        activeStreams: streams.left,
+      },
+    ]
+  }
+  if (h.kind === `admission`)
+    return [
+      {
+        name: `source-cleaned-up`,
+        outcomes: {
+          left: [h.cleanup === `during-mapping` ? `rejected` : `fulfilled`],
+        },
+        problems: [],
+        providerState: `idle`,
+        sourceStatus: `cleaned-up`,
+        activeStreams: [],
+      },
+    ]
+  if (h.kind === `settlement`) {
+    if (h.timing === `before-sync`)
+      return [
+        {
+          name: `failed-initial-load`,
+          outcomes: { left: [`rejected`] },
+          problems: [],
+          rejectionMayOwnError: true,
+          rejections,
+        },
+      ]
+    const final: StreamExpectation = {
+      name: `failed-visible-load`,
+      outcomes: {
+        left:
+          h.timing === `after-application`
+            ? [`fulfilled`]
+            : [`fulfilled`, `rejected`],
+      },
+      problems: failed,
+      rejectionMayOwnError: true,
+      rejections,
+      rows: { left: ids },
+    }
+    const prelude: Array<StreamExpectation> =
+      h.timing === `before-application` && h.baseline === `confirmed-empty`
+        ? [
+            {
+              name: `empty-baseline-confirmed`,
+              outcomes: { right: [`fulfilled`] },
+              rows: { right: [] },
+              problems: [],
+              sourceStatus: `ready`,
+              sourceError: false,
+              activeStreams: ownerStreams(h).right,
+            },
+            {
+              name: `empty-baseline-retired`,
+              outcomes: { right: [`retired`] },
+              rows: { right: [] },
+              problems: [],
+              sourceStatus: `ready`,
+              sourceError: false,
+              activeStreams: [],
+            },
+          ]
+        : []
+    return h.timing === `before-application`
+      ? [
+          ...prelude,
+          {
+            name: `receipt-held`,
+            outcomes: { left: [`pending`] },
+            problems: [],
+          },
+          final,
+        ]
+      : [final]
+  }
+  const live = h.retire === `left` ? `right` : `left`
+  const streams = ownerStreams(h)
+  const retained = failed.filter((stream) => streams[live].includes(stream))
+  const cuts: Array<StreamExpectation> = [
+    {
+      name: `loaded`,
+      outcomes: { left: [`fulfilled`], right: [`fulfilled`] },
+      problems: [],
+      rows: { left: ids, right: ids },
+      forwardedSubscriptions: h.parameterization
+        ? [
+            ...new Map(
+              [
+                ...ownerSubscriptions(h).left,
+                ...ownerSubscriptions(h).right,
+              ].map((stream) => [authoredStreamIdentity(stream), stream]),
+            ).values(),
+          ]
+        : undefined,
+    },
+    {
+      name: `failed`,
+      outcomes: { left: [`fulfilled`], right: [`fulfilled`] },
+      problems: failed,
+    },
+  ]
+  if (h.changeError)
+    cuts.push({
+      name: `changed-error`,
+      outcomes: { left: [`fulfilled`], right: [`fulfilled`] },
+      problems: failed,
+    })
+  cuts.push({
+    name: `owner-retired`,
+    outcomes: { [h.retire]: [`retired`], [live]: [`fulfilled`] },
+    problems: retained,
+    rows: { [live]: ids },
+    activeStreams: streams[live],
+  })
+  if (h.recover)
+    cuts.push({
+      name: `recovered`,
+      outcomes: { [live]: [`fulfilled`] },
+      problems: [],
+      rows: { [live]: ids },
+    })
+  return cuts
+}
+
+// Ending the final demand ends provider work. This cut precedes the fixture's
+// rescue of leaked SDK leases, so rescue cannot make resource leaks pass.
+export function onDemandStreamsModel(
+  h: OnDemandStreamsHistory,
+): Array<StreamExpectation> {
+  const cuts = expectedStreamCuts(h)
+  return h.kind === `admission`
+    ? cuts
+    : [
+        ...cuts,
+        {
+          name: `source-cleaned-up`,
+          outcomes: {},
+          problems: [],
+          sourceStatus: `cleaned-up`,
+          providerState: `idle`,
+          activeStreams: [],
+        },
+      ]
+}
+
+export const onDemandStreamsStates = [
+  `shared-error-retained`,
+  `independent-error-retired`,
+  `partial-overlap-retired`,
+  `stream-error-before-sync`,
+  `stream-error-before-application`,
+  `confirmed-empty-baseline`,
+  `stream-error-after-application`,
+  `error-identity-changed`,
+  `stream-recovered`,
+  `mapping-cleanup`,
+  `loaded-cleanup`,
+  `parameter-equal-retained`,
+  `parameter-distinct-retired`,
+  `priority-requested`,
+  `empty-mapping-applied`,
+  `throwing-mapper-retried`,
+  `request-pre-aborted`,
+  `request-mapper-aborted`,
+  `request-post-mapper-aborted`,
+  `request-healthy`,
+] as const
+export type OnDemandStreamsState = (typeof onDemandStreamsStates)[number]
+
+/** Random coordinates remain free while each construction supplies its premise. */
+export function constructOnDemandStreamsHistory(
+  h: OnDemandStreamsHistory,
+  state: OnDemandStreamsState,
+): OnDemandStreamsHistory {
+  const coordinates = {
+    coordinate: h.coordinate,
+    rowCount: h.rowCount,
+    value: h.value,
+  }
+  if (state.startsWith(`request-`))
+    return {
+      ...coordinates,
+      kind: `request`,
+      abort:
+        state === `request-pre-aborted`
+          ? `before-mapping`
+          : state === `request-mapper-aborted`
+            ? `during-mapping`
+            : state === `request-post-mapper-aborted`
+              ? `after-mapping`
+              : `none`,
+    }
+  if (
+    state === `priority-requested` ||
+    state === `empty-mapping-applied` ||
+    state === `throwing-mapper-retried`
+  )
+    return {
+      ...coordinates,
+      kind: `mapper`,
+      operation:
+        state === `priority-requested`
+          ? `priority`
+          : state === `empty-mapping-applied`
+            ? `empty`
+            : `throw`,
+    }
+  if (state === `mapping-cleanup` || state === `loaded-cleanup`)
+    return {
+      ...coordinates,
+      kind: `admission`,
+      cleanup:
+        state === `mapping-cleanup` ? `during-mapping` : `after-application`,
+    }
+  if (
+    state === `stream-error-before-application` ||
+    state === `confirmed-empty-baseline`
+  )
+    return {
+      ...coordinates,
+      kind: `settlement`,
+      timing: `before-application`,
+      baseline: `confirmed-empty`,
+    }
+  if (
+    state === `stream-error-before-sync` ||
+    state === `stream-error-after-application`
+  )
+    return {
+      ...coordinates,
+      kind: `settlement`,
+      timing:
+        state === `stream-error-before-sync`
+          ? `before-sync`
+          : `after-application`,
+    }
+  const base = {
+    ...coordinates,
+    kind: `ownership` as const,
+    overlap: `same` as const,
+    failing: `all` as const,
+    retire:
+      h.kind === `ownership`
+        ? h.retire
+        : h.coordinate % 2
+          ? (`left` as const)
+          : (`right` as const),
+    changeError: false,
+    recover: false,
+  }
+  if (state === `parameter-equal-retained`)
+    return { ...base, parameterization: `equal` }
+  if (state === `parameter-distinct-retired`)
+    return {
+      ...base,
+      overlap: `disjoint`,
+      parameterization: `distinct`,
+      failing: base.retire,
+    }
+  if (state === `independent-error-retired`)
+    return { ...base, overlap: `disjoint`, failing: base.retire }
+  if (state === `partial-overlap-retired`)
+    return { ...base, overlap: `partial` }
+  if (state === `error-identity-changed`)
+    return { ...base, overlap: `disjoint`, changeError: true }
+  if (state === `stream-recovered`)
+    return { ...base, overlap: `disjoint`, recover: true, changeError: true }
+  return base
+}
+
+/** Same judgment for generated histories, fixed regressions and receivers. */
+export function onDemandStreamsViolations(
+  expected: ReadonlyArray<StreamExpectation>,
+  cuts: ReadonlyArray<StreamCut>,
+): Array<string> {
+  const violations: Array<string> = []
+  for (const wanted of expected) {
+    const cut = cuts.find((entry) => entry.name === wanted.name)
+    if (!cut) {
+      violations.push(`${wanted.name}: missing observation`)
+      continue
+    }
+    for (const field of [
+      `providerState`,
+      `sourceStatus`,
+      `sourceError`,
+    ] as const)
+      if (wanted[field] !== undefined && cut[field] !== wanted[field])
+        violations.push(
+          `${cut.name}: ${field} ${cut[field]} differs from ${wanted[field]}`,
+        )
+    if (
+      wanted.activeStreams &&
+      (cut.activeStreams === undefined ||
+        JSON.stringify([...new Set(cut.activeStreams)].sort()) !==
+          JSON.stringify([...new Set(wanted.activeStreams)].sort()))
+    )
+      violations.push(
+        `${cut.name}: retained SDK stream inventory ${JSON.stringify(cut.activeStreams)} differs from ${JSON.stringify(wanted.activeStreams)}`,
+      )
+    if (
+      wanted.forwardedSubscriptions &&
+      JSON.stringify(
+        cut.forwardedSubscriptions
+          ?.map((stream) => JSON.stringify(stream))
+          .sort(),
+      ) !==
+        JSON.stringify(
+          wanted.forwardedSubscriptions
+            .map((stream) => JSON.stringify(stream))
+            .sort(),
+        )
+    )
+      violations.push(
+        `${cut.name}: forwarded stream name, parameters or priority differ`,
+      )
+    for (const field of [
+      `admitted`,
+      `aborted`,
+      `subscriptionStatus`,
+      `mapperCalls`,
+      `acquisitions`,
+    ] as const)
+      if (
+        wanted.request?.[field] !== undefined &&
+        cut.request?.[field] !== wanted.request[field]
+      )
+        violations.push(
+          `${cut.name}: request ${field} ${cut.request?.[field]} differs from ${wanted.request[field]}`,
+        )
+    for (const owner of [`left`, `right`] as const) {
+      const status = wanted.queryStatuses?.[owner]
+      if (status !== undefined && cut.queryStatuses?.[owner] !== status)
+        violations.push(
+          `${cut.name}: ${owner} current query status ${cut.queryStatuses?.[owner]} differs from ${status}`,
+        )
+      const outcomes = wanted.outcomes[owner]
+      if (outcomes && !outcomes.includes(cut.outcomes[owner]!))
+        violations.push(
+          `${cut.name}: ${owner} outcome ${cut.outcomes[owner]} outside ${outcomes.join(`/`)}`,
+        )
+      const expectedRejections = wanted.rejections?.[owner]
+      if (
+        expectedRejections &&
+        cut.outcomes[owner] === `rejected` &&
+        !expectedRejections.some(
+          (error) =>
+            JSON.stringify(error) === JSON.stringify(cut.rejections?.[owner]),
+        )
+      )
+        violations.push(
+          `${cut.name}: ${owner} rejection lost its public category, identity coordinates or messages`,
+        )
+      const values = wanted.rowValues?.[owner]
+      if (
+        values &&
+        cut.outcomes[owner] === `fulfilled` &&
+        JSON.stringify(cut.rowValues?.[owner]) !== JSON.stringify(values)
+      )
+        violations.push(
+          `${cut.name}: ${owner} cached row values differ from applied donor result`,
+        )
+      const ids = wanted.rows?.[owner]
+      if (
+        ids &&
+        cut.outcomes[owner] === `fulfilled` &&
+        JSON.stringify(cut.rows[owner]) !== JSON.stringify(ids)
+      )
+        violations.push(`${cut.name}: ${owner} visible rows differ`)
+    }
+    const problems = [...new Set(cut.problems)].sort()
+    const rejected =
+      wanted.rejectionMayOwnError && cut.outcomes.left === `rejected`
+    if (
+      !rejected &&
+      (problems.some((stream) => !wanted.problems.includes(stream)) ||
+        (problems.length === 0) !== (wanted.problems.length === 0))
+    )
+      violations.push(
+        `${cut.name}: failed stream coverage ${JSON.stringify(problems)} differs from ${JSON.stringify(wanted.problems)}`,
+      )
+  }
+  if (cuts.length !== expected.length)
+    violations.push(
+      `unexpected observation count ${cuts.length}, expected ${expected.length}`,
+    )
+  return violations
+}

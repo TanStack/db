@@ -21,8 +21,10 @@
     "build": "vite build",
     "lint": "eslint . --fix",
     "test": "vitest --run",
-    "test:oracles": "vitest run tests/reference-adapter-oracle.property.test.ts",
-    "test:neon": "vitest run --config vitest.neon.config.ts"
+    "test:oracles": "vitest run tests/reference-adapter-oracle.property.test.ts tests/persisted-demand-receiving-oracle.test.ts tests/persisted-demand-peer-oracle.test.ts",
+    "test:neon": "vitest run --config vitest.neon.config.ts",
+    "test:oracles:neon": "vitest run --config vitest.neon.config.ts",
+    "test:oracles:neon-browser": "vitest run --config vitest.neon-browser.config.ts"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",

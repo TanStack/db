@@ -1,0 +1,54 @@
+{
+  "name": "@tanstack/powersync-direct-collection",
+  "version": "0.0.0",
+  "description": "Sync from PowerSync directly to TanStack DB collections",
+  "author": "POWERSYNC",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TanStack/db.git",
+    "directory": "packages/powersync-direct-collection"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "powersync",
+    "realtime",
+    "local-first",
+    "sync-engine",
+    "sync",
+    "typescript"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "lint": "eslint . --fix",
+    "test": "vitest --run",
+    "test:oracles": "vitest run --coverage.enabled=false tests/cursor-persisted-demand-oracle.property.test.ts tests/decode-refusal-oracle.property.test.ts tests/eager-live-source-conformance-oracle.property.test.ts tests/eager-reload-conformance-oracle.property.test.ts tests/initial-receipt-oracle.property.test.ts tests/mutation-confirmation-cancellation-oracle.property.test.ts tests/mutation-confirmation-oracle.property.test.ts tests/on-demand-streams-conformance-oracle.property.test.ts tests/on-demand-streams-persisted-conformance-oracle.property.test.ts tests/persisted-demand-conformance-oracle.test.ts tests/persisted-initial-receipt-oracle.property.test.ts tests/persisted-startup-conformance-oracle.property.test.ts tests/shared-client-conformance-oracle.property.test.ts"
+  },
+  "type": "module",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "src"
+  ],
+  "dependencies": {
+    "@powersync/standalone-client": "^0.1.1",
+    "@tanstack/db": "workspace:*"
+  }
+}

@@ -1,0 +1,206 @@
+{
+  "stage": "v3 exact frozen pre-production receiving gates; canonical index1ec1/subsets20f8 unchanged",
+  "at": "2026-11-18T02:28:09.776196+00:00",
+  "hosts": {
+    "node": {
+      "log": ".review-2377/direct-decode-cause-cache-v3-original-node.log",
+      "sha256": "afbcc9f8d82412226803d4b3dacc5f104618afa8da6e3f36feec415e20291d96",
+      "result": "66failed/268passed334total",
+      "semanticFailures": 42,
+      "uncreditedInvalidCleanCalibrations": 24,
+      "determinismFailures": 0,
+      "failingCells": {
+        "eager:cold-initial-throw-null-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cold-initial-throw-throwing-conversion": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cold-initial-throw-throwing-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cold-live-throw-null-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cold-live-throw-throwing-conversion": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cold-live-throw-throwing-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cached-initial-throw-null-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cached-initial-throw-throwing-conversion": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cached-initial-throw-throwing-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cold-initial-throw-null-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cold-initial-throw-throwing-conversion": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cold-initial-throw-throwing-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cold-live-throw-null-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cold-live-throw-throwing-conversion": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cold-live-throw-throwing-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cached-initial-changed-id": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cached-initial-throw-error": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cached-initial-throw-null-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cached-initial-throw-throwing-conversion": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cached-initial-throw-throwing-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "unconstrained generated": [
+          "fixed seed 2377",
+          "random seed"
+        ]
+      },
+      "replays": [
+        "Replay: TANSTACK_DB_ORACLE_SEED=2377 TANSTACK_DB_ORACLE_PATH=0:2:2:2 TANSTACK_DB_ORACLE_PROPERTY='adapter-conformance.decode-refusal.powersync-direct' TANSTACK_DB_ORACLE_UNIT='random seed: generated eager:cold-initial-throw-null-prototype' vitest run -t '^adapter-conformance\\.decode-refusal\\.powersync-direct(?: | > )random seed: generated eager:cold-initial-throw-null-prototype$'",
+        "Replay: TANSTACK_DB_ORACLE_SEED=2377 TANSTACK_DB_ORACLE_PATH=0:3:3:3:3:3 TANSTACK_DB_ORACLE_PROPERTY='adapter-conformance.decode-refusal.powersync-direct' TANSTACK_DB_ORACLE_UNIT='random seed: generated on-demand:cached-initial-throw-error' vitest run -t '^adapter-conformance\\.decode-refusal\\.powersync-direct(?: | > )random seed: generated on-demand:cached-initial-throw-error$'",
+        "Replay: TANSTACK_DB_ORACLE_SEED=1007465153 TANSTACK_DB_ORACLE_PATH=0:2:2:2:2:2 TANSTACK_DB_ORACLE_PROPERTY='adapter-conformance.decode-refusal.powersync-direct' TANSTACK_DB_ORACLE_UNIT='random seed: generated eager:cold-initial-throw-null-prototype' vitest run -t '^adapter-conformance\\.decode-refusal\\.powersync-direct(?: | > )random seed: generated eager:cold-initial-throw-null-prototype$'",
+        "Replay: TANSTACK_DB_ORACLE_SEED=1007465153 TANSTACK_DB_ORACLE_PATH=0:3:3:3:3 TANSTACK_DB_ORACLE_PROPERTY='adapter-conformance.decode-refusal.powersync-direct' TANSTACK_DB_ORACLE_UNIT='random seed: generated on-demand:cached-initial-throw-error' vitest run -t '^adapter-conformance\\.decode-refusal\\.powersync-direct(?: | > )random seed: generated on-demand:cached-initial-throw-error$'"
+      ]
+    },
+    "chromium": {
+      "log": ".review-2377/direct-decode-cause-cache-v3-original-browser-renewed.log",
+      "sha256": "899f333732654e29747708b3e42b82ca74dee454254273a30d8383301d3aa68a",
+      "result": "66failed/261passed327total",
+      "semanticFailures": 42,
+      "uncreditedInvalidCleanCalibrations": 24,
+      "determinismFailures": 0,
+      "failingCells": {
+        "eager:cold-initial-throw-null-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cold-initial-throw-throwing-conversion": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cold-initial-throw-throwing-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cold-live-throw-null-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cold-live-throw-throwing-conversion": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cold-live-throw-throwing-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cached-initial-throw-null-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cached-initial-throw-throwing-conversion": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "eager:cached-initial-throw-throwing-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cold-initial-throw-null-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cold-initial-throw-throwing-conversion": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cold-initial-throw-throwing-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cold-live-throw-null-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cold-live-throw-throwing-conversion": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cold-live-throw-throwing-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cached-initial-changed-id": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cached-initial-throw-error": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cached-initial-throw-null-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cached-initial-throw-throwing-conversion": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "on-demand:cached-initial-throw-throwing-prototype": [
+          "fixed seed 2377",
+          "random seed"
+        ],
+        "unconstrained generated": [
+          "fixed seed 2377",
+          "random seed"
+        ]
+      },
+      "replays": [
+        "Replay: TANSTACK_DB_ORACLE_SEED=2377 TANSTACK_DB_ORACLE_PATH=0:2:2:2 TANSTACK_DB_ORACLE_PROPERTY='adapter-conformance.decode-refusal.powersync-direct.chromium' TANSTACK_DB_ORACLE_UNIT='random seed: generated eager:cold-initial-throw-null-prototype' vitest run -t '^adapter-conformance\\.decode-refusal\\.powersync-direct\\.chromium(?: | > )random seed: generated eager:cold-initial-throw-null-prototype$'",
+        "Replay: TANSTACK_DB_ORACLE_SEED=2377 TANSTACK_DB_ORACLE_PATH=0:3:3:3:3:3 TANSTACK_DB_ORACLE_PROPERTY='adapter-conformance.decode-refusal.powersync-direct.chromium' TANSTACK_DB_ORACLE_UNIT='random seed: generated on-demand:cached-initial-throw-error' vitest run -t '^adapter-conformance\\.decode-refusal\\.powersync-direct\\.chromium(?: | > )random seed: generated on-demand:cached-initial-throw-error$'",
+        "Replay: TANSTACK_DB_ORACLE_SEED=1569873453 TANSTACK_DB_ORACLE_PATH=0:2:2:2:2 TANSTACK_DB_ORACLE_PROPERTY='adapter-conformance.decode-refusal.powersync-direct.chromium' TANSTACK_DB_ORACLE_UNIT='random seed: generated eager:cold-initial-throw-null-prototype' vitest run -t '^adapter-conformance\\.decode-refusal\\.powersync-direct\\.chromium(?: | > )random seed: generated eager:cold-initial-throw-null-prototype$'",
+        "Replay: TANSTACK_DB_ORACLE_SEED=1569873453 TANSTACK_DB_ORACLE_PATH=0:3:3:3:3:3 TANSTACK_DB_ORACLE_PROPERTY='adapter-conformance.decode-refusal.powersync-direct.chromium' TANSTACK_DB_ORACLE_UNIT='random seed: generated on-demand:cached-initial-throw-error' vitest run -t '^adapter-conformance\\.decode-refusal\\.powersync-direct\\.chromium(?: | > )random seed: generated on-demand:cached-initial-throw-error$'"
+      ]
+    }
+  }
+}

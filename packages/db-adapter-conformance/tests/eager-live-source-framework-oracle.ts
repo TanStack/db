@@ -3,6 +3,7 @@
  * original checkpoint. This bridge transports its law and checkpoint to the
  * framework. Setup errors escape; cleanup diagnostics remain secondary.
  */
+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'
 import { ConformanceViolation, checkEagerLiveSourceHistory } from '../src'
 import type {
   EagerLiveSourceDriver,
@@ -27,10 +28,11 @@ export type EagerHistoryResult = {
 export async function observeEagerLiveSourceHistory(
   driver: EagerLiveSourceDriver,
   history: EagerLiveSourceHistory,
-  corruptValues = false,
+  corruption?: `values` | `delivery-errors`,
+  additionalStates: ReadonlyArray<EagerLiveSourceReachState> = [],
 ): Promise<EagerHistoryResult> {
   const reached: Array<EagerLiveSourceReachState> = []
-  const actualDriver = corruptValues
+  const actualDriver = corruption
     ? {
         ...driver,
         create: () => {
@@ -44,11 +46,29 @@ export async function observeEagerLiveSourceHistory(
                 return collection.status
               },
               get health() {
-                return collection.health
+                const health = collection.health
+                const problem = health.failureReason
+                if (corruption !== `delivery-errors` || !problem) return health
+                // A plausible wrong receiver retains only its first error.
+                // Retry policy permits that for later attempts of one outage,
+                // but the shared frame owes every distinct delivery error.
+                const first = problem.errors[0]!
+                return {
+                  ...health,
+                  failureReason: {
+                    ...problem,
+                    cause: first.cause,
+                    message: first.message,
+                    at: first.at,
+                    errors: [first],
+                  },
+                }
               },
               *values() {
                 for (const row of collection.values())
-                  yield { ...row, value: { incorrect: true } }
+                  yield corruption === `values`
+                    ? { ...row, value: { incorrect: true } }
+                    : row
               },
             },
           }
@@ -58,11 +78,25 @@ export async function observeEagerLiveSourceHistory(
   try {
     const result = await checkEagerLiveSourceHistory(actualDriver, history, {
       reach: (state) => reached.push(state),
+      additionalStates,
     })
     return { reached, result }
   } catch (error) {
-    const primary = error instanceof AggregateError ? error.cause : error
-    if (!(primary instanceof ConformanceViolation)) throw error
+    let primary: ConformanceViolation
+    let cleanup: Array<string>
+    try {
+      const candidate = error instanceof AggregateError ? error.cause : error
+      if (!(candidate instanceof ConformanceViolation)) throw error
+      primary = candidate
+      cleanup =
+        error instanceof AggregateError
+          ? [describeOracleCleanupError(error)]
+          : []
+    } catch {
+      // Unknown throws remain the primary value even if inspecting their
+      // prototype or AggregateError details itself throws.
+      throw error
+    }
     return {
       reached,
       failure: {
@@ -70,8 +104,7 @@ export async function observeEagerLiveSourceHistory(
         step: primary.step,
         expected: primary.expected,
         actual: primary.actual,
-        cleanup:
-          error instanceof AggregateError ? error.errors.map(String) : [],
+        cleanup,
       },
     }
   }

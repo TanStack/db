@@ -1,0 +1,21 @@
+{
+  "productionHead": "92a1493e0f45dbfd1fc3a51460ccb9228d8f787d",
+  "recordedAt": "2026-11-17T16:00:47.508654+00:00",
+  "stage": "Frozen receiving-checkpoint amendment reviewed and exercised against original production before reapplying the saved source repair. Assembled from the retained pre-repair manifest; this does not replace the original test gate snapshot.",
+  "files": {
+    "packages/db-adapter-conformance/tests/on-demand-streams-oracle.ts": "9d01642d402de72153166ad841d6b475e3edb1024f87039cf22f83cd46192123",
+    "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts": "214aa23c736c4b994741c92871b3b71802989aea68bda14358a20952261411e9",
+    "packages/db-adapter-conformance/tests/on-demand-streams-oracle-suite.ts": "cb23d4692c42010f2fa30bf7a42a9a2fd6442d94beffcf451f9950aaf049b6ee",
+    "packages/powersync-direct-collection/tests/on-demand-service.ts": "c1a75d9d9fc605ff5f79e628428b24665b54958690a3d102b88f99cf092f6d20",
+    "packages/powersync-direct-collection/tests/on-demand-streams-driver.ts": "9bcae7b5e5d3784c0809f928102d454b6297dac6816c3f4364e3aceadb5423cc",
+    "packages/powersync-direct-collection/tests/on-demand-streams-persisted-driver.ts": "d3f04b5c8cf3009e9efc70c3da7136fe89d89a473ce01572a7b17e0064e84082",
+    "packages/powersync-direct-collection/tests/on-demand-streams-conformance-oracle.property.test.ts": "f612397701661be4eefe740fbfcfb8d975869ebfe742f7ff0574b62b03f3746b",
+    "packages/powersync-direct-collection/tests/on-demand-streams-persisted-conformance-oracle.property.test.ts": "c90017d3f4b4b61b33290f15c542dd600e7516a99e680beeac7c80d3d94c849d",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-subsets-oracle.browser.test.ts": "7800e67373cff0aecb4986911b810251d93cbd8f2c46e10cafda19715faf8201",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-persisted-subsets-oracle.browser.test.ts": "a697d01bc4c2146f35ff7466176f08f6944dfa40a21eac794d1bc54a99f1731f",
+    "packages/powersync-direct-collection/src/index.ts": "4cafcd3e53977c30511a85e1482be2e0bda2ad75ab0788d1d49e71a8db78761f",
+    "packages/powersync-direct-collection/src/subsets.ts": "73a8f7e6112f4d3192ce309c9f5bce8bb0f0eedb371ad4b755130dec13437495",
+    "packages/db-adapter-conformance/tests/health-report-handoff.ts": "9ee1acac3abe1948c4c9683ed1002b33f083b24cb681b409931228bcee228fa1",
+    "packages/db-adapter-conformance/tests/health-report-handoff.test.ts": "6fad1e971d06085c8056c2ed2080f57ee62afc94619765747210ca9b681cd093"
+  }
+}

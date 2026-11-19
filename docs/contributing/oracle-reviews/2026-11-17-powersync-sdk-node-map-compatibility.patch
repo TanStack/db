@@ -1,0 +1,144 @@
+diff --git a/packages/shared-internals/src/standalone/client_state.ts b/packages/shared-internals/src/standalone/client_state.ts
+index 8bdfd0f..305267b 100644
+--- a/packages/shared-internals/src/standalone/client_state.ts
++++ b/packages/shared-internals/src/standalone/client_state.ts
+@@ -1,3 +1,4 @@
++import { getOrCreate } from '../utils/map.js';
+ import { DownloadChanges, DownloadEvent, RestartSyncError } from './api.js';
+ import { Bucket, OplogEntry, OplogState, RowKey, RowState } from './oplog.js';
+ import { BucketRequest, StreamingSyncRequest, StreamSubscriptionRequest } from './requests.js';
+@@ -118,7 +119,7 @@ export class DownloadClientState {
+     for (const [bucket, entry] of checkpoint.buckets.entries()) {
+       bucketsToDelete.delete(bucket);
+ 
+-      const resolvedBucket = buckets.getOrInsertComputed(bucket, () => new Bucket(bucket));
++      const resolvedBucket = getOrCreate(buckets, bucket, () => new Bucket(bucket));
+       resolvedBucket.priority = entry.priority ?? 3;
+     }
+ 
+@@ -193,7 +194,7 @@ export class DownloadClientState {
+       const latestEntry = row?.resolve(targetPriority);
+       if (row) handledRows.push(row);
+ 
+-      const tableEntries = changes.getOrInsertComputed(key.table, () => new Map());
++      const tableEntries = getOrCreate(changes, key.table, () => new Map());
+       tableEntries.set(key.rowid, latestEntry?.data?.parsed() ?? null);
+     };
+ 
+diff --git a/packages/shared-internals/src/standalone/oplog.ts b/packages/shared-internals/src/standalone/oplog.ts
+index 24ae0cf..cae9899 100644
+--- a/packages/shared-internals/src/standalone/oplog.ts
++++ b/packages/shared-internals/src/standalone/oplog.ts
+@@ -1,3 +1,4 @@
++import { getOrCreate } from '../utils/map.js';
+ import { RestartSyncError } from './api.js';
+ import type { OplogEntryJSON } from './sync_protocol.js';
+ 
+@@ -6,7 +7,7 @@ export class OplogState {
+   readonly buckets = new Map<string, Bucket>();
+ 
+   rowState(key: RowKey) {
+-    return this.rows.getOrInsertComputed(key.formatted, () => new RowState(key));
++    return getOrCreate(this.rows, key.formatted, () => new RowState(key));
+   }
+ 
+   /**
+@@ -129,7 +130,7 @@ export class RowState {
+   constructor(readonly key: RowKey) {}
+ 
+   bucketState(bucket: Bucket): BucketRowState {
+-    return this.buckets.getOrInsertComputed(bucket, () => new BucketRowState());
++    return getOrCreate(this.buckets, bucket, () => new BucketRowState());
+   }
+ 
+   /**
+diff --git a/packages/shared-internals/src/utils/map.ts b/packages/shared-internals/src/utils/map.ts
+new file mode 100644
+index 0000000..b2a5161
+--- /dev/null
++++ b/packages/shared-internals/src/utils/map.ts
+@@ -0,0 +1,8 @@
++/** Returns an existing entry, computing and storing a value only for a missing key. */
++export function getOrCreate<K, V>(map: Map<K, V>, key: K, create: (key: K) => V): V {
++  // A stored undefined is still an entry and must not invoke create again.
++  if (map.has(key)) return map.get(key)!;
++  const value = create(key);
++  map.set(key, value);
++  return value;
++}
+diff --git a/packages/shared-internals/tests/standalone-compatibility.test.ts b/packages/shared-internals/tests/standalone-compatibility.test.ts
+new file mode 100644
+index 0000000..f69c283
+--- /dev/null
++++ b/packages/shared-internals/tests/standalone-compatibility.test.ts
+@@ -0,0 +1,19 @@
++import { expect, test } from 'vitest';
++import { DownloadClientState, LocalWriteState } from '../src/standalone/client_state.js';
++
++// Keep this outside tests/standalone: that directory is skipped on Node < 26.
++// A complete checkpoint exercises bucket, row, per-bucket and per-table maps.
++test('applies a standalone checkpoint on maintained Node runtimes without polyfills', () => {
++  const state = new DownloadClientState(new LocalWriteState());
++  state.push({ checkpoint: { last_op_id: '1', buckets: [{ bucket: 'bucket', checksum: 0 }] } });
++  state.push({
++    data: {
++      bucket: 'bucket',
++      data: [{ op: 'PUT', op_id: '1', checksum: 0, object_type: 'items', object_id: 'row', data: '{"value":1}' }]
++    }
++  });
++
++  expect(state.push({ checkpoint_complete: { last_op_id: '1' } })).toStrictEqual([
++    { type: 'rows', changes: { updatedRows: new Map([['items', new Map([['row', { value: 1 }]])]]) } }
++  ]);
++});
+diff --git a/packages/shared-internals/tests/utils/map.test.ts b/packages/shared-internals/tests/utils/map.test.ts
+new file mode 100644
+index 0000000..c31401f
+--- /dev/null
++++ b/packages/shared-internals/tests/utils/map.test.ts
+@@ -0,0 +1,45 @@
++import { expect, test, vi } from 'vitest';
++import { getOrCreate } from '../../src/utils/map.js';
++
++test('computes a missing entry once and reuses its identity', () => {
++  const key = {};
++  const value = {};
++  const entries = new Map<object, object>();
++  const create = vi.fn(() => value);
++
++  expect(getOrCreate(entries, key, create)).toBe(value);
++  expect(getOrCreate(entries, key, create)).toBe(value);
++  expect(entries.get(key)).toBe(value);
++  expect(create).toHaveBeenCalledExactlyOnceWith(key);
++});
++
++test('preserves a stored undefined without computing a replacement', () => {
++  const entries = new Map<string, string | undefined>([['key', undefined]]);
++  const create = vi.fn(() => 'replacement');
++
++  expect(getOrCreate(entries, 'key', create)).toBeUndefined();
++  expect(entries.has('key')).toBe(true);
++  expect(create).not.toHaveBeenCalled();
++});
++
++test('stores a computed undefined without computing it again', () => {
++  const entries = new Map<string, undefined>();
++  const create = vi.fn(() => undefined);
++
++  expect(getOrCreate(entries, 'key', create)).toBeUndefined();
++  expect(getOrCreate(entries, 'key', create)).toBeUndefined();
++  expect(entries.has('key')).toBe(true);
++  expect(create).toHaveBeenCalledOnce();
++});
++
++test('does not insert an entry when its factory throws', () => {
++  const entries = new Map<string, number>();
++  const error = new Error('creation failed');
++
++  expect(() =>
++    getOrCreate(entries, 'key', () => {
++      throw error;
++    })
++  ).toThrow(error);
++  expect(entries.has('key')).toBe(false);
++});

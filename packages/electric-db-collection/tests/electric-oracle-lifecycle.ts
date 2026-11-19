@@ -77,6 +77,7 @@ export async function withElectricSetup<T>(
 export async function withElectricCleanup<T>(
   run: () => T | Promise<T>,
   cleanups: Array<Cleanup>,
+  observeCleanupFailure?: (label: string | undefined, error: unknown) => void,
 ): Promise<T> {
   let outcome: { ok: true; value: T } | { ok: false; error: unknown }
   try {
@@ -95,6 +96,7 @@ export async function withElectricCleanup<T>(
       )
     } catch (error) {
       failures.push({ label, error })
+      observeCleanupFailure?.(label, error)
     }
   }
   if (!outcome.ok) {

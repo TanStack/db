@@ -1,0 +1,294 @@
+{
+  "patchSha256": "2b6561c2b2ba6865bd0cb989fc11e358e38cd7edca289134a87a960d8070f93e",
+  "base": "3601c03398e34639632101fd22c6247e9495b3ae",
+  "verdict": "Approved for scoped four-call-site semantics and demonstrated native Node 24/26 compatibility; not all-maintained-Node validation.",
+  "workerRuntimes": {
+    "node24": {
+      "version": "v24.19.0",
+      "execPath": "/usr/local/bin/node",
+      "computed": "undefined",
+      "iteratorFilter": "function",
+      "groupBy": "function"
+    },
+    "node26": {
+      "version": "v26.13.1",
+      "execPath": "/Users/kyle.mathews/.npm/_npx/bac97da9607b7ef2/node_modules/node/bin/node",
+      "computed": "function",
+      "iteratorFilter": "function",
+      "groupBy": "function"
+    }
+  },
+  "semanticExperiments": {
+    "node24": {
+      "runtime": "v24.19.0",
+      "features": {
+        "computed": "undefined",
+        "iteratorFilter": "function",
+        "groupBy": "function"
+      },
+      "outcomes": [
+        {
+          "name": "existing identity",
+          "actual": [
+            "same identity",
+            0,
+            1
+          ],
+          "comparedWithNative": false
+        },
+        {
+          "name": "existing undefined",
+          "actual": [
+            0,
+            true,
+            [
+              [
+                "key",
+                null
+              ]
+            ]
+          ],
+          "comparedWithNative": false
+        },
+        {
+          "name": "computed undefined",
+          "actual": [
+            1,
+            true,
+            [
+              [
+                "key",
+                null
+              ]
+            ]
+          ],
+          "comparedWithNative": false
+        },
+        {
+          "name": "factory throws without side effects",
+          "actual": [
+            [
+              "peer",
+              "kept"
+            ]
+          ],
+          "comparedWithNative": false
+        },
+        {
+          "name": "factory inserts same key before return",
+          "actual": [
+            "outer",
+            [
+              [
+                "peer",
+                "kept"
+              ],
+              [
+                "key",
+                "outer"
+              ]
+            ]
+          ],
+          "comparedWithNative": false
+        },
+        {
+          "name": "factory clears and reinserts before return",
+          "actual": [
+            "outer",
+            [
+              [
+                "other",
+                "first"
+              ],
+              [
+                "key",
+                "outer"
+              ]
+            ]
+          ],
+          "comparedWithNative": false
+        },
+        {
+          "name": "nested insertion for same key",
+          "actual": [
+            "outer",
+            2,
+            [
+              [
+                "key",
+                "outer"
+              ]
+            ]
+          ],
+          "comparedWithNative": false
+        },
+        {
+          "name": "factory mutates same key then throws",
+          "actual": [
+            [
+              "key",
+              "side effect"
+            ]
+          ],
+          "comparedWithNative": false
+        }
+      ],
+      "excludedSignedZeroCallback": {
+        "helperReceivesNegativeZero": true
+      }
+    },
+    "node26": {
+      "runtime": "v26.13.1",
+      "features": {
+        "computed": "function",
+        "iteratorFilter": "function",
+        "groupBy": "function"
+      },
+      "outcomes": [
+        {
+          "name": "existing identity",
+          "actual": [
+            "same identity",
+            0,
+            1
+          ],
+          "comparedWithNative": true
+        },
+        {
+          "name": "existing undefined",
+          "actual": [
+            0,
+            true,
+            [
+              [
+                "key",
+                null
+              ]
+            ]
+          ],
+          "comparedWithNative": true
+        },
+        {
+          "name": "computed undefined",
+          "actual": [
+            1,
+            true,
+            [
+              [
+                "key",
+                null
+              ]
+            ]
+          ],
+          "comparedWithNative": true
+        },
+        {
+          "name": "factory throws without side effects",
+          "actual": [
+            [
+              "peer",
+              "kept"
+            ]
+          ],
+          "comparedWithNative": true
+        },
+        {
+          "name": "factory inserts same key before return",
+          "actual": [
+            "outer",
+            [
+              [
+                "peer",
+                "kept"
+              ],
+              [
+                "key",
+                "outer"
+              ]
+            ]
+          ],
+          "comparedWithNative": true
+        },
+        {
+          "name": "factory clears and reinserts before return",
+          "actual": [
+            "outer",
+            [
+              [
+                "other",
+                "first"
+              ],
+              [
+                "key",
+                "outer"
+              ]
+            ]
+          ],
+          "comparedWithNative": true
+        },
+        {
+          "name": "nested insertion for same key",
+          "actual": [
+            "outer",
+            2,
+            [
+              [
+                "key",
+                "outer"
+              ]
+            ]
+          ],
+          "comparedWithNative": true
+        },
+        {
+          "name": "factory mutates same key then throws",
+          "actual": [
+            [
+              "key",
+              "side effect"
+            ]
+          ],
+          "comparedWithNative": true
+        }
+      ],
+      "excludedSignedZeroCallback": {
+        "helperReceivesNegativeZero": true,
+        "nativeReceivesNegativeZero": false
+      }
+    }
+  },
+  "campaigns": {
+    "node24": {
+      "files": 5,
+      "tests": 57,
+      "result": "pass"
+    },
+    "node26": {
+      "files": 5,
+      "tests": 57,
+      "result": "pass"
+    }
+  },
+  "checks": {
+    "targetedTypeScript": "pass",
+    "diffCheck": "pass",
+    "applyOnCheckpointEditCheckout": "pass",
+    "reverseApplyOnCompatibilityCheckout": "pass"
+  },
+  "evidenceSha256": {
+    "/private/tmp/pr2377-map-compat-independent-node24.log": "8ecb7e25b46856face4503dc219ace552ea84a24c737e7a4468ad3895db30dd7",
+    "/private/tmp/pr2377-map-compat-independent-node26.log": "ce70a962292411d4b01f84bbdfdecb238563d1bfa11610302503fc0bcbafa25c",
+    "/private/tmp/pr2377-map-compat-independent-semantics-node24.log": "957d5a10dd884ab122c45d159da05d44242adc5af8ccce03083240b1f22dabb1",
+    "/private/tmp/pr2377-map-compat-independent-semantics-node26.log": "e204f9902999af9b63b88cf4344011f35cdc00eda3f0c163c67d4b3e0e72e9d1",
+    "/private/tmp/pr2377-map-compat-independent-worker-node24.log": "b9c71d2347ffb362b05beea972d63599ac30883ae83ed85819dfd5446955f23f",
+    "/private/tmp/pr2377-map-compat-independent-worker-node26.log": "10751fc653d3759cd9d1d387c8c97e52b718ef5c2eafcea6a00b91a49906182e",
+    "/private/tmp/pr2377-map-compat-independent-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "probeSha256": "a636726aefc40e2d17767f04a6771cd76b307a884b6a835a483a4e694b77dbd6",
+  "limits": [
+    "Node 22 unexecuted; reported acquisition HTTP403 is setup evidence, not semantic incompatibility.",
+    "No Node20, upstream declared Vitest4.1.10 full dependency set, browser bundle, installed dependency or downstream adapter certification.",
+    "Ordinary internal maps and current string/object keys, not a native-method polyfill for numeric callback key canonicalization, Map subclasses, overridden intrinsics or invalid callbacks.",
+    "Original-source RED logs verified against published hashes and inspected, not rerun by this reviewer because no production edits were authorized."
+  ]
+}

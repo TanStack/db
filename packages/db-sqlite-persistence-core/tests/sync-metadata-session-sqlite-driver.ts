@@ -4,7 +4,8 @@
  * SQLite and coordinator boundaries here. The law, model, legal histories,
  * and comparison are imported from sync-metadata-session-oracle.ts. This
  * driver supplies two persisted Collections, two production coordinators over
- * Node's BroadcastChannel/Web Locks, and one node:sqlite database. Each
+ * Node's BroadcastChannel and Web Locks (the test-only exclusive-lock
+ * polyfill on Node 22), and one node:sqlite database. Each
  * Collection has its own adapter; their shared physical database supplies the
  * shared scheduler premise.
  *
@@ -60,7 +61,7 @@ export async function createSQLiteDriver(
   productionPath: SessionGrammar,
 ): Promise<RecoveryDriver> {
   const database = new DatabaseSync(`:memory:`)
-  const { driver, drained } = createMetadataSQLiteDriver(database)
+  const { driver, drained, dispose } = createMetadataSQLiteDriver(database)
   Object.defineProperty(driver, SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY, {
     value: {},
   })
@@ -552,7 +553,7 @@ export async function createSQLiteDriver(
       for (const coordinator of coordinators) coordinator.dispose()
       if (seedClaim)
         await adapters[0]!.releaseCacheGenerationClaim(seedClaim.claimId)
-      await drained()
+      await dispose()
       database.close()
     },
   }

@@ -104,6 +104,7 @@ const config = defineConfig({
     // These properties launch real Chromium in the dedicated browser CI group.
     exclude: [...configDefaults.exclude, ...adapterBrowserTests],
     environment: `node`,
+    setupFiles: [`../db-sqlite-persistence-core/tests/node-web-locks-setup.ts`],
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: {
       enabled: true,

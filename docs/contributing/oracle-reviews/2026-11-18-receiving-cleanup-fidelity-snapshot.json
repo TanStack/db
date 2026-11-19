@@ -1,0 +1,3274 @@
+{
+  "reviewed_pr_head": "92a1493e0f45dbfd1fc3a51460ccb9228d8f787d",
+  "task": "Receiving diagnostic failure-fidelity amendment",
+  "scope": "Initial git diff plus untracked package TS/JS source inventory; no production behavior changes",
+  "initial_source_files": [
+    "packages/browser-db-sqlite-persistence/e2e/native-powersync-batch-decode-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/native-powersync-hooks-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/native-powersync-initial-receipt-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-cursor-persisted-demand-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-cursor-persisted-demand.opfs.ts",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-decode-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-eager-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-mutation-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-persisted-demand-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-persisted-demand.opfs.ts",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-persisted-receipt-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-persisted-subsets-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-shared-client-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-startup-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-subsets-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/query-cross-adapter-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/query-cross-adapter-receiving.opfs.ts",
+    "packages/browser-db-sqlite-persistence/e2e/trailbase-mutation-events-oracle.browser.test.ts",
+    "packages/browser-db-sqlite-persistence/e2e/trailbase-mutation-events.opfs.ts",
+    "packages/browser-db-sqlite-persistence/vitest.adapter-oracles.config.ts",
+    "packages/convex-db-collection/tests/conformance-driver.ts",
+    "packages/convex-db-collection/tests/eager-gate-conformance-oracle.property.test.ts",
+    "packages/convex-db-collection/tests/eager-lifecycle-receiving-oracle.property.test.ts",
+    "packages/convex-db-collection/tests/eager-reload-conformance-oracle.property.test.ts",
+    "packages/convex-db-collection/tests/eager-reload-driver.ts",
+    "packages/convex-db-collection/tests/initial-receipt-conformance-oracle.property.test.ts",
+    "packages/convex-db-collection/tests/initial-receipt-driver.ts",
+    "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+    "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts",
+    "packages/db-adapter-conformance/src/eager-live-source-oracle.ts",
+    "packages/db-adapter-conformance/tests/decode-refusal-driver.ts",
+    "packages/db-adapter-conformance/tests/decode-refusal-oracle-suite.ts",
+    "packages/db-adapter-conformance/tests/decode-refusal-oracle.ts",
+    "packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts",
+    "packages/db-adapter-conformance/tests/eager-live-source-oracle-suite.ts",
+    "packages/db-adapter-conformance/tests/eager-reload-driver.ts",
+    "packages/db-adapter-conformance/tests/eager-reload-oracle-suite.ts",
+    "packages/db-adapter-conformance/tests/eager-reload-oracle.ts",
+    "packages/db-adapter-conformance/tests/eager-reload-projection.test.ts",
+    "packages/db-adapter-conformance/tests/health-report-handoff.test.ts",
+    "packages/db-adapter-conformance/tests/health-report-handoff.ts",
+    "packages/db-adapter-conformance/tests/neon-idempotent-removal-oracle.property.test.ts",
+    "packages/db-adapter-conformance/tests/neon-initial-receipt-oracle.property.test.ts",
+    "packages/db-adapter-conformance/tests/neon-receiving-oracle.browser.test.ts",
+    "packages/db-adapter-conformance/tests/neon-reload-oracle.property.test.ts",
+    "packages/db-adapter-conformance/tests/neon-sdk-oracle.property.test.ts",
+    "packages/db-adapter-conformance/tests/neon-shared-client-oracle.property.test.ts",
+    "packages/db-adapter-conformance/tests/neon/neon-idempotent-removal-driver.ts",
+    "packages/db-adapter-conformance/tests/neon/neon-idempotent-removal-oracle.ts",
+    "packages/db-adapter-conformance/tests/neon/neon-initial-receipt-driver.ts",
+    "packages/db-adapter-conformance/tests/neon/neon-initial-receipt-node-driver.ts",
+    "packages/db-adapter-conformance/tests/neon/neon-initial-receipt-worker.ts",
+    "packages/db-adapter-conformance/tests/neon/neon-realtime-driver.ts",
+    "packages/db-adapter-conformance/tests/neon/neon-receiving.ts",
+    "packages/db-adapter-conformance/tests/neon/neon-reload-driver.ts",
+    "packages/db-adapter-conformance/tests/neon/neon-sdk-driver.ts",
+    "packages/db-adapter-conformance/tests/neon/neon-shared-client-driver.ts",
+    "packages/db-adapter-conformance/tests/neon/neon-shared-client-oracle-suite.ts",
+    "packages/db-adapter-conformance/tests/neon/neon-shared-client-oracle.ts",
+    "packages/db-adapter-conformance/tests/neon/vendor/collection-options.ts",
+    "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+    "packages/db-adapter-conformance/tests/on-demand-streams-oracle-suite.ts",
+    "packages/db-adapter-conformance/tests/on-demand-streams-oracle.ts",
+    "packages/db-adapter-conformance/tests/shared-client-oracle-suite.ts",
+    "packages/db-adapter-conformance/tests/shared-client-oracle.ts",
+    "packages/db-adapter-conformance/vitest.neon-browser.config.ts",
+    "packages/db-adapter-conformance/vitest.neon.config.ts",
+    "packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts",
+    "packages/db/e2e/local-stores-receiving.ts",
+    "packages/db/tests/local-only-direct-write-oracle.test.ts",
+    "packages/db/tests/local-storage-eager-reload-driver.ts",
+    "packages/db/tests/local-storage-eager-reload-oracle.browser.test.ts",
+    "packages/db/tests/local-storage-eager-reload-oracle.property.test.ts",
+    "packages/db/tests/local-storage-receiving-cleanup.browser.test.ts",
+    "packages/db/tests/local-storage-receiving-cleanup.test.ts",
+    "packages/db/tests/local-storage-write-order-driver.ts",
+    "packages/db/tests/local-storage-write-order-oracle.test.ts",
+    "packages/db/tests/local-storage-write-order-oracle.ts",
+    "packages/db/tests/mutation-confirmation-oracle.ts",
+    "packages/db/tests/oracle-cleanup.test.ts",
+    "packages/db/tests/oracle-cleanup.ts",
+    "packages/db/tests/oracle-config.ts",
+    "packages/db/tests/oracle-replay-manifest.ts",
+    "packages/db/tests/oracle-replay.test.ts",
+    "packages/db/vite.config.ts",
+    "packages/db/vitest.local-stores.config.ts",
+    "packages/electric-db-collection/tests/conformance-driver.ts",
+    "packages/electric-db-collection/tests/cross-adapter-gate-driver.ts",
+    "packages/electric-db-collection/tests/cross-adapter-gate-oracle.property.test.ts",
+    "packages/electric-db-collection/tests/cross-adapter-http.ts",
+    "packages/electric-db-collection/tests/cross-adapter-mutation-driver.ts",
+    "packages/electric-db-collection/tests/cross-adapter-mutation-oracle.property.test.ts",
+    "packages/electric-db-collection/tests/cross-adapter-mutation-registration-oracle.ts",
+    "packages/electric-db-collection/tests/cross-adapter-receipt-driver.ts",
+    "packages/electric-db-collection/tests/cross-adapter-receipt-node-driver.ts",
+    "packages/electric-db-collection/tests/cross-adapter-receipt-oracle.property.test.ts",
+    "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts",
+    "packages/electric-db-collection/tests/cross-adapter-receiving-oracle.browser.test.ts",
+    "packages/electric-db-collection/tests/cross-adapter-receiving.ts",
+    "packages/electric-db-collection/tests/cross-adapter-reload-driver.ts",
+    "packages/electric-db-collection/tests/cross-adapter-reload-oracle.property.test.ts",
+    "packages/electric-db-collection/tests/cross-adapter-rows.ts",
+    "packages/electric-db-collection/tests/electric-oracle-lifecycle.ts",
+    "packages/electric-db-collection/tests/electric-oracle-values.ts",
+    "packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts",
+    "packages/electric-db-collection/tests/electric-sdk-delivery-support.ts",
+    "packages/electric-db-collection/tests/sdk-decoder-driver.ts",
+    "packages/electric-db-collection/tests/sdk-decoder-oracle-suite.ts",
+    "packages/electric-db-collection/tests/sdk-decoder-oracle.ts",
+    "packages/electric-db-collection/tests/sdk-http.ts",
+    "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts",
+    "packages/electric-db-collection/tests/sdk-snapshot-receiving-oracle-suite.ts",
+    "packages/electric-db-collection/vite.config.ts",
+    "packages/electric-db-collection/vitest.cross-adapter.config.ts",
+    "packages/powersync-db-collection/src/powersync.ts",
+    "packages/powersync-db-collection/tests/batch-decode-conformance-oracle.property.test.ts",
+    "packages/powersync-db-collection/tests/batch-decode-driver.ts",
+    "packages/powersync-db-collection/tests/batch-decode-oracle-suite.ts",
+    "packages/powersync-db-collection/tests/batch-decode-oracle.ts",
+    "packages/powersync-db-collection/tests/eager-reload-common.ts",
+    "packages/powersync-db-collection/tests/hook-lifecycle-conformance-oracle.property.test.ts",
+    "packages/powersync-db-collection/tests/hook-lifecycle-driver.ts",
+    "packages/powersync-db-collection/tests/hook-lifecycle-oracle-suite.ts",
+    "packages/powersync-db-collection/tests/hook-lifecycle-oracle.ts",
+    "packages/powersync-db-collection/tests/initial-receipt-browser.ts",
+    "packages/powersync-db-collection/tests/initial-receipt-common.ts",
+    "packages/powersync-db-collection/tests/initial-receipt-conformance-oracle.property.test.ts",
+    "packages/powersync-db-collection/tests/initial-receipt-driver.ts",
+    "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+    "packages/powersync-db-collection/tests/native-receiving-browser.ts",
+    "packages/powersync-db-collection/tests/native-receiving-host.ts",
+    "packages/powersync-db-collection/tests/receiving-cleanup.test.ts",
+    "packages/powersync-db-collection/tests/receiving-cleanup.ts",
+    "packages/powersync-direct-collection/src/index.ts",
+    "packages/powersync-direct-collection/src/subsets.ts",
+    "packages/powersync-direct-collection/tests/conformance-driver.ts",
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-cleanup.test.ts",
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-driver.ts",
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-history-oracle.ts",
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-oracle-suite.ts",
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-oracle.property.test.ts",
+    "packages/powersync-direct-collection/tests/decode-refusal-driver.ts",
+    "packages/powersync-direct-collection/tests/decode-refusal-oracle.property.test.ts",
+    "packages/powersync-direct-collection/tests/eager-live-source-conformance-oracle.property.test.ts",
+    "packages/powersync-direct-collection/tests/eager-live-source-history-oracle.ts",
+    "packages/powersync-direct-collection/tests/eager-protocol-service.ts",
+    "packages/powersync-direct-collection/tests/eager-reload-conformance-oracle.property.test.ts",
+    "packages/powersync-direct-collection/tests/eager-reload-driver.ts",
+    "packages/powersync-direct-collection/tests/fake-service.ts",
+    "packages/powersync-direct-collection/tests/initial-receipt-driver.ts",
+    "packages/powersync-direct-collection/tests/initial-receipt-oracle-suite.ts",
+    "packages/powersync-direct-collection/tests/initial-receipt-oracle.property.test.ts",
+    "packages/powersync-direct-collection/tests/initial-receipt-oracle.ts",
+    "packages/powersync-direct-collection/tests/initial-receipt-worker.ts",
+    "packages/powersync-direct-collection/tests/mutation-confirmation-cancellation-oracle.property.test.ts",
+    "packages/powersync-direct-collection/tests/mutation-confirmation-cancellation-oracle.ts",
+    "packages/powersync-direct-collection/tests/mutation-confirmation-cancellation-registration-oracle.ts",
+    "packages/powersync-direct-collection/tests/mutation-confirmation-driver.ts",
+    "packages/powersync-direct-collection/tests/mutation-confirmation-history-oracle.ts",
+    "packages/powersync-direct-collection/tests/mutation-confirmation-oracle.property.test.ts",
+    "packages/powersync-direct-collection/tests/mutation-confirmation-registration-oracle.ts",
+    "packages/powersync-direct-collection/tests/mutation-confirmation-service.ts",
+    "packages/powersync-direct-collection/tests/on-demand-service.ts",
+    "packages/powersync-direct-collection/tests/on-demand-streams-conformance-oracle.property.test.ts",
+    "packages/powersync-direct-collection/tests/on-demand-streams-driver.ts",
+    "packages/powersync-direct-collection/tests/on-demand-streams-persisted-conformance-oracle.property.test.ts",
+    "packages/powersync-direct-collection/tests/on-demand-streams-persisted-driver.ts",
+    "packages/powersync-direct-collection/tests/persisted-demand-cleanup.test.ts",
+    "packages/powersync-direct-collection/tests/persisted-demand-conformance-oracle.test.ts",
+    "packages/powersync-direct-collection/tests/persisted-demand-driver.ts",
+    "packages/powersync-direct-collection/tests/persisted-demand-history-oracle.ts",
+    "packages/powersync-direct-collection/tests/persisted-demand-oracle-suite.ts",
+    "packages/powersync-direct-collection/tests/persisted-initial-receipt-cleanup.test.ts",
+    "packages/powersync-direct-collection/tests/persisted-initial-receipt-driver.ts",
+    "packages/powersync-direct-collection/tests/persisted-initial-receipt-node-driver.ts",
+    "packages/powersync-direct-collection/tests/persisted-initial-receipt-oracle.property.test.ts",
+    "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts",
+    "packages/powersync-direct-collection/tests/persisted-startup-conformance-oracle.property.test.ts",
+    "packages/powersync-direct-collection/tests/persisted-startup-driver.ts",
+    "packages/powersync-direct-collection/tests/shared-client-conformance-oracle.property.test.ts",
+    "packages/powersync-direct-collection/tests/shared-client-driver.ts",
+    "packages/query-db-collection/tests/eager-reload-conformance-oracle.property.test.ts",
+    "packages/query-db-collection/tests/eager-reload-driver.ts",
+    "packages/query-db-collection/tests/failing-queries-driver.ts",
+    "packages/query-db-collection/tests/failing-queries-oracle.test.ts",
+    "packages/query-db-collection/tests/failing-queries-oracle.ts",
+    "packages/query-db-collection/tests/select-failures-oracle-suite.ts",
+    "packages/query-db-collection/vitest.config.ts",
+    "packages/rxdb-db-collection/tests/eager-gate-conformance-oracle.browser.test.ts",
+    "packages/rxdb-db-collection/tests/eager-gate-conformance-oracle.property.test.ts",
+    "packages/rxdb-db-collection/tests/eager-gate-driver.ts",
+    "packages/rxdb-db-collection/tests/eager-reload-driver.ts",
+    "packages/rxdb-db-collection/tests/initial-receipt-driver.ts",
+    "packages/rxdb-db-collection/tests/initial-receipt-node-driver.ts",
+    "packages/rxdb-db-collection/tests/initial-receipt-oracle.browser.test.ts",
+    "packages/rxdb-db-collection/tests/initial-receipt-oracle.property.test.ts",
+    "packages/rxdb-db-collection/tests/initial-receipt-worker.ts",
+    "packages/rxdb-db-collection/tests/mutation-driver.ts",
+    "packages/rxdb-db-collection/tests/mutation-source-batch-oracle.browser.test.ts",
+    "packages/rxdb-db-collection/tests/mutation-source-batch-oracle.property.test.ts",
+    "packages/rxdb-db-collection/tests/mutation-source-batch-oracle.ts",
+    "packages/rxdb-db-collection/tests/persisted-initial-receipt-driver.ts",
+    "packages/rxdb-db-collection/tests/persisted-initial-receipt-node-driver.ts",
+    "packages/rxdb-db-collection/tests/persisted-initial-receipt-oracle.browser.test.ts",
+    "packages/rxdb-db-collection/tests/persisted-initial-receipt-oracle.property.test.ts",
+    "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+    "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+    "packages/rxdb-db-collection/tests/receiving-cleanup.test.ts",
+    "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts",
+    "packages/rxdb-db-collection/tests/shared-client-driver.ts",
+    "packages/rxdb-db-collection/tests/shared-client-oracle.browser.test.ts",
+    "packages/rxdb-db-collection/tests/shared-client-oracle.property.test.ts",
+    "packages/rxdb-db-collection/tests/shared-client-oracle.ts",
+    "packages/rxdb-db-collection/vite.config.ts",
+    "packages/rxdb-db-collection/vitest.browser-oracles.config.ts",
+    "packages/trailbase-db-collection/src/trailbase.ts",
+    "packages/trailbase-db-collection/tests/eager-live-source-oracle-suite.ts",
+    "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts",
+    "packages/trailbase-db-collection/tests/mutation-events-sdk-oracle-suite.ts",
+    "packages/trailbase-db-collection/tests/mutation-events-sdk-oracle.property.test.ts",
+    "packages/trailbase-db-collection/tests/mutation-events-sdk-oracle.ts",
+    "packages/trailbase-db-collection/tests/sdk-conformance-driver.ts",
+    "packages/trailbase-db-collection/tests/sdk-eager-gate-conformance-oracle.property.test.ts",
+    "packages/trailbase-db-collection/tests/sdk-eager-live-source-conformance-oracle.property.test.ts",
+    "packages/trailbase-db-collection/tests/sdk-eager-reload-conformance-oracle.property.test.ts",
+    "packages/trailbase-db-collection/tests/sdk-eager-reload-driver.ts",
+    "packages/trailbase-db-collection/tests/sdk-persisted-startup-conformance-oracle.property.test.ts",
+    "packages/trailbase-db-collection/tests/sdk-persisted-startup-driver.ts",
+    "packages/trailbase-db-collection/tests/sdk-service.ts"
+  ],
+  "initial_source_file_count": 231,
+  "final_amendment_sources_sha256": {
+    "packages/powersync-db-collection/tests/receiving-cleanup.ts": "07e24fb35e386b6604953fd8687e302177e4b261c7c8f9e625fa092d47940dc0",
+    "packages/powersync-direct-collection/tests/persisted-initial-receipt-driver.ts": "9c9aaf394bcd8da14f85bf77420be8cf47ab29c89edc068486ec29970dc40874",
+    "packages/electric-db-collection/tests/cross-adapter-receipt-driver.ts": "d4e11aaa9d3390ccf2d21438628cc8ef5c1ed4c2f8f2adcf16dc8c50ea9c5135",
+    "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts": "3f8185ee7c0c703780903b30a9825c85c67ac25cb2c006204da7c30556d0668c",
+    "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts": "f680ce1011bc71545687b76598d81bdcb965c8072ec2d6bc3f72bae45f88e238",
+    "packages/convex-db-collection/tests/initial-receipt-worker.ts": "12997582bf30fa5a628583301453835e9349c8b2e715dd7b5e30b2afe5780f16",
+    "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts": "02b9afa128f5a7aec1cedb07bd43ee49e3652d644767c118b174ce422001516e",
+    "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts": "74bc92d354003a4b98f5510dbaef4c231d51de8f44fb1f8ef4c68292d62bda8e",
+    "packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts": "22422fb1e298cc643fd572e297eea13b51fbdd2bff9e9833ae29fae58a90f9ec",
+    "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts": "2bff8e733ab1af5b0044534c2ebd6d5965438d9bb7cb3c07d78a909d2e4711eb",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts": "e9a6d9842436f808437117711ccde977bccee97d57da04d3f9b735e08b010de9",
+    "packages/powersync-db-collection/tests/initial-receipt-worker.ts": "e631c48ac80892cb0a10dcbd98cbbd781945a3b60e6a9d64a24bf23dc906aaf2",
+    "packages/powersync-direct-collection/tests/initial-receipt-worker.ts": "d57f47ec1069cc401adea51a262165f44eb373618a1b0729d9994980d96bbc50",
+    "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts": "7aa74f15a846cc2fd546c0213e2790dc5678fbab5bf94aa12e32be21bc0979c0",
+    "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts": "28611c1711e1c4bbe54f8b3bfe491a5e897bf6f14e6ea48d159d06f2d04e1b77",
+    "packages/electric-db-collection/tests/cross-adapter-receiving.ts": "b930f6166f6bdbf8ab7027b0217396933afa96024a46d2ee698fc6fff4728421",
+    "packages/rxdb-db-collection/tests/initial-receipt-worker.ts": "bb646ef7a6516b2afc00f4cdc70419c875eb45f7a0deebb37eb1b2ae1d1a270f",
+    "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts": "e26ed7a7a2659faf718b63238b9a5622a37771cbed6ada4682e77cef99ff7b59",
+    "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts": "c1a83785c1540bf3743e10bb964ee53ca90c80c2e99db0f7996d7d24446a5d57",
+    "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts": "c08ed4e6e99530f645a9718407ff0eebd415c83cd01727d94eaf4586c3afe790",
+    "packages/db-adapter-conformance/src/eager-live-source-oracle.ts": "abc07901fc6ab979c6f41bade19b1211c3bf8db1c35d8857f98869b5050aea49",
+    "packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts": "0c6d93baea994e7fcd309a5e160bce3efb504cf73327ebf3c59ba5d7fd4b0e3b",
+    "packages/db-adapter-conformance/tests/receiving-cleanup-format.test.ts": "851cabd326df580ec0629dd8dea0c2dacc193ba00a3dfeef5ae91c40362d38c0",
+    "packages/db/tests/oracle-cleanup.ts": "15317e3871120de3840160b070d902e765989fe070112fbbf3d14d87b84bf6bc"
+  },
+  "amendment_deltas": {
+    "packages/powersync-db-collection/tests/receiving-cleanup.ts": "--- before/packages/powersync-db-collection/tests/receiving-cleanup.ts\n+++ after/packages/powersync-db-collection/tests/receiving-cleanup.ts\n@@ -4,33 +4,12 @@\n  * a completed mismatch stays available to the model's comparison, with every\n  * subsequent cleanup error recorded separately.\n  */\n-import { withOracleCleanup } from '../../db/tests/oracle-cleanup'\n+import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'\n \n export type ReceivingCleanup = { cleanupErrors?: ReadonlyArray<string> }\n export async function retainNativeObservation<T extends ReceivingCleanup>(\n   run: () => Promise<T>,\n   cleanups: ReadonlyArray<() => unknown>,\n ): Promise<T> {\n-  let completed: T | undefined\n-  try {\n-    return await withOracleCleanup(async () => {\n-      completed = await run()\n-      return completed\n-    }, cleanups)\n-  } catch (error) {\n-    if (!completed) throw error\n-    const failures: Array<unknown> =\n-      error instanceof AggregateError ? error.errors : [error]\n-    return {\n-      ...completed,\n-      cleanupErrors: [\n-        ...(completed.cleanupErrors ?? []),\n-        ...failures.map((failure) =>\n-          failure instanceof Error\n-            ? (failure.stack ?? `${failure.name}: ${failure.message}`)\n-            : String(failure),\n-        ),\n-      ],\n-    }\n-  }\n+  return retainOracleCleanupObservation(run, cleanups)\n }\n",
+    "packages/powersync-direct-collection/tests/persisted-initial-receipt-driver.ts": "--- before/packages/powersync-direct-collection/tests/persisted-initial-receipt-driver.ts\n+++ after/packages/powersync-direct-collection/tests/persisted-initial-receipt-driver.ts\n@@ -12,7 +12,7 @@\n  */\n import { createCollection } from '@tanstack/db'\n import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'\n-import { withOracleCleanup } from '../../db/tests/oracle-cleanup'\n+import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'\n import { startupRows } from '../../db-adapter-conformance/tests/persisted-startup-oracle'\n import { directEagerClient } from './eager-reload-driver'\n import { eagerProtocolTurn, untilEagerProtocol } from './eager-protocol-service'\n@@ -28,28 +28,7 @@\n   run: () => Promise<InitialReceiptObservation>,\n   cleanups: ReadonlyArray<() => unknown>,\n ): Promise<InitialReceiptObservation> {\n-  let completed: InitialReceiptObservation | undefined\n-  try {\n-    return await withOracleCleanup(async () => {\n-      completed = await run()\n-      return completed\n-    }, cleanups)\n-  } catch (error) {\n-    if (!completed) throw error\n-    const failures: Array<unknown> =\n-      error instanceof AggregateError ? error.errors : [error]\n-    return {\n-      ...completed,\n-      cleanupErrors: [\n-        ...(completed.cleanupErrors ?? []),\n-        ...failures.map((failure) =>\n-          failure instanceof Error\n-            ? (failure.stack ?? `${failure.name}: ${failure.message}`)\n-            : String(failure),\n-        ),\n-      ],\n-    }\n-  }\n+  return retainOracleCleanupObservation(run, cleanups)\n }\n \n export async function observePersistedInitialReceipt(\n",
+    "packages/electric-db-collection/tests/cross-adapter-receipt-driver.ts": "--- before/packages/electric-db-collection/tests/cross-adapter-receipt-driver.ts\n+++ after/packages/electric-db-collection/tests/cross-adapter-receipt-driver.ts\n@@ -18,7 +18,7 @@\n  */\n import { createCollection } from '@tanstack/db'\n import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'\n-import { withOracleCleanup } from '../../db/tests/oracle-cleanup'\n+import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'\n import { startupRows } from '../../db-adapter-conformance/tests/persisted-startup-oracle'\n import { crossElectricReloadAdapter } from './cross-adapter-reload-driver'\n import { electricTurn, untilElectric } from './cross-adapter-http'\n@@ -33,28 +33,7 @@\n   run: () => Promise<InitialReceiptObservation>,\n   cleanups: ReadonlyArray<() => unknown>,\n ): Promise<InitialReceiptObservation> {\n-  let completed: InitialReceiptObservation | undefined\n-  try {\n-    return await withOracleCleanup(async () => {\n-      completed = await run()\n-      return completed\n-    }, cleanups)\n-  } catch (error) {\n-    if (!completed) throw error\n-    const failures: Array<unknown> =\n-      error instanceof AggregateError ? error.errors : [error]\n-    return {\n-      ...completed,\n-      cleanupErrors: [\n-        ...(completed.cleanupErrors ?? []),\n-        ...failures.map((failure) =>\n-          failure instanceof Error\n-            ? (failure.stack ?? `${failure.name}: ${failure.message}`)\n-            : String(failure),\n-        ),\n-      ],\n-    }\n-  }\n+  return retainOracleCleanupObservation(run, cleanups)\n }\n \n export async function observePersistedInitialReceipt(\n",
+    "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts": "--- before/packages/db-adapter-conformance/tests/on-demand-streams-driver.ts\n+++ after/packages/db-adapter-conformance/tests/on-demand-streams-driver.ts\n@@ -15,7 +15,10 @@\n   parseLoadSubsetOptions,\n   whenSyncAccepted,\n } from '@tanstack/db'\n-import { withOracleCleanup } from '../../db/tests/oracle-cleanup'\n+import {\n+  describeOracleCleanupError,\n+  withOracleCleanup,\n+} from '../../db/tests/oracle-cleanup'\n import { streamRows } from './on-demand-streams-oracle'\n import type { HealthReportCounts } from './health-report-handoff'\n import type {\n@@ -323,10 +326,7 @@\n                 },\n                 (error: unknown) => {\n                   outcomes.right = `rejected`\n-                  request!.rejection =\n-                    error instanceof Error\n-                      ? `${error.name}: ${error.message}`\n-                      : String(error)\n+                  request!.rejection = describeOracleCleanupError(error)\n                 },\n               )\n           },\n@@ -622,15 +622,12 @@\n     // primary and each teardown diagnostic survives the browser boundary.\n     // A setup/body failure still uses withOracleCleanup's original exception.\n     if (!completed) throw error\n-    const errors: Array<unknown> =\n-      error instanceof AggregateError ? error.errors : [error]\n     return {\n       ...completed,\n-      cleanupErrors: errors.map((failure) =>\n-        failure instanceof Error\n-          ? (failure.stack ?? `${failure.name}: ${failure.message}`)\n-          : String(failure),\n-      ),\n+      cleanupErrors: [\n+        ...(completed.cleanupErrors ?? []),\n+        describeOracleCleanupError(error),\n+      ],\n     }\n   }\n }\n",
+    "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts": "--- before/packages/convex-db-collection/tests/snapshot-oracle.property.test.ts\n+++ after/packages/convex-db-collection/tests/snapshot-oracle.property.test.ts\n@@ -30,6 +30,7 @@\n import { makeFunctionReference } from 'convex/server'\n import { expect } from 'vitest'\n import { ConvexClient } from 'convex/browser'\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import {\n   forwardAssertionJudgment,\n   oracleAssertion,\n@@ -446,12 +447,10 @@\n     )\n   )\n     errors.push(`partial selected publication`)\n-  const firstReady =\n-    h.phase === `live` ? expected.before : expected.target\n+  const firstReady = h.phase === `live` ? expected.before : expected.target\n   // Every history reaches readiness: an initially refused selection does so\n   // in its new sync run. The callback must already see that complete result.\n-  if (!same(raw.readyRows[0], firstReady))\n-    errors.push(`rows inside readiness`)\n+  if (!same(raw.readyRows[0], firstReady)) errors.push(`rows inside readiness`)\n   return errors\n }\n \n@@ -607,10 +606,10 @@\n     )\n   } catch (error) {\n     if (!raw) throw error\n-    raw.cleanupErrors =\n-      error instanceof AggregateError\n-        ? error.errors.map(String)\n-        : [String(error)]\n+    raw.cleanupErrors = [\n+      ...(raw.cleanupErrors ?? []),\n+      describeOracleCleanupError(error),\n+    ]\n   }\n   if (!raw) throw new Error(`Projection receiver did not record its final cut`)\n   return raw\n",
+    "packages/convex-db-collection/tests/initial-receipt-worker.ts": "--- before/packages/convex-db-collection/tests/initial-receipt-worker.ts\n+++ after/packages/convex-db-collection/tests/initial-receipt-worker.ts\n@@ -9,6 +9,7 @@\n import { readFileSync } from 'node:fs'\n import { createCollection } from '@tanstack/db'\n import { ConvexClient } from 'convex/browser'\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import { convexCollectionOptions } from '../src'\n import { initialReceiptModel } from '../../powersync-direct-collection/tests/initial-receipt-oracle'\n import { ConvexProvider, rowsQuery } from './conformance-driver'\n@@ -22,7 +23,9 @@\n   fault?: `cleanup-only` | `mismatch-and-cleanup`\n }\n const detachedErrors: Array<string> = []\n-process.on(`unhandledRejection`, (error) => detachedErrors.push(String(error)))\n+process.on(`unhandledRejection`, (error) =>\n+  detachedErrors.push(describeOracleCleanupError(error)),\n+)\n const provider = new ConvexProvider(history.client)\n const options = convexCollectionOptions({\n   id: `convex-initial-receipt`,\n@@ -109,7 +112,10 @@\n try {\n   await provider.dispose()\n } catch (error) {\n-  observed.cleanupErrors = [String(error)]\n+  observed.cleanupErrors = [\n+    ...(observed.cleanupErrors ?? []),\n+    describeOracleCleanupError(error),\n+  ]\n }\n if (history.fault === `mismatch-and-cleanup`)\n   observed.detachedErrors.push(`injected detached receipt rejection`)\n",
+    "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts": "--- before/packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts\n+++ after/packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts\n@@ -5,7 +5,10 @@\n  * after both; provider delivery does not supply expected observations.\n  */\n import { createCollection, createLiveQueryCollection } from '@tanstack/db'\n-import { withOracleCleanup } from '../../db/tests/oracle-cleanup'\n+import {\n+  describeOracleCleanupError,\n+  withOracleCleanup,\n+} from '../../db/tests/oracle-cleanup'\n import { trailBaseCollectionOptions } from '../src/trailbase'\n import { TrailBaseSdkService, untilSdk } from './sdk-service'\n import {\n@@ -239,7 +242,9 @@\n         await cleanup()\n       } catch (error) {\n         if (!completed) throw error\n-        ;(completed.cleanupErrors ??= []).push(String(error))\n+        ;(completed.cleanupErrors ??= []).push(\n+          describeOracleCleanupError(error),\n+        )\n       }\n     }),\n   )\n",
+    "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts": "--- before/packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts\n+++ after/packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts\n@@ -12,6 +12,7 @@\n import fc from 'fast-check'\n import { IR, createCollection } from '@tanstack/db'\n import { ShapeStream } from '@electric-sql/client'\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import { electricCollectionOptions } from '../src/electric'\n import { controlledHttp, deferred, headers } from './sdk-http'\n import {\n@@ -569,7 +570,7 @@\n           checkpoint.completed = true\n         },\n         cleanupFailure: (label, error) =>\n-          cleanupErrors.push(`${label}: ${String(error)}`),\n+          cleanupErrors.push(`${label}: ${describeOracleCleanupError(error)}`),\n       },\n     )\n     return { reached, cleanupErrors }\n",
+    "packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts": "--- before/packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts\n+++ after/packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts\n@@ -3,6 +3,7 @@\n  * original checkpoint. This bridge transports its law and checkpoint to the\n  * framework. Setup errors escape; cleanup diagnostics remain secondary.\n  */\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import { ConformanceViolation, checkEagerLiveSourceHistory } from '../src'\n import type {\n   EagerLiveSourceDriver,\n@@ -81,8 +82,21 @@\n     })\n     return { reached, result }\n   } catch (error) {\n-    const primary = error instanceof AggregateError ? error.cause : error\n-    if (!(primary instanceof ConformanceViolation)) throw error\n+    let primary: ConformanceViolation\n+    let cleanup: Array<string>\n+    try {\n+      const candidate = error instanceof AggregateError ? error.cause : error\n+      if (!(candidate instanceof ConformanceViolation)) throw error\n+      primary = candidate\n+      cleanup =\n+        error instanceof AggregateError\n+          ? [describeOracleCleanupError(error)]\n+          : []\n+    } catch {\n+      // Unknown throws remain the primary value even if inspecting their\n+      // prototype or AggregateError details itself throws.\n+      throw error\n+    }\n     return {\n       reached,\n       failure: {\n@@ -90,8 +104,7 @@\n         step: primary.step,\n         expected: primary.expected,\n         actual: primary.actual,\n-        cleanup:\n-          error instanceof AggregateError ? error.errors.map(String) : [],\n+        cleanup,\n       },\n     }\n   }\n",
+    "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts": "--- before/packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts\n+++ after/packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts\n@@ -1,4 +1,5 @@\n /** Real browser source SQLite and wrapper OPFS receive one receipt law. */\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import { observeBrowserPowerSyncInitialReceipt } from '../../powersync-db-collection/tests/initial-receipt-browser'\n import { observePowerSyncHooks } from '../../powersync-db-collection/tests/hook-lifecycle-driver'\n import { observeNativeBatchDecode } from '../../powersync-db-collection/tests/batch-decode-driver'\n@@ -26,7 +27,7 @@\n   const database = await openBrowserWASQLiteOPFSDatabase({ databaseName })\n   const detachedErrors: Array<string> = []\n   const onUnhandledRejection = (event: PromiseRejectionEvent) => {\n-    detachedErrors.push(String(event.reason))\n+    detachedErrors.push(describeOracleCleanupError(event.reason))\n     event.preventDefault()\n   }\n   window.addEventListener(`unhandledrejection`, onUnhandledRejection)\n",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts": "--- before/packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts\n+++ after/packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts\n@@ -38,7 +38,10 @@\n   createBrowserWASQLitePersistence,\n   openBrowserWASQLiteOPFSDatabase,\n } from '../src'\n-import { withOracleCleanup } from '../../db/tests/oracle-cleanup'\n+import {\n+  describeOracleCleanupError,\n+  withOracleCleanup,\n+} from '../../db/tests/oracle-cleanup'\n import { recordQueryHistory } from './query-ownership-browser-support'\n import {\n   removeStartupOPFSArtifacts,\n@@ -161,7 +164,7 @@\n   const database = await openBrowserWASQLiteOPFSDatabase({ databaseName })\n   const detachedErrors: Array<string> = []\n   const onUnhandledRejection = (event: PromiseRejectionEvent) => {\n-    detachedErrors.push(String(event.reason))\n+    detachedErrors.push(describeOracleCleanupError(event.reason))\n     event.preventDefault()\n   }\n   window.addEventListener(`unhandledrejection`, onUnhandledRejection)\n",
+    "packages/powersync-db-collection/tests/initial-receipt-worker.ts": "--- before/packages/powersync-db-collection/tests/initial-receipt-worker.ts\n+++ after/packages/powersync-db-collection/tests/initial-receipt-worker.ts\n@@ -1,6 +1,7 @@\n /** An isolated Node host records actual detached receipt rejections. */\n import process from 'node:process'\n import { readFileSync } from 'node:fs'\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import { createStartupHost } from '../../db-adapter-conformance/tests/persisted-startup-host'\n import { retainInitialReceiptCleanup } from '../../powersync-direct-collection/tests/persisted-initial-receipt-driver'\n import { powerSyncEagerReloadAdapter } from './eager-reload-driver'\n@@ -14,7 +15,7 @@\n }\n const detachedErrors: Array<string> = []\n process.on(`unhandledRejection`, (reason) =>\n-  detachedErrors.push(String(reason)),\n+  detachedErrors.push(describeOracleCleanupError(reason)),\n )\n const storage = createStartupHost(input.host)\n const observed = await retainInitialReceiptCleanup(\n",
+    "packages/powersync-direct-collection/tests/initial-receipt-worker.ts": "--- before/packages/powersync-direct-collection/tests/initial-receipt-worker.ts\n+++ after/packages/powersync-direct-collection/tests/initial-receipt-worker.ts\n@@ -6,6 +6,7 @@\n import process from 'node:process'\n import { readFileSync } from 'node:fs'\n import { createCollection } from '@tanstack/db'\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import { directEagerClient } from './eager-reload-driver'\n import { eagerProtocolTurn, untilEagerProtocol } from './eager-protocol-service'\n import { initialReceiptModel } from './initial-receipt-oracle'\n@@ -17,7 +18,7 @@\n const history = JSON.parse(readFileSync(0, `utf8`)) as InitialReceiptHistory\n const detachedErrors: Array<string> = []\n process.on(`unhandledRejection`, (reason) => {\n-  detachedErrors.push(String(reason))\n+  detachedErrors.push(describeOracleCleanupError(reason))\n })\n const source = directEagerClient()\n const options = source.options(`controlled-initial-receipt`)\n",
+    "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts": "--- before/packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts\n+++ after/packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts\n@@ -1,6 +1,7 @@\n /** An isolated native process preserves detached errors as oracle observations. */\n import process from 'node:process'\n import { readFileSync } from 'node:fs'\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import { createStartupHost } from '../../db-adapter-conformance/tests/persisted-startup-host'\n import {\n   observePersistedInitialReceipt,\n@@ -15,7 +16,7 @@\n }\n const detachedErrors: Array<string> = []\n process.on(`unhandledRejection`, (reason) =>\n-  detachedErrors.push(String(reason)),\n+  detachedErrors.push(describeOracleCleanupError(reason)),\n )\n const storage = createStartupHost(input.host)\n const observed = await retainInitialReceiptCleanup(\n",
+    "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts": "--- before/packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts\n+++ after/packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts\n@@ -1,6 +1,7 @@\n /** An isolated native process preserves detached errors as oracle observations. */\n import process from 'node:process'\n import { readFileSync } from 'node:fs'\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import { createStartupHost } from '../../db-adapter-conformance/tests/persisted-startup-host'\n import {\n   observePersistedInitialReceipt,\n@@ -16,7 +17,7 @@\n }\n const detachedErrors: Array<string> = []\n process.on(`unhandledRejection`, (reason) =>\n-  detachedErrors.push(String(reason)),\n+  detachedErrors.push(describeOracleCleanupError(reason)),\n )\n const storage = createStartupHost(input.host)\n const observed = await retainInitialReceiptCleanup(\n",
+    "packages/electric-db-collection/tests/cross-adapter-receiving.ts": "--- before/packages/electric-db-collection/tests/cross-adapter-receiving.ts\n+++ after/packages/electric-db-collection/tests/cross-adapter-receiving.ts\n@@ -1,4 +1,5 @@\n /** Browser entry supplies only the real host production path and observations. */\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import {\n   observeEagerGateFailure,\n   observeEagerReload,\n@@ -59,7 +60,7 @@\n   const database = await openBrowserWASQLiteOPFSDatabase({ databaseName })\n   const detachedErrors: Array<string> = []\n   const recordRejection = (event: PromiseRejectionEvent) => {\n-    detachedErrors.push(String(event.reason))\n+    detachedErrors.push(describeOracleCleanupError(event.reason))\n     event.preventDefault()\n   }\n   window.addEventListener(`unhandledrejection`, recordRejection)\n",
+    "packages/rxdb-db-collection/tests/initial-receipt-worker.ts": "--- before/packages/rxdb-db-collection/tests/initial-receipt-worker.ts\n+++ after/packages/rxdb-db-collection/tests/initial-receipt-worker.ts\n@@ -1,6 +1,7 @@\n /** Native host events remain facts for the shared receipt comparison. */\n import process from 'node:process'\n import { readFileSync } from 'node:fs'\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import { observeRxdbInitialReceipt } from './initial-receipt-driver'\n import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'\n \n@@ -10,7 +11,7 @@\n }\n const errors: Array<string> = []\n process.on(`unhandledRejection`, (error) => {\n-  errors.push(String(error))\n+  errors.push(describeOracleCleanupError(error))\n })\n const observed = await observeRxdbInitialReceipt(history, errors, teardownFault)\n process.stdout.write(`RECEIPT_OBSERVATION:${JSON.stringify(observed)}\\n`)\n",
+    "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts": "--- before/packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts\n+++ after/packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts\n@@ -14,7 +14,7 @@\n }\n const detachedErrors: Array<string> = []\n process.on(`unhandledRejection`, (reason) =>\n-  detachedErrors.push(String(reason)),\n+  detachedErrors.push(describeOracleCleanupError(reason)),\n )\n const storage = createStartupHost(input.host)\n const observed = await retainOracleCleanupObservation(\n",
+    "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts": "--- before/packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts\n+++ after/packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts\n@@ -21,7 +21,7 @@\n   const database = await openBrowserWASQLiteOPFSDatabase({ databaseName })\n   const detachedErrors: Array<string> = []\n   const onUnhandledRejection = (event: PromiseRejectionEvent) => {\n-    detachedErrors.push(String(event.reason))\n+    detachedErrors.push(describeOracleCleanupError(event.reason))\n     event.preventDefault()\n   }\n   window.addEventListener(`unhandledrejection`, onUnhandledRejection)\n",
+    "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts": "--- before/packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts\n+++ after/packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts\n@@ -1,4 +1,5 @@\n /** Actual Chromium supplies detached-error events for the shared comparison. */\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import { observeEagerGateFailure } from '../../db-adapter-conformance/tests/eager-reload-driver'\n import { observeRxdbInitialReceipt } from './initial-receipt-driver'\n import { observeRxdbSharedClient } from './shared-client-driver'\n@@ -18,7 +19,7 @@\n target.runRxdbInitialReceipt = async (history: InitialReceiptHistory) => {\n   const errors: Array<string> = []\n   const record = (event: PromiseRejectionEvent) => {\n-    errors.push(String(event.reason))\n+    errors.push(describeOracleCleanupError(event.reason))\n   }\n   window.addEventListener(`unhandledrejection`, record)\n   try {\n",
+    "packages/db-adapter-conformance/src/eager-live-source-oracle.ts": "--- before/packages/db-adapter-conformance/src/eager-live-source-oracle.ts\n+++ after/packages/db-adapter-conformance/src/eager-live-source-oracle.ts\n@@ -146,6 +146,7 @@\n  * a driver and compares each checkpoint with the model.\n  */\n import * as fc from 'fast-check'\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import type { ChangeMessage, HealthNode } from '@tanstack/db'\n \n // ---------------------------------------------------------------------------\n@@ -2488,13 +2489,21 @@\n \n /** JSON for a message; a bigint shows as `<digits>n`, `-0` as `-0`. */\n function show(value: unknown): string {\n-  return JSON.stringify(value, (_key, item: unknown) =>\n-    typeof item === `bigint`\n-      ? `${String(item)}n`\n-      : Object.is(item, -0)\n-        ? `-0`\n-        : item,\n-  )\n+  try {\n+    return String(\n+      JSON.stringify(value, (_key, item: unknown) =>\n+        typeof item === `bigint`\n+          ? `${String(item)}n`\n+          : Object.is(item, -0)\n+            ? `-0`\n+            : item,\n+      ),\n+    )\n+  } catch {\n+    // Diagnostic serialization must not replace the law, checkpoint, or raw\n+    // observation retained by ConformanceViolation.\n+    return describeOracleCleanupError(value)\n+  }\n }\n \n /** A law violation at one checkpoint. */\n@@ -2596,7 +2605,7 @@\n function watchDetachedFailures(driver: EagerLiveSourceDriver) {\n   const found: Array<string> = []\n   const onRejection = (reason: unknown) => {\n-    found.push(`unhandled rejection: ${String(reason)}`)\n+    found.push(`unhandled rejection: ${describeOracleCleanupError(reason)}`)\n   }\n   const hasProcess = typeof process !== `undefined`\n   if (hasProcess) process.on(`unhandledRejection`, onRejection)\n@@ -2604,7 +2613,9 @@\n   for (const level of [`error`, `warn`] as const) {\n     console[level] = (...args: Array<unknown>) => {\n       if (!driver.declaredDiagnostic?.(level, args)) {\n-        found.push(`console.${level}: ${args.map(String).join(` `)}`)\n+        found.push(\n+          `console.${level}: ${args.map(describeOracleCleanupError).join(` `)}`,\n+        )\n       }\n     }\n   }\n@@ -2895,7 +2906,7 @@\n           reasons.every((cause, index) => matchesEntry(cause, want[index]!)) &&\n           (want.length === 0 || health.failureReason?.cause === reasons.at(-1)),\n         want.map(describeEntry),\n-        reasons.map(String),\n+        reasons.map(describeOracleCleanupError),\n       )\n     } else {\n       // Client-created values: the outage shows the attempt that crossed\n@@ -2913,7 +2924,7 @@\n             : `${reasonLaw} (health failureReason)`,\n           stepIndex,\n           describeEntry(first),\n-          reasons.map(String),\n+          reasons.map(describeOracleCleanupError),\n         )\n       }\n       let next = 0\n@@ -2925,7 +2936,7 @@\n             return next++ < want.length\n           }),\n         want.map(describeEntry),\n-        reasons.map(String),\n+        reasons.map(describeOracleCleanupError),\n       )\n       // HEALTH-1/2's frame retains every still-open delivery error. The\n       // retry policy above permits omitting later attempts of an outage;\n@@ -2940,7 +2951,7 @@\n           (reasons.length === 0 ||\n             health.failureReason?.cause === reasons.at(-1)),\n         requiredDeliveries.map(describeEntry),\n-        reasons.map(String),\n+        reasons.map(describeOracleCleanupError),\n       )\n     }\n     if (\n@@ -2960,7 +2971,9 @@\n             (want.rejectedWith === `adapter` ||\n               matches(got.rejected, want.rejectedWith)),\n       want,\n-      typeof got === `object` ? { rejected: String(got.rejected) } : got,\n+      typeof got === `object`\n+        ? { rejected: describeOracleCleanupError(got.rejected) }\n+        : got,\n     )\n     expected.syncWaits.forEach((wantWait, index) => {\n       const settled = syncWaits[index]!.current\n",
+    "packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts": "--- before/packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts\n+++ after/packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts\n@@ -7,6 +7,7 @@\n   eq,\n } from '@tanstack/db'\n import { ShapeStream } from '@electric-sql/client'\n+import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'\n import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'\n import { electricCollectionOptions } from '../src/electric'\n import {\n@@ -201,16 +202,21 @@\n })\n \n function violationCheckpoint(error: unknown): string {\n-  if (!(error instanceof Error)) return `${typeof error}:${String(error)}`\n-  const message = error.message.split(`\\n`)[0] ?? ``\n-  const checkpoint = /Electric oracle checkpoint timed out: (.+)/.exec(\n-    message,\n-  )?.[1]\n-  const assertion = /^(.+?): expected(?: |$)/.exec(message)?.[1]\n-  const sourceLine = error.stack?.match(\n-    /electric-sdk-delivery-oracle\\.property\\.test\\.ts:(\\d+):/,\n-  )?.[1]\n-  return `${error.name}:${checkpoint ?? assertion ?? sourceLine ?? message}`\n+  try {\n+    if (!(error instanceof Error))\n+      return `${typeof error}:${describeOracleCleanupError(error)}`\n+    const message = error.message.split(`\\n`)[0] ?? ``\n+    const checkpoint = /Electric oracle checkpoint timed out: (.+)/.exec(\n+      message,\n+    )?.[1]\n+    const assertion = /^(.+?): expected(?: |$)/.exec(message)?.[1]\n+    const sourceLine = error.stack?.match(\n+      /electric-sdk-delivery-oracle\\.property\\.test\\.ts:(\\d+):/,\n+    )?.[1]\n+    return `${error.name}:${checkpoint ?? assertion ?? sourceLine ?? message}`\n+  } catch {\n+    return `${typeof error}:${describeOracleCleanupError(error)}`\n+  }\n }\n \n // A shrink candidate at another checkpoint cannot replace the first mismatch.\n@@ -396,13 +402,19 @@\n     return false\n   }\n }\n-const asError = (failure: unknown): Error =>\n-  failure instanceof Error ? failure : new Error(String(failure))\n+const asError = (failure: unknown): Error => {\n+  try {\n+    if (failure instanceof Error) return failure\n+  } catch {\n+    // A hostile thrown value can reject prototype inspection too.\n+  }\n+  return new Error(describeOracleCleanupError(failure))\n+}\n /** A rejection that the old matchers did not accept stays a driver error: a\n  * new, unmarked error, so no comparison checkpoint inside it counts. */\n const unaccepted = (mutant: string, failure: unknown): Error =>\n   new Error(\n-    `${mutant} failed in a way that its calibration does not accept: ${String(failure)}`,\n+    `${mutant} failed in a way that its calibration does not accept: ${describeOracleCleanupError(failure)}`,\n   )\n const rejectionOf = (run: Promise<unknown>): Promise<unknown> =>\n   run.then(\n"
+  },
+  "cleanup_callers": {
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-persisted-demand.opfs.ts": [
+      {
+        "line": 4,
+        "text": "retainDirectDemandCleanup,"
+      },
+      {
+        "line": 20,
+        "text": "return retainDirectDemandCleanup("
+      }
+    ],
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts": [
+      {
+        "line": 27,
+        "text": "retainInitialReceiptCleanup,"
+      },
+      {
+        "line": 43,
+        "text": "withOracleCleanup,"
+      },
+      {
+        "line": 71,
+        "text": "await withOracleCleanup(async () => {"
+      },
+      {
+        "line": 141,
+        "text": "withOracleCleanup("
+      },
+      {
+        "line": 171,
+        "text": "return retainInitialReceiptCleanup("
+      }
+    ],
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-cursor-persisted-demand.opfs.ts": [
+      {
+        "line": 4,
+        "text": "retainCursorDemandCleanup,"
+      },
+      {
+        "line": 17,
+        "text": "return retainCursorDemandCleanup("
+      }
+    ],
+    "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts": [
+      {
+        "line": 7,
+        "text": "import { retainInitialReceiptCleanup } from '../../powersync-direct-collection/tests/persisted-initial-receipt-driver'"
+      },
+      {
+        "line": 35,
+        "text": "const completed = await retainInitialReceiptCleanup("
+      }
+    ],
+    "packages/db-adapter-conformance/tests/decode-refusal-driver.ts": [
+      {
+        "line": 8,
+        "text": "import { withOracleCleanup } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 95,
+        "text": "return withOracleCleanup(async () => {"
+      }
+    ],
+    "packages/browser-db-sqlite-persistence/e2e/query-cross-adapter-receiving.opfs.ts": [
+      {
+        "line": 8,
+        "text": "import { withOracleCleanup } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 34,
+        "text": "await withOracleCleanup("
+      }
+    ],
+    "packages/db-adapter-conformance/tests/eager-reload-driver.ts": [
+      {
+        "line": 13,
+        "text": "import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 130,
+        "text": "return retainOracleCleanupObservation<EagerReloadObservation>(async () => {"
+      },
+      {
+        "line": 275,
+        "text": "return retainOracleCleanupObservation<EagerGateObservation>(async () => {"
+      }
+    ],
+    "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts": [
+      {
+        "line": 20,
+        "text": "withOracleCleanup,"
+      },
+      {
+        "line": 261,
+        "text": "return await withOracleCleanup(async () => {"
+      },
+      {
+        "line": 623,
+        "text": "// A setup/body failure still uses withOracleCleanup's original exception."
+      }
+    ],
+    "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts": [
+      {
+        "line": 43,
+        "text": "import { controlledClient, withTestCleanup } from './helpers'"
+      },
+      {
+        "line": 165,
+        "text": "await withTestCleanup("
+      },
+      {
+        "line": 546,
+        "text": "await withTestCleanup("
+      }
+    ],
+    "packages/db-adapter-conformance/tests/neon/neon-shared-client-driver.ts": [
+      {
+        "line": 3,
+        "text": "import { retainOracleCleanupObservation } from '../../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 56,
+        "text": "return retainOracleCleanupObservation<NeonSharedObservation>(async () => {"
+      }
+    ],
+    "packages/db/tests/local-only-direct-write-oracle.test.ts": [
+      {
+        "line": 6,
+        "text": "import { withOracleCleanup } from './oracle-cleanup'"
+      },
+      {
+        "line": 331,
+        "text": "await withOracleCleanup(async () => {"
+      }
+    ],
+    "packages/db/tests/oracle-cleanup.test.ts": [
+      {
+        "line": 3,
+        "text": "import { retainOracleCleanupObservation } from './oracle-cleanup'"
+      },
+      {
+        "line": 11,
+        "text": "const completed = await retainOracleCleanupObservation("
+      },
+      {
+        "line": 41,
+        "text": "const outcome = retainOracleCleanupObservation("
+      },
+      {
+        "line": 64,
+        "text": "retainOracleCleanupObservation(() => Promise.resolve(raw), []),"
+      },
+      {
+        "line": 160,
+        "text": "const completed = await retainOracleCleanupObservation("
+      }
+    ],
+    "packages/db-adapter-conformance/tests/neon/neon-initial-receipt-driver.ts": [
+      {
+        "line": 13,
+        "text": "import { retainOracleCleanupObservation } from '../../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 77,
+        "text": "await retainOracleCleanupObservation<InitialReceiptObservation>(async () => {"
+      }
+    ],
+    "packages/electric-db-collection/tests/cross-adapter-receipt-driver.ts": [
+      {
+        "line": 21,
+        "text": "import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 32,
+        "text": "export async function retainInitialReceiptCleanup("
+      },
+      {
+        "line": 36,
+        "text": "return retainOracleCleanupObservation(run, cleanups)"
+      },
+      {
+        "line": 108,
+        "text": "return retainInitialReceiptCleanup(async () => {"
+      }
+    ],
+    "packages/db/tests/oracle-cleanup.ts": [
+      {
+        "line": 8,
+        "text": "export async function withOracleCleanup<T>("
+      },
+      {
+        "line": 77,
+        "text": "* still runs. Before recording completes, withOracleCleanup retains the body"
+      },
+      {
+        "line": 80,
+        "text": "export async function retainOracleCleanupObservation<"
+      },
+      {
+        "line": 88,
+        "text": "const result = await withOracleCleanup("
+      }
+    ],
+    "packages/electric-db-collection/tests/sdk-decoder-driver.ts": [
+      {
+        "line": 10,
+        "text": "retainOracleCleanupObservation,"
+      },
+      {
+        "line": 11,
+        "text": "withOracleCleanup,"
+      },
+      {
+        "line": 58,
+        "text": "return withOracleCleanup("
+      },
+      {
+        "line": 198,
+        "text": "await retainOracleCleanupObservation<DecoderObservation>(async () => {"
+      }
+    ],
+    "packages/electric-db-collection/tests/cross-adapter-receiving.ts": [
+      {
+        "line": 25,
+        "text": "retainInitialReceiptCleanup,"
+      },
+      {
+        "line": 67,
+        "text": "return retainInitialReceiptCleanup("
+      }
+    ],
+    "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts": [
+      {
+        "line": 8,
+        "text": "retainInitialReceiptCleanup,"
+      },
+      {
+        "line": 23,
+        "text": "const observed = await retainInitialReceiptCleanup("
+      }
+    ],
+    "packages/electric-db-collection/tests/cross-adapter-mutation-driver.ts": [
+      {
+        "line": 10,
+        "text": "import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 116,
+        "text": "// withOracleCleanup, which restores all three methods on success or failure."
+      },
+      {
+        "line": 159,
+        "text": "return retainOracleCleanupObservation(async () => {"
+      }
+    ],
+    "packages/db/tests/local-storage-write-order-driver.ts": [
+      {
+        "line": 9,
+        "text": "import { retainOracleCleanupObservation } from './oracle-cleanup'"
+      },
+      {
+        "line": 98,
+        "text": "const completed = await retainOracleCleanupObservation(async () => {"
+      }
+    ],
+    "packages/powersync-db-collection/tests/initial-receipt-common.ts": [
+      {
+        "line": 17,
+        "text": "import { retainInitialReceiptCleanup } from '../../powersync-direct-collection/tests/persisted-initial-receipt-driver'"
+      },
+      {
+        "line": 62,
+        "text": "return retainInitialReceiptCleanup(async () => {"
+      }
+    ],
+    "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts": [
+      {
+        "line": 20,
+        "text": "withElectricCleanup,"
+      },
+      {
+        "line": 201,
+        "text": "return withElectricCleanup("
+      }
+    ],
+    "packages/electric-db-collection/tests/electric-oracle-lifecycle.ts": [
+      {
+        "line": 71,
+        "text": "return withElectricCleanup(() => {"
+      },
+      {
+        "line": 77,
+        "text": "export async function withElectricCleanup<T>("
+      }
+    ],
+    "packages/powersync-db-collection/tests/native-receiving-host.ts": [
+      {
+        "line": 6,
+        "text": "import { withOracleCleanup } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 25,
+        "text": "withOracleCleanup("
+      }
+    ],
+    "packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts": [
+      {
+        "line": 48,
+        "text": "withElectricCleanup,"
+      },
+      {
+        "line": 656,
+        "text": "return withElectricCleanup(async () => {"
+      },
+      {
+        "line": 968,
+        "text": "await withElectricCleanup(async () => {"
+      },
+      {
+        "line": 1253,
+        "text": "await withElectricCleanup(async () => {"
+      },
+      {
+        "line": 1568,
+        "text": "await withElectricCleanup(async () => {"
+      },
+      {
+        "line": 1969,
+        "text": "await withElectricCleanup(async () => {"
+      }
+    ],
+    "packages/powersync-db-collection/tests/native-receiving-browser.ts": [
+      {
+        "line": 3,
+        "text": "import { withOracleCleanup } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 15,
+        "text": "withOracleCleanup("
+      }
+    ],
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-driver.ts": [
+      {
+        "line": 149,
+        "text": "export async function retainCursorDemandCleanup("
+      }
+    ],
+    "packages/powersync-db-collection/tests/receiving-cleanup.ts": [
+      {
+        "line": 3,
+        "text": "* fails. A failure before completion remains primary through withOracleCleanup;"
+      },
+      {
+        "line": 7,
+        "text": "import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 14,
+        "text": "return retainOracleCleanupObservation(run, cleanups)"
+      }
+    ],
+    "packages/powersync-direct-collection/tests/persisted-demand-cleanup.test.ts": [
+      {
+        "line": 4,
+        "text": "retainDirectDemandCleanup,"
+      },
+      {
+        "line": 21,
+        "text": "const retained = await retainDirectDemandCleanup("
+      },
+      {
+        "line": 40,
+        "text": "const failed = retainDirectDemandCleanup("
+      },
+      {
+        "line": 67,
+        "text": "const retained = await retainDirectDemandCleanup("
+      }
+    ],
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-cleanup.test.ts": [
+      {
+        "line": 4,
+        "text": "retainCursorDemandCleanup,"
+      },
+      {
+        "line": 25,
+        "text": "const retained = await retainCursorDemandCleanup("
+      },
+      {
+        "line": 66,
+        "text": "const failure: unknown = await retainCursorDemandCleanup("
+      }
+    ],
+    "packages/powersync-db-collection/tests/initial-receipt-worker.ts": [
+      {
+        "line": 6,
+        "text": "import { retainInitialReceiptCleanup } from '../../powersync-direct-collection/tests/persisted-initial-receipt-driver'"
+      },
+      {
+        "line": 21,
+        "text": "const observed = await retainInitialReceiptCleanup("
+      }
+    ],
+    "packages/powersync-direct-collection/tests/persisted-startup-driver.ts": [
+      {
+        "line": 21,
+        "text": "import { withOracleCleanup } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 62,
+        "text": "withOracleCleanup(() => collection.cleanup(), [source.dispose]),"
+      }
+    ],
+    "packages/powersync-direct-collection/tests/persisted-initial-receipt-driver.ts": [
+      {
+        "line": 15,
+        "text": "import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 27,
+        "text": "export async function retainInitialReceiptCleanup("
+      },
+      {
+        "line": 31,
+        "text": "return retainOracleCleanupObservation(run, cleanups)"
+      },
+      {
+        "line": 74,
+        "text": "return retainInitialReceiptCleanup(async () => {"
+      }
+    ],
+    "packages/powersync-direct-collection/tests/mutation-confirmation-driver.ts": [
+      {
+        "line": 11,
+        "text": "import { withOracleCleanup } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 261,
+        "text": "return withOracleCleanup(async () => {"
+      }
+    ],
+    "packages/powersync-direct-collection/tests/cursor-persisted-demand-oracle.property.test.ts": [
+      {
+        "line": 10,
+        "text": "retainCursorDemandCleanup,"
+      },
+      {
+        "line": 18,
+        "text": "return retainCursorDemandCleanup("
+      }
+    ],
+    "packages/powersync-direct-collection/tests/persisted-demand-conformance-oracle.test.ts": [
+      {
+        "line": 10,
+        "text": "retainDirectDemandCleanup,"
+      },
+      {
+        "line": 18,
+        "text": "return retainDirectDemandCleanup("
+      }
+    ],
+    "packages/query-db-collection/tests/failing-queries-driver.ts": [
+      {
+        "line": 6,
+        "text": "import { withOracleCleanup } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 116,
+        "text": "return withOracleCleanup(async () => {"
+      }
+    ],
+    "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts": [
+      {
+        "line": 9,
+        "text": "import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 28,
+        "text": "const observed = await retainOracleCleanupObservation("
+      }
+    ],
+    "packages/powersync-direct-collection/tests/persisted-initial-receipt-cleanup.test.ts": [
+      {
+        "line": 5,
+        "text": "import { retainInitialReceiptCleanup } from './persisted-initial-receipt-driver'"
+      },
+      {
+        "line": 24,
+        "text": "const recorded = await retainInitialReceiptCleanup("
+      }
+    ],
+    "packages/powersync-direct-collection/tests/persisted-demand-driver.ts": [
+      {
+        "line": 198,
+        "text": "export async function retainDirectDemandCleanup("
+      }
+    ],
+    "packages/rxdb-db-collection/tests/persisted-initial-receipt-driver.ts": [
+      {
+        "line": 16,
+        "text": "import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 62,
+        "text": "return retainOracleCleanupObservation<InitialReceiptObservation>(async () => {"
+      }
+    ],
+    "packages/rxdb-db-collection/tests/mutation-driver.ts": [
+      {
+        "line": 11,
+        "text": "import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 249,
+        "text": "return retainOracleCleanupObservation<RxdbMutationResult>(async () => {"
+      }
+    ],
+    "packages/powersync-direct-collection/tests/shared-client-driver.ts": [
+      {
+        "line": 12,
+        "text": "import { withOracleCleanup } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 132,
+        "text": "return withOracleCleanup("
+      }
+    ],
+    "packages/query-db-collection/tests/failing-queries-oracle.test.ts": [
+      {
+        "line": 28,
+        "text": "import { withOracleCleanup } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 70,
+        "text": "return withOracleCleanup("
+      }
+    ],
+    "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts": [
+      {
+        "line": 5,
+        "text": "import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 20,
+        "text": "const observed = await retainOracleCleanupObservation("
+      }
+    ],
+    "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts": [
+      {
+        "line": 8,
+        "text": "retainInitialReceiptCleanup,"
+      },
+      {
+        "line": 22,
+        "text": "const observed = await retainInitialReceiptCleanup("
+      }
+    ],
+    "packages/rxdb-db-collection/tests/shared-client-driver.ts": [
+      {
+        "line": 11,
+        "text": "import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 110,
+        "text": "return retainOracleCleanupObservation<RxdbSharedObservation>(async () => {"
+      }
+    ],
+    "packages/rxdb-db-collection/tests/initial-receipt-driver.ts": [
+      {
+        "line": 12,
+        "text": "import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'"
+      },
+      {
+        "line": 109,
+        "text": "await retainOracleCleanupObservation<InitialReceiptObservation>(async () => {"
+      }
+    ],
+    "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts": [
+      {
+        "line": 10,
+        "text": "withOracleCleanup,"
+      },
+      {
+        "line": 238,
+        "text": "return withOracleCleanup("
+      }
+    ]
+  },
+  "control_results": {
+    "source-original": {
+      "controls": 108,
+      "outcomes": {
+        "PASS": 59,
+        "FAIL": 49
+      },
+      "artifact": ".review-2377/cleanup-source-controls-original.json",
+      "sha256": "b6065f2368776459a6705965ededd10c4f5652b6789a5dabd29f68e7d54ad50e",
+      "results": [
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "5f8e040bb99e0863aab44a49cd7b277d7da78ecd6ce32ef9a2d45980b8815b54",
+          "target": "request-rejection",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "5f8e040bb99e0863aab44a49cd7b277d7da78ecd6ce32ef9a2d45980b8815b54",
+          "target": "request-rejection",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "5f8e040bb99e0863aab44a49cd7b277d7da78ecd6ce32ef9a2d45980b8815b54",
+          "target": "request-rejection",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "5f8e040bb99e0863aab44a49cd7b277d7da78ecd6ce32ef9a2d45980b8815b54",
+          "target": "request-rejection",
+          "case": "throwing-prototype",
+          "verdict": "FAIL",
+          "failure": "Error: prototype failed"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "5f8e040bb99e0863aab44a49cd7b277d7da78ecd6ce32ef9a2d45980b8815b54",
+          "target": "request-rejection",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "5f8e040bb99e0863aab44a49cd7b277d7da78ecd6ce32ef9a2d45980b8815b54",
+          "target": "request-rejection",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "5f8e040bb99e0863aab44a49cd7b277d7da78ecd6ce32ef9a2d45980b8815b54",
+          "target": "catch",
+          "case": "ordinary",
+          "verdict": "FAIL",
+          "failure": "Error: Completed raw or prior diagnostic lost"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "5f8e040bb99e0863aab44a49cd7b277d7da78ecd6ce32ef9a2d45980b8815b54",
+          "target": "catch",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "5f8e040bb99e0863aab44a49cd7b277d7da78ecd6ce32ef9a2d45980b8815b54",
+          "target": "catch",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "5f8e040bb99e0863aab44a49cd7b277d7da78ecd6ce32ef9a2d45980b8815b54",
+          "target": "catch",
+          "case": "throwing-prototype",
+          "verdict": "FAIL",
+          "failure": "Error: prototype failed"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "5f8e040bb99e0863aab44a49cd7b277d7da78ecd6ce32ef9a2d45980b8815b54",
+          "target": "catch",
+          "case": "cyclic-aggregate",
+          "verdict": "FAIL",
+          "failure": "Error: Completed raw or prior diagnostic lost"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "5f8e040bb99e0863aab44a49cd7b277d7da78ecd6ce32ef9a2d45980b8815b54",
+          "target": "catch",
+          "case": "throwing-aggregate-details",
+          "verdict": "FAIL",
+          "failure": "Error: details failed"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts",
+          "source": "a92ce38add10d2399c742fded6f2b768bdec7d247e758e344d70c759dec0fa74",
+          "target": "catch",
+          "case": "ordinary",
+          "verdict": "FAIL",
+          "failure": "Error: Completed raw or prior diagnostic lost"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts",
+          "source": "a92ce38add10d2399c742fded6f2b768bdec7d247e758e344d70c759dec0fa74",
+          "target": "catch",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts",
+          "source": "a92ce38add10d2399c742fded6f2b768bdec7d247e758e344d70c759dec0fa74",
+          "target": "catch",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts",
+          "source": "a92ce38add10d2399c742fded6f2b768bdec7d247e758e344d70c759dec0fa74",
+          "target": "catch",
+          "case": "throwing-prototype",
+          "verdict": "FAIL",
+          "failure": "Error: prototype failed"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts",
+          "source": "a92ce38add10d2399c742fded6f2b768bdec7d247e758e344d70c759dec0fa74",
+          "target": "catch",
+          "case": "cyclic-aggregate",
+          "verdict": "FAIL",
+          "failure": "Error: Completed raw or prior diagnostic lost"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts",
+          "source": "a92ce38add10d2399c742fded6f2b768bdec7d247e758e344d70c759dec0fa74",
+          "target": "catch",
+          "case": "throwing-aggregate-details",
+          "verdict": "FAIL",
+          "failure": "Error: details failed"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "0838b84009667a824d350945762499acf4960b1abccd476d6a91615045e0b064",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "0838b84009667a824d350945762499acf4960b1abccd476d6a91615045e0b064",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "0838b84009667a824d350945762499acf4960b1abccd476d6a91615045e0b064",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "0838b84009667a824d350945762499acf4960b1abccd476d6a91615045e0b064",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "0838b84009667a824d350945762499acf4960b1abccd476d6a91615045e0b064",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "0838b84009667a824d350945762499acf4960b1abccd476d6a91615045e0b064",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "0838b84009667a824d350945762499acf4960b1abccd476d6a91615045e0b064",
+          "target": "catch",
+          "case": "ordinary",
+          "verdict": "FAIL",
+          "failure": "Error: Completed raw or prior diagnostic lost"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "0838b84009667a824d350945762499acf4960b1abccd476d6a91615045e0b064",
+          "target": "catch",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "0838b84009667a824d350945762499acf4960b1abccd476d6a91615045e0b064",
+          "target": "catch",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "0838b84009667a824d350945762499acf4960b1abccd476d6a91615045e0b064",
+          "target": "catch",
+          "case": "throwing-prototype",
+          "verdict": "FAIL",
+          "failure": "Error: Completed raw or prior diagnostic lost"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "0838b84009667a824d350945762499acf4960b1abccd476d6a91615045e0b064",
+          "target": "catch",
+          "case": "cyclic-aggregate",
+          "verdict": "FAIL",
+          "failure": "Error: Completed raw or prior diagnostic lost"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "0838b84009667a824d350945762499acf4960b1abccd476d6a91615045e0b064",
+          "target": "catch",
+          "case": "throwing-aggregate-details",
+          "verdict": "FAIL",
+          "failure": "Error: Completed raw or prior diagnostic lost"
+        },
+        {
+          "path": "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts",
+          "source": "a66d3d42acbec2bba8c738bd5614647826bc84f0ecb74afad451c1467a423c30",
+          "target": "cleanup-wrapper",
+          "case": "ordinary",
+          "verdict": "PASS",
+          "calls": [
+            "first",
+            "later"
+          ]
+        },
+        {
+          "path": "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts",
+          "source": "a66d3d42acbec2bba8c738bd5614647826bc84f0ecb74afad451c1467a423c30",
+          "target": "cleanup-wrapper",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value",
+          "calls": [
+            "first",
+            "later"
+          ]
+        },
+        {
+          "path": "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts",
+          "source": "a66d3d42acbec2bba8c738bd5614647826bc84f0ecb74afad451c1467a423c30",
+          "target": "cleanup-wrapper",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed",
+          "calls": [
+            "first",
+            "later"
+          ]
+        },
+        {
+          "path": "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts",
+          "source": "a66d3d42acbec2bba8c738bd5614647826bc84f0ecb74afad451c1467a423c30",
+          "target": "cleanup-wrapper",
+          "case": "throwing-prototype",
+          "verdict": "PASS",
+          "calls": [
+            "first",
+            "later"
+          ]
+        },
+        {
+          "path": "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts",
+          "source": "a66d3d42acbec2bba8c738bd5614647826bc84f0ecb74afad451c1467a423c30",
+          "target": "cleanup-wrapper",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS",
+          "calls": [
+            "first",
+            "later"
+          ]
+        },
+        {
+          "path": "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts",
+          "source": "a66d3d42acbec2bba8c738bd5614647826bc84f0ecb74afad451c1467a423c30",
+          "target": "cleanup-wrapper",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS",
+          "calls": [
+            "first",
+            "later"
+          ]
+        },
+        {
+          "path": "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts",
+          "source": "af2ca140c7ad4b485542b018be14618ca0a1eb566b50c2def1ea8dd30ac5473e",
+          "target": "cleanup-observer",
+          "case": "ordinary",
+          "verdict": "PASS",
+          "calls": [
+            "later"
+          ]
+        },
+        {
+          "path": "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts",
+          "source": "af2ca140c7ad4b485542b018be14618ca0a1eb566b50c2def1ea8dd30ac5473e",
+          "target": "cleanup-observer",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value",
+          "calls": [
+            "later"
+          ]
+        },
+        {
+          "path": "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts",
+          "source": "af2ca140c7ad4b485542b018be14618ca0a1eb566b50c2def1ea8dd30ac5473e",
+          "target": "cleanup-observer",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed",
+          "calls": [
+            "later"
+          ]
+        },
+        {
+          "path": "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts",
+          "source": "af2ca140c7ad4b485542b018be14618ca0a1eb566b50c2def1ea8dd30ac5473e",
+          "target": "cleanup-observer",
+          "case": "throwing-prototype",
+          "verdict": "PASS",
+          "calls": [
+            "later"
+          ]
+        },
+        {
+          "path": "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts",
+          "source": "af2ca140c7ad4b485542b018be14618ca0a1eb566b50c2def1ea8dd30ac5473e",
+          "target": "cleanup-observer",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS",
+          "calls": [
+            "later"
+          ]
+        },
+        {
+          "path": "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts",
+          "source": "af2ca140c7ad4b485542b018be14618ca0a1eb566b50c2def1ea8dd30ac5473e",
+          "target": "cleanup-observer",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS",
+          "calls": [
+            "later"
+          ]
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+          "source": "9ea797f3d550b54413222060fcec242c3c3a28e8d69b053b047958dd08d0683f",
+          "target": "detached-browser",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+          "source": "9ea797f3d550b54413222060fcec242c3c3a28e8d69b053b047958dd08d0683f",
+          "target": "detached-browser",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+          "source": "9ea797f3d550b54413222060fcec242c3c3a28e8d69b053b047958dd08d0683f",
+          "target": "detached-browser",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+          "source": "9ea797f3d550b54413222060fcec242c3c3a28e8d69b053b047958dd08d0683f",
+          "target": "detached-browser",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+          "source": "9ea797f3d550b54413222060fcec242c3c3a28e8d69b053b047958dd08d0683f",
+          "target": "detached-browser",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+          "source": "9ea797f3d550b54413222060fcec242c3c3a28e8d69b053b047958dd08d0683f",
+          "target": "detached-browser",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts",
+          "source": "94c8b9c17a2861bbe9a14f07e5a7cb24848652fe6a295bed25fca2181b197eb9",
+          "target": "detached-browser",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts",
+          "source": "94c8b9c17a2861bbe9a14f07e5a7cb24848652fe6a295bed25fca2181b197eb9",
+          "target": "detached-browser",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts",
+          "source": "94c8b9c17a2861bbe9a14f07e5a7cb24848652fe6a295bed25fca2181b197eb9",
+          "target": "detached-browser",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts",
+          "source": "94c8b9c17a2861bbe9a14f07e5a7cb24848652fe6a295bed25fca2181b197eb9",
+          "target": "detached-browser",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts",
+          "source": "94c8b9c17a2861bbe9a14f07e5a7cb24848652fe6a295bed25fca2181b197eb9",
+          "target": "detached-browser",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts",
+          "source": "94c8b9c17a2861bbe9a14f07e5a7cb24848652fe6a295bed25fca2181b197eb9",
+          "target": "detached-browser",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+          "source": "3b9f1cda3552013db268002b78c6c02d1815862e1caa067889855c5142712532",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+          "source": "3b9f1cda3552013db268002b78c6c02d1815862e1caa067889855c5142712532",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+          "source": "3b9f1cda3552013db268002b78c6c02d1815862e1caa067889855c5142712532",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+          "source": "3b9f1cda3552013db268002b78c6c02d1815862e1caa067889855c5142712532",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+          "source": "3b9f1cda3552013db268002b78c6c02d1815862e1caa067889855c5142712532",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+          "source": "3b9f1cda3552013db268002b78c6c02d1815862e1caa067889855c5142712532",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/initial-receipt-worker.ts",
+          "source": "0c815ad1e5fbce157f769e050b6bfdc5a124fc6b0b656e032ff7ad5d4d04d66a",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/initial-receipt-worker.ts",
+          "source": "0c815ad1e5fbce157f769e050b6bfdc5a124fc6b0b656e032ff7ad5d4d04d66a",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/initial-receipt-worker.ts",
+          "source": "0c815ad1e5fbce157f769e050b6bfdc5a124fc6b0b656e032ff7ad5d4d04d66a",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/initial-receipt-worker.ts",
+          "source": "0c815ad1e5fbce157f769e050b6bfdc5a124fc6b0b656e032ff7ad5d4d04d66a",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/initial-receipt-worker.ts",
+          "source": "0c815ad1e5fbce157f769e050b6bfdc5a124fc6b0b656e032ff7ad5d4d04d66a",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/initial-receipt-worker.ts",
+          "source": "0c815ad1e5fbce157f769e050b6bfdc5a124fc6b0b656e032ff7ad5d4d04d66a",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "2e888b83d1d72a321073b9636b6d09d62cb100bdd24a805e08dcab32dc6e518a",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "2e888b83d1d72a321073b9636b6d09d62cb100bdd24a805e08dcab32dc6e518a",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "2e888b83d1d72a321073b9636b6d09d62cb100bdd24a805e08dcab32dc6e518a",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "2e888b83d1d72a321073b9636b6d09d62cb100bdd24a805e08dcab32dc6e518a",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "2e888b83d1d72a321073b9636b6d09d62cb100bdd24a805e08dcab32dc6e518a",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "2e888b83d1d72a321073b9636b6d09d62cb100bdd24a805e08dcab32dc6e518a",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts",
+          "source": "b2d7e94b458647362642b7c301f83cd091b7af27ed5f0ce598f95c9fd7fc27c9",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts",
+          "source": "b2d7e94b458647362642b7c301f83cd091b7af27ed5f0ce598f95c9fd7fc27c9",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts",
+          "source": "b2d7e94b458647362642b7c301f83cd091b7af27ed5f0ce598f95c9fd7fc27c9",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts",
+          "source": "b2d7e94b458647362642b7c301f83cd091b7af27ed5f0ce598f95c9fd7fc27c9",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts",
+          "source": "b2d7e94b458647362642b7c301f83cd091b7af27ed5f0ce598f95c9fd7fc27c9",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts",
+          "source": "b2d7e94b458647362642b7c301f83cd091b7af27ed5f0ce598f95c9fd7fc27c9",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receiving.ts",
+          "source": "13c1d6437c0bab760e0a10e5c8f10ee9c15162f655cf2239664953846422cfbd",
+          "target": "detached-browser",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receiving.ts",
+          "source": "13c1d6437c0bab760e0a10e5c8f10ee9c15162f655cf2239664953846422cfbd",
+          "target": "detached-browser",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receiving.ts",
+          "source": "13c1d6437c0bab760e0a10e5c8f10ee9c15162f655cf2239664953846422cfbd",
+          "target": "detached-browser",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receiving.ts",
+          "source": "13c1d6437c0bab760e0a10e5c8f10ee9c15162f655cf2239664953846422cfbd",
+          "target": "detached-browser",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receiving.ts",
+          "source": "13c1d6437c0bab760e0a10e5c8f10ee9c15162f655cf2239664953846422cfbd",
+          "target": "detached-browser",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receiving.ts",
+          "source": "13c1d6437c0bab760e0a10e5c8f10ee9c15162f655cf2239664953846422cfbd",
+          "target": "detached-browser",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/initial-receipt-worker.ts",
+          "source": "54c5cab1a758e23e377c559b5562d7e2e2848e5629262e1eb55f0eaf36b0ef89",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/initial-receipt-worker.ts",
+          "source": "54c5cab1a758e23e377c559b5562d7e2e2848e5629262e1eb55f0eaf36b0ef89",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/initial-receipt-worker.ts",
+          "source": "54c5cab1a758e23e377c559b5562d7e2e2848e5629262e1eb55f0eaf36b0ef89",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/initial-receipt-worker.ts",
+          "source": "54c5cab1a758e23e377c559b5562d7e2e2848e5629262e1eb55f0eaf36b0ef89",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/initial-receipt-worker.ts",
+          "source": "54c5cab1a758e23e377c559b5562d7e2e2848e5629262e1eb55f0eaf36b0ef89",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/initial-receipt-worker.ts",
+          "source": "54c5cab1a758e23e377c559b5562d7e2e2848e5629262e1eb55f0eaf36b0ef89",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "6b23294ccfb8bb1ba0a38fd5a343e5ad2590676a4826d2666c06ab4c5dc9b338",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "6b23294ccfb8bb1ba0a38fd5a343e5ad2590676a4826d2666c06ab4c5dc9b338",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "6b23294ccfb8bb1ba0a38fd5a343e5ad2590676a4826d2666c06ab4c5dc9b338",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "6b23294ccfb8bb1ba0a38fd5a343e5ad2590676a4826d2666c06ab4c5dc9b338",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "6b23294ccfb8bb1ba0a38fd5a343e5ad2590676a4826d2666c06ab4c5dc9b338",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "6b23294ccfb8bb1ba0a38fd5a343e5ad2590676a4826d2666c06ab4c5dc9b338",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+          "source": "fe6e641f615149573523a11d6c29b79d3b90e13b793922c1dcdcb2a5cf27a0a2",
+          "target": "detached-browser",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+          "source": "fe6e641f615149573523a11d6c29b79d3b90e13b793922c1dcdcb2a5cf27a0a2",
+          "target": "detached-browser",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+          "source": "fe6e641f615149573523a11d6c29b79d3b90e13b793922c1dcdcb2a5cf27a0a2",
+          "target": "detached-browser",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+          "source": "fe6e641f615149573523a11d6c29b79d3b90e13b793922c1dcdcb2a5cf27a0a2",
+          "target": "detached-browser",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+          "source": "fe6e641f615149573523a11d6c29b79d3b90e13b793922c1dcdcb2a5cf27a0a2",
+          "target": "detached-browser",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+          "source": "fe6e641f615149573523a11d6c29b79d3b90e13b793922c1dcdcb2a5cf27a0a2",
+          "target": "detached-browser",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts",
+          "source": "4a33199ddd29a1661bc1a559356dce46fa3a2606c763daa0ea700f723ea7e05f",
+          "target": "detached-browser",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts",
+          "source": "4a33199ddd29a1661bc1a559356dce46fa3a2606c763daa0ea700f723ea7e05f",
+          "target": "detached-browser",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts",
+          "source": "4a33199ddd29a1661bc1a559356dce46fa3a2606c763daa0ea700f723ea7e05f",
+          "target": "detached-browser",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion failed"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts",
+          "source": "4a33199ddd29a1661bc1a559356dce46fa3a2606c763daa0ea700f723ea7e05f",
+          "target": "detached-browser",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts",
+          "source": "4a33199ddd29a1661bc1a559356dce46fa3a2606c763daa0ea700f723ea7e05f",
+          "target": "detached-browser",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts",
+          "source": "4a33199ddd29a1661bc1a559356dce46fa3a2606c763daa0ea700f723ea7e05f",
+          "target": "detached-browser",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        }
+      ]
+    },
+    "source-repaired": {
+      "controls": 108,
+      "outcomes": {
+        "PASS": 108
+      },
+      "artifact": ".review-2377/cleanup-source-controls-repaired.json",
+      "sha256": "9de5cb81d617b507e5df2772e67e5b001b2187bae0f86196bec2db9a8cb19831",
+      "results": [
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "3f8185ee7c0c703780903b30a9825c85c67ac25cb2c006204da7c30556d0668c",
+          "target": "request-rejection",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "3f8185ee7c0c703780903b30a9825c85c67ac25cb2c006204da7c30556d0668c",
+          "target": "request-rejection",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "3f8185ee7c0c703780903b30a9825c85c67ac25cb2c006204da7c30556d0668c",
+          "target": "request-rejection",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "3f8185ee7c0c703780903b30a9825c85c67ac25cb2c006204da7c30556d0668c",
+          "target": "request-rejection",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "3f8185ee7c0c703780903b30a9825c85c67ac25cb2c006204da7c30556d0668c",
+          "target": "request-rejection",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "3f8185ee7c0c703780903b30a9825c85c67ac25cb2c006204da7c30556d0668c",
+          "target": "request-rejection",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "3f8185ee7c0c703780903b30a9825c85c67ac25cb2c006204da7c30556d0668c",
+          "target": "catch",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "3f8185ee7c0c703780903b30a9825c85c67ac25cb2c006204da7c30556d0668c",
+          "target": "catch",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "3f8185ee7c0c703780903b30a9825c85c67ac25cb2c006204da7c30556d0668c",
+          "target": "catch",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "3f8185ee7c0c703780903b30a9825c85c67ac25cb2c006204da7c30556d0668c",
+          "target": "catch",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "3f8185ee7c0c703780903b30a9825c85c67ac25cb2c006204da7c30556d0668c",
+          "target": "catch",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts",
+          "source": "3f8185ee7c0c703780903b30a9825c85c67ac25cb2c006204da7c30556d0668c",
+          "target": "catch",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts",
+          "source": "f680ce1011bc71545687b76598d81bdcb965c8072ec2d6bc3f72bae45f88e238",
+          "target": "catch",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts",
+          "source": "f680ce1011bc71545687b76598d81bdcb965c8072ec2d6bc3f72bae45f88e238",
+          "target": "catch",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts",
+          "source": "f680ce1011bc71545687b76598d81bdcb965c8072ec2d6bc3f72bae45f88e238",
+          "target": "catch",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts",
+          "source": "f680ce1011bc71545687b76598d81bdcb965c8072ec2d6bc3f72bae45f88e238",
+          "target": "catch",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts",
+          "source": "f680ce1011bc71545687b76598d81bdcb965c8072ec2d6bc3f72bae45f88e238",
+          "target": "catch",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/snapshot-oracle.property.test.ts",
+          "source": "f680ce1011bc71545687b76598d81bdcb965c8072ec2d6bc3f72bae45f88e238",
+          "target": "catch",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "12997582bf30fa5a628583301453835e9349c8b2e715dd7b5e30b2afe5780f16",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "12997582bf30fa5a628583301453835e9349c8b2e715dd7b5e30b2afe5780f16",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "12997582bf30fa5a628583301453835e9349c8b2e715dd7b5e30b2afe5780f16",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "12997582bf30fa5a628583301453835e9349c8b2e715dd7b5e30b2afe5780f16",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "12997582bf30fa5a628583301453835e9349c8b2e715dd7b5e30b2afe5780f16",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "12997582bf30fa5a628583301453835e9349c8b2e715dd7b5e30b2afe5780f16",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "12997582bf30fa5a628583301453835e9349c8b2e715dd7b5e30b2afe5780f16",
+          "target": "catch",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "12997582bf30fa5a628583301453835e9349c8b2e715dd7b5e30b2afe5780f16",
+          "target": "catch",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "12997582bf30fa5a628583301453835e9349c8b2e715dd7b5e30b2afe5780f16",
+          "target": "catch",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "12997582bf30fa5a628583301453835e9349c8b2e715dd7b5e30b2afe5780f16",
+          "target": "catch",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "12997582bf30fa5a628583301453835e9349c8b2e715dd7b5e30b2afe5780f16",
+          "target": "catch",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/convex-db-collection/tests/initial-receipt-worker.ts",
+          "source": "12997582bf30fa5a628583301453835e9349c8b2e715dd7b5e30b2afe5780f16",
+          "target": "catch",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts",
+          "source": "02b9afa128f5a7aec1cedb07bd43ee49e3652d644767c118b174ce422001516e",
+          "target": "cleanup-wrapper",
+          "case": "ordinary",
+          "verdict": "PASS",
+          "calls": [
+            "first",
+            "later"
+          ]
+        },
+        {
+          "path": "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts",
+          "source": "02b9afa128f5a7aec1cedb07bd43ee49e3652d644767c118b174ce422001516e",
+          "target": "cleanup-wrapper",
+          "case": "null-prototype",
+          "verdict": "PASS",
+          "calls": [
+            "first",
+            "later"
+          ]
+        },
+        {
+          "path": "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts",
+          "source": "02b9afa128f5a7aec1cedb07bd43ee49e3652d644767c118b174ce422001516e",
+          "target": "cleanup-wrapper",
+          "case": "throwing-conversion",
+          "verdict": "PASS",
+          "calls": [
+            "first",
+            "later"
+          ]
+        },
+        {
+          "path": "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts",
+          "source": "02b9afa128f5a7aec1cedb07bd43ee49e3652d644767c118b174ce422001516e",
+          "target": "cleanup-wrapper",
+          "case": "throwing-prototype",
+          "verdict": "PASS",
+          "calls": [
+            "first",
+            "later"
+          ]
+        },
+        {
+          "path": "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts",
+          "source": "02b9afa128f5a7aec1cedb07bd43ee49e3652d644767c118b174ce422001516e",
+          "target": "cleanup-wrapper",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS",
+          "calls": [
+            "first",
+            "later"
+          ]
+        },
+        {
+          "path": "packages/trailbase-db-collection/tests/mutation-events-sdk-driver.ts",
+          "source": "02b9afa128f5a7aec1cedb07bd43ee49e3652d644767c118b174ce422001516e",
+          "target": "cleanup-wrapper",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS",
+          "calls": [
+            "first",
+            "later"
+          ]
+        },
+        {
+          "path": "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts",
+          "source": "74bc92d354003a4b98f5510dbaef4c231d51de8f44fb1f8ef4c68292d62bda8e",
+          "target": "cleanup-observer",
+          "case": "ordinary",
+          "verdict": "PASS",
+          "calls": [
+            "later"
+          ]
+        },
+        {
+          "path": "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts",
+          "source": "74bc92d354003a4b98f5510dbaef4c231d51de8f44fb1f8ef4c68292d62bda8e",
+          "target": "cleanup-observer",
+          "case": "null-prototype",
+          "verdict": "PASS",
+          "calls": [
+            "later"
+          ]
+        },
+        {
+          "path": "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts",
+          "source": "74bc92d354003a4b98f5510dbaef4c231d51de8f44fb1f8ef4c68292d62bda8e",
+          "target": "cleanup-observer",
+          "case": "throwing-conversion",
+          "verdict": "PASS",
+          "calls": [
+            "later"
+          ]
+        },
+        {
+          "path": "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts",
+          "source": "74bc92d354003a4b98f5510dbaef4c231d51de8f44fb1f8ef4c68292d62bda8e",
+          "target": "cleanup-observer",
+          "case": "throwing-prototype",
+          "verdict": "PASS",
+          "calls": [
+            "later"
+          ]
+        },
+        {
+          "path": "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts",
+          "source": "74bc92d354003a4b98f5510dbaef4c231d51de8f44fb1f8ef4c68292d62bda8e",
+          "target": "cleanup-observer",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS",
+          "calls": [
+            "later"
+          ]
+        },
+        {
+          "path": "packages/electric-db-collection/tests/sdk-snapshot-delivery-oracle.ts",
+          "source": "74bc92d354003a4b98f5510dbaef4c231d51de8f44fb1f8ef4c68292d62bda8e",
+          "target": "cleanup-observer",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS",
+          "calls": [
+            "later"
+          ]
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+          "source": "2bff8e733ab1af5b0044534c2ebd6d5965438d9bb7cb3c07d78a909d2e4711eb",
+          "target": "detached-browser",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+          "source": "2bff8e733ab1af5b0044534c2ebd6d5965438d9bb7cb3c07d78a909d2e4711eb",
+          "target": "detached-browser",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+          "source": "2bff8e733ab1af5b0044534c2ebd6d5965438d9bb7cb3c07d78a909d2e4711eb",
+          "target": "detached-browser",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+          "source": "2bff8e733ab1af5b0044534c2ebd6d5965438d9bb7cb3c07d78a909d2e4711eb",
+          "target": "detached-browser",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+          "source": "2bff8e733ab1af5b0044534c2ebd6d5965438d9bb7cb3c07d78a909d2e4711eb",
+          "target": "detached-browser",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.ts",
+          "source": "2bff8e733ab1af5b0044534c2ebd6d5965438d9bb7cb3c07d78a909d2e4711eb",
+          "target": "detached-browser",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts",
+          "source": "e9a6d9842436f808437117711ccde977bccee97d57da04d3f9b735e08b010de9",
+          "target": "detached-browser",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts",
+          "source": "e9a6d9842436f808437117711ccde977bccee97d57da04d3f9b735e08b010de9",
+          "target": "detached-browser",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts",
+          "source": "e9a6d9842436f808437117711ccde977bccee97d57da04d3f9b735e08b010de9",
+          "target": "detached-browser",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts",
+          "source": "e9a6d9842436f808437117711ccde977bccee97d57da04d3f9b735e08b010de9",
+          "target": "detached-browser",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts",
+          "source": "e9a6d9842436f808437117711ccde977bccee97d57da04d3f9b735e08b010de9",
+          "target": "detached-browser",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts",
+          "source": "e9a6d9842436f808437117711ccde977bccee97d57da04d3f9b735e08b010de9",
+          "target": "detached-browser",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+          "source": "e631c48ac80892cb0a10dcbd98cbbd781945a3b60e6a9d64a24bf23dc906aaf2",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+          "source": "e631c48ac80892cb0a10dcbd98cbbd781945a3b60e6a9d64a24bf23dc906aaf2",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+          "source": "e631c48ac80892cb0a10dcbd98cbbd781945a3b60e6a9d64a24bf23dc906aaf2",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+          "source": "e631c48ac80892cb0a10dcbd98cbbd781945a3b60e6a9d64a24bf23dc906aaf2",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+          "source": "e631c48ac80892cb0a10dcbd98cbbd781945a3b60e6a9d64a24bf23dc906aaf2",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-db-collection/tests/initial-receipt-worker.ts",
+          "source": "e631c48ac80892cb0a10dcbd98cbbd781945a3b60e6a9d64a24bf23dc906aaf2",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/initial-receipt-worker.ts",
+          "source": "d57f47ec1069cc401adea51a262165f44eb373618a1b0729d9994980d96bbc50",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/initial-receipt-worker.ts",
+          "source": "d57f47ec1069cc401adea51a262165f44eb373618a1b0729d9994980d96bbc50",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/initial-receipt-worker.ts",
+          "source": "d57f47ec1069cc401adea51a262165f44eb373618a1b0729d9994980d96bbc50",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/initial-receipt-worker.ts",
+          "source": "d57f47ec1069cc401adea51a262165f44eb373618a1b0729d9994980d96bbc50",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/initial-receipt-worker.ts",
+          "source": "d57f47ec1069cc401adea51a262165f44eb373618a1b0729d9994980d96bbc50",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/initial-receipt-worker.ts",
+          "source": "d57f47ec1069cc401adea51a262165f44eb373618a1b0729d9994980d96bbc50",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "7aa74f15a846cc2fd546c0213e2790dc5678fbab5bf94aa12e32be21bc0979c0",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "7aa74f15a846cc2fd546c0213e2790dc5678fbab5bf94aa12e32be21bc0979c0",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "7aa74f15a846cc2fd546c0213e2790dc5678fbab5bf94aa12e32be21bc0979c0",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "7aa74f15a846cc2fd546c0213e2790dc5678fbab5bf94aa12e32be21bc0979c0",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "7aa74f15a846cc2fd546c0213e2790dc5678fbab5bf94aa12e32be21bc0979c0",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/powersync-direct-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "7aa74f15a846cc2fd546c0213e2790dc5678fbab5bf94aa12e32be21bc0979c0",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts",
+          "source": "28611c1711e1c4bbe54f8b3bfe491a5e897bf6f14e6ea48d159d06f2d04e1b77",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts",
+          "source": "28611c1711e1c4bbe54f8b3bfe491a5e897bf6f14e6ea48d159d06f2d04e1b77",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts",
+          "source": "28611c1711e1c4bbe54f8b3bfe491a5e897bf6f14e6ea48d159d06f2d04e1b77",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts",
+          "source": "28611c1711e1c4bbe54f8b3bfe491a5e897bf6f14e6ea48d159d06f2d04e1b77",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts",
+          "source": "28611c1711e1c4bbe54f8b3bfe491a5e897bf6f14e6ea48d159d06f2d04e1b77",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receipt-worker.ts",
+          "source": "28611c1711e1c4bbe54f8b3bfe491a5e897bf6f14e6ea48d159d06f2d04e1b77",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receiving.ts",
+          "source": "b930f6166f6bdbf8ab7027b0217396933afa96024a46d2ee698fc6fff4728421",
+          "target": "detached-browser",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receiving.ts",
+          "source": "b930f6166f6bdbf8ab7027b0217396933afa96024a46d2ee698fc6fff4728421",
+          "target": "detached-browser",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receiving.ts",
+          "source": "b930f6166f6bdbf8ab7027b0217396933afa96024a46d2ee698fc6fff4728421",
+          "target": "detached-browser",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receiving.ts",
+          "source": "b930f6166f6bdbf8ab7027b0217396933afa96024a46d2ee698fc6fff4728421",
+          "target": "detached-browser",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receiving.ts",
+          "source": "b930f6166f6bdbf8ab7027b0217396933afa96024a46d2ee698fc6fff4728421",
+          "target": "detached-browser",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/electric-db-collection/tests/cross-adapter-receiving.ts",
+          "source": "b930f6166f6bdbf8ab7027b0217396933afa96024a46d2ee698fc6fff4728421",
+          "target": "detached-browser",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/initial-receipt-worker.ts",
+          "source": "bb646ef7a6516b2afc00f4cdc70419c875eb45f7a0deebb37eb1b2ae1d1a270f",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/initial-receipt-worker.ts",
+          "source": "bb646ef7a6516b2afc00f4cdc70419c875eb45f7a0deebb37eb1b2ae1d1a270f",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/initial-receipt-worker.ts",
+          "source": "bb646ef7a6516b2afc00f4cdc70419c875eb45f7a0deebb37eb1b2ae1d1a270f",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/initial-receipt-worker.ts",
+          "source": "bb646ef7a6516b2afc00f4cdc70419c875eb45f7a0deebb37eb1b2ae1d1a270f",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/initial-receipt-worker.ts",
+          "source": "bb646ef7a6516b2afc00f4cdc70419c875eb45f7a0deebb37eb1b2ae1d1a270f",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/initial-receipt-worker.ts",
+          "source": "bb646ef7a6516b2afc00f4cdc70419c875eb45f7a0deebb37eb1b2ae1d1a270f",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "e26ed7a7a2659faf718b63238b9a5622a37771cbed6ada4682e77cef99ff7b59",
+          "target": "detached-node",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "e26ed7a7a2659faf718b63238b9a5622a37771cbed6ada4682e77cef99ff7b59",
+          "target": "detached-node",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "e26ed7a7a2659faf718b63238b9a5622a37771cbed6ada4682e77cef99ff7b59",
+          "target": "detached-node",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "e26ed7a7a2659faf718b63238b9a5622a37771cbed6ada4682e77cef99ff7b59",
+          "target": "detached-node",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "e26ed7a7a2659faf718b63238b9a5622a37771cbed6ada4682e77cef99ff7b59",
+          "target": "detached-node",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt-worker.ts",
+          "source": "e26ed7a7a2659faf718b63238b9a5622a37771cbed6ada4682e77cef99ff7b59",
+          "target": "detached-node",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+          "source": "c1a83785c1540bf3743e10bb964ee53ca90c80c2e99db0f7996d7d24446a5d57",
+          "target": "detached-browser",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+          "source": "c1a83785c1540bf3743e10bb964ee53ca90c80c2e99db0f7996d7d24446a5d57",
+          "target": "detached-browser",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+          "source": "c1a83785c1540bf3743e10bb964ee53ca90c80c2e99db0f7996d7d24446a5d57",
+          "target": "detached-browser",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+          "source": "c1a83785c1540bf3743e10bb964ee53ca90c80c2e99db0f7996d7d24446a5d57",
+          "target": "detached-browser",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+          "source": "c1a83785c1540bf3743e10bb964ee53ca90c80c2e99db0f7996d7d24446a5d57",
+          "target": "detached-browser",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/persisted-initial-receipt.browser.ts",
+          "source": "c1a83785c1540bf3743e10bb964ee53ca90c80c2e99db0f7996d7d24446a5d57",
+          "target": "detached-browser",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts",
+          "source": "c08ed4e6e99530f645a9718407ff0eebd415c83cd01727d94eaf4586c3afe790",
+          "target": "detached-browser",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts",
+          "source": "c08ed4e6e99530f645a9718407ff0eebd415c83cd01727d94eaf4586c3afe790",
+          "target": "detached-browser",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts",
+          "source": "c08ed4e6e99530f645a9718407ff0eebd415c83cd01727d94eaf4586c3afe790",
+          "target": "detached-browser",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts",
+          "source": "c08ed4e6e99530f645a9718407ff0eebd415c83cd01727d94eaf4586c3afe790",
+          "target": "detached-browser",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts",
+          "source": "c08ed4e6e99530f645a9718407ff0eebd415c83cd01727d94eaf4586c3afe790",
+          "target": "detached-browser",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "path": "packages/rxdb-db-collection/tests/rxdb-receiving.browser.ts",
+          "source": "c08ed4e6e99530f645a9718407ff0eebd415c83cd01727d94eaf4586c3afe790",
+          "target": "detached-browser",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        }
+      ]
+    },
+    "framework-original": {
+      "controls": 8,
+      "outcomes": {
+        "PASS": 4,
+        "FAIL": 4
+      },
+      "artifact": ".review-2377/cleanup-framework-controls-original.json",
+      "sha256": "01068bfaa92df51d8916aebf2e27bdb602937c0a177c3b24ccc8e9110982a2ab",
+      "results": [
+        {
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion"
+        },
+        {
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "case": "raw-proxy",
+          "verdict": "FAIL",
+          "failure": "Original thrown value replaced during diagnostic classification"
+        },
+        {
+          "case": "raw-aggregate-cause",
+          "verdict": "FAIL",
+          "failure": "Original thrown value replaced during diagnostic classification"
+        }
+      ]
+    },
+    "framework-repaired": {
+      "controls": 8,
+      "outcomes": {
+        "PASS": 8
+      },
+      "artifact": ".review-2377/cleanup-framework-controls-repaired.json",
+      "sha256": "742cad91d4cfa7e75bff36d28ea239f3f9d432dc6523e1153ca29d4e2cede9b0",
+      "results": [
+        {
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "case": "raw-proxy",
+          "verdict": "PASS"
+        },
+        {
+          "case": "raw-aggregate-cause",
+          "verdict": "PASS"
+        }
+      ]
+    },
+    "watcher-original": {
+      "controls": 18,
+      "outcomes": {
+        "PASS": 12,
+        "FAIL": 6
+      },
+      "artifact": ".review-2377/cleanup-watcher-controls-original.json",
+      "sha256": "160f91c28509d1dc160a591e972dc89f3c9f11bfc930597c68f9ed4a21dfa6dd",
+      "results": [
+        {
+          "mode": "rejection",
+          "case": "ordinary",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "rejection",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "rejection",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "rejection",
+          "case": "throwing-prototype",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "rejection",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "rejection",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-error",
+          "case": "ordinary",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-error",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-error",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-error",
+          "case": "throwing-prototype",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-error",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-error",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-warn",
+          "case": "ordinary",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-warn",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-warn",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-warn",
+          "case": "throwing-prototype",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-warn",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-warn",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        }
+      ]
+    },
+    "watcher-repaired": {
+      "controls": 18,
+      "outcomes": {
+        "PASS": 18
+      },
+      "artifact": ".review-2377/cleanup-watcher-controls-repaired.json",
+      "sha256": "d24b31c85383c33bfd87fc3c934b9e80c521e240cc0783851c5968b612ae07f6",
+      "results": [
+        {
+          "mode": "rejection",
+          "case": "ordinary",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "rejection",
+          "case": "null-prototype",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "rejection",
+          "case": "throwing-conversion",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "rejection",
+          "case": "throwing-prototype",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "rejection",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "rejection",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-error",
+          "case": "ordinary",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-error",
+          "case": "null-prototype",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-error",
+          "case": "throwing-conversion",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-error",
+          "case": "throwing-prototype",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-error",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-error",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-warn",
+          "case": "ordinary",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-warn",
+          "case": "null-prototype",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-warn",
+          "case": "throwing-conversion",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-warn",
+          "case": "throwing-prototype",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-warn",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        },
+        {
+          "mode": "console-warn",
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS",
+          "removed": true,
+          "later": true
+        }
+      ]
+    },
+    "violation-original": {
+      "controls": 6,
+      "outcomes": {
+        "PASS": 3,
+        "FAIL": 3
+      },
+      "artifact": ".review-2377/cleanup-violation-controls-original.json",
+      "sha256": "f1cbd329d6d6606d8af58c02308d9bb2894721ef66ef9873f1b5cad1900ac72f",
+      "results": [
+        {
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "case": "cyclic-thrown-value",
+          "verdict": "FAIL",
+          "failure": "TypeError: Converting circular structure to JSON\n    --> starting at object with constructor 'Object'\n    --- property 'self' closes the circle"
+        },
+        {
+          "case": "throwing-toJSON",
+          "verdict": "FAIL",
+          "failure": "Error: toJSON"
+        },
+        {
+          "case": "throwing-access",
+          "verdict": "FAIL",
+          "failure": "Error: access"
+        },
+        {
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        }
+      ]
+    },
+    "violation-repaired": {
+      "controls": 6,
+      "outcomes": {
+        "PASS": 6
+      },
+      "artifact": ".review-2377/cleanup-violation-controls-repaired.json",
+      "sha256": "7c2cd777796fa995b363fbd655a4e1684cf9043332cb1fc4101691c9972f3533",
+      "results": [
+        {
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "case": "cyclic-thrown-value",
+          "verdict": "PASS"
+        },
+        {
+          "case": "throwing-toJSON",
+          "verdict": "PASS"
+        },
+        {
+          "case": "throwing-access",
+          "verdict": "PASS"
+        },
+        {
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        }
+      ]
+    },
+    "electric-classifier-original": {
+      "controls": 18,
+      "outcomes": {
+        "PASS": 8,
+        "FAIL": 10
+      },
+      "artifact": ".review-2377/cleanup-electric-classifier-controls-original.json",
+      "sha256": "d2355ae3c4bbfdb95a02513dd2f0479c872767279c993a06b05b6129bf1a4c54",
+      "results": [
+        {
+          "helper": "violationCheckpoint",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "violationCheckpoint",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "helper": "violationCheckpoint",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion"
+        },
+        {
+          "helper": "violationCheckpoint",
+          "case": "throwing-prototype",
+          "verdict": "FAIL",
+          "failure": "Error: prototype"
+        },
+        {
+          "helper": "violationCheckpoint",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "violationCheckpoint",
+          "case": "throwing-message",
+          "verdict": "FAIL",
+          "failure": "Error: message"
+        },
+        {
+          "helper": "asError",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "asError",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "helper": "asError",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion"
+        },
+        {
+          "helper": "asError",
+          "case": "throwing-prototype",
+          "verdict": "FAIL",
+          "failure": "Error: prototype"
+        },
+        {
+          "helper": "asError",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "asError",
+          "case": "throwing-message",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "unaccepted",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "unaccepted",
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "helper": "unaccepted",
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion"
+        },
+        {
+          "helper": "unaccepted",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "unaccepted",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "unaccepted",
+          "case": "throwing-message",
+          "verdict": "FAIL",
+          "failure": "Error: message"
+        }
+      ]
+    },
+    "electric-classifier-repaired": {
+      "controls": 18,
+      "outcomes": {
+        "PASS": 18
+      },
+      "artifact": ".review-2377/cleanup-electric-classifier-controls-repaired.json",
+      "sha256": "e209c0a5b94f9eae618f26ce39bef5a5533f7daff8f6a3948782a7a832df7b77",
+      "results": [
+        {
+          "helper": "violationCheckpoint",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "violationCheckpoint",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "violationCheckpoint",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "violationCheckpoint",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "violationCheckpoint",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "violationCheckpoint",
+          "case": "throwing-message",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "asError",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "asError",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "asError",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "asError",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "asError",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "asError",
+          "case": "throwing-message",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "unaccepted",
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "unaccepted",
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "unaccepted",
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "unaccepted",
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "unaccepted",
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "helper": "unaccepted",
+          "case": "throwing-message",
+          "verdict": "PASS"
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    ".review-2377/cleanup-retainers-original.log": "ba9aad5b03b6134d65a39d2d68435d76d33be807cb129f467795d9fa059cf39b",
+    ".review-2377/cleanup-retainers-final.log": "3b0e1ba132b4a53b2a3d1d009bd80d7f9beccbd2a5e7d474266d61b59110ed62",
+    ".review-2377/cleanup-format.vitest.config.mts": "d2b3f3d2491c114dbdb0a162b33cb21f22b053936e6dfa440c397dc20a7d5313",
+    ".review-2377/cleanup-source-controls.mjs": "76ed96cad1432f5563c3c6561fd72c3f61d5f9e6c2ef182088f91d7640dbeeec",
+    ".review-2377/cleanup-framework-controls.mjs": "139dcb6133385977a2f1ddac6bf480970aa9c789ce78f1480edd803bdc0d4c3e",
+    ".review-2377/cleanup-watcher-controls.mjs": "d021af7cef6943a02be9c4441abcf4cf4342ef8ab540f0b2fb3afc6e8bf822ba",
+    ".review-2377/cleanup-violation-controls.mjs": "22863d086bd27d7429a8bbe6e110ee8b69e66dcd1e48ca1ffcaaf9ff5cb0e5c9",
+    ".review-2377/cleanup-diagnostics-eslint-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ".review-2377/cleanup-diagnostics-typecheck-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ".review-2377/cleanup-diagnostics-lint-changed-final.log": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168",
+    ".review-2377/cleanup-electric-classifier-controls.mjs": "e44bd26c501b43d3364c2b67a1665304341a0807d22a44c00fad531d66078d7d",
+    ".review-2377/cleanup-electric-classifier-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ".review-2377/cleanup-refresh-evidence.py": "17dde80402f03899a72c089c242b871d2e48396cc4403c65d077aef1aa134f08",
+    ".review-2377/cleanup-diagnostic-original-sources.json": "c5b3749c59a2c50a6b4e3cb31fba75fddf028de051d340384fd5ac6683b577af"
+  },
+  "ordinary_imported_retainer_controls": {
+    "original": {
+      "fail": 9,
+      "pass": 12
+    },
+    "final": {
+      "pass": 21
+    }
+  },
+  "corrections": [
+    "Initial132 source-control count included five browser callbacks again at removeEventListener. Unique inventory was102; adding six request-rejection callback controls gives final108.",
+    "Source0529bec2 was a provisional pre-lint version: no-unnecessary-condition rejected JSON.stringify(...)??fallback; finalabc07901 uses String(JSON.stringify(...)) inside the guardedtry. The String argument is JSON primitive output. Watcher18/constructor6 rerun on finalbytes. Earlier source-freeze notices were premature; finalcarry usesabc07901."
+  ],
+  "limits": [
+    "Finite actual diagnostic-function controls; no real-provider receiving campaign rerun is claimed.",
+    "Normal receiver results require independently reviewed diagnostic-only dependency carry.",
+    "Semantic row/ID encodings, provider classification and product error identity transports are outside this amendment.",
+    "Source hashes for untouched initial inventory files are not globally frozen; concurrent owners retain their evidence."
+  ],
+  "independent_review": {
+    "reviewer": "/root/oracle_diff_enforcement",
+    "outcome": "approved finite diagnostic-only dependency carry",
+    "shared_source": "abc07901fc6ab979c6f41bade19b1211c3bf8db1c35d8857f98869b5050aea49",
+    "rerun_counts": {
+      "source": 108,
+      "watcher": 18,
+      "constructor": 6,
+      "framework": 8,
+      "electric_classifier": 18,
+      "ordinary_retainers": 21
+    },
+    "additional_constructor_controls": 24,
+    "evidence": "Independent reviewer reran original/repaired controls and verified retained original law, step and rawvalues; exact final inventory acknowledgment follows separately.",
+    "evidence_artifacts_sha256": {
+      ".review-2377/enforcement-cleanup-constructor-adjacent-final.json": "72d42fdee3dee21d64f60be3b76ac517549ba34969418cb3662352b868bd43ab",
+      ".review-2377/enforcement-cleanup-electric-original-final.json": "d2355ae3c4bbfdb95a02513dd2f0479c872767279c993a06b05b6129bf1a4c54",
+      ".review-2377/enforcement-cleanup-electric-repaired-final.json": "e209c0a5b94f9eae618f26ce39bef5a5533f7daff8f6a3948782a7a832df7b77",
+      ".review-2377/enforcement-cleanup-framework-original-final.json": "01068bfaa92df51d8916aebf2e27bdb602937c0a177c3b24ccc8e9110982a2ab",
+      ".review-2377/enforcement-cleanup-framework-repaired-final.json": "742cad91d4cfa7e75bff36d28ea239f3f9d432dc6523e1153ca29d4e2cede9b0",
+      ".review-2377/enforcement-cleanup-retainers-final.log": "ea07adceaf8b7e1083e2a409348ef4abc6b15230282628fea5cf07e2753bc82d",
+      ".review-2377/enforcement-cleanup-source-original-final.json": "b6065f2368776459a6705965ededd10c4f5652b6789a5dabd29f68e7d54ad50e",
+      ".review-2377/enforcement-cleanup-source-repaired-final.json": "9de5cb81d617b507e5df2772e67e5b001b2187bae0f86196bec2db9a8cb19831",
+      ".review-2377/enforcement-cleanup-violation-original-final.json": "f1cbd329d6d6606d8af58c02308d9bb2894721ef66ef9873f1b5cad1900ac72f",
+      ".review-2377/enforcement-cleanup-violation-repaired-final.json": "7c2cd777796fa995b363fbd655a4e1684cf9043332cb1fc4101691c9972f3533",
+      ".review-2377/enforcement-cleanup-watcher-original-final.json": "160f91c28509d1dc160a591e972dc89f3c9f11bfc930597c68f9ed4a21dfa6dd",
+      ".review-2377/enforcement-cleanup-watcher-repaired-final.json": "d24b31c85383c33bfd87fc3c934b9e80c521e240cc0783851c5968b612ae07f6"
+    },
+    "final_24_source_map_acknowledged": true
+  },
+  "verification": {
+    "scoped_eslint": "PASS across all22owned diagnostic files plus ordinary retainer test",
+    "package_tsc": "PASS: pnpm exec tsc --noEmit -p packages/db-adapter-conformance/tsconfig.json",
+    "lint_changed": "PASS: pnpm lint:changed"
+  },
+  "control_programs": {
+    "cleanup-source-controls.mjs": "import fs from 'node:fs'\nimport crypto from 'node:crypto'\nimport ts from 'typescript'\nimport { describeOracleCleanupError, withOracleCleanup } from '../packages/db/tests/oracle-cleanup.ts'\nconst phase = process.argv[2] ?? 'repaired'\nconst originals = JSON.parse(fs.readFileSync('.review-2377/cleanup-diagnostic-original-sources.json','utf8'))\nconst cases = [\n ['ordinary',()=>new Error('diagnostic failure')],\n ['null-prototype',()=>Object.create(null)],\n ['throwing-conversion',()=>({toString(){throw new Error('conversion failed')}})],\n ['throwing-prototype',()=>new Proxy({}, {getPrototypeOf(){throw new Error('prototype failed')}})],\n ['cyclic-aggregate',()=>{const e=new AggregateError([],'cycle'); e.errors.push(e);return e}],\n ['throwing-aggregate-details',()=>Object.defineProperty(new AggregateError([],'details'),'errors',{get(){throw new Error('details failed')}})],\n]\nconst results=[]\nconst paths=Object.keys(originals).filter(p=>!p.endsWith('/receiving-cleanup.ts')&&!p.endsWith('/persisted-initial-receipt-driver.ts')&&!p.endsWith('/cross-adapter-receipt-driver.ts')&&!p.endsWith('/eager-live-source-framework-oracle.ts')&&!p.includes('/src/eager-live-source-oracle.ts')&&!p.endsWith('/electric-sdk-delivery-oracle.property.test.ts'))\nconst compile=(node,file,bindings)=>new Function(...Object.keys(bindings),ts.transpileModule(`return (${node.getText(file)})`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText)(...Object.values(bindings))\nfor(const path of paths){\n const source=phase==='original'?originals[path]:fs.readFileSync(path,'utf8')\n const file=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true)\n const targets=[]\n const visit=node=>{\n  if(ts.isCallExpression(node)&&!node.expression.getText(file).endsWith('removeEventListener')&&node.arguments[0]&&/^[`'\"]unhandled[Rr]ejection[`'\"]$/.test(node.arguments[0].getText(file))){\n   let handler=node.arguments[1]\n   if(handler&&ts.isIdentifier(handler)){\n    const name=handler.text\n    const find=n=>{if(ts.isVariableDeclaration(n)&&n.name.getText(file)===name)handler=n.initializer;ts.forEachChild(n,find)}\n    find(file)\n   }\n   if(handler)targets.push([node.expression.getText(file)==='process.on'?'detached-node':'detached-browser',handler])\n  }\n  if(path.endsWith('on-demand-streams-driver.ts')&&ts.isArrowFunction(node)&&node.parameters[0]?.name.getText(file)==='error'&&node.body.getText(file).includes('request!.rejection'))targets.push(['request-rejection',node])\n  if(ts.isCatchClause(node)&&node.block.getText(file).includes('cleanupErrors')&&!path.includes('mutation-events')&&!path.includes('sdk-snapshot'))targets.push(['catch',node.block])\n  if(ts.isCallExpression(node)&&node.expression.getText(file)==='cleanups.map'&&path.includes('mutation-events'))targets.push(['cleanup-wrapper',node.arguments[0]])\n  if(ts.isPropertyAssignment(node)&&node.name.getText(file)==='cleanupFailure'&&path.includes('sdk-snapshot'))targets.push(['cleanup-observer',node.initializer])\n  ts.forEachChild(node,visit)\n }\n visit(file)\n if(!targets.length)throw new Error('No actual diagnostic target in '+path)\n for(const [target,node] of targets)for(const [label,make] of cases){\n  const diagnostics=[],calls=[]\n  const raw={wrongRows:['wrong'],cleanupErrors:['prior']}\n  let actual=raw,failure,prevented=false\n  try{\n   const reason=make()\n   const bindings={describeOracleCleanupError,errors:diagnostics,detachedErrors:diagnostics,detached:diagnostics}\n   if(target.startsWith('detached-')){\n    const handler=compile(node,file,bindings)\n    const browser=target==='detached-browser'\n    handler(browser?{reason,error:reason,preventDefault(){prevented=true}}:reason)\n    if(diagnostics.length!==1||!diagnostics[0])throw new Error('Detached diagnostic lost')\n   }else if(target==='request-rejection'){\n    const outcomes={right:'pending'},request={}\n    compile(node,file,{outcomes,request,describeOracleCleanupError})(reason)\n    if(outcomes.right!=='rejected'||!request.rejection)throw new Error('Request rejection diagnostic lost')\n   }else if(target==='catch'){\n    const body=ts.transpileModule(node.getText(file),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText\n    actual=new Function('raw','completed','observed','error','describeOracleCleanupError',body)(raw,raw,raw,reason,describeOracleCleanupError)??raw\n    if(actual.wrongRows!==raw.wrongRows||actual.cleanupErrors.length<2||actual.cleanupErrors[0]!=='prior')throw new Error('Completed raw or prior diagnostic lost')\n   }else if(target==='cleanup-wrapper'){\n    const wrap=compile(node,file,{completed:raw,describeOracleCleanupError})\n    await withOracleCleanup(()=>Promise.resolve(raw),[wrap(()=>{calls.push('first');throw reason}),()=>calls.push('later')])\n    if(calls.join(',')!=='first,later'||raw.cleanupErrors.length!==2)throw new Error('Cleanup or completed diagnostic lost')\n   }else{\n    const record=compile(node,file,{cleanupErrors:diagnostics,describeOracleCleanupError})\n    await withOracleCleanup(()=>Promise.resolve(raw),[()=>{try{throw reason}catch(error){record('label',error)}},()=>calls.push('later')])\n    if(calls[0]!=='later'||diagnostics.length!==1)throw new Error('Later release or diagnostic lost')\n   }\n  }catch(error){failure=describeOracleCleanupError(error)}\n  results.push({path,source:crypto.createHash('sha256').update(source).digest('hex'),target,case:label,verdict:failure?'FAIL':'PASS',...(failure?{failure}:{}),...(calls.length?{calls}:{})})\n }\n}\nconsole.log(JSON.stringify(results,null,2))\nprocess.exitCode=results.some(r=>r.verdict==='FAIL')?1:0\n",
+    "cleanup-framework-controls.mjs": "import fs from 'node:fs'\nimport ts from 'typescript'\nimport crypto from 'node:crypto'\nimport { describeOracleCleanupError } from '../packages/db/tests/oracle-cleanup.ts'\nconst phase=process.argv[2]??'repaired'\nconst path='packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts'\nconst source=phase==='original'?JSON.parse(fs.readFileSync('.review-2377/cleanup-diagnostic-original-sources.json','utf8'))[path]:fs.readFileSync(path,'utf8')\nconst file=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true)\nconst node=file.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='observeEagerLiveSourceHistory')\nconst body=ts.transpileModule(`return (${node.getText(file).replace('export ','')})`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText\nclass ConformanceViolation extends Error { law='original law'; step=7;expected=['expected'];actual=['wrong'] }\nconst cases=[['ordinary',()=>new Error('secondary')],['null-prototype',()=>Object.create(null)],['throwing-conversion',()=>({toString(){throw new Error('conversion')}})],['throwing-prototype',()=>new Proxy({}, {getPrototypeOf(){throw new Error('prototype')}})],['cyclic-aggregate',()=>{const e=new AggregateError([],'cycle');e.errors.push(e);return e}],['throwing-aggregate-details',()=>Object.defineProperty(new AggregateError([],'details'),'errors',{get(){throw new Error('details')}})]]\nconst results=[]\nfor(const [label,make] of cases){\n const primary=new ConformanceViolation()\n const error=new AggregateError([make()],'comparison and cleanup',{cause:primary})\n const observe=new Function('ConformanceViolation','checkEagerLiveSourceHistory','describeOracleCleanupError',body)(ConformanceViolation,()=>Promise.reject(error),describeOracleCleanupError)\n let failure\n try{\n  const raw=await observe({},[])\n  if(raw.failure?.law!==primary.law||raw.failure.step!==7||raw.failure.actual!==primary.actual||!raw.failure.cleanup[0])throw new Error('Primary or cleanup diagnostic lost')\n }catch(error){failure=describeOracleCleanupError(error)}\n results.push({case:label,verdict:failure?'FAIL':'PASS',...(failure?{failure}:{})})\n}\nfor(const [label,error] of [['raw-proxy',new Proxy({}, {getPrototypeOf(){throw new Error('classification')}})],['raw-aggregate-cause',Object.defineProperty(new AggregateError([],'unknown'),'cause',{get(){throw new Error('cause getter')}})]]){\n const observe=new Function('ConformanceViolation','checkEagerLiveSourceHistory','describeOracleCleanupError',body)(ConformanceViolation,()=>Promise.reject(error),describeOracleCleanupError)\n const outcome=await observe({},[]).catch(reason=>reason)\n results.push({case:label,verdict:outcome===error?'PASS':'FAIL',...(outcome===error?{}:{failure:'Original thrown value replaced during diagnostic classification'})})\n}\nconsole.log(JSON.stringify({path,source:crypto.createHash('sha256').update(source).digest('hex'),results},null,2))\nprocess.exitCode=results.some(x=>x.verdict==='FAIL')?1:0\n",
+    "cleanup-watcher-controls.mjs": "import fs from 'node:fs'\nimport ts from 'typescript'\nimport crypto from 'node:crypto'\nimport {describeOracleCleanupError,withOracleCleanup} from '../packages/db/tests/oracle-cleanup.ts'\nconst phase=process.argv[2]??'repaired'\nconst path='packages/db-adapter-conformance/src/eager-live-source-oracle.ts'\nconst source=phase==='original'?JSON.parse(fs.readFileSync('.review-2377/cleanup-diagnostic-original-sources.json','utf8'))[path]:fs.readFileSync(path,'utf8')\nconst file=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true)\nconst node=file.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='watchDetachedFailures')\nconst body=ts.transpileModule(`return (${node.getText(file)})`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText\nconst cases=[['ordinary',()=>new Error('detached failure')],['null-prototype',()=>Object.create(null)],['throwing-conversion',()=>({toString(){throw new Error('conversion')}})],['throwing-prototype',()=>new Proxy({}, {getPrototypeOf(){throw new Error('prototype')}})],['cyclic-aggregate',()=>{const e=new AggregateError([],'cycle');e.errors.push(e);return e}],['throwing-aggregate-details',()=>Object.defineProperty(new AggregateError([],'details'),'errors',{get(){throw new Error('details')}})]]\nconst results=[]\nfor(const mode of ['rejection','console-error','console-warn'])for(const [label,make] of cases){\n let callback,removed=false,later=false,failure\n const originalError=()=>{},originalWarn=()=>{}\n const console={error:originalError,warn:originalWarn}\n const process={on(event,fn){callback=fn},off(event,fn){removed=fn===callback}}\n const watch=new Function('console','process','describeOracleCleanupError',body)(console,process,describeOracleCleanupError)({})\n try{\n  const raw={wrongRows:['wrong']}\n  const value=await withOracleCleanup(()=>{const reason=make();if(mode==='rejection')callback(reason);else console[mode==='console-error'?'error':'warn']('prefix',reason);return raw},[()=>watch.stop(),()=>{later=true}])\n  if(value!==raw||watch.found().length!==1||!removed||!later||console.error!==originalError||console.warn!==originalWarn)throw new Error('Raw observation, diagnostic or cleanup lost')\n }catch(error){failure=describeOracleCleanupError(error)}\n results.push({mode,case:label,verdict:failure?'FAIL':'PASS',...(failure?{failure}:{}),removed,later})\n}\nconsole.log(JSON.stringify({path,source:crypto.createHash('sha256').update(source).digest('hex'),results},null,2))\nprocess.exitCode=results.some(r=>r.verdict==='FAIL')?1:0\n",
+    "cleanup-violation-controls.mjs": "import fs from 'node:fs'\nimport ts from 'typescript'\nimport crypto from 'node:crypto'\nimport { describeOracleCleanupError } from '../packages/db/tests/oracle-cleanup.ts'\nconst phase=process.argv[2]??'repaired'\nconst path='packages/db-adapter-conformance/src/eager-live-source-oracle.ts'\nconst source=phase==='original'?JSON.parse(fs.readFileSync('.review-2377/cleanup-diagnostic-original-sources.json','utf8'))[path]:fs.readFileSync(path,'utf8')\nconst file=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true)\nconst nodes=file.statements.filter(n=>(ts.isFunctionDeclaration(n)&&n.name?.text==='show')||(ts.isClassDeclaration(n)&&n.name?.text==='ConformanceViolation'))\nconst body=ts.transpileModule(nodes.map(n=>n.getText(file).replace('export ','')).join('\\n')+'\\nreturn ConformanceViolation',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText\nconst Violation=new Function('describeOracleCleanupError',body)(describeOracleCleanupError)\nconst cases=[['ordinary',()=>new Error('original')],['null-prototype',()=>Object.create(null)],['cyclic-thrown-value',()=>{const value={};value.self=value;return value}],['throwing-toJSON',()=>({toJSON(){throw new Error('toJSON')}})],['throwing-access',()=>new Proxy({}, {get(){throw new Error('access')}})],['cyclic-aggregate',()=>{const value=new AggregateError([],'cycle');value.errors.push(value);return value}]]\nconst results=[]\nfor(const [label,make] of cases){let failure;try{const actual=make();const v=new Violation('original law',7,'expected',actual,[]);if(v.law!=='original law'||v.step!==7||v.actual!==actual||!v.message.includes('original law'))throw new Error('Original law/checkpoint/raw lost')}catch(error){failure=describeOracleCleanupError(error)}results.push({case:label,verdict:failure?'FAIL':'PASS',...(failure?{failure}:{})})}\nconsole.log(JSON.stringify({path,source:crypto.createHash('sha256').update(source).digest('hex'),results},null,2))\nprocess.exitCode=results.some(r=>r.verdict==='FAIL')?1:0\n",
+    "cleanup-electric-classifier-controls.mjs": "import fs from 'node:fs'\nimport crypto from 'node:crypto'\nimport ts from 'typescript'\nimport {describeOracleCleanupError} from '../packages/db/tests/oracle-cleanup.ts'\nconst phase=process.argv[2]??'repaired'\nconst path='packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts'\nconst source=phase==='original'?JSON.parse(fs.readFileSync('.review-2377/cleanup-diagnostic-original-sources.json','utf8'))[path]:fs.readFileSync(path,'utf8')\nconst file=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true)\nconst nodes=[]\nfor(const n of file.statements){\n if(ts.isFunctionDeclaration(n)&&n.name?.text==='violationCheckpoint')nodes.push(n.getText(file))\n if(ts.isVariableStatement(n))for(const d of n.declarationList.declarations)if(['asError','unaccepted'].includes(d.name.getText(file)))nodes.push('const '+d.getText(file))\n}\nconst body=ts.transpileModule(nodes.join('\\n')+'\\nreturn {violationCheckpoint,asError,unaccepted}',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText\nconst api=new Function('describeOracleCleanupError',body)(describeOracleCleanupError)\nconst cases=[['ordinary',()=>new Error('original')],['null-prototype',()=>Object.create(null)],['throwing-conversion',()=>({toString(){throw new Error('conversion')}})],['throwing-prototype',()=>new Proxy({}, {getPrototypeOf(){throw new Error('prototype')}})],['cyclic-aggregate',()=>{const e=new AggregateError([],'cycle');e.errors.push(e);return e}],['throwing-message',()=>Object.defineProperty(new Error('original'),'message',{get(){throw new Error('message')}})]]\nconst results=[]\nfor(const name of ['violationCheckpoint','asError','unaccepted'])for(const [label,make]of cases){let failure;try{const input=make();const value=name==='unaccepted'?api[name]('mutant',input):api[name](input);if(name==='violationCheckpoint'){if(typeof value!=='string'||!value)throw new Error('Checkpoint diagnostic lost')}else if(!(value instanceof Error))throw new Error('Error diagnostic lost');if(name==='asError'&&label==='ordinary'&&value!==input)throw new Error('Original Error identity lost')}catch(error){failure=describeOracleCleanupError(error)}results.push({helper:name,case:label,verdict:failure?'FAIL':'PASS',...(failure?{failure}:{})})}\nconsole.log(JSON.stringify({path,source:crypto.createHash('sha256').update(source).digest('hex'),results},null,2))\nprocess.exitCode=results.some(r=>r.verdict==='FAIL')?1:0\n",
+    "cleanup-format.vitest.config.mts": "import { defineConfig } from 'vitest/config'\nimport { fileURLToPath } from 'node:url'\nexport default defineConfig({resolve:{alias:{'@tanstack/db':fileURLToPath(new URL('../packages/db/src/index.ts',import.meta.url)),'@tanstack/db-ivm':fileURLToPath(new URL('../packages/db-ivm/src/index.ts',import.meta.url))}},test:{include:['packages/db-adapter-conformance/tests/receiving-cleanup-format.test.ts'],environment:'node',coverage:{enabled:false}}})\n"
+  }
+}

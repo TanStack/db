@@ -1,0 +1,18 @@
+{
+  "stage": "Saved-demand / offline-reopen test-only receiving gate. Direct production remains previous scoped repair unchanged. No new-class production edit permitted until NodeSQLite and actual OPFS comparison and independent review.",
+  "recordedAt": "2026-11-17T17:02:36.558333+00:00",
+  "files": {
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-persisted-demand-oracle.browser.test.ts": "67e3d2519f55a74b8359ad9c7d918e1072a3c4df4ba6cac5d740eb5bc24c6e9b",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-persisted-demand.opfs.html": "76cc563e5f028e2e83fba3cef935c99aa02f2e7ca0814d06854cbb2164c8e002",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-persisted-demand.opfs.ts": "7b84412379cf67a35eb1c3199460824bd16bc1eb2a941f2fc539e3e99f060bc8",
+    "packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts": "ac569ff5f1177e8ddace08e8298970c362f42b9f504828c345cd1a534add692c",
+    "packages/powersync-direct-collection/tests/persisted-demand-conformance-oracle.test.ts": "56fa614b333f32467cab1114189eceae14b098b0224e73d337255b854afe2b10",
+    "packages/powersync-direct-collection/tests/persisted-demand-driver.ts": "07b69c263c7354c36a74d674ba0cf4930f56684dd4e8085e8fe0ed4358f22548",
+    "packages/powersync-direct-collection/tests/persisted-demand-history-oracle.ts": "13207b4b52bc5862916941211bf3acad9d6d1c6c916ec436cf0f59c6acc40ccd",
+    "packages/powersync-direct-collection/tests/persisted-demand-oracle-suite.ts": "3c9d7f880f5ade888e5ac34f66bd8fb5e7d0ae53052e0e466efb2359379a8d92"
+  },
+  "productionSources": {
+    "packages/powersync-direct-collection/src/index.ts": "a30e71beb96fade6c5714a300ea76628386dd0b9b1ea04ad60ccf3ee9ae074fa",
+    "packages/powersync-direct-collection/src/subsets.ts": "00fb4cb1976ec8b384d01e1fbb483768204bc40b69a3dcc19ed21b4356b3e380"
+  }
+}

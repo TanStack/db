@@ -37,7 +37,9 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "test:oracles": "vitest run --coverage.enabled=false tests/eager-gate-conformance-oracle.property.test.ts tests/eager-live-source-conformance-oracle.property.test.ts tests/eager-reload-conformance-oracle.property.test.ts tests/initial-receipt-oracle.property.test.ts tests/mutation-source-batch-oracle.property.test.ts tests/persisted-baseline-lifecycle-oracle.test.ts tests/persisted-capability-conformance-oracle.test.ts tests/persisted-initial-receipt-oracle.property.test.ts tests/persisted-startup-conformance-oracle.property.test.ts tests/shared-client-oracle.property.test.ts",
+    "test:oracles:browser": "vitest run --config vitest.browser-oracles.config.ts"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",

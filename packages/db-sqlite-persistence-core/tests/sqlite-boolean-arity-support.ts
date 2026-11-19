@@ -1,5 +1,8 @@
-import { DatabaseSync } from 'node:sqlite'
 import type { SQLiteDriver } from '../src'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
 
 // Fixtures for the boolean-arity oracle and its ordinary scenario tests. The
 // oracle in `sqlite-boolean-arity-oracle.test.ts` owns the law.

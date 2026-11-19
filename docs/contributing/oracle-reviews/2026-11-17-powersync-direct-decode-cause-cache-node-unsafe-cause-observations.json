@@ -1,0 +1,5043 @@
+[
+  {
+    "cell": "eager:cold-initial-throw-null-prototype",
+    "history": {
+      "mode": "eager",
+      "startup": "cold",
+      "throwCause": "null-prototype",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12000,
+      "epoch": 684322022206,
+      "flag": true
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "loading",
+      "load": "pending",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12000-shared-0",
+        "row-12000-shared-1"
+      ],
+      "causesThrown": [
+        "null-prototype"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "eager:cold-initial-throw-null-prototype",
+        "eager:initial-throw",
+        "eager:refusal-middle",
+        "eager:initial-throw-middle"
+      ]
+    },
+    "violations": [
+      "source readiness, settlement or event order differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cold-initial-throw-throwing-conversion",
+    "history": {
+      "mode": "eager",
+      "startup": "cold",
+      "throwCause": "throwing-conversion",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 12001,
+      "epoch": 803903441576,
+      "flag": true
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "loading",
+      "load": "pending",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12001-shared-0",
+        "row-12001-shared-1"
+      ],
+      "causesThrown": [
+        "throwing-conversion"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "eager:cold-initial-throw-throwing-conversion",
+        "eager:initial-throw",
+        "eager:refusal-middle",
+        "eager:initial-throw-middle"
+      ]
+    },
+    "violations": [
+      "source readiness, settlement or event order differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cold-initial-throw-throwing-prototype",
+    "history": {
+      "mode": "eager",
+      "startup": "cold",
+      "throwCause": "throwing-prototype",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12002,
+      "epoch": 1999999999965,
+      "flag": true
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "loading",
+      "load": "pending",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12002-shared-0",
+        "row-12002-shared-1"
+      ],
+      "causesThrown": [
+        "throwing-prototype"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "eager:cold-initial-throw-throwing-prototype",
+        "eager:initial-throw",
+        "eager:refusal-middle",
+        "eager:initial-throw-middle"
+      ]
+    },
+    "violations": [
+      "source readiness, settlement or event order differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cold-live-throw-null-prototype",
+    "history": {
+      "mode": "eager",
+      "startup": "cold",
+      "throwCause": "null-prototype",
+      "retireDemand": false,
+      "phase": "live",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12003,
+      "epoch": 32,
+      "flag": false
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [
+        {
+          "id": "row-12003-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 32
+        },
+        {
+          "id": "row-12003-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 33
+        },
+        {
+          "id": "row-12003-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 34
+        }
+      ],
+      "rows": [
+        {
+          "id": "row-12003-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 32
+        },
+        {
+          "id": "row-12003-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 33
+        },
+        {
+          "id": "row-12003-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 34
+        }
+      ],
+      "readySnapshots": [
+        [
+          {
+            "id": "row-12003-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 32
+          },
+          {
+            "id": "row-12003-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 33
+          },
+          {
+            "id": "row-12003-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 34
+          }
+        ]
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12003-shared-0",
+        "row-12003-shared-1"
+      ],
+      "causesThrown": [
+        "null-prototype"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "eager:cold-live-throw-null-prototype",
+        "eager:live-throw",
+        "eager:refusal-middle",
+        "eager:live-throw-middle",
+        "eager:live-overlap"
+      ]
+    },
+    "violations": [
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cold-live-throw-throwing-conversion",
+    "history": {
+      "mode": "eager",
+      "startup": "cold",
+      "throwCause": "throwing-conversion",
+      "retireDemand": false,
+      "phase": "live",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 12004,
+      "epoch": 23,
+      "flag": false
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [
+        {
+          "id": "row-12004-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 23
+        },
+        {
+          "id": "row-12004-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 24
+        },
+        {
+          "id": "row-12004-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 25
+        }
+      ],
+      "rows": [
+        {
+          "id": "row-12004-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 23
+        },
+        {
+          "id": "row-12004-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 24
+        },
+        {
+          "id": "row-12004-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 25
+        }
+      ],
+      "readySnapshots": [
+        [
+          {
+            "id": "row-12004-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 23
+          },
+          {
+            "id": "row-12004-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 24
+          },
+          {
+            "id": "row-12004-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 25
+          }
+        ]
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12004-new-0",
+        "row-12004-new-1"
+      ],
+      "causesThrown": [
+        "throwing-conversion"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "eager:cold-live-throw-throwing-conversion",
+        "eager:live-throw",
+        "eager:refusal-middle",
+        "eager:live-throw-middle",
+        "eager:live-fresh"
+      ]
+    },
+    "violations": [
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cold-live-throw-throwing-prototype",
+    "history": {
+      "mode": "eager",
+      "startup": "cold",
+      "throwCause": "throwing-prototype",
+      "retireDemand": false,
+      "phase": "live",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12005,
+      "epoch": 39,
+      "flag": false
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [
+        {
+          "id": "row-12005-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 39
+        },
+        {
+          "id": "row-12005-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 40
+        },
+        {
+          "id": "row-12005-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 41
+        }
+      ],
+      "rows": [
+        {
+          "id": "row-12005-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 39
+        },
+        {
+          "id": "row-12005-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 40
+        },
+        {
+          "id": "row-12005-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 41
+        }
+      ],
+      "readySnapshots": [
+        [
+          {
+            "id": "row-12005-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 39
+          },
+          {
+            "id": "row-12005-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 40
+          },
+          {
+            "id": "row-12005-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 41
+          }
+        ]
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12005-shared-0",
+        "row-12005-shared-1"
+      ],
+      "causesThrown": [
+        "throwing-prototype"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "eager:cold-live-throw-throwing-prototype",
+        "eager:live-throw",
+        "eager:refusal-middle",
+        "eager:live-throw-middle",
+        "eager:live-overlap"
+      ]
+    },
+    "violations": [
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cached-initial-valid",
+    "history": {
+      "mode": "eager",
+      "startup": "cached",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "valid",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12006,
+      "epoch": 394864760332,
+      "flag": true
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [],
+      "rows": [
+        {
+          "id": "row-12006-shared-0",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 394864760332
+        },
+        {
+          "id": "row-12006-shared-1",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 394864760333
+        },
+        {
+          "id": "row-12006-shared-2",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 394864760334
+        }
+      ],
+      "readySnapshots": [
+        [
+          {
+            "id": "row-12006-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 394864760332
+          },
+          {
+            "id": "row-12006-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 394864760333
+          },
+          {
+            "id": "row-12006-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 394864760334
+          }
+        ]
+      ],
+      "publications": [
+        [
+          {
+            "id": "row-12006-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 394864760332
+          },
+          {
+            "id": "row-12006-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 394864760333
+          },
+          {
+            "id": "row-12006-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 394864760334
+          }
+        ],
+        [
+          {
+            "id": "row-12006-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 394864760332
+          },
+          {
+            "id": "row-12006-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 394864760333
+          },
+          {
+            "id": "row-12006-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 394864760334
+          }
+        ]
+      ],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": true,
+      "parsed": [
+        "row-12006-shared-0",
+        "row-12006-shared-1",
+        "row-12006-shared-2"
+      ],
+      "causesThrown": [],
+      "cachedInput": [
+        "row-12006-shared-0",
+        "row-12006-shared-1",
+        "row-12006-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "eager:cached-initial-valid",
+        "eager:initial-valid"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cached-initial-changed-id",
+    "history": {
+      "mode": "eager",
+      "startup": "cached",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "changed-id",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12007,
+      "epoch": 1994446072764,
+      "flag": false
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "error",
+      "load": "rejected",
+      "error": "invalid-row-id",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12007-shared-0",
+        "row-12007-shared-1"
+      ],
+      "causesThrown": [],
+      "cachedInput": [
+        "row-12007-shared-0",
+        "row-12007-shared-1",
+        "row-12007-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "eager:cached-initial-changed-id",
+        "eager:initial-changed-id",
+        "eager:refusal-middle",
+        "eager:initial-changed-id-middle"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cached-initial-throw-error",
+    "history": {
+      "mode": "eager",
+      "startup": "cached",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 12008,
+      "epoch": 1394102766378,
+      "flag": false
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "error",
+      "load": "rejected",
+      "error": "refused-12008-1",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12008-shared-0",
+        "row-12008-shared-1"
+      ],
+      "causesThrown": [
+        "error"
+      ],
+      "cachedInput": [
+        "row-12008-shared-0",
+        "row-12008-shared-1",
+        "row-12008-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "eager:cached-initial-throw-error",
+        "eager:initial-throw",
+        "eager:refusal-middle",
+        "eager:initial-throw-middle"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cached-initial-throw-null-prototype",
+    "history": {
+      "mode": "eager",
+      "startup": "cached",
+      "throwCause": "null-prototype",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12009,
+      "epoch": 1174175771183,
+      "flag": false
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "loading",
+      "load": "pending",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12009-shared-0",
+        "row-12009-shared-1"
+      ],
+      "causesThrown": [
+        "null-prototype"
+      ],
+      "cachedInput": [
+        "row-12009-shared-0",
+        "row-12009-shared-1",
+        "row-12009-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "eager:cached-initial-throw-null-prototype",
+        "eager:initial-throw",
+        "eager:refusal-middle",
+        "eager:initial-throw-middle"
+      ]
+    },
+    "violations": [
+      "source readiness, settlement or event order differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cached-initial-throw-throwing-conversion",
+    "history": {
+      "mode": "eager",
+      "startup": "cached",
+      "throwCause": "throwing-conversion",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12010,
+      "epoch": 135028606574,
+      "flag": true
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "loading",
+      "load": "pending",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12010-shared-0",
+        "row-12010-shared-1"
+      ],
+      "causesThrown": [
+        "throwing-conversion"
+      ],
+      "cachedInput": [
+        "row-12010-shared-0",
+        "row-12010-shared-1",
+        "row-12010-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "eager:cached-initial-throw-throwing-conversion",
+        "eager:initial-throw",
+        "eager:refusal-middle",
+        "eager:initial-throw-middle"
+      ]
+    },
+    "violations": [
+      "source readiness, settlement or event order differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cached-initial-throw-throwing-prototype",
+    "history": {
+      "mode": "eager",
+      "startup": "cached",
+      "throwCause": "throwing-prototype",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 12011,
+      "epoch": 1194260978259,
+      "flag": true
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "loading",
+      "load": "pending",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12011-shared-0",
+        "row-12011-shared-1"
+      ],
+      "causesThrown": [
+        "throwing-prototype"
+      ],
+      "cachedInput": [
+        "row-12011-shared-0",
+        "row-12011-shared-1",
+        "row-12011-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "eager:cached-initial-throw-throwing-prototype",
+        "eager:initial-throw",
+        "eager:refusal-middle",
+        "eager:initial-throw-middle"
+      ]
+    },
+    "violations": [
+      "source readiness, settlement or event order differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cold-initial-throw-null-prototype",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cold",
+      "throwCause": "null-prototype",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12012,
+      "epoch": 1999999999969,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 1,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "AbortError",
+          "message": "This operation was aborted"
+        },
+        "sourceStatus": "ready",
+        "sourceErrorPresent": false,
+        "sourceError": null
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12012-shared-0",
+        "row-12012-shared-1"
+      ],
+      "causesThrown": [
+        "null-prototype"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "on-demand:cold-initial-throw-null-prototype",
+        "on-demand:initial-throw",
+        "on-demand:refusal-middle",
+        "on-demand:initial-throw-middle",
+        "on-demand:source-ready-query-pending"
+      ]
+    },
+    "violations": [
+      "query source health differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cold-initial-throw-throwing-conversion",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cold",
+      "throwCause": "throwing-conversion",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 12013,
+      "epoch": 5,
+      "flag": false
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 1,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "AbortError",
+          "message": "This operation was aborted"
+        },
+        "sourceStatus": "ready",
+        "sourceErrorPresent": false,
+        "sourceError": null
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12013-shared-0",
+        "row-12013-shared-1"
+      ],
+      "causesThrown": [
+        "throwing-conversion"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "on-demand:cold-initial-throw-throwing-conversion",
+        "on-demand:initial-throw",
+        "on-demand:refusal-middle",
+        "on-demand:initial-throw-middle",
+        "on-demand:source-ready-query-pending"
+      ]
+    },
+    "violations": [
+      "query source health differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cold-initial-throw-throwing-prototype",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cold",
+      "throwCause": "throwing-prototype",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12014,
+      "epoch": 1490476882493,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 1,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "AbortError",
+          "message": "This operation was aborted"
+        },
+        "sourceStatus": "ready",
+        "sourceErrorPresent": false,
+        "sourceError": null
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12014-shared-0",
+        "row-12014-shared-1"
+      ],
+      "causesThrown": [
+        "throwing-prototype"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "on-demand:cold-initial-throw-throwing-prototype",
+        "on-demand:initial-throw",
+        "on-demand:refusal-middle",
+        "on-demand:initial-throw-middle",
+        "on-demand:source-ready-query-pending"
+      ]
+    },
+    "violations": [
+      "query source health differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cold-live-throw-null-prototype",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cold",
+      "throwCause": "null-prototype",
+      "retireDemand": false,
+      "phase": "live",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 12015,
+      "epoch": 511902567418,
+      "flag": false
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 2,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": []
+      },
+      "query": {
+        "before": [
+          {
+            "id": "row-12015-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 511902567418
+          },
+          {
+            "id": "row-12015-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 511902567419
+          },
+          {
+            "id": "row-12015-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 511902567420
+          }
+        ],
+        "rows": [
+          {
+            "id": "row-12015-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 511902567418
+          },
+          {
+            "id": "row-12015-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 511902567419
+          },
+          {
+            "id": "row-12015-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 511902567420
+          }
+        ],
+        "readySnapshots": [
+          [
+            {
+              "id": "row-12015-shared-0",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 511902567418
+            },
+            {
+              "id": "row-12015-shared-1",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 511902567419
+            },
+            {
+              "id": "row-12015-shared-2",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 511902567420
+            }
+          ]
+        ],
+        "publications": [],
+        "status": "ready",
+        "load": "fulfilled",
+        "rejection": null,
+        "sourceStatus": "ready",
+        "sourceErrorPresent": false,
+        "sourceError": null
+      },
+      "before": [
+        {
+          "id": "row-12015-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 511902567418
+        },
+        {
+          "id": "row-12015-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 511902567419
+        },
+        {
+          "id": "row-12015-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 511902567420
+        }
+      ],
+      "rows": [
+        {
+          "id": "row-12015-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 511902567418
+        },
+        {
+          "id": "row-12015-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 511902567419
+        },
+        {
+          "id": "row-12015-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 511902567420
+        }
+      ],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": true
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12015-new-0",
+        "row-12015-new-1"
+      ],
+      "causesThrown": [
+        "null-prototype"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "on-demand:cold-live-throw-null-prototype",
+        "on-demand:live-throw",
+        "on-demand:refusal-middle",
+        "on-demand:live-throw-middle",
+        "on-demand:live-fresh",
+        "on-demand:source-ready-query-pending"
+      ]
+    },
+    "violations": [
+      "query source health differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cold-live-throw-throwing-conversion",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cold",
+      "throwCause": "throwing-conversion",
+      "retireDemand": false,
+      "phase": "live",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 12016,
+      "epoch": 74610023255,
+      "flag": false
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 2,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": []
+      },
+      "query": {
+        "before": [
+          {
+            "id": "row-12016-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 74610023255
+          },
+          {
+            "id": "row-12016-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 74610023256
+          },
+          {
+            "id": "row-12016-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 74610023257
+          }
+        ],
+        "rows": [
+          {
+            "id": "row-12016-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 74610023255
+          },
+          {
+            "id": "row-12016-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 74610023256
+          },
+          {
+            "id": "row-12016-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 74610023257
+          }
+        ],
+        "readySnapshots": [
+          [
+            {
+              "id": "row-12016-shared-0",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 74610023255
+            },
+            {
+              "id": "row-12016-shared-1",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 74610023256
+            },
+            {
+              "id": "row-12016-shared-2",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 74610023257
+            }
+          ]
+        ],
+        "publications": [],
+        "status": "ready",
+        "load": "fulfilled",
+        "rejection": null,
+        "sourceStatus": "ready",
+        "sourceErrorPresent": false,
+        "sourceError": null
+      },
+      "before": [
+        {
+          "id": "row-12016-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 74610023255
+        },
+        {
+          "id": "row-12016-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 74610023256
+        },
+        {
+          "id": "row-12016-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 74610023257
+        }
+      ],
+      "rows": [
+        {
+          "id": "row-12016-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 74610023255
+        },
+        {
+          "id": "row-12016-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 74610023256
+        },
+        {
+          "id": "row-12016-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 74610023257
+        }
+      ],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": true
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12016-new-0",
+        "row-12016-new-1"
+      ],
+      "causesThrown": [
+        "throwing-conversion"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "on-demand:cold-live-throw-throwing-conversion",
+        "on-demand:live-throw",
+        "on-demand:refusal-middle",
+        "on-demand:live-throw-middle",
+        "on-demand:live-fresh",
+        "on-demand:source-ready-query-pending"
+      ]
+    },
+    "violations": [
+      "query source health differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cold-live-throw-throwing-prototype",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cold",
+      "throwCause": "throwing-prototype",
+      "retireDemand": false,
+      "phase": "live",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 12017,
+      "epoch": 18,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 2,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": []
+      },
+      "query": {
+        "before": [
+          {
+            "id": "row-12017-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 18
+          },
+          {
+            "id": "row-12017-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 19
+          },
+          {
+            "id": "row-12017-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 20
+          }
+        ],
+        "rows": [
+          {
+            "id": "row-12017-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 18
+          },
+          {
+            "id": "row-12017-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 19
+          },
+          {
+            "id": "row-12017-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 20
+          }
+        ],
+        "readySnapshots": [
+          [
+            {
+              "id": "row-12017-shared-0",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 18
+            },
+            {
+              "id": "row-12017-shared-1",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 19
+            },
+            {
+              "id": "row-12017-shared-2",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 20
+            }
+          ]
+        ],
+        "publications": [],
+        "status": "ready",
+        "load": "fulfilled",
+        "rejection": null,
+        "sourceStatus": "ready",
+        "sourceErrorPresent": false,
+        "sourceError": null
+      },
+      "before": [
+        {
+          "id": "row-12017-shared-0",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 18
+        },
+        {
+          "id": "row-12017-shared-1",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 19
+        },
+        {
+          "id": "row-12017-shared-2",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 20
+        }
+      ],
+      "rows": [
+        {
+          "id": "row-12017-shared-0",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 18
+        },
+        {
+          "id": "row-12017-shared-1",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 19
+        },
+        {
+          "id": "row-12017-shared-2",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 20
+        }
+      ],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": true
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12017-new-0",
+        "row-12017-new-1"
+      ],
+      "causesThrown": [
+        "throwing-prototype"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "on-demand:cold-live-throw-throwing-prototype",
+        "on-demand:live-throw",
+        "on-demand:refusal-middle",
+        "on-demand:live-throw-middle",
+        "on-demand:live-fresh",
+        "on-demand:source-ready-query-pending"
+      ]
+    },
+    "violations": [
+      "query source health differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cached-initial-valid",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cached",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "valid",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 12018,
+      "epoch": 413969947350,
+      "flag": false
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 2,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [
+          {
+            "id": "row-12018-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947350
+          },
+          {
+            "id": "row-12018-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 413969947351
+          },
+          {
+            "id": "row-12018-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947352
+          }
+        ],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": [
+          {
+            "id": "row-12018-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947350
+          },
+          {
+            "id": "row-12018-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 413969947351
+          },
+          {
+            "id": "row-12018-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947352
+          }
+        ]
+      },
+      "query": {
+        "before": [],
+        "rows": [
+          {
+            "id": "row-12018-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947350
+          },
+          {
+            "id": "row-12018-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 413969947351
+          },
+          {
+            "id": "row-12018-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947352
+          }
+        ],
+        "readySnapshots": [
+          [
+            {
+              "id": "row-12018-shared-0",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 413969947350
+            },
+            {
+              "id": "row-12018-shared-1",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 413969947351
+            },
+            {
+              "id": "row-12018-shared-2",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 413969947352
+            }
+          ]
+        ],
+        "publications": [
+          [
+            {
+              "id": "row-12018-shared-0",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 413969947350
+            },
+            {
+              "id": "row-12018-shared-1",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 413969947351
+            },
+            {
+              "id": "row-12018-shared-2",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 413969947352
+            }
+          ]
+        ],
+        "status": "ready",
+        "load": "fulfilled",
+        "rejection": null,
+        "sourceStatus": "ready",
+        "sourceErrorPresent": false,
+        "sourceError": null
+      },
+      "before": [],
+      "rows": [
+        {
+          "id": "row-12018-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 413969947350
+        },
+        {
+          "id": "row-12018-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 413969947351
+        },
+        {
+          "id": "row-12018-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 413969947352
+        }
+      ],
+      "readySnapshots": [
+        [
+          {
+            "id": "row-12018-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947350
+          },
+          {
+            "id": "row-12018-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 413969947351
+          },
+          {
+            "id": "row-12018-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947352
+          }
+        ]
+      ],
+      "publications": [
+        [
+          {
+            "id": "row-12018-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947350
+          },
+          {
+            "id": "row-12018-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 413969947351
+          },
+          {
+            "id": "row-12018-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947352
+          }
+        ]
+      ],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": true
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": true,
+      "parsed": [
+        "row-12018-shared-0",
+        "row-12018-shared-1",
+        "row-12018-shared-2",
+        "row-12018-shared-0",
+        "row-12018-shared-1",
+        "row-12018-shared-2",
+        "row-12018-shared-0",
+        "row-12018-shared-1",
+        "row-12018-shared-2",
+        "row-12018-shared-0",
+        "row-12018-shared-1",
+        "row-12018-shared-2"
+      ],
+      "causesThrown": [],
+      "cachedInput": [
+        "row-12018-shared-0",
+        "row-12018-shared-1",
+        "row-12018-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "on-demand:cached-initial-valid",
+        "on-demand:initial-valid",
+        "on-demand:source-ready-query-pending"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cached-initial-changed-id",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cached",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "changed-id",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12019,
+      "epoch": 0,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 0,
+      "atDemand": {
+        "sourceStatus": "error",
+        "sourceLoad": "rejected",
+        "sourceRows": [],
+        "queryStatus": "error",
+        "queryLoad": "rejected",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "Error",
+          "message": "parse must preserve the PowerSync row id"
+        },
+        "sourceStatus": "error",
+        "sourceErrorPresent": true,
+        "sourceError": "invalid-row-id"
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "error",
+      "load": "rejected",
+      "error": "invalid-row-id",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12019-shared-0",
+        "row-12019-shared-1"
+      ],
+      "causesThrown": [],
+      "cachedInput": [
+        "row-12019-shared-0",
+        "row-12019-shared-1",
+        "row-12019-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "on-demand:cached-initial-changed-id",
+        "on-demand:initial-changed-id",
+        "on-demand:refusal-middle",
+        "on-demand:initial-changed-id-middle"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cached-initial-throw-error",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cached",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12020,
+      "epoch": 958735332908,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 0,
+      "atDemand": {
+        "sourceStatus": "error",
+        "sourceLoad": "rejected",
+        "sourceRows": [],
+        "queryStatus": "error",
+        "queryLoad": "rejected",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "Error",
+          "message": "refused-12020-1"
+        },
+        "sourceStatus": "error",
+        "sourceErrorPresent": true,
+        "sourceError": "refused-12020-1"
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "error",
+      "load": "rejected",
+      "error": "refused-12020-1",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12020-shared-0",
+        "row-12020-shared-1"
+      ],
+      "causesThrown": [
+        "error"
+      ],
+      "cachedInput": [
+        "row-12020-shared-0",
+        "row-12020-shared-1",
+        "row-12020-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "on-demand:cached-initial-throw-error",
+        "on-demand:initial-throw",
+        "on-demand:refusal-middle",
+        "on-demand:initial-throw-middle"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cached-initial-throw-null-prototype",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cached",
+      "throwCause": "null-prototype",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12021,
+      "epoch": 627286631769,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 0,
+      "atDemand": {
+        "sourceStatus": "loading",
+        "sourceLoad": "pending",
+        "sourceRows": [],
+        "queryStatus": "error",
+        "queryLoad": "rejected",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "Error",
+          "message": "PowerSync collection is not syncing"
+        },
+        "sourceStatus": "loading",
+        "sourceErrorPresent": false,
+        "sourceError": null
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "loading",
+      "load": "pending",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12021-shared-0",
+        "row-12021-shared-1"
+      ],
+      "causesThrown": [
+        "null-prototype"
+      ],
+      "cachedInput": [
+        "row-12021-shared-0",
+        "row-12021-shared-1",
+        "row-12021-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "on-demand:cached-initial-throw-null-prototype",
+        "on-demand:initial-throw",
+        "on-demand:refusal-middle",
+        "on-demand:initial-throw-middle"
+      ]
+    },
+    "violations": [
+      "source readiness, settlement or event order differs",
+      "query source health differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cached-initial-throw-throwing-conversion",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cached",
+      "throwCause": "throwing-conversion",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 12022,
+      "epoch": 38,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 0,
+      "atDemand": {
+        "sourceStatus": "loading",
+        "sourceLoad": "pending",
+        "sourceRows": [],
+        "queryStatus": "error",
+        "queryLoad": "rejected",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "Error",
+          "message": "PowerSync collection is not syncing"
+        },
+        "sourceStatus": "loading",
+        "sourceErrorPresent": false,
+        "sourceError": null
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "loading",
+      "load": "pending",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12022-shared-0",
+        "row-12022-shared-1"
+      ],
+      "causesThrown": [
+        "throwing-conversion"
+      ],
+      "cachedInput": [
+        "row-12022-shared-0",
+        "row-12022-shared-1",
+        "row-12022-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "on-demand:cached-initial-throw-throwing-conversion",
+        "on-demand:initial-throw",
+        "on-demand:refusal-middle",
+        "on-demand:initial-throw-middle"
+      ]
+    },
+    "violations": [
+      "source readiness, settlement or event order differs",
+      "query source health differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cached-initial-throw-throwing-prototype",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cached",
+      "throwCause": "throwing-prototype",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12023,
+      "epoch": 40,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 0,
+      "atDemand": {
+        "sourceStatus": "loading",
+        "sourceLoad": "pending",
+        "sourceRows": [],
+        "queryStatus": "error",
+        "queryLoad": "rejected",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "Error",
+          "message": "PowerSync collection is not syncing"
+        },
+        "sourceStatus": "loading",
+        "sourceErrorPresent": false,
+        "sourceError": null
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "loading",
+      "load": "pending",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12023-shared-0",
+        "row-12023-shared-1"
+      ],
+      "causesThrown": [
+        "throwing-prototype"
+      ],
+      "cachedInput": [
+        "row-12023-shared-0",
+        "row-12023-shared-1",
+        "row-12023-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "on-demand:cached-initial-throw-throwing-prototype",
+        "on-demand:initial-throw",
+        "on-demand:refusal-middle",
+        "on-demand:initial-throw-middle"
+      ]
+    },
+    "violations": [
+      "source readiness, settlement or event order differs",
+      "query source health differs",
+      "terminal decoding health differs"
+    ],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cold-initial-ordinary-valid",
+    "history": {
+      "mode": "eager",
+      "startup": "cold",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "valid",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 13024,
+      "epoch": 87328384078,
+      "flag": true
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [],
+      "rows": [
+        {
+          "id": "row-13024-shared-0",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 87328384078
+        },
+        {
+          "id": "row-13024-shared-1",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 87328384079
+        },
+        {
+          "id": "row-13024-shared-2",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 87328384080
+        }
+      ],
+      "readySnapshots": [
+        [
+          {
+            "id": "row-13024-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 87328384078
+          },
+          {
+            "id": "row-13024-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 87328384079
+          },
+          {
+            "id": "row-13024-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 87328384080
+          }
+        ]
+      ],
+      "publications": [
+        [
+          {
+            "id": "row-13024-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 87328384078
+          },
+          {
+            "id": "row-13024-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 87328384079
+          },
+          {
+            "id": "row-13024-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 87328384080
+          }
+        ],
+        [
+          {
+            "id": "row-13024-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 87328384078
+          },
+          {
+            "id": "row-13024-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 87328384079
+          },
+          {
+            "id": "row-13024-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 87328384080
+          }
+        ]
+      ],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": true,
+      "parsed": [
+        "row-13024-shared-0",
+        "row-13024-shared-1",
+        "row-13024-shared-2"
+      ],
+      "causesThrown": [],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "eager:initial-valid"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cold-initial-ordinary-throw",
+    "history": {
+      "mode": "eager",
+      "startup": "cold",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 13025,
+      "epoch": 30,
+      "flag": false
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "error",
+      "load": "rejected",
+      "error": "refused-13025-1",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-13025-shared-0",
+        "row-13025-shared-1"
+      ],
+      "causesThrown": [
+        "error"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "eager:initial-throw",
+        "eager:refusal-middle",
+        "eager:initial-throw-middle"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cold-initial-ordinary-changed-id",
+    "history": {
+      "mode": "eager",
+      "startup": "cold",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "changed-id",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 13026,
+      "epoch": 1895579021373,
+      "flag": true
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [],
+      "rows": [],
+      "readySnapshots": [],
+      "publications": [],
+      "status": "error",
+      "load": "rejected",
+      "error": "invalid-row-id",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-13026-shared-0",
+        "row-13026-shared-1"
+      ],
+      "causesThrown": [],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "eager:initial-changed-id",
+        "eager:refusal-middle",
+        "eager:initial-changed-id-middle"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cold-live-ordinary-valid",
+    "history": {
+      "mode": "eager",
+      "startup": "cold",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "live",
+      "outcome": "valid",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 13027,
+      "epoch": 18,
+      "flag": true
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [
+        {
+          "id": "row-13027-shared-0",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 18
+        },
+        {
+          "id": "row-13027-shared-1",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 19
+        },
+        {
+          "id": "row-13027-shared-2",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 20
+        }
+      ],
+      "rows": [
+        {
+          "id": "row-13027-new-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 10018
+        },
+        {
+          "id": "row-13027-new-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 10019
+        },
+        {
+          "id": "row-13027-new-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 10020
+        },
+        {
+          "id": "row-13027-shared-0",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 18
+        },
+        {
+          "id": "row-13027-shared-1",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 19
+        },
+        {
+          "id": "row-13027-shared-2",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 20
+        }
+      ],
+      "readySnapshots": [
+        [
+          {
+            "id": "row-13027-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 18
+          },
+          {
+            "id": "row-13027-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 19
+          },
+          {
+            "id": "row-13027-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 20
+          }
+        ]
+      ],
+      "publications": [
+        [
+          {
+            "id": "row-13027-new-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 10018
+          },
+          {
+            "id": "row-13027-new-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 10019
+          },
+          {
+            "id": "row-13027-new-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 10020
+          },
+          {
+            "id": "row-13027-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 18
+          },
+          {
+            "id": "row-13027-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 19
+          },
+          {
+            "id": "row-13027-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 20
+          }
+        ]
+      ],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": true,
+      "parsed": [
+        "row-13027-new-0",
+        "row-13027-new-1",
+        "row-13027-new-2"
+      ],
+      "causesThrown": [],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "eager:live-valid",
+        "eager:live-fresh"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cold-live-ordinary-throw",
+    "history": {
+      "mode": "eager",
+      "startup": "cold",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "live",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 13028,
+      "epoch": 28,
+      "flag": true
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [
+        {
+          "id": "row-13028-shared-0",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 28
+        },
+        {
+          "id": "row-13028-shared-1",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 29
+        },
+        {
+          "id": "row-13028-shared-2",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 30
+        }
+      ],
+      "rows": [
+        {
+          "id": "row-13028-shared-0",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 28
+        },
+        {
+          "id": "row-13028-shared-1",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 29
+        },
+        {
+          "id": "row-13028-shared-2",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 30
+        }
+      ],
+      "readySnapshots": [
+        [
+          {
+            "id": "row-13028-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 28
+          },
+          {
+            "id": "row-13028-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 29
+          },
+          {
+            "id": "row-13028-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 30
+          }
+        ]
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": "refused-13028-1",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-13028-new-0",
+        "row-13028-new-1"
+      ],
+      "causesThrown": [
+        "error"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "eager:live-throw",
+        "eager:refusal-middle",
+        "eager:live-throw-middle",
+        "eager:live-fresh"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "eager:cold-live-ordinary-changed-id",
+    "history": {
+      "mode": "eager",
+      "startup": "cold",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "live",
+      "outcome": "changed-id",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 13029,
+      "epoch": 1805265323768,
+      "flag": false
+    },
+    "raw": {
+      "mode": "eager",
+      "subsetRequests": 0,
+      "before": [
+        {
+          "id": "row-13029-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 1805265323768
+        },
+        {
+          "id": "row-13029-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 1805265323769
+        },
+        {
+          "id": "row-13029-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 1805265323770
+        }
+      ],
+      "rows": [
+        {
+          "id": "row-13029-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 1805265323768
+        },
+        {
+          "id": "row-13029-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 1805265323769
+        },
+        {
+          "id": "row-13029-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 1805265323770
+        }
+      ],
+      "readySnapshots": [
+        [
+          {
+            "id": "row-13029-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 1805265323768
+          },
+          {
+            "id": "row-13029-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 1805265323769
+          },
+          {
+            "id": "row-13029-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 1805265323770
+          }
+        ]
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": "invalid-row-id",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-13029-shared-0",
+        "row-13029-shared-1"
+      ],
+      "causesThrown": [],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "eager:live-changed-id",
+        "eager:refusal-middle",
+        "eager:live-changed-id-middle",
+        "eager:live-overlap"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cold-initial-ordinary-valid",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cold",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "valid",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 13030,
+      "epoch": 1999999999966,
+      "flag": false
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 2,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [
+          {
+            "id": "row-13030-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 1999999999966
+          },
+          {
+            "id": "row-13030-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 1999999999967
+          },
+          {
+            "id": "row-13030-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 1999999999968
+          }
+        ],
+        "readySnapshots": [
+          [
+            {
+              "id": "row-13030-shared-0",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 1999999999966
+            },
+            {
+              "id": "row-13030-shared-1",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 1999999999967
+            },
+            {
+              "id": "row-13030-shared-2",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 1999999999968
+            }
+          ]
+        ],
+        "publications": [
+          [
+            {
+              "id": "row-13030-shared-0",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 1999999999966
+            },
+            {
+              "id": "row-13030-shared-1",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 1999999999967
+            },
+            {
+              "id": "row-13030-shared-2",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 1999999999968
+            }
+          ],
+          [
+            {
+              "id": "row-13030-shared-0",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 1999999999966
+            },
+            {
+              "id": "row-13030-shared-1",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 1999999999967
+            },
+            {
+              "id": "row-13030-shared-2",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 1999999999968
+            }
+          ]
+        ],
+        "status": "ready",
+        "load": "fulfilled",
+        "rejection": null,
+        "sourceStatus": "ready",
+        "sourceErrorPresent": false,
+        "sourceError": null
+      },
+      "before": [],
+      "rows": [
+        {
+          "id": "row-13030-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 1999999999966
+        },
+        {
+          "id": "row-13030-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 1999999999967
+        },
+        {
+          "id": "row-13030-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 1999999999968
+        }
+      ],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [
+        [
+          {
+            "id": "row-13030-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 1999999999966
+          },
+          {
+            "id": "row-13030-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 1999999999967
+          },
+          {
+            "id": "row-13030-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 1999999999968
+          }
+        ],
+        [
+          {
+            "id": "row-13030-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 1999999999966
+          },
+          {
+            "id": "row-13030-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 1999999999967
+          },
+          {
+            "id": "row-13030-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 1999999999968
+          }
+        ]
+      ],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": true
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": true,
+      "parsed": [
+        "row-13030-shared-0",
+        "row-13030-shared-1",
+        "row-13030-shared-2",
+        "row-13030-shared-0",
+        "row-13030-shared-1",
+        "row-13030-shared-2",
+        "row-13030-shared-0",
+        "row-13030-shared-1",
+        "row-13030-shared-2"
+      ],
+      "causesThrown": [],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "on-demand:initial-valid",
+        "on-demand:source-ready-query-pending"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cold-initial-ordinary-throw",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cold",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 13031,
+      "epoch": 6,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 1,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "AbortError",
+          "message": "This operation was aborted"
+        },
+        "sourceStatus": "ready",
+        "sourceErrorPresent": true,
+        "sourceError": "refused-13031-1"
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": "refused-13031-1",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-13031-shared-0",
+        "row-13031-shared-1"
+      ],
+      "causesThrown": [
+        "error"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "on-demand:initial-throw",
+        "on-demand:refusal-middle",
+        "on-demand:initial-throw-middle",
+        "on-demand:source-ready-query-pending"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cold-initial-ordinary-changed-id",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cold",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "changed-id",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 13032,
+      "epoch": 788419269717,
+      "flag": false
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 1,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "AbortError",
+          "message": "This operation was aborted"
+        },
+        "sourceStatus": "ready",
+        "sourceErrorPresent": true,
+        "sourceError": "invalid-row-id"
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": "invalid-row-id",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-13032-shared-0",
+        "row-13032-shared-1"
+      ],
+      "causesThrown": [],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "on-demand:initial-changed-id",
+        "on-demand:refusal-middle",
+        "on-demand:initial-changed-id-middle",
+        "on-demand:source-ready-query-pending"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cold-live-ordinary-valid",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cold",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "live",
+      "outcome": "valid",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 13033,
+      "epoch": 813493101461,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 2,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": []
+      },
+      "query": {
+        "before": [
+          {
+            "id": "row-13033-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 813493101461
+          },
+          {
+            "id": "row-13033-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 813493101462
+          },
+          {
+            "id": "row-13033-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 813493101463
+          }
+        ],
+        "rows": [
+          {
+            "id": "row-13033-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 813493111461
+          },
+          {
+            "id": "row-13033-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 813493111462
+          },
+          {
+            "id": "row-13033-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 813493111463
+          }
+        ],
+        "readySnapshots": [
+          [
+            {
+              "id": "row-13033-shared-0",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 813493101461
+            },
+            {
+              "id": "row-13033-shared-1",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 813493101462
+            },
+            {
+              "id": "row-13033-shared-2",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 813493101463
+            }
+          ]
+        ],
+        "publications": [
+          [
+            {
+              "id": "row-13033-shared-0",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 813493111461
+            },
+            {
+              "id": "row-13033-shared-1",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 813493111462
+            },
+            {
+              "id": "row-13033-shared-2",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 813493111463
+            }
+          ]
+        ],
+        "status": "ready",
+        "load": "fulfilled",
+        "rejection": null,
+        "sourceStatus": "ready",
+        "sourceErrorPresent": false,
+        "sourceError": null
+      },
+      "before": [
+        {
+          "id": "row-13033-shared-0",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 813493101461
+        },
+        {
+          "id": "row-13033-shared-1",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 813493101462
+        },
+        {
+          "id": "row-13033-shared-2",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 813493101463
+        }
+      ],
+      "rows": [
+        {
+          "id": "row-13033-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 813493111461
+        },
+        {
+          "id": "row-13033-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 813493111462
+        },
+        {
+          "id": "row-13033-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 813493111463
+        }
+      ],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [
+        [
+          {
+            "id": "row-13033-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 813493111461
+          },
+          {
+            "id": "row-13033-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 813493111462
+          },
+          {
+            "id": "row-13033-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 813493111463
+          }
+        ]
+      ],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": true
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": true,
+      "parsed": [
+        "row-13033-shared-0",
+        "row-13033-shared-1",
+        "row-13033-shared-2"
+      ],
+      "causesThrown": [],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "on-demand:live-valid",
+        "on-demand:live-overlap",
+        "on-demand:source-ready-query-pending"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cold-live-ordinary-throw",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cold",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "live",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 13034,
+      "epoch": 6,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 2,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": []
+      },
+      "query": {
+        "before": [
+          {
+            "id": "row-13034-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 6
+          },
+          {
+            "id": "row-13034-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 7
+          },
+          {
+            "id": "row-13034-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 8
+          }
+        ],
+        "rows": [
+          {
+            "id": "row-13034-shared-0",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 6
+          },
+          {
+            "id": "row-13034-shared-1",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 7
+          },
+          {
+            "id": "row-13034-shared-2",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 8
+          }
+        ],
+        "readySnapshots": [
+          [
+            {
+              "id": "row-13034-shared-0",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 6
+            },
+            {
+              "id": "row-13034-shared-1",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 7
+            },
+            {
+              "id": "row-13034-shared-2",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 8
+            }
+          ]
+        ],
+        "publications": [],
+        "status": "ready",
+        "load": "fulfilled",
+        "rejection": null,
+        "sourceStatus": "ready",
+        "sourceErrorPresent": true,
+        "sourceError": "refused-13034-1"
+      },
+      "before": [
+        {
+          "id": "row-13034-shared-0",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 6
+        },
+        {
+          "id": "row-13034-shared-1",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 7
+        },
+        {
+          "id": "row-13034-shared-2",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 8
+        }
+      ],
+      "rows": [
+        {
+          "id": "row-13034-shared-0",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 6
+        },
+        {
+          "id": "row-13034-shared-1",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 7
+        },
+        {
+          "id": "row-13034-shared-2",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 8
+        }
+      ],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": "refused-13034-1",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": true
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-13034-shared-0",
+        "row-13034-shared-1"
+      ],
+      "causesThrown": [
+        "error"
+      ],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "on-demand:live-throw",
+        "on-demand:refusal-middle",
+        "on-demand:live-throw-middle",
+        "on-demand:live-overlap",
+        "on-demand:source-ready-query-pending"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cold-live-ordinary-changed-id",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cold",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "live",
+      "outcome": "changed-id",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 13035,
+      "epoch": 11,
+      "flag": false
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 2,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": []
+      },
+      "query": {
+        "before": [
+          {
+            "id": "row-13035-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 11
+          },
+          {
+            "id": "row-13035-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 12
+          },
+          {
+            "id": "row-13035-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 13
+          }
+        ],
+        "rows": [
+          {
+            "id": "row-13035-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 11
+          },
+          {
+            "id": "row-13035-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 12
+          },
+          {
+            "id": "row-13035-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 13
+          }
+        ],
+        "readySnapshots": [
+          [
+            {
+              "id": "row-13035-shared-0",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 11
+            },
+            {
+              "id": "row-13035-shared-1",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 12
+            },
+            {
+              "id": "row-13035-shared-2",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 13
+            }
+          ]
+        ],
+        "publications": [],
+        "status": "ready",
+        "load": "fulfilled",
+        "rejection": null,
+        "sourceStatus": "ready",
+        "sourceErrorPresent": true,
+        "sourceError": "invalid-row-id"
+      },
+      "before": [
+        {
+          "id": "row-13035-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 11
+        },
+        {
+          "id": "row-13035-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 12
+        },
+        {
+          "id": "row-13035-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 13
+        }
+      ],
+      "rows": [
+        {
+          "id": "row-13035-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 11
+        },
+        {
+          "id": "row-13035-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 12
+        },
+        {
+          "id": "row-13035-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 13
+        }
+      ],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": "invalid-row-id",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": true
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-13035-new-0",
+        "row-13035-new-1"
+      ],
+      "causesThrown": [],
+      "cachedInput": [],
+      "cachedStartup": null,
+      "reached": [
+        "on-demand:live-changed-id",
+        "on-demand:refusal-middle",
+        "on-demand:live-changed-id-middle",
+        "on-demand:live-fresh",
+        "on-demand:source-ready-query-pending"
+      ]
+    },
+    "violations": [],
+    "browserErrors": []
+  }
+]

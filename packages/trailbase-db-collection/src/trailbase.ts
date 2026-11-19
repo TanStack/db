@@ -141,17 +141,20 @@ export function trailBaseCollectionOptions<
   const serialIns = (item: TItem) =>
     convert<TItem, TRecord>(config.serialize, item)
 
-  const seenIds = new Store(new Map<string, number>())
+  // Fresh event tokens distinguish confirmation from an older same-key event,
+  // including two events in one clock tick. Time is used only for expiry.
+  const seenIds = new Store(new Map<string, { at: number }>())
 
   const internalSyncMode = config.syncMode ?? `eager`
   let fullSyncCompleted = false
 
   const awaitIds = (
     ids: Array<string>,
+    previous: typeof seenIds.state,
     timeout: number = 120 * 1000,
   ): Promise<void> => {
-    const completed = (value: Map<string, number>) =>
-      ids.every((id) => value.has(id))
+    const completed = (value: typeof seenIds.state) =>
+      ids.every((id) => value.has(id) && value.get(id) !== previous.get(id))
     if (completed(seenIds.state)) {
       return Promise.resolve()
     }
@@ -418,9 +421,9 @@ export function trailBaseCollectionOptions<
             ++eventSequence
             if (loadsInFlight > 0)
               eventSequenceByKey.set(getKey(value), eventSequence)
-            seenIds.setState((curr: Map<string, number>) => {
+            seenIds.setState((curr) => {
               const newIds = new Map(curr)
-              newIds.set(String(getKey(value)), Date.now())
+              newIds.set(String(getKey(value)), { at: Date.now() })
               return newIds
             })
           }
@@ -504,7 +507,7 @@ export function trailBaseCollectionOptions<
             let anyExpired = false
 
             const notExpired = Array.from(curr.entries()).filter(([_, v]) => {
-              const expired = now - v > 300 * 1000
+              const expired = now - v.at > 300 * 1000
               anyExpired = anyExpired || expired
               return !expired
             })
@@ -562,6 +565,7 @@ export function trailBaseCollectionOptions<
     sync,
     getKey,
     onInsert: async (params: InsertMutationFnParams<TItem, TKey>) => {
+      const previous = seenIds.state
       const ids = await config.recordApi.createBulk(
         params.transaction.mutations.map((tx) => {
           const { type, modified } = tx
@@ -575,9 +579,13 @@ export function trailBaseCollectionOptions<
       // The optimistic mutation overlay is removed on return, so at this point
       // we have to ensure that the new record was properly added to the local
       // DB by the subscription.
-      await awaitIds(ids.map((id) => String(id)))
+      await awaitIds(
+        ids.map((id) => String(id)),
+        previous,
+      )
     },
     onUpdate: async (params: UpdateMutationFnParams<TItem, TKey>) => {
+      const previous = seenIds.state
       const ids: Array<string> = await Promise.all(
         params.transaction.mutations.map(async (tx) => {
           const { type, changes, key } = tx
@@ -594,9 +602,10 @@ export function trailBaseCollectionOptions<
       // The optimistic mutation overlay is removed on return, so at this point
       // we have to ensure that the new record was properly updated in the local
       // DB by the subscription.
-      await awaitIds(ids)
+      await awaitIds(ids, previous)
     },
     onDelete: async (params: DeleteMutationFnParams<TItem, TKey>) => {
+      const previous = seenIds.state
       const ids: Array<string> = await Promise.all(
         params.transaction.mutations.map(async (tx) => {
           const { type, key } = tx
@@ -612,7 +621,7 @@ export function trailBaseCollectionOptions<
       // The optimistic mutation overlay is removed on return, so at this point
       // we have to ensure that the new record was properly updated in the local
       // DB by the subscription.
-      await awaitIds(ids)
+      await awaitIds(ids, previous)
     },
     utils: {
       cancel: cancelEventReader,

@@ -1,0 +1,1432 @@
+{
+  "base": "92a1493e0f45dbfd1fc3a51460ccb9228d8f787d",
+  "finalManifest": {
+    "path": "docs/contributing/oracle-reviews/2026-11-17-cross-adapter-neon-final-test-snapshot-v13.json",
+    "sha256": "7a4b729bc2be7f73fe8185f29bb16f106c108c477ff0866088c27951dc7751f1",
+    "entries": 41
+  },
+  "fullRunSnapshot": {
+    "path": "docs/contributing/oracle-reviews/2026-11-17-cross-adapter-neon-final-test-snapshot-v7.json",
+    "sha256": "ae0ac9f9b3c37b519e8f101c1e1f689850c30950796de17d039e1fd4fdbe2b69",
+    "attribution": "Full normal-provider runs used v7. Exact exception-only amendments v8/v9 are separately reviewed; no relabeling of prior runs."
+  },
+  "adapterSource": {
+    "path": "packages/db-adapter-conformance/tests/neon/vendor/collection-options.ts",
+    "sha256": "a995cbff72a3f25edddc31cf859089c5206bb3284c909416e6adf2919f0ae58b",
+    "status": "vendored upstream candidate, no released package changed"
+  },
+  "patches": {
+    "2026-11-17-neon-realtime-tanstack-adapter.patch": {
+      "sha256": "46c1a21d5efe29ba76b3c8eb79c1af7482b54c50901766705e12217f7f7e7d51",
+      "gitApplyCheck": "PASS against separately preserved original upstream source"
+    },
+    "2026-11-17-neon-sdk-retained-evidence.patch": {
+      "sha256": "b966c730ef65f3bc442398d9b7ca818c35f78feb7ac6e23fe224bc234347ba64",
+      "gitApplyCheck": "PASS against separately preserved original upstream source"
+    },
+    "2026-11-17-neon-sdk-applied-proof-order.patch": {
+      "sha256": "7a590e7ba6f3ebe92f0f150e130de4c1cf76dd64d69fd54d6dc9ce1abcb659e1",
+      "gitApplyCheck": "PASS against separately preserved original upstream source"
+    }
+  },
+  "installedSdkPortfolio": {
+    "node": {
+      "path": ".review-2377/neon-final-installed-node.log",
+      "sha256": "63d4c8f74dbda9cad4cd6266e4b83915b92d48bd981375209ba20b5b12bd7038",
+      "exitCode": 1,
+      "passed": 528,
+      "failed": 10,
+      "testSummary": [
+        "Tests  10 failed | 528 passed (538)"
+      ],
+      "generatedReach": [
+        {
+          "campaign": "adapter.neon.idempotent-removal.sdk fixed seed 2377: generated",
+          "counts": {
+            "empty-baseline": 13,
+            "ordered-absent-removal": 14,
+            "ordered-present-removal": 7,
+            "plain-absent-removal": 15,
+            "repeated-absent-removal": 20,
+            "retained-baseline": 47,
+            "transient-row": 15
+          }
+        },
+        {
+          "campaign": "adapter.neon.idempotent-removal.sdk random seed: generated",
+          "counts": {
+            "empty-baseline": 12,
+            "ordered-absent-removal": 13,
+            "ordered-present-removal": 10,
+            "plain-absent-removal": 18,
+            "repeated-absent-removal": 22,
+            "retained-baseline": 48,
+            "transient-row": 9
+          }
+        },
+        {
+          "campaign": "adapter-conformance.eager-live-source.neon-realtime fixed seed 2118: generated",
+          "counts": {
+            "change-batch": 209,
+            "failure-after-ready": 77,
+            "failure-before-ready": 70,
+            "field-removed": 30,
+            "first-ready": 305,
+            "multi-change-batch": 125,
+            "reconnect": 51,
+            "renewal": 103,
+            "replacing-snapshot": 110,
+            "restart": 153,
+            "restart-after-failure": 36,
+            "value:array:change": 64,
+            "value:array:load": 102,
+            "value:boolean:change": 61,
+            "value:boolean:load": 98,
+            "value:float:change": 54,
+            "value:float:load": 98,
+            "value:integer:change": 62,
+            "value:integer:load": 117,
+            "value:null:change": 50,
+            "value:null:load": 102,
+            "value:object:change": 61,
+            "value:object:load": 113,
+            "value:string:change": 58,
+            "value:string:load": 107,
+            "wait-before-evidence-fulfilled": 48,
+            "wait-on-retired-evidence": 90,
+            "wait-rejected-at-retirement": 128,
+            "wait-timed-out": 115
+          }
+        },
+        {
+          "campaign": "adapter-conformance.eager-live-source.neon-realtime random seed: generated",
+          "counts": {
+            "change-batch": 210,
+            "failure-after-ready": 65,
+            "failure-before-ready": 73,
+            "field-removed": 38,
+            "first-ready": 302,
+            "multi-change-batch": 128,
+            "reconnect": 46,
+            "renewal": 107,
+            "replacing-snapshot": 120,
+            "restart": 165,
+            "restart-after-failure": 36,
+            "value:array:change": 57,
+            "value:array:load": 114,
+            "value:boolean:change": 68,
+            "value:boolean:load": 102,
+            "value:float:change": 50,
+            "value:float:load": 104,
+            "value:integer:change": 75,
+            "value:integer:load": 125,
+            "value:null:change": 51,
+            "value:null:load": 118,
+            "value:object:change": 63,
+            "value:object:load": 125,
+            "value:string:change": 62,
+            "value:string:load": 99,
+            "wait-before-evidence-fulfilled": 50,
+            "wait-on-retired-evidence": 84,
+            "wait-rejected-at-retirement": 134,
+            "wait-timed-out": 114
+          }
+        },
+        {
+          "campaign": "adapter.neon.initial-receipt-cleanup.sdk fixed seed 2377: generated",
+          "counts": {
+            "after-application": 6,
+            "empty-source": 4,
+            "held-receipt": 6,
+            "nonempty-source": 8
+          }
+        },
+        {
+          "campaign": "adapter.neon.initial-receipt-cleanup.sdk random seed: generated",
+          "counts": {
+            "after-application": 8,
+            "empty-source": 2,
+            "held-receipt": 4,
+            "nonempty-source": 10
+          }
+        },
+        {
+          "campaign": "adapter.neon.eager-reload.sdk fixed seed 2367: generated",
+          "counts": {
+            "changed-overlap": 17,
+            "empty-result": 14,
+            "fresh": 21,
+            "fresh-held": 14,
+            "no-mutation": 34,
+            "omitted-row": 22,
+            "persisting-mutation": 46,
+            "reload-empty": 28,
+            "reload-empty-held": 13,
+            "reload-retained": 31,
+            "reload-retained-held": 19
+          }
+        },
+        {
+          "campaign": "adapter.neon.eager-reload.sdk random seed: generated",
+          "counts": {
+            "changed-overlap": 18,
+            "empty-result": 21,
+            "fresh": 21,
+            "fresh-held": 13,
+            "no-mutation": 32,
+            "omitted-row": 15,
+            "persisting-mutation": 48,
+            "reload-empty": 32,
+            "reload-empty-held": 19,
+            "reload-retained": 27,
+            "reload-retained-held": 16
+          }
+        },
+        {
+          "campaign": "adapter.neon.shared-client.sdk fixed seed 2377: generated",
+          "counts": {
+            "disjoint-membership": 25,
+            "empty-first-result": 10,
+            "empty-later-result": 5,
+            "empty-peer-result": 9,
+            "equal-membership": 5,
+            "first-retired": 21,
+            "join-after-readiness": 17,
+            "join-before-readiness": 23,
+            "partial-membership": 13,
+            "second-retired": 19
+          }
+        },
+        {
+          "campaign": "adapter.neon.shared-client.sdk random seed: generated",
+          "counts": {
+            "disjoint-membership": 15,
+            "empty-first-result": 8,
+            "empty-later-result": 7,
+            "empty-peer-result": 3,
+            "equal-membership": 9,
+            "first-retired": 18,
+            "join-after-readiness": 16,
+            "join-before-readiness": 24,
+            "partial-membership": 16,
+            "second-retired": 22
+          }
+        }
+      ]
+    },
+    "chromium": {
+      "path": ".review-2377/neon-final-installed-browser.log",
+      "sha256": "346cc74474ad1f1bf785de595bb5e774630de5a56b0407626869f2e696e53c83",
+      "exitCode": 1,
+      "passed": 407,
+      "failed": 6,
+      "testSummary": [
+        "Tests  6 failed | 407 passed (413)"
+      ],
+      "generatedReach": [
+        {
+          "campaign": "adapter-conformance.eager-live-source.neon-sdk.ordered.chromium random seed: generated",
+          "counts": {
+            "change-batch": 46,
+            "failure-after-ready": 23,
+            "failure-before-ready": 17,
+            "field-removed": 6,
+            "first-ready": 65,
+            "multi-change-batch": 22,
+            "replacing-snapshot": 25,
+            "restart": 47,
+            "restart-after-failure": 12,
+            "value:array:change": 11,
+            "value:array:load": 21,
+            "value:boolean:change": 10,
+            "value:boolean:load": 22,
+            "value:float:change": 14,
+            "value:float:load": 25,
+            "value:integer:change": 8,
+            "value:integer:load": 19,
+            "value:null:change": 9,
+            "value:null:load": 19,
+            "value:object:change": 14,
+            "value:object:load": 21,
+            "value:string:change": 10,
+            "value:string:load": 26,
+            "wait-before-evidence-fulfilled": 15,
+            "wait-on-retired-evidence": 26,
+            "wait-rejected-at-retirement": 27,
+            "wait-timed-out": 35
+          }
+        },
+        {
+          "campaign": "adapter.neon.eager-reload.sdk.chromium fixed seed 2367: generated",
+          "counts": {
+            "changed-overlap": 17,
+            "empty-result": 14,
+            "fresh": 21,
+            "fresh-held": 14,
+            "no-mutation": 34,
+            "omitted-row": 22,
+            "persisting-mutation": 46,
+            "reload-empty": 28,
+            "reload-empty-held": 13,
+            "reload-retained": 31,
+            "reload-retained-held": 19
+          }
+        },
+        {
+          "campaign": "adapter.neon.eager-reload.sdk.chromium random seed: generated",
+          "counts": {
+            "changed-overlap": 17,
+            "empty-result": 9,
+            "fresh": 28,
+            "fresh-held": 20,
+            "no-mutation": 31,
+            "omitted-row": 17,
+            "persisting-mutation": 49,
+            "reload-empty": 27,
+            "reload-empty-held": 15,
+            "reload-retained": 25,
+            "reload-retained-held": 14
+          }
+        },
+        {
+          "campaign": "adapter.neon.shared-client.sdk.chromium fixed seed 2377: generated",
+          "counts": {
+            "disjoint-membership": 25,
+            "empty-first-result": 10,
+            "empty-later-result": 5,
+            "empty-peer-result": 9,
+            "equal-membership": 5,
+            "first-retired": 21,
+            "join-after-readiness": 17,
+            "join-before-readiness": 23,
+            "partial-membership": 13,
+            "second-retired": 19
+          }
+        },
+        {
+          "campaign": "adapter.neon.shared-client.sdk.chromium random seed: generated",
+          "counts": {
+            "disjoint-membership": 23,
+            "empty-first-result": 13,
+            "empty-later-result": 9,
+            "empty-peer-result": 8,
+            "equal-membership": 10,
+            "first-retired": 24,
+            "join-after-readiness": 20,
+            "join-before-readiness": 20,
+            "partial-membership": 11,
+            "second-retired": 16
+          }
+        },
+        {
+          "campaign": "adapter.neon.idempotent-removal.sdk.chromium fixed seed 2377: generated",
+          "counts": {
+            "empty-baseline": 13,
+            "ordered-absent-removal": 14,
+            "ordered-present-removal": 7,
+            "plain-absent-removal": 15,
+            "repeated-absent-removal": 20,
+            "retained-baseline": 47,
+            "transient-row": 15
+          }
+        },
+        {
+          "campaign": "adapter.neon.idempotent-removal.sdk.chromium random seed: generated",
+          "counts": {
+            "empty-baseline": 8,
+            "ordered-absent-removal": 10,
+            "ordered-present-removal": 19,
+            "plain-absent-removal": 9,
+            "repeated-absent-removal": 15,
+            "retained-baseline": 52,
+            "transient-row": 14
+          }
+        },
+        {
+          "campaign": "adapter.neon.initial-receipt-cleanup.sdk.chromium fixed seed 2377: generated",
+          "counts": {
+            "after-application": 6,
+            "empty-source": 4,
+            "held-receipt": 6,
+            "nonempty-source": 8
+          }
+        },
+        {
+          "campaign": "adapter.neon.initial-receipt-cleanup.sdk.chromium random seed: generated",
+          "counts": {
+            "after-application": 4,
+            "empty-source": 4,
+            "held-receipt": 8,
+            "nonempty-source": 8
+          }
+        }
+      ]
+    },
+    "remainingOwner": "shared eager EVID-1/EVID-2; applied proof lost after terminal close; installed SDK0.2.0 remains release blocker"
+  },
+  "combinedSdkProposalPortfolio": {
+    "node": {
+      "path": ".review-2377/neon-final-sdk-proposal-node.log",
+      "sha256": "f47700d8294fcbe71e9acf6ebef0a4a4edbc12108a0f4f99a3b47b0e4f8df439",
+      "exitCode": 0,
+      "passed": 538,
+      "failed": 0,
+      "testSummary": [
+        "Tests  538 passed (538)"
+      ],
+      "generatedReach": [
+        {
+          "campaign": "adapter-conformance.eager-live-source.neon-realtime fixed seed 2118: generated",
+          "counts": {
+            "change-batch": 209,
+            "failure-after-ready": 77,
+            "failure-before-ready": 70,
+            "field-removed": 30,
+            "first-ready": 305,
+            "multi-change-batch": 125,
+            "reconnect": 51,
+            "renewal": 103,
+            "replacing-snapshot": 110,
+            "restart": 153,
+            "restart-after-failure": 36,
+            "value:array:change": 64,
+            "value:array:load": 102,
+            "value:boolean:change": 61,
+            "value:boolean:load": 98,
+            "value:float:change": 54,
+            "value:float:load": 98,
+            "value:integer:change": 62,
+            "value:integer:load": 117,
+            "value:null:change": 50,
+            "value:null:load": 102,
+            "value:object:change": 61,
+            "value:object:load": 113,
+            "value:string:change": 58,
+            "value:string:load": 107,
+            "wait-before-evidence-fulfilled": 48,
+            "wait-on-retired-evidence": 90,
+            "wait-rejected-at-retirement": 128,
+            "wait-timed-out": 115
+          }
+        },
+        {
+          "campaign": "adapter-conformance.eager-live-source.neon-realtime random seed: generated",
+          "counts": {
+            "change-batch": 186,
+            "failure-after-ready": 79,
+            "failure-before-ready": 78,
+            "field-removed": 30,
+            "first-ready": 280,
+            "multi-change-batch": 120,
+            "reconnect": 62,
+            "renewal": 93,
+            "replacing-snapshot": 94,
+            "restart": 146,
+            "restart-after-failure": 47,
+            "value:array:change": 55,
+            "value:array:load": 95,
+            "value:boolean:change": 55,
+            "value:boolean:load": 99,
+            "value:float:change": 42,
+            "value:float:load": 78,
+            "value:integer:change": 62,
+            "value:integer:load": 101,
+            "value:null:change": 55,
+            "value:null:load": 92,
+            "value:object:change": 49,
+            "value:object:load": 89,
+            "value:string:change": 64,
+            "value:string:load": 113,
+            "wait-before-evidence-fulfilled": 37,
+            "wait-on-retired-evidence": 77,
+            "wait-rejected-at-retirement": 145,
+            "wait-timed-out": 102
+          }
+        },
+        {
+          "campaign": "adapter.neon.eager-reload.sdk fixed seed 2367: generated",
+          "counts": {
+            "changed-overlap": 17,
+            "empty-result": 14,
+            "fresh": 21,
+            "fresh-held": 14,
+            "no-mutation": 34,
+            "omitted-row": 22,
+            "persisting-mutation": 46,
+            "reload-empty": 28,
+            "reload-empty-held": 13,
+            "reload-retained": 31,
+            "reload-retained-held": 19
+          }
+        },
+        {
+          "campaign": "adapter.neon.eager-reload.sdk random seed: generated",
+          "counts": {
+            "changed-overlap": 15,
+            "empty-result": 19,
+            "fresh": 27,
+            "fresh-held": 20,
+            "no-mutation": 26,
+            "omitted-row": 23,
+            "persisting-mutation": 54,
+            "reload-empty": 24,
+            "reload-empty-held": 15,
+            "reload-retained": 29,
+            "reload-retained-held": 19
+          }
+        },
+        {
+          "campaign": "adapter-conformance.eager-live-source.neon-sdk fixed seed 2118: generated",
+          "counts": {
+            "change-batch": 45,
+            "failure-after-ready": 24,
+            "failure-before-ready": 12,
+            "field-removed": 12,
+            "first-ready": 63,
+            "multi-change-batch": 29,
+            "replacing-snapshot": 27,
+            "restart": 32,
+            "restart-after-failure": 6,
+            "value:array:change": 15,
+            "value:array:load": 22,
+            "value:boolean:change": 11,
+            "value:boolean:load": 25,
+            "value:float:change": 15,
+            "value:float:load": 21,
+            "value:integer:change": 16,
+            "value:integer:load": 26,
+            "value:null:change": 19,
+            "value:null:load": 25,
+            "value:object:change": 9,
+            "value:object:load": 25,
+            "value:string:change": 11,
+            "value:string:load": 21,
+            "wait-before-evidence-fulfilled": 15,
+            "wait-on-retired-evidence": 16,
+            "wait-rejected-at-retirement": 26,
+            "wait-timed-out": 25
+          }
+        },
+        {
+          "campaign": "adapter-conformance.eager-live-source.neon-sdk random seed: generated",
+          "counts": {
+            "change-batch": 40,
+            "failure-after-ready": 23,
+            "failure-before-ready": 24,
+            "field-removed": 11,
+            "first-ready": 58,
+            "multi-change-batch": 28,
+            "replacing-snapshot": 27,
+            "restart": 33,
+            "restart-after-failure": 15,
+            "value:array:change": 11,
+            "value:array:load": 20,
+            "value:boolean:change": 14,
+            "value:boolean:load": 24,
+            "value:float:change": 12,
+            "value:float:load": 24,
+            "value:integer:change": 15,
+            "value:integer:load": 26,
+            "value:null:change": 10,
+            "value:null:load": 24,
+            "value:object:change": 10,
+            "value:object:load": 23,
+            "value:string:change": 12,
+            "value:string:load": 18,
+            "wait-before-evidence-fulfilled": 11,
+            "wait-on-retired-evidence": 16,
+            "wait-rejected-at-retirement": 25,
+            "wait-timed-out": 28
+          }
+        },
+        {
+          "campaign": "adapter-conformance.eager-live-source.neon-sdk.ordered fixed seed 2118: generated",
+          "counts": {
+            "change-batch": 45,
+            "failure-after-ready": 24,
+            "failure-before-ready": 12,
+            "field-removed": 12,
+            "first-ready": 63,
+            "multi-change-batch": 29,
+            "replacing-snapshot": 27,
+            "restart": 32,
+            "restart-after-failure": 6,
+            "value:array:change": 15,
+            "value:array:load": 22,
+            "value:boolean:change": 11,
+            "value:boolean:load": 25,
+            "value:float:change": 15,
+            "value:float:load": 21,
+            "value:integer:change": 16,
+            "value:integer:load": 26,
+            "value:null:change": 19,
+            "value:null:load": 25,
+            "value:object:change": 9,
+            "value:object:load": 25,
+            "value:string:change": 11,
+            "value:string:load": 21,
+            "wait-before-evidence-fulfilled": 15,
+            "wait-on-retired-evidence": 16,
+            "wait-rejected-at-retirement": 26,
+            "wait-timed-out": 25
+          }
+        },
+        {
+          "campaign": "adapter-conformance.eager-live-source.neon-sdk.ordered random seed: generated",
+          "counts": {
+            "change-batch": 44,
+            "failure-after-ready": 24,
+            "failure-before-ready": 16,
+            "field-removed": 6,
+            "first-ready": 64,
+            "multi-change-batch": 29,
+            "replacing-snapshot": 25,
+            "restart": 42,
+            "restart-after-failure": 14,
+            "value:array:change": 11,
+            "value:array:load": 20,
+            "value:boolean:change": 15,
+            "value:boolean:load": 25,
+            "value:float:change": 11,
+            "value:float:load": 22,
+            "value:integer:change": 16,
+            "value:integer:load": 28,
+            "value:null:change": 14,
+            "value:null:load": 21,
+            "value:object:change": 15,
+            "value:object:load": 17,
+            "value:string:change": 12,
+            "value:string:load": 23,
+            "wait-before-evidence-fulfilled": 12,
+            "wait-on-retired-evidence": 19,
+            "wait-rejected-at-retirement": 28,
+            "wait-timed-out": 28
+          }
+        },
+        {
+          "campaign": "adapter.neon.shared-client.sdk fixed seed 2377: generated",
+          "counts": {
+            "disjoint-membership": 25,
+            "empty-first-result": 10,
+            "empty-later-result": 5,
+            "empty-peer-result": 9,
+            "equal-membership": 5,
+            "first-retired": 21,
+            "join-after-readiness": 17,
+            "join-before-readiness": 23,
+            "partial-membership": 13,
+            "second-retired": 19
+          }
+        },
+        {
+          "campaign": "adapter.neon.shared-client.sdk random seed: generated",
+          "counts": {
+            "disjoint-membership": 23,
+            "empty-first-result": 9,
+            "empty-later-result": 9,
+            "empty-peer-result": 6,
+            "equal-membership": 6,
+            "first-retired": 19,
+            "join-after-readiness": 23,
+            "join-before-readiness": 17,
+            "partial-membership": 14,
+            "second-retired": 21
+          }
+        },
+        {
+          "campaign": "adapter.neon.initial-receipt-cleanup.sdk fixed seed 2377: generated",
+          "counts": {
+            "after-application": 6,
+            "empty-source": 4,
+            "held-receipt": 6,
+            "nonempty-source": 8
+          }
+        },
+        {
+          "campaign": "adapter.neon.initial-receipt-cleanup.sdk random seed: generated",
+          "counts": {
+            "after-application": 5,
+            "empty-source": 4,
+            "held-receipt": 7,
+            "nonempty-source": 8
+          }
+        },
+        {
+          "campaign": "adapter.neon.idempotent-removal.sdk fixed seed 2377: generated",
+          "counts": {
+            "empty-baseline": 13,
+            "ordered-absent-removal": 14,
+            "ordered-present-removal": 7,
+            "plain-absent-removal": 15,
+            "repeated-absent-removal": 20,
+            "retained-baseline": 47,
+            "transient-row": 15
+          }
+        },
+        {
+          "campaign": "adapter.neon.idempotent-removal.sdk random seed: generated",
+          "counts": {
+            "empty-baseline": 8,
+            "ordered-absent-removal": 10,
+            "ordered-present-removal": 15,
+            "plain-absent-removal": 10,
+            "repeated-absent-removal": 14,
+            "retained-baseline": 52,
+            "transient-row": 14
+          }
+        }
+      ]
+    },
+    "chromium": {
+      "path": ".review-2377/neon-final-sdk-proposal-browser.log",
+      "sha256": "d7d7211ef42b38cbc069b19e7fbff52d58d3198861647a5e1ec2b5cafeddef4f",
+      "exitCode": 0,
+      "passed": 413,
+      "failed": 0,
+      "testSummary": [
+        "Tests  413 passed (413)"
+      ],
+      "generatedReach": [
+        {
+          "campaign": "adapter-conformance.eager-live-source.neon-sdk.chromium fixed seed 2118: generated",
+          "counts": {
+            "change-batch": 45,
+            "failure-after-ready": 24,
+            "failure-before-ready": 12,
+            "field-removed": 12,
+            "first-ready": 63,
+            "multi-change-batch": 29,
+            "replacing-snapshot": 27,
+            "restart": 32,
+            "restart-after-failure": 6,
+            "value:array:change": 15,
+            "value:array:load": 22,
+            "value:boolean:change": 11,
+            "value:boolean:load": 25,
+            "value:float:change": 15,
+            "value:float:load": 21,
+            "value:integer:change": 16,
+            "value:integer:load": 26,
+            "value:null:change": 19,
+            "value:null:load": 25,
+            "value:object:change": 9,
+            "value:object:load": 25,
+            "value:string:change": 11,
+            "value:string:load": 21,
+            "wait-before-evidence-fulfilled": 15,
+            "wait-on-retired-evidence": 16,
+            "wait-rejected-at-retirement": 26,
+            "wait-timed-out": 25
+          }
+        },
+        {
+          "campaign": "adapter-conformance.eager-live-source.neon-sdk.chromium random seed: generated",
+          "counts": {
+            "change-batch": 48,
+            "failure-after-ready": 29,
+            "failure-before-ready": 24,
+            "field-removed": 12,
+            "first-ready": 70,
+            "multi-change-batch": 32,
+            "replacing-snapshot": 26,
+            "restart": 32,
+            "restart-after-failure": 15,
+            "value:array:change": 15,
+            "value:array:load": 22,
+            "value:boolean:change": 15,
+            "value:boolean:load": 25,
+            "value:float:change": 12,
+            "value:float:load": 21,
+            "value:integer:change": 18,
+            "value:integer:load": 29,
+            "value:null:change": 11,
+            "value:null:load": 22,
+            "value:object:change": 12,
+            "value:object:load": 21,
+            "value:string:change": 13,
+            "value:string:load": 33,
+            "wait-before-evidence-fulfilled": 12,
+            "wait-on-retired-evidence": 10,
+            "wait-rejected-at-retirement": 18,
+            "wait-timed-out": 18
+          }
+        },
+        {
+          "campaign": "adapter-conformance.eager-live-source.neon-sdk.ordered.chromium fixed seed 2118: generated",
+          "counts": {
+            "change-batch": 45,
+            "failure-after-ready": 24,
+            "failure-before-ready": 12,
+            "field-removed": 12,
+            "first-ready": 63,
+            "multi-change-batch": 29,
+            "replacing-snapshot": 27,
+            "restart": 32,
+            "restart-after-failure": 6,
+            "value:array:change": 15,
+            "value:array:load": 22,
+            "value:boolean:change": 11,
+            "value:boolean:load": 25,
+            "value:float:change": 15,
+            "value:float:load": 21,
+            "value:integer:change": 16,
+            "value:integer:load": 26,
+            "value:null:change": 19,
+            "value:null:load": 25,
+            "value:object:change": 9,
+            "value:object:load": 25,
+            "value:string:change": 11,
+            "value:string:load": 21,
+            "wait-before-evidence-fulfilled": 15,
+            "wait-on-retired-evidence": 16,
+            "wait-rejected-at-retirement": 26,
+            "wait-timed-out": 25
+          }
+        },
+        {
+          "campaign": "adapter-conformance.eager-live-source.neon-sdk.ordered.chromium random seed: generated",
+          "counts": {
+            "change-batch": 43,
+            "failure-after-ready": 23,
+            "failure-before-ready": 22,
+            "field-removed": 6,
+            "first-ready": 63,
+            "multi-change-batch": 32,
+            "replacing-snapshot": 23,
+            "restart": 31,
+            "restart-after-failure": 12,
+            "value:array:change": 14,
+            "value:array:load": 21,
+            "value:boolean:change": 19,
+            "value:boolean:load": 26,
+            "value:float:change": 14,
+            "value:float:load": 26,
+            "value:integer:change": 18,
+            "value:integer:load": 24,
+            "value:null:change": 14,
+            "value:null:load": 25,
+            "value:object:change": 12,
+            "value:object:load": 21,
+            "value:string:change": 17,
+            "value:string:load": 22,
+            "wait-before-evidence-fulfilled": 13,
+            "wait-on-retired-evidence": 13,
+            "wait-rejected-at-retirement": 20,
+            "wait-timed-out": 22
+          }
+        },
+        {
+          "campaign": "adapter.neon.eager-reload.sdk.chromium fixed seed 2367: generated",
+          "counts": {
+            "changed-overlap": 17,
+            "empty-result": 14,
+            "fresh": 21,
+            "fresh-held": 14,
+            "no-mutation": 34,
+            "omitted-row": 22,
+            "persisting-mutation": 46,
+            "reload-empty": 28,
+            "reload-empty-held": 13,
+            "reload-retained": 31,
+            "reload-retained-held": 19
+          }
+        },
+        {
+          "campaign": "adapter.neon.eager-reload.sdk.chromium random seed: generated",
+          "counts": {
+            "changed-overlap": 21,
+            "empty-result": 8,
+            "fresh": 24,
+            "fresh-held": 16,
+            "no-mutation": 30,
+            "omitted-row": 19,
+            "persisting-mutation": 50,
+            "reload-empty": 28,
+            "reload-empty-held": 16,
+            "reload-retained": 28,
+            "reload-retained-held": 18
+          }
+        },
+        {
+          "campaign": "adapter.neon.shared-client.sdk.chromium fixed seed 2377: generated",
+          "counts": {
+            "disjoint-membership": 25,
+            "empty-first-result": 10,
+            "empty-later-result": 5,
+            "empty-peer-result": 9,
+            "equal-membership": 5,
+            "first-retired": 21,
+            "join-after-readiness": 17,
+            "join-before-readiness": 23,
+            "partial-membership": 13,
+            "second-retired": 19
+          }
+        },
+        {
+          "campaign": "adapter.neon.shared-client.sdk.chromium random seed: generated",
+          "counts": {
+            "disjoint-membership": 23,
+            "empty-first-result": 14,
+            "empty-later-result": 8,
+            "empty-peer-result": 5,
+            "equal-membership": 6,
+            "first-retired": 20,
+            "join-after-readiness": 24,
+            "join-before-readiness": 16,
+            "partial-membership": 14,
+            "second-retired": 20
+          }
+        },
+        {
+          "campaign": "adapter.neon.idempotent-removal.sdk.chromium fixed seed 2377: generated",
+          "counts": {
+            "empty-baseline": 13,
+            "ordered-absent-removal": 14,
+            "ordered-present-removal": 7,
+            "plain-absent-removal": 15,
+            "repeated-absent-removal": 20,
+            "retained-baseline": 47,
+            "transient-row": 15
+          }
+        },
+        {
+          "campaign": "adapter.neon.idempotent-removal.sdk.chromium random seed: generated",
+          "counts": {
+            "empty-baseline": 13,
+            "ordered-absent-removal": 7,
+            "ordered-present-removal": 9,
+            "plain-absent-removal": 15,
+            "repeated-absent-removal": 16,
+            "retained-baseline": 47,
+            "transient-row": 16
+          }
+        },
+        {
+          "campaign": "adapter.neon.initial-receipt-cleanup.sdk.chromium fixed seed 2377: generated",
+          "counts": {
+            "after-application": 6,
+            "empty-source": 4,
+            "held-receipt": 6,
+            "nonempty-source": 8
+          }
+        },
+        {
+          "campaign": "adapter.neon.initial-receipt-cleanup.sdk.chromium random seed: generated",
+          "counts": {
+            "after-application": 7,
+            "empty-source": 4,
+            "held-receipt": 5,
+            "nonempty-source": 8
+          }
+        }
+      ]
+    },
+    "status": "isolated local SDK proposal, installed dependencies unchanged"
+  },
+  "rawRemoval": {
+    "preEditManifest": "docs/contributing/oracle-reviews/2026-11-17-cross-adapter-neon-first-repair-test-snapshot-v6.json",
+    "red": {
+      "node": {
+        "path": ".review-2377/neon-v6-removal-first-repair-node.log",
+        "sha256": "1135c299799ba425340fbc9185620c578ed71650928f56a0ee28aaffb8fd882d",
+        "exitCode": 1,
+        "passed": 16,
+        "failed": 18,
+        "testSummary": [
+          "Tests  18 failed | 16 passed (34)"
+        ],
+        "generatedReach": []
+      },
+      "chromium": {
+        "path": ".review-2377/neon-v6-removal-first-repair-browser.log",
+        "sha256": "a242bbf57014a2bb8c313cf5bfe9d80b3f704496fcfef2ead707620a793b64b2",
+        "exitCode": 1,
+        "passed": 15,
+        "failed": 19,
+        "testSummary": [
+          "Tests  19 failed | 15 passed | 379 skipped (413)"
+        ],
+        "generatedReach": []
+      }
+    },
+    "green": {
+      "node": 34,
+      "chromium": 34
+    },
+    "ignoreAllRemovalsMutant": {
+      "semanticRowViolationsPerHost": 2,
+      "logs": {
+        "node": {
+          "path": ".review-2377/neon-v6-ignore-all-removals-mutant-node.log",
+          "sha256": "22f78ac115836540a87257d58117d6a968708ba227e9960a169d18be1e84eabd"
+        },
+        "browser": {
+          "path": ".review-2377/neon-v6-ignore-all-removals-mutant-browser.log",
+          "sha256": "4d74fc2803017de79fe8358de81c4f8e7846dc96eefc2a51c8f0678470b1492f"
+        }
+      },
+      "classification": "semantic shared step1 row comparisons; setup/timeout/invalid clean-baseline failures not credited as kills"
+    },
+    "approvals": [
+      "independent enforcement exact v6 RED/v7 GREEN and mutant evidence",
+      "independent adversarial final bounded raw-removal/source verdict"
+    ]
+  },
+  "detachedRecorderAmendment": {
+    "law": "Recording an arbitrary detached rejection reason retains a nonempty diagnostic and does not itself throw; a browser recorder also prevents default handling.",
+    "files": {
+      "packages/db-adapter-conformance/tests/neon/neon-initial-receipt-worker.ts": "46d09199b4656f26b5757fa4ee691b422786350fdc19d64adcd33584672b76ab",
+      "packages/db-adapter-conformance/tests/neon/neon-receiving.ts": "66c4e7c7d2193fd0a3b5a570118a63faa9595f2e9fb3823e37b5e3de08fb19e4",
+      "packages/db/tests/oracle-cleanup.ts": "15317e3871120de3840160b070d902e765989fe070112fbbf3d14d87b84bf6bc",
+      "packages/db/tests/oracle-cleanup.test.ts": "3b9d62134f58bea524f1d0bba1ed89aa2a54ad606f3c0846d0f02a8a598cfb22"
+    },
+    "command": "node --import tsx .review-2377/neon-detached-recorder-control.mjs",
+    "controlSource": "import fs from 'node:fs'\nimport crypto from 'node:crypto'\nimport ts from 'typescript'\nimport { describeOracleCleanupError } from '../packages/db/tests/oracle-cleanup.ts'\n\nconst cases = [\n  ['ordinary', () => new Error('detached failure')],\n  ['null-prototype', () => Object.create(null)],\n  ['throwing-conversion', () => new Proxy({}, { get() { throw new Error('conversion failed') } })],\n  ['cyclic-aggregate', () => { const error = new AggregateError([], 'detached cycle'); error.errors.push(error); return error }],\n]\nconst paths = [\n  ['node', 'packages/db-adapter-conformance/tests/neon/neon-initial-receipt-worker.ts'],\n  ['browser', 'packages/db-adapter-conformance/tests/neon/neon-receiving.ts'],\n]\nconst results = []\nfor (const [host, path] of paths) {\n  const text = fs.readFileSync(path, 'utf8')\n  const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true)\n  let callback\n  const visit = node => {\n    if (host === 'node' && ts.isCallExpression(node) && node.expression.getText(file) === 'process.on' && node.arguments[0]?.getText(file) === '`unhandledRejection`') callback = node.arguments[1]\n    if (host === 'browser' && ts.isVariableDeclaration(node) && node.name.getText(file) === 'record') callback = node.initializer\n    ts.forEachChild(node, visit)\n  }\n  visit(file)\n  if (!callback) throw new Error(`No actual callback found in ${path}`)\n  const body = ts.transpileModule(`return (${callback.getText(file)})`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText\n  for (const [name, create] of cases) {\n    const errors = []\n    let prevented = false\n    let failure\n    try {\n      const handler = new Function('describeOracleCleanupError', 'errors', 'detached', body)(describeOracleCleanupError, errors, errors)\n      const reason = create()\n      handler(host === 'node' ? reason : { reason, preventDefault() { prevented = true } })\n      if (errors.length !== 1 || !errors[0] || (host === 'browser' && !prevented)) throw new Error('Detached diagnostic or browser handling lost')\n    } catch (error) { failure = String(error) }\n    results.push({host, path, source: crypto.createHash('sha256').update(text).digest('hex'), case:name, verdict: failure ? 'FAIL' : 'PASS', errors, ...(failure ? {failure} : {})})\n  }\n}\nconsole.log(JSON.stringify(results, null, 2))\nprocess.exitCode = results.some(result => result.verdict === 'FAIL') ? 1 : 0\n",
+    "original": [
+      {
+        "host": "node",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-initial-receipt-worker.ts",
+        "source": "d34b1e02ec8a3ac1c07da2df63553a8d58b750abeb55092dbb9d4cdb377f3209",
+        "case": "ordinary",
+        "verdict": "PASS",
+        "errors": [
+          "Error: detached failure"
+        ]
+      },
+      {
+        "host": "node",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-initial-receipt-worker.ts",
+        "source": "d34b1e02ec8a3ac1c07da2df63553a8d58b750abeb55092dbb9d4cdb377f3209",
+        "case": "null-prototype",
+        "verdict": "FAIL",
+        "errors": [],
+        "failure": "TypeError: Cannot convert object to primitive value"
+      },
+      {
+        "host": "node",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-initial-receipt-worker.ts",
+        "source": "d34b1e02ec8a3ac1c07da2df63553a8d58b750abeb55092dbb9d4cdb377f3209",
+        "case": "throwing-conversion",
+        "verdict": "FAIL",
+        "errors": [],
+        "failure": "Error: conversion failed"
+      },
+      {
+        "host": "node",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-initial-receipt-worker.ts",
+        "source": "d34b1e02ec8a3ac1c07da2df63553a8d58b750abeb55092dbb9d4cdb377f3209",
+        "case": "cyclic-aggregate",
+        "verdict": "PASS",
+        "errors": [
+          "AggregateError: detached cycle"
+        ]
+      },
+      {
+        "host": "browser",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-receiving.ts",
+        "source": "1355a3a2a523fcf8b0fffae13735ea6f42fe426435215f9cac8c0d2ffb1c6a22",
+        "case": "ordinary",
+        "verdict": "PASS",
+        "errors": [
+          "Error: detached failure"
+        ]
+      },
+      {
+        "host": "browser",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-receiving.ts",
+        "source": "1355a3a2a523fcf8b0fffae13735ea6f42fe426435215f9cac8c0d2ffb1c6a22",
+        "case": "null-prototype",
+        "verdict": "FAIL",
+        "errors": [],
+        "failure": "TypeError: Cannot convert object to primitive value"
+      },
+      {
+        "host": "browser",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-receiving.ts",
+        "source": "1355a3a2a523fcf8b0fffae13735ea6f42fe426435215f9cac8c0d2ffb1c6a22",
+        "case": "throwing-conversion",
+        "verdict": "FAIL",
+        "errors": [],
+        "failure": "Error: conversion failed"
+      },
+      {
+        "host": "browser",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-receiving.ts",
+        "source": "1355a3a2a523fcf8b0fffae13735ea6f42fe426435215f9cac8c0d2ffb1c6a22",
+        "case": "cyclic-aggregate",
+        "verdict": "PASS",
+        "errors": [
+          "AggregateError: detached cycle"
+        ]
+      }
+    ],
+    "repaired": [
+      {
+        "host": "node",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-initial-receipt-worker.ts",
+        "source": "46d09199b4656f26b5757fa4ee691b422786350fdc19d64adcd33584672b76ab",
+        "case": "ordinary",
+        "verdict": "PASS",
+        "errors": [
+          "Error: detached failure"
+        ]
+      },
+      {
+        "host": "node",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-initial-receipt-worker.ts",
+        "source": "46d09199b4656f26b5757fa4ee691b422786350fdc19d64adcd33584672b76ab",
+        "case": "null-prototype",
+        "verdict": "PASS",
+        "errors": [
+          "[unprintable cleanup error]"
+        ]
+      },
+      {
+        "host": "node",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-initial-receipt-worker.ts",
+        "source": "46d09199b4656f26b5757fa4ee691b422786350fdc19d64adcd33584672b76ab",
+        "case": "throwing-conversion",
+        "verdict": "PASS",
+        "errors": [
+          "[unprintable cleanup error]"
+        ]
+      },
+      {
+        "host": "node",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-initial-receipt-worker.ts",
+        "source": "46d09199b4656f26b5757fa4ee691b422786350fdc19d64adcd33584672b76ab",
+        "case": "cyclic-aggregate",
+        "verdict": "PASS",
+        "errors": [
+          "AggregateError: detached cycle: [circular cleanup error]"
+        ]
+      },
+      {
+        "host": "browser",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-receiving.ts",
+        "source": "66c4e7c7d2193fd0a3b5a570118a63faa9595f2e9fb3823e37b5e3de08fb19e4",
+        "case": "ordinary",
+        "verdict": "PASS",
+        "errors": [
+          "Error: detached failure"
+        ]
+      },
+      {
+        "host": "browser",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-receiving.ts",
+        "source": "66c4e7c7d2193fd0a3b5a570118a63faa9595f2e9fb3823e37b5e3de08fb19e4",
+        "case": "null-prototype",
+        "verdict": "PASS",
+        "errors": [
+          "[unprintable cleanup error]"
+        ]
+      },
+      {
+        "host": "browser",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-receiving.ts",
+        "source": "66c4e7c7d2193fd0a3b5a570118a63faa9595f2e9fb3823e37b5e3de08fb19e4",
+        "case": "throwing-conversion",
+        "verdict": "PASS",
+        "errors": [
+          "[unprintable cleanup error]"
+        ]
+      },
+      {
+        "host": "browser",
+        "path": "packages/db-adapter-conformance/tests/neon/neon-receiving.ts",
+        "source": "66c4e7c7d2193fd0a3b5a570118a63faa9595f2e9fb3823e37b5e3de08fb19e4",
+        "case": "cyclic-aggregate",
+        "verdict": "PASS",
+        "errors": [
+          "AggregateError: detached cycle: [circular cleanup error]"
+        ]
+      }
+    ],
+    "classification": "actual TypeScript callback expressions extracted with AST, transpiled and invoked in Node; browser callback source control is not a browser-host execution",
+    "receivingImportChecks": {
+      "node": {
+        "path": ".review-2377/neon-final-recorder-amendment-node.log",
+        "sha256": "2e9169613dd93fa63a91b0660369e5a9015277bc810c116e3d4f76692d68fa85",
+        "exitCode": 0,
+        "passed": 30,
+        "failed": 0,
+        "testSummary": [
+          "Tests  30 passed (30)"
+        ],
+        "generatedReach": [
+          {
+            "campaign": "adapter.neon.initial-receipt-cleanup.sdk fixed seed 2377: generated",
+            "counts": {
+              "after-application": 6,
+              "empty-source": 4,
+              "held-receipt": 6,
+              "nonempty-source": 8
+            }
+          },
+          {
+            "campaign": "adapter.neon.initial-receipt-cleanup.sdk random seed: generated",
+            "counts": {
+              "after-application": 5,
+              "empty-source": 2,
+              "held-receipt": 7,
+              "nonempty-source": 10
+            }
+          }
+        ]
+      },
+      "chromium": {
+        "path": ".review-2377/neon-final-recorder-amendment-browser.log",
+        "sha256": "fbcb359e9cd79dd1f99022740be6533c993eec1d8e15044bcd0679af7d7ddaed",
+        "exitCode": 0,
+        "passed": 30,
+        "failed": 0,
+        "selected": 30,
+        "testSummary": [
+          "Tests  30 passed | 383 skipped (413)"
+        ],
+        "generatedReach": [
+          {
+            "campaign": "adapter.neon.initial-receipt-cleanup.sdk.chromium fixed seed 2377: generated",
+            "counts": {
+              "after-application": 6,
+              "empty-source": 4,
+              "held-receipt": 6,
+              "nonempty-source": 8
+            }
+          },
+          {
+            "campaign": "adapter.neon.initial-receipt-cleanup.sdk.chromium random seed: generated",
+            "counts": {
+              "after-application": 5,
+              "empty-source": 2,
+              "held-receipt": 7,
+              "nonempty-source": 10
+            }
+          }
+        ]
+      }
+    },
+    "carry": "Independent enforcement approved exact v9 normal-provider carry: only shared formatter export plus2event diagnostic formatter adoptions; laws, histories, scheduling cuts, listeners and provider operations unchanged."
+  },
+  "checks": {
+    "scopedEslint": "PASS",
+    "packageTypeScript": "PASS",
+    "gitDiffCheck": "PASS",
+    "patchApplyChecks": "all3PASS"
+  },
+  "limits": [
+    "controlled local v2 frames, not deployed Neon service",
+    "bounded generated raw-removal keys/values/publications; no universal proof",
+    "receipt wrapper uses memory storage, not durable SQLite reopen",
+    "SDK diagnostic six histories and15 retention controls are finite independent checks",
+    "upstream adapter and SDK fixes require publication and released-version receiving run"
+  ],
+  "frameworkRecorderAmendment": {
+    "source": "packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts",
+    "sha256": "22422fb1e298cc643fd572e297eea13b51fbdd2bff9e9833ae29fae58a90f9ec",
+    "law": "Diagnostic classification and formatting preserve the original recognized law/checkpoint/raw observation, or rethrow an unclassified original failure by identity.",
+    "controlSource": "import fs from 'node:fs'\nimport ts from 'typescript'\nimport crypto from 'node:crypto'\nimport { describeOracleCleanupError } from '../packages/db/tests/oracle-cleanup.ts'\nconst phase=process.argv[2]??'repaired'\nconst path='packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts'\nconst source=phase==='original'?JSON.parse(fs.readFileSync('.review-2377/cleanup-diagnostic-original-sources.json','utf8'))[path]:fs.readFileSync(path,'utf8')\nconst file=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true)\nconst node=file.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='observeEagerLiveSourceHistory')\nconst body=ts.transpileModule(`return (${node.getText(file).replace('export ','')})`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText\nclass ConformanceViolation extends Error { law='original law'; step=7;expected=['expected'];actual=['wrong'] }\nconst cases=[['ordinary',()=>new Error('secondary')],['null-prototype',()=>Object.create(null)],['throwing-conversion',()=>({toString(){throw new Error('conversion')}})],['throwing-prototype',()=>new Proxy({}, {getPrototypeOf(){throw new Error('prototype')}})],['cyclic-aggregate',()=>{const e=new AggregateError([],'cycle');e.errors.push(e);return e}],['throwing-aggregate-details',()=>Object.defineProperty(new AggregateError([],'details'),'errors',{get(){throw new Error('details')}})]]\nconst results=[]\nfor(const [label,make] of cases){\n const primary=new ConformanceViolation()\n const error=new AggregateError([make()],'comparison and cleanup',{cause:primary})\n const observe=new Function('ConformanceViolation','checkEagerLiveSourceHistory','describeOracleCleanupError',body)(ConformanceViolation,()=>Promise.reject(error),describeOracleCleanupError)\n let failure\n try{\n  const raw=await observe({},[])\n  if(raw.failure?.law!==primary.law||raw.failure.step!==7||raw.failure.actual!==primary.actual||!raw.failure.cleanup[0])throw new Error('Primary or cleanup diagnostic lost')\n }catch(error){failure=describeOracleCleanupError(error)}\n results.push({case:label,verdict:failure?'FAIL':'PASS',...(failure?{failure}:{})})\n}\nfor(const [label,error] of [['raw-proxy',new Proxy({}, {getPrototypeOf(){throw new Error('classification')}})],['raw-aggregate-cause',Object.defineProperty(new AggregateError([],'unknown'),'cause',{get(){throw new Error('cause getter')}})]]){\n const observe=new Function('ConformanceViolation','checkEagerLiveSourceHistory','describeOracleCleanupError',body)(ConformanceViolation,()=>Promise.reject(error),describeOracleCleanupError)\n const outcome=await observe({},[]).catch(reason=>reason)\n results.push({case:label,verdict:outcome===error?'PASS':'FAIL',...(outcome===error?{}:{failure:'Original thrown value replaced during diagnostic classification'})})\n}\nconsole.log(JSON.stringify({path,source:crypto.createHash('sha256').update(source).digest('hex'),results},null,2))\nprocess.exitCode=results.some(x=>x.verdict==='FAIL')?1:0\n",
+    "original": {
+      "path": "packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts",
+      "source": "84f11150cc8cf5e4a3ff08267a6701ef570cb5acf52618622605740803bfe71e",
+      "results": [
+        {
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "case": "null-prototype",
+          "verdict": "FAIL",
+          "failure": "TypeError: Cannot convert object to primitive value"
+        },
+        {
+          "case": "throwing-conversion",
+          "verdict": "FAIL",
+          "failure": "Error: conversion"
+        },
+        {
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "case": "raw-proxy",
+          "verdict": "FAIL",
+          "failure": "Original thrown value replaced during diagnostic classification"
+        },
+        {
+          "case": "raw-aggregate-cause",
+          "verdict": "FAIL",
+          "failure": "Original thrown value replaced during diagnostic classification"
+        }
+      ]
+    },
+    "formatterOnly": {
+      "path": "packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts",
+      "source": "6d008d6896f5b26d980d774400d58e9b27145b25b9cbd552e5596538585f806b",
+      "results": [
+        {
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "case": "raw-proxy",
+          "verdict": "FAIL",
+          "failure": "Original thrown value replaced during diagnostic classification"
+        },
+        {
+          "case": "raw-aggregate-cause",
+          "verdict": "FAIL",
+          "failure": "Original thrown value replaced during diagnostic classification"
+        }
+      ]
+    },
+    "repaired": {
+      "path": "packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts",
+      "source": "22422fb1e298cc643fd572e297eea13b51fbdd2bff9e9833ae29fae58a90f9ec",
+      "results": [
+        {
+          "case": "ordinary",
+          "verdict": "PASS"
+        },
+        {
+          "case": "null-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "case": "throwing-conversion",
+          "verdict": "PASS"
+        },
+        {
+          "case": "throwing-prototype",
+          "verdict": "PASS"
+        },
+        {
+          "case": "cyclic-aggregate",
+          "verdict": "PASS"
+        },
+        {
+          "case": "throwing-aggregate-details",
+          "verdict": "PASS"
+        },
+        {
+          "case": "raw-proxy",
+          "verdict": "PASS"
+        },
+        {
+          "case": "raw-aggregate-cause",
+          "verdict": "PASS"
+        }
+      ]
+    },
+    "classification": "Actual exported production-driver function extracted and invoked in Node; no new browser-host execution or normal-provider campaign claimed.",
+    "carryStatus": "APPROVED by independent enforcement for exact final v11 all41hashes: actual exported-function8controls independentlyPASS, original known law/step/raw identity preserved and unknown failures rethrown by identity. Normal provider entry/model/comparison/schedule unchanged; no new host execution claimed.",
+    "independentEnforcementControl": {
+      "path": ".review-2377/enforcement-framework-final-controls.json",
+      "sha256": "742cad91d4cfa7e75bff36d28ea239f3f9d432dc6523e1153ca29d4e2cede9b0",
+      "observations": {
+        "path": "packages/db-adapter-conformance/tests/eager-live-source-framework-oracle.ts",
+        "source": "22422fb1e298cc643fd572e297eea13b51fbdd2bff9e9833ae29fae58a90f9ec",
+        "results": [
+          {
+            "case": "ordinary",
+            "verdict": "PASS"
+          },
+          {
+            "case": "null-prototype",
+            "verdict": "PASS"
+          },
+          {
+            "case": "throwing-conversion",
+            "verdict": "PASS"
+          },
+          {
+            "case": "throwing-prototype",
+            "verdict": "PASS"
+          },
+          {
+            "case": "cyclic-aggregate",
+            "verdict": "PASS"
+          },
+          {
+            "case": "throwing-aggregate-details",
+            "verdict": "PASS"
+          },
+          {
+            "case": "raw-proxy",
+            "verdict": "PASS"
+          },
+          {
+            "case": "raw-aggregate-cause",
+            "verdict": "PASS"
+          }
+        ]
+      }
+    }
+  },
+  "recorderAmendmentManifest": {
+    "path": "docs/contributing/oracle-reviews/2026-11-17-cross-adapter-neon-final-test-snapshot-v9.json",
+    "sha256": "5efce8237590870603d1efdc200e3e07f932bcb323bea4ea1411bb9a80936f3d",
+    "entries": 41
+  },
+  "frameworkAmendmentManifest": {
+    "path": "docs/contributing/oracle-reviews/2026-11-17-cross-adapter-neon-final-test-snapshot-v11.json",
+    "sha256": "b65a9b7fc9e6edb9e6d1fd1526a874c8720f6095e12245b32157a0cb4898244e",
+    "entries": 41
+  },
+  "sharedConformanceDiagnosticAmendment": {
+    "source": "packages/db-adapter-conformance/src/eager-live-source-oracle.ts",
+    "sha256": "abc07901fc6ab979c6f41bade19b1211c3bf8db1c35d8857f98869b5050aea49",
+    "report": "docs/contributing/oracle-reviews/2026-11-18-receiving-cleanup-fidelity.md",
+    "snapshot": "docs/contributing/oracle-reviews/2026-11-18-receiving-cleanup-fidelity-snapshot.json",
+    "controls": {
+      "watcher": {
+        "originalSemanticFailures": 6,
+        "finalPassing": 18
+      },
+      "conformanceViolationConstructor": {
+        "originalSemanticFailures": 3,
+        "finalPassing": 6
+      }
+    },
+    "scope": "Total rejection/console diagnostic formatting and safe mismatch descriptions only; accepted comparison conditions, model, history grammar and timing unchanged. Final source edits stopped by owner.",
+    "carryStatus": "APPROVED by independent enforcement for exact v13: byte SHA verified and all41sourcehashes current. Actual extracted watcher18/constructor6 controls GREEN, original6/3RED; additional24constructor expected/actual/history corruptions preserve law/step/raw identities. Accepted comparison conditions/model/history/cut/schedule unchanged. Independent adversarial approved original v12 diagnostic change; final lint-only carry separately recorded.",
+    "lintAmendment": {
+      "before": "0529bec22b56bd9618acac3b8597d69b3e8d09a65bce4bee0b8a88fc1398d2e7",
+      "after": "abc07901fc6ab979c6f41bade19b1211c3bf8db1c35d8857f98869b5050aea49",
+      "change": "Inside guarded show(), use String(JSON.stringify(...)) instead of a nullish fallback rejected by no-unnecessary-condition. Formatter output only; final actual watcher18/constructor6 controls rerun GREEN."
+    }
+  },
+  "conformanceDiagnosticManifest": {
+    "path": "docs/contributing/oracle-reviews/2026-11-17-cross-adapter-neon-final-test-snapshot-v12.json",
+    "sha256": "2da0dae9a0bab861e405dd6559bc36e51e3be8c88860c9cd82d08c1a82aabf95",
+    "entries": 41
+  }
+}

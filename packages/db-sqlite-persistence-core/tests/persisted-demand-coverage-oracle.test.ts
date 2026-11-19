@@ -1,4 +1,3 @@
-import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, vi } from 'vitest'
 import {
   BTreeIndex,
@@ -59,6 +58,10 @@ import type {
 } from './persisted-demand-coverage-model-oracle.js'
 import type { Collection, LoadSubsetOptions } from '@tanstack/db'
 import type { SQLiteDriver } from '../src/index.js'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
 
 /**
  * # When may an on-demand query settle on rows from SQLite?

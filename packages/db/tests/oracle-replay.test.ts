@@ -772,6 +772,29 @@ describe(`named oracle replay manifest`, () => {
         expect(source).toContain(`const property = \`${entry.property}\``)
         expect(source).toMatch(/registerTrailBaseEager\(\s*\{\s*property,/u)
       } else if (
+        entry.property ===
+          `adapter-conformance.eager-live-source.electric.chromium` ||
+        entry.property ===
+          `adapter-conformance.eager-live-source.electric.no-on-error.chromium`
+      ) {
+        expect(entry.file).toBe(
+          `packages/electric-db-collection/tests/cross-adapter-receiving-oracle.browser.test.ts`,
+        )
+        expect(source).toContain(`property: \`${entry.property}\``)
+      } else if (
+        entry.property.startsWith(
+          `adapter-conformance.eager-live-source.neon-sdk`,
+        )
+      ) {
+        expect(entry.file).toBe(
+          entry.property.endsWith(`.chromium`)
+            ? `packages/db-adapter-conformance/tests/neon-receiving-oracle.browser.test.ts`
+            : `packages/db-adapter-conformance/tests/neon-sdk-oracle.property.test.ts`,
+        )
+        // The ordered-transport variant selects one of two complete literal
+        // IDs; both keep the same model and the appropriate receiving host.
+        expect(source).toContain(`\`${entry.property}\``)
+      } else if (
         entry.property.startsWith(`adapter-conformance.eager-live-source.`)
       ) {
         const prefix = `adapter-conformance.eager-live-source.`
@@ -799,6 +822,26 @@ describe(`named oracle replay manifest`, () => {
                 source.includes(`\`${variant[0]}\``)),
           ).toBe(true)
         }
+      } else if (
+        /^adapter\.convex\.(eager-lifecycle|eager-reload|eager-gate|initial-receipt)\.(javascript|react|wrapped)$/.test(
+          entry.property,
+        ) ||
+        /^convex\.snapshot-projection\.(javascript|react|wrapped)$/.test(
+          entry.property,
+        )
+      ) {
+        // Each actual SDK client is registered by the receiving file's finite
+        // loop. The property and loop coordinate must agree; a similarly named
+        // receiver for another client does not establish this replay route.
+        const client = entry.property.split(`.`).at(-1)!
+        const prefix = entry.property.slice(0, -client.length)
+        const coordinate = entry.property.includes(`.eager-gate.`)
+          ? `kind`
+          : `client`
+        expect(source).toContain(`\`${prefix}\${${coordinate}}\``)
+        expect(source).toContain(
+          `for (const ${coordinate} of [\`javascript\`, \`react\`, \`wrapped\`] as const)`,
+        )
       } else if (entry.property.startsWith(`electric.sdk-resume-checkpoint.`)) {
         const [, , tagged, consumer, emptySecond, delivery] =
           entry.property.split(`.`)

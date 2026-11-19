@@ -1,0 +1,18 @@
+{
+  "packages/db-adapter-conformance/tests/on-demand-streams-oracle.ts": "b973ec9b74094d77b7ff80f4f583411020bcef8dd309bea14a28d19744656a0c",
+  "packages/db-adapter-conformance/tests/on-demand-streams-driver.ts": "5f8e040bb99e0863aab44a49cd7b277d7da78ecd6ce32ef9a2d45980b8815b54",
+  "packages/db-adapter-conformance/tests/on-demand-streams-oracle-suite.ts": "f13222f5644ce042c8a5a3eb7d4075bdfa6800399f166cbf91a5252665f5ec63",
+  "packages/powersync-direct-collection/tests/on-demand-streams-driver.ts": "2554a833139ac7aa37d10e747e3cdd48364eb46ba9dd01e2ee74631e4ccfa040",
+  "packages/powersync-direct-collection/tests/on-demand-streams-persisted-driver.ts": "5bedca374f3f2b64c9931ac8eed599b398e1c41886e0c1916fb18d735a0551c2",
+  "packages/powersync-direct-collection/tests/on-demand-streams-conformance-oracle.property.test.ts": "f612397701661be4eefe740fbfcfb8d975869ebfe742f7ff0574b62b03f3746b",
+  "packages/powersync-direct-collection/tests/on-demand-streams-persisted-conformance-oracle.property.test.ts": "c90017d3f4b4b61b33290f15c542dd600e7516a99e680beeac7c80d3d94c849d",
+  "packages/powersync-direct-collection/tests/on-demand-service.ts": "b450bb75bc08c408be00a1309035b127841bdf5187aaa820c3c2e8349278df4e",
+  "packages/powersync-direct-collection/src/index.ts": "a30e71beb96fade6c5714a300ea76628386dd0b9b1ea04ad60ccf3ee9ae074fa",
+  "packages/powersync-direct-collection/src/subsets.ts": "00fb4cb1976ec8b384d01e1fbb483768204bc40b69a3dcc19ed21b4356b3e380",
+  "packages/browser-db-sqlite-persistence/e2e/powersync-direct-subsets-oracle.browser.test.ts": "7800e67373cff0aecb4986911b810251d93cbd8f2c46e10cafda19715faf8201",
+  "packages/browser-db-sqlite-persistence/e2e/powersync-direct-persisted-subsets-oracle.browser.test.ts": "a697d01bc4c2146f35ff7466176f08f6944dfa40a21eac794d1bc54a99f1731f",
+  "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.ts": "94c8b9c17a2861bbe9a14f07e5a7cb24848652fe6a295bed25fca2181b197eb9",
+  "packages/browser-db-sqlite-persistence/e2e/powersync-direct-receiving.opfs.html": "b96e34fef3fca0c1bd85b32ef735a308d4b9a90dff9cf811cbf884b64d48499d",
+  "packages/browser-db-sqlite-persistence/tests/adapter-chromium-host.ts": "e0e1e06b91f388cff7c87bdc5883ec486c3ec88a6cc551a2e5f15ea27b012f5f",
+  "packages/db/tests/oracle-cleanup.ts": "23497e2b680f5a7be09d51944cd75cceb745aa9d57ac948079c5e2dedde3490b"
+}

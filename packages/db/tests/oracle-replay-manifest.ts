@@ -18,6 +18,445 @@ import {
 const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
+  ...[`query`, `electric`, `powersync`, `trailbase`, `convex`].flatMap(
+    (adapter) => [
+      [
+        `db-adapter-conformance/tests/persisted-demand-receiving-oracle.test.ts`,
+        `adapter.${adapter}.persisted-demand`,
+        `node-sqlite`,
+      ] as const,
+      [
+        `browser-db-sqlite-persistence/e2e/adapter-persisted-demand-oracle.browser.test.ts`,
+        `adapter.${adapter}.persisted-demand`,
+        `chromium-opfs`,
+      ] as const,
+    ],
+  ),
+  [
+    `db-adapter-conformance/tests/persisted-demand-peer-oracle.test.ts`,
+    `adapter.convex.persisted-demand-peer`,
+    `node-sqlite`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/adapter-persisted-demand-peer-oracle.browser.test.ts`,
+    `adapter.convex.persisted-demand-peer`,
+    `chromium-opfs`,
+  ],
+  [
+    `electric-db-collection/tests/cross-adapter-receiving-oracle.browser.test.ts`,
+    `adapter-conformance.eager-live-source.electric`,
+    `chromium no-on-error.chromium`,
+  ],
+  [
+    `electric-db-collection/tests/cross-adapter-receiving-oracle.browser.test.ts`,
+    `electric.sdk-snapshot-delivery`,
+    `chromium`,
+  ],
+  [
+    `electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
+    `electric`,
+    `sdk-decoder-delivery`,
+  ],
+  [
+    `electric-db-collection/tests/cross-adapter-receiving-oracle.browser.test.ts`,
+    `electric.sdk-decoder-delivery`,
+    `chromium`,
+  ],
+  [
+    `rxdb-db-collection/tests/mutation-source-batch-oracle.property.test.ts`,
+    `adapter.rxdb`,
+    `mutation-source-batch`,
+  ],
+  [
+    `rxdb-db-collection/tests/mutation-source-batch-oracle.browser.test.ts`,
+    `adapter.rxdb.mutation-source-batch`,
+    `chromium`,
+  ],
+  [
+    `rxdb-db-collection/tests/persisted-initial-receipt-oracle.property.test.ts`,
+    `adapter.rxdb.persisted-initial-receipt`,
+    `controlled node-sqlite`,
+  ],
+  [
+    `rxdb-db-collection/tests/persisted-initial-receipt-oracle.browser.test.ts`,
+    `adapter.rxdb.persisted-initial-receipt`,
+    `chromium-opfs`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/native-powersync-hooks-oracle.browser.test.ts`,
+    `adapter.powersync.hook-lifecycle`,
+    `chromium`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/native-powersync-union-oracle.browser.test.ts`,
+    `adapter.powersync.demand-union`,
+    `chromium`,
+  ],
+  [
+    `powersync-db-collection/tests/demand-union-conformance-oracle.property.test.ts`,
+    `adapter.powersync`,
+    `demand-union`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/native-powersync-batch-decode-oracle.browser.test.ts`,
+    `adapter.powersync.batch-decode`,
+    `chromium`,
+  ],
+  [
+    `electric-db-collection/tests/cross-adapter-receipt-oracle.property.test.ts`,
+    `adapter.electric.initial-receipt.applied`,
+    `controlled node-sqlite`,
+  ],
+  [
+    `electric-db-collection/tests/cross-adapter-receiving-oracle.browser.test.ts`,
+    `adapter.electric.initial-receipt.applied`,
+    `chromium`,
+  ],
+  [
+    `powersync-db-collection/tests/batch-decode-conformance-oracle.property.test.ts`,
+    `adapter.powersync`,
+    `batch-decode`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-sdk-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source.neon-sdk`,
+    `ordered`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-receiving-oracle.browser.test.ts`,
+    `adapter-conformance.eager-live-source.neon-sdk`,
+    `ordered.chromium`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/trailbase-mutation-events-oracle.browser.test.ts`,
+    `trailbase.mutation-events.sdk`,
+    `chromium`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-receiving-oracle.browser.test.ts`,
+    `adapter-conformance.eager-live-source.neon-sdk`,
+    `chromium`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-receiving-oracle.browser.test.ts`,
+    `adapter.neon.eager-reload.sdk`,
+    `chromium`,
+  ],
+  [
+    `powersync-db-collection/tests/hook-lifecycle-conformance-oracle.property.test.ts`,
+    `adapter.powersync`,
+    `hook-lifecycle`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-sdk-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `neon-sdk`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-reload-oracle.property.test.ts`,
+    `adapter.neon.eager-reload`,
+    `sdk`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-initial-receipt-oracle.property.test.ts`,
+    `adapter.neon.initial-receipt-cleanup`,
+    `sdk`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-shared-client-oracle.property.test.ts`,
+    `adapter.neon.shared-client`,
+    `sdk`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-receiving-oracle.browser.test.ts`,
+    `adapter.neon.initial-receipt-cleanup.sdk`,
+    `chromium`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-receiving-oracle.browser.test.ts`,
+    `adapter.neon.shared-client.sdk`,
+    `chromium`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-idempotent-removal-oracle.property.test.ts`,
+    `adapter.neon.idempotent-removal`,
+    `sdk`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-receiving-oracle.browser.test.ts`,
+    `adapter.neon.idempotent-removal.sdk`,
+    `chromium`,
+  ],
+  [
+    `rxdb-db-collection/tests/eager-gate-conformance-oracle.property.test.ts`,
+    `adapter.rxdb`,
+    `eager-gate`,
+  ],
+  [
+    `rxdb-db-collection/tests/eager-gate-conformance-oracle.browser.test.ts`,
+    `adapter.rxdb.eager-gate`,
+    `chromium`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/native-powersync-initial-receipt-oracle.browser.test.ts`,
+    `adapter.powersync.initial-receipt-cleanup`,
+    `persisted-opfs`,
+  ],
+  [
+    `db/tests/local-storage-eager-reload-oracle.browser.test.ts`,
+    `local-storage.write-order`,
+    `chromium`,
+  ],
+  [
+    `convex-db-collection/tests/snapshot-oracle.property.test.ts`,
+    `convex.snapshot-projection`,
+    `javascript react wrapped`,
+  ],
+  [
+    `electric-db-collection/tests/cross-adapter-receipt-oracle.property.test.ts`,
+    `adapter.electric.initial-receipt`,
+    `controlled node-sqlite`,
+  ],
+  [
+    `electric-db-collection/tests/cross-adapter-receiving-oracle.browser.test.ts`,
+    `adapter.electric`,
+    `initial-receipt.chromium mutation-confirmation.chromium`,
+  ],
+  [
+    `electric-db-collection/tests/cross-adapter-mutation-oracle.property.test.ts`,
+    `adapter.electric`,
+    `mutation-confirmation`,
+  ],
+  [
+    `powersync-db-collection/tests/initial-receipt-conformance-oracle.property.test.ts`,
+    `adapter.powersync.initial-receipt-cleanup`,
+    `persisted-controlled persisted-node-sqlite`,
+  ],
+  [
+    `rxdb-db-collection/tests/initial-receipt-oracle.browser.test.ts`,
+    `adapter.rxdb.initial-receipt-cleanup`,
+    `chromium`,
+  ],
+  [
+    `rxdb-db-collection/tests/shared-client-oracle.browser.test.ts`,
+    `adapter.rxdb.shared-client`,
+    `chromium`,
+  ],
+  [
+    `electric-db-collection/tests/cross-adapter-reload-oracle.property.test.ts`,
+    `adapter.electric`,
+    `eager-reload`,
+  ],
+  [
+    `electric-db-collection/tests/cross-adapter-gate-oracle.property.test.ts`,
+    `adapter.electric`,
+    `eager-gate-failure`,
+  ],
+  [
+    `electric-db-collection/tests/cross-adapter-receiving-oracle.browser.test.ts`,
+    `adapter.electric`,
+    `eager-reload.chromium eager-gate-failure.chromium`,
+  ],
+  [
+    `db/tests/local-storage-eager-reload-oracle.property.test.ts`,
+    `adapter.local-storage.eager-reload`,
+    `node`,
+  ],
+  [
+    `db/tests/local-storage-eager-reload-oracle.browser.test.ts`,
+    `adapter.local-storage.eager-reload`,
+    `chromium`,
+  ],
+  [
+    `rxdb-db-collection/tests/initial-receipt-oracle.property.test.ts`,
+    `adapter.rxdb`,
+    `initial-receipt-cleanup`,
+  ],
+  [
+    `rxdb-db-collection/tests/shared-client-oracle.property.test.ts`,
+    `adapter.rxdb`,
+    `shared-client`,
+  ],
+  [
+    `query-db-collection/tests/failing-queries-oracle.test.ts`,
+    `query-db`,
+    `select-failures select-failures.node-sqlite`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/query-cross-adapter-oracle.browser.test.ts`,
+    `adapter.query`,
+    `complete-result-reload.chromium initial-gate.chromium`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/query-cross-adapter-oracle.browser.test.ts`,
+    `query-db.select-failures`,
+    `chromium-opfs`,
+  ],
+  [
+    `db/tests/local-only-direct-write-oracle.test.ts`,
+    `local-only`,
+    `handler-confirmation`,
+  ],
+  [
+    `trailbase-db-collection/tests/mutation-events-sdk-oracle.property.test.ts`,
+    `trailbase.mutation-events`,
+    `sdk`,
+  ],
+  [
+    `trailbase-db-collection/tests/sdk-eager-reload-conformance-oracle.property.test.ts`,
+    `adapter.trailbase.eager-reload`,
+    `sdk`,
+  ],
+  [
+    `trailbase-db-collection/tests/sdk-eager-gate-conformance-oracle.property.test.ts`,
+    `adapter.trailbase.eager-gate`,
+    `sdk`,
+  ],
+  [
+    `trailbase-db-collection/tests/sdk-persisted-startup-conformance-oracle.property.test.ts`,
+    `adapter.trailbase.persisted-startup`,
+    `sdk`,
+  ],
+  [
+    `convex-db-collection/tests/eager-gate-conformance-oracle.property.test.ts`,
+    `adapter.convex.eager-gate`,
+    `javascript react wrapped`,
+  ],
+  [
+    `convex-db-collection/tests/initial-receipt-conformance-oracle.property.test.ts`,
+    `adapter.convex.initial-receipt`,
+    `javascript react wrapped`,
+  ],
+  [
+    `convex-db-collection/tests/eager-lifecycle-receiving-oracle.property.test.ts`,
+    `adapter.convex.eager-lifecycle`,
+    `javascript react wrapped`,
+  ],
+  [
+    `convex-db-collection/tests/eager-reload-conformance-oracle.property.test.ts`,
+    `adapter.convex.eager-reload`,
+    `javascript react wrapped`,
+  ],
+  [
+    `query-db-collection/tests/eager-reload-conformance-oracle.property.test.ts`,
+    `adapter.query`,
+    `complete-result-reload initial-gate`,
+  ],
+  [
+    `trailbase-db-collection/tests/sdk-eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `trailbase-sdk`,
+  ],
+  [
+    `powersync-direct-collection/tests/persisted-demand-conformance-oracle.test.ts`,
+    `adapter.powersync-direct.persisted-demand`,
+    `node-sqlite`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/powersync-direct-persisted-demand-oracle.browser.test.ts`,
+    `adapter.powersync-direct.persisted-demand`,
+    `chromium-opfs`,
+  ],
+  [
+    `powersync-direct-collection/tests/cursor-persisted-demand-oracle.property.test.ts`,
+    `adapter.powersync-direct.persisted-cursor`,
+    `node-sqlite`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/powersync-direct-cursor-persisted-demand-oracle.browser.test.ts`,
+    `adapter.powersync-direct.persisted-cursor`,
+    `chromium-opfs`,
+  ],
+  [
+    `powersync-direct-collection/tests/shared-client-conformance-oracle.property.test.ts`,
+    `adapter.powersync-direct`,
+    `shared-client`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/powersync-direct-shared-client-oracle.browser.test.ts`,
+    `adapter.powersync-direct.shared-client`,
+    `chromium`,
+  ],
+  [
+    `powersync-direct-collection/tests/eager-reload-conformance-oracle.property.test.ts`,
+    `adapter.powersync-direct`,
+    `eager-reload eager-gate-failure`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/powersync-direct-eager-oracle.browser.test.ts`,
+    `adapter.powersync-direct`,
+    `eager-reload.chromium eager-gate-failure.chromium`,
+  ],
+  [
+    `powersync-direct-collection/tests/initial-receipt-oracle.property.test.ts`,
+    `adapter.powersync-direct`,
+    `initial-receipt-cleanup`,
+  ],
+  [
+    `powersync-direct-collection/tests/persisted-initial-receipt-oracle.property.test.ts`,
+    `adapter.powersync-direct.initial-receipt-cleanup`,
+    `persisted-controlled persisted-node-sqlite`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/powersync-direct-persisted-receipt-oracle.browser.test.ts`,
+    `adapter.powersync-direct.initial-receipt-cleanup`,
+    `chromium-opfs`,
+  ],
+  [
+    `powersync-direct-collection/tests/on-demand-streams-conformance-oracle.property.test.ts`,
+    `adapter.powersync-direct`,
+    `on-demand-streams`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/powersync-direct-subsets-oracle.browser.test.ts`,
+    `adapter.powersync-direct.on-demand-streams`,
+    `chromium`,
+  ],
+  [
+    `powersync-direct-collection/tests/on-demand-streams-persisted-conformance-oracle.property.test.ts`,
+    `adapter.powersync-direct.on-demand-streams`,
+    `persisted-controlled persisted-node-sqlite`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/powersync-direct-persisted-subsets-oracle.browser.test.ts`,
+    `adapter.powersync-direct.on-demand-streams`,
+    `persisted-chromium-opfs`,
+  ],
+  [
+    `powersync-direct-collection/tests/persisted-startup-conformance-oracle.property.test.ts`,
+    `adapter.powersync-direct`,
+    `persisted-startup`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/powersync-direct-startup-oracle.browser.test.ts`,
+    `adapter.powersync-direct.persisted-startup`,
+    `chromium-opfs`,
+  ],
+  [
+    `powersync-direct-collection/tests/decode-refusal-oracle.property.test.ts`,
+    `adapter-conformance.decode-refusal`,
+    `powersync-direct`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/powersync-direct-decode-oracle.browser.test.ts`,
+    `adapter-conformance.decode-refusal.powersync-direct`,
+    `chromium`,
+  ],
+  [
+    `powersync-direct-collection/tests/mutation-confirmation-oracle.property.test.ts`,
+    `powersync-direct`,
+    `mutation-confirmation`,
+  ],
+  [
+    `powersync-direct-collection/tests/mutation-confirmation-cancellation-oracle.property.test.ts`,
+    `powersync-direct`,
+    `mutation-confirmation-cancellation`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/powersync-direct-mutation-oracle.browser.test.ts`,
+    `powersync-direct`,
+    `mutation-confirmation.chromium mutation-confirmation-cancellation.chromium`,
+  ],
   [
     `db/tests/oracle-campaign-units.test.ts`,
     `oracle-campaign-units`,
@@ -283,6 +722,11 @@ const ownerGroups: ReadonlyArray<
     `convex-db-collection/tests/lazy-paging-oracle.property.test.ts`,
     `convex`,
     `lazy-values lazy-work lazy-publication lazy-lifecycle lazy-receipt`,
+  ],
+  [
+    `convex-db-collection/tests/lazy-paging-baseline-oracle.property.test.ts`,
+    `convex`,
+    `lazy-baseline lazy-deferred-baseline lazy-retained-omission lazy-late-baseline lazy-support-baseline`,
   ],
   [
     `convex-db-collection/tests/lazy-paging-receipt-oracle.property.test.ts`,
@@ -1087,6 +1531,7 @@ const ownerGroups: ReadonlyArray<
     `db/tests/local-storage-write-order-oracle.test.ts`,
     `local-storage`,
     `write-order`,
+    `db/tests/local-storage-write-order-oracle.ts`,
   ],
   [
     `db/tests/query/bucket-facade-rollback-oracle.property.test.ts`,
@@ -1416,6 +1861,11 @@ const ownerGroups: ReadonlyArray<
     `powersync-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
     `adapter-conformance.eager-live-source`,
     `powersync`,
+  ],
+  [
+    `powersync-direct-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `powersync-direct`,
   ],
   [
     `electric-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
@@ -1895,6 +2345,18 @@ const reseededProperties = new Set<string>()
 // Keep their literal registry names here; the owner groups still supply their
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
+  `adapter.convex.persisted-demand-peer.node-sqlite`,
+  `adapter.convex.persisted-demand-peer.chromium-opfs`,
+  ...[`query`, `electric`, `powersync`, `trailbase`, `convex`].flatMap(
+    (adapter) => [
+      `adapter.${adapter}.persisted-demand.node-sqlite`,
+      `adapter.${adapter}.persisted-demand.chromium-opfs`,
+    ],
+  ),
+  `adapter.electric.mutation-confirmation`,
+  `adapter.electric.mutation-confirmation.chromium`,
+  `local-storage.write-order.chromium`,
+  `adapter.powersync-direct.persisted-startup.chromium-opfs`,
   // Every property that the declareOracle removal added is an enumerated
   // source: one test per history, and no random campaign.
   ...convertedProperties,
@@ -2047,6 +2509,49 @@ function directReplayTestName(property: string): string | undefined {
   // any prefix rule below can name a campaign it does not have.
   if (enumeratedProperties.has(property))
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
+  if (
+    property.startsWith(`adapter.powersync-direct.`) ||
+    property.startsWith(`adapter.convex.eager-`) ||
+    property.startsWith(`adapter.convex.initial-receipt.`) ||
+    property.startsWith(`adapter.local-storage.eager-reload.`) ||
+    property.startsWith(`adapter.rxdb.initial-receipt-cleanup`) ||
+    property.startsWith(`adapter.rxdb.shared-client`) ||
+    property.startsWith(`adapter.rxdb.eager-gate`) ||
+    property.startsWith(`adapter.rxdb.persisted-initial-receipt.`) ||
+    property.startsWith(`adapter.rxdb.mutation-source-batch`) ||
+    property.startsWith(`adapter.powersync.initial-receipt-cleanup.`) ||
+    property.startsWith(`adapter.powersync.hook-lifecycle`) ||
+    property.startsWith(`adapter.powersync.demand-union`) ||
+    property.startsWith(`adapter.powersync.batch-decode`) ||
+    property.startsWith(`adapter.electric.initial-receipt.`) ||
+    property.startsWith(`adapter.electric.mutation-confirmation`) ||
+    property.startsWith(`electric.sdk-decoder-delivery`) ||
+    property === `electric.sdk-snapshot-delivery.chromium` ||
+    property === `adapter-conformance.eager-live-source.electric.chromium` ||
+    property ===
+      `adapter-conformance.eager-live-source.electric.no-on-error.chromium` ||
+    property.startsWith(`query-db.select-failures`) ||
+    property === `local-only.handler-confirmation` ||
+    property.startsWith(`convex.snapshot-projection.`) ||
+    property.startsWith(`trailbase.mutation-events.sdk`) ||
+    property.startsWith(`adapter.electric.eager-`) ||
+    property.startsWith(`adapter.query.complete-result-reload`) ||
+    property.startsWith(`adapter.query.initial-gate`) ||
+    property.startsWith(`adapter.trailbase.eager-`) ||
+    property.startsWith(`adapter.neon.eager-reload.sdk`) ||
+    property.startsWith(`adapter.neon.initial-receipt-cleanup.sdk`) ||
+    property.startsWith(`adapter.neon.shared-client.sdk`) ||
+    property.startsWith(`adapter.neon.idempotent-removal.sdk`) ||
+    property.startsWith(`adapter-conformance.eager-live-source.neon-sdk`) ||
+    property === `adapter.trailbase.persisted-startup.sdk` ||
+    property === `adapter-conformance.eager-live-source.trailbase-sdk` ||
+    property.startsWith(`powersync-direct.`) ||
+    property.startsWith(
+      `adapter-conformance.decode-refusal.powersync-direct`,
+    ) ||
+    property === `adapter-conformance.eager-live-source.powersync-direct`
+  )
+    return `${property.replaceAll(`.`, `\\.`)} > random seed`
   if (nativeSyncMetadataProperties.has(property))
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > random seed`
   if (property.startsWith(`adapter-conformance.persisted-baseline-lifecycle.`))
@@ -2153,6 +2658,84 @@ const outsideReplayConfigs = new Map([
  * runs only under its own config.
  */
 const ownerReplayConfigs = new Map([
+  [
+    `packages/rxdb-db-collection/tests/mutation-source-batch-oracle.browser.test.ts`,
+    `vitest.browser-oracles.config.ts`,
+  ],
+  [
+    `packages/rxdb-db-collection/tests/persisted-initial-receipt-oracle.browser.test.ts`,
+    `vitest.browser-oracles.config.ts`,
+  ],
+  [
+    `packages/db-adapter-conformance/tests/neon-receiving-oracle.browser.test.ts`,
+    `vitest.neon-browser.config.ts`,
+  ],
+  [
+    `packages/db-adapter-conformance/tests/neon-sdk-oracle.property.test.ts`,
+    `vitest.neon.config.ts`,
+  ],
+  [
+    `packages/db-adapter-conformance/tests/neon-reload-oracle.property.test.ts`,
+    `vitest.neon.config.ts`,
+  ],
+  [
+    `packages/db-adapter-conformance/tests/neon-initial-receipt-oracle.property.test.ts`,
+    `vitest.neon.config.ts`,
+  ],
+  [
+    `packages/db-adapter-conformance/tests/neon-shared-client-oracle.property.test.ts`,
+    `vitest.neon.config.ts`,
+  ],
+  [
+    `packages/db-adapter-conformance/tests/neon-idempotent-removal-oracle.property.test.ts`,
+    `vitest.neon.config.ts`,
+  ],
+  [
+    `packages/db/tests/local-storage-eager-reload-oracle.browser.test.ts`,
+    `vitest.local-stores.config.ts`,
+  ],
+  ...[
+    `native-powersync-hooks-oracle.browser.test.ts`,
+    `native-powersync-union-oracle.browser.test.ts`,
+    `adapter-persisted-demand-oracle.browser.test.ts`,
+    `adapter-persisted-demand-peer-oracle.browser.test.ts`,
+    `native-powersync-batch-decode-oracle.browser.test.ts`,
+    `trailbase-mutation-events-oracle.browser.test.ts`,
+    `native-powersync-initial-receipt-oracle.browser.test.ts`,
+    `query-cross-adapter-oracle.browser.test.ts`,
+    `powersync-direct-shared-client-oracle.browser.test.ts`,
+    `powersync-direct-eager-oracle.browser.test.ts`,
+    `powersync-direct-persisted-receipt-oracle.browser.test.ts`,
+    `powersync-direct-subsets-oracle.browser.test.ts`,
+    `powersync-direct-persisted-subsets-oracle.browser.test.ts`,
+    `powersync-direct-startup-oracle.browser.test.ts`,
+    `powersync-direct-decode-oracle.browser.test.ts`,
+    `powersync-direct-mutation-oracle.browser.test.ts`,
+    `powersync-direct-persisted-demand-oracle.browser.test.ts`,
+    `powersync-direct-cursor-persisted-demand-oracle.browser.test.ts`,
+  ].map(
+    (file) =>
+      [
+        `packages/browser-db-sqlite-persistence/e2e/${file}`,
+        `vitest.adapter-oracles.config.ts`,
+      ] as const,
+  ),
+  [
+    `packages/electric-db-collection/tests/cross-adapter-receiving-oracle.browser.test.ts`,
+    `vitest.cross-adapter.config.ts`,
+  ],
+  [
+    `packages/rxdb-db-collection/tests/initial-receipt-oracle.browser.test.ts`,
+    `vitest.browser-oracles.config.ts`,
+  ],
+  [
+    `packages/rxdb-db-collection/tests/shared-client-oracle.browser.test.ts`,
+    `vitest.browser-oracles.config.ts`,
+  ],
+  [
+    `packages/rxdb-db-collection/tests/eager-gate-conformance-oracle.browser.test.ts`,
+    `vitest.browser-oracles.config.ts`,
+  ],
   [
     `packages/convex-db-collection/e2e/auth-app-oracle.test.ts`,
     `vitest.e2e.config.ts`,

@@ -17,6 +17,17 @@ export function powerSyncEagerReloadAdapterFor(
   return {
     async open(initial, id) {
       const { database, dispose } = await open(schema)
+      let trackingSetup: Promise<unknown> = Promise.resolve()
+      const createTrigger = database.triggers.createDiffTrigger.bind(
+        database.triggers,
+      )
+      database.triggers.createDiffTrigger = (options) => {
+        const setup = createTrigger(options)
+        // This is the actual SDK operation, including every beforeCreate SQL
+        // page and trigger installation. It is independent of markReady().
+        trackingSetup = setup
+        return setup
+      }
       const replace = (next: Array<StartupRow>) =>
         database.writeTransaction(async (tx) => {
           await tx.execute(`DELETE FROM rows`)
@@ -37,6 +48,11 @@ export function powerSyncEagerReloadAdapterFor(
           onDeserializationError: () => {},
         }),
         replace,
+        propagate: async () => {
+          await trackingSetup
+          await database.writeTransaction(() => Promise.resolve())
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        },
         dispose,
       }
     },
