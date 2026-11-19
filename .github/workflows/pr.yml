@@ -117,6 +117,7 @@ jobs:
             collections-3,
             collections-4,
             lint-rules,
+            lint-scope,
           ]
     env:
       TEST_GROUP: ${{ matrix.group }}

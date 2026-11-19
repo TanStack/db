@@ -25,7 +25,8 @@ import { fileURLToPath } from 'node:url'
 // Every package with a test script, and every config, has exactly one entry
 // without a file, so a new test file runs without an edit here. Each test runs
 // exactly once. The times beside the jobs are the entries' seconds on CI
-// (TanStack/db run 44577798618), with four entries at a time.
+// (TanStack/db run 44593906345), with four entries at a time; they vary
+// with what runs beside them.
 const testParts = {
   fixed: `fixed seed `,
   random: `^(?!.*fixed seed ).*random seed`,
@@ -87,51 +88,49 @@ const packageJobs = {
     pkg(`@tanstack/preact-db`),
     pkg(`@tanstack/react-router-with-db`),
   ],
-  // About 1,300 entry-seconds each, no entry above about 430.
+  // About 1,100 to 1,350 entry-seconds each, no entry above about 400.
   'collections-1': [
-    pkg(powersync, liveSource, `random`), // 434
-    pkg(electric, liveSource, `fixed`), // ~230
-    pkg(conformance, reference, `other`), // 212
-    pkg(powersync), // 144
-    pkg(powersync, liveSource, `other`), // 121
-    pkg(powersync, startup, `random`), // 120
+    pkg(conformance, reference, `other`), // 378
+    pkg(powersync, liveSource, `random`), // 288
+    pkg(powersync, liveSource, `other`), // 194
+    pkg(electric, liveSource, `fixed`), // 166
+    pkg(powersync), // 166
+    pkg(powersync, startup, `random`), // 161
     pkg(`@tanstack/db-collection-e2e`), // 1
   ],
   'collections-2': [
-    pkg(powersync, reload, `other`), // ~396
-    pkg(conformance, reference, `random`), // 241
-    pkg(powersync, liveSource, `fixed`), // 215
-    pkg(`@tanstack/trailbase-db-collection`), // 179
-    pkg(powersync, reload, `random`), // ~120
-    pkg(`@tanstack/rxdb-db-collection`), // 93
-    pkg(conformance), // 72
+    pkg(conformance, reference, `random`), // 386
+    pkg(powersync, liveSource, `fixed`), // 364
+    pkg(powersync, reload, `other`), // 360
+    pkg(powersync, reload, `random`), // 135
+    pkg(conformance), // 58
   ],
   'collections-3': [
-    pkg(powersync, baseline, `other`), // ~358
-    pkg(electric, liveSource, `random`), // ~250
-    pkg(`@tanstack/convex-db-collection`, liveSource), // 225
-    pkg(powersync, startup, `fixed`), // 189
-    pkg(powersync, reload, `fixed`), // ~120
-    pkg(`@tanstack/convex-db-collection`), // 118
-    pkg(electric, liveSource, `other`), // ~15
+    pkg(`@tanstack/convex-db-collection`, liveSource), // 253
+    pkg(`@tanstack/trailbase-db-collection`), // 195
+    pkg(powersync, baseline, `other`), // 189
+    pkg(electric, liveSource, `random`), // 170
+    pkg(`@tanstack/rxdb-db-collection`), // 131
+    pkg(powersync, startup, `fixed`), // 114
+    pkg(powersync, reload, `fixed`), // 70
+    pkg(`@tanstack/convex-db-collection`), // 68
+    pkg(electric, liveSource, `other`), // 25
   ],
   'collections-4': [
-    pkg(powersync, startup, `other`), // 310
-    pkg(query), // 262
-    pkg(conformance, reference, `fixed`), // 230
-    pkg(query, `tests/refetch-ordered-prefix-oracle.test.ts`), // 211
-    pkg(electric), // 138
-    pkg(powersync, baseline, `fixed`), // ~86
-    pkg(powersync, baseline, `random`), // ~79
+    pkg(powersync, startup, `other`), // 284
+    pkg(conformance, reference, `fixed`), // 261
+    pkg(query), // 220
+    pkg(query, `tests/refetch-ordered-prefix-oracle.test.ts`), // 172
+    pkg(electric), // 150
+    pkg(powersync, baseline, `fixed`), // 48
+    pkg(powersync, baseline, `random`), // 40
   ],
-  // The repository scripts' oracles, which the lint job ran before.
-  'lint-rules': [
-    scripts(`publish-http-oracle.property.test.js`),
-    scripts(lintScope, `fixed`),
-    scripts(lintScope, `random`),
-    scripts(),
-    scripts(lintScope, `other`),
-  ],
+  // The repository scripts' oracles, which the lint job ran before. Their
+  // histories run ESLint and Node in child processes. lint-scope runs whole
+  // in a job of its own: its file-wide reach ledger (an afterAll minimum over
+  // both campaigns) counts only the histories of its own process.
+  'lint-rules': [scripts(`publish-http-oracle.property.test.js`), scripts()],
+  'lint-scope': [scripts(lintScope)],
 }
 
 const root = fileURLToPath(new URL(`../`, import.meta.url))
