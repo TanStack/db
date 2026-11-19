@@ -1,4 +1,4 @@
-import { deepEquals } from '../utils'
+import { sameRowValue } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import {
@@ -150,6 +150,9 @@ export class CollectionStateManager<
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
+  // Transactions whose rows cleanup discarded. They keep their hold, but they
+  // never overlay this Collection again, even after a restart.
+  private discardedTransactions = new WeakSet<Transaction<any>>()
   public pendingSyncedTransactions: Array<
     PendingSyncedTransaction<TOutput, TKey>
   > = []
@@ -709,8 +712,13 @@ export class CollectionStateManager<
         continue
       }
       // Settlement can outlive cleanup. Keep pruning settled transactions,
-      // but do not republish a sibling from the discarded sync run.
-      if (this.lifecycle.hasStartedCleanup()) continue
+      // but do not republish a sibling from the discarded sync run, or any
+      // write that arrives while that cleanup is still running.
+      if (
+        this.lifecycle.isCleaningUp() ||
+        this.discardedTransactions.has(transaction)
+      )
+        continue
       for (const mutation of transaction.mutations) {
         if (mutation.collection !== this.collection) continue
         this.pendingLocalChanges.add(mutation.key)
@@ -787,7 +795,7 @@ export class CollectionStateManager<
       } else if (
         previousValue !== undefined &&
         currentValue !== undefined &&
-        (!deepEquals(previousValue, currentValue) ||
+        (!sameRowValue(previousValue, currentValue) ||
           previousVirtualProps.$origin !== nextVirtualProps.$origin ||
           previousVirtualProps.$hasPendingWrites !==
             nextVirtualProps.$hasPendingWrites)
@@ -924,7 +932,8 @@ export class CollectionStateManager<
     // like any insert, holds and seeds notwithstanding.
     if (this.hydrationSeedKeys.has(key) && !projection.sourceKeys.has(key))
       return `insert`
-    if (current.value !== undefined && deepEquals(current.value, value)) {
+    // An equal re-insert has the same row value: -0 and 0 differ (FID-1).
+    if (current.value !== undefined && sameRowValue(current.value, value)) {
       return `update`
     }
     return `duplicate`
@@ -1453,7 +1462,7 @@ export class CollectionStateManager<
           previousVirtualProps.$hasPendingWrites !==
             nextVirtualProps.$hasPendingWrites ||
           previousVirtualProps.$origin !== nextVirtualProps.$origin ||
-          !deepEquals(previousVisibleValue, newVisibleValue)
+          !sameRowValue(previousVisibleValue, newVisibleValue)
         ) {
           events.push({
             type: `update`,
@@ -1646,6 +1655,8 @@ export class CollectionStateManager<
    */
   public cleanup(): void {
     this.syncRunGeneration++
+    for (const transaction of this.transactions.values())
+      this.discardedTransactions.add(transaction)
     for (const transaction of this.pendingSyncedTransactions) {
       transaction.applied.reject(new SyncTransactionAbortedError())
     }

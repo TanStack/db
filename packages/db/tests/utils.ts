@@ -15,43 +15,12 @@ import type { WithVirtualProps } from '../src/virtual-props.js'
 import type { Transaction } from '../src/transactions.js'
 import type { Collection } from '../src/collection/index.js'
 
+export { withOracleCleanup } from './oracle-cleanup'
+
 export type OutputWithVirtual<
   T extends object,
   TKey extends string | number = string | number,
 > = WithVirtualProps<T, TKey>
-/**
- * Runs an oracle check, then every cleanup step in order. A cleanup failure
- * never replaces the check's own failure: the check failure is thrown alone or
- * as the `cause` of an `AggregateError` that also holds each cleanup failure.
- */
-export async function withOracleCleanup(
-  check: () => Promise<void> | void,
-  cleanups: ReadonlyArray<() => unknown>,
-): Promise<void> {
-  const failures: Array<unknown> = []
-  let checkFailed = false
-  try {
-    await check()
-  } catch (error) {
-    checkFailed = true
-    failures.push(error)
-  }
-  for (const cleanup of cleanups) {
-    try {
-      await cleanup()
-    } catch (error) {
-      failures.push(error)
-    }
-  }
-  if (failures.length === 1) throw failures[0]
-  if (failures.length > 1) {
-    throw new AggregateError(
-      failures,
-      checkFailed ? `Oracle check and cleanup failed` : `Oracle cleanup failed`,
-      { cause: failures[0] },
-    )
-  }
-}
 
 // Keep sync startup, writes, readiness, and load outcomes in the test itself.
 export function createOnDemandCollection<T extends { id: string | number }>(
@@ -294,6 +263,7 @@ type MockSyncCollectionConfig<T extends object = Record<string, unknown>> = {
   getKey: (item: T) => string | number
   autoIndex?: `off` | `eager`
   sync?: SyncConfig<T>
+  rowUpdateMode?: `full`
   syncMode?: `eager` | `on-demand`
   defaultStringCollation?: StringCollationConfig
   defaultIndexType?: IndexConstructor
@@ -362,6 +332,7 @@ export function mockSyncCollectionOptions<
   }
 
   const sync = config.sync ?? {
+    rowUpdateMode: config.rowUpdateMode,
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       begin = params.begin
       write = params.write
@@ -381,7 +352,11 @@ export function mockSyncCollectionOptions<
   }
 
   // Destructure to avoid passing test-only properties (like initialData) to createCollection
-  const { initialData: _initialData, ...collectionConfig } = config
+  const {
+    initialData: _initialData,
+    rowUpdateMode: _rowUpdateMode,
+    ...collectionConfig
+  } = config
 
   const options: CollectionConfig<T, string | number, never> & {
     utils: typeof utils

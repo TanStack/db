@@ -13,9 +13,12 @@
  * end of a turn.
  *
  * A budget is keyed by its registered property where the code names one
- * (`oraclePropertyOptions(n, 'p')`, `oracleRandomParameters(n, _, 'p')`, or
- * `{ property: 'p', defaultRuns: n }`), and otherwise by its fixed seed
- * (`{ seed: s, numRuns: oracleRuns(n) }`). A key or count is a literal, a
+ * (`oraclePropertyOptions(n, 'p')`, `oracleRandomParameters(n, _, 'p')`,
+ * `{ property: 'p', defaultRuns: n }`, or the framework definition
+ * `oracleProperty({ id: 'p', histories: { runs: n } })`), and otherwise by its
+ * fixed seed (`{ seed: s, numRuns: oracleRuns(n) }`, its declared form
+ * `oracleFixedSeed(s, { numRuns: oracleRuns(n) })`, or a seed `s` in that
+ * definition's `fixedSeeds`, whose campaign runs the same `n`). A key or count is a literal, a
  * constant in the same file, or a constant that the file imports. An import
  * follows relative re-exports (`export { x } from`, `export * from`), so a
  * constant defined in a support module is tracked where the oracle uses it.
@@ -36,15 +39,46 @@
  * (directly or through re-exports) changed. Untracked files count as changed.
  *
  *   node scripts/check-oracle-run-counts.mjs [--format=text|github]
+ *
+ * The parser is loaded with a dynamic import, so a checkout without an
+ * install, such as a fresh worktree, gets one line instead of a crash, as the
+ * oracle lint does: `oracle lint skipped: dependencies are not installed in
+ * <checkout>; run pnpm install`. Any other failure, such as a checkout with
+ * no main branch, is one `oracle lint failed: <message>` line. Either one is
+ * written to stderr with exit status 1, so CI does not pass a check that did
+ * not run.
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { basename, join, posix } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
-import tsParser from '@typescript-eslint/parser'
+import { failureLine, loadFailureLine } from './lint-load-failure.mjs'
 
 const root = fileURLToPath(new URL(`../`, import.meta.url))
+// Importing this module, as the lint script does, must not run the report.
+const isMain =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+
+/**
+ * Writes one line in place of the report, and fails the run, so a check that
+ * did not run cannot pass.
+ */
+function fail(line) {
+  process.stderr.write(`${line}\n`)
+  process.exitCode = 1
+}
+
+// An importer, such as the lint script, reports a parser that cannot load
+// itself.
+let tsParser
+try {
+  tsParser = (await import(`@typescript-eslint/parser`)).default
+} catch (error) {
+  if (!isMain) throw error
+  fail(loadFailureLine(error, realpathSync(root)))
+}
 
 function git(cwd, ...args) {
   // Pipe stderr so that a failed attempt in `mergeBase` prints nothing. An
@@ -317,6 +351,47 @@ function runBudgets(file, revision, reader) {
         if (typeof property === `string`)
           record(`property ${property}`, value(first))
       }
+      // A framework definition declares its budget inside its histories.
+      if (
+        node.callee.name === `oracleProperty` &&
+        first?.type === `ObjectExpression`
+      ) {
+        const property = propertyValue(first, `id`, file, reader, revision)
+        const histories = first.properties.find(
+          (candidate) =>
+            candidate.type === `Property` &&
+            !candidate.computed &&
+            nameOf(candidate.key) === `histories`,
+        )?.value
+        if (histories?.type === `ObjectExpression`) {
+          const runs = propertyValue(histories, `runs`, file, reader, revision)
+          if (typeof property === `string`) record(`property ${property}`, runs)
+          // Each fixed-seed campaign runs the same `runs` histories.
+          const fixedSeeds = histories.properties.find(
+            (candidate) =>
+              candidate.type === `Property` &&
+              !candidate.computed &&
+              nameOf(candidate.key) === `fixedSeeds`,
+          )?.value
+          if (fixedSeeds?.type === `ArrayExpression`)
+            for (const element of fixedSeeds.elements) {
+              const seed = value(element)
+              if (typeof seed === `number`) record(`fixed seed ${seed}`, runs)
+            }
+        }
+      }
+      // A declared fixed seed: `oracleFixedSeed(s, { numRuns: n })`.
+      if (
+        node.callee.name === `oracleFixedSeed` &&
+        second?.type === `ObjectExpression`
+      ) {
+        const seed = value(first)
+        if (typeof seed === `number`)
+          record(
+            `fixed seed ${seed}`,
+            propertyValue(second, `numRuns`, file, reader, revision),
+          )
+      }
       if (node.callee.name === `oracleRandomParameters`) {
         const property = value(third)
         if (typeof property === `string`)
@@ -465,11 +540,8 @@ export function describeLoweredRunBudget({ key, was, now }) {
     : `${key}: run budget lowered from ${was} to ${now}`
 }
 
-// Importing this module, as the lint script does, must not run the report.
-if (
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+/** Writes the report for a command-line run. */
+function report() {
   const { values: options } = parseArgs({
     options: { format: { type: `string`, default: `text` } },
   })
@@ -485,4 +557,12 @@ if (
     }
   }
   process.exitCode = lowered.length > 0 && options.format === `text` ? 1 : 0
+}
+
+if (isMain && tsParser !== undefined) {
+  try {
+    report()
+  } catch (error) {
+    fail(failureLine(error))
+  }
 }

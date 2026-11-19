@@ -1,5 +1,3 @@
-import { declareOracle } from '../oracle-declaration.js'
-
 /**
  * Source metadata is a source fact, separate from output-row attribution.
  * VirtualRowProps supplies the authored key and Collection ID. An optimistic
@@ -21,5 +19,3 @@ export function expectedSourceMetadata(
     $origin: pending ? (`local` as const) : appliedOrigin,
   }
 }
-
-declareOracle({ model: [expectedSourceMetadata] })

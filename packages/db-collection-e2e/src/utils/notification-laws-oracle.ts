@@ -1,5 +1,4 @@
 import { expect } from 'vitest'
-import { declareOracle } from '../../../db/tests/oracle-declaration.js'
 
 export type Notification<Row> = {
   events: Array<{
@@ -53,7 +52,3 @@ export function expectNotificationsStopped<Row>(
 ): void {
   expect(callbacks).toStrictEqual(archived)
 }
-
-declareOracle({
-  check: [expectNotificationHistory, expectNotificationsStopped],
-})

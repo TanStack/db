@@ -11,6 +11,7 @@ import {
   installInitialOrderedRows,
   stageInsert,
 } from './collection-sync-reentrancy-support.js'
+import { readyCases } from './collection-sync-reentrancy-ready-grammar-oracle.js'
 import type {
   LayoutCallback,
   OrderedRow,
@@ -20,6 +21,30 @@ import type {
 } from './collection-sync-reentrancy-support.js'
 
 describe(`sync publication reentrancy`, () => {
+  // Moved from collection-sync-reentrancy-oracle.test.ts: a size check of the
+  // ready-callback truncate grammar, which runs no production.
+  it(`enumerates prior requests and legal ready-callback writes`, () => {
+    // none and update 1 allow 6 writes, delete 1 allows 5, insert 3 allows 7.
+    expect(readyCases).toHaveLength(2 * 24 * 3)
+    const labels = new Set(
+      readyCases.map(
+        ({ priorName, callbackName }) => `${priorName} / ${callbackName}`,
+      ),
+    )
+    for (const witness of [
+      `none / delete 1`,
+      `none / delete 2`,
+      `none / insert 4`,
+      `update 1 / delete 1`,
+      `none / insert 3`,
+      `insert 3 / delete 3`,
+      `delete 1 / insert 1`,
+    ])
+      expect(labels).toContain(witness)
+    expect(labels).not.toContain(`delete 1 / delete 1`)
+    expect(labels).not.toContain(`insert 3 / insert 3`)
+  })
+
   it.each([`cleanup`, `discard`] as const)(
     `releases queued messages when %s retires a deferral`,
     (ending) => {

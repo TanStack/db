@@ -3,7 +3,7 @@
  * and provides a way to retrieve those changes.
  */
 
-import { deepEqualsInternal, isTemporal } from './utils'
+import { DRAFT, ROW, deepEqualsInternal, isTemporal } from './utils'
 import { codedMessage, devBuild } from './error-message'
 
 // Resolve draft handles before calling native Map/Set membership methods.
@@ -357,13 +357,14 @@ function deepClone<T extends unknown>(
 }
 
 // Generic value equality intentionally ignores some native state. Draft
-// assignments must also preserve Set contents/order and RegExp match position.
+// assignments must also preserve Set contents/order and RegExp match position,
+// and tell -0 from 0, which are distinct row values.
 function draftValuesEqual(
   left: unknown,
   right: unknown,
   paired?: Map<object, object>,
 ): boolean {
-  return deepEqualsInternal(left, right, paired, true)
+  return deepEqualsInternal(left, right, DRAFT | ROW, paired)
 }
 
 /**
@@ -923,17 +924,8 @@ export function withFlatChangeTracking<T extends object>(
     for (const key in draft) {
       const value = (draft as Record<string, unknown>)[key]
       const before = original[key]
-      // Only a hidden field can hold an object; compare it as the proxy does.
-      if (
-        !Object.hasOwn(original, key) ||
-        !(
-          value === before ||
-          Object.is(value, before) ||
-          (typeof before === `object` &&
-            before !== null &&
-            draftValuesEqual(value, before))
-        )
-      ) {
+      // Compare as the proxy does; only a hidden field can hold an object.
+      if (!Object.hasOwn(original, key) || !draftValuesEqual(value, before)) {
         defineDataProperty(changes, key, value)
         if (value !== null && typeof value === `object`) assignedObject = true
       }

@@ -1,18 +1,29 @@
 import { Temporal } from 'temporal-polyfill'
-import { describe, expect, it as vitestIt } from 'vitest'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { describe, expect } from 'vitest'
+import { fc } from '@fast-check/vitest'
 import {
   equalHashValues,
   hash,
   registerOpaqueHash,
 } from '../src/hashing/hash.js'
 import {
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRuns,
-} from '../../db/tests/oracle-config.js'
-import { declareOracle } from '../../db/tests/oracle-declaration.js'
+  differs,
+  oracleProperty,
+  pass,
+} from '../../db/tests/oracle-property.js'
 import { colliding } from './hash-collision-support.js'
+import {
+  SENTINEL,
+  SYMBOLS,
+  TEMPORALS,
+  identity,
+  nodes,
+  num,
+  pairArb,
+  primitiveArb,
+} from './hash-identity-grammar-oracle.js'
+import type { Pair, RefKind, Spec } from './hash-identity-grammar-oracle.js'
+import type { Observation, Verdict } from '../../db/tests/oracle-property.js'
 
 /**
  * # Which values share D2 value identity?
@@ -54,7 +65,7 @@ import { colliding } from './hash-collision-support.js'
  *   equal, so every type marker has the same hash number.
  *
  * Authority: the method comments in `src/hashing/hash.ts`, and the behavior at
- * `8283f2e8`, which this file pins before the hash dispatch refactor.
+ * `8283f2e8`, which this file fixes before the hash dispatch refactor.
  *
  * Limits:
  * - Arrays from another realm (`node:vm`) are outside the grammar. An ordinary
@@ -72,47 +83,10 @@ import { colliding } from './hash-collision-support.js'
  */
 
 // ---------------------------------------------------------------------------
-// Value specs. A spec is plain data, so the model never reads production
-// objects. Kinds name contract rules, not production's marker/header/body
-// split. `ref` is production's reference leaf. Two kinds exist only in this
-// model: `twice` is one child that the driver shares or copies, and `back` is
-// a back edge to an ancestor container.
-
-type Spec =
-  | { k: `num`; v: number }
-  | { k: `str`; v: string }
-  | { k: `bool`; v: boolean }
-  | { k: `null` }
-  | { k: `undef` }
-  | { k: `big`; v: bigint }
-  | { k: `sym`; id: number }
-  | { k: `ref`; kind: RefKind; id: number }
-  | { k: `date`; t: number }
-  | { k: `bin`; bytes: Array<number> }
-  | { k: `temporal`; i: number }
-  | { k: `regex`; source: string; flags: string; lastIndex: number; p?: Spec }
-  | { k: `array`; items: Array<Spec | null>; p?: Spec }
-  | { k: `twice`; child: Spec }
-  | { k: `map`; entries: Array<[Spec, Spec]> }
-  | { k: `set`; items: Array<Spec> }
-  | { k: `obj`; entries: Array<[string, Spec]>; syms: Array<[number, Spec]> }
-  | { k: `back`; up: number }
-
-type RefKind = `fn` | `handle` | `file` | `bigbin`
-
-const TEMPORALS: ReadonlyArray<[keyof typeof Temporal, string]> = [
-  [`PlainDate`, `2024-01-15`],
-  [`PlainDate`, `2024-01-16`],
-  [`Duration`, `P1D`],
-  [`Instant`, `2024-01-15T00:00:00Z`],
-]
-const SYMBOLS = [Symbol(`s0`), Symbol(`s1`)]
-// The last two are distinct keys that locale collation ranks as equal (a
-// precomposed and a decomposed Å), so key order must not come from collation.
-const OBJECT_KEYS = [`a`, `b`, `c`, `0`, `1`, `\u00C5`, `A\u030A`]
-// No value in any pool equals this text, so a leaf that holds it makes a
-// cyclic value unequal to its original.
-const SENTINEL = `\u0000sentinel`
+// Value specs, the identity model (`identity`, `canon`), and the grammar
+// (`pairArb`, with its near-miss mutations) live in
+// hash-identity-grammar-oracle.ts. Their fixed-seed census is in
+// hash-identity-grammar.test.ts. The driver and checks below stay here.
 
 // Reference leaves are shared by both sides of a pair: equal ids are the same
 // object, and different ids are different objects with the same contents.
@@ -133,434 +107,6 @@ function refObject(kind: RefKind, id: number): object {
   }
   return value
 }
-
-// ---------------------------------------------------------------------------
-// Model: a canonical encoding of a spec's identity.
-
-function identity(spec: Spec): string {
-  return JSON.stringify(canon(spec))
-}
-
-// Maps and Sets merge primitive keys and shared references that are equal
-// under SameValueZero: the first position stays and the last value wins.
-// Every other generated key is a fresh object and never merges.
-const MERGING_KINDS = new Set<Spec[`k`]>([
-  `num`,
-  `str`,
-  `bool`,
-  `null`,
-  `undef`,
-  `big`,
-  `sym`,
-  `ref`,
-])
-const CONTAINER_KINDS = new Set<Spec[`k`]>([
-  `array`,
-  `twice`,
-  `map`,
-  `set`,
-  `obj`,
-  `regex`,
-])
-function mapEntries(
-  entries: Array<[Spec, Spec | undefined]>,
-): Array<[unknown, unknown]> {
-  const out: Array<[unknown, unknown]> = []
-  const positions = new Map<string, number>()
-  for (const [key, value] of entries) {
-    const encoded = canon(key)
-    const valueCode = value === undefined ? null : canon(value)
-    if (MERGING_KINDS.has(key.k)) {
-      const id = JSON.stringify(encoded)
-      const at = positions.get(id)
-      if (at !== undefined) {
-        out[at]![1] = valueCode
-        continue
-      }
-      positions.set(id, out.length)
-    }
-    out.push([encoded, valueCode])
-  }
-  return out
-}
-
-function canon(spec: Spec): unknown {
-  const inner = canon
-  const props = (p: Spec | undefined) => (p ? [[`p`, inner(p)]] : [])
-  switch (spec.k) {
-    case `num`:
-      // `String` writes -0 as `0` and keeps NaN and infinities distinct.
-      return [`num`, String(spec.v)]
-    case `str`:
-    case `bool`:
-      return [spec.k, spec.v]
-    case `null`:
-    case `undef`:
-      return [spec.k]
-    case `big`:
-      return [`big`, String(spec.v)]
-    case `sym`:
-      return [`sym`, spec.id]
-    case `ref`:
-      return [`ref`, spec.kind, spec.id]
-    case `date`:
-      return [`date`, String(spec.t)]
-    case `bin`:
-      return [`bin`, spec.bytes]
-    case `temporal`:
-      return [`temporal`, TEMPORALS[spec.i]]
-    case `regex`:
-      return [`regex`, spec.source, spec.flags, spec.lastIndex, props(spec.p)]
-    case `array`:
-      return [
-        `array`,
-        spec.items.length,
-        spec.items.flatMap((item, index) =>
-          item === null ? [] : [[index, inner(item)]],
-        ),
-        props(spec.p),
-      ]
-    case `twice`:
-      // A shared child and a copied child have the same identity.
-      return [`array`, 2, [0, 1].map((index) => [index, inner(spec.child)]), []]
-    case `map`:
-      return [
-        `map`,
-        mapEntries(spec.entries.map(([key, value]) => [key, value])),
-      ]
-    case `set`:
-      return [
-        `set`,
-        mapEntries(spec.items.map((item) => [item, undefined])).map(
-          ([item]) => item,
-        ),
-      ]
-    case `obj`:
-      return [
-        `obj`,
-        [...spec.entries]
-          .sort(([left], [right]) => (left < right ? -1 : 1))
-          .map(([key, value]) => [key, inner(value)]),
-        [...spec.syms]
-          .sort(([left], [right]) => left - right)
-          .map(([id, value]) => [id, inner(value)]),
-      ]
-    case `back`:
-      // Only cyclic histories hold back edges, and their verdicts come from
-      // construction, not from this encoding.
-      return [`back`, spec.up]
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Grammar. Near-miss mutations change one node, so equal and unequal pairs
-// both occur often.
-
-const primitiveArb: fc.Arbitrary<Spec> = fc.oneof(
-  fc
-    .constantFrom(0, 1, 2, 1.5, NaN, Infinity, -Infinity)
-    .map((v) => ({ k: `num` as const, v })),
-  fc.constantFrom(``, `a`, `1`, `true`).map((v) => ({ k: `str` as const, v })),
-  fc.boolean().map((v) => ({ k: `bool` as const, v })),
-  fc.constant({ k: `null` as const }),
-  fc.constant({ k: `undef` as const }),
-  fc.constantFrom(0n, 1n).map((v) => ({ k: `big` as const, v })),
-  fc.nat(1).map((id) => ({ k: `sym` as const, id })),
-)
-const leafArb: fc.Arbitrary<Spec> = fc.oneof(
-  { weight: 4, arbitrary: primitiveArb },
-  fc.record({
-    k: fc.constant(`ref` as const),
-    kind: fc.constantFrom<RefKind>(`fn`, `handle`, `file`, `bigbin`),
-    id: fc.nat(1),
-  }),
-  fc.constantFrom(0, 1, NaN).map((t) => ({ k: `date` as const, t })),
-  fc
-    .array(fc.nat(255), { maxLength: 4 })
-    .map((bytes) => ({ k: `bin` as const, bytes })),
-  fc.nat(TEMPORALS.length - 1).map((i) => ({ k: `temporal` as const, i })),
-  fc.record({
-    k: fc.constant(`regex` as const),
-    source: fc.constantFrom(`a`, `b`),
-    flags: fc.constantFrom(``, `g`),
-    lastIndex: fc.nat(1),
-  }),
-)
-
-const specArb = fc.letrec<{ spec: Spec }>((tie) => ({
-  spec: fc.oneof(
-    { depthSize: `small`, withCrossShrink: true },
-    { weight: 3, arbitrary: leafArb },
-    fc.record({
-      k: fc.constant(`array` as const),
-      items: fc.array(fc.option(tie(`spec`), { freq: 5, nil: null }), {
-        maxLength: 3,
-      }),
-    }),
-    fc.record({ k: fc.constant(`twice` as const), child: tie(`spec`) }),
-    fc.record({
-      k: fc.constant(`map` as const),
-      // Keys are any generated value, unique by identity; mutations may still
-      // merge two keys, and the model merges them the same way.
-      entries: fc.uniqueArray(
-        fc.tuple(
-          fc.oneof({ weight: 2, arbitrary: primitiveArb }, tie(`spec`)),
-          tie(`spec`),
-        ),
-        { maxLength: 3, selector: ([key]) => identity(key) },
-      ),
-    }),
-    fc.record({
-      k: fc.constant(`set` as const),
-      // Unique identities, so a Set never merges two generated values.
-      items: fc.uniqueArray(tie(`spec`), { maxLength: 3, selector: identity }),
-    }),
-    fc.record({
-      k: fc.constant(`obj` as const),
-      entries: fc.uniqueArray(
-        fc.tuple(fc.constantFrom(...OBJECT_KEYS), tie(`spec`)),
-        { maxLength: 3, selector: ([key]) => key },
-      ),
-      syms: fc.uniqueArray(fc.tuple(fc.nat(1), tie(`spec`)), {
-        maxLength: 1,
-        selector: ([id]) => id,
-      }),
-    }),
-  ),
-})).spec
-
-/** Every node of a spec in preorder, with a function that replaces it. */
-function nodes(
-  spec: Spec,
-  replace: (next: Spec) => Spec = (next) => next,
-): Array<[Spec, (next: Spec) => Spec]> {
-  const out: Array<[Spec, (next: Spec) => Spec]> = [[spec, replace]]
-  const child = (value: Spec, rebuild: (next: Spec) => Spec) =>
-    out.push(...nodes(value, (next) => replace(rebuild(next))))
-  if (spec.k === `array`)
-    spec.items.forEach((item, index) => {
-      if (item !== null)
-        child(item, (next) => ({
-          ...spec,
-          items: spec.items.map((old, i) => (i === index ? next : old)),
-        }))
-    })
-  else if (spec.k === `set`)
-    spec.items.forEach((item, index) =>
-      child(item, (next) => ({
-        ...spec,
-        items: spec.items.map((old, i) => (i === index ? next : old)),
-      })),
-    )
-  else if (spec.k === `twice`)
-    child(spec.child, (next) => ({ ...spec, child: next }))
-  else if (spec.k === `map`)
-    spec.entries.forEach(([key, value], index) => {
-      child(key, (next) => ({
-        ...spec,
-        entries: spec.entries.map((old, i) =>
-          i === index ? ([next, value] as [Spec, Spec]) : old,
-        ),
-      }))
-      child(value, (next) => ({
-        ...spec,
-        entries: spec.entries.map((old, i) =>
-          i === index ? ([key, next] as [Spec, Spec]) : old,
-        ),
-      }))
-    })
-  else if (spec.k === `obj`)
-    spec.entries.forEach(([key, value], index) =>
-      child(value, (next) => ({
-        ...spec,
-        entries: spec.entries.map((old, i) =>
-          i === index ? ([key, next] as [string, Spec]) : old,
-        ),
-      })),
-    )
-  if (spec.k === `obj`)
-    spec.syms.forEach(([id, value], index) =>
-      child(value, (next) => ({
-        ...spec,
-        syms: spec.syms.map((old, i) =>
-          i === index ? ([id, next] as [number, Spec]) : old,
-        ),
-      })),
-    )
-  return out
-}
-
-type Mutation =
-  | `none`
-  | `replace`
-  | `split`
-  | `header`
-  | `order`
-  | `hole`
-  | `retype`
-  | `property`
-
-/** A small change to one node. Some changes keep the identity; the model
- * decides the verdict. */
-function nearMiss(spec: Spec, choice: number): [Mutation, Spec] {
-  switch (spec.k) {
-    case `num`:
-      return [`replace`, { k: `num`, v: [0, 1, NaN][choice % 3]! }]
-    case `str`:
-      return choice % 2
-        ? [`retype`, { k: `num`, v: Number(spec.v) }]
-        : [`replace`, { k: `str`, v: `${spec.v}!` }]
-    case `big`:
-      return [`retype`, { k: `num`, v: Number(spec.v) }]
-    case `ref`:
-      return [`replace`, { ...spec, id: 1 - spec.id }]
-    case `date`:
-      return choice % 2
-        ? [`retype`, { k: `num`, v: spec.t }]
-        : [`header`, { ...spec, t: Number.isNaN(spec.t) ? 0 : NaN }]
-    case `bin`:
-      return choice % 3 === 0
-        ? [`header`, { k: `bin`, bytes: [...spec.bytes, 0] }]
-        : choice % 3 === 1 && spec.bytes.length > 0
-          ? [
-              `header`,
-              // Same length, one byte changed.
-              {
-                k: `bin`,
-                bytes: spec.bytes.map((byte, i) => (i === 0 ? byte ^ 1 : byte)),
-              },
-            ]
-          : [`retype`, { k: `array`, items: spec.bytes.map(num) }]
-    case `temporal`:
-      return [`header`, { ...spec, i: (spec.i + 1) % TEMPORALS.length }]
-    case `regex`:
-      return choice % 3 === 0
-        ? [`header`, { ...spec, lastIndex: spec.lastIndex + 1 }]
-        : choice % 3 === 1
-          ? [`header`, { ...spec, flags: spec.flags ? `` : `g` }]
-          : [`property`, { ...spec, p: num(1) }]
-    case `array`:
-      return choice % 4 === 0
-        ? [`hole`, { ...spec, items: [...spec.items, null] }]
-        : choice % 4 === 1 && spec.items.length > 0
-          ? [
-              `hole`,
-              {
-                ...spec,
-                items: spec.items.map((item, i): Spec | null =>
-                  i === 0 ? (item ? null : { k: `undef` }) : item,
-                ),
-              },
-            ]
-          : choice % 4 === 2
-            ? [`property`, { ...spec, p: num(1) }]
-            : [
-                `retype`,
-                {
-                  k: `obj`,
-                  entries: spec.items.flatMap((item, i) =>
-                    item && i < 2 ? [[String(i), item] as [string, Spec]] : [],
-                  ),
-                  syms: [],
-                },
-              ]
-    case `twice`:
-      // A shared child on one side against two different copies on the other
-      // tests that equality's revisit check keys on both objects.
-      return choice % 2
-        ? [`replace`, { k: `array`, items: [spec.child] }]
-        : [
-            `split`,
-            {
-              k: `array`,
-              items: [spec.child, nearMiss(spec.child, choice >> 1)[1]],
-            },
-          ]
-    case `map`: {
-      const pairs = spec.entries.map(([key, value]): Spec => ({
-        k: `array`,
-        items: [key, value],
-      }))
-      const [first, second] = spec.entries
-      // Repeating a primitive key makes the Map merge the two entries.
-      if (choice % 2 === 0 && first && second && MERGING_KINDS.has(first[0].k))
-        return [
-          `property`,
-          {
-            ...spec,
-            entries: spec.entries.map(([key, value], i) =>
-              i === 1 ? ([first[0], value] as [Spec, Spec]) : [key, value],
-            ),
-          },
-        ]
-      return choice % 4 === 0 && spec.entries.length > 1
-        ? [`order`, { ...spec, entries: [...spec.entries].reverse() }]
-        : choice % 4 === 1 && spec.entries.length > 0
-          ? [
-              `property`,
-              {
-                ...spec,
-                entries: spec.entries.map(([key, value], i) =>
-                  i === 0
-                    ? ([{ k: `str`, v: `\u0000key` }, value] as [Spec, Spec])
-                    : [key, value],
-                ),
-              },
-            ]
-          : choice % 4 === 2
-            ? [`retype`, { k: `array`, items: pairs }]
-            : [`retype`, { k: `set`, items: pairs }]
-    }
-    case `set`:
-      return choice % 2 && spec.items.length > 1
-        ? [`order`, { ...spec, items: [...spec.items].reverse() }]
-        : [`retype`, { k: `array`, items: spec.items }]
-    case `obj`:
-      return choice % 3 === 0 && spec.entries.length > 0
-        ? [
-            `property`,
-            {
-              ...spec,
-              entries: spec.entries.map(([key, value], i) =>
-                i === 0 ? ([`${key}!`, value] as [string, Spec]) : [key, value],
-              ),
-            },
-          ]
-        : choice % 3 === 1
-          ? [
-              `property`,
-              {
-                ...spec,
-                syms: spec.syms.length
-                  ? spec.syms.map(([id, value]) => [1 - id, value])
-                  : [[0, num(1)]],
-              },
-            ]
-          : [`order`, { ...spec, entries: [...spec.entries].reverse() }]
-    default:
-      return [`replace`, { k: `str`, v: `other` }]
-  }
-}
-
-function num(v: number): Spec {
-  return { k: `num`, v }
-}
-
-type Pair = { left: Spec; right: Spec; mutation: Mutation }
-
-const pairArb: fc.Arbitrary<Pair> = specArb.chain((left) =>
-  fc.tuple(fc.nat(), fc.nat(), fc.nat(9)).map(([at, choice, mode]): Pair => {
-    if (mode < 3) return { left, right: left, mutation: `none` }
-    // Leaves outnumber containers, so half of the mutations target a
-    // container node when the spec has one.
-    const all = nodes(left)
-    const containers = all.filter(([node]) => CONTAINER_KINDS.has(node.k))
-    const pool = mode % 2 && containers.length > 0 ? containers : all
-    const [node, replace] = pool[at % pool.length]!
-    const [mutation, next] = nearMiss(node, choice)
-    return { left, right: replace(next), mutation }
-  }),
-)
 
 // ---------------------------------------------------------------------------
 // Realization. Each side is built as fresh objects. `seed` varies property
@@ -740,9 +286,16 @@ const MODULES: ReadonlyArray<Module> = [
   },
 ]
 
-function expectPair(
-  pair: Pair,
-  seeds: [number, number],
+type PairPlan = { pair: Pair; seeds: [number, number] }
+type Observe = (checkpoint: string, value: unknown) => void
+
+function expectedPair({ pair }: PairPlan): boolean {
+  return identity(pair.left) === identity(pair.right)
+}
+
+function drivePair(
+  { pair, seeds }: PairPlan,
+  observe: Observe,
   modules: ReadonlyArray<Module> = MODULES,
 ): void {
   const expected = identity(pair.left) === identity(pair.right)
@@ -750,42 +303,98 @@ function expectPair(
   const right = realize(pair.right, seeds[1])
   for (const module of modules) {
     const context = `${module.name}, ${pair.mutation}: ${identity(pair.left)} vs ${identity(pair.right)}`
-    expect(module.equalHashValues(left, right), `equality, ${context}`).toBe(
-      expected,
-    )
-    expect(module.equalHashValues(right, left), `symmetry, ${context}`).toBe(
-      expected,
-    )
+    observe(`equality, ${context}`, {
+      kind: `equality`,
+      actual: module.equalHashValues(left, right),
+    })
+    observe(`symmetry, ${context}`, {
+      kind: `equality`,
+      actual: module.equalHashValues(right, left),
+    })
     if (expected)
-      expect(module.hash(left), `hash, ${context}`).toBe(module.hash(right))
+      observe(`hash, ${context}`, {
+        kind: `hash consequence`,
+        actual: Object.is(module.hash(left), module.hash(right)),
+      })
   }
 }
 
-function expectCyclicPair({ spec, changed, seeds }: CyclicPair): void {
+function checkPair(
+  _plan: PairPlan,
+  trace: ReadonlyArray<Observation>,
+  expected: boolean,
+): Verdict {
+  for (const { checkpoint, value } of trace) {
+    const actual = value as { kind: string; actual: unknown }
+    const mismatch = differs(
+      checkpoint,
+      actual.kind,
+      actual.actual,
+      actual.kind === `equality` ? expected : true,
+    )
+    if (mismatch) return mismatch
+  }
+  return pass
+}
+
+function driveCyclicPair(
+  { spec, changed, seeds }: CyclicPair,
+  observe: Observe,
+): void {
   const left = realize(spec, seeds[0])
   const same = realize(spec, seeds[1])
   const other = realize(changed, seeds[1])
   for (const module of MODULES) {
-    expect(module.equalHashValues(left, same), `${module.name} equality`).toBe(
-      true,
-    )
-    expect(
-      module.equalHashValues(left, other),
-      `${module.name} inequality`,
-    ).toBe(false)
-    expect(() => module.hash(left)).toThrow(
-      new TypeError(`Cannot hash cyclic structural values`),
-    )
+    observe(`${module.name} equality`, {
+      kind: `equality`,
+      actual: module.equalHashValues(left, same),
+    })
+    observe(`${module.name} inequality`, {
+      kind: `inequality`,
+      actual: module.equalHashValues(left, other),
+    })
+    // A thrown TypeError is an observation promised by this cyclic-value law.
+    // Only this hash call is captured; realization and equality errors escape.
+    let rejection = false
+    try {
+      module.hash(left)
+    } catch (error) {
+      rejection =
+        error instanceof TypeError &&
+        error.message === `Cannot hash cyclic structural values`
+    }
+    observe(`${module.name} cycle rejection`, {
+      kind: `cycle rejection`,
+      actual: rejection,
+    })
   }
+}
+
+function expectedCyclicPair() {
+  return { equality: true, inequality: false, [`cycle rejection`]: true }
+}
+function checkCyclicPair(
+  _plan: CyclicPair,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof expectedCyclicPair>,
+): Verdict {
+  for (const { checkpoint, value } of trace) {
+    const actual = value as { kind: keyof typeof expected; actual: unknown }
+    const mismatch = differs(
+      checkpoint,
+      actual.kind,
+      actual.actual,
+      expected[actual.kind],
+    )
+    if (mismatch) return mismatch
+  }
+  return pass
 }
 
 // The model is `identity` (and its encoding `canon`): equal identities must
 // share a verdict and hash. The grammar `pairArb` is calibrated below.
-declareOracle({
-  check: [expectPair, expectCyclicPair],
-  model: [identity, canon],
-  grammar: [pairArb],
-})
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 
 // ---------------------------------------------------------------------------
 // Campaigns. Each generated property has a fixed campaign and a random
@@ -793,117 +402,52 @@ declareOracle({
 // runs its recorded history once and every other test stands aside. A seed
 // alone reseeds the random campaigns.
 
-const FIXED_SEED = 2026930
-const PAIR_IDENTITY = `ivm.hash-identity`
-const CYCLIC_IDENTITY = `ivm.hash-identity-cycles`
-
-const it = oracleReplayTest(vitestIt)
-
 describe(`hash identity oracle`, () => {
-  it(`matches the identity model across generated value pairs (${FIXED_SEED})`, () => {
-    fc.assert(
-      fc.property(pairArb, fc.nat(), fc.nat(), (pair, left, right) =>
-        expectPair(pair, [left, right]),
-      ),
-      { numRuns: oracleRuns(300), seed: FIXED_SEED },
-    )
+  oracleProperty({
+    id: `ivm.hash-identity`,
+    law: {
+      statement: `D2 equality is symmetric and agrees with independent value identity; equal identities have equal hashes under native and colliding-marker modules.`,
+      authority: `The existing nine value-identity rules documented above.`,
+      limits: `The original bounded recursive value-spec grammar, mutations and realization seeds; collision freedom is not promised.`,
+    },
+    owns: [
+      `src/hashing/hash.ts#hash`,
+      `src/hashing/hash.ts#equalHashValues`,
+      `src/hashing/hash.ts#registerOpaqueHash`,
+    ],
+    histories: {
+      arbitrary: fc.tuple(pairArb, fc.nat(), fc.nat()),
+      runs: 300,
+      fixedSeeds: [2026930],
+    },
+    resolve: ([pair, left, right]) => ({
+      pair,
+      seeds: [left, right] as [number, number],
+    }),
+    model: expectedPair,
+    driver: drivePair,
+    check: checkPair,
   })
-  oracleReplayTest(fcTest, PAIR_IDENTITY).prop(
-    [pairArb, fc.nat(), fc.nat()],
-    oraclePropertyOptions(300, PAIR_IDENTITY),
-  )(
-    `matches the identity model across generated value pairs (random)`,
-    (pair, left, right) => expectPair(pair, [left, right]),
-  )
-
-  it(`matches constructed verdicts across generated cyclic values (${FIXED_SEED})`, () => {
-    fc.assert(fc.property(cyclicArb, expectCyclicPair), {
-      numRuns: oracleRuns(300),
-      seed: FIXED_SEED,
-    })
-  })
-  oracleReplayTest(fcTest, CYCLIC_IDENTITY).prop(
-    [cyclicArb],
-    oraclePropertyOptions(300, CYCLIC_IDENTITY),
-  )(
-    `matches constructed verdicts across generated cyclic values (random)`,
-    expectCyclicPair,
-  )
-
-  // Positive execution witness: the fixed campaign reaches every value kind
-  // and every mutation, with both verdicts.
-  it(`reaches every kind, mutation, and verdict in the fixed campaign`, () => {
-    const sample = fc.sample(pairArb, { seed: FIXED_SEED, numRuns: 300 })
-    const kinds = new Set<string>()
-    for (const { left } of sample)
-      for (const [node] of nodes(left))
-        kinds.add(node.k === `ref` ? `ref:${node.kind}` : node.k)
-    expect([...kinds].sort()).toEqual(
-      [
-        `array`,
-        `big`,
-        `bin`,
-        `bool`,
-        `date`,
-        `map`,
-        `null`,
-        `num`,
-        `obj`,
-        `ref:bigbin`,
-        `ref:file`,
-        `ref:fn`,
-        `ref:handle`,
-        `regex`,
-        `set`,
-        `str`,
-        `sym`,
-        `temporal`,
-        `twice`,
-        `undef`,
-      ].sort(),
-    )
-    const verdicts = new Map<string, Set<boolean>>()
-    for (const pair of sample) {
-      const equal = identity(pair.left) === identity(pair.right)
-      const seen = verdicts.get(pair.mutation) ?? new Set()
-      verdicts.set(pair.mutation, seen.add(equal))
-    }
-    expect([...verdicts.keys()].sort()).toEqual(
-      [
-        `header`,
-        `hole`,
-        `none`,
-        `order`,
-        `property`,
-        `replace`,
-        `retype`,
-        `split`,
-      ].sort(),
-    )
-    for (const mutation of [`header`, `hole`, `retype`, `replace`, `split`])
-      expect(verdicts.get(mutation), mutation).toContain(false)
-    expect(verdicts.get(`none`)).toEqual(new Set([true]))
-
-    // Map keys reach non-string primitives, containers, and merged keys.
-    const keyKinds = new Set<string>()
-    let merged = 0
-    for (const { left, right } of sample)
-      for (const spec of [left, right])
-        for (const [node] of nodes(spec))
-          if (node.k === `map`) {
-            for (const [key] of node.entries) keyKinds.add(key.k)
-            const encoded = canon(node) as [string, Array<unknown>]
-            if (encoded[1].length < node.entries.length) merged++
-          }
-    expect(
-      keyKinds.has(`num`) && keyKinds.has(`sym`) && keyKinds.has(`ref`),
-    ).toBe(true)
-    expect(keyKinds.has(`obj`) || keyKinds.has(`array`)).toBe(true)
-    expect(merged).toBeGreaterThan(0)
+  oracleProperty({
+    id: `ivm.hash-identity-cycles`,
+    law: {
+      statement: `Constructed equal cyclic values compare equal, the changed cyclic value differs, and hashing rejects with the existing cyclic-structural-value TypeError.`,
+      authority: `The existing cyclic value-identity contract documented above.`,
+      limits: `The original array/Map/Set/object cyclic spec and leaf-replacement grammar; no arbitrary graph-shape claim is added.`,
+    },
+    owns: [
+      `src/hashing/hash.ts#hash`,
+      `src/hashing/hash.ts#equalHashValues`,
+      `src/hashing/hash.ts#registerOpaqueHash`,
+    ],
+    histories: { arbitrary: cyclicArb, runs: 300, fixedSeeds: [2026930] },
+    model: expectedCyclicPair,
+    driver: driveCyclicPair,
+    check: checkCyclicPair,
   })
 
-  // Pinned witnesses for rules that a wrong design would plausibly break.
-  const pinned: Array<[string, Spec, Spec]> = [
+  // Fixed witnesses for rules that a wrong design would plausibly break.
+  const fixedWitnesses: Array<[string, Spec, Spec]> = [
     [
       `a hole differs from undefined`,
       { k: `array`, items: [null, num(1)] },
@@ -1027,66 +571,133 @@ describe(`hash identity oracle`, () => {
       { k: `obj`, entries: [], syms: [[1, num(1)]] },
     ],
   ]
-  it.each(pinned)(`%s`, (_name, left, right) => {
-    for (const seeds of [
-      [1, 2],
-      [3, 4],
-    ] as Array<[number, number]>)
-      expectPair({ left, right, mutation: `replace` }, seeds)
-  })
-
-  it(`does not accept a second copy because the first copy matched`, () => {
-    const spec: Spec = {
-      k: `twice`,
-      child: { k: `obj`, entries: [[`a`, num(1)]], syms: [] },
-    }
-    const split: Spec = {
-      k: `array`,
-      items: [
-        { k: `obj`, entries: [[`a`, num(1)]], syms: [] },
-        { k: `obj`, entries: [[`a`, num(2)]], syms: [] },
-      ],
-    }
+  // The fixed witnesses run through the same driver, model, and check as the
+  // generated campaign. pairArb is a chained arbitrary, so it cannot take
+  // these pairs back; they form one enumerated property. Each former test ran
+  // its pair under several realization seeds; each seed pair is a history.
+  const fixedPairHistories: Array<PairPlan & { name: string }> = [
+    ...fixedWitnesses.flatMap(([name, left, right]) =>
+      (
+        [
+          [1, 2],
+          [3, 4],
+        ] as Array<[number, number]>
+      ).map((seeds) => ({
+        name,
+        pair: { left, right, mutation: `replace` as const },
+        seeds,
+      })),
+    ),
     // Some seeds share the child on the left side.
-    for (let seed = 1; seed < 20; seed++)
-      expectPair({ left: spec, right: split, mutation: `split` }, [seed, seed])
-  })
-
-  it(`keeps distinct identities separate when their digests collide`, () => {
-    const pair: Pair = {
-      left: { k: `map`, entries: [] },
-      right: { k: `set`, items: [] },
-      mutation: `retype`,
-    }
-    const left = realize(pair.left, 1)
-    const right = realize(pair.right, 2)
-    expect(colliding.hash(left)).toBe(colliding.hash(right))
-    const digestOnly: Module = {
-      name: `digest-only mutant`,
-      hash: colliding.hash,
-      equalHashValues: (a, b) => colliding.hash(a) === colliding.hash(b),
-    }
-    expect(() => expectPair(pair, [1, 2], [digestOnly])).toThrow()
-    expectPair(pair, [1, 2])
-  })
-
-  it(`treats shared and copied subtrees, prototypes, and hidden properties as equal`, () => {
-    const spec: Spec = {
-      k: `twice`,
-      child: {
-        k: `obj`,
-        entries: [
-          [`a`, num(0)],
-          [`b`, { k: `bin`, bytes: [1] }],
-        ],
-        syms: [],
+    ...Array.from({ length: 19 }, (_, index) => index + 1).map((seed) => ({
+      name: `does not accept a second copy because the first copy matched`,
+      pair: {
+        left: {
+          k: `twice`,
+          child: { k: `obj`, entries: [[`a`, num(1)]], syms: [] },
+        } satisfies Spec,
+        right: {
+          k: `array`,
+          items: [
+            { k: `obj`, entries: [[`a`, num(1)]], syms: [] },
+            { k: `obj`, entries: [[`a`, num(2)]], syms: [] },
+          ],
+        } satisfies Spec,
+        mutation: `split` as const,
       },
-    }
+      seeds: [seed, seed] as [number, number],
+    })),
     // Different seeds choose sharing, prototypes, carriers, and -0.
-    for (let seed = 1; seed < 40; seed++)
-      expectPair({ left: spec, right: spec, mutation: `none` }, [
-        seed,
-        seed + 101,
-      ])
+    ...Array.from({ length: 39 }, (_, index) => index + 1).map((seed) => {
+      const spec: Spec = {
+        k: `twice`,
+        child: {
+          k: `obj`,
+          entries: [
+            [`a`, num(0)],
+            [`b`, { k: `bin`, bytes: [1] }],
+          ],
+          syms: [],
+        },
+      }
+      return {
+        name: `treats shared and copied subtrees, prototypes, and hidden properties as equal`,
+        pair: { left: spec, right: spec, mutation: `none` as const },
+        seeds: [seed, seed + 101] as [number, number],
+      }
+    }),
+  ]
+  oracleProperty({
+    id: `ivm.hash-identity-fixed`,
+    law: {
+      statement: `D2 equality is symmetric and agrees with independent value identity; equal identities have equal hashes under native and colliding-marker modules.`,
+      authority: `The existing nine value-identity rules documented above.`,
+      limits: `Named witnesses for rules that a wrong design would plausibly break, which the chained pair grammar cannot take back; each is replayed under its former realization seeds through the same driver, model, and check.`,
+    },
+    owns: [
+      `src/hashing/hash.ts#hash`,
+      `src/hashing/hash.ts#equalHashValues`,
+      `src/hashing/hash.ts#registerOpaqueHash`,
+    ],
+    histories: fixedPairHistories,
+    label: ({ name, seeds }) => `${name} (seeds ${seeds[0]}, ${seeds[1]})`,
+    model: expectedPair,
+    driver: drivePair,
+    check: checkPair,
+  })
+
+  // A map and a set whose colliding-marker digests are equal. The driver
+  // first confirms the collision, so the witness tests identity and not the
+  // digest. A digest-only equality must be rejected on it.
+  const digestOnly: Module = {
+    name: `digest-only mutant`,
+    hash: colliding.hash,
+    equalHashValues: (a, b) => colliding.hash(a) === colliding.hash(b),
+  }
+  function driveDigestCollision(
+    plan: PairPlan,
+    observe: Observe,
+    modules: ReadonlyArray<Module> = MODULES,
+  ): void {
+    const left = realize(plan.pair.left, plan.seeds[0])
+    const right = realize(plan.pair.right, plan.seeds[1])
+    expect(colliding.hash(left)).toBe(colliding.hash(right))
+    drivePair(plan, observe, modules)
+  }
+  oracleProperty({
+    id: `ivm.hash-identity-digest-collision`,
+    law: {
+      statement: `D2 equality is symmetric and agrees with independent value identity; equal identities have equal hashes under native and colliding-marker modules.`,
+      authority: `The existing nine value-identity rules documented above.`,
+      limits: `One map and set pair whose colliding-marker digests are equal; a digest-only equality calibrates the comparison.`,
+    },
+    owns: [
+      `src/hashing/hash.ts#hash`,
+      `src/hashing/hash.ts#equalHashValues`,
+      `src/hashing/hash.ts#registerOpaqueHash`,
+    ],
+    histories: [
+      {
+        pair: {
+          left: { k: `map`, entries: [] },
+          right: { k: `set`, items: [] },
+          mutation: `retype`,
+        },
+        seeds: [1, 2],
+      },
+    ] satisfies Array<PairPlan>,
+    label: () =>
+      `keeps distinct identities separate when their digests collide`,
+    model: expectedPair,
+    driver: driveDigestCollision,
+    check: checkPair,
+    calibrations: [
+      {
+        name: `rejects a digest-only equality on colliding digests`,
+        law: `equality`,
+        driver: (plan, observe) =>
+          driveDigestCollision(plan, observe, [digestOnly]),
+      },
+    ],
   })
 })

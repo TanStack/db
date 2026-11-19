@@ -93,7 +93,7 @@ describe(`Ordered source request ownership`, () => {
     let joinedPending = false
     const loader = new OrderedSourceLoader(
       createOrderByInfo({
-        joinedFilterSourceId: `child`,
+        joinedFilterSourceIds: [`child`],
         requiresFullSource: true,
       }),
       fakeSubscription(requests, releases),

@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { declareOracle } from './oracle-declaration'
+import { describe, expect } from 'vitest'
+import { oracleProperty } from './oracle-config'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter'
 import {
   confirmEverything,
   createOrders,
@@ -18,7 +23,7 @@ import type { Handlers, Orders } from './local-only-direct-write-fixture'
  * transaction, and runs the user's handler.
  *
  * The change-event history oracle drives this path through generated
- * histories and checks every publication. These witnesses pin the guard's
+ * histories and checks every publication. These witnesses fix the guard's
  * fallback cases, which that oracle does not generate: removing the guard
  * hides a direct write under a pending overlay and holds it behind a
  * persisting transaction, for every operation type.
@@ -79,8 +84,6 @@ function expectDirectMatchesConfirmed(
   expect(direct.remaining).toBe(0)
 }
 
-declareOracle({ check: [expectDirectMatchesConfirmed] })
-
 describe(`local-only direct writes match the confirmed optimistic path`, () => {
   const histories: Record<string, Array<Write>> = {
     'a mixed multi-key batch': [
@@ -134,12 +137,38 @@ describe(`local-only direct writes match the confirmed optimistic path`, () => {
     ],
   }
 
-  for (const [name, writes] of Object.entries(histories)) {
-    it(`for ${name}`, async () => {
-      const direct = await observe({}, writes)
-      const reference = await observe(confirmEverything, writes)
+  // A history's writes are functions, so each enumerated history is its name;
+  // resolution maps it to those writes.
+  oracleProperty({
+    id: `local-only.direct-write-fixed`,
+    law: {
+      statement: `A local-only direct write leaves the same rows, publishes the same batches, throws the same errors, and ends with the same completed transactions as the confirmed optimistic path, with no transaction left on the Collection.`,
+      authority: `The local-only direct-write law stated above`,
+      limits: `The named guard fallback histories above, which the change-event history oracle does not generate.`,
+    },
+    // What this oracle owns: the gap report judges the local-only direct-write
+    // guard in CollectionMutationsManager.commitLocalOnlyDirect and the local-only
+    // Collection options by this file's fixed direct-write histories.
+    owns: [
+      `src/local-only.ts`,
+      `src/collection/mutations.ts#CollectionMutationsManager.commitLocalOnlyDirect`,
+    ],
+    histories: Object.keys(histories),
+    label: (name) => `for ${name}`,
+    resolve: (name) => ({ name, writes: histories[name]! }),
+    model: recordedAssertionJudgment,
+    driver: (plan, record) =>
+      recordAssertionJudgment(
+        `local-only.direct-write-fixed`,
+        plan,
+        record,
+        async () => {
+          const direct = await observe({}, plan.writes)
+          const reference = await observe(confirmEverything, plan.writes)
 
-      expectDirectMatchesConfirmed(direct, reference)
-    })
-  }
+          expectDirectMatchesConfirmed(direct, reference)
+        },
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

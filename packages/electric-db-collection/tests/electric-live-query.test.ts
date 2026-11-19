@@ -901,7 +901,7 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
   // Initial-query readiness and Effect `skipInitial` follow the settled subset
   // in both cases. Electric buffers progressive changes until the full sync,
   // so it cannot deliver a change between settlement and source readiness;
-  // the controlled core lane owns that history.
+  // the controlled core path owns that history.
   describe(`initial readiness follows the settled subset`, () => {
     const selectedUser = sampleUsers[0]!
     const laterUser = { ...sampleUsers[3]!, active: true, id: 5 }
@@ -964,7 +964,7 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
       ])
     })
 
-    // A known limit, pinned so that a change to Electric's buffering is
+    // A known limit, fixed so that a change to Electric's buffering is
     // visible: before the full sync, a ready progressive query shows its
     // snapshot rows, and stream changes to them wait for the atomic swap.
     it(`a ready query's rows update only when the full sync completes`, async () => {

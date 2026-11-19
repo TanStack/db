@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe } from 'vitest'
 import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 import { CapacitorSQLiteDriver } from '../src/capacitor-sqlite-driver'
 import { createCapacitorSQLiteTestDatabase } from './helpers/capacitor-sqlite-test-db'
@@ -24,4 +25,6 @@ function createDriverHarness(): SQLiteDriverContractHarness {
   }
 }
 
-runSQLiteDriverContractSuite(`capacitor sqlite driver`, createDriverHarness)
+describe(`Capacitor SQLite driver satisfies the shared SQLite driver contract`, () => {
+  runSQLiteDriverContractSuite(`capacitor sqlite driver`, createDriverHarness)
+})

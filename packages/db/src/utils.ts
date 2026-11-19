@@ -8,6 +8,7 @@ import type { CompareOptions } from './query/builder/types'
 interface TypedArray {
   length: number
   [index: number]: number
+  every: (predicate: (value: number, index: number) => boolean) => boolean
 }
 
 export const durationFields = [
@@ -27,6 +28,7 @@ export type DurationFields = Record<(typeof durationFields)[number], number>
 /**
  * Deep equality function that compares two values recursively
  * Handles primitives, objects, arrays, Date, RegExp, Map, Set, TypedArrays, and Temporal objects
+ * Plain records can compare by keys with keyed class instances and records from other realms.
  *
  * @param a - First value to compare
  * @param b - Second value to compare
@@ -42,12 +44,31 @@ export type DurationFields = Record<(typeof durationFields)[number], number>
  * ```
  */
 export function deepEquals(a: any, b: any): boolean {
-  return deepEqualsInternal(a, b, undefined)
+  return deepEqualsInternal(a, b)
+}
+
+/**
+ * @internal Whether a synced row changed observably: deep equality that
+ * tells -0 from 0 and preserves record prototypes, as public row values do.
+ * Maintainer decisions: FID-1, 2026-10-29; record shape, 2026-11-03.
+ */
+export function sameRowValue(a: unknown, b: unknown): boolean {
+  return deepEqualsInternal(a, b, ROW)
+}
+
+/**
+ * @internal Whether an ordered Effect's update repeats its previous
+ * publication: row-value equality, except that a class instance equals only
+ * itself, since it can hold readable state outside its enumerable fields
+ * (maintainer decision 2026-11-02).
+ */
+export function samePublishedValue(a: unknown, b: unknown): boolean {
+  return deepEqualsInternal(a, b, ROW | PUBLICATION)
 }
 
 /** @internal Compare persisted public and durable value shapes before skipping a reload. */
 export function equalPersistedSnapshotValues(a: unknown, b: unknown): boolean {
-  return deepEqualsInternal(a, b, undefined, true, true)
+  return deepEqualsInternal(a, b, DRAFT | PERSISTED)
 }
 
 function isPlainPrototype(prototype: object | null): boolean {
@@ -62,25 +83,37 @@ function enumerableOwnKeys(value: object): Array<string | symbol> {
   return keys
 }
 
+// The comparison modes of `deepEqualsInternal`, combined as bits.
+/**
+ * The stricter equality used by change-tracking drafts: Map and Set contents
+ * must match in order, RegExp match position must match, and arrays compare
+ * as keyed objects (holes and extra enumerable keys count).
+ */
+export const DRAFT = 1
+/** Persisted snapshots also distinguish prototypes after serialization. */
+const PERSISTED = 2
+/** Row change detection tells -0 from 0; general equality does not. */
+export const ROW = 4
+/** An ordered Effect's publication also compares a class instance by identity. */
+const PUBLICATION = 8
+
 /**
  * Internal implementation with cycle detection to prevent infinite recursion.
  * Internal callers can seed already-paired roots when comparing their children.
  *
- * `draft` selects the stricter equality used by change-tracking drafts: Map
- * and Set contents must match in order, RegExp match position must match, and
- * arrays compare as keyed objects (holes and extra enumerable keys count).
- * `persistedSnapshot` also distinguishes prototypes after serialization.
+ * `mode` combines the bits above; one recursive call forwards all of them.
  */
 export function deepEqualsInternal(
   a: any,
   b: any,
+  mode = 0,
   // Created on the first container that descends into a child.
-  visited: Map<object, object> | undefined,
-  draft = false,
-  persistedSnapshot = false,
+  visited?: Map<object, object>,
 ): boolean {
-  // Handle strict equality (primitives, same reference)
-  if (a === b || Object.is(a, b)) return true
+  const draft = mode & DRAFT
+  // Handle strict equality (primitives, same reference); a row value tells
+  // -0 from 0.
+  if ((!(mode & ROW) && a === b) || Object.is(a, b)) return true
 
   // Handle null/undefined
   if (a == null || b == null) return false
@@ -91,12 +124,16 @@ export function deepEqualsInternal(
   // SQLite can turn an authored nested instance into an equal-keyed plain
   // record. A skipped persisted reload must not retain the old public shape.
   if (
-    persistedSnapshot &&
+    mode & PERSISTED &&
     typeof a === `object` &&
     Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)
   ) {
     return false
   }
+
+  // A container already paired in this comparison closes a cycle: it equals
+  // only its partner.
+  if (visited?.has(a)) return visited.get(a) === b
 
   // Handle Date objects
   if (a instanceof Date) {
@@ -122,34 +159,15 @@ export function deepEqualsInternal(
   if (a instanceof Map) {
     if (!(b instanceof Map)) return false
     if (a.size !== b.size) return false
-
-    // Check for circular references
-    if (visited?.has(a)) {
-      return visited.get(a) === b
-    }
-    visited ??= new Map()
-    visited.set(a, b)
+    ;(visited ??= new Map()).set(a, b)
 
     // A draft compares entries in order; general equality looks keys up.
     const bEntries = draft && Array.from(b.entries())
     const result = Array.from(a.entries()).every(([key, val], index) =>
       bEntries
         ? Object.is(key, bEntries[index]![0]) &&
-          deepEqualsInternal(
-            val,
-            bEntries[index]![1],
-            visited,
-            true,
-            persistedSnapshot,
-          )
-        : b.has(key) &&
-          deepEqualsInternal(
-            val,
-            b.get(key),
-            visited,
-            draft,
-            persistedSnapshot,
-          ),
+          deepEqualsInternal(val, bEntries[index]![1], mode, visited)
+        : b.has(key) && deepEqualsInternal(val, b.get(key), mode, visited),
     )
 
     visited.delete(a)
@@ -162,28 +180,15 @@ export function deepEqualsInternal(
   if (a instanceof Set) {
     if (!(b instanceof Set)) return false
     if (a.size !== b.size) return false
-
-    // Check for circular references
-    if (visited?.has(a)) {
-      return visited.get(a) === b
-    }
-    visited ??= new Map()
-    visited.set(a, b)
+    ;(visited ??= new Map()).set(a, b)
 
     // Convert to arrays for comparison
     const aValues = Array.from(a)
     const bValues = Array.from(b)
 
     if (draft) {
-      const result = aValues.every((val, index) =>
-        deepEqualsInternal(
-          val,
-          bValues[index],
-          visited,
-          draft,
-          persistedSnapshot,
-        ),
-      )
+      // A draft compares contents in order, as it compares arrays.
+      const result = deepEqualsInternal(aValues, bValues, mode, visited)
       visited.delete(a)
       return result
     }
@@ -194,79 +199,64 @@ export function deepEqualsInternal(
       return aValues.every((val) => b.has(val))
     }
 
-    // Object-valued Sets are unordered. Match each value once, carrying a
-    // branch-local cycle map so a failed candidate cannot poison the next.
-    const matchValues = (
-      index: number,
-      remaining: ReadonlyArray<number>,
-      branchVisited: Map<object, object>,
-    ): boolean => {
-      if (index === aValues.length) return true
-      const value = aValues[index]
-      for (const [remainingIndex, candidateIndex] of remaining.entries()) {
-        const candidateVisited = new Map(branchVisited)
-        if (
-          deepEqualsInternal(
-            value,
-            bValues[candidateIndex],
-            candidateVisited,
-            draft,
-            persistedSnapshot,
-          ) &&
-          matchValues(
-            index + 1,
-            remaining.filter((_, otherIndex) => otherIndex !== remainingIndex),
-            candidateVisited,
-          )
-        ) {
-          return true
-        }
-      }
-      return false
+    // A paired equality is already a bijection. Keep common equal inputs linear.
+    if (
+      aValues.every((value, index) =>
+        deepEqualsInternal(value, bValues[index], mode, visited),
+      )
+    ) {
+      visited.delete(a)
+      return true
     }
-    const result = matchValues(
-      0,
-      bValues.map((_, index) => index),
-      visited,
+
+    // Recursive comparisons remove their own pairs before returning. Reuse the
+    // ancestor map; only failed assignments need augmenting-path search.
+    const candidates = aValues.map((value) =>
+      bValues.flatMap((candidate, index) =>
+        deepEqualsInternal(value, candidate, mode, visited) ? [index] : [],
+      ),
     )
+    const assigned = new Map<number, number>()
+    const match = (index: number, seen: Set<number>): boolean => {
+      const options = candidates[index]!
+      const free = options.find((candidate) => !assigned.has(candidate))
+      if (free !== undefined) {
+        assigned.set(free, index)
+        return true
+      }
+      return options.some((candidate) => {
+        if (seen.has(candidate)) return false
+        seen.add(candidate)
+        const previous = assigned.get(candidate)
+        if (previous !== undefined && !match(previous, seen)) return false
+        assigned.set(candidate, index)
+        return true
+      })
+    }
+    const result = aValues.every((_, index) => match(index, new Set()))
     visited.delete(a)
     return result
   }
   // Symmetric check: if b is Set but a is not, they're not equal
   if (b instanceof Set) return false
 
-  // Handle TypedArrays
-  if (
-    ArrayBuffer.isView(a) &&
-    ArrayBuffer.isView(b) &&
-    !(a instanceof DataView) &&
-    !(b instanceof DataView)
-  ) {
+  // Handle TypedArrays. A typed array is its own value class: it equals only
+  // another typed array, in both directions.
+  const typed = ArrayBuffer.isView(a) && !(a instanceof DataView)
+  if (typed !== (ArrayBuffer.isView(b) && !(b instanceof DataView))) {
+    return false
+  }
+  if (typed) {
     const typedA = a as unknown as TypedArray
     const typedB = b as unknown as TypedArray
-    // Elements compare like numbers: -0 equals 0, NaN equals NaN. Only a
-    // draft treats a change of typed-array class as a change.
-    if (
-      (draft && Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) ||
-      typedA.length !== typedB.length
+    // Elements compare as the numbers they are: NaN equals NaN, and -0
+    // equals 0 except as a row value. Only a draft treats a change of
+    // typed-array class as a change.
+    return (
+      (!draft || Object.getPrototypeOf(a) === Object.getPrototypeOf(b)) &&
+      typedA.length === typedB.length &&
+      typedA.every((x, i) => deepEqualsInternal(x, typedB[i], mode))
     )
-      return false
-
-    for (let i = 0; i < typedA.length; i++) {
-      const x = typedA[i]!
-      const y = typedB[i]!
-      if (x !== y && !(x !== x && y !== y)) return false
-    }
-
-    return true
-  }
-  // Symmetric check: if b is TypedArray but a is not, they're not equal
-  if (
-    ArrayBuffer.isView(b) &&
-    !(b instanceof DataView) &&
-    !ArrayBuffer.isView(a)
-  ) {
-    return false
   }
 
   // Handle Temporal objects
@@ -303,34 +293,32 @@ export function deepEqualsInternal(
   if (Array.isArray(a) !== Array.isArray(b)) return false
   if (Array.isArray(a) && a.length !== b.length) return false
   if (Array.isArray(a) && !draft) {
-    // Check for circular references
-    if (visited?.has(a)) {
-      return visited.get(a) === b
-    }
-    visited ??= new Map()
-    visited.set(a, b)
+    ;(visited ??= new Map()).set(a, b)
 
-    const result = a.every((item, index) =>
-      deepEqualsInternal(item, b[index], visited, draft, persistedSnapshot),
-    )
+    let result = true
+    for (let index = 0; index < a.length; index++) {
+      if (!deepEqualsInternal(a[index], b[index], mode, visited)) {
+        result = false
+        break
+      }
+    }
     visited.delete(a)
     return result
   }
   // Handle objects
   if (typeof a === `object`) {
-    // Instances of two different classes differ. A plain or null-prototype
-    // object, from any realm, compares by keys with any class: a draft
-    // snapshot and plain JSON both hold class instances as plain objects.
+    // Row publication preserves record prototypes. Generic equality and draft
+    // reconstruction keep their established plain-record/class bridge.
     const prototype = Object.getPrototypeOf(a)
     const prototypeB = Object.getPrototypeOf(b)
     const plain = isPlainPrototype(prototype)
     const plainB = isPlainPrototype(prototypeB)
-    if (prototype !== prototypeB && !plain && !plainB) return false
-
-    // Check for circular references
-    if (visited?.has(a)) {
-      return visited.get(a) === b
-    }
+    if (
+      prototype !== prototypeB &&
+      ((mode & ROW && !draft) || (!plain && !plainB))
+    )
+      return false
+    if (mode & PUBLICATION && !(plain && plainB)) return false
 
     // Compare enumerable symbol keys as well as string keys. Query results may
     // use user-owned symbols, and a symbol-only update is still a value change.
@@ -355,13 +343,12 @@ export function deepEqualsInternal(
     for (const key of keysA) {
       const value = a[key]
       if (!registered && value !== null && typeof value === `object`) {
-        visited ??= new Map()
-        visited.set(a, b)
+        ;(visited ??= new Map()).set(a, b)
         registered = true
       }
       if (
         !Object.prototype.propertyIsEnumerable.call(b, key) ||
-        !deepEqualsInternal(value, b[key], visited, draft, persistedSnapshot)
+        !deepEqualsInternal(value, b[key], mode, visited)
       ) {
         result = false
         break

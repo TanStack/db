@@ -2188,7 +2188,7 @@ Failed to get item with key "${String(key)}" from object store "${objectStore.na
 
 <a id="error-206"></a>
 
-## Error 206: `collection/index.ts`
+## Error 206: `collection/validate-indexing.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -2447,7 +2447,7 @@ Development builds show this message, with `${...}` replaced by values:
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-DbClient cannot reuse live query "${queryHash}" with different source Collections. Use the same Collection objects or a distinct query key.
+DbClient cannot reuse live query "${queryHash}" with different source Collections or getKey/schema options. Use the same Collection objects and options, or a distinct query key.
 ```
 
 <a id="error-235"></a>
@@ -2628,4 +2628,24 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 Source collection '${collectionId}' failed its first load
+```
+
+<a id="error-261"></a>
+
+## Error 261: `query/validate-limit.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+limit must be nonnegative
+```
+
+<a id="error-262"></a>
+
+## Error 262: `live-query-observer.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+LiveQueryObserver requires finite Collection row and layout revision clocks
 ```

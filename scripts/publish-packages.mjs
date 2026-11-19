@@ -37,8 +37,24 @@ async function publishWithHiddenPackages(
   })
   const preStatePath = join(rootDirectory, '.changeset', 'pre.json')
   const preState = readFileSync(preStatePath)
+  const configPath = join(rootDirectory, '.changeset', 'config.json')
+  const configContents = readFileSync(configPath)
+  const config = JSON.parse(configContents.toString())
 
   try {
+    // Hidden packages remain versionable so Changesets accepts their public
+    // dependents. Their private manifests still exclude them from uploads.
+    writeFileSync(
+      configPath,
+      `${JSON.stringify(
+        {
+          ...config,
+          privatePackages: { ...config.privatePackages, version: true },
+        },
+        null,
+        2,
+      )}\n`,
+    )
     for (const { path, contents } of originals) {
       const manifest = JSON.parse(contents.toString())
       writeFileSync(
@@ -51,6 +67,7 @@ async function publishWithHiddenPackages(
   } finally {
     for (const { path, contents } of originals) writeFileSync(path, contents)
     writeFileSync(preStatePath, preState)
+    writeFileSync(configPath, configContents)
   }
 }
 

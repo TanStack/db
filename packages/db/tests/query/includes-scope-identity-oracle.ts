@@ -1,5 +1,4 @@
 import { fc } from '@fast-check/vitest'
-import { declareOracle } from '../oracle-declaration.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
 import {
@@ -851,5 +850,3 @@ export function sortedRequests(sources: ScopedSources) {
     notes: [...sources.notes.requests].sort(),
   }
 }
-
-declareOracle({ model: [recomputeScopedRows] })

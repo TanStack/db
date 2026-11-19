@@ -58,7 +58,7 @@ describe(`oracle run configuration`, () => {
       }),
     ).toEqual({
       multiplier: 100,
-      replaySeed: -42,
+      campaignSeed: -42,
       replayPath: `1:0:2`,
       replayProperty: `includes.incremental-history`,
     })
@@ -67,7 +67,7 @@ describe(`oracle run configuration`, () => {
   it(`uses one run multiplier and no replay coordinates by default`, () => {
     expect(readOracleRunConfig({})).toEqual({
       multiplier: 1,
-      replaySeed: undefined,
+      campaignSeed: undefined,
       replayPath: undefined,
       replayProperty: undefined,
     })
@@ -137,19 +137,19 @@ describe(`oracle run configuration`, () => {
 
   it(`adds a shrink path only to its named property`, () => {
     const ordinaryRun = {
-      replaySeed: undefined,
+      campaignSeed: undefined,
       replayPath: undefined,
       replayProperty: undefined,
     }
     const replayRun = {
-      replaySeed: -42,
+      campaignSeed: -42,
       replayPath: `1:0:2`,
       replayProperty: `includes.incremental-history`,
     }
 
     expect(
       oracleRandomParameters(40, ordinaryRun, `includes.incremental-history`),
-    ).toEqual({ numRuns: 40 })
+    ).toEqual({ numRuns: 40, seed: expect.any(Number) })
     expect(
       oracleRandomParameters(40, replayRun, `includes.alpha-renaming`),
     ).toEqual({

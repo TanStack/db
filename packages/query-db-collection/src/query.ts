@@ -1190,16 +1190,14 @@ export function queryCollectionOptions(
      * result (#2136). It reports the shift; the ordered loader then
      * re-establishes the window with a bounded repair.
      *
-     * A gap needs a page whose keys change, and one of two shapes:
-     * - the page has a later page after it, which still starts where the page
-     *   used to end; or
-     * - the page's end moves earlier in the order. Rows that arrive ahead push
-     *   its old last row out, and if another answer such as a tie request
-     *   still holds that row, the loader sees no delete and still treats rows
-     *   through the old boundary as loaded.
-     * A change that keeps every page's keys cannot open one: a value change
-     * reaches the loader through its order-change path. A loader's own
-     * acquisition (`refetch: true`) never reports, so its repair cannot loop.
+     * A gap has one of two shapes:
+     * - a page changes keys and has a later page, which still starts where
+     *   the page used to end; or
+     * - a page's end moves earlier in the order, even with the same keys.
+     *   A persisting optimistic write can hide that row's order change, so
+     *   the loader cannot rely on a visible update to repair the old boundary.
+     * A loader's own acquisition (`refetch: true`) never reports, so its
+     * repair cannot loop.
      */
     const orderedPageResults = new WeakMap<
       AnyQuery,
@@ -1253,16 +1251,14 @@ export function queryCollectionOptions(
       if (
         invalidationTimer !== undefined ||
         acquisitionRefetches.has(hashedQueryKey) ||
-        previous?.last === undefined ||
-        previous.keys === next.keys
+        previous?.last === undefined
       )
         return
       const end = previous.last.value
       const endMovedEarlier =
         next.last === undefined || next.compare(next.last.value, end) < 0
-      // The page has a later page when another page with its predicate and
-      // order ends deeper in the order. An empty page counts: it continues
-      // from where an earlier page ended.
+      // Another page with the same predicate and order ends deeper in the
+      // order. An empty page counts: it continues from an earlier page's end.
       const hasLaterPage = () =>
         [...state.observers.values()].some((observer) => {
           const other = orderedPageResults.get(observer.getCurrentQuery())
@@ -1275,7 +1271,7 @@ export function queryCollectionOptions(
           )
         })
       // One report per burst of refetched pages, after their rows apply.
-      if (endMovedEarlier || hasLaterPage()) {
+      if (endMovedEarlier || (previous.keys !== next.keys && hasLaterPage())) {
         invalidationTimer = setTimeout(() => {
           invalidationTimer = undefined
           if (activeSyncSession === syncSession) invalidateLoadedSubsets()
@@ -1678,11 +1674,20 @@ export function queryCollectionOptions(
 
       const ownedRows = new Set<string | number>()
       const hydratedOwners = Array.from(
-        collection._state.syncedData.keys(),
-        (rowKey) => [rowKey, getPersistedOwners(rowKey)] as const,
+        collection._state.acceptedSyncedEntries(),
+        ([rowKey]) => [rowKey, getPersistedOwners(rowKey)] as const,
       )
       for (const [rowKey, owners] of hydratedOwners) {
         if (owners.size === 0) {
+          // An eager result covers every row. A restored direct-write row has
+          // no owner or same-run write position; its omission is authoritative.
+          // Same-run direct writes keep their fetch-generation precedence.
+          if (
+            syncMode === `eager` &&
+            persistence !== null &&
+            !unownedDirectWritePositions.has(rowKey)
+          )
+            ownedRows.add(rowKey)
           continue
         }
 
@@ -2574,8 +2579,8 @@ export function queryCollectionOptions(
           ? queryCollectionSuccessfulFetchStarts.get(currentQuery)
           : undefined
       if (syncMode === `eager`) {
-        // A new complete snapshot replaces direct rows without subset owners.
-        // Hydrated rows with no claim are not necessarily this Query's rows.
+        // A later complete fetch also settles same-run ownerless direct rows.
+        // Restored ownerless rows are included in the hydrated baseline above.
         unownedDirectWritePositions.forEach((directPosition, key) => {
           if (
             currentSyncedItems.has(key) &&
@@ -2730,9 +2735,8 @@ export function queryCollectionOptions(
         }
 
         previouslyOwnedRows.forEach((key) => {
-          const oldItem = shouldUsePersistedBaseline
-            ? persistedBaseline.get(key)?.value
-            : currentSyncedItems.get(key)
+          const oldItem =
+            persistedBaseline?.get(key)?.value ?? currentSyncedItems.get(key)
           const newItem = newItemsMap.get(key)
           if (!newItem) {
             const directPosition = unownedDirectWritePositions.get(key)
@@ -2783,13 +2787,16 @@ export function queryCollectionOptions(
           } else if (
             !previouslyOwnedRows.has(key) &&
             (result.isFetchedAfterMount ||
+              (syncMode === `eager` &&
+                persistence !== null &&
+                directPosition === undefined) ||
               (directPosition !== undefined &&
                 cachedRemoteFetchStart !== undefined &&
                 cachedRemoteFetchStart > directPosition)) &&
             !deepEquals(currentSyncedItems.get(key), newItem)
           ) {
-            // A fetched row can first claim a directly inserted key. That
-            // claim also replaces the direct value with the server value.
+            // A result that first claims a restored peer row must apply its
+            // returned value too. Same-run direct rows retain fetch precedence.
             write({ type: `update`, value: newItem })
           }
           if (addsOwner || insertsRow) {
@@ -2878,6 +2885,14 @@ export function queryCollectionOptions(
       }
     }
 
+    // The first eager result can arrive before persisted restore publishes.
+    // Its ownership baseline must include durable rows still absent in memory.
+    const needsPersistedBaseline = (queryHash: string) =>
+      retainedQueriesPendingRevalidation.has(queryHash) ||
+      (syncMode === `eager` &&
+        persistence !== null &&
+        !queryToRows.has(queryHash))
+
     const reconcileSuccessfulResult = async (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
@@ -2892,10 +2907,19 @@ export function queryCollectionOptions(
       const validatedItems =
         selectedItems ??
         validateSuccessfulResultItemsForApplication(queryKey, result)
-      const persistedBaseline = await loadPersistedBaselineForQuery(
-        hashedQueryKey,
-        validatedItems.length === 0,
-      )
+      // Eager restore already owns the complete row read and its key evidence.
+      // Await its acceptance before diffing, rather than scanning it again.
+      // A persisting optimistic transaction can still hold its application.
+      const useHydratedBaseline =
+        syncMode === `eager` &&
+        !retainedQueriesPendingRevalidation.has(hashedQueryKey)
+      if (useHydratedBaseline) await persistence?.hydrateBaseline()
+      const persistedBaseline = useHydratedBaseline
+        ? undefined
+        : await loadPersistedBaselineForQuery(
+            hashedQueryKey,
+            validatedItems.length === 0,
+          )
       if (
         collection.status === `cleaned-up` ||
         resultApplicationControllers.get(hashedQueryKey) !== applicationToken
@@ -3224,7 +3248,7 @@ export function queryCollectionOptions(
                     hashedQueryKey,
                     result,
                     (signal, token) =>
-                      retainedQueriesPendingRevalidation.has(hashedQueryKey)
+                      needsPersistedBaseline(hashedQueryKey)
                         ? reconcileSuccessfulResult(
                             queryKey,
                             result,
@@ -3290,23 +3314,26 @@ export function queryCollectionOptions(
               return
             }
             if (result.isFetching) return
-
-            enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
-              reconcileSuccessfulResult(
-                queryKey,
-                result,
-                token,
-                signal,
-                undefined,
-                fetchStartGenerations.get(hashedQueryKey) ??
-                  directWriteGeneration,
-              ),
-            )
-          } else {
-            enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
-              applySuccessfulResult(queryKey, result, token, undefined, signal),
-            )
           }
+          enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
+            needsPersistedBaseline(hashedQueryKey)
+              ? reconcileSuccessfulResult(
+                  queryKey,
+                  result,
+                  token,
+                  signal,
+                  undefined,
+                  fetchStartGenerations.get(hashedQueryKey) ??
+                    directWriteGeneration,
+                )
+              : applySuccessfulResult(
+                  queryKey,
+                  result,
+                  token,
+                  undefined,
+                  signal,
+                ),
+          )
         }
 
         if (

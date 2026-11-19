@@ -28,6 +28,16 @@ function equalityOperandKey(value: unknown): string {
   return key
 }
 
+// Record the original three production judgments without deciding equality.
+export function observeEqualityPartition({ left, right }: EqualityPair) {
+  const predicate = new Func(`eq`, [new Value(left), new Value(right)])
+  return {
+    d2: equalityKey(left) === equalityKey(right),
+    operand: equalityOperandKey(left) === equalityOperandKey(right),
+    predicate: compileExpression(predicate)({}),
+  }
+}
+
 export function assertEqualityPartition({
   label,
   left,

@@ -33,11 +33,22 @@ Live query results include computed, read-only virtual properties on every row:
 
 - `$hasPendingWrites`: `true` while a pending local optimistic mutation affects the row; otherwise `false`. It is always `false` for local-only collections. It does not indicate server acknowledgement.
 - `$origin`: Collection attribution for the current row. Optimistic rows are `"local"`; source rows use key and timing, not a source client ID. A peer write can be `"local"`. A truncate does not consume an active mutation's attribution for an untouched key. See [VirtualOrigin](../reference/type-aliases/VirtualOrigin.md) for settlement, truncate, and overlap rules. Local-only Collections always use `"local"`.
-- `$key`: the row key for the result.
+- `$key`: the row key for the result. Joined rows use a composite key for each
+  pair, including whole-source selections and spreads. An explicit `getKey`
+  replaces that key. Source-attributed selections retain the other source fields.
 - `$collectionId`: the selected source Collection's ID for a whole-row `.select` or a `.select` projection that spreads a source row, including a joined row. With multiple source spreads, the last spread supplies the metadata. Other projections receive the live-query Collection's ID, regardless of selected virtual field names. A functional `.fn.select()` retains source metadata only when it returns a source row directly. A new object, including a spread, receives the live-query Collection's metadata.
 
 These props can be used in `where`, `select`, and `orderBy` clauses. They are added to
 query outputs automatically and should not be persisted back to storage.
+
+These metadata rules apply to published Collection row roots, including
+Collection-valued includes. Intermediate subquery projections, `.fn.select()`,
+`.fn.where()` and `.fn.having()` inputs, inline includes and Effect outputs keep
+their authored fields. For example, an intermediate projection with
+`$collectionId: 'application'` exposes that string to a downstream callback.
+Publishing that value as a Collection row supplies genuine computed metadata.
+Read source metadata before projection when you need the source's attribution.
+
 
 ## Table of Contents
 
@@ -108,6 +119,43 @@ const activeUsers = createCollection(liveQueryCollectionOptions({
 | `schema` | `Schema` (optional) | Optional schema for validation |
 | `startSync` | `boolean` (optional) | Whether to start the live query's sync run immediately. Defaults to `false`. A live query reads local memory: until it has a subscriber or a preload, it shows only rows its source collections already hold and starts no network work for them. |
 | `gcTime` | `number` (optional) | Garbage collection time in milliseconds. Defaults to `5000` (5 seconds). |
+| `autoIndex` | `'off' \| 'eager'` (optional) | Automatic indexing for this live-query collection's output. Defaults to `'off'`. Eager indexing requires `defaultIndexType`. |
+| `defaultIndexType` | `IndexConstructor` (optional) | Index implementation used for automatic indexes and `createIndex` calls that omit `indexType`, such as `BasicIndex` or `BTreeIndex`. |
+
+### Indexing Intermediate Results
+
+When another query reads a live-query collection, indexes on that collection
+can speed up downstream filters and ordered pages. Set the indexing options on
+the collection that holds the intermediate results:
+
+```ts
+import { BasicIndex, createLiveQueryCollection } from '@tanstack/db'
+
+const cachedUsers = createLiveQueryCollection({
+  query: (q) => q.from({ user: usersCollection })
+    .select(({ user }) => ({ id: user.id, name: user.name })),
+  autoIndex: 'eager',
+  defaultIndexType: BasicIndex,
+})
+
+const firstUsers = createLiveQueryCollection((q) =>
+  q.from({ user: cachedUsers })
+    .orderBy(({ user }) => user.name)
+    .limit(20)
+)
+```
+
+The downstream query creates a matching index on `cachedUsers` when needed.
+These options also work inside `liveQueryCollectionOptions` and framework hook
+config objects. Each live-query collection controls its own indexing policy;
+the options do not change its source collections. Setting `defaultIndexType`
+alone leaves automatic indexing off and supplies the type for manual indexes.
+React and Preact retain these options in a mounted binding until its query or
+nonempty `queryKey` changes. Independent React Suspense bindings share an
+output Collection only when their supplied Collection options agree; object
+and function options must use the same references. `DbClient.preloadLiveQuery`
+requires `defaultIndexType` for every eager declaration, even when rows are
+already cached.
 
 ### Convenience Function
 
@@ -239,6 +287,12 @@ function UserSearch({ search }: { search: string }) {
 ```
 
 You can also provide a `queryKey` as a performance escape hatch for a very hot render path, but normal structured queries should omit it.
+
+For bindings that compare query identity, treat the key and its nested values
+as immutable. Fresh plain objects and arrays with equal contents keep the
+authored query; record property order does not matter. Replace changed nested
+objects and their parents to invalidate the query on the next framework update.
+Mutating a key in place has no supported invalidation behavior.
 
 Query identity matters where a hook compares it to decide whether to compile
 again: React and Preact compare it on every render, and a `DbClient` matches
@@ -1844,6 +1898,8 @@ const user = createLiveQueryCollection((q) =>
 
 Use `distinct` to remove duplicate rows from your query results based on the selected columns. The `distinct` operator ensures that each unique combination of selected values appears only once in the result set.
 
+Implicit result keys are not guaranteed to stay the same across query rebuilds. Configure `getKey` from the selected values when your application needs stable keys.
+
 > [!IMPORTANT]
 > The `distinct` operator requires a `select` clause. You cannot use `distinct` without specifying which columns to select.
 
@@ -2126,7 +2182,10 @@ function TodoRow({ listId }: { listId: string }) {
 
 Results are the same with or without pooling. Without `pool`, each query
 compiles its own live-query Collection, and the app does not bundle pooling.
-Suspense hooks and queries with a `DbClient` never pool.
+Suspense hooks and queries with a `DbClient` never pool. A pooled config can
+contain only `query`, `pool`, and `gcTime`. Any other option, including
+`autoIndex`, `defaultIndexType`, or an explicitly supplied `undefined` field,
+compiles its own Collection. Omit those fields when you want pooling.
 
 ## Composable Queries
 
@@ -2449,6 +2508,8 @@ interface DeltaEvent<TRow, TKey> {
 | `enter` | Row entered the query result | The new row | — |
 | `exit` | Row left the query result | The exiting row | — |
 | `update` | Row changed but stayed in the result | The new row | The row before the change |
+
+Unordered Effects classify graph deltas using result membership. They keep result keys without retaining projected rows or comparing projected values. A graph update can therefore notify handlers even when the projected fields compare equal. Ordered Effects retain the last coherent result for repair across graph runs and suppress equal-value updates. Callback presence does not change the delta values.
 
 ### Named Callbacks
 

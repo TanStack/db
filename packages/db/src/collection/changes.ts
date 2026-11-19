@@ -46,7 +46,6 @@ export class CollectionChangesManager<
     | {
         depth: number
         discard: boolean
-        stateRevision: number
         layoutRevision: number
         publications: Array<{
           changes: Array<ChangeMessage<TOutput, TKey>>
@@ -63,7 +62,8 @@ export class CollectionChangesManager<
 
   /**
    * Monotonic revision of the collection's visible state, advanced once per
-   * committed batch of changes and cleanup — including while nothing is subscribed.
+   * committed batch of changes, cleanup, and discarded layout epochs — even
+   * while nothing is subscribed.
    * Lets consumers (the live-query observer) cheaply detect "did the data
    * change" without subscribing, and stays untouched by subscription
    * bootstrap replays, which do not go through emitEvents.
@@ -71,8 +71,8 @@ export class CollectionChangesManager<
   public stateRevision = 0
 
   /**
-   * Monotonic revision advanced only for explicit layout-only publications.
-   * Observers use it to detect reordered rows whose values did not change.
+   * Revision of explicit layout-only publications. A discarded deferral can
+   * restore it; stateRevision fences that invalidation for detached observers.
    */
   public layoutRevision = 0
 
@@ -216,7 +216,6 @@ export class CollectionChangesManager<
     const deferral = (this.deferral ??= {
       depth: 0,
       discard: false,
-      stateRevision: this.stateRevision,
       layoutRevision: this.layoutRevision,
       publications: [],
     })
@@ -235,7 +234,11 @@ export class CollectionChangesManager<
       deferral.publications = []
       this.deferral = undefined
       if (deferral.discard) {
-        this.stateRevision = deferral.stateRevision
+        // State already committed, so its row clock must never rewind. A
+        // discarded layout clock also needs a fresh invalidation token: a
+        // detached observer may have read while delivery was deferred.
+        if (this.layoutRevision !== deferral.layoutRevision)
+          this.stateRevision++
         this.layoutRevision = deferral.layoutRevision
         return
       }

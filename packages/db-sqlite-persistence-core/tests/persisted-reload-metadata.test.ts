@@ -1799,7 +1799,7 @@ describe(`persistedCollectionOptions`, () => {
     },
   )
 
-  // Hostile output controls calibrate the same comparison used above and by
+  // Mutant output controls calibrate the same comparison used above and by
   // the captured-read source history. A missing key, an obsolete defined
   // field, and an obsolete own-undefined field must all be rejected. These
   // controls do not substitute for the production RED witnesses above.

@@ -290,5 +290,9 @@ export function gate() {
   return { promise, resolve }
 }
 
-/** Yields one macrotask, after the microtasks that the step queued. */
-export const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+/**
+ * Yields one macrotask, after the microtasks that the step queued.
+ * `setImmediate` yields it without the 1 ms clamp of `setTimeout(0)`, which
+ * left schedule-heavy oracles mostly idle.
+ */
+export const turn = () => new Promise<void>((resolve) => setImmediate(resolve))

@@ -1,5 +1,3 @@
-import { declareOracle } from './oracle-declaration.js'
-
 /**
  * A Collection may retire only after every subscriber, preload and persisting
  * transaction has released it for gcTime. A startup without subscribers, or a
@@ -264,10 +262,3 @@ export function checkGcObservation(
       `visible keys expected [${[...expected].join()}], got [${actual.visibleKeys.join()}]`,
     )
 }
-
-// The model is the reducer and its derived deadline. The check compares the
-// public observation at one cut with that model's prediction for the cut.
-declareOracle({
-  check: [checkGcObservation],
-  model: [createGcModel, stepGcModel, gcDeadline],
-})

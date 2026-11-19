@@ -4,7 +4,7 @@ import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { ReactNode } from 'react'
 
 // Shared fixtures for the infinite query render-cut tests. The laws are owned by
-// infinite-query-render-cuts-oracle.test.tsx, and the ordinary pinned tests live in
+// infinite-query-render-cuts-oracle.test.tsx, and the ordinary fixed tests live in
 // infinite-query-render-cuts.test.tsx.
 export type Row = { id: string; label: string; rank: number }
 

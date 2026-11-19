@@ -1,0 +1,443 @@
+{
+  "preConversionHead": "6e56f0b1b063146e064589066779f4f0576e7ea4",
+  "reviewedHead": "629c910565db30f89d9f17006c18f4eea80c36c7",
+  "comparisonBaselineRunHead": "3b492829777c871d8769742ddfdce150df7a5b60",
+  "package": "packages/preact-db",
+  "source": "src/useLiveQuery.ts",
+  "seed": 2291,
+  "contexts": 2,
+  "beforeReportSha256": "ac66478637312515ab95079103a63b96fccb19d21dc2e133fb430b740cf28bb6",
+  "afterReportSha256": "61098750b802c9cd631bf91e924b26491d798bdee4d3403eeb8a9ac3e8209f8a",
+  "results": [
+    {
+      "key": "src/useLiveQuery.ts#onWindowChange:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)",
+        "ordered window rows"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "ordered window rows"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#rerender:arithmetic-swap:const rerender = ( ) => setRevision ( ( revision ) => revision + 1 )",
+      "before": "survived",
+      "after": "survived",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#rerender:value-undefined:const rerender = ( ) => setRevision ( ( revision ) => revision + 1 )",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterLaws": [
+        "source update rows"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)",
+        "outer window retains Collection"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "outer window retains Collection"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }~2",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "bound options"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }~2",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "bound options"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:binary-swap:if ( observer . getSnapshot ( ) !== snapshot ) rerender ( )",
+      "before": "survived",
+      "after": "survived",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:commitWindow ( )",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)",
+        "ordered window rows"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "ordered window rows"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:observer . subscribe ( rerender )",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterLaws": [
+        "source update rows"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:rerender ( )",
+      "before": "unreached",
+      "after": "unreached",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:useLayoutEffect ( ( ) => { const rerender = ( ) => setRevision ( ( revision ) => revision + 1 ) observer . subscribe ( rerender ) if ( observer . getSnapshot ( ) !== snapshot ) rerender ( ) return ( ) => observer . dispose ( ) } , [ observer ] )",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterLaws": [
+        "source update rows"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:delete-call:useLayoutEffect ( ( ) => { if ( commitWindow ) { binding . identity = identity commitWindow ( ) } } )",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)",
+        "ordered window rows"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "ordered window rows"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:drop-not:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:drop-not:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "bound options"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }~2",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "bound options"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }~3",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }~4",
+      "before": "survived",
+      "after": "survived",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )",
+      "before": "survived",
+      "after": "survived",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )~2",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)",
+        "outer window retains Collection"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "outer window retains Collection"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )~3",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)",
+        "outer window retains Collection"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "outer window retains Collection"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~2",
+      "before": "survived",
+      "after": "survived",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:field-drop:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~3",
+      "before": "survived",
+      "after": "survived",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:if-false:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:if-false:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:if-false:if ( commitWindow ) { binding . identity = identity commitWindow ( ) }",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)",
+        "ordered window rows"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "ordered window rows"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:if-false:if ( observer . getSnapshot ( ) !== snapshot ) rerender ( )",
+      "before": "survived",
+      "after": "survived",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:if-true:if ( ! binding ?. collection || binding . identity !== identity ) { const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } ) if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } } }",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "bound options"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:if-true:if ( ! binding || collection !== binding . collection ) { binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , } }",
+      "before": "survived",
+      "after": "survived",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:if-true:if ( commitWindow ) { binding . identity = identity commitWindow ( ) }",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:if-true:if ( observer . getSnapshot ( ) !== snapshot ) rerender ( )",
+      "before": "survived",
+      "after": "survived",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:binding = bindingRef . current = { identity , collection , observer : createLiveQueryObserver ( collection , { mode : `wholesale` } ) , }",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const [ , setRevision ] = useState ( 0 )",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const bindingRef = useRef < LiveQueryBinding | null > ( null )",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const claimsRef = useRef < LiveQuerySourceIdClaims | null > ( null )",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const collection = resolveLiveQueryValue ( preparedValue , { gcTime : DEFAULT_GC_TIME_MS , previousCollection : binding ?. collection ?? null , windowOwner : bindingRef , onWindowChange : ( move ) => { commitWindow = move } , } )",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )",
+      "before": "survived",
+      "after": "survived",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~2",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "bound options"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~3",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "bound options"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const identity = isCollection ( input ) ? input : queryKey ? getStableValueHash ( [ `queryKey` , queryKey ] , `queryKey` ) : identifyLiveQuery ( preparedValue , { claims : ( claimsRef . current ??= createLiveQuerySourceIdClaims ( ) ) , client : undefined , bindingName : `useLiveQuery` , } , getLiveQueryHash , )~4",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const preparedValue = prepareLiveQueryValue ( input , undefined )",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const queryKey = getLiveQueryKey ( input )",
+      "before": "killed",
+      "after": "killed",
+      "beforeLaws": [
+        "(unnamed)"
+      ],
+      "afterLaws": [
+        "(unnamed)",
+        "bound options"
+      ]
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:const snapshot = observer . getSnapshot ( )",
+      "before": "crashed",
+      "after": "crashed",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:if ( observer . getSnapshot ( ) !== snapshot ) rerender ( )",
+      "before": "survived",
+      "after": "survived",
+      "beforeLaws": [],
+      "afterLaws": []
+    },
+    {
+      "key": "src/useLiveQuery.ts#useLiveQuery:value-undefined:return ( ) => observer . dispose ( )",
+      "before": "survived",
+      "after": "survived",
+      "beforeLaws": [],
+      "afterLaws": []
+    }
+  ]
+}

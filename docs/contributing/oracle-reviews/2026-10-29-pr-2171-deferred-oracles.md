@@ -19,6 +19,13 @@ No follow-up PR is claimed until one is actually created.
   callbacks. The approved callback law remains normative. The accepted runtime
   owner has 377 passes / 203 intended REDs and all 2,153 cells; the bounded
   concrete lane has the same seven failures and one compatible pass on main.
+  The runtime follow-up restores this owner and adds direct child receivers.
+  It reproduces 348 REDs before repair and passes all 979 tests afterward, with
+  all 3,510 states reached. This includes a low-level shared compiler-cache
+  receiver whose 132 histories reproduced 26 failures before its cache repair.
+  Inline QueryRef histories also reject an overbroad
+  first repair before the corrected production edit. See [the runtime repair](callback-metadata.md).
+  This does not close the separate static metadata receiving-type failures below.
 - P11/P12: raw undefined becomes null and selected empty records disappear.
   Their root/QueryRef runtime owner retains 18 REDs, correlated receiver 72 REDs,
   and source-public type receiver 280 REDs. Every declared receiving cell and
@@ -249,3 +256,14 @@ settlement and after it. The original oracle remains active and unchanged;
 there is no skip, narrowed comparison, retry-away, GREEN, or bug-class closure
 claim. Its CI RED remains an open baseline defect under this explicit release
 scope deferral.
+
+## P09 follow-up (2026-10-29)
+
+[PR #2301](https://github.com/TanStack/db/pull/2301) restores the exact accepted
+Effect owner and repairs its LEFT-join startup delta. Fresh unchanged-production
+RED precedes the production edit. The owner passes all 216 tests after repair,
+with every one of its 5,512 reach cells at count 1. Original and overcorrection
+mutants fail the shared comparisons. The
+[versioned follow-up](effect-startup-delta.md) records commands, fingerprints,
+neighboring guarantees and the bounded closure. This updates P09 only. All
+other deferrals and limits in this release record remain open.

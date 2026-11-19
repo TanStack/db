@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { D2, MultiSet, output } from '@tanstack/db-ivm'
 import { Temporal } from 'temporal-polyfill'
 import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { getQueryIR } from '../../src/query/builder/query-ir.js'
 import { createCollection } from '../../src/collection/index.js'
 import { compileQuery } from '../../src/query/compiler/index.js'
@@ -22,11 +22,16 @@ import {
   UnionFrom,
 } from '../../src/query/ir.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+import { oracleProperty, pass, violation } from '../oracle-config.js'
+import {
+  forwardAssertionJudgment,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
 import { mockSyncCollectionOptions } from '../utils.js'
-import { assertEqualityPartition } from './identity-output-shape-support.js'
+import { observeEqualityPartition } from './identity-output-shape-support.js'
 import type { EqualityPair } from './identity-output-shape-support.js'
+import type { Observation, Verdict } from '../oracle-config.js'
 import type { CollectionImpl } from '../../src/collection/index.js'
 import type { QueryIR } from '../../src/query/ir.js'
 
@@ -95,7 +100,7 @@ function expectBag(
 
 /**
  * Predicts the complete output bag of one form over the initial sources. The
- * shape law: runShapes checks every compiled result against this prediction.
+ * shape law: checkShapes checks every compiled result against this prediction.
  */
 function expectedShapeRows(
   form: Form,
@@ -124,10 +129,11 @@ function expectedShapeRows(
   )
 }
 
-async function runShapes(
+async function driveShapes(
   form: Form,
   aliases: [string, string, string, string],
   label: string,
+  observe: (checkpoint: string, value: unknown) => void,
   mutant?: ResultMutant,
 ) {
   const users = createCollection<User>({
@@ -238,8 +244,7 @@ async function runShapes(
       for (const entry of bag) {
         // Unit inputs produce exact integer bag counts. Array lengths alone
         // would silently truncate a malformed fractional output weight.
-        expect(Number.isSafeInteger(entry.count)).toBe(true)
-        expect(entry.count).toBeGreaterThanOrEqual(0)
+        observe(`weight`, entry.count)
       }
       return bag.flatMap(({ row, count }) =>
         Array.from({ length: count }, () => structuredClone(row)),
@@ -272,108 +277,180 @@ async function runShapes(
       const left = makeQuery(aliases[0], aliases[1])
       const right = makeQuery(aliases[2], aliases[3])
       const initialOutputs = [left.send(), right.send()]
-      const explicit = form.startsWith('explicit')
       const identities = [
         getQueryIdentity(left.query),
         getQueryIdentity(right.query),
       ]
       if (mutant === 'constant-identity') identities[1] = identities[0]!
-      expect(
-        identities[0] === identities[1],
-        'output-sensitive identity law',
-      ).toBe(explicit)
-      const check = (outputs: Array<Array<unknown>>, rows: Array<User>) => {
+      observe(`identity`, identities[0] === identities[1])
+      const record = (checkpoint: string, outputs: Array<Array<unknown>>) => {
         if (mutant === 'alias') outputs[1]![0] = { wrongAlias: outputs[1]![0] }
         if (mutant === 'missing-peer') outputs[1]!.pop()
         if (mutant === 'shared-wrong-output') {
           outputs[0] = [{ wrong: true }]
           outputs[1] = [{ wrong: true }]
         }
-        expectBag(
-          outputs[0]!,
-          expectedShapeRows(
-            form,
-            rows,
-            initialPosts,
-            left.userAlias,
-            left.postAlias,
-          ),
-        )
-        expectBag(
-          outputs[1]!,
-          expectedShapeRows(
-            form,
-            rows,
-            initialPosts,
-            right.userAlias,
-            right.postAlias,
-          ),
-        )
-        if (explicit) expectBag(outputs[0]!, outputs[1]!)
+        observe(checkpoint, outputs)
       }
-      check(initialOutputs, initialUsers)
+      record(`initial`, initialOutputs)
       const updated: User = { ...initialUsers[0]!, label: label + '-updated' }
-      check(
-        [
-          left.send(initialUsers[0], updated),
-          right.send(initialUsers[0], updated),
-        ],
-        [updated, initialUsers[1]!],
-      )
+      record(`updated`, [
+        left.send(initialUsers[0], updated),
+        right.send(initialUsers[0], updated),
+      ])
       return Promise.resolve()
     },
     () => [() => users.cleanup(), () => posts.cleanup()],
   )
 }
 
-describe('query identity agrees with compiled lexical output shape', () => {
-  it.each(forms)(
-    'preserves full results and multiplicity for %s',
-    async (form) => {
-      await runShapes(form, ['user', 'post', 'account', 'article'], 'author')
-    },
-  )
-  it.each([101600, undefined])(
-    'varies safe aliases and payloads, seed=%s',
-    async (seed) => {
-      await fc.assert(
-        fc.asyncProperty(
-          fc.constantFrom(...forms),
-          fc.shuffledSubarray(
-            ['user', 'post', 'account', 'article', 'writer', 'entry'],
-            { minLength: 4, maxLength: 4 },
-          ),
-          fc.string({ maxLength: 8 }),
-          (form, aliases, label) =>
-            runShapes(form, aliases as [string, string, string, string], label),
-        ),
-        seed === undefined
-          ? oraclePropertyOptions(60, `query-identity.compiled-output`)
-          : { numRuns: oracleRuns(60), seed },
+// The reference keeps the same finite sources and recomputes complete bags at
+// initial publication and after the label update. Aliases affect output shape;
+// the independent calculation never reads the compiler or its identity key.
+type ShapeHistory = [Form, Array<string>, string]
+function modelShapes([form, aliases, label]: ShapeHistory) {
+  const users = [
+    { id: 1, label },
+    { id: 2, label: `unmatched peer` },
+  ]
+  const posts = [
+    { id: 10, userId: 1, title: `same title` },
+    { id: 11, userId: 1, title: `same title` },
+    { id: 12, userId: 99, title: `orphan` },
+  ]
+  const outputs = (rows: Array<User>) => [
+    expectedShapeRows(form, rows, posts, aliases[0]!, aliases[1]!),
+    expectedShapeRows(form, rows, posts, aliases[2]!, aliases[3]!),
+  ]
+  return {
+    equalIdentity: form.startsWith(`explicit`),
+    initial: outputs(users),
+    updated: outputs([{ ...users[0]!, label: label + `-updated` }, users[1]!]),
+  }
+}
+
+// The existing bag judgment also rejects fractional/negative weights before
+// array expansion. Only comparison assertions are translated to a verdict;
+// compiler, graph and cleanup errors escape the production driver unchanged.
+function checkShapes(
+  _history: ShapeHistory,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof modelShapes>,
+): Verdict {
+  let checkpoint = `weight`
+  try {
+    for (const observation of trace) {
+      checkpoint = observation.checkpoint
+      if (checkpoint === `weight`) {
+        const count = observation.value as number
+        expect(Number.isSafeInteger(count)).toBe(true)
+        expect(count).toBeGreaterThanOrEqual(0)
+      } else if (checkpoint === `identity`) {
+        expect(observation.value, `output-sensitive identity law`).toBe(
+          expected.equalIdentity,
+        )
+      } else if (checkpoint === `initial` || checkpoint === `updated`) {
+        const outputs = observation.value as Array<Array<unknown>>
+        expectBag(outputs[0]!, expected[checkpoint][0]!)
+        expectBag(outputs[1]!, expected[checkpoint][1]!)
+        if (expected.equalIdentity) expectBag(outputs[0]!, outputs[1]!)
+      }
+    }
+  } catch (error) {
+    return {
+      kind: `violation`,
+      checkpoint,
+      law: `compiled output shape`,
+      difference: String(error),
+      cause: error,
+    }
+  }
+  for (const required of [`identity`, `initial`, `updated`])
+    if (!trace.some((observation) => observation.checkpoint === required))
+      return violation(
+        required,
+        `the compiler comparison checkpoint is missing`,
+        `compiled output shape`,
       )
-    },
-  )
-  it.each([
-    'alias',
-    'missing-peer',
-    'constant-identity',
-    'shared-wrong-output',
-    'fractional-weight',
-  ] as const)(
-    'rejects captured %s against independent results',
-    async (mutant) => {
-      const form = mutant === 'missing-peer' ? 'explicit-join' : 'implicit-join'
-      await runShapes(form, ['user', 'post', 'account', 'article'], 'author')
-      await expect(
-        runShapes(
-          form,
-          ['user', 'post', 'account', 'article'],
-          'author',
-          mutant,
-        ),
-      ).rejects.toMatchObject({ name: 'AssertionError' })
-    },
-  )
+  return pass
+}
+
+const shapeHistories = fc.tuple(
+  fc.constantFrom(...forms),
+  fc.shuffledSubarray(
+    ['user', 'post', 'account', 'article', 'writer', 'entry'],
+    { minLength: 4, maxLength: 4 },
+  ),
+  fc.string({ maxLength: 8 }),
+)
+oracleProperty({
+  id: `query-identity.compiled-output`,
+  law: {
+    statement: `Query identity erases aliases only when complete compiled output bags agree, including lexical keys and multiplicity.`,
+    authority: `The query identity and compiled output shape contract stated above; expectedShapeRows independently predicts both initial and updated bags.`,
+    limits: `The original five query forms, six safe alias names, bounded labels and finite source rows; no arbitrary cache history or framework scheduling claim.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/compiler/evaluators.ts#compileExpression',
+    'src/query/compiler/index.ts#compileQuery',
+    'src/query/compiler/query-equivalence.ts#queriesMatchForCaching',
+    'src/query/equality-value-identity.ts#getEqualityValueIdentity',
+    'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+    'src/query/ir-stable-identity.ts#getQueryIdentity',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: {
+    arbitrary: shapeHistories,
+    runs: 60,
+    fixedSeeds: [101600],
+    states: [],
+    constructed: [],
+    // Every form with the base aliases and label, which the calibrations
+    // below also corrupt.
+    fixed: forms.map((form) => ({
+      name: `preserves full results and multiplicity for ${form}`,
+      history: [
+        form,
+        ['user', 'post', 'account', 'article'],
+        'author',
+      ] satisfies ShapeHistory,
+    })),
+  },
+  model: modelShapes,
+  driver: ([form, aliases, label], observe) =>
+    driveShapes(
+      form,
+      aliases as [string, string, string, string],
+      label,
+      observe,
+    ),
+  check: checkShapes,
+  // A captured result mutant must fail the independent output comparison on
+  // the history its old witness used: explicit-join for a missing peer,
+  // implicit-join otherwise, with the base aliases and label.
+  calibrations: (
+    [
+      'alias',
+      'missing-peer',
+      'constant-identity',
+      'shared-wrong-output',
+      'fractional-weight',
+    ] as const
+  ).map((mutant) => ({
+    name: `rejects captured ${mutant} against independent results`,
+    law: `compiled output shape`,
+    driver: ([form, aliases, label]: ShapeHistory, observe) =>
+      driveShapes(
+        form,
+        aliases as [string, string, string, string],
+        label,
+        observe,
+        form === (mutant === 'missing-peer' ? 'explicit-join' : 'implicit-join')
+          ? mutant
+          : undefined,
+      ),
+  })),
 })
 
 const equalityPairArbitrary: fc.Arbitrary<EqualityPair> = fc.oneof(
@@ -453,21 +530,79 @@ const equalityPairArbitrary: fc.Arbitrary<EqualityPair> = fc.oneof(
   }),
 )
 
-describe(`equality-value and IR operand identity agree`, () => {
-  it.each([20260928, undefined])(
-    `agrees across the supported value grammar, seed=%s`,
-    async (seed) => {
-      await fc.assert(
-        fc.asyncProperty(equalityPairArbitrary, (pair) => {
-          assertEqualityPartition(pair)
-          return Promise.resolve()
-        }),
-        seed === undefined
-          ? oraclePropertyOptions(160, `query-identity.equality-partition`)
-          : { numRuns: oracleRuns(160), seed },
-      )
-    },
+// Pair labels and the independently declared equality bit remain the original
+// generated grammar. The production path records all three judgments as data.
+function modelEqualityPair(pair: EqualityPair) {
+  return {
+    d2: pair.equal,
+    operand: pair.equal,
+    predicate: pair.left == null || pair.right == null ? null : pair.equal,
+  }
+}
+function checkEqualityPair(
+  pair: EqualityPair,
+  trace: ReadonlyArray<Observation>,
+  expected: ReturnType<typeof modelEqualityPair>,
+): Verdict {
+  const observation = trace.find(
+    ({ checkpoint }) => checkpoint === `equality partition`,
   )
+  if (observation === undefined)
+    return violation(
+      `equality partition`,
+      `the key-construction checkpoint is missing`,
+      `equality partition`,
+    )
+  const actual = observation.value as ReturnType<
+    typeof observeEqualityPartition
+  >
+  try {
+    expect(actual.d2, `${pair.label}: D2 key`).toBe(expected.d2)
+    expect(actual.operand, `${pair.label}: IR operand key`).toBe(
+      expected.operand,
+    )
+    expect(actual.predicate, `${pair.label}: predicate result`).toBe(
+      expected.predicate,
+    )
+  } catch (error) {
+    return {
+      kind: `violation`,
+      checkpoint: `equality partition`,
+      law: `equality partition`,
+      difference: String(error),
+      cause: error,
+    }
+  }
+  return pass
+}
+oracleProperty({
+  id: `query-identity.equality-partition`,
+  law: {
+    statement: `D2 equality keys, IR equality operand keys and the compiled equality predicate agree with the independently declared value-pair partition.`,
+    authority: `The supported equality-value and equality-operand contract stated at the start of this owner.`,
+    limits: `The unchanged primitive, Date, Temporal, binary and reference-pair grammar; no complete JavaScript-value or collision-freedom claim.`,
+  },
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/compiler/evaluators.ts#compileExpression',
+    'src/query/compiler/index.ts#compileQuery',
+    'src/query/compiler/query-equivalence.ts#queriesMatchForCaching',
+    'src/query/equality-value-identity.ts#getEqualityValueIdentity',
+    'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+    'src/query/ir-stable-identity.ts#getQueryIdentity',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: {
+    arbitrary: equalityPairArbitrary,
+    runs: 160,
+    fixedSeeds: [20260928],
+    states: [],
+    constructed: [],
+  },
+  model: modelEqualityPair,
+  driver: (pair, observe) =>
+    observe(`equality partition`, observeEqualityPartition(pair)),
+  check: checkEqualityPair,
 })
 
 type CompoundRow = { id: number; a: number; b: number; c: number }
@@ -499,127 +634,144 @@ function expectedCompoundJoinRows(
  * rows; fresh public Collections must match it before identity is compared.
  * These are initial-publication witnesses, not arbitrary cache histories.
  */
+async function runCompoundJoinBoundary(
+  boundary: `direct` | `from` | `joined`,
+): Promise<void> {
+  const leftRows = [
+    { id: 1, a: 1, b: 2, c: 9 },
+    { id: 2, a: 1, b: 3, c: 8 },
+  ]
+  const rightRows = [
+    { id: 10, a: 1, b: 2, c: 3 },
+    { id: 11, a: 1, b: 3, c: 7 },
+  ]
+  const left = createCollection(
+    mockSyncCollectionOptions({
+      id: `compound-identity-left`,
+      getKey: (row: (typeof leftRows)[number]) => row.id,
+      initialData: leftRows,
+    }),
+  )
+  const right = createCollection(
+    mockSyncCollectionOptions({
+      id: `compound-identity-right`,
+      getKey: (row: (typeof rightRows)[number]) => row.id,
+      initialData: rightRows,
+    }),
+  )
+  const cleanups: Array<() => Promise<void>> = [
+    () => left.cleanup(),
+    () => right.cleanup(),
+  ]
+  await withHistoryCleanup(
+    async () => {
+      const own = <T extends { cleanup: () => Promise<void> }>(live: T): T => {
+        cleanups.unshift(() => live.cleanup())
+        return live
+      }
+      const makeQuery = (
+        variant: `base` | `reordered` | `nested` | `different`,
+      ) => {
+        const joined = new Query()
+          .from({ left })
+          .innerJoin({ right }, ({ left: l, right: r }) => {
+            const a = eq(l.a, r.a)
+            const b = eq(l.b, variant === `different` ? r.c : r.b)
+            if (variant === `reordered`) return and(eq(r.b, l.b), eq(r.a, l.a))
+            if (variant === `nested`) return and(b, and(a, b))
+            return and(a, b)
+          })
+          .select(({ left: l, right: r }) => ({
+            leftId: l.id,
+            rightId: r.id,
+          }))
+        if (boundary === `direct`)
+          return {
+            ir: getQueryIR(joined),
+            live: own(createLiveQueryCollection({ query: joined })),
+          }
+        if (boundary === `from`) {
+          const query = new Query()
+            .from({ result: joined })
+            .select(({ result }) => ({
+              leftId: result.leftId,
+              rightId: result.rightId,
+            }))
+          return {
+            ir: getQueryIR(query),
+            live: own(createLiveQueryCollection({ query })),
+          }
+        }
+        const query = new Query()
+          .from({ anchor: left })
+          .innerJoin({ result: joined }, ({ anchor, result }) =>
+            eq(anchor.id, result.leftId),
+          )
+          .select(({ result }) => ({
+            leftId: result.leftId,
+            rightId: result.rightId,
+          }))
+        return {
+          ir: getQueryIR(query),
+          live: own(createLiveQueryCollection({ query })),
+        }
+      }
+      const queries = {
+        base: makeQuery(`base`),
+        reordered: makeQuery(`reordered`),
+        nested: makeQuery(`nested`),
+        different: makeQuery(`different`),
+      }
+      for (const [variant, { live }] of Object.entries(queries)) {
+        await live.preload()
+        const expected = expectedCompoundJoinRows(leftRows, rightRows, variant)
+        expectBag(
+          live.toArray.map(({ leftId, rightId }) => ({ leftId, rightId })),
+          expected,
+        )
+      }
+      const { base, reordered, nested, different } = queries
+      expect(getQueryIdentity(base.ir)).toBe(getQueryIdentity(reordered.ir))
+      expect(getQueryIdentity(base.ir)).toBe(getQueryIdentity(nested.ir))
+      expect(
+        getQueryIdentity(base.ir),
+        `different later operand changes identity`,
+      ).not.toBe(getQueryIdentity(different.ir))
+      expect(
+        queriesMatchForCaching(base.ir, different.ir),
+        `different later operand cannot reuse a subquery`,
+      ).toBe(false)
+    },
+    () => cleanups,
+  )
+}
+
 describe(`compound join identity and output`, () => {
-  for (const boundary of [`direct`, `from`, `joined`] as const) {
-    it(`retains every equality across ${boundary}`, async () => {
-      const leftRows = [
-        { id: 1, a: 1, b: 2, c: 9 },
-        { id: 2, a: 1, b: 3, c: 8 },
-      ]
-      const rightRows = [
-        { id: 10, a: 1, b: 2, c: 3 },
-        { id: 11, a: 1, b: 3, c: 7 },
-      ]
-      const left = createCollection(
-        mockSyncCollectionOptions({
-          id: `compound-identity-left`,
-          getKey: (row: (typeof leftRows)[number]) => row.id,
-          initialData: leftRows,
-        }),
-      )
-      const right = createCollection(
-        mockSyncCollectionOptions({
-          id: `compound-identity-right`,
-          getKey: (row: (typeof rightRows)[number]) => row.id,
-          initialData: rightRows,
-        }),
-      )
-      const cleanups: Array<() => Promise<void>> = [
-        () => left.cleanup(),
-        () => right.cleanup(),
-      ]
-      await withHistoryCleanup(
-        async () => {
-          const own = <T extends { cleanup: () => Promise<void> }>(
-            live: T,
-          ): T => {
-            cleanups.unshift(() => live.cleanup())
-            return live
-          }
-          const makeQuery = (
-            variant: `base` | `reordered` | `nested` | `different`,
-          ) => {
-            const joined = new Query()
-              .from({ left })
-              .innerJoin({ right }, ({ left: l, right: r }) => {
-                const a = eq(l.a, r.a)
-                const b = eq(l.b, variant === `different` ? r.c : r.b)
-                if (variant === `reordered`)
-                  return and(eq(r.b, l.b), eq(r.a, l.a))
-                if (variant === `nested`) return and(b, and(a, b))
-                return and(a, b)
-              })
-              .select(({ left: l, right: r }) => ({
-                leftId: l.id,
-                rightId: r.id,
-              }))
-            if (boundary === `direct`)
-              return {
-                ir: getQueryIR(joined),
-                live: own(createLiveQueryCollection({ query: joined })),
-              }
-            if (boundary === `from`) {
-              const query = new Query()
-                .from({ result: joined })
-                .select(({ result }) => ({
-                  leftId: result.leftId,
-                  rightId: result.rightId,
-                }))
-              return {
-                ir: getQueryIR(query),
-                live: own(createLiveQueryCollection({ query })),
-              }
-            }
-            const query = new Query()
-              .from({ anchor: left })
-              .innerJoin({ result: joined }, ({ anchor, result }) =>
-                eq(anchor.id, result.leftId),
-              )
-              .select(({ result }) => ({
-                leftId: result.leftId,
-                rightId: result.rightId,
-              }))
-            return {
-              ir: getQueryIR(query),
-              live: own(createLiveQueryCollection({ query })),
-            }
-          }
-          const queries = {
-            base: makeQuery(`base`),
-            reordered: makeQuery(`reordered`),
-            nested: makeQuery(`nested`),
-            different: makeQuery(`different`),
-          }
-          for (const [variant, { live }] of Object.entries(queries)) {
-            await live.preload()
-            const expected = expectedCompoundJoinRows(
-              leftRows,
-              rightRows,
-              variant,
-            )
-            expectBag(
-              live.toArray.map(({ leftId, rightId }) => ({ leftId, rightId })),
-              expected,
-            )
-          }
-          const { base, reordered, nested, different } = queries
-          expect(getQueryIdentity(base.ir)).toBe(getQueryIdentity(reordered.ir))
-          expect(getQueryIdentity(base.ir)).toBe(getQueryIdentity(nested.ir))
-          expect(
-            getQueryIdentity(base.ir),
-            `different later operand changes identity`,
-          ).not.toBe(getQueryIdentity(different.ir))
-          expect(
-            queriesMatchForCaching(base.ir, different.ir),
-            `different later operand cannot reuse a subquery`,
-          ).toBe(false)
-        },
-        () => cleanups,
-      )
-    })
-  }
-})
-declareOracle({
-  check: [runShapes],
-  model: [expectedShapeRows, expectedCompoundJoinRows],
+  oracleProperty({
+    id: `query-identity.compound-join`,
+    law: {
+      statement: `A compound join retains every equality: AND is commutative, associative and idempotent, but changing an operand changes the output, and query identity follows the output.`,
+      authority: `The query identity and compiled output shape contract stated above, extended to compound joins by the feature request.`,
+      limits: `Direct, from, and joined QueryRef boundaries at initial publication; no arbitrary cache histories.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/query/compiler/evaluators.ts#compileExpression',
+      'src/query/compiler/index.ts#compileQuery',
+      'src/query/compiler/query-equivalence.ts#queriesMatchForCaching',
+      'src/query/equality-value-identity.ts#getEqualityValueIdentity',
+      'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+      'src/query/ir-stable-identity.ts#getQueryIdentity',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [`direct`, `from`, `joined`] as const,
+    label: (boundary) => `retains every equality across ${boundary}`,
+    resolve: (boundary) => ({ boundary }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`compound join identity`, plan, observe, () =>
+        runCompoundJoinBoundary(plan.boundary),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

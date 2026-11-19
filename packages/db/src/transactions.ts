@@ -1,5 +1,5 @@
 import { createDeferred } from './deferred'
-import { deepEquals } from './utils'
+import { sameRowValue } from './utils'
 import { safeRandomUUID } from './utils/uuid'
 import { normalizeError } from './utils/error.js'
 import './duplicate-instance-check'
@@ -228,7 +228,8 @@ function mergePendingMutations<T extends object>(
       if (existing.type !== `delete`) break
       const original = existing.collection._state.syncedData.get(existing.key)
       if (original === undefined) return incoming
-      if (deepEquals(original, incoming.modified)) {
+      // -0 and 0 are distinct row values, as user writes (FID-1).
+      if (sameRowValue(original, incoming.modified)) {
         return null
       }
 
@@ -238,7 +239,7 @@ function mergePendingMutations<T extends object>(
       for (const key of keys) {
         if (
           Object.hasOwn(original, key) !== Object.hasOwn(modified, key) ||
-          !deepEquals(original[key as keyof T], modified[key as keyof T])
+          !sameRowValue(original[key as keyof T], modified[key as keyof T])
         ) {
           changes[key as keyof T] = modified[key as keyof T]
         }

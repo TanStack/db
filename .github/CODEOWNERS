@@ -1,0 +1,21 @@
+# Extra review for security-sensitive changes only. Everything else gets normal review.
+
+# Code that runs with secrets or publish rights
+.github/workflows/                 @TanStack/tanstack-core
+.github/CODEOWNERS                 @TanStack/tanstack-core
+
+# Release and package publishing
+.changeset/config.json             @TanStack/tanstack-core
+.npmrc                             @TanStack/tanstack-core
+
+# Scripts the release job runs (it has id-token: write for npm publishing)
+scripts/publish-packages.mjs       @TanStack/tanstack-core
+scripts/version-packages.mjs       @TanStack/tanstack-core
+scripts/check-dist-probes.mjs      @TanStack/tanstack-core
+scripts/generate-error-docs.mjs    @TanStack/tanstack-core
+scripts/generate-docs.ts           @TanStack/tanstack-core
+scripts/comment-on-release.ts      @TanStack/tanstack-core
+
+# Dependency automation and install-time scripts
+.github/renovate.json              @TanStack/tanstack-core
+pnpm-workspace.yaml                @TanStack/tanstack-core

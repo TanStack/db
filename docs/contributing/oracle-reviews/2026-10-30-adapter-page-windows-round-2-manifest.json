@@ -1,0 +1,76 @@
+{
+  "base_head": "c351fc04d7f70dc59bf92ecbed310f899b9511cd",
+  "branch": "codex/evaluate-2291-window",
+  "review_entry_manifest_sha256": "69f3395bb34456601fbfbfbd5537a9185b6060952f829f6a65c0d60c24f60985",
+  "sources_sha256": {
+    "packages/angular-db/src/index.ts": "b856d0a98c47071691583a370edffc25764d529fa33fecc28c383ed54deb3fe8",
+    "packages/db-ivm/src/operators/topKArray.ts": "ff21d0f944043db4d28c9be7c429594d668763f634443801a8dc65188ee8d9f1",
+    "packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts": "1ef076cdca0976323847511681d6d4c75a25bd2c345377a8df4b1d52a9625577",
+    "packages/db/src/live-query-options.ts": "0a049edd35b0b2f8c803aacc8457df9ff619c2f356f6a234660674487d03a368",
+    "packages/db/tests/conformance/contract.ts": "b6f345576497c94aeb2720b11ff188a55f27b74905ae2c69ec42e9421f232b41",
+    "packages/db/tests/conformance/lagging-source.ts": "19feb3b6f87e89fd60cf22605f81c755d94e43db39a11a19e1d49f42accc1097",
+    "packages/db/tests/conformance/suite.ts": "be7929e6d0d0838f4214c7af473c77b91d32741b347d91d20041a5f8c790ebd2",
+    "packages/db/tests/conformance/window-history-oracle.ts": "531dbc269de8663de5ba5c7eb4b70f94b8056e2d438ca0960122588991b25168",
+    "packages/db/tests/failure-fidelity.test.ts": "5072d609cde0a399f41e24e90929377497ec4a7f8276dfbab520ce3a4bd0bf64",
+    "packages/db/tests/oracle-config.ts": "3de8b1bbfdf9d99ed9c85f52f24411e49da5b9cdc99bee7e82912da4cdeac92a",
+    "packages/db/tests/oracle-failure-fidelity.ts": "f95203e1c3f7d9f256f10862dd7b9627e85879321fd82b214a3f40ad01ed6901",
+    "packages/preact-db/src/useLiveQuery.ts": "fe381f9c87cfdd5b57e9cc9ff77a6d1dbfa1fc84191c69fa7247fa9953223f0d",
+    "packages/preact-db/tests/window-render-oracle.test.tsx": "994f5702a0ff4649369f44bc7ea8341519b19c0260c887b458b97b3f951c06a1",
+    "packages/react-db/src/useLiveQuery.ts": "46684d6f8365237d49656fe0cbfa87439178bf9c3edfa2468f56dbf26d16cb66",
+    "packages/react-db/tests/window-render-oracle.test.tsx": "819359c432c167bf2f23462c6fa8e63de443569aba66a6838def2183eca539cb",
+    "packages/solid-db/src/useLiveQuery.ts": "8e414683931992f72d3208d1f5952d2f33625eac7b0b88aaf5755a210d19ded2",
+    "packages/svelte-db/src/useLiveQuery.svelte.ts": "23e316c6515bcbdd159121c9497911075ed3d54670a6d7b19a76089eef2212bc",
+    "packages/vue-db/src/useLiveQuery.ts": "5c4d910952e54b58002459b21d86c9ba6c25fcc67e7cce677e0c6b66b7aecc3c"
+  },
+  "production_changes_during_round": [],
+  "focused_shared_test_counts": {
+    "react": 44,
+    "preact": 22,
+    "vue": 10,
+    "solid": 10,
+    "angular": 10,
+    "svelte": 10
+  },
+  "focused_receiving_test_counts": {
+    "react": 24,
+    "preact": 24
+  },
+  "failure_fidelity_test_count": 5,
+  "fresh_numeric_review_test_count": 16,
+  "total_distinct_focused_tests": 175,
+  "logs_sha256": {
+    "review-2291/fresh-react-primary-fidelity-finalized-calibration.log": "2d2e3117792955f7ef3a1e47abb4251128619dbad1fb090714c23287759a3565",
+    "review-2291/fresh-receiving-preact-finalized-green.log": "ab655316938bc245419f6a347ddb049cdabe94a195b7b54b5399f67d0b46a240",
+    "review-2291/fresh-receiving-preact-finalized-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "review-2291/fresh-receiving-react-finalized-green.log": "becc7248e81a9152303b0673685124fda40f98f6be0fd7216481368f8c59f266",
+    "review-2291/fresh-receiving-react-finalized-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "review-2291/round2-fidelity-direct-replay-green.log": "cc6aad51a9f7487b2febcaee83b215ae4fb8ec13741b0c73be690187e1579664",
+    "review-2291/round2-fidelity-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "review-2291/round2-final-angular.log": "f8250e67be0809523db781eda03fc0ae75f0aee9dd94da2e8880fbd878a706bc",
+    "review-2291/round2-final-failure-fidelity.log": "5d29d562c10813aab5d46e5d8e84b76ab5893d789e454bb1ef2e262125f33dc1",
+    "review-2291/round2-final-preact.log": "5e46f2f358f2625fab76a69fb3b935e9020793167d6940887f18f8dc914e6ab8",
+    "review-2291/round2-final-react.log": "3ded791e9033f95dd34c3d47dd8e1e67b7a223551a4dfefabeb96213f9b56252",
+    "review-2291/round2-final-solid.log": "938ab637dbdec588aa31c8cedc09405966490c2d7782f554243de5c75681b6bd",
+    "review-2291/round2-final-svelte.log": "7ed5edc95ac3fb04358756ebd2ba8ae14eeb9f6585c64056f4d2e3cc0f1c7023",
+    "review-2291/round2-final-vue.log": "1e575c23495bdc72c6291f92f9f3807a6c31953ca815726710b7ce1607fd8147",
+    "review-2291/round2-shrink-calibration-driver.ts.txt": "4d648d742c86d033e0c560a54cde72a9ee2126abf15256c23d1c04ded21b0461",
+    "review-2291/round2-shrink-fidelity-calibration-green.log": "3c50f086c2fb38f000c2c90e2fae003b0dce65222f875d2abe3af4f793142ea9",
+    "review-2291/round2-shrink-fidelity-calibration-red.log": "fffd2b2fa5bef77ceea8712a423bb0eb8a0773b08e808574b3fb6a5f25d1ceab",
+    "review-2291/subscription-churn-old-check-red.log": "6b2678e6f6ee6bfaed4acd08f93d70f6b22616ebd3d74019dedb4b14d9bdb305",
+    "review-2291/round2-frozen-lint.log": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168",
+    "review-2291/round2-frozen-db-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "reach_sha256": {
+    "2026-10-30-adapter-page-windows-round-2-reach.json": "eb61bdd2b2d30e3d6fd89d45165d77cd36876c00c3cdf5c0dae24f9c8f4489a9"
+  },
+  "validation_exit_codes": {
+    "pnpm lint:changed": 0,
+    "core test TypeScript": 0,
+    "React TypeScript": 0,
+    "Preact TypeScript": 0,
+    "git diff --check": 0
+  },
+  "review_record_sha256": {
+    "2026-10-30-adapter-page-windows-round-2.md": "d19a8799a1dacc9e57cf8f6d793e33fc0f8f8212688208f2641a6acc1faf0cb9"
+  }
+}

@@ -15,6 +15,8 @@ import {
   sortedChanges,
   sortedRows,
 } from './collection-subscription-replay-support.js'
+import { oracleAssertion } from './oracle-assertion-adapter.js'
+import { sampleReplayGrammarCensus } from './collection-subscription-replay-grammar-oracle.js'
 import type {
   ReplayChange,
   ReplayRow,
@@ -3037,4 +3039,66 @@ describe(`CollectionSubscription replay oracle`, () => {
       }
     },
   )
+})
+
+// A grammar census of the replay scenario grammar: a fixed-seed sample must
+// contain shared, failed, stale, released, and post-replay histories. It runs
+// no production, so it moved here from the oracle file.
+describe(`CollectionSubscription replay scenario grammar`, () => {
+  it(`generates shared, failed, stale, released, and post-replay histories`, () => {
+    const scenarios = sampleReplayGrammarCensus()
+
+    oracleAssertion('existing comparison at 1561', () =>
+      expect(scenarios.some(({ demandIds }) => demandIds.length > 1)).toBe(
+        true,
+      ),
+    )
+    oracleAssertion('existing comparison at 1562', () =>
+      expect(scenarios.some(({ attempts }) => attempts.length > 1)).toBe(true),
+    )
+    oracleAssertion('existing comparison at 1563', () =>
+      expect(
+        scenarios.some(({ attempts }) =>
+          attempts.some(({ loads }) =>
+            loads.some(({ outcome }) => outcome === `reject`),
+          ),
+        ),
+      ).toBe(true),
+    )
+    oracleAssertion('existing comparison at 1570', () =>
+      expect(
+        scenarios.some(({ attempts }) =>
+          attempts.some(({ loads }) =>
+            loads.some(({ writeBeforeSettlement }) => writeBeforeSettlement),
+          ),
+        ),
+      ).toBe(true),
+    )
+    oracleAssertion('existing comparison at 1577', () =>
+      expect(
+        scenarios.some(({ settlementOrder }) =>
+          settlementOrder.some((value, index) => value !== index),
+        ),
+      ).toBe(true),
+    )
+    oracleAssertion('existing comparison at 1582', () =>
+      expect(
+        scenarios.some(({ releaseOnLastAttempt }) =>
+          Boolean(releaseOnLastAttempt),
+        ),
+      ).toBe(true),
+    )
+    oracleAssertion('existing comparison at 1587', () =>
+      expect(
+        scenarios.some(({ afterSettlement }) => afterSettlement.length > 0),
+      ).toBe(true),
+    )
+    oracleAssertion('existing comparison at 1590', () =>
+      expect(
+        scenarios.some(({ afterSettlement }) =>
+          afterSettlement.some(({ type }) => type === `request`),
+        ),
+      ).toBe(true),
+    )
+  })
 })

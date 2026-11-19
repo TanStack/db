@@ -14,7 +14,7 @@ levels; they are different questions, not a mandatory sequence:
 
 | Level       | Attack                                                                                                                                                                                         |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Enforcement | Find a legal history or wrong output that the model, generator, driver, or recorder cannot distinguish. Can the intended production path remain unexercised while the test passes?             |
+| Enforcement | Find a legal history or wrong output that the model, generator, production driver, or recorder cannot distinguish. Can the intended production path remain unexercised while the test passes?             |
 | Formulation | Find an omitted precondition, excessive guarantee, wrong checkpoint, or ambiguous observation. Try a correct alternative implementation as well as a wrong one.                                |
 | Suitability | Question whether the promised behavior is desirable, safe, or conventional. Name the external contract, standard, user consequence, or engineering reason that makes the objection applicable. |
 | Composition | Find obligations that conflict, duplicate each other, or require a shared ordering or authority rule. Use the tension or restructuring card if that is the material uncertainty.               |
@@ -34,7 +34,7 @@ this table to locate the repair:
 | The reference predicts behavior the accepted law does not allow.                | Reference model.                                                          |
 | An accepted law over-promises, under-promises, or conflicts with another law.   | Authorized contract decision, then model and test updates.                |
 | The law needs information the production path lacks at the promised checkpoint. | Provider, protocol, architecture, or an authorized contract decision.     |
-| The check rejects an allowed intermediate observation or accepts a wrong one.   | Evaluation: checkpoint, history grammar, driver, recorder, or comparison. |
+| The check rejects an allowed intermediate observation or accepts a wrong one.   | Evaluation: checkpoint, history grammar, production driver, recorder, or comparison. |
 | Correct behavior still fails the user's need.                                   | Requirement and its suitability for the intended use.                     |
 
 These locations can overlap. Name the evidence for each before choosing a
@@ -52,12 +52,12 @@ the evidence that could decide between them, and a possible repair condition.
 Check that the attack is within scope and that its standard actually applies.
 An outside-domain case may motivate a scope change; label that proposal.
 
-When execution is authorized and practical, run the discriminating experiment.
-A hostile control must reach the intended comparison to demonstrate rejection.
-Use the oracle guide's calibration and mutant-outcome rules. A source-level
-argument can remain useful when execution is unavailable; label it accurately.
-For a systematic search across plausible wrong implementations, use the
-[mutant gap hunt](mutant-gap-hunt.md) to design semantic edits and classify
+When execution is authorized and practical, run the discriminating experiment. A
+wrong-result control must reach the intended comparison to demonstrate
+rejection. Use the oracle guide's calibration and mutant-outcome rules. A
+source-level argument can remain useful when execution is unavailable; label it
+accurately. For a systematic search across plausible wrong implementations, use
+the [mutant gap hunt](mutant-gap-hunt.md) to design semantic edits and classify
 survivors.
 
 **Return:** supported defects, design objections, and untested hypotheses as

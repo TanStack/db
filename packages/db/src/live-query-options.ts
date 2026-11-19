@@ -9,14 +9,14 @@ import { createLiveQueryCollection } from './query/live-query-collection.js'
 import { LIVE_QUERY_INTERNAL } from './query/live/internal.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import {
+  getQueryIdentity,
   getStableQueryBuilderHash,
   getStableValueHash,
 } from './query/ir-stable-identity.js'
 import { getStringCollationIdentity } from './query/runtime-reference-identity.js'
 import { codedMessage, devBuild } from './error-message.js'
-import { InvalidPoolOptionError } from './errors.js'
+import { InvalidPoolOptionError, UnhashableQueryIRError } from './errors.js'
 import type { Collection, CollectionImpl } from './collection/index.js'
-import type { CollectionOptionsIdentity } from './collection-options.js'
 import type { CollectionOptions, DbClient } from './client.js'
 import type { PooledLiveQueries } from './query/pooled-live-query.js'
 import type {
@@ -148,32 +148,6 @@ type PreparedLiveQueryConfigInput = Omit<
   client?: DbClient
 }
 
-function createInitialQueryBuilder(): InitialQueryBuilder {
-  // Query construction does not materialize descriptor Collections.
-  return new BaseQueryBuilder() as InitialQueryBuilder
-}
-
-function createCollectionResolver(
-  dbClient: DbClient | undefined,
-  deferredCollections?: DeferredLiveQueryCollections,
-) {
-  if (!dbClient) return undefined
-  return (
-    options: CollectionOptionsIdentity<any, string | number, any, any, any>,
-  ): CollectionImpl<any, string | number, any, any, any> => {
-    if (!deferredCollections) {
-      return dbClient.collection(
-        options as CollectionOptions<any, string | number, any, any>,
-      ) as CollectionImpl<any, string | number, any, any, any>
-    }
-    const collection = dbClient._materializeCollectionForRender(
-      options as CollectionOptions<any, string | number, any, any>,
-    ) as CollectionImpl<any, string | number, any, any, any>
-    if (collection._deferSyncStart()) deferredCollections.add(collection)
-    return collection
-  }
-}
-
 export function prepareLiveQueryValue(
   value: unknown,
   dbClient: DbClient | undefined,
@@ -181,7 +155,7 @@ export function prepareLiveQueryValue(
 ): unknown {
   if (typeof value === `function`) {
     return prepareLiveQueryValue(
-      value(createInitialQueryBuilder()),
+      value(new BaseQueryBuilder() as InitialQueryBuilder),
       dbClient,
       deferredCollections,
     )
@@ -189,7 +163,24 @@ export function prepareLiveQueryValue(
 
   if (value instanceof BaseQueryBuilder) {
     return value._bindCollectionSources(
-      createCollectionResolver(dbClient, deferredCollections),
+      dbClient
+        ? (options) => {
+            const config = options as CollectionOptions<
+              any,
+              string | number,
+              any,
+              any
+            >
+            const collection = (
+              deferredCollections
+                ? dbClient._materializeCollectionForRender(config)
+                : dbClient.collection(config)
+            ) as CollectionImpl<any, string | number, any, any, any>
+            if (deferredCollections && collection._deferSyncStart())
+              deferredCollections.add(collection)
+            return collection
+          }
+        : undefined,
     )
   }
 
@@ -197,7 +188,6 @@ export function prepareLiveQueryValue(
     value &&
     typeof value === `object` &&
     !isCollection(value) &&
-    !(value instanceof BaseQueryBuilder) &&
     `query` in value
   ) {
     const pool = configPool(value)
@@ -237,19 +227,12 @@ export function getPreparedLiveQuerySources(
   onUnboundDescriptor?: (alias: string) => never,
 ): Array<Collection> {
   if (isCollection(value)) return [value]
-  const query =
-    value instanceof BaseQueryBuilder
-      ? value
-      : value && typeof value === `object` && `query` in value
-        ? value.query
-        : value
+  const query = queryConfig(value)?.query ?? value
   if (query instanceof BaseQueryBuilder) {
     return collectSourceRefs(query._getQuery()).map((source) =>
-      source.type === `descriptorRef`
-        ? onUnboundDescriptor
-          ? onUnboundDescriptor(source.alias)
-          : requireCollectionSource(source)
-        : source.collection,
+      source.type === `descriptorRef` && onUnboundDescriptor
+        ? onUnboundDescriptor(source.alias)
+        : requireCollectionSource(source),
     )
   }
   return isCollection(query) ? [query] : []
@@ -309,24 +292,16 @@ export function getLiveQueryHash(
   queryKey?: LiveQueryKey,
 ): string {
   if (queryKey?.length) {
-    const query =
-      preparedValue instanceof BaseQueryBuilder
-        ? preparedValue
-        : preparedValue &&
-            typeof preparedValue === `object` &&
-            `query` in preparedValue
-          ? preparedValue.query
-          : undefined
+    const query = queryConfig(preparedValue)?.query
     const ir = isCollection(preparedValue)
       ? getBuilderFromConfig(preparedValue.config)?.getWindow()
       : query instanceof BaseQueryBuilder
         ? query._getQuery()
         : undefined
-    const window =
-      ir && (ir.limit !== undefined || (ir.offset ?? 0) !== 0)
-        ? [{ limit: ir.limit, offset: ir.offset ?? 0 }]
-        : []
-    return getStableValueHash([`queryKey`, queryKey, ...window], `queryKey`)
+    const identity: Array<unknown> = [`queryKey`, queryKey]
+    if (ir && (ir.limit !== undefined || (ir.offset ?? 0) !== 0))
+      identity.push({ limit: ir.limit, offset: ir.offset ?? 0 })
+    return getStableValueHash(identity, `queryKey`)
   }
   const identity = isCollection(preparedValue)
     ? [`collection`, preparedValue.id]
@@ -335,22 +310,102 @@ export function getLiveQueryHash(
   return getStableValueHash(identity, `queryKey`)
 }
 
-// A config that names only its query and lifetime describes the same live
-// query as its builder. Any other option shapes its Collection, so compiles.
-function poolConfig(
-  config: LiveQueryCollectionConfig<any>,
-  gcTime: number | undefined,
-  pool: PooledLiveQueries,
-): Collection<any, any, any> | undefined {
+// Each entry belongs to one framework binding or an unclaimed retry resource.
+// DbClient snapshots remain separate; peers never share a mutable window owner.
+const resolvedQueryValues = new WeakMap<
+  object,
+  { collection: object; config: NonNullable<ReturnType<typeof queryConfig>> }
+>()
+
+function queryConfig(
+  value: unknown,
+): (Record<string, unknown> & { query?: unknown }) | undefined {
+  return value instanceof BaseQueryBuilder
+    ? { query: value }
+    : value && typeof value === `object`
+      ? (value as Record<string, unknown>)
+      : undefined
+}
+
+function moveExistingWindow(
+  after: ReturnType<typeof queryConfig>,
+  previous: Collection<object, string | number, {}> | null | undefined,
+  owner: object | undefined,
+) {
   if (
-    !(config.query instanceof BaseQueryBuilder) ||
-    !Object.keys(config).every((key) => key === `query` || key === `gcTime`)
-  ) {
-    return undefined
+    !previous ||
+    (previous.status !== `ready` && previous.status !== `loading`)
+  )
+    return
+  const retained = owner && resolvedQueryValues.get(owner)
+  if (!retained || retained.collection !== previous) return
+  const before = retained.config
+  if (
+    !(before.query instanceof BaseQueryBuilder) ||
+    !(after?.query instanceof BaseQueryBuilder)
+  )
+    return
+  const oldQuery = before.query._getQuery()
+  const query = after.query._getQuery()
+  const limit = query.limit
+  const offset = query.offset ?? 0
+  // Adding/removing the outer limit, findOne, and opaque plans keep their
+  // ordinary compilation path. A move needs a finite ordered target window.
+  if (
+    after.singleResult === true ||
+    query.singleResult ||
+    !query.orderBy?.length ||
+    oldQuery.limit === undefined ||
+    limit === undefined ||
+    !Number.isSafeInteger(limit) ||
+    limit < 0 ||
+    !Number.isSafeInteger(offset) ||
+    offset < 0
+  )
+    return
+  const keys = Object.keys(before)
+  if (
+    keys.length !== Object.keys(after).length ||
+    keys.some((key) => key !== `query` && before[key] !== after[key])
+  )
+    return
+  // IR source IDs establish semantic identity, but a keyed query may legally
+  // swap the object under an ID. Reuse must preserve the exact source objects.
+  const sources = getPreparedLiveQuerySources(before)
+  const nextSources = getPreparedLiveQuerySources(after)
+  if (
+    sources.length !== nextSources.length ||
+    sources.some((source, index) => source !== nextSources[index])
+  )
+    return
+  try {
+    if (
+      getQueryIdentity({ ...oldQuery, limit: undefined, offset: undefined }) !==
+      getQueryIdentity({ ...query, limit: undefined, offset: undefined })
+    )
+      return
+  } catch (error) {
+    if (error instanceof UnhashableQueryIRError) return
+    throw error
   }
-  return pool.createPooledLiveQuery(config.query, {
-    gcTime: config.gcTime ?? gcTime,
-  })
+  const builder = getBuilderFromConfig(previous.config)
+  if (!builder) return
+  return () => {
+    // A framework can commit synchronously from a Collection publication
+    // callback. Move after that publication, while this remains the binding's
+    // last resolved result and a consumer still asks for it.
+    queueMicrotask(() => {
+      if (
+        resolvedQueryValues.get(owner)?.collection !== previous ||
+        previous.subscriberCount === 0
+      )
+        return
+      const result = builder.setWindow({ offset, limit })
+      // The Collection reports request failures through its health tree. A
+      // superseded move or unmount can reject its waiter without a hook caller.
+      if (result !== true) void result.catch(() => {})
+    })
+  }
 }
 
 /**
@@ -365,6 +420,9 @@ export function resolveLiveQueryValue(
     gcTime,
     pool,
     startSync = true,
+    previousCollection,
+    windowOwner,
+    onWindowChange,
   }: {
     gcTime?: number
     // `false` keeps a hook that cannot pool, such as a Suspense or DbClient
@@ -372,39 +430,59 @@ export function resolveLiveQueryValue(
     // A pool here has passed `configPool`.
     pool?: PooledLiveQueries | false
     startSync?: boolean
+    /** @internal undefined skips window tracking; null starts an owned result. */
+    previousCollection?: Collection<object, string | number, {}> | null
+    /** @internal Identity of one framework binding; never shared by peers. */
+    windowOwner?: object
+    /** @internal React/Preact defer mutation until their render commits. */
+    onWindowChange?: (move: () => void) => void
   } = {},
 ): Collection<any, any, any> | null {
+  if (previousCollection !== undefined)
+    value = prepareLiveQueryValue(value, undefined)
+  const input = queryConfig(value)
+  const move = moveExistingWindow(input, previousCollection, windowOwner)
+  if (move) {
+    if (onWindowChange) onWindowChange(move)
+    else move()
+    return previousCollection!
+  }
   if (value === undefined || value === null) return null
   if (isCollection(value)) {
     value.startSyncImmediate()
     return value
   }
-  if (value instanceof BaseQueryBuilder) {
-    return (
-      (pool ? pool.createPooledLiveQuery(value, { gcTime }) : undefined) ??
-      createLiveQueryCollection({ query: value, startSync, gcTime })
-    )
-  }
-  if (typeof value === `object`) {
-    const requested = configPool(value)
-    const { pool: _pool, ...given } = value as LiveQueryHookConfig<any>
+  if (input) {
+    const requested = configPool(input)
+    const { pool: _pool, ...given } = input as LiveQueryHookConfig<any>
     const pooling = pool === false ? undefined : (requested ?? pool)
     // A pooled view needs the built query. Build a query function once and
     // compile the same builder if the partition cannot serve it.
     const built =
       pooling && typeof given.query === `function`
-        ? given.query(createInitialQueryBuilder())
+        ? given.query(new BaseQueryBuilder() as InitialQueryBuilder)
         : undefined
     const config =
       built instanceof BaseQueryBuilder ? { ...given, query: built } : given
-    return (
-      (pooling ? poolConfig(config, gcTime, pooling) : undefined) ??
+    // A query and lifetime alone can pool; other options shape a Collection.
+    const pooled =
+      pooling &&
+      config.query instanceof BaseQueryBuilder &&
+      Object.keys(config).every((key) => key === `query` || key === `gcTime`)
+        ? pooling.createPooledLiveQuery(config.query, {
+            gcTime: config.gcTime ?? gcTime,
+          })
+        : undefined
+    const collection =
+      pooled ??
       createLiveQueryCollection({
         ...config,
         startSync: config.startSync ?? startSync,
         gcTime: config.gcTime ?? gcTime,
       })
-    )
+    if (previousCollection !== undefined && windowOwner)
+      resolvedQueryValues.set(windowOwner, { collection, config: input })
+    return collection
   }
   throw new Error(
     devBuild() && process.env.NODE_ENV !== `production`

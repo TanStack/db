@@ -1,5 +1,5 @@
 import fc from 'fast-check'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import {
   createLiveQueryCollection,
@@ -10,15 +10,16 @@ import {
 } from '../../src/query/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { CollectionSubscription } from '../../src/collection/subscription.js'
-import { createOracleReach } from '../oracle-reach.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
+import { oracleProperty } from '../oracle-config.js'
 import {
-  oraclePropertyOptions,
-  oracleRuns,
-  readOracleRunConfig,
-} from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+  rejectAt,
+} from '../oracle-assertion-adapter.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 /**
@@ -165,7 +166,8 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * node may list a failure, and the replay-error identity law skips peer
  * histories. The replay-error identity law judges only rejections with a failure of a replay
  * the move waited on; a move that resumes into another failed replay is not
- * judged.
+ * judged. Each subscription owns its replay verdict, even when publication
+ * is shared with a sibling. Error-order comparisons keep that distinction.
  */
 type OrderedFailureState =
   `initiating-keyed-request-failed` | `keyed-reacquisition-failed`
@@ -178,7 +180,14 @@ type OrderedCommand =
   // while the next stays pending. `newest` settles the most recently held
   // load instead of the oldest, so a later load can settle before an earlier
   // one, as independent provider requests may.
-  | { type: `settle`; ok: boolean; keepHolding?: boolean; newest?: boolean }
+  | {
+      type: `settle`
+      ok: boolean
+      keepHolding?: boolean
+      newest?: boolean
+      // Settle a new sibling demand, or drain other adapter work while it stays held.
+      target?: `new-sibling` | `other`
+    }
   | { type: `truncate`; armAfterStart: boolean }
   | { type: `unloadThrows` }
   | { type: `window`; offset: 0 | 1; limit: 1 | 2 | 3 }
@@ -231,6 +240,12 @@ const orderedScenario: fc.Arbitrary<OrderedScenario> = fc.record({
   historyDuringPreload: fc.boolean(),
 })
 
+const holdCommand = { type: `hold` as const }
+const unloadThrowsCommand = { type: `unloadThrows` as const }
+const truncateMarkersCommand = { type: `truncateMarkers` as const }
+const markerThrowsCommand = { type: `markerThrows` as const }
+const truncateCommand = { type: `truncate` as const, armAfterStart: false }
+
 const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
   {
     weight: 3,
@@ -240,7 +255,7 @@ const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
       rank: fc.integer({ min: 1, max: 60 }),
     }),
   },
-  { weight: 2, arbitrary: fc.constant({ type: `hold` as const }) },
+  { weight: 2, arbitrary: fc.constant(holdCommand) },
   {
     weight: 3,
     arbitrary: fc.record({
@@ -262,12 +277,12 @@ const orderedCommand: fc.Arbitrary<OrderedCommand> = fc.oneof(
       armAfterStart: fc.boolean(),
     }),
   },
-  { weight: 2, arbitrary: fc.constant({ type: `unloadThrows` as const }) },
+  { weight: 2, arbitrary: fc.constant(unloadThrowsCommand) },
   {
     weight: 1,
-    arbitrary: fc.constant({ type: `truncateMarkers` as const }),
+    arbitrary: fc.constant(truncateMarkersCommand),
   },
-  { weight: 1, arbitrary: fc.constant({ type: `markerThrows` as const }) },
+  { weight: 1, arbitrary: fc.constant(markerThrowsCommand) },
   {
     weight: 2,
     arbitrary: fc.record({
@@ -316,6 +331,16 @@ type OrderedReach = {
   // Deferred window moves that rejected with a failure of a replay they
   // waited on.
   deferredMoveRejections: number
+  ownReplayFailureComparisons: number
+  siblingReplayFailureComparisons: number
+  siblingSuccessfulCoverage: number
+  // Owed request-error comparisons after another subscription asked for its keys.
+  siblingRequestErrorChecks: number
+  lateSiblingSettlements: number
+  retryWhileSiblingLoads: number
+  newSiblingReplayFailures: number
+  newSiblingReplayRetirements: number
+  newSiblingReplayRecoveries: number
   replayLoads: number
   abortRejections: number
   preloadChecks: number
@@ -350,13 +375,19 @@ function checkReplayDemandFailure(
   entered: ReadonlySet<ReplayDemandState>,
 ) {
   if (entered.size > 0)
-    expect(
-      reach.terminalErrors,
-      `a failure behind the replay barrier is nonterminal`,
-    ).toBe(0)
+    oracleAssertion(`a failure behind the replay barrier is nonterminal`, () =>
+      expect(
+        reach.terminalErrors,
+        `a failure behind the replay barrier is nonterminal`,
+      ).toBe(0),
+    )
   // New demand that fails is a request error on the query's node.
   if (entered.has(replayDemandStates[0]))
-    expect(reach.requestErrors, `ordinary failure is a request error`).toBe(1)
+    oracleAssertion(`ordinary failure is a request error`, () =>
+      expect(reach.requestErrors, `ordinary failure is a request error`).toBe(
+        1,
+      ),
+    )
 }
 
 const ordinaryOrderedScenario: OrderedScenario = {
@@ -428,27 +459,39 @@ async function checkOrderedReplay(
     rows: Array<OrderedRow>,
     shown: { offset: number; limit: number },
   ) => {
-    expect(
-      rows.map(({ rank }) => rank),
-      label,
-    ).toEqual(expectedRanks(shown))
+    oracleAssertion(label, () =>
+      expect(
+        rows.map(({ rank }) => rank),
+        label,
+      ).toEqual(expectedRanks(shown)),
+    )
     for (const row of rows) {
-      expect(row.rank, `${label}: row ${row.id} rank`).toBe(
-        truth.get(row.id)?.rank,
+      oracleAssertion(`${label}: row ${row.id} rank`, () =>
+        expect(row.rank, `${label}: row ${row.id} rank`).toBe(
+          truth.get(row.id)?.rank,
+        ),
       )
-      expect(eligible(row.id), `${label}: row ${row.id} is eligible`).toBe(true)
+      oracleAssertion(`${label}: row ${row.id} is eligible`, () =>
+        expect(eligible(row.id), `${label}: row ${row.id} is eligible`).toBe(
+          true,
+        ),
+      )
     }
-    expect(
-      new Set(rows.map(({ id }) => id)).size,
-      `${label}: each row once`,
-    ).toBe(rows.length)
+    oracleAssertion(`${label}: each row once`, () =>
+      expect(
+        new Set(rows.map(({ id }) => id)).size,
+        `${label}: each row once`,
+      ).toBe(rows.length),
+    )
     if (new Set(rows.map(({ rank }) => rank)).size < rows.length) {
       reach.tiedWindows++
     }
     if (!scenario.includes) return
     for (const row of rows as Array<OrderedRow & { markers?: Array<number> }>) {
-      expect(row.markers, `${label}: row ${row.id} markers`).toEqual(
-        marked.has(row.id) ? [row.id] : [],
+      oracleAssertion(`${label}: row ${row.id} markers`, () =>
+        expect(row.markers, `${label}: row ${row.id} markers`).toEqual(
+          marked.has(row.id) ? [row.id] : [],
+        ),
       )
     }
     reach.includeChecks++
@@ -463,10 +506,17 @@ async function checkOrderedReplay(
     error?: Error
     // Its source, the keys it asked for, and whether it is an ordered read.
     source?: BarrierSource
+    // Publication is shared, but each subscription owns its replay verdict.
+    subscription: LoadSubsetOptions[`subscription`]
+    // This subscription held no acquisition at truncate, then started demand
+    // during its sibling replay. Measured only from adapter receipts.
+    newSiblingReplay?: boolean
+    markerTruncate?: number
     keys?: Set<number>
     ordered?: boolean
   }
   const loads: Array<Load> = []
+  const receiptOptions = new Map<Load, LoadSubsetOptions>()
   // Retention model. Each source with an open or failed replay has a
   // barrier. `pending` holds the loads that still hold its publication: the
   // loads started while it is up, and work an older replay started. `own`
@@ -569,14 +619,27 @@ async function checkOrderedReplay(
     // failure no longer fails the replay (ARCHITECTURE.md law 17: a failure
     // counts for a key no later held load loaded).
     if (ok && barrier?.pending.has(load) && !options.signal?.aborted) {
+      // Sibling success cannot decide another subscription's failure.
+      // The public request-error comparison below enforces that distinction;
+      // model self-consistency is not production calibration evidence.
       for (const failed of barrier.failures.keys()) {
         if (
+          failed.subscription !== load.subscription &&
           loads.indexOf(failed) < loads.indexOf(load) &&
           failed.ordered === load.ordered &&
           failed.keys !== undefined &&
           [...failed.keys].every((key) => load.keys?.has(key))
         )
+          reach.siblingSuccessfulCoverage++
+        if (
+          loads.indexOf(failed) < loads.indexOf(load) &&
+          failed.subscription === load.subscription &&
+          failed.ordered === load.ordered &&
+          failed.keys !== undefined &&
+          [...failed.keys].every((key) => load.keys?.has(key))
+        ) {
           barrier.failures.delete(failed)
+        }
       }
     }
     barrier?.pending.delete(load)
@@ -594,7 +657,9 @@ async function checkOrderedReplay(
     const failures = barrier.failures.size
     for (const owned of [barrier.pending, barrier.failures]) {
       for (const [load, held] of owned) {
-        if (held === options) owned.delete(load)
+        if (held === options) {
+          owned.delete(load)
+        }
       }
     }
     // One failed demand retires while another still holds the barrier.
@@ -609,6 +674,46 @@ async function checkOrderedReplay(
   const oneSubscription = (_source: BarrierSource) => !scenario.peer
   const acquired = new Map<LoadSubsetOptions, number>()
   const held: Array<(ok: boolean) => void> = []
+  const heldReceipts = new Map<(ok: boolean) => void, Load>()
+  const holdLoad = (load: Load) =>
+    new Promise<boolean>((resolve) => {
+      held.push(resolve)
+      heldReceipts.set(resolve, load)
+    })
+  // Driver receipts at the actual truncate, independent of model membership.
+  // These select legal settlement orders and measure reach only.
+  let markerSubscriptionsAtTruncate = new Set<
+    LoadSubsetOptions[`subscription`]
+  >()
+  const hasPendingReplaySibling = (
+    subscription: LoadSubsetOptions[`subscription`],
+  ) =>
+    loads.some(
+      (load) =>
+        load.source === `markers` &&
+        load.outcome === `pending` &&
+        load.subscription !== subscription &&
+        markerSubscriptionsAtTruncate.has(load.subscription) &&
+        !receiptOptions.get(load)?.signal?.aborted &&
+        (acquired.get(receiptOptions.get(load)!) ?? 0) > 0,
+    )
+  const isNewSiblingReplayLoad = (options: LoadSubsetOptions) =>
+    markerTruncates > 0 &&
+    !markerSubscriptionsAtTruncate.has(options.subscription) &&
+    ((markerCommitting &&
+      [...markerSubscriptionsAtTruncate].some(
+        (subscription) => subscription !== options.subscription,
+      )) ||
+      hasPendingReplaySibling(options.subscription))
+  const noteNewSiblingFailure = (load: Load, options: LoadSubsetOptions) => {
+    if (
+      load.newSiblingReplay &&
+      !options.signal?.aborted &&
+      hasPendingReplaySibling(options.subscription)
+    )
+      reach.newSiblingReplayFailures++
+  }
+  let observingHistory = false
   let holding = false
   let truncates = 0
   let throwNextUnload = false
@@ -693,18 +798,19 @@ async function checkOrderedReplay(
   // request error on the query's own node. The error stays until one of these
   // meets it:
   // - its demand retires, which aborts its request and unloads it;
-  // - a later load of the source asks for some of its keys: that newer
+  // - a later load of the same subscription asks for some of its keys: that newer
   //   request of the demand decides them, and keys it no longer asks for
   //   left the demand (ARCHITECTURE.md law 16: a lazy demand's error clears
   //   when that demand settles or is released; a key's latest load decides
   //   it);
-  // - a later load of the same source covers its keys;
+  // - a later load of the same subscription covers its keys;
   // - a replay of its source that rose after the failure completes, since a
   //   replay asks again for every held demand.
   // A failure that joins a replay waits for its subscription's verdict,
   // which comes once that subscription's participants settled, so it owes
   // no error before then. The barrier that holds publication stays shared
-  // across the query's subscriptions to the source. Keys come from evaluating the request's
+  // across the query's subscriptions to the source. A sibling's successful
+  // load cannot decide this demand's error. Keys come from evaluating the request's
   // `where` over a small key domain, independent of production's bookkeeping.
   // The account combines the production concepts of a failed request and the
   // replay verdict that decides it; it names no production structure.
@@ -734,6 +840,7 @@ async function checkOrderedReplay(
   const requestFailures: Array<RequestFailure> = []
   const loadedKeys: Array<{
     source: BarrierSource
+    subscription: LoadSubsetOptions[`subscription`]
     keys: Set<number>
     at: number
   }> = []
@@ -758,7 +865,25 @@ async function checkOrderedReplay(
       )
     )
       reach.successWhileSubscriptionOwes++
-    loadedKeys.push({ source, keys, at: ++requestClock })
+    // Later successful coverage by this subscription is a recovery control.
+    // Coverage by a sibling cannot decide this subscription's failure.
+    if (
+      loads.some(
+        (earlier) =>
+          earlier.newSiblingReplay &&
+          earlier.outcome === `failed` &&
+          earlier.source === source &&
+          earlier.subscription === options.subscription &&
+          [...(earlier.keys ?? [])].every((key) => keys.has(key)),
+      )
+    )
+      reach.newSiblingReplayRecoveries++
+    loadedKeys.push({
+      source,
+      subscription: options.subscription,
+      keys,
+      at: ++requestClock,
+    })
   }
   const recordRequestFailure = (
     load: Load,
@@ -799,6 +924,7 @@ async function checkOrderedReplay(
       (later, index) =>
         index > at &&
         later.source === failure.source &&
+        later.subscription === failure.options.subscription &&
         !later.ordered &&
         [...failure.keys].some((key) => later.keys?.has(key)),
     )
@@ -806,6 +932,7 @@ async function checkOrderedReplay(
     const covered = loadedKeys.some(
       (loaded) =>
         loaded.source === failure.source &&
+        loaded.subscription === failure.options.subscription &&
         loaded.at > failure.at &&
         [...failure.keys].every((key) => loaded.keys.has(key)),
     )
@@ -890,6 +1017,15 @@ async function checkOrderedReplay(
     requestErrorChecks: 0,
     successWhileSubscriptionOwes: 0,
     deferredMoveRejections: 0,
+    ownReplayFailureComparisons: 0,
+    siblingReplayFailureComparisons: 0,
+    siblingSuccessfulCoverage: 0,
+    siblingRequestErrorChecks: 0,
+    lateSiblingSettlements: 0,
+    retryWhileSiblingLoads: 0,
+    newSiblingReplayFailures: 0,
+    newSiblingReplayRetirements: 0,
+    newSiblingReplayRecoveries: 0,
     replayLoads: 0,
     abortRejections: 0,
     preloadChecks: 0,
@@ -942,11 +1078,29 @@ async function checkOrderedReplay(
               // owner, whose release unloads it.
               acquired.set(options, (acquired.get(options) ?? 0) + 1)
               const load: Load = {
+                subscription: options.subscription,
                 epoch: truncates,
                 outcome: `failed`,
                 source: `markers`,
                 keys: requestedKeys(`markers`, options),
               }
+              load.markerTruncate = markerTruncates
+              load.newSiblingReplay = isNewSiblingReplayLoad(options)
+              receiptOptions.set(load, options)
+              // This retry premise is measured when the real adapter receives
+              // another load of a failed demand while its sibling still loads.
+              if (
+                load.newSiblingReplay &&
+                loads.some(
+                  (earlier) =>
+                    earlier.subscription === load.subscription &&
+                    earlier.outcome === `failed` &&
+                    [...(earlier.keys ?? [])].every((key) =>
+                      load.keys?.has(key),
+                    ),
+                )
+              )
+                reach.retryWhileSiblingLoads++
               loads.push(load)
               reach.markerLoads++
               // The throw happens while the subscription registers the
@@ -968,6 +1122,7 @@ async function checkOrderedReplay(
               const recovery =
                 belongsToRecovery(options, markerTruncates, markerCommitting) ||
                 (participant && oneSubscription(`markers`))
+              noteNewSiblingFailure(load, options)
               settleParticipant(`markers`, load, options, false)
               // A load that threw acquired nothing, so the adapter never sees
               // its demand retire, and any graph run can retire it. The
@@ -990,11 +1145,29 @@ async function checkOrderedReplay(
               const startedReady = allReady()
               acquired.set(options, (acquired.get(options) ?? 0) + 1)
               const load: Load = {
+                subscription: options.subscription,
                 epoch: truncates,
                 outcome: `pending`,
                 source: `markers`,
                 keys: requestedKeys(`markers`, options),
               }
+              load.markerTruncate = markerTruncates
+              load.newSiblingReplay = isNewSiblingReplayLoad(options)
+              receiptOptions.set(load, options)
+              // This retry premise is measured when the real adapter receives
+              // another load of a failed demand while its sibling still loads.
+              if (
+                load.newSiblingReplay &&
+                loads.some(
+                  (earlier) =>
+                    earlier.subscription === load.subscription &&
+                    earlier.outcome === `failed` &&
+                    [...(earlier.keys ?? [])].every((key) =>
+                      load.keys?.has(key),
+                    ),
+                )
+              )
+                reach.retryWhileSiblingLoads++
               loads.push(load)
               reach.markerLoads++
               const participant = joinBarrier(`markers`, load, options)
@@ -1014,14 +1187,13 @@ async function checkOrderedReplay(
               const newDemandDuringReplay =
                 !reload && markerCommitting && isDemand(options)
               if (holding) {
-                const ok = await new Promise<boolean>((resolve) =>
-                  held.push(resolve),
-                )
+                const ok = await holdLoad(load)
                 if (!ok) {
                   // The source's replay had already failed and still holds
                   // publication when this load fails.
                   const barrierFailed =
                     (barriers.get(`markers`)?.failures.size ?? 0) > 0
+                  noteNewSiblingFailure(load, options)
                   const replayLoading = settleParticipant(
                     `markers`,
                     load,
@@ -1119,6 +1291,20 @@ async function checkOrderedReplay(
             })()
           },
           unloadSubset: (options) => {
+            // During commands, same-truncate unload retires a failed demand;
+            // final cleanup and a newer replay's acquisition renewal do not
+            // supply this reach witness.
+            if (
+              observingHistory &&
+              loads.some(
+                (load) =>
+                  receiptOptions.get(load) === options &&
+                  load.newSiblingReplay &&
+                  load.outcome === `failed` &&
+                  load.markerTruncate === markerTruncates,
+              )
+            )
+              reach.newSiblingReplayRetirements++
             unloaded.add(options)
             retireParticipants(`markers`, options)
             const count = acquired.get(options) ?? 0
@@ -1146,6 +1332,7 @@ async function checkOrderedReplay(
             const startedReady = allReady()
             acquired.set(options, (acquired.get(options) ?? 0) + 1)
             const load: Load = {
+              subscription: options.subscription,
               epoch: truncates,
               outcome: `pending`,
               source: `rows`,
@@ -1156,9 +1343,7 @@ async function checkOrderedReplay(
             const participant = joinBarrier(`rows`, load, options)
             belongsToRecovery(options, truncates, truncating)
             if (holding) {
-              const ok = await new Promise<boolean>((resolve) =>
-                held.push(resolve),
-              )
+              const ok = await holdLoad(load)
               if (!ok) {
                 const replayLoading = settleParticipant(
                   `rows`,
@@ -1336,7 +1521,11 @@ async function checkOrderedReplay(
   // (ARCHITECTURE.md law 16), so a terminal error needs a load that failed
   // while the query was still loading: an initial load failure.
   const checkTerminal = (label: string, shown: { status: string }) => {
-    expect(failedWhileLoading.has(shown), `${label}: terminal error`).toBe(true)
+    oracleAssertion(`${label}: terminal error`, () =>
+      expect(failedWhileLoading.has(shown), `${label}: terminal error`).toBe(
+        true,
+      ),
+    )
   }
   // At a cut, a query that has not ended lists each failure the account
   // owes among its node's open request failures, by the injected error
@@ -1348,14 +1537,31 @@ async function checkOrderedReplay(
     if (owed.length === 0) return
     reach.requestErrorChecks++
     for (const failure of owed) {
-      expect(
-        [live, peer].some((query) =>
-          query?.health.error?.errors.some(
-            ({ cause }) => cause === failure.load.error,
-          ),
-        ),
+      // Reach is measured at the health assertion, after a sibling asked
+      // for overlapping keys that cannot decide this subscription's error.
+      if (
+        loads.some(
+          (later, index) =>
+            index > loads.indexOf(failure.load) &&
+            later.source === failure.source &&
+            later.subscription !== failure.options.subscription &&
+            !later.ordered &&
+            [...failure.keys].some((key) => later.keys?.has(key)),
+        )
+      )
+        reach.siblingRequestErrorChecks++
+      oracleAssertion(
         `${label}: request error for "${failure.load.error?.message}" on keys ${[...failure.keys].join()}`,
-      ).toBe(true)
+        () =>
+          expect(
+            [live, peer].some((query) =>
+              query?.health.error?.errors.some(
+                ({ cause }) => cause === failure.load.error,
+              ),
+            ),
+            `${label}: request error for "${failure.load.error?.message}" on keys ${[...failure.keys].join()}`,
+          ).toBe(true),
+      )
     }
   }
   // Replay error identity (ARCHITECTURE.md, "Replay participants and
@@ -1367,7 +1573,12 @@ async function checkOrderedReplay(
   // failing, as a demand's replacement does, no longer count. A failure of a
   // load in no waited replay is the move's own window failure after it
   // resumed, which this law does not judge.
+  // The source-wide barrier combines subscriptions only for publication.
+  // Their verdicts remain separate: a sibling can fail while another replay
+  // still loads. Only failures of the rejecting subscription compete for its
+  // earliest error. Subscription identity comes from adapter request data.
   const covers = (later: Load, earlier: Load) =>
+    later.subscription === earlier.subscription &&
     later.ordered === earlier.ordered &&
     later.keys !== undefined &&
     earlier.keys !== undefined &&
@@ -1392,13 +1603,32 @@ async function checkOrderedReplay(
     )
     if (candidates.length === 0) return
     reach.deferredMoveRejections++
+    const rejected = loads.find((load) => load.error === error)!
+    for (const barrier of candidates) {
+      if (
+        barrier.history.filter(
+          (load) => load.subscription === rejected.subscription,
+        ).length > 1
+      )
+        reach.ownReplayFailureComparisons++
+      if (
+        barrier.history.some(
+          (load) => load.subscription !== rejected.subscription,
+        )
+      )
+        reach.siblingReplayFailureComparisons++
+    }
     const earliest = candidates.some((barrier) =>
       barrier.history
         .slice(
           0,
           barrier.history.findIndex((load) => load.error === error),
         )
-        .every((earlier, at) => !stillDecides(barrier, earlier, at)),
+        .every(
+          (earlier, at) =>
+            earlier.subscription !== rejected.subscription ||
+            !stillDecides(barrier, earlier, at),
+        ),
     )
     if (!earliest)
       moveErrorViolation ??= `move ${move} rejected with "${error.message}", not its replay's earliest failure that still decides it`
@@ -1441,8 +1671,13 @@ async function checkOrderedReplay(
     const raised = [...barriers.values()]
     if (raised.some(({ ambiguous }) => ambiguous)) return
     if (live.status === `error`) return
-    expect(JSON.parse(JSON.stringify(live.toArray)), label).toEqual(
-      JSON.parse(retainedRows),
+    oracleAssertion(
+      `${label}; new sibling replay failures: ${reach.newSiblingReplayFailures}`,
+      () =>
+        expect(
+          JSON.parse(JSON.stringify(live.toArray)),
+          `${label}; new sibling replay failures: ${reach.newSiblingReplayFailures}`,
+        ).toEqual(JSON.parse(retainedRows!)),
     )
     if (raised.some(({ failures }) => failures.size > 0)) {
       reach.retainedFailedReplays++
@@ -1456,9 +1691,10 @@ async function checkOrderedReplay(
       await flushPromises()
       const next = held.shift()
       if (!next) return
+      heldReceipts.delete(next)
       next(true)
     }
-    throw new Error(`held loads did not drain`)
+    rejectAt('held loads drain', new Error('held loads did not drain'))
   }
   const truncate = async () => {
     truncates++
@@ -1480,6 +1716,19 @@ async function checkOrderedReplay(
   // An eager marker source rewrites its rows; an on-demand one replays the
   // demand it retains.
   const truncateMarkers = async () => {
+    markerSubscriptionsAtTruncate = new Set(
+      [...acquired].flatMap(([options, count]) =>
+        count > 0 &&
+        !options.signal?.aborted &&
+        loads.some(
+          (load) =>
+            load.source === `markers` &&
+            load.subscription === options.subscription,
+        )
+          ? [options.subscription]
+          : [],
+      ),
+    )
     installedMarkers.clear()
     raiseBarrier(`markers`)
     markerSync.begin()
@@ -1508,6 +1757,7 @@ async function checkOrderedReplay(
   try {
     if (!scenario.historyDuringPreload) await preload
     let sawRequestError = false
+    observingHistory = true
     for (const command of history) {
       try {
         switch (command.type) {
@@ -1540,7 +1790,40 @@ async function checkOrderedReplay(
             break
           case `settle`: {
             holding = command.keepHolding === true && holding
-            ;(command.newest === true ? held.pop() : held.shift())?.(command.ok)
+            const candidates = held.filter((resolve) => {
+              const receipt = heldReceipts.get(resolve)!
+              const activeNewSibling =
+                receipt.source === `markers` &&
+                !markerSubscriptionsAtTruncate.has(receipt.subscription) &&
+                !receiptOptions.get(receipt)?.signal?.aborted
+              return (
+                command.target === undefined ||
+                (command.target === `new-sibling`
+                  ? activeNewSibling
+                  : !activeNewSibling)
+              )
+            })
+            const selected = command.newest ? candidates.at(-1) : candidates[0]
+            if (selected) {
+              held.splice(held.indexOf(selected), 1)
+              const receipt = heldReceipts.get(selected)!
+              if (
+                receipt.source === `markers` &&
+                !markerSubscriptionsAtTruncate.has(receipt.subscription) &&
+                !loads.some(
+                  (other) =>
+                    other !== receipt &&
+                    other.source === `markers` &&
+                    other.subscription !== receipt.subscription &&
+                    other.outcome === `pending` &&
+                    !receiptOptions.get(other)?.signal?.aborted,
+                ) &&
+                !receiptOptions.get(receipt)?.signal?.aborted
+              )
+                reach.lateSiblingSettlements++
+              heldReceipts.delete(selected)
+              selected(command.ok)
+            }
             break
           }
           case `truncate`:
@@ -1677,6 +1960,7 @@ async function checkOrderedReplay(
         sawRequestError = true
     }
     if (sawRequestError) reach.requestErrors++
+    observingHistory = false
     holding = false
     throwNextUnload = false
     // The drain is the checkpoint, where recovery loads succeed, so an
@@ -1691,26 +1975,43 @@ async function checkOrderedReplay(
     // an initial load fails; it does not wait for a later truncate.
     if (scenario.historyDuringPreload) {
       reach.preloadChecks++
-      expect(preloadSettled, `initial preload settles`).toBe(true)
+      oracleAssertion(`initial preload settles`, () =>
+        expect(preloadSettled, `initial preload settles`).toBe(true),
+      )
     }
-    if (violation) throw new Error(`adapter release: ${violation}`)
+    if (violation)
+      rejectAt('adapter release', new Error(`adapter release: ${violation}`))
     if (moveOrderViolation) {
-      throw new Error(`newest move wins: ${moveOrderViolation}`)
+      rejectAt(
+        'newest move wins',
+        new Error(`newest move wins: ${moveOrderViolation}`),
+      )
     }
     if (moveErrorViolation) {
-      throw new Error(`replay error identity: ${moveErrorViolation}`)
+      rejectAt(
+        'replay error identity',
+        new Error(`replay error identity: ${moveErrorViolation}`),
+      )
     }
     if (escapedError() !== undefined) {
-      throw new Error(`escaped error: only injected faults may surface`, {
-        cause: escapedError(),
-      })
+      rejectAt(
+        'escaped error',
+        new Error(`escaped error: only injected faults may surface`, {
+          cause: escapedError(),
+        }),
+      )
     }
     checkRetention(`retained publication once loading is quiet`)
     // Status: a release that throws is reported, but it fails no load, so a
     // quiet query with no failed load stays ready.
     if (!anyLoadFailedNow()) {
-      expect(live.status, `status`).toBe(`ready`)
-      if (peer) expect(peer.status, `peer status`).toBe(`ready`)
+      oracleAssertion(`status`, () =>
+        expect(live.status, `status`).toBe(`ready`),
+      )
+      if (peer)
+        oracleAssertion(`peer status`, () =>
+          expect(peer.status, `peer status`).toBe(`ready`),
+        )
     }
     if (!faultExcusesWindow()) {
       reach.settledWindowChecks++
@@ -1727,11 +2028,15 @@ async function checkOrderedReplay(
     if (readsMarkers) await truncateMarkers()
     await settleAll()
     await flushPromises()
-    if (violation) throw new Error(`adapter release: ${violation}`)
+    if (violation)
+      rejectAt('adapter release', new Error(`adapter release: ${violation}`))
     if (escapedError() !== undefined) {
-      throw new Error(`escaped error: only injected faults may surface`, {
-        cause: escapedError(),
-      })
+      rejectAt(
+        'escaped error',
+        new Error(`escaped error: only injected faults may surface`, {
+          cause: escapedError(),
+        }),
+      )
     }
     // A failed window operation stays private until a later explicit move
     // revalidates it (ARCHITECTURE.md), so recovery ends with one.
@@ -1749,10 +2054,16 @@ async function checkOrderedReplay(
         checkWindow(label, shown.toArray, expected)
         // Recovery replayed every source and revalidated the window, and each
         // success decides the request errors before it, so none stays.
-        expect(shown.health.error, `${label}: stale request error`).toBeNull()
+        oracleAssertion(`${label}: stale request error`, () =>
+          expect(
+            shown.health.error,
+            `${label}: stale request error`,
+          ).toBeNull(),
+        )
       }
     }
   } finally {
+    observingHistory = false
     holding = false
     for (const resolve of held.splice(0)) resolve(true)
     for (const subscription of subscriptions) subscription.unsubscribe()
@@ -1772,24 +2083,653 @@ async function checkOrderedReplay(
 // the published window at each checkpoint with the expectation that the history
 // implies. Its expectation is computed inside the function body, not by a named
 // model part yet.
-declareOracle({ check: [checkOrderedReplay] })
+
+type GeneratedValue<T> = T extends fc.Arbitrary<infer Value> ? Value : never
+const orderedReplayLaw = {
+  statement: `Ordered public windows, replay retention, readiness, lease balance and request errors follow the unchanged independent account at each history cut, quiet settlement and recovery.`,
+  authority: `ARCHITECTURE.md ordered requests, atomic window publication, replay participants and laws9,10,16,17 stated above.`,
+  limits: `The original bounded commands, scenarios, one ordered source, one include level, adapter faults and per-subscription observations stated above.`,
+}
+const preloadStates = [
+  `preloadReplayFailures`,
+  `discardedReplayMoves`,
+  `preloadChecks`,
+] as const
+const failedReplayStates = [
+  `retainedFailedReplays`,
+  `heldPublicationChecks`,
+  `participantDemandFailures`,
+  `includeDemandFailures`,
+  `siblingDemandFailures`,
+  `failedSiblingDemandFailures`,
+  `thrownReplayDemands`,
+  `partialFailureRetirements`,
+  `requestErrorChecks`,
+  `deferredMoveRejections`,
+  `successWhileSubscriptionOwes`,
+] as const
+const keyedFailureStates = [
+  `initiating-keyed-request-failed`,
+  `keyed-reacquisition-failed`,
+] as const
+
+type ReplayEntry = {
+  history: Array<OrderedCommand>
+  scenario: OrderedScenario
+  fresh?: boolean
+}
+type ReplayPlan = {
+  entries: ReadonlyArray<ReplayEntry>
+  states: ReadonlyArray<keyof OrderedReach>
+  demand?: boolean
+  keyed?: boolean
+}
+async function driveReplayPlan(
+  plan: ReplayPlan,
+  observe: Parameters<typeof recordAssertionJudgment>[2],
+): Promise<void> {
+  await recordAssertionJudgment(
+    `ordered replay refinement`,
+    plan,
+    observe,
+    async () => {
+      for (const { history, scenario, fresh } of plan.entries) {
+        const entered = new Set<ReplayDemandState>()
+        const reach = await checkOrderedReplay(
+          history,
+          scenario,
+          (state) => {
+            entered.add(state)
+            if (plan.demand) observe(`reach`, state)
+          },
+          plan.keyed ? (state) => observe(`reach`, state) : undefined,
+        )
+        for (const state of plan.states)
+          if (reach[state] > 0) observe(`reach`, state)
+        if (plan.demand) checkReplayDemandFailure(reach, entered)
+        if (fresh) {
+          oracleAssertion(`fresh request failure: terminal`, () =>
+            expect(reach.terminalErrors, `fresh request failure`).toBe(0),
+          )
+          oracleAssertion(`fresh request failure: request`, () =>
+            expect(reach.requestErrors, `fresh request failure`).toBe(1),
+          )
+        }
+      }
+    },
+  )
+}
+
+function canonicalCommand(command: OrderedCommand): OrderedCommand {
+  switch (command.type) {
+    case `hold`:
+      return holdCommand
+    case `unloadThrows`:
+      return unloadThrowsCommand
+    case `truncateMarkers`:
+      return truncateMarkersCommand
+    case `markerThrows`:
+      return markerThrowsCommand
+    case `truncate`:
+      return command.armAfterStart ? command : truncateCommand
+    default:
+      return command
+  }
+}
+
+type ReplayWitness = {
+  states: ReadonlyArray<keyof OrderedReach>
+  history: Array<OrderedCommand>
+  scenario: OrderedScenario
+}
+// These process prefixes are existing grammar histories witnessed by the old
+// campaigns. Construction keeps their relative rank relations, varies ranks
+// from the generated input and appends its existing hold commands. No expected
+// product value comes from these premises; checkOrderedReplay still judges it.
+function varyReplayWitness(
+  witness: ReplayWitness,
+  generated: [Array<OrderedCommand>, OrderedScenario],
+  broad: boolean,
+): [Array<OrderedCommand>, OrderedScenario] {
+  const salt =
+    generated[0].find((command) => command.type === `move`)?.rank ??
+    generated[1].limit
+  const vary = (command: OrderedCommand): OrderedCommand => {
+    if (command.type !== `move`) return { ...command }
+    const rank = witness.scenario.ties
+      ? 5 * (salt % 12) + (command.rank % 5) || 60
+      : command.rank % 10 === 0
+        ? command.rank
+        : Math.floor(command.rank / 10) * 10 + 1 + (salt % 9)
+    return { ...command, rank }
+  }
+  const history = witness.history.map(vary)
+  const tailStart = broad ? 0 : history[2]?.type === `settle` ? 3 : 4
+  for (let index = tailStart; index < history.length; index++) {
+    const command = history[index]!
+    if (command.type === `settle`)
+      history[index] = {
+        ...command,
+        keepHolding: command.keepHolding ?? false,
+        newest: command.newest ?? false,
+      }
+  }
+  const room = Math.min(
+    12 - history.length,
+    broad ? 12 : 8 - (history.length - tailStart),
+  )
+  history.push(
+    ...generated[0].filter((command) => command.type === `hold`).slice(0, room),
+  )
+  return [
+    history.map(canonicalCommand),
+    {
+      ...witness.scenario,
+      abortedMarkerLoads: witness.states.includes(`abortRejections`)
+        ? `reject`
+        : generated[1].abortedMarkerLoads,
+    },
+  ]
+}
+const broadReplayWitnesses: ReadonlyArray<ReplayWitness> = [
+  {
+    states: ['settlementThrows'],
+    history: [
+      { type: 'unloadThrows' },
+      { type: 'move', id: 2, rank: 1 },
+      { type: 'unloadThrows' },
+    ],
+    scenario: { ...ordinaryOrderedScenario },
+  },
+  {
+    states: ['throwsAfterReplay'],
+    history: [{ type: 'truncate', armAfterStart: true }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      offset: 1,
+      limit: 3,
+      markerMode: 'on-demand',
+      includes: true,
+    },
+  },
+  {
+    states: ['replayStartThrows'],
+    history: [
+      { type: 'truncate', armAfterStart: false },
+      { type: 'truncate', armAfterStart: true },
+      { type: 'truncate', armAfterStart: true },
+    ],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      offset: 1,
+      ties: true,
+      peer: true,
+      abortedMarkerLoads: 'reject',
+    },
+  },
+  {
+    states: ['heldAcrossTruncate'],
+    history: [{ type: 'truncate', armAfterStart: false }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      offset: 1,
+      ties: true,
+      joined: 'none',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['failedLoads'],
+    history: [{ type: 'settle', ok: false, keepHolding: true, newest: false }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      offset: 1,
+      ties: true,
+      peer: true,
+      joined: 'some',
+      markerMode: 'on-demand',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['settledWindowChecks'],
+    history: [{ type: 'truncateMarkers' }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      offset: 1,
+      limit: 1,
+      markerMode: 'on-demand',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['tiedWindows'],
+    history: [{ type: 'move', id: 1, rank: 58 }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      offset: 1,
+      ties: true,
+      joined: 'inner',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+    },
+  },
+  {
+    states: ['peerChecks'],
+    history: [{ type: 'truncateMarkers' }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      limit: 3,
+      peer: true,
+      joined: 'inner',
+      markerMode: 'on-demand',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['windowMoves'],
+    history: [{ type: 'window', offset: 1, limit: 2 }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      ties: true,
+      joined: 'some',
+      markerMode: 'on-demand',
+    },
+  },
+  {
+    states: ['descendingRuns'],
+    history: [{ type: 'truncateMarkers' }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      offset: 1,
+      limit: 1,
+      markerMode: 'on-demand',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['joinedRuns'],
+    history: [{ type: 'truncateMarkers' }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      limit: 3,
+      peer: true,
+      joined: 'inner',
+      markerMode: 'on-demand',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['includeChecks'],
+    history: [{ type: 'truncateMarkers' }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      offset: 1,
+      limit: 1,
+      markerMode: 'on-demand',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['markChanges'],
+    history: [{ type: 'mark', id: 3, on: false }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      offset: 1,
+      limit: 1,
+      joined: 'some',
+      markerMode: 'on-demand',
+    },
+  },
+  {
+    states: ['antiJoinedRuns'],
+    history: [{ type: 'settle', ok: true, keepHolding: true, newest: false }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      offset: 1,
+      limit: 1,
+      ties: true,
+      joined: 'none',
+      markerMode: 'on-demand',
+    },
+  },
+  {
+    states: ['innerJoinedRuns'],
+    history: [{ type: 'truncateMarkers' }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      limit: 3,
+      peer: true,
+      joined: 'inner',
+      markerMode: 'on-demand',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['markerLoads'],
+    history: [{ type: 'truncateMarkers' }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      offset: 1,
+      limit: 1,
+      markerMode: 'on-demand',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['markerTruncates'],
+    history: [{ type: 'truncateMarkers' }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      offset: 1,
+      limit: 1,
+      markerMode: 'on-demand',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['replayLoads'],
+    history: [{ type: 'truncateMarkers' }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      offset: 1,
+      limit: 1,
+      markerMode: 'on-demand',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['abortRejections'],
+    history: [{ type: 'truncateMarkers' }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      offset: 1,
+      limit: 1,
+      markerMode: 'on-demand',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['preloadChecks'],
+    history: [{ type: 'truncateMarkers' }],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      offset: 1,
+      limit: 1,
+      markerMode: 'on-demand',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['heldPublicationChecks'],
+    history: [
+      { type: 'hold' },
+      { type: 'move', id: 3, rank: 1 },
+      { type: 'truncateMarkers' },
+    ],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      limit: 1,
+      joined: 'some',
+      markerMode: 'on-demand',
+    },
+  },
+]
+function broadConstructions(states: ReadonlyArray<keyof OrderedReach>) {
+  return broadReplayWitnesses.map((witness) => ({
+    name: `existing ${witness.states.join(`, `)} premise`,
+    enters: witness.states.filter((state) => states.includes(state)),
+    build: (generated: [Array<OrderedCommand>, OrderedScenario]) =>
+      varyReplayWitness(witness, generated, true),
+  }))
+}
+const failedReplayWitnesses: ReadonlyArray<ReplayWitness> = [
+  {
+    states: ['retainedFailedReplays', 'heldPublicationChecks'],
+    history: [
+      { type: 'hold' },
+      { type: 'truncate', armAfterStart: false },
+      { type: 'settle', ok: false, keepHolding: false },
+    ],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      direction: 'desc',
+      joined: 'none',
+      markerMode: 'on-demand',
+      includes: true,
+    },
+  },
+  {
+    states: [
+      'participantDemandFailures',
+      'includeDemandFailures',
+      'requestErrorChecks',
+    ],
+    history: [
+      { type: 'hold' },
+      { type: 'truncateMarkers' },
+      { type: 'move', id: 3, rank: 1 },
+      { type: 'settle', ok: false, newest: true },
+    ],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      markerMode: 'on-demand',
+      includes: true,
+    },
+  },
+  {
+    states: ['siblingDemandFailures', 'successWhileSubscriptionOwes'],
+    history: [
+      { type: 'hold' },
+      { type: 'truncateMarkers' },
+      { type: 'settle', ok: false, keepHolding: true },
+      { type: 'move', id: 1, rank: 29 },
+    ],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      offset: 1,
+      ties: true,
+      joined: 'some',
+      markerMode: 'on-demand',
+      includes: true,
+    },
+  },
+  {
+    states: ['failedSiblingDemandFailures', 'partialFailureRetirements'],
+    history: [
+      { type: 'hold' },
+      { type: 'truncateMarkers' },
+      { type: 'window', offset: 0, limit: 2 },
+      { type: 'settle', ok: false, newest: true },
+      { type: 'settle', ok: false, newest: false, keepHolding: false },
+    ],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      joined: 'some',
+      markerMode: 'on-demand',
+      includes: true,
+    },
+  },
+  {
+    states: ['thrownReplayDemands'],
+    history: [
+      { type: 'hold' },
+      { type: 'truncateMarkers' },
+      { type: 'move', id: 5, rank: 6 },
+      { type: 'settle', ok: false, newest: true },
+      { type: 'move', id: 4, rank: 58 },
+      { type: 'markerThrows' },
+      { type: 'truncateMarkers' },
+    ],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      limit: 3,
+      markerMode: 'on-demand',
+      includes: true,
+      abortedMarkerLoads: 'reject',
+      historyDuringPreload: true,
+    },
+  },
+  {
+    states: ['deferredMoveRejections'],
+    history: [
+      { type: 'hold' },
+      { type: 'truncateMarkers' },
+      { type: 'window', offset: 1, limit: 1 },
+      { type: 'settle', ok: false, newest: true },
+    ],
+    scenario: {
+      ...ordinaryOrderedScenario,
+      limit: 3,
+      ties: true,
+      joined: 'some',
+      markerMode: 'on-demand',
+      abortedMarkerLoads: 'reject',
+    },
+  },
+]
+// Five separately generated constructions retain the original minimum of
+// five histories for every failed-replay state, without counting fixed replays.
+function failedReplayConstructions() {
+  return failedReplayWitnesses.flatMap((witness) =>
+    Array.from({ length: 5 }, (_, index) => ({
+      name: `${witness.states.join(`, `)} premise ${index + 1}`,
+      enters: witness.states,
+      build: (generated: [Array<OrderedCommand>, OrderedScenario]) =>
+        varyReplayWitness(witness, generated, false),
+    })),
+  )
+}
+// The existing preload grammar can express both prefixes. Five constructions
+// for each preserve its minimum5; direction, ties and later commands still vary.
+function preloadConstructions() {
+  return ([`failure`, `discard`] as const).flatMap((kind) =>
+    Array.from({ length: 5 }, (_, index) => ({
+      name: `preload ${kind} premise ${index + 1}`,
+      enters:
+        kind === `failure`
+          ? [`preloadReplayFailures`, `preloadChecks`]
+          : [`discardedReplayMoves`, `preloadChecks`],
+      build: ([history, scenario]: [Array<OrderedCommand>, OrderedScenario]): [
+        Array<OrderedCommand>,
+        OrderedScenario,
+      ] => [
+        [
+          ...(kind === `failure`
+            ? [
+                {
+                  type: `settle` as const,
+                  ok: true,
+                  keepHolding: true,
+                  newest: false,
+                },
+                truncateMarkersCommand,
+                {
+                  type: `settle` as const,
+                  ok: false,
+                  keepHolding: false,
+                  newest: true,
+                },
+              ]
+            : [
+                truncateCommand,
+                {
+                  type: `window` as const,
+                  offset: scenario.offset,
+                  limit: scenario.limit,
+                },
+                truncateCommand,
+              ]),
+          ...history.filter((command) => command.type === `hold`).slice(0, 9),
+        ],
+        {
+          ...scenario,
+          peer: false,
+          joined: false,
+          includes: true,
+          limit: 2,
+          markerMode: `on-demand`,
+          historyDuringPreload: true,
+        },
+      ],
+    })),
+  )
+}
 
 const orderedReplayProperty = `replay.ordered-window-faults`
-const orderedReplayConfig = readOracleRunConfig()
-const orderedReplayCampaigns =
-  orderedReplayConfig.replayPath === undefined
-    ? ([`fixed`, `random`] as const)
-    : orderedReplayConfig.replayProperty === orderedReplayProperty
-      ? ([`replay`] as const)
-      : ([] as const)
-
 const orderedFailureProperty = `replay.keyed-request-failures`
-const orderedFailureCampaigns =
-  orderedReplayConfig.replayPath === undefined
-    ? ([`fixed`, `random`] as const)
-    : orderedReplayConfig.replayProperty === orderedFailureProperty
-      ? ([`replay`] as const)
-      : ([] as const)
+
+type OrderedReplayRegression = {
+  name: string
+  history: Array<OrderedCommand>
+  scenario?: OrderedScenario
+  reaches?: keyof OrderedReach
+  // A fixed history that the law places in a recovery. The history also
+  // holds where the model cannot tell which subscription issued a load
+  // (see Limits).
+  recovers?: true
+  failureState?: ReplayDemandState
+}
+
+// One named replay regression: `checkOrderedReplay` judges it, and the
+// regression's own reach and recovery premises must hold.
+async function runOrderedReplayRegression({
+  history,
+  scenario,
+  ...replay
+}: OrderedReplayRegression): Promise<void> {
+  const entered = new Set<ReplayDemandState>()
+  const reach = await checkOrderedReplay(history, scenario, (state) =>
+    entered.add(state),
+  )
+  checkReplayDemandFailure(reach, entered)
+  if (`failureState` in replay) expect(entered).toContain(replay.failureState)
+  const reaches: keyof OrderedReach | undefined =
+    `reaches` in replay ? replay.reaches : undefined
+  if (reaches) expect(reach[reaches], reaches).toBeGreaterThan(0)
+  if (`recovers` in replay) {
+    expect(reach.terminalErrors, `recovery failure ends the query`).toBe(0)
+  }
+}
 
 describe(`Ordered windows across truncate replays`, () => {
   // Traces the campaigns found, kept as replays. Each failed before its fix:
@@ -1823,7 +2763,7 @@ describe(`Ordered windows across truncate replays`, () => {
   //   showed neither window);
   // - two window moves that a pending source recovery defers (both resumed
   //   after recovery, the older one last, so it replaced the newer window).
-  it.each([
+  const orderedReplayRegressions: Array<OrderedReplayRegression> = [
     {
       name: `a release that throws after a successful repair`,
       history: [
@@ -2369,34 +3309,30 @@ describe(`Ordered windows across truncate replays`, () => {
       },
       reaches: `failedLoads`,
     },
-  ] satisfies Array<{
-    name: string
-    history: Array<OrderedCommand>
-    scenario?: OrderedScenario
-    reaches?: keyof OrderedReach
-    // A replay whose history the law places in a recovery. The pin also
-    // holds where the model cannot tell which subscription issued a load
-    // (see Limits).
-    recovers?: true
-    failureState?: ReplayDemandState
-  }>)(
-    `keeps the ordered window for $name (generated replay)`,
-    async ({ history, scenario, ...replay }) => {
-      const entered = new Set<ReplayDemandState>()
-      const reach = await checkOrderedReplay(history, scenario, (state) =>
-        entered.add(state),
-      )
-      checkReplayDemandFailure(reach, entered)
-      if (`failureState` in replay)
-        expect(entered).toContain(replay.failureState)
-      const reaches: keyof OrderedReach | undefined =
-        `reaches` in replay ? replay.reaches : undefined
-      if (reaches) expect(reach[reaches], reaches).toBeGreaterThan(0)
-      if (`recovers` in replay) {
-        expect(reach.terminalErrors, `recovery failure ends the query`).toBe(0)
-      }
+  ]
+  oracleProperty({
+    id: `replay.ordered-window-regressions`,
+    law: {
+      ...orderedReplayLaw,
+      limits: `The named replay regressions above, which the generated command grammar cannot take back; each replays through checkOrderedReplay with the same reach and recovery checks.`,
     },
-  )
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: orderedReplayRegressions,
+    label: ({ name }) =>
+      `keeps the ordered window for ${name} (generated replay)`,
+    resolve: (regression) => ({ regression }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`ordered replay refinement`, plan, observe, () =>
+        runOrderedReplayRegression(plan.regression),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
   // Found by the failed-replay random campaign at five times its run count.
   // A join and an include share the marker source. One subscription's replay
@@ -2405,126 +3341,279 @@ describe(`Ordered windows across truncate replays`, () => {
   // marker change then retires the first replay's failed demand, which
   // discarded that replay and published an empty window while the second
   // failure held nothing; that failure now holds its own subscription.
-  it(`keeps the last publication when a marker change follows two failed replay loads`, async () => {
-    await checkOrderedReplay(
-      [
-        { type: `hold` },
-        { type: `truncateMarkers` },
-        { type: `settle`, ok: true, keepHolding: true, newest: false },
-        { type: `settle`, ok: false, newest: true, keepHolding: true },
-        { type: `move`, id: 1, rank: 1 },
-        { type: `settle`, ok: false, newest: false },
-        { type: `hold` },
-        { type: `mark`, id: 4, on: false },
-      ],
+  oracleProperty({
+    id: `replay.ordered-window-fixed`,
+    law: {
+      ...orderedReplayLaw,
+      limits: `One named regression that the generated command grammar cannot take back; it replays through checkOrderedReplay.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [
       {
-        ...ordinaryOrderedScenario,
-        direction: `desc`,
-        offset: 1,
-        limit: 1,
-        joined: `some`,
-        markerMode: `on-demand`,
-        includes: true,
+        name: `keeps the last publication when a marker change follows two failed replay loads`,
+        history: [
+          { type: `hold` },
+          { type: `truncateMarkers` },
+          { type: `settle`, ok: true, keepHolding: true, newest: false },
+          { type: `settle`, ok: false, newest: true, keepHolding: true },
+          { type: `move`, id: 1, rank: 1 },
+          { type: `settle`, ok: false, newest: false },
+          { type: `hold` },
+          { type: `mark`, id: 4, on: false },
+        ] satisfies Array<OrderedCommand>,
+        scenario: {
+          ...ordinaryOrderedScenario,
+          direction: `desc`,
+          offset: 1,
+          limit: 1,
+          joined: `some`,
+          markerMode: `on-demand`,
+          includes: true,
+        } satisfies OrderedScenario,
       },
-    )
+    ],
+    label: ({ name }) => name,
+    resolve: (regression) => ({ regression }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `ordered replay refinement`,
+        plan,
+        observe,
+        async () => {
+          await checkOrderedReplay(
+            plan.regression.history,
+            plan.regression.scenario,
+          )
+        },
+      ),
+    check: forwardAssertionJudgment,
   })
 
-  it.each(orderedReplayCampaigns)(
-    `keeps the ordered window under load and release faults (%s campaign)`,
-    async (campaign) => {
-      const total: OrderedReach = {
-        settlementThrows: 0,
-        throwsAfterReplay: 0,
-        replayStartThrows: 0,
-        heldAcrossTruncate: 0,
-        failedLoads: 0,
-        settledWindowChecks: 0,
-        tiedWindows: 0,
-        peerChecks: 0,
-        windowMoves: 0,
-        descendingRuns: 0,
-        joinedRuns: 0,
-        includeChecks: 0,
-        markChanges: 0,
-        antiJoinedRuns: 0,
-        innerJoinedRuns: 0,
-        markerLoads: 0,
-        markerTruncates: 0,
-        terminalErrors: 0,
-        requestErrors: 0,
-        requestErrorChecks: 0,
-        successWhileSubscriptionOwes: 0,
-        deferredMoveRejections: 0,
-        replayLoads: 0,
-        abortRejections: 0,
-        preloadChecks: 0,
-        heldPublicationChecks: 0,
-        retainedFailedReplays: 0,
-        participantDemandFailures: 0,
-        includeDemandFailures: 0,
-        siblingDemandFailures: 0,
-        failedSiblingDemandFailures: 0,
-        thrownReplayDemands: 0,
-        partialFailureRetirements: 0,
-        preloadReplayFailures: 0,
-        discardedReplayMoves: 0,
-      }
-      // Reach witnesses: releases throw without a truncate, while a replay
-      // starts, and while it settles; loads fail and stay held across a
-      // truncate; truncates ask again for held demand; and the settled-window
-      // law is checked.
-      // A terminal error needs a failed first load, and a request error a held
-      // demand load that fails after readiness; the named replays above reach
-      // both. A failed replay that the retention law can
-      // judge, a demand that fails while its replay is open, a replay that
-      // fails before the first ready, and a window move behind a discarded
-      // replay are rare here; the campaigns below declare them.
-      const ownedElsewhere = new Set<keyof OrderedReach>([
-        `terminalErrors`,
-        `requestErrors`,
-        `retainedFailedReplays`,
-        `participantDemandFailures`,
-        `includeDemandFailures`,
-        `siblingDemandFailures`,
-        `failedSiblingDemandFailures`,
-        `thrownReplayDemands`,
-        `partialFailureRetirements`,
-        `preloadReplayFailures`,
-        `discardedReplayMoves`,
-        `requestErrorChecks`,
-        `deferredMoveRejections`,
-        `successWhileSubscriptionOwes`,
-      ])
-      // Counts are histories, rather than repeated events in one trace.
-      const dimensions = (
-        Object.keys(total) as Array<keyof OrderedReach>
-      ).filter((dimension) => !ownedElsewhere.has(dimension))
-      const declared = createOracleReach(orderedReplayProperty, dimensions)
-      await fc.assert(
-        fc.asyncProperty(
-          fc.array(orderedCommand, { minLength: 1, maxLength: 12 }),
-          orderedScenario,
-          async (history, scenario) => {
-            declared.beginHistory()
-            const reach = await checkOrderedReplay(history, scenario)
-            for (const key of dimensions) {
-              if (reach[key] > 0) declared.reach(key)
-            }
-          },
-        ),
-        campaign === `fixed`
-          ? { seed: 20261021, numRuns: oracleRuns(300) }
-          : oraclePropertyOptions(300, orderedReplayProperty),
-      )
-      console.info(
-        orderedReplayProperty,
-        campaign,
-        Object.fromEntries(declared.counts()),
-      )
-      declared.assertReached()
-    },
-    120_000,
+  // A window with no initial include demand can activate its first include
+  // acquisition while a sibling join replay is still loading. Failure of that
+  // demand belongs to the shared publication barrier (law 9), even though its
+  // subscription had no replay of its own at the truncate. Adapter receipts
+  // prove both premises. This bounded grammar varies order, width, prior
+  // settlements and later demand changes; it reuses every ordinary observation
+  // and the independent retention account above. A move can retire the failed
+  // demand; a later truncate can replace it with successful own coverage.
+  oracleProperty({
+    id: 'replay.new-sibling-demand',
+    law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [{ matrix: 'new-sibling-demand' }],
+    resolve: (history) => history,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment('replay.new-sibling-demand', plan, observe, () =>
+        runNewSiblingMatrix(observe),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  // Law 9 keeps late include demand private after its sibling settles.
+  // A waiting move distinguishes publication retention from replay verdicts:
+  // Atomic window publication allows rejection despite a later retry.
+  oracleProperty({
+    id: 'replay.sibling-settlement-order',
+    law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [{ matrix: 'sibling-settlement-order' }],
+    resolve: (history) => history,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        'replay.sibling-settlement-order',
+        plan,
+        observe,
+        () => runSiblingSettlementMatrix(observe),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  // This finite history grammar varies which source replays, the order of
+  // two load failures, join form, direction and window width. Join plus include
+  // gives sibling subscriptions; the root replay gives same-subscription
+  // failures. The same comparison checks both, without an expected error
+  // copied from production or a source-wide error order.
+  oracleProperty({
+    id: 'replay.subscription-error-order',
+    law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [{ matrix: 'subscription-error-order' }],
+    resolve: (history) => history,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        'replay.subscription-error-order',
+        plan,
+        observe,
+        () => runErrorOrderMatrix(observe),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  // Failure followed by successful coverage is the neighboring regime of
+  // the two-failure grammar above. Real adapter subscriptions supply identity;
+  // the shared account comparison requires a sibling's failure to survive.
+  oracleProperty({
+    id: 'replay.subscription-success-scope',
+    law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [{ matrix: 'subscription-success-scope' }],
+    resolve: (history) => history,
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        'replay.subscription-success-scope',
+        plan,
+        observe,
+        () => runSuccessScopeMatrix(observe),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  const total: OrderedReach = {
+    settlementThrows: 0,
+    throwsAfterReplay: 0,
+    replayStartThrows: 0,
+    heldAcrossTruncate: 0,
+    failedLoads: 0,
+    settledWindowChecks: 0,
+    tiedWindows: 0,
+    peerChecks: 0,
+    windowMoves: 0,
+    descendingRuns: 0,
+    joinedRuns: 0,
+    includeChecks: 0,
+    markChanges: 0,
+    antiJoinedRuns: 0,
+    innerJoinedRuns: 0,
+    markerLoads: 0,
+    markerTruncates: 0,
+    terminalErrors: 0,
+    requestErrors: 0,
+    requestErrorChecks: 0,
+    successWhileSubscriptionOwes: 0,
+    deferredMoveRejections: 0,
+    ownReplayFailureComparisons: 0,
+    siblingReplayFailureComparisons: 0,
+    siblingSuccessfulCoverage: 0,
+    siblingRequestErrorChecks: 0,
+    lateSiblingSettlements: 0,
+    retryWhileSiblingLoads: 0,
+    newSiblingReplayFailures: 0,
+    newSiblingReplayRetirements: 0,
+    newSiblingReplayRecoveries: 0,
+    replayLoads: 0,
+    abortRejections: 0,
+    preloadChecks: 0,
+    heldPublicationChecks: 0,
+    retainedFailedReplays: 0,
+    participantDemandFailures: 0,
+    includeDemandFailures: 0,
+    siblingDemandFailures: 0,
+    failedSiblingDemandFailures: 0,
+    thrownReplayDemands: 0,
+    partialFailureRetirements: 0,
+    preloadReplayFailures: 0,
+    discardedReplayMoves: 0,
+  }
+  // Reach witnesses: releases throw without a truncate, while a replay
+  // starts, and while it settles; loads fail and stay held across a
+  // truncate; truncates ask again for held demand; and the settled-window
+  // law is checked.
+  // A terminal error needs a failed first load, and a request error a held
+  // demand load that fails after readiness; the named replays above reach
+  // both. A failed replay that the retention law can
+  // judge, a demand that fails while its replay is open, a replay that
+  // fails before the first ready, and a window move behind a discarded
+  // replay are rare here; the campaigns below declare them.
+  const ownedElsewhere = new Set<keyof OrderedReach>([
+    `terminalErrors`,
+    `requestErrors`,
+    `retainedFailedReplays`,
+    `participantDemandFailures`,
+    `includeDemandFailures`,
+    `siblingDemandFailures`,
+    `failedSiblingDemandFailures`,
+    `thrownReplayDemands`,
+    `partialFailureRetirements`,
+    `preloadReplayFailures`,
+    `discardedReplayMoves`,
+    `requestErrorChecks`,
+    `deferredMoveRejections`,
+    `ownReplayFailureComparisons`,
+    `siblingReplayFailureComparisons`,
+    `siblingSuccessfulCoverage`,
+    `siblingRequestErrorChecks`,
+    // The constructive settlement-order grammar declares these premises.
+    `lateSiblingSettlements`,
+    `retryWhileSiblingLoads`,
+    // The constructive new-sibling grammar declares these rare premises.
+    `newSiblingReplayFailures`,
+    `newSiblingReplayRetirements`,
+    `newSiblingReplayRecoveries`,
+    `successWhileSubscriptionOwes`,
+  ])
+  // Counts are histories, rather than repeated events in one trace.
+  const broadStates = (Object.keys(total) as Array<keyof OrderedReach>).filter(
+    (dimension) => !ownedElsewhere.has(dimension),
   )
+
+  oracleProperty({
+    id: orderedReplayProperty,
+    law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: {
+      arbitrary: fc.tuple(
+        fc.array(orderedCommand, { minLength: 1, maxLength: 12 }),
+        orderedScenario,
+      ),
+      runs: 300,
+      fixedSeeds: [20261021],
+      states: broadStates,
+      constructed: broadConstructions(broadStates),
+    },
+    resolve: ([history, scenario]) => ({
+      entries: [{ history, scenario }],
+      states: broadStates,
+    }),
+    model: recordedAssertionJudgment,
+    driver: driveReplayPlan,
+    check: forwardAssertionJudgment,
+  })
 
   // The retention law needs a replay that fails while the query holds its
   // last publication. Each history here starts by holding the next loads and
@@ -2535,47 +3624,78 @@ describe(`Ordered windows across truncate replays`, () => {
   // moves, marks, window moves, and truncates act on a failed replay. Peers
   // stay out because the retention law does not judge them.
   const failedReplayTruncate = fc.constantFrom(
-    { type: `truncate` as const, armAfterStart: false },
-    { type: `truncateMarkers` as const },
+    truncateCommand,
+    truncateMarkersCommand,
   )
-  const failedReplayHistory: fc.Arbitrary<Array<OrderedCommand>> = fc
-    .tuple(
-      failedReplayTruncate,
-      fc.option(
-        fc.oneof(
-          fc.record({
-            type: fc.constant(`move` as const),
-            id: fc.integer({ min: 1, max: 5 }),
-            rank: fc.integer({ min: 1, max: 60 }),
-          }),
-          fc.record({
-            type: fc.constant(`mark` as const),
-            id: fc.integer({ min: 1, max: 5 }),
-            on: fc.boolean(),
-          }),
-          fc.record({
-            type: fc.constant(`window` as const),
-            offset: fc.constantFrom(0 as const, 1 as const),
-            limit: fc.constantFrom(1 as const, 2 as const, 3 as const),
-          }),
-        ),
-        { nil: undefined },
+  const failedReplayHistoryInput = fc.tuple(
+    failedReplayTruncate,
+    fc.option(
+      fc.oneof(
+        fc.record({
+          type: fc.constant(`move` as const),
+          id: fc.integer({ min: 1, max: 5 }),
+          rank: fc.integer({ min: 1, max: 60 }),
+        }),
+        fc.record({
+          type: fc.constant(`mark` as const),
+          id: fc.integer({ min: 1, max: 5 }),
+          on: fc.boolean(),
+        }),
+        fc.record({
+          type: fc.constant(`window` as const),
+          offset: fc.constantFrom(0 as const, 1 as const),
+          limit: fc.constantFrom(1 as const, 2 as const, 3 as const),
+        }),
       ),
-      fc.boolean(),
-      fc.array(orderedCommand, { maxLength: 8 }),
-    )
-    .map(([truncate, change, keepHolding, rest]) => [
-      { type: `hold` as const },
-      truncate,
-      ...(change
-        ? [change, { type: `settle` as const, ok: false, newest: true }]
-        : [{ type: `settle` as const, ok: false, keepHolding }]),
-      ...rest,
-    ])
-  const failedReplayScenario = orderedScenario.map((scenario) => ({
-    ...scenario,
-    peer: false,
-  }))
+      { nil: undefined },
+    ),
+    fc.boolean(),
+    fc.array(orderedCommand, { maxLength: 8 }),
+  )
+  const resolveFailurePrefix = ([
+    truncate,
+    change,
+    keepHolding,
+    rest,
+  ]: GeneratedValue<typeof failedReplayHistoryInput>) => [
+    { type: `hold` as const },
+    truncate,
+    ...(change
+      ? [change, { type: `settle` as const, ok: false, newest: true }]
+      : [{ type: `settle` as const, ok: false, keepHolding }]),
+    ...rest,
+  ]
+  const failedReplayHistory = failedReplayHistoryInput.map(
+    resolveFailurePrefix,
+    (value) => {
+      if (!Array.isArray(value))
+        throw new Error('expected failed replay history')
+      const history = value as Array<OrderedCommand>
+      const changed = history[2]?.type !== 'settle'
+      const input = [
+        history[1],
+        changed ? history[2] : undefined,
+        !changed && history[2]?.type === 'settle'
+          ? !!history[2].keepHolding
+          : false,
+        history.slice(changed ? 4 : 3),
+      ] as GeneratedValue<typeof failedReplayHistoryInput>
+      if (
+        !failedReplayHistoryInput.canShrinkWithoutContext(input) ||
+        JSON.stringify(resolveFailurePrefix(input)) !== JSON.stringify(value)
+      )
+        throw new Error('not a failed replay prefix')
+      return input
+    },
+  )
+  const failedReplayScenario = orderedScenario.map(
+    (scenario) => ({ ...scenario, peer: false }),
+    (value) => {
+      if (!orderedScenario.canShrinkWithoutContext(value) || value.peer)
+        throw new Error('expected peer-free scenario')
+      return value
+    },
+  )
   // An include demand that fails while its replay still loads needs an
   // include over on-demand markers and a move that brings a row into the
   // window during the marker replay; this branch builds that start. The
@@ -2777,13 +3897,6 @@ describe(`Ordered windows across truncate replays`, () => {
     { weight: 2, arbitrary: heldRetryCase },
   )
   const failedReplayProperty = `replay.ordered-failed-replay`
-  const failedReplayCampaigns =
-    orderedReplayConfig.replayPath === undefined
-      ? ([`fixed`, `random`] as const)
-      : orderedReplayConfig.replayProperty === failedReplayProperty
-        ? ([`replay`] as const)
-        : ([] as const)
-
   // Recovery during the initial preload. A history starts while the first
   // loads are held, over on-demand markers that the query includes or joins.
   // Its grammar settles held loads one at a time, truncates either source,
@@ -2806,13 +3919,10 @@ describe(`Ordered windows across truncate replays`, () => {
         newest: fc.boolean(),
       }),
     },
-    { weight: 2, arbitrary: fc.constant({ type: `truncateMarkers` as const }) },
+    { weight: 2, arbitrary: fc.constant(truncateMarkersCommand) },
     {
       weight: 1,
-      arbitrary: fc.constant({
-        type: `truncate` as const,
-        armAfterStart: false,
-      }),
+      arbitrary: fc.constant(truncateCommand),
     },
     {
       weight: 2,
@@ -2830,14 +3940,26 @@ describe(`Ordered windows across truncate replays`, () => {
         rank: fc.integer({ min: 1, max: 60 }),
       }),
     },
-    { weight: 1, arbitrary: fc.constant({ type: `hold` as const }) },
+    { weight: 1, arbitrary: fc.constant(holdCommand) },
   )
-  const preloadScenario = orderedScenario.map((scenario) => ({
-    ...scenario,
-    markerMode: `on-demand` as const,
-    includes: scenario.includes || !scenario.joined,
-    historyDuringPreload: true,
-  }))
+  const preloadScenario = orderedScenario.map(
+    (scenario) => ({
+      ...scenario,
+      markerMode: `on-demand` as const,
+      includes: scenario.includes || !scenario.joined,
+      historyDuringPreload: true,
+    }),
+    (value) => {
+      if (
+        !orderedScenario.canShrinkWithoutContext(value) ||
+        value.markerMode !== 'on-demand' ||
+        !value.historyDuringPreload ||
+        (!value.joined && !value.includes)
+      )
+        throw new Error('expected preload scenario')
+      return value
+    },
+  )
   // A replay of include demand that fails before the first ready: initial
   // loads settle one at a time, so the order source delivers rows and the
   // include demands them; the marker source truncates; more held loads
@@ -2878,126 +4000,55 @@ describe(`Ordered windows across truncate replays`, () => {
     { weight: 1, arbitrary: preloadDemandFailure },
   )
   const preloadProperty = `replay.ordered-preload-recovery`
-  const preloadCampaigns =
-    orderedReplayConfig.replayPath === undefined
-      ? ([`fixed`, `random`] as const)
-      : orderedReplayConfig.replayProperty === preloadProperty
-        ? ([`replay`] as const)
-        : ([] as const)
-
-  it.each(preloadCampaigns)(
-    `recovers replays that start during the initial preload (%s campaign)`,
-    async (campaign) => {
-      // Declared reach: a replay participant that fails before the first
-      // ready, which must end the query or let the preload settle, and a
-      // window move that waits behind a replay a newer truncate discards,
-      // which must still apply.
-      const reach = createOracleReach(
-        preloadProperty,
-        [
-          `preloadReplayFailures`,
-          `discardedReplayMoves`,
-          `preloadChecks`,
-        ] as const,
-        { minimum: 5 },
-      )
-      await fc.assert(
-        fc.asyncProperty(preloadCase, async ([history, scenario]) => {
-          reach.beginHistory()
-          const observed = await checkOrderedReplay(history, scenario)
-          for (const state of [
-            `preloadReplayFailures`,
-            `discardedReplayMoves`,
-            `preloadChecks`,
-          ] as const) {
-            if (observed[state] > 0) reach.reach(state)
-          }
-        }),
-        // The fixed seed kills both mutants that the evidence names: a
-        // builder that lets a discarded replay reject a deferred window move,
-        // and one that keeps a failure before the first ready non-fatal. Each
-        // dies in about half of 200-run seeds.
-        campaign === `fixed`
-          ? { seed: 20261027, numRuns: oracleRuns(300) }
-          : oraclePropertyOptions(300, preloadProperty),
-      )
-      reach.assertReached()
+  oracleProperty({
+    id: preloadProperty,
+    law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: {
+      arbitrary: preloadCase,
+      runs: 300,
+      fixedSeeds: [20261027],
+      states: preloadStates,
+      constructed: preloadConstructions(),
     },
-    120_000,
-  )
+    resolve: ([history, scenario]) => ({
+      entries: [{ history, scenario }],
+      states: preloadStates,
+    }),
+    model: recordedAssertionJudgment,
+    driver: driveReplayPlan,
+    check: forwardAssertionJudgment,
+  })
 
-  it.each(failedReplayCampaigns)(
-    `keeps the last publication through a failed replay (%s campaign)`,
-    async (campaign) => {
-      // Declared reach: histories where the retention law judged a failed
-      // replay, judged a replay that still held publication, and saw a
-      // demand that the graph started after the commit fail while its replay
-      // still loaded, on either source and for an include. An include
-      // demand's rejection arrives before its replay records the failure, so
-      // only there does the demand wait for the replay to decide it.
-      const reach = createOracleReach(
-        failedReplayProperty,
-        [
-          `retainedFailedReplays`,
-          `heldPublicationChecks`,
-          `participantDemandFailures`,
-          `includeDemandFailures`,
-          `siblingDemandFailures`,
-          `failedSiblingDemandFailures`,
-          `thrownReplayDemands`,
-          `partialFailureRetirements`,
-          `requestErrorChecks`,
-          `deferredMoveRejections`,
-          `successWhileSubscriptionOwes`,
-        ] as const,
-        { minimum: 5 },
-      )
-      await fc.assert(
-        fc.asyncProperty(failedReplayCase, async ([history, scenario]) => {
-          reach.beginHistory()
-          const observed = await checkOrderedReplay(history, scenario)
-          if (observed.retainedFailedReplays > 0) {
-            reach.reach(`retainedFailedReplays`)
-          }
-          if (observed.heldPublicationChecks > 0) {
-            reach.reach(`heldPublicationChecks`)
-          }
-          if (observed.participantDemandFailures > 0) {
-            reach.reach(`participantDemandFailures`)
-          }
-          if (observed.includeDemandFailures > 0) {
-            reach.reach(`includeDemandFailures`)
-          }
-          if (observed.siblingDemandFailures > 0) {
-            reach.reach(`siblingDemandFailures`)
-          }
-          if (observed.failedSiblingDemandFailures > 0) {
-            reach.reach(`failedSiblingDemandFailures`)
-          }
-          if (observed.thrownReplayDemands > 0) {
-            reach.reach(`thrownReplayDemands`)
-          }
-          if (observed.partialFailureRetirements > 0) {
-            reach.reach(`partialFailureRetirements`)
-          }
-          if (observed.requestErrorChecks > 0) {
-            reach.reach(`requestErrorChecks`)
-          }
-          if (observed.deferredMoveRejections > 0) {
-            reach.reach(`deferredMoveRejections`)
-          }
-          if (observed.successWhileSubscriptionOwes > 0) {
-            reach.reach(`successWhileSubscriptionOwes`)
-          }
-        }),
-        campaign === `fixed`
-          ? { seed: 20261023, numRuns: oracleRuns(600) }
-          : oraclePropertyOptions(600, failedReplayProperty),
-      )
-      reach.assertReached()
+  oracleProperty({
+    id: failedReplayProperty,
+    law: orderedReplayLaw,
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/collection/subscription.ts',
+      'src/indexes/btree-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: {
+      arbitrary: failedReplayCase,
+      runs: 600,
+      fixedSeeds: [20261023],
+      states: failedReplayStates,
+      constructed: failedReplayConstructions(),
     },
-    120_000,
-  )
+    resolve: ([history, scenario]) => ({
+      entries: [{ history, scenario }],
+      states: failedReplayStates,
+    }),
+    model: recordedAssertionJudgment,
+    driver: driveReplayPlan,
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -3015,12 +4066,6 @@ describe(`Ordered windows across truncate replays`, () => {
  * Aborted work does not count. Named neighbors above calibrate both witnesses.
  */
 const replayDemandProperty = `replay.subscription-demand-origin`
-const replayDemandCampaigns =
-  orderedReplayConfig.replayPath === undefined
-    ? ([`fixed`, `random`] as const)
-    : orderedReplayConfig.replayProperty === replayDemandProperty
-      ? ([`replay`] as const)
-      : ([] as const)
 const replayDemandHistory = fc.record({
   origin: fc.constantFrom(`new-demand` as const, `renewal` as const),
   previousReplays: fc.integer({ min: 0, max: 3 }),
@@ -3031,63 +4076,73 @@ const replayDemandHistory = fc.record({
 })
 
 // Direct replay registers only the selected property campaign.
-it.each(replayDemandCampaigns)(
-  `distinguishes failed demand origins (%s campaign)`,
-  async (campaign) => {
-    const declared = createOracleReach(replayDemandProperty, replayDemandStates)
-    await fc.assert(
-      fc.asyncProperty(replayDemandHistory, async (generated) => {
-        declared.beginHistory()
-        const history: Array<OrderedCommand> = [
-          ...Array.from({ length: generated.previousReplays }, () => ({
-            type: `truncateMarkers` as const,
-          })),
-          { type: `hold` },
-          ...(generated.origin === `new-demand`
-            ? [{ type: `move` as const, ...generated.move }]
-            : []),
-          { type: `truncateMarkers` },
-          ...Array.from(
-            { length: generated.origin === `new-demand` ? 1 : 0 },
-            () => ({
-              type: `settle` as const,
-              ok: true,
-            }),
-          ),
-          { type: `settle`, ok: false },
-        ]
-        const entered = new Set<ReplayDemandState>()
-        const reach = await checkOrderedReplay(
+oracleProperty({
+  id: replayDemandProperty,
+  law: orderedReplayLaw,
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/collection/subscription.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: {
+    arbitrary: replayDemandHistory,
+    runs: 75,
+    fixedSeeds: [2233],
+    states: replayDemandStates,
+    constructed: replayDemandStates.map((state, index) => ({
+      name: state,
+      enters: [state],
+      build: (generated: GeneratedValue<typeof replayDemandHistory>) => ({
+        ...generated,
+        origin: index === 0 ? ('new-demand' as const) : ('renewal' as const),
+        move: { ...generated.move, id: index === 0 ? 1 : generated.move.id },
+      }),
+    })),
+  },
+  resolve: (
+    generated: GeneratedValue<typeof replayDemandHistory>,
+  ): ReplayPlan => {
+    const history: Array<OrderedCommand> = [
+      ...Array.from({ length: generated.previousReplays }, () => ({
+        type: `truncateMarkers` as const,
+      })),
+      { type: `hold` },
+      ...(generated.origin === `new-demand`
+        ? [{ type: `move` as const, ...generated.move }]
+        : []),
+      { type: `truncateMarkers` },
+      ...Array.from(
+        { length: generated.origin === `new-demand` ? 1 : 0 },
+        () => ({
+          type: `settle` as const,
+          ok: true,
+        }),
+      ),
+      { type: `settle`, ok: false },
+    ]
+
+    return {
+      entries: [
+        {
           history,
-          {
+          scenario: {
             ...ordinaryOrderedScenario,
             limit: 1,
             joined: generated.origin === `new-demand` ? `none` : `some`,
             markerMode: `on-demand`,
             includes: generated.origin === `new-demand`,
           },
-          (state) => {
-            entered.add(state)
-            declared.reach(state)
-          },
-        )
-        // Neither failure may end the query: each fails behind the marker
-        // barrier, which keeps the query available for a later replay.
-        checkReplayDemandFailure(reach, entered)
-      }),
-      campaign === `fixed`
-        ? { seed: 2233, numRuns: oracleRuns(75) }
-        : oraclePropertyOptions(75, replayDemandProperty),
-    )
-    console.info(
-      replayDemandProperty,
-      campaign,
-      Object.fromEntries(declared.counts()),
-    )
-    declared.assertReached()
+        },
+      ],
+      states: [],
+      demand: true,
+    }
   },
-  120_000,
-)
+  model: recordedAssertionJudgment,
+  driver: driveReplayPlan,
+  check: forwardAssertionJudgment,
+})
 
 // The broad grammar may miss the low-frequency interaction between a
 // truncate's private window change and fresh child demand. These generated
@@ -3097,70 +4152,350 @@ it.each(replayDemandCampaigns)(
 // settlement actions before recovery; fresh-failure histories need no suffix.
 // A new include fails in the first prefix. In the second it succeeds, and
 // failure instead reaches the already established marker reacquisition.
-it.each(orderedFailureCampaigns)(
-  `distinguishes keyed request failure from reacquisition (%s campaign)`,
-  async (campaign) => {
-    const failureReach = createOracleReach<OrderedFailureState>(
-      orderedFailureProperty,
-      [`initiating-keyed-request-failed`, `keyed-reacquisition-failed`],
-    )
-    await fc.assert(
-      fc.asyncProperty(
-        fc.array(orderedCommand, { minLength: 0, maxLength: 6 }),
-        fc.constantFrom(`asc` as const, `desc` as const),
-        fc.integer({ min: 1, max: 9 }),
-        fc.boolean(),
-        fc.boolean(),
-        async (suffix, direction, rank, markThird, markFourth) => {
-          for (const fresh of [true, false]) {
-            failureReach.beginHistory()
-            const history: Array<OrderedCommand> = [
-              {
-                type: `move`,
-                id: direction === `asc` ? 1 : 5,
-                rank: direction === `asc` ? -rank : 100 + rank,
-              },
-              { type: `mark`, id: 3, on: markThird },
-              { type: `mark`, id: 4, on: markFourth },
+oracleProperty({
+  id: orderedFailureProperty,
+  law: orderedReplayLaw,
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/collection/subscription.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  histories: {
+    arbitrary: fc.tuple(
+      fc.array(orderedCommand, { minLength: 0, maxLength: 6 }),
+      fc.constantFrom('asc' as const, 'desc' as const),
+      fc.integer({ min: 1, max: 9 }),
+      fc.boolean(),
+      fc.boolean(),
+    ),
+    runs: 40,
+    fixedSeeds: [20261026],
+    states: keyedFailureStates,
+    constructed: [
+      {
+        name: 'both keyed failure origins',
+        enters: keyedFailureStates,
+        build: (generated) => generated,
+      },
+    ],
+  },
+  resolve: ([suffix, direction, rank, markThird, markFourth]): ReplayPlan => ({
+    entries: [true, false].map((fresh): ReplayEntry => {
+      const history: Array<OrderedCommand> = [
+        {
+          type: `move`,
+          id: direction === `asc` ? 1 : 5,
+          rank: direction === `asc` ? -rank : 100 + rank,
+        },
+        { type: `mark`, id: 3, on: markThird },
+        { type: `mark`, id: 4, on: markFourth },
+        { type: `hold` },
+        { type: `truncateMarkers` },
+        ...(fresh ? [] : [{ type: `settle` as const, ok: true }]),
+        { type: `settle`, ok: false },
+        ...(fresh ? [] : suffix),
+      ]
+
+      return {
+        history,
+        scenario: {
+          ...ordinaryOrderedScenario,
+          direction,
+          limit: 1,
+          joined: `none`,
+          markerMode: `on-demand`,
+          includes: true,
+        },
+        fresh,
+      }
+    }),
+    states: [],
+    keyed: true,
+  }),
+  model: recordedAssertionJudgment,
+  driver: driveReplayPlan,
+  check: forwardAssertionJudgment,
+})
+
+async function runNewSiblingMatrix(
+  observe: Parameters<typeof recordAssertionJudgment>[2],
+): Promise<void> {
+  const states = [
+    `newSiblingReplayFailures`,
+    `newSiblingReplayRetirements`,
+    `newSiblingReplayRecoveries`,
+  ] as const
+  const counts = new Map<keyof OrderedReach, number>(
+    states.map((state) => [state, 0]),
+  )
+  const record = (state: keyof OrderedReach) => {
+    counts.set(state, (counts.get(state) ?? 0) + 1)
+    observe('reach', state)
+  }
+  for (const direction of [`desc`, `asc`] as const) {
+    for (const limit of [2, 1, 3] as const) {
+      for (const settles of [2, 1]) {
+        for (const change of [`mark`, `none`, `move`, `replay`] as const) {
+          const observed = await checkOrderedReplay(
+            [
               { type: `hold` },
               { type: `truncateMarkers` },
-              ...(fresh ? [] : [{ type: `settle` as const, ok: true }]),
-              { type: `settle`, ok: false },
-              ...(fresh ? [] : suffix),
-            ]
-            const reach = await checkOrderedReplay(
-              history,
+              ...Array.from({ length: settles }, () => ({
+                type: `settle` as const,
+                ok: true,
+                keepHolding: true,
+                newest: false,
+              })),
+              { type: `settle`, ok: false, newest: true, keepHolding: true },
+              ...(change === `none`
+                ? []
+                : change === `replay`
+                  ? [{ type: `truncateMarkers` as const }]
+                  : change === `mark`
+                    ? [{ type: `mark` as const, id: 1, on: false }]
+                    : [
+                        {
+                          type: `move` as const,
+                          id: 1,
+                          rank: direction === `desc` ? 60 : 1,
+                        },
+                      ]),
+            ],
+            {
+              ...ordinaryOrderedScenario,
+              direction,
+              offset: 1,
+              limit,
+              joined: `none`,
+              includes: true,
+              markerMode: `on-demand`,
+            },
+          )
+          for (const state of states) {
+            if (observed[state] > 0) record(state)
+          }
+        }
+      }
+    }
+  }
+  console.info(`replay.new-sibling-demand`, Object.fromEntries(counts))
+  for (const [state, count] of counts)
+    oracleAssertion(`matrix reach: ${state}`, () =>
+      expect(count, state).toBeGreaterThanOrEqual(1),
+    )
+}
+
+async function runSiblingSettlementMatrix(
+  observe: Parameters<typeof recordAssertionJudgment>[2],
+): Promise<void> {
+  const states = [`lateSiblingSettlements`, `retryWhileSiblingLoads`] as const
+  const counts = new Map<keyof OrderedReach, number>(
+    states.map((state) => [state, 0]),
+  )
+  const failures: Array<unknown> = []
+  const record = (state: keyof OrderedReach) => {
+    counts.set(state, (counts.get(state) ?? 0) + 1)
+    observe('reach', state)
+  }
+  for (const direction of [`asc`, `desc`] as const) {
+    for (const limit of [1, 2, 3] as const) {
+      for (const includeFirst of [false, true]) {
+        for (const ok of [false, true]) {
+          for (const waitingMove of [false, true]) {
+            try {
+              const receipt = await checkOrderedReplay(
+                [
+                  { type: `hold` },
+                  { type: `truncateMarkers` },
+                  { type: `move`, id: 6, rank: direction === `asc` ? 60 : 1 },
+                  {
+                    type: `settle`,
+                    ok: true,
+                    keepHolding: true,
+                    target: `other`,
+                  },
+                  ...(waitingMove
+                    ? [{ type: `window` as const, offset: 0 as const, limit }]
+                    : []),
+                  ...(includeFirst
+                    ? [
+                        {
+                          type: `settle` as const,
+                          ok,
+                          keepHolding: true,
+                          target: `new-sibling` as const,
+                        },
+                      ]
+                    : []),
+                  // Twelve settlements exceed the other receipts in this
+                  // six-row domain; selected new demand stays held throughout.
+                  ...Array.from({ length: 12 }, () => ({
+                    type: `settle` as const,
+                    ok: true,
+                    keepHolding: true,
+                    target: `other` as const,
+                  })),
+                  ...(!includeFirst
+                    ? [
+                        {
+                          type: `settle` as const,
+                          ok,
+                          keepHolding: true,
+                          target: `new-sibling` as const,
+                        },
+                      ]
+                    : []),
+                ],
+                {
+                  ...ordinaryOrderedScenario,
+                  direction,
+                  offset: 1,
+                  limit,
+                  joined: `none`,
+                  includes: true,
+                  markerMode: `on-demand`,
+                },
+              )
+              for (const state of states) if (receipt[state] > 0) record(state)
+            } catch (error) {
+              failures.push(error)
+            }
+          }
+        }
+      }
+    }
+  }
+  console.info(`replay.sibling-settlement-order`, Object.fromEntries(counts))
+  if (failures.length)
+    throw new AggregateError(
+      failures,
+      `${failures.length} settlement histories violated shared publication`,
+      { cause: failures[0] },
+    )
+  for (const [state, count] of counts)
+    oracleAssertion(`matrix reach: ${state}`, () =>
+      expect(count, state).toBeGreaterThanOrEqual(1),
+    )
+}
+
+async function runErrorOrderMatrix(
+  observe: Parameters<typeof recordAssertionJudgment>[2],
+): Promise<void> {
+  const counts = new Map<keyof OrderedReach, number>(
+    (
+      [
+        `ownReplayFailureComparisons`,
+        `siblingReplayFailureComparisons`,
+      ] as const
+    ).map((state) => [state, 0]),
+  )
+  const record = (state: keyof OrderedReach) => {
+    counts.set(state, (counts.get(state) ?? 0) + 1)
+    observe('reach', state)
+  }
+  for (const direction of [`asc`, `desc`] as const) {
+    for (const joined of [false, `some`, `none`, `inner`] as const) {
+      for (const limit of [1, 2, 3] as const) {
+        for (const markers of [false, true]) {
+          for (const newest of [false, true]) {
+            const observed = await checkOrderedReplay(
+              [
+                { type: `hold` },
+                markers
+                  ? { type: `truncateMarkers` }
+                  : { type: `truncate`, armAfterStart: false },
+                { type: `window`, offset: 0, limit },
+                { type: `settle`, ok: false, newest },
+                {
+                  type: `settle`,
+                  ok: false,
+                  newest: !newest,
+                  keepHolding: false,
+                },
+              ],
               {
                 ...ordinaryOrderedScenario,
                 direction,
-                limit: 1,
-                joined: `none`,
+                joined,
+                limit,
                 markerMode: `on-demand`,
                 includes: true,
               },
-              undefined,
-              failureReach.reach,
             )
-            // A fresh request that fails inside the marker barrier keeps the
-            // query; a later suffix may legitimately end it, so only the
-            // fresh history is pinned.
-            if (fresh) {
-              expect(reach.terminalErrors, `fresh request failure`).toBe(0)
-              expect(reach.requestErrors, `fresh request failure`).toBe(1)
+            for (const state of [
+              `ownReplayFailureComparisons`,
+              `siblingReplayFailureComparisons`,
+            ] as const) {
+              if (observed[state] > 0) record(state)
             }
           }
-        },
-      ),
-      campaign === `fixed`
-        ? { seed: 20261026, numRuns: oracleRuns(40) }
-        : oraclePropertyOptions(40, orderedFailureProperty),
+        }
+      }
+    }
+  }
+  console.info(`replay.subscription-error-order`, Object.fromEntries(counts))
+  for (const [state, count] of counts)
+    oracleAssertion(`matrix reach: ${state}`, () =>
+      expect(count, state).toBeGreaterThanOrEqual(5),
     )
-    console.info(
-      orderedFailureProperty,
-      campaign,
-      Object.fromEntries(failureReach.counts()),
+}
+
+async function runSuccessScopeMatrix(
+  observe: Parameters<typeof recordAssertionJudgment>[2],
+): Promise<void> {
+  const counts = new Map<keyof OrderedReach, number>(
+    ([`siblingSuccessfulCoverage`, `siblingRequestErrorChecks`] as const).map(
+      (state) => [state, 0],
+    ),
+  )
+  const record = (state: keyof OrderedReach) => {
+    counts.set(state, (counts.get(state) ?? 0) + 1)
+    observe('reach', state)
+  }
+  for (const direction of [`asc`, `desc`] as const) {
+    for (const joined of [false, `some`, `none`, `inner`] as const) {
+      for (const limit of [1, 2, 3] as const) {
+        for (const markers of [false, true]) {
+          for (const newest of [false, true]) {
+            const observed = await checkOrderedReplay(
+              [
+                { type: `hold` },
+                markers
+                  ? { type: `truncateMarkers` }
+                  : { type: `truncate`, armAfterStart: false },
+                { type: `window`, offset: 0, limit },
+                { type: `settle`, ok: false, newest, keepHolding: true },
+                {
+                  type: `settle`,
+                  ok: true,
+                  newest: !newest,
+                  keepHolding: false,
+                },
+              ],
+              {
+                ...ordinaryOrderedScenario,
+                direction,
+                joined,
+                limit,
+                markerMode: `on-demand`,
+                includes: true,
+              },
+            )
+            for (const state of [
+              `siblingSuccessfulCoverage`,
+              `siblingRequestErrorChecks`,
+            ] as const) {
+              if (observed[state] > 0) record(state)
+            }
+          }
+        }
+      }
+    }
+  }
+  console.info(`replay.subscription-success-scope`, Object.fromEntries(counts))
+  for (const [state, count] of counts)
+    oracleAssertion(`matrix reach: ${state}`, () =>
+      expect(count, state).toBeGreaterThanOrEqual(1),
     )
-    failureReach.assertReached()
-  },
-  120_000,
-)
+}

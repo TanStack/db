@@ -1,5 +1,6 @@
 // Shared helpers for the oracle file and the ordinary tests moved from it.
 import { expect } from 'vitest'
+import { oracleAssertion } from './oracle-assertion-adapter.js'
 import type { LoadSubsetOptions } from '../src/types.js'
 
 export type ReplayRow = {
@@ -53,9 +54,19 @@ export function expectSameSubsetRequest(
   actual: LoadSubsetOptions,
   expected: LoadSubsetOptions,
 ): void {
-  expect(actual.where).toBe(expected.where)
-  expect(actual.orderBy).toBe(expected.orderBy)
-  expect(actual.limit).toBe(expected.limit)
-  expect(actual.cursor).toEqual(expected.cursor)
-  expect(actual.offset).toBe(expected.offset)
+  oracleAssertion('existing comparison at 56', () =>
+    expect(actual.where).toBe(expected.where),
+  )
+  oracleAssertion('existing comparison at 57', () =>
+    expect(actual.orderBy).toBe(expected.orderBy),
+  )
+  oracleAssertion('existing comparison at 58', () =>
+    expect(actual.limit).toBe(expected.limit),
+  )
+  oracleAssertion('existing comparison at 59', () =>
+    expect(actual.cursor).toEqual(expected.cursor),
+  )
+  oracleAssertion('existing comparison at 60', () =>
+    expect(actual.offset).toBe(expected.offset),
+  )
 }

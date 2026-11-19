@@ -78,6 +78,11 @@ export class OrderedSourceLoader {
   // completion sets it again, so it never needs clearing.
   private hasSettledSourceRequest = false
   private settledSourceBoundary: Record<string, unknown> | undefined
+  // The settled prefix ending at that boundary: a row that ties with the
+  // boundary but is not among these rows lies outside the prefix.
+  private settledSourcePrefix: ReadonlyArray<
+    ChangeMessage<Record<string, unknown>, string | number>
+  > = []
   // Independent of ordinary finite success. A live delete or order-changing
   // update owes a bounded repair: unlike a failed request it cannot have
   // partially written unknown rows, so re-reading the exact ordered prefix is
@@ -161,7 +166,7 @@ export class OrderedSourceLoader {
       info.sourceHoldsAllRows &&
       info.index !== undefined &&
       info.orderBy.length === 1 &&
-      info.joinedFilterSourceId === undefined
+      !info.joinedFilterSourceIds?.length
   }
 
   private get needsOrderingRepair(): boolean {
@@ -229,10 +234,21 @@ export class OrderedSourceLoader {
     let hasOptimisticDeparture = false
     for (const change of changes) {
       const previous = sentRows?.get(change.key)
-      // A finished repair holds every row through its boundary, so releasing
-      // what it superseded removes only rows outside its coverage.
+      // A finished repair holds every row of its prefix, so releasing what it
+      // superseded removes only rows after it, such as a tie only an old tie
+      // request held. Deleting a sent row of the prefix is new source
+      // information.
       if (change.type === `delete` && this.retiringSupersededAcquisitions) {
-        continue
+        const order =
+          previous === undefined || this.settledSourceBoundary === undefined
+            ? 1
+            : this.info.comparator(previous, this.settledSourceBoundary)
+        if (
+          order > 0 ||
+          (order === 0 &&
+            this.settledSourcePrefix.every(({ key }) => key !== change.key))
+        )
+          continue
       }
       // A sent row that leaves or moves. An optimistic overlay may still
       // revert, so it only checks the local supply; a source move invalidates
@@ -295,7 +311,10 @@ export class OrderedSourceLoader {
       this.blockedLoadMore?.windowOperationGeneration
     continuesOrderedPrefixRepair ||=
       this.blockedLoadMore?.continuesOrderedPrefixRepair ?? false
-    if (this.info.joinedFilterSourceId && this.hasPendingJoinedWork()) {
+    if (
+      this.info.joinedFilterSourceIds?.length &&
+      this.hasPendingJoinedWork()
+    ) {
       if (
         windowOperationGeneration !== undefined ||
         continuesOrderedPrefixRepair
@@ -308,6 +327,15 @@ export class OrderedSourceLoader {
       return this.pending
     }
     this.blockedLoadMore = undefined
+    // A repair step that a staged continuation or a blocked window move
+    // resumes after the chain's epoch moved starts the replacement instead:
+    // the obsolete chain issues no further tie or refill. A staged boundary
+    // step reaches this check too, because the invalidation cleared the
+    // settled boundary it would read.
+    if (continuesOrderedPrefixRepair && this.repairNeedsReplacement()) {
+      this.finishOrderedPrefixRepair(windowOperationGeneration)
+      return this.pending
+    }
     // A finite step staged under ordering debt cannot run ahead of the owed
     // read. An invalidation drops it. A failure, even one from before a
     // cursor reset that keeps the work staged after it, clears the boundary,
@@ -762,7 +790,14 @@ export class OrderedSourceLoader {
       if (!this.active || !hasSupersededAcquisition) {
         this.cancelRepairRetry()
         this.repairRetries = 0
-        this.moveWork({ kind: `idle` }, [`repair`], `none`)
+        // Retirement can deliver a newer invalidation or raise the debt to a
+        // full-source read. Keep that debt for the next pass; otherwise this
+        // chain has paid its own epoch.
+        this.moveWork(
+          { kind: `idle` },
+          [`repair`],
+          this.repairNeedsReplacement() ? this.debt : `none`,
+        )
       }
     }
   }
@@ -879,7 +914,10 @@ export class OrderedSourceLoader {
         continuation.continuesOrderedPrefixRepair,
       )
     } else {
-      if (this.info.joinedFilterSourceId && this.hasPendingJoinedWork()) {
+      if (
+        this.info.joinedFilterSourceIds?.length &&
+        this.hasPendingJoinedWork()
+      ) {
         this.stagedContinuation = continuation
         return
       }
@@ -1214,15 +1252,17 @@ export class OrderedSourceLoader {
               }
               if (!isFullSource && options.orderBy) {
                 try {
-                  this.settledSourceBoundary =
-                    this.subscription
-                      .readOrderedSnapshot({
-                        ...options,
-                        // Provider limits include optimistic headroom. Those
-                        // extra local ranks do not prove a source boundary.
-                        limit: requestedCount ?? options.limit,
-                      })
-                      .at(-1)?.value ?? this.settledSourceBoundary
+                  const prefix = this.subscription.readOrderedSnapshot({
+                    ...options,
+                    // Provider limits include optimistic headroom. Those
+                    // extra local ranks do not prove a source boundary.
+                    limit: requestedCount ?? options.limit,
+                  })
+                  const boundary = prefix.at(-1)?.value
+                  if (boundary) {
+                    this.settledSourceBoundary = boundary
+                    this.settledSourcePrefix = prefix
+                  }
                 } catch (error) {
                   if (canSettleSynchronously) {
                     synchronousCompletionFailure = { error }

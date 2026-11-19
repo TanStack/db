@@ -83,6 +83,8 @@ export function createConvexOptions<
         if (!ready || terminal) {
           stopped = { error }
           failSync(error)
+          // LIFE-10: the stopped run releases its subscription at once.
+          release()
         } else reportError(error)
         onError?.(error)
       }
@@ -176,7 +178,10 @@ export function createConvexOptions<
             }
           }, fail)
       }
+      // The latest result the source delivered, accepted or rejected.
+      let received: TResult | undefined
       const receive = (result: TResult): void => {
+        received = result
         try {
           accept(result)
         } catch (error) {
@@ -184,6 +189,12 @@ export function createConvexOptions<
         }
       }
       let subscription: ConvexSubscription<TResult> | undefined
+      let released = false
+      const release = (): void => {
+        if (released || !subscription) return
+        released = true
+        subscription.unsubscribe()
+      }
       const refresh = async (): Promise<void> => {
         if (stopped) throw stopped.error
         if (!active || !subscription) {
@@ -196,10 +207,24 @@ export function createConvexOptions<
           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
           if (!active)
             throw new Error(`Convex sync ended before source acceptance.`)
-          const value = subscription.getCurrentValue()
-          if (value !== undefined) accept(value)
+          let value: TResult | undefined
+          try {
+            value = subscription.getCurrentValue()
+          } catch (error) {
+            // The latest result is a failure already reported: the client
+            // builds a new error on each read, so reject with the reported
+            // one rather than report it again (EVID-1, HEALTH-2).
+            if (syncError !== undefined) throw syncError
+            throw error
+          }
+          // A result already received is not delivered again: a rejected one
+          // keeps its reported failure.
+          if (value !== undefined && value !== received) {
+            received = value
+            accept(value)
+          }
         } catch (error) {
-          fail(error)
+          if (error !== syncError) fail(error)
           throw error
         }
         if (!initialized) await firstResult
@@ -209,6 +234,8 @@ export function createConvexOptions<
       readCurrent = refresh
       try {
         subscription = subscribe(receive, fail)
+        // A failure during subscription comes before it can be released.
+        if (stopped) release()
         // Validate subscription construction before readiness. The empty lazy
         // run still precedes subset activation, avoiding first-page replay.
         if (syncMode === `on-demand`) receive([] as TResult)
@@ -247,7 +274,7 @@ export function createConvexOptions<
           active = false
           rejectFirst(new Error(`Convex sync ended before source acceptance.`))
           if (readCurrent === refresh) readCurrent = undefined
-          subscription?.unsubscribe()
+          release()
         },
       }
     },

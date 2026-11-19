@@ -14,10 +14,17 @@ import type { SyncConfig } from '../../src/types.js'
 import type {
   BucketFacadeRef,
   BucketRow,
+  ValueResolver,
 } from '../../src/query/live/materialized-pipeline.js'
 import type { Context } from '../../src/query/builder/types.js'
 
 type FacadeSync = Parameters<SyncConfig<Record<string, unknown>>[`sync`]>[0]
+
+// These direct component fixtures have flat rows and root facade references,
+// with no nested include paths or compiler metadata to clean. Keep their
+// resolver in the driver; unused generic helpers are absent from built dist.
+const resolveFlatFacadeValue: ValueResolver = (value, resolveFacade) =>
+  resolveFacade(value)
 
 class ThrowingBuildIndex extends BasicIndex<number> {
   throwBeforeBuild = false
@@ -77,6 +84,7 @@ describe(`BucketFacadeAdapter`, () => {
           },
         ],
         () => {},
+        resolveFlatFacadeValue,
       )
       graph.finalize()
       const ref: BucketFacadeRef = {
@@ -140,6 +148,7 @@ describe(`BucketFacadeAdapter`, () => {
           },
         ],
         () => {},
+        resolveFlatFacadeValue,
       )
       graph.finalize()
       const bucketKey = `group`
@@ -226,6 +235,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
+      resolveFlatFacadeValue,
     )
     graph.finalize()
 
@@ -279,6 +289,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
+      resolveFlatFacadeValue,
     )
     graph.finalize()
 
@@ -363,7 +374,9 @@ describe(`BucketFacadeAdapter`, () => {
     expect(layoutPublications).toBe(0)
     expect(statusChanges).toBe(0)
     expect(truncates).toBe(0)
-    expect(facade._stateRevision).toBe(stateRevision)
+    // Discarded delivery restores public rows, but committed clocks never rewind.
+    expect(facade._stateRevision).toBeGreaterThan(stateRevision)
+    const restoredRevision = facade._stateRevision
     expect(facade._layoutRevision).toBe(layoutRevision)
     expect(facade.status).toBe(`ready`)
 
@@ -387,7 +400,7 @@ describe(`BucketFacadeAdapter`, () => {
     expect(publications[0]).toHaveLength(2)
     expect(statusChanges).toBe(0)
     expect(truncates).toBe(0)
-    expect(facade._stateRevision).toBe(stateRevision + 1)
+    expect(facade._stateRevision).toBe(restoredRevision + 1)
     expect(facade._layoutRevision).toBe(layoutRevision + 1)
     expect(facade.toArray.map((row) => facade.getKeyFromItem(row))).toEqual([
       fixed.id,
@@ -419,7 +432,7 @@ describe(`BucketFacadeAdapter`, () => {
     expect(layoutPublications).toBe(1)
     expect(publications).toHaveLength(2)
     expect(publications[1]).toEqual([])
-    expect(facade._stateRevision).toBe(stateRevision + 1)
+    expect(facade._stateRevision).toBe(restoredRevision + 1)
     expect(facade._layoutRevision).toBe(layoutRevision + 2)
 
     unsubscribeTruncate()
@@ -452,6 +465,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
+      resolveFlatFacadeValue,
     )
     graph.finalize()
 
@@ -547,6 +561,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
+      resolveFlatFacadeValue,
     )
     graph.finalize()
 
@@ -611,7 +626,8 @@ describe(`BucketFacadeAdapter`, () => {
     expect(facade.status).toBe(`ready`)
     expect(facade._state.syncedData.get(original.id)).toMatchObject(original)
     expect(publications).toEqual([])
-    expect(facade._stateRevision).toBe(revision)
+    expect(facade._stateRevision).toBeGreaterThan(revision)
+    const restoredRevision = facade._stateRevision
 
     const final = { id: 1, value: `final` }
     rows.sendData(
@@ -626,7 +642,7 @@ describe(`BucketFacadeAdapter`, () => {
     expect(facade.toArray.map(stripVirtualProps)).toEqual([final])
     expect(publications).toHaveLength(1)
     expect(publications[0]).toHaveLength(1)
-    expect(facade._stateRevision).toBe(revision + 1)
+    expect(facade._stateRevision).toBe(restoredRevision + 1)
     expect(index.lookup(`eq`, `original`)).toEqual(new Set())
     expect(index.lookup(`eq`, `replacement`)).toEqual(new Set())
     expect(index.lookup(`eq`, `final`)).toEqual(new Set([original.id]))

@@ -55,12 +55,16 @@
  */
 import { describe, expect, it } from 'vitest'
 import { include, pooledLiveQueries } from '@tanstack/db'
-import { createOracleReach } from '../oracle-reach'
+import { registerWindowHistoryOracle } from './window-history-oracle'
+import { registerResultShapeOracle } from './result-shape-oracle'
 import { ScenarioLifetime } from './scenario-lifetime'
 import { ScenarioSources } from './scenario-sources'
 import { scenarioRegistry } from './registration'
+import { registerIndexingConfigScenarios } from './indexing-config-oracle'
 import { expectDisabledResult } from './disabled-laws'
 import { expectPublishedRows } from './publication-laws-oracle'
+import { runRowSnapshotHistories } from './row-snapshot-oracle'
+import { runPublicFieldHistories } from './public-field-oracle'
 import {
   expectKeyedRows,
   expectOrderedRows,
@@ -160,8 +164,10 @@ const ISSUES: Array<Issue> = [
 ]
 
 export function runSuite(rawDriver: LiveQueryDriver) {
+  registerWindowHistoryOracle(rawDriver)
+  registerResultShapeOracle(rawDriver)
   const { ops } = rawDriver
-  const registry = scenarioRegistry(rawDriver.knownGaps)
+  const registry = scenarioRegistry(rawDriver.limits)
 
   // Track every handle mounted during the current scenario so it is always torn
   // down, even when a scenario throws before its own
@@ -176,8 +182,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
   }
   const driver: LiveQueryDriver = {
     ...rawDriver,
-    makeSource: (data, collectionId) =>
-      sources!.track(rawDriver.makeSource(data, collectionId)),
+    makeSource: (data, collectionId, options) =>
+      sources!.track(rawDriver.makeSource(data, collectionId, options)),
     makeDeferredSource: <T extends { id: string }>() =>
       sources!.track(rawDriver.makeDeferredSource<T>()),
     makeLaggingSource: <T extends { id: string }>() =>
@@ -229,6 +235,22 @@ export function runSuite(rawDriver: LiveQueryDriver) {
   }
 
   describe(`live-query conformance :: ${driver.name}`, () => {
+    registerIndexingConfigScenarios(driver, scenario)
+    for (const input of [`callback`, `config`, `collection`] as const)
+      for (const writes of [`sync`, `optimistic`] as const)
+        scenario(
+          `row-snapshot-isolation-${input}-${writes}`,
+          `materialization preserves borrowed rows and immutable mutation snapshots`,
+          () => runRowSnapshotHistories(rawDriver, input, writes),
+          30000,
+        )
+    for (const input of [`callback`, `config`] as const)
+      scenario(
+        `public-field-destination-${input}`,
+        `nested source spreads preserve accepted inherited-name destinations`,
+        () => runPublicFieldHistories(rawDriver, input),
+        30000,
+      )
     // ---- spine: query + liveness ----------------------------------------
 
     scenario(
@@ -391,13 +413,14 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         // The current result and the publication recorder are separate
         // observations. A ready, nonempty accessor must reach the log before
         // setParam's explicit first-turn read can supply another value.
-        const publicationReach = createOracleReach(
-          `pooled parameter publication`,
-          [`initial data rows`, `switched data rows`, `switched state rows`],
-        )
-        publicationReach.beginHistory()
+        const publicationStates = [
+          `initial data rows`,
+          `switched data rows`,
+          `switched state rows`,
+        ]
+        const observedPublications = new Set<string>()
         expectPublishedRows(moving.publications(), [SEED[0]!, SEED[2]!])
-        publicationReach.reach(`initial data rows`)
+        observedPublications.add(`initial data rows`)
 
         // Every value the binding publishes after a switch holds only rows of
         // the new group, or none while it loads; the old group's rows never
@@ -413,9 +436,9 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           // The keyed state map follows the same law as `data`.
           const states = moving.statePublications().slice(before)
           expectPublishedRows(published, rows)
-          publicationReach.reach(`switched data rows`)
+          observedPublications.add(`switched data rows`)
           expectPublishedRows(states, rows)
-          publicationReach.reach(`switched state rows`)
+          observedPublications.add(`switched state rows`)
         }
 
         await switchTo(`b`, [SEED[1]!])
@@ -437,7 +460,9 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           [`1`, `3`],
           [`1`, `3`],
         ])
-        publicationReach.assertReached()
+        expect(
+          publicationStates.filter((state) => !observedPublications.has(state)),
+        ).toEqual([])
         for (const h of [moving, peer]) h.unmount()
         await expect
           .poll(() => source.collection.subscriberCount, {
@@ -1413,11 +1438,12 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           )
         // Declared reach: the states where a claim must outlive the query
         // that made it.
-        const reach = createOracleReach<ReachState>(`source-id claim memory`, [
+        const requiredStates: ReadonlyArray<ReachState> = [
           `swap after an intervening query`,
           `swap after a disabled step`,
           `revisit after an intervening query`,
-        ])
+        ]
+        const observedStates = new Set<ReachState>()
         type ReachState =
           | `swap after an intervening query`
           | `swap after a disabled step`
@@ -1488,10 +1514,11 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           )
         type KeyedReachState =
           `claim crosses a keyed step` | `keyed step after a claim`
-        const keyedReach = createOracleReach<KeyedReachState>(
-          `source-id claim memory with keys`,
-          [`claim crosses a keyed step`, `keyed step after a claim`],
-        )
+        const requiredKeyedStates: ReadonlyArray<KeyedReachState> = [
+          `claim crosses a keyed step`,
+          `keyed step after a claim`,
+        ]
+        const observedKeyedStates = new Set<KeyedReachState>()
         const runKeyedClaimGrammar = async () => {
           const mountKeyed = driver.mountKeyedControllable
           // Every comparing driver supplies the keyed form.
@@ -1507,7 +1534,6 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           for (const first of [`A`, `C`, `AK`] as const) {
             for (const second of keyedPicks) {
               for (const third of keyedPicks) {
-                keyedReach.beginHistory()
                 const history: Array<KeyedPick> = [first]
                 const h = mountKeyed!<KeyedPick>(
                   (q, pick) =>
@@ -1552,13 +1578,13 @@ export function runSuite(rawDriver: LiveQueryDriver) {
                     claimIndex >= 0 &&
                     history.slice(claimIndex + 1).some(isKeyed)
                   ) {
-                    keyedReach.reach(`claim crosses a keyed step`)
+                    observedKeyedStates.add(`claim crosses a keyed step`)
                   }
                   if (
                     isKeyed(next) &&
                     sameIdPriors.some((prior) => !isKeyed(prior))
                   ) {
-                    keyedReach.reach(`keyed step after a claim`)
+                    observedKeyedStates.add(`keyed step after a claim`)
                   }
                   if (keyedCollides(history, next)) {
                     await expectRejection(
@@ -1586,21 +1612,23 @@ export function runSuite(rawDriver: LiveQueryDriver) {
               }
             }
           }
-          keyedReach.assertReached()
+          expect(
+            requiredKeyedStates.filter(
+              (state) => !observedKeyedStates.has(state),
+            ),
+          ).toEqual([])
         }
         // The same 32 histories also witness the reactive driver's actual
         // accessor recorder. Comparing bindings have a rejection obligation
         // instead, so these publication states do not apply to their path.
-        const publicationReach = createOracleReach(
-          `reactive source-ID publication`,
-          comparesIdentity ? [] : [`initial data rows`, `swapped data rows`],
-        )
+        const publicationStates = comparesIdentity
+          ? []
+          : [`initial data rows`, `swapped data rows`]
+        const observedPublications = new Set<string>()
         const picks: ReadonlyArray<Pick> = [`A`, `B`, `C`, `D`]
         for (const first of [`A`, `C`] as const) {
           for (const second of picks) {
             for (const third of picks) {
-              reach.beginHistory()
-              publicationReach.beginHistory()
               const history: Array<Pick> = [first]
               const h = driver.mountControllable<Pick>(
                 (q, pick) =>
@@ -1615,11 +1643,11 @@ export function runSuite(rawDriver: LiveQueryDriver) {
               expectUnorderedRows(h.current().data, rowsOf[first])
               if (!comparesIdentity) {
                 expectPublishedRows(h.publications(), rowsOf[first])
-                publicationReach.reach(`initial data rows`)
+                observedPublications.add(`initial data rows`)
               }
               for (const next of [second, third]) {
                 const state = reachedState(history, next)
-                if (state) reach.reach(state)
+                if (state) observedStates.add(state)
                 if (comparesIdentity && collides(history, next)) {
                   await expectRejection(
                     `SourceCollectionIdReuseError`,
@@ -1644,7 +1672,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
                     swapped,
                     rowsOf[next as Exclude<Pick, `D`>],
                   )
-                  publicationReach.reach(`swapped data rows`)
+                  observedPublications.add(`swapped data rows`)
                 }
                 history.push(next)
                 if (next === `D`) {
@@ -1660,8 +1688,12 @@ export function runSuite(rawDriver: LiveQueryDriver) {
             }
           }
         }
-        reach.assertReached()
-        publicationReach.assertReached()
+        expect(
+          requiredStates.filter((state) => !observedStates.has(state)),
+        ).toEqual([])
+        expect(
+          publicationStates.filter((state) => !observedPublications.has(state)),
+        ).toEqual([])
 
         if (comparesIdentity) await runKeyedClaimGrammar()
 
@@ -2189,7 +2221,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(49)
+      expect(registry.size).toBe(66)
     })
   })
 }

@@ -20,7 +20,7 @@
  *
  * Model: `expectedChanges` folds every row's operations, in callback order,
  * over plain copies of the rows. It keeps enumerable fields whose final value
- * differs under `===` or `Object.is` from the row's own field, or, for the
+ * differs under `Object.is` from the row's own field, or, for the
  * object a non-enumerable field holds, by contents; plus deleted enumerable
  * fields. A copy holds no non-enumerable field, so reading one gives
  * `undefined`, deleting one does nothing, and writing one is a change unless
@@ -50,40 +50,42 @@
  * `withArrayChangeTracking` and `withChangeTracking` run the same operations.
  *
  * Refinement check: the flat result, the proxy result, and the model are
- * strictly equal, including present `undefined` fields and the cycles a
- * stored draft creates, except that `0` and `-0` compare equal and
- * prototypes are ignored: collection equality does not distinguish them, and
- * the proxy skips writing a value equal to the current one. Mutating an
- * assigned object after the callback leaves both results unchanged.
+ * strictly equal, including present `undefined` fields, zero signs, and the
+ * cycles a stored draft creates, except that prototypes are ignored:
+ * collection equality does not distinguish them. `-0` and `0` are distinct
+ * row values (maintainer decision, 2026-10-29), so writing one over the
+ * other is a change, as `NaN` over `NaN` is not. Mutating an assigned object
+ * after the callback leaves both results unchanged.
  *
- * Calibration: a flat diff with `!==` reports unchanged `NaN` fields, one with
- * `Object.is` alone reports `-0` written over `0`, one that skips deletions
+ * Calibration: a flat diff with `!==` reports unchanged `NaN` fields, one
+ * that also accepts `===` drops `-0` written over `0` (the behavior before
+ * the 2026-10-29 decision, in both trackers), one that skips deletions
  * loses removed fields, one that ignores whether the row owns a field drops
  * added `undefined` fields, and one that edits rows in place breaks the throw
- * and stored-draft histories; each fails a pinned history and the fixed
+ * and stored-draft histories; each fails a fixed history and the fixed
  * campaign. The proxy used to treat a field added with `undefined` as
  * reverted when another field went back to its original value, and dropped
- * the added field; the pinned history and both campaigns fail without the
+ * the added field; the fixed history and both campaigns fail without the
  * fix, because the grammar weights that run.
  *
  * Known omissions: nested objects, arrays, Dates, Maps, Sets, class
  * instances, and symbol keys are outside this owner; the proxy oracles and
  * contracts own them, and this file checks only that they fall back.
  */
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { describe, expect } from 'vitest'
 import {
   withArrayChangeTracking,
   withChangeTracking,
   withFlatChangeTracking,
 } from '../src/proxy.js'
+import { oracleProperty } from './oracle-config.js'
 import {
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRuns,
-} from './oracle-config.js'
-import { declareOracle } from './oracle-declaration.js'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import {
   FRESH_OBJECT,
   MISSING,
@@ -137,8 +139,10 @@ type History = {
 // Model
 // ---------------------------------------------------------------------------
 
+// The same value: `NaN` is itself, and `-0` is not `0` (maintainer
+// decision, 2026-10-29: they are distinct row values).
 function sameValue(a: unknown, b: unknown): boolean {
-  return a === b || Object.is(a, b)
+  return Object.is(a, b)
 }
 
 // Only a non-enumerable field holds an object, always `{ nested: 1 }`; an
@@ -242,10 +246,9 @@ function applyOperation(
   }
 }
 
-// Collection equality does not distinguish -0 from 0 or prototypes. A
-// stored draft can make a change set cyclic, so the copy keeps cycles.
+// Collection equality does not distinguish prototypes. A stored draft can
+// make a change set cyclic, so the copy keeps cycles.
 function normalize(value: unknown, copies = new Map<object, Row>()): unknown {
-  if (value === 0) return 0
   if (value === null || typeof value !== `object`) return value
   const existing = copies.get(value)
   if (existing) return existing
@@ -371,7 +374,7 @@ const historyArbitrary: fc.Arbitrary<History> = fc
     }),
   )
 
-// Each witness pins a shape the trackers once disagreed on to the change
+// Each witness checks a shape the trackers once disagreed on to the change
 // set both must now report: defining a field acts as assigning it, and a
 // non-enumerable field is not row data unless the callback writes it.
 const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
@@ -413,7 +416,7 @@ const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
     },
   },
   {
-    name: `-0 written over 0 is not a change`,
+    name: `-0 written over 0 is a change`,
     history: {
       rows: [plainRow([0, 1, MISSING])],
       operations: [[{ kind: `set`, field: `a`, value: -0 }]],
@@ -564,38 +567,93 @@ function runHistory(history: History): void {
       }
       return undefined
     })
-    expect(errors[0], `flat rethrows`).toBeOneOf([CallbackError, TypeError])
-    expect(errors[1], `proxy throws the same error`).toBe(errors[0])
+    oracleAssertion(`flat rethrows`, () =>
+      expect(errors[0], `flat rethrows`).toBeOneOf([CallbackError, TypeError]),
+    )
+    oracleAssertion(`proxy throws the same error`, () =>
+      expect(errors[1], `proxy throws the same error`).toBe(errors[0]),
+    )
     for (const rows of [flatRows, proxyRows]) {
-      expect(rows.map(rowState), `rows unchanged`).toStrictEqual(
-        originals.map(rowState),
+      oracleAssertion(`rows unchanged`, () =>
+        expect(rows.map(rowState), `rows unchanged`).toStrictEqual(
+          originals.map(rowState),
+        ),
       )
     }
     return
   }
   const flat = track.flat()
-  expect(flat, `flat rows take the flat path`).toBeDefined()
+  oracleAssertion(`flat rows take the flat path`, () =>
+    expect(flat, `flat rows take the flat path`).toBeDefined(),
+  )
   const proxy = track.proxy()
-  expect(normalize(flat), `flat vs model`).toStrictEqual(normalize(model))
-  expect(normalize(proxy), `proxy vs model`).toStrictEqual(normalize(model))
+  oracleAssertion(`flat vs model`, () =>
+    expect(normalize(flat), `flat vs model`).toStrictEqual(normalize(model)),
+  )
+  oracleAssertion(`proxy vs model`, () =>
+    expect(normalize(proxy), `proxy vs model`).toStrictEqual(normalize(model)),
+  )
 }
 
-declareOracle({ check: [runHistory], model: [expectedChanges] })
-
 describe(`flat change tracking oracle`, () => {
-  if (!oracleReplayRequested()) {
-    for (const { name, history } of pinnedHistories) {
-      it(`matches the draft proxy when ${name}`, () => runHistory(history))
-    }
+  // The pinned histories are outside what the generated grammar can take
+  // back, so one enumerated property replays them through the same helper.
+  oracleProperty({
+    id: `flat-change-tracking.pinned`,
+    law: {
+      statement: `Flat and proxy trackers agree with the independent authored field-difference model, including signed zero, deletion, reversion, descriptor effects, stored drafts and callback rejection.`,
+      authority: `src/proxy.ts draft/change-set contract and the 2026-10-29 signed-zero maintainer decision`,
+      limits: `Named regressions that the generated flat-row grammar cannot take back; each is replayed through the same driver and comparison.`,
+    },
+    owns: [
+      `src/proxy.ts#withFlatChangeTracking`,
+      `src/proxy.ts#withChangeTracking`,
+      `src/proxy.ts#withArrayChangeTracking`,
+    ],
+    histories: pinnedHistories.map(({ name }) => name),
+    label: (name) => `matches the draft proxy when ${name}`,
+    resolve: (name) => ({
+      history: pinnedHistories.find((entry) => entry.name === name)!.history,
+    }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `flat change tracking equivalence`,
+        plan,
+        observe,
+        () => runHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
-    fcTest.prop([historyArbitrary], {
-      seed: 44_502_101,
-      numRuns: oracleRuns(200),
-    })(`matches the draft proxy (fixed)`, runHistory)
-  }
-  // A path replay of this property runs its one recorded history here.
-  oracleReplayTest(fcTest, property).prop(
-    [historyArbitrary],
-    oraclePropertyOptions(200, property),
-  )(`matches the draft proxy (random)`, runHistory)
+  oracleProperty({
+    id: property,
+    law: {
+      statement: `Flat and proxy trackers agree with the independent authored field-difference model, including signed zero, deletion, reversion, descriptor effects, stored drafts and callback rejection.`,
+      authority: `src/proxy.ts draft/change-set contract and the 2026-10-29 signed-zero maintainer decision`,
+      limits: `The existing bounded flat-row grammar; nested rich containers, class instances and symbol keys belong to the other proxy owners.`,
+    },
+    // What this oracle owns: the gap report judges the flat and proxy change trackers
+    // (withFlatChangeTracking, withChangeTracking, withArrayChangeTracking) by this file's tests.
+    owns: [
+      `src/proxy.ts#withFlatChangeTracking`,
+      `src/proxy.ts#withChangeTracking`,
+      `src/proxy.ts#withArrayChangeTracking`,
+    ],
+    histories: {
+      arbitrary: historyArbitrary,
+      runs: 200,
+      fixedSeeds: [44502101],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `flat change tracking equivalence`,
+        plan,
+        observe,
+        () => runHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

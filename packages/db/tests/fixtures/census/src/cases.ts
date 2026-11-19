@@ -1,5 +1,5 @@
 // Classifier cases for tests/error-sites-oracle.ts. The production error
-// message oracle pins how the census classifies each function below.
+// message oracle checks how the census classifies each function below.
 
 function devBuild(): boolean {
   return true

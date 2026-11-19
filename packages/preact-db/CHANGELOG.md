@@ -1,5 +1,44 @@
 # @tanstack/preact-db
 
+## 1.0.0-rc.1.5
+
+### Patch Changes
+
+- Updated dependencies [[`522f657`](https://github.com/TanStack/db/commit/522f65777a42673a1befcb8169854002894d15c0), [`a86aa43`](https://github.com/TanStack/db/commit/a86aa430418572a4834972aa60b7d6a18e2e08ba), [`6ec538e`](https://github.com/TanStack/db/commit/6ec538ecd3c8a966e6a1e93d88b82023021a47a4)]:
+  - @tanstack/db@1.0.0-rc.1.5
+
+## 1.0.0-rc.1.4
+
+### Patch Changes
+
+- Updated dependencies [[`bfb660a`](https://github.com/TanStack/db/commit/bfb660a1e8074064cd1fd93a645273c17aaec98c)]:
+  - @tanstack/db@1.0.0-rc.1.4
+
+## 1.0.0-rc.1.3
+
+### Patch Changes
+
+- Keep live-query Collections across finite page changes under a DbClient, including React Suspense and Svelte, while preserving page-specific preload and hydration snapshots. Give independent React Suspense queries separate successful Collections so one query cannot move another query's page. Surface a private Suspense output's failed first load while it is showing copied ready rows, and keep its health independent of a peer's page-request failures. Fix initially disabled keyed query admission in Preact and Svelte, and finish hydration seed handoff when subset work settles without a row or status change. ([#2348](https://github.com/TanStack/db/pull/2348))
+
+- Updated dependencies [[`8a31870`](https://github.com/TanStack/db/commit/8a318707b2debe080195ae422a63982d118cf72f), [`70a744b`](https://github.com/TanStack/db/commit/70a744b3a4022b6df41b9717108f3e44b999af46)]:
+  - @tanstack/db@1.0.0-rc.1.3
+
+## 1.0.0-rc.1.2
+
+### Patch Changes
+
+- Keep adapter-owned live queries and their source subscriptions when only the ordered query's finite `.limit()` or `.offset()` changes. Preserve exact requested bounds and select only installed ranks when page windows include negative offsets. Keep Angular's list/findOne result shape consistent with the current query during reactive changes, and avoid React 18 layout-effect warnings during server rendering. ([#2316](https://github.com/TanStack/db/pull/2316))
+
+- Updated dependencies [[`30e8546`](https://github.com/TanStack/db/commit/30e85464ed2b9b12c5f10981a062427a1fc8daaa), [`a3c4d06`](https://github.com/TanStack/db/commit/a3c4d0676621cc7df4d242bdfe31815509add734), [`035a526`](https://github.com/TanStack/db/commit/035a5260ef994ce3aabed77a3f09b35c71482a9a), [`baabf57`](https://github.com/TanStack/db/commit/baabf57a0f110d57ad9bb7b81148466b18fbe0d1), [`9be51e0`](https://github.com/TanStack/db/commit/9be51e037f6c092bc9625f9b5b4b7e23eb4fa5fe), [`a3c4d06`](https://github.com/TanStack/db/commit/a3c4d0676621cc7df4d242bdfe31815509add734), [`85392bd`](https://github.com/TanStack/db/commit/85392bd1d349aa3bb77c9c11ffba671f0b2d2a84), [`9be3c4e`](https://github.com/TanStack/db/commit/9be3c4ed2c8d9762d3837e38d8869483d50b07f6)]:
+  - @tanstack/db@1.0.0-rc.1.2
+
+## 1.0.0-rc.1.1
+
+### Patch Changes
+
+- Updated dependencies [[`bfd1da1`](https://github.com/TanStack/db/commit/bfd1da1a7e752d66fd667adfd3cdf54f60732b22), [`a2f3465`](https://github.com/TanStack/db/commit/a2f346596c34faa7e65211134194337bd2e0007d), [`9cfa11f`](https://github.com/TanStack/db/commit/9cfa11fc712866f8f276e85762865ebb8bd49cbe)]:
+  - @tanstack/db@1.0.0-rc.1.1
+
 ## 1.0.0-rc.1
 
 ### Major Changes

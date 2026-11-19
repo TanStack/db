@@ -262,7 +262,7 @@ describe(`live queries across uncommitted renders`, () => {
     expect(loadCount).toBe(1)
   })
 
-  it(`retains a shared precommit collection until every suspense consumer commits`, async () => {
+  it(`finishes independent suspense queries when peers commit at different times`, async () => {
     let resolveLoad!: () => void
     let releaseSecondRender!: () => void
     let loadSettled = false
@@ -275,7 +275,6 @@ describe(`live queries across uncommitted renders`, () => {
     const secondRender = new Promise<void>((resolve) => {
       releaseSecondRender = resolve
     })
-    const never = new Promise<void>(() => {})
     const source = createCollection<Person>({
       id: `two-uncommitted-async-on-demand-consumers`,
       getKey: (person) => person.id,
@@ -291,7 +290,9 @@ describe(`live queries across uncommitted renders`, () => {
           return {
             loadSubset: () => {
               loadCount++
-              return loadSettled ? never : load
+              // Each independent output can acquire the already loaded rows.
+              // Only the initial acquisition waits for provider delivery.
+              return loadSettled ? true : load
             },
           }
         },
@@ -302,12 +303,15 @@ describe(`live queries across uncommitted renders`, () => {
       query: (q: InitialQueryBuilder) =>
         q.from({ person: source }).where(({ person }) => eq(person.id, `1`)),
     }
+    const outputs = new Map<string, object>()
     const First = () => {
-      const { data } = useLiveSuspenseQuery(config)
+      const { data, collection } = useLiveSuspenseQuery(config)
+      outputs.set(`First`, collection)
       return <div>First: {data[0]?.name}</div>
     }
     const Second = () => {
-      const { data } = useLiveSuspenseQuery(config)
+      const { data, collection } = useLiveSuspenseQuery(config)
+      outputs.set(`Second`, collection)
       if (secondRenderBlocked) throw secondRender
       return <div>Second: {data[0]?.name}</div>
     }
@@ -341,10 +345,14 @@ describe(`live queries across uncommitted renders`, () => {
     })
     await advanceTime(1)
     expect(view.getByText(`Second: Alice`)).toBeDefined()
-    expect(loadCount).toBe(1)
+    expect(outputs.get(`Second`) === outputs.get(`First`)).toBe(false)
+    expect(loadCount).toBeGreaterThan(1)
+    view.unmount()
+    await advanceTime(5100)
+    expect(source.subscriberCount).toBe(0)
   })
 
-  it(`shares an active suspense collection and retires it after cleanup`, async () => {
+  it(`keeps suspense outputs independent and retires them after cleanup`, async () => {
     let releaseSecondRender!: () => void
     let secondRenderBlocked = true
     const secondRender = new Promise<void>((resolve) => {
@@ -406,12 +414,15 @@ describe(`live queries across uncommitted renders`, () => {
     await advanceTime(1)
 
     expect(thirdView.getByText(`Third: A 0`)).toBeDefined()
-    expect(liveCollections.get(`Third`)).toBe(secondCollection)
+    expect(secondCollection === firstCollection).toBe(false)
+    expect(liveCollections.get(`Third`) === secondCollection).toBe(false)
+    expect(liveCollections.get(`Third`) === firstCollection).toBe(false)
 
     firstView.unmount()
     secondView.unmount()
     thirdView.unmount()
     await advanceTime(5100)
+    expect(source.subscriberCount).toBe(0)
 
     const fourthView = render(
       <Suspense fallback={<div>Fourth loading</div>}>
@@ -424,7 +435,7 @@ describe(`live queries across uncommitted renders`, () => {
     expect(liveCollections.get(`Fourth`)).not.toBe(secondCollection)
   })
 
-  it(`retains a ready collection while its next suspense consumer is pending commit`, async () => {
+  it(`keeps a pending suspense peer usable after the first binding unmounts`, async () => {
     let releaseSecondRender!: () => void
     let secondRenderBlocked = true
     const secondRender = new Promise<void>((resolve) => {
@@ -462,10 +473,11 @@ describe(`live queries across uncommitted renders`, () => {
       </Suspense>,
     )
     expect(secondView.getByText(`Second loading`)).toBeDefined()
-    expect(collectionsByLabel.get(`Second`)).toBe(firstCollection)
+    expect(collectionsByLabel.get(`Second`) === firstCollection).toBe(false)
 
     firstView.unmount()
     await advanceTime(2)
+    expect(source.subscriberCount).toBeGreaterThan(0)
 
     await act(async () => {
       secondRenderBlocked = false
@@ -475,7 +487,11 @@ describe(`live queries across uncommitted renders`, () => {
     await advanceTime(1)
 
     expect(secondView.getByText(`Second: A`)).toBeDefined()
-    expect(collectionsByLabel.get(`Second`)).toBe(firstCollection)
+    expect(collectionsByLabel.get(`Second`) === firstCollection).toBe(false)
+    expect(source.subscriberCount).toBeGreaterThan(0)
+    secondView.unmount()
+    await advanceTime(5100)
+    expect(source.subscriberCount).toBe(0)
   })
 
   it(`does not share precommit queries across distinct source objects with the same id`, async () => {

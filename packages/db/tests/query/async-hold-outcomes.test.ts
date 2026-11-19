@@ -12,7 +12,7 @@ import type { LoadSubsetOptions } from '../../src/types.js'
  * Initial-query readiness and Effect `skipInitial` suppression wait on held
  * acquisitions: a live query's lazy demand and an Effect's initial loads.
  * Model D in `includes-temporal-oracle.test.ts` owns the settle, abort
- * (rekey), and truncate-replacement outcomes. This file pins the remaining
+ * (rekey), and truncate-replacement outcomes. This file covers the remaining
  * outcomes for one hold at a time:
  *
  * - a real load failure disposes a `skipInitial` Effect and delivers nothing;

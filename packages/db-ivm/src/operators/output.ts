@@ -1,7 +1,10 @@
-import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
-import { StreamBuilder } from '../d2.js'
-import type { IStreamBuilder, PipedOperator } from '../types.js'
-import type { DifferenceStreamReader } from '../graph.js'
+import { UnaryOperator } from '../graph.js'
+import { unaryOperator } from '../unary-operator.js'
+import type { PipedOperator } from '../types.js'
+import type {
+  DifferenceStreamReader,
+  DifferenceStreamWriter,
+} from '../graph.js'
 import type { MultiSet } from '../multiset.js'
 
 /**
@@ -35,18 +38,5 @@ export class OutputOperator<T> extends UnaryOperator<T> {
 export function output<T>(
   fn: (data: MultiSet<T>) => void,
 ): PipedOperator<T, T> {
-  return (stream: IStreamBuilder<T>): IStreamBuilder<T> => {
-    const outputStream = new StreamBuilder<T>(
-      stream.graph,
-      new DifferenceStreamWriter<T>(),
-    )
-    const operator = new OutputOperator<T>(
-      stream.graph.getNextOperatorId(),
-      stream.connectReader(),
-      outputStream.writer,
-      fn,
-    )
-    stream.graph.addOperator(operator)
-    return outputStream
-  }
+  return unaryOperator(OutputOperator<T>, fn)
 }

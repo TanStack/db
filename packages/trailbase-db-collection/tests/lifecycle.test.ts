@@ -278,7 +278,7 @@ it.each(
  * row the service deleted while no stream listened stays: that is this
  * adapter's limit for on-demand reloads.
  *
- * Reference: the same service as the eager reload lane. Between the runs
+ * Reference: the same service as the eager reload grammar. Between the runs
  * the service updates row 1 and deletes row 2 with no change event; row 3
  * is untouched. Checkpoint: once the reload settles and the replayed load
  * has applied, row 1 shows its edit, row 3 survives, and row 2 keeps its

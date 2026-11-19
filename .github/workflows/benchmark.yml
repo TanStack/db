@@ -8,6 +8,12 @@ on:
       - 'packages/db-ivm/**'
       - 'scripts/bench/**'
       - '.github/workflows/benchmark.yml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.npmrc'
+      - 'patches/**'
+      - '*config*'
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -31,19 +37,42 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
-      - name: Run benchmark on PR
+      - name: Test benchmark input selection
+        run: node --test scripts/bench/inputs-changed.test.mjs
+      - name: Detect benchmark input changes
+        id: inputs
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          pnpm --filter @tanstack/db-ivm build
-          pnpm exec tsx scripts/bench/incremental-update.ts \
-            --iterations=100 --warmup=20 \
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          else
+            BASE_SHA=$(git merge-base "origin/$BASE_REF" HEAD)
+            node scripts/bench/inputs-changed.mjs "$BASE_SHA" HEAD >> "$GITHUB_OUTPUT"
+          fi
+      - name: Report unchanged benchmark inputs
+        if: steps.inputs.outputs.changed == 'false'
+        run: echo 'Benchmark inputs are unchanged. Version and changelog edits do not require a latency comparison.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Setup Tools
+        if: steps.inputs.outputs.changed == 'true'
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
+      - name: Test benchmark regression gate
+        if: steps.inputs.outputs.changed == 'true'
+        run: node --test scripts/bench/compare-incremental-update.test.mjs
+      - name: Run benchmark on PR
+        if: steps.inputs.outputs.changed == 'true'
+        run: |
+          pnpm --filter @tanstack/db-ivm --filter @tanstack/db build
+          node scripts/bench/production.mjs scripts/bench/incremental-update.ts \
+            --iterations=100 --warmup=20 --repetitions=3 \
             --outFile="$RUNNER_TEMP/candidate.json"
       - name: Run benchmark on base
+        if: steps.inputs.outputs.changed == 'true'
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
         run: |
@@ -51,21 +80,34 @@ jobs:
           BASE_SHA=$(git merge-base "origin/$BASE_REF" HEAD)
           echo "Benchmarking base commit $BASE_SHA"
           git checkout --force "$BASE_SHA"
-          # Run the exact same benchmark code on both sides
-          git checkout "$HEAD_SHA" -- scripts/bench
+          # Run the exact same benchmark code on both sides, including the
+          # runner's dist freshness check
+          git checkout "$HEAD_SHA" -- scripts/bench packages/db/scripts/assert-dist-fresh.mjs
           pnpm install --frozen-lockfile
-          pnpm --filter @tanstack/db-ivm build
-          pnpm exec tsx scripts/bench/incremental-update.ts \
-            --iterations=100 --warmup=20 \
+          pnpm --filter @tanstack/db-ivm --filter @tanstack/db build
+          node scripts/bench/production.mjs scripts/bench/incremental-update.ts \
+            --iterations=100 --warmup=20 --repetitions=3 \
             --outFile="$RUNNER_TEMP/base.json"
       - name: Compare results
+        id: comparison
+        if: steps.inputs.outputs.changed == 'true'
+        continue-on-error: true
         run: |
           pnpm exec tsx scripts/bench/compare-incremental-update.ts \
             --base="$RUNNER_TEMP/base.json" \
             --candidate="$RUNNER_TEMP/candidate.json" \
-            --outFile="$RUNNER_TEMP/comparison.md"
-          cat "$RUNNER_TEMP/comparison.md" >> "$GITHUB_STEP_SUMMARY"
+            --outFile="$RUNNER_TEMP/comparison.md" \
+            --failOnRegression=true
+      - name: Publish summary
+        if: always() && steps.inputs.outputs.changed == 'true' && steps.comparison.outcome != 'skipped'
+        run: |
+          if [ -f "$RUNNER_TEMP/comparison.md" ]; then
+            cat "$RUNNER_TEMP/comparison.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Benchmark comparison failed before producing a report; see the comparison log.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload reports
+        if: always() && steps.inputs.outputs.changed == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: benchmark-reports
@@ -74,7 +116,7 @@ jobs:
             ${{ runner.temp }}/candidate.json
             ${{ runner.temp }}/comparison.md
       - name: Comment on PR
-        if: github.event_name == 'pull_request'
+        if: always() && steps.inputs.outputs.changed == 'true' && github.event_name == 'pull_request' && steps.comparison.outcome != 'skipped'
         # PRs from forks get a read-only token; the job summary and artifacts
         # still carry the results.
         continue-on-error: true
@@ -83,6 +125,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
+          if [ ! -f "$RUNNER_TEMP/comparison.md" ]; then exit 0; fi
           MARKER='<!-- incremental-update-benchmark -->'
           BODY_FILE="$RUNNER_TEMP/comment.md"
           { echo "$MARKER"; cat "$RUNNER_TEMP/comparison.md"; } > "$BODY_FILE"
@@ -93,3 +136,6 @@ jobs:
           else
             gh api "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@"$BODY_FILE" > /dev/null
           fi
+      - name: Enforce regression gate
+        if: always() && steps.comparison.outcome == 'failure'
+        run: exit 1

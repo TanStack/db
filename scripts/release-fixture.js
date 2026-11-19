@@ -361,9 +361,12 @@ if (tool === 'pnpm' && args[0] === 'publish') {
   const manifest = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json')))
   const tag = args[args.indexOf('--tag') + 1]
   const access = args[args.indexOf('--access') + 1]
-  if (JSON.stringify(args) !== JSON.stringify([
-    'publish', '--json', '--access', access, '--tag', tag, '--no-git-checks',
-  ]) || !state.packages[manifest.name] || tag.startsWith('-') || access.startsWith('-'))
+  // Changesets 2.31 moves --json after the ordinary publish flags.
+  const supported = [
+    ['publish', '--json', '--access', access, '--tag', tag, '--no-git-checks'],
+    ['publish', '--access', access, '--tag', tag, '--no-git-checks', '--json'],
+  ].some((command) => JSON.stringify(args) === JSON.stringify(command))
+  if (!supported || !state.packages[manifest.name] || tag.startsWith('-') || access.startsWith('-'))
     stop('unrecognized publish command')
   const success = state.failed || state.failureName !== manifest.name
   log.push({ type: 'publish', name: manifest.name, version: manifest.version,
@@ -411,12 +414,14 @@ stop('unrecognized command ' + tool + ' ' + args.join(' '))
         timeout: 5_000,
         env: commandEnvironment(),
       }),
-    // Only manifest/pre-state bytes belong to the publish restoration promise;
+    // Config, manifest and pre-state bytes belong to the restoration promise;
     // registry and Git logs deliberately change when a publish succeeds.
     bytes: () =>
       Object.fromEntries(
         [
+          '.changeset/config.json',
           '.changeset/pre.json',
+          'packages/private/package.json',
           ...Object.keys(packageNames).map(
             (key) => `packages/${key}/package.json`,
           ),

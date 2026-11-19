@@ -234,52 +234,71 @@ function isBinaryValue(input: object): input is Uint8Array {
  * Reference-valued leaves remain opaque, including registered mutable handles.
  */
 export function equalHashValues(left: unknown, right: unknown): boolean {
-  const compared = new Map<object, Set<object>>()
-  const keys = (value: object) =>
-    Reflect.ownKeys(value).filter((key) =>
-      Object.prototype.propertyIsEnumerable.call(value, key),
-    )
-  function equal(a: unknown, b: unknown): boolean {
-    if (a === b || (Number.isNaN(a) && Number.isNaN(b))) return true
-    if (
-      a === null ||
-      b === null ||
-      typeof a !== `object` ||
-      typeof b !== `object` ||
-      isReferenceHashedObject(a) ||
-      isReferenceHashedObject(b)
-    )
-      return false
-    // Arrays from another realm take the object marker but keep this check.
-    if (Array.isArray(a) && Array.isArray(b) && a.length !== b.length)
-      return false
+  return compareHashValues(left, right)
+}
 
-    // Revisited pairs close cycles and avoid expanding shared subtrees. Check
-    // before objectParts copies Map or Set entries; record only pairs with a
-    // body, after their markers and headers match.
-    const peers = compared.get(a)
-    if (peers?.has(b)) return true
-    const [aMarker, aHeader, aBody] = objectParts(a)
-    const [bMarker, bHeader, bBody] = objectParts(b)
-    if (
-      aMarker !== bMarker ||
-      !aHeader.every((value, index) => value === bHeader[index])
+function enumerableKeys(value: object): Array<PropertyKey> {
+  return Reflect.ownKeys(value).filter((key) =>
+    Object.prototype.propertyIsEnumerable.call(value, key),
+  )
+}
+
+// Allocate pair memoization only when structural bodies need comparison. A
+// module-level recursion also avoids rebuilding the worker for every call.
+// With `signedZero`, it compares row values: a leaf tells -0 from 0. Headers
+// still compare with `===`: core's row equality ignores a RegExp's
+// `lastIndex`, so a change of only a header's zero sign never reaches here.
+/** @internal */
+export function compareHashValues(
+  a: unknown,
+  b: unknown,
+  signedZero?: boolean,
+  compared?: Map<object, Set<object>>,
+): boolean {
+  // `Object.is` also makes NaN equal to NaN; row values tell -0 from 0.
+  if ((!signedZero && a === b) || Object.is(a, b)) return true
+  if (
+    a === null ||
+    b === null ||
+    typeof a !== `object` ||
+    typeof b !== `object` ||
+    isReferenceHashedObject(a) ||
+    isReferenceHashedObject(b)
+  )
+    return false
+  // Arrays from another realm take the object marker but keep this check.
+  if (Array.isArray(a) && Array.isArray(b) && a.length !== b.length)
+    return false
+
+  // Revisited pairs close cycles and avoid expanding shared subtrees. Check
+  // before objectParts copies Map or Set entries; record only pairs with a
+  // body, after their markers and headers match.
+  const peers = compared?.get(a)
+  if (peers?.has(b)) return true
+  const [aMarker, aHeader, aBody] = objectParts(a)
+  const [bMarker, bHeader, bBody] = objectParts(b)
+  if (
+    aMarker !== bMarker ||
+    !aHeader.every((value, index) => value === bHeader[index])
+  )
+    return false
+  if (!aBody || !bBody) return true
+  if (peers) peers.add(b)
+  else (compared ??= new Map()).set(a, new Set([b]))
+  const aKeys = enumerableKeys(aBody)
+  return (
+    aKeys.length === enumerableKeys(bBody).length &&
+    aKeys.every(
+      (key) =>
+        Object.prototype.propertyIsEnumerable.call(bBody, key) &&
+        compareHashValues(
+          aBody[key as keyof object],
+          bBody[key as keyof object],
+          signedZero,
+          compared,
+        ),
     )
-      return false
-    if (!aBody || !bBody) return true
-    if (peers) peers.add(b)
-    else compared.set(a, new Set([b]))
-    const aKeys = keys(aBody)
-    return (
-      aKeys.length === keys(bBody).length &&
-      aKeys.every(
-        (key) =>
-          Object.prototype.propertyIsEnumerable.call(bBody, key) &&
-          equal(aBody[key as keyof object], bBody[key as keyof object]),
-      )
-    )
-  }
-  return equal(left, right)
+  )
 }
 
 let nextRefId = 1

@@ -2750,7 +2750,11 @@ describe(`On-Demand Sync Mode`, () => {
         syncBatchSize: settings.syncBatchSize,
       })
       const sync = config.sync.sync({
-        collection: { status: `ready`, has: () => false },
+        collection: {
+          status: `ready`,
+          health: { reloading: false },
+          has: () => false,
+        },
         begin,
         write,
         commit,

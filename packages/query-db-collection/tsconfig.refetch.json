@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "rootDir": "../..",
+    "paths": {
+      "@tanstack/db": ["../db/src/index.ts"],
+      "@tanstack/db-ivm": ["../db-ivm/src/index.ts"]
+    }
+  },
+  "include": ["src/query.ts", "tests/refetch-ordered-prefix-oracle.test.ts"]
+}

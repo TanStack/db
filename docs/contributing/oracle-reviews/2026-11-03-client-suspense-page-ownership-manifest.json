@@ -1,0 +1,1138 @@
+{
+  "baseHead": "1443dc92e5417394acbdc98b782caa9802848ce6",
+  "treeStatus": "four oracle enforcement repairs on42514b45f; no production edits; digest excludes report and manifest",
+  "algorithm": "sha256 of sorted UTF-8 path, NUL, file bytes",
+  "reviewedHead": "42514b45f3e8d63f3bb4000280d915ab4079d41c",
+  "pullRequest": "https://github.com/TanStack/db/pull/2348",
+  "combinedSha256": "2324d2e46262f0e5a63498bc53824e44aa33db945904159727bd8905792cc5ad",
+  "files": [
+    {
+      "path": ".changeset/fix-client-pages-and-suspense-ownership.md",
+      "sha256": "bb2841a86bccfbc4f2310ffa33e4e8f63918119ca1b2045684b59258906439a7"
+    },
+    {
+      "path": "docs/contributing/oracle-coverage.md",
+      "sha256": "5fca4d39566093542765264a5e524f001f2e60854e6283ef724df54277594402"
+    },
+    {
+      "path": "docs/framework/react/overview.md",
+      "sha256": "fec4e59f6ce4507df1819913963390977e2981f31b44c49a3055238f2dbfe663"
+    },
+    {
+      "path": "docs/guides/live-queries.md",
+      "sha256": "a46cb2dba26ded881b62a2d94f335a786e06b3240209c6b3ceeedc4f23f41af2"
+    },
+    {
+      "path": "packages/db/src/live-query-observer.ts",
+      "sha256": "ddfc273f9206ad97f7bfd0152fa953188fa92440b053777c1d90c8c23e06c885"
+    },
+    {
+      "path": "packages/db/src/live-query-options.ts",
+      "sha256": "41e653166c7daf5d4d422be294f1a98c2d50fc9200042637032d2932c692e532"
+    },
+    {
+      "path": "packages/db/tests/conformance/client-window-history-oracle.ts",
+      "sha256": "bf0377d06a0069708a03f476ecda63719c0464588dd912cc096472df0caad3ee"
+    },
+    {
+      "path": "packages/db/tests/conformance/contract.ts",
+      "sha256": "94fbf8fa38608747b10330c3a307887c73393b0a64ff2157b824a9ff2e54afb9"
+    },
+    {
+      "path": "packages/db/tests/conformance/indexing-config-oracle.ts",
+      "sha256": "4d1b78fd610044d318a1cee7762930c7dece0b709df19b6bdc3322c252c0542f"
+    },
+    {
+      "path": "packages/db/tests/conformance/indexing-reuse-oracle.test.ts",
+      "sha256": "f273af8197be4afd9cb4dad7fa17d07cdc15671b82f1704e0d7e12ea5cf0e702"
+    },
+    {
+      "path": "packages/db/tests/conformance/window-history-oracle.ts",
+      "sha256": "e5b26430f3f6e1cf82f19e6a1e9fdedf4553810dd88baae731033be4de860e92"
+    },
+    {
+      "path": "packages/db/tests/live-query-cache-options-oracle.ts",
+      "sha256": "8e8f873e57fcf448636ad54b9a45100602f1d7a2460f4fff3599b46555d0b37f"
+    },
+    {
+      "path": "packages/db/tests/live-query-observer-hydration-oracle.property.test.ts",
+      "sha256": "b2ae5fb670e0d52a6eec0821217d01698e71e9358d1ead71e38cc4e4bbdfe22b"
+    },
+    {
+      "path": "packages/db/tests/oracle-config.ts",
+      "sha256": "497c18823374a7d0e769559f16499c7f90f76e2c99edf5fd6df7ace48a3ca6c0"
+    },
+    {
+      "path": "packages/db/tests/oracle-replay-manifest.ts",
+      "sha256": "e0480f10c1861a7960bae3100f06673a5e978ee95ee646d2e9d30937dd421327"
+    },
+    {
+      "path": "packages/db/tests/oracle-replay.test.ts",
+      "sha256": "7bf2f6e2f73858bf9dd2b61b1e86fd382943b89aa6038ea1f0e453ffcfae08f5"
+    },
+    {
+      "path": "packages/preact-db/src/useLiveQuery.ts",
+      "sha256": "6fc91226b13950bd033ba5e7955b4b4427e4c3be1445074cfee19d25d531b986"
+    },
+    {
+      "path": "packages/react-db/src/useLiveQuery.ts",
+      "sha256": "5aab14a8d8f1b8bac879773029bad3b13c49a36ccefc23732c69178f5fe28a49"
+    },
+    {
+      "path": "packages/react-db/src/useLiveSuspenseQuery.ts",
+      "sha256": "3a7dffba5ce2493ae190b4e82462c78c4e79233ddcb7299b2498d3d8f56d3366"
+    },
+    {
+      "path": "packages/react-db/tests/client-window-oracle.test.tsx",
+      "sha256": "2ca4e03e3f6b152c10613e3b486731dab2f6900a3b75e271050f784b98d672b7"
+    },
+    {
+      "path": "packages/react-db/tests/conformance.test.tsx",
+      "sha256": "4e713186cecf31d8c105f59edacfc5fbc52553c148a2ec67a916dced3664ff27"
+    },
+    {
+      "path": "packages/react-db/tests/source-id-reuse-oracle.test.tsx",
+      "sha256": "cd8dec3db947c3f688947ce1cae95a33e8564614d68baa5b40a18793b46b4207"
+    },
+    {
+      "path": "packages/react-db/tests/suspense-indexing-config-oracle.test.tsx",
+      "sha256": "10c13bc46724c093d5caf77e3f14bb4325604ca1016ff13b1f7c608b0dcc14b0"
+    },
+    {
+      "path": "packages/react-db/tests/suspense-lifecycle-oracle.test.tsx",
+      "sha256": "9821b2ee8636c88ddeac17543ba56e4528b2975c228211734a05e3a1a80a7aad"
+    },
+    {
+      "path": "packages/react-db/tests/suspense-local-options-oracle.test.tsx",
+      "sha256": "138ce6f5153b03236cb1c8505d012ffea24b25f76f58961755911a0084c7a266"
+    },
+    {
+      "path": "packages/react-db/tests/useLiveQuery.uncommitted-render.test.tsx",
+      "sha256": "f4a365a23a04282cfab3018d121142040d52070f1de2c8a5ba9536423cd14a6d"
+    },
+    {
+      "path": "packages/react-db/tests/window-render-oracle.test.tsx",
+      "sha256": "c4c0a0b27cbe57946417d108007cf8469963732cef489a29ddb2a010a3f67e3d"
+    },
+    {
+      "path": "packages/svelte-db/src/useLiveQuery.svelte.ts",
+      "sha256": "33bfce543dd29ee44f4485769af0021b76bc7e6649e3fc370877efdaee173b28"
+    },
+    {
+      "path": "packages/svelte-db/tests/client-window-oracle.svelte.test.ts",
+      "sha256": "d66ae788fc6abbc7fa088dab6bd7bb66c9c3dac985eb6c99327d23b127fa7075"
+    },
+    {
+      "path": "packages/svelte-db/tests/conformance.svelte.test.ts",
+      "sha256": "df98bf808e5ecc51962387440062d8763d43c6e5e1ce538d7a2d09cd01d046b2"
+    }
+  ],
+  "priorManifests": [
+    {
+      "baseHead": "1443dc92e5417394acbdc98b782caa9802848ce6",
+      "treeStatus": "uncommitted; no PR",
+      "algorithm": "sha256 of sorted UTF-8 path, NUL, file bytes",
+      "combinedSha256": "1972e2bfdc64b61c11996f50db5c0afc5433cdb50b028220a1d59166dccb1e55",
+      "files": [
+        {
+          "path": "docs/contributing/oracle-coverage.md",
+          "sha256": "b1429ec2b6806bd7924111df9180d4b85b3f0015532cba8a1fd416dcc6b4723d"
+        },
+        {
+          "path": "docs/framework/react/overview.md",
+          "sha256": "8d7ce71adac30864b49a9f0f46f78afabfe2184f1a5de39537452820c75622ed"
+        },
+        {
+          "path": "packages/db/tests/conformance/contract.ts",
+          "sha256": "f3b5644aff82a12eec0bc1d8676e373f70fa23bfba5ab90cca06233628c1dd4e"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-config-oracle.ts",
+          "sha256": "0aba35b33bd3e2c656e04b65406368c8ad40bb3ae0879a0dc2976a4720f763ed"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-reuse-oracle.test.ts",
+          "sha256": "c5a7fd8da6ed46b9096962167e62f3ed08ea21e25de23712b1831549bfa05011"
+        },
+        {
+          "path": "packages/db/tests/conformance/window-history-oracle.ts",
+          "sha256": "c6a2b2c7b4cdda177d7d51a536707758030eaed75fb6a8e9e17c667d0355bf5f"
+        },
+        {
+          "path": "packages/db/tests/live-query-cache-options-oracle.ts",
+          "sha256": "8e8f873e57fcf448636ad54b9a45100602f1d7a2460f4fff3599b46555d0b37f"
+        },
+        {
+          "path": "packages/db/tests/oracle-config.ts",
+          "sha256": "3547b4b78fad2f00a4fa2fac9f01e87cf9e734ec06d84f73091f953214c94a0e"
+        },
+        {
+          "path": "packages/react-db/src/useLiveQuery.ts",
+          "sha256": "2f26818a251aa498c7edcaea7fa855fbd836f2aa1cc2c6750dcc20d24358c15f"
+        },
+        {
+          "path": "packages/react-db/tests/client-window-oracle.test.tsx",
+          "sha256": "a645c6d892485b8abe4f918d6341ab374a0d8af05196f2ebba0dd63adec3ed5b"
+        },
+        {
+          "path": "packages/react-db/tests/conformance.test.tsx",
+          "sha256": "4e713186cecf31d8c105f59edacfc5fbc52553c148a2ec67a916dced3664ff27"
+        },
+        {
+          "path": "packages/react-db/tests/source-id-reuse-oracle.test.tsx",
+          "sha256": "cd8dec3db947c3f688947ce1cae95a33e8564614d68baa5b40a18793b46b4207"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-indexing-config-oracle.test.tsx",
+          "sha256": "6e9e933c0d4778eb07761aac6aa6cafd954f0528349153fd61b8082a18bd52e6"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-local-options-oracle.test.tsx",
+          "sha256": "0fc239c55e3db14034ab075b9f93e2faadb60e267ec7449c2fe31d0abcf40e07"
+        },
+        {
+          "path": "packages/react-db/tests/useLiveQuery.uncommitted-render.test.tsx",
+          "sha256": "f4a365a23a04282cfab3018d121142040d52070f1de2c8a5ba9536423cd14a6d"
+        },
+        {
+          "path": "packages/react-db/tests/window-render-oracle.test.tsx",
+          "sha256": "6750c9412be8995ebf942b2c4af2ad043917cc34fa2a88e4f17a77b944fad527"
+        },
+        {
+          "path": "packages/svelte-db/src/useLiveQuery.svelte.ts",
+          "sha256": "95a0c3af45bc6978480b84451be7cc74289e2f214264655a034afa10912b7f23"
+        },
+        {
+          "path": "packages/svelte-db/tests/conformance.svelte.test.ts",
+          "sha256": "df98bf808e5ecc51962387440062d8763d43c6e5e1ce538d7a2d09cd01d046b2"
+        }
+      ]
+    },
+    {
+      "baseHead": "1443dc92e5417394acbdc98b782caa9802848ce6",
+      "treeStatus": "uncommitted; no PR",
+      "algorithm": "sha256 of sorted UTF-8 path, NUL, file bytes",
+      "combinedSha256": "efd5bb4df0db5f86e9c169439835202d11ef15466dfff01ccb8a21d4ce3e2c79",
+      "files": [
+        {
+          "path": "docs/contributing/oracle-coverage.md",
+          "sha256": "b1429ec2b6806bd7924111df9180d4b85b3f0015532cba8a1fd416dcc6b4723d"
+        },
+        {
+          "path": "docs/framework/react/overview.md",
+          "sha256": "8d7ce71adac30864b49a9f0f46f78afabfe2184f1a5de39537452820c75622ed"
+        },
+        {
+          "path": "packages/db/tests/conformance/contract.ts",
+          "sha256": "f3b5644aff82a12eec0bc1d8676e373f70fa23bfba5ab90cca06233628c1dd4e"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-config-oracle.ts",
+          "sha256": "0aba35b33bd3e2c656e04b65406368c8ad40bb3ae0879a0dc2976a4720f763ed"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-reuse-oracle.test.ts",
+          "sha256": "c5a7fd8da6ed46b9096962167e62f3ed08ea21e25de23712b1831549bfa05011"
+        },
+        {
+          "path": "packages/db/tests/conformance/window-history-oracle.ts",
+          "sha256": "c6a2b2c7b4cdda177d7d51a536707758030eaed75fb6a8e9e17c667d0355bf5f"
+        },
+        {
+          "path": "packages/db/tests/live-query-cache-options-oracle.ts",
+          "sha256": "8e8f873e57fcf448636ad54b9a45100602f1d7a2460f4fff3599b46555d0b37f"
+        },
+        {
+          "path": "packages/db/tests/oracle-config.ts",
+          "sha256": "3547b4b78fad2f00a4fa2fac9f01e87cf9e734ec06d84f73091f953214c94a0e"
+        },
+        {
+          "path": "packages/react-db/src/useLiveQuery.ts",
+          "sha256": "7170c6e9447a73ef3bc392b05a54da5b2fd50bbb5a369fe1bcf242a920c13bed"
+        },
+        {
+          "path": "packages/react-db/src/useLiveSuspenseQuery.ts",
+          "sha256": "0e52d7f4a5f8644de1fdc2f959e2ab20209dcef3f43619b6377ed6db1b8d0836"
+        },
+        {
+          "path": "packages/react-db/tests/client-window-oracle.test.tsx",
+          "sha256": "a645c6d892485b8abe4f918d6341ab374a0d8af05196f2ebba0dd63adec3ed5b"
+        },
+        {
+          "path": "packages/react-db/tests/conformance.test.tsx",
+          "sha256": "4e713186cecf31d8c105f59edacfc5fbc52553c148a2ec67a916dced3664ff27"
+        },
+        {
+          "path": "packages/react-db/tests/source-id-reuse-oracle.test.tsx",
+          "sha256": "cd8dec3db947c3f688947ce1cae95a33e8564614d68baa5b40a18793b46b4207"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-indexing-config-oracle.test.tsx",
+          "sha256": "6e9e933c0d4778eb07761aac6aa6cafd954f0528349153fd61b8082a18bd52e6"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-local-options-oracle.test.tsx",
+          "sha256": "0fc239c55e3db14034ab075b9f93e2faadb60e267ec7449c2fe31d0abcf40e07"
+        },
+        {
+          "path": "packages/react-db/tests/useLiveQuery.uncommitted-render.test.tsx",
+          "sha256": "f4a365a23a04282cfab3018d121142040d52070f1de2c8a5ba9536423cd14a6d"
+        },
+        {
+          "path": "packages/react-db/tests/window-render-oracle.test.tsx",
+          "sha256": "6750c9412be8995ebf942b2c4af2ad043917cc34fa2a88e4f17a77b944fad527"
+        },
+        {
+          "path": "packages/svelte-db/src/useLiveQuery.svelte.ts",
+          "sha256": "821f6d40246121e65e7c2658e3a80d66d2d0962fc13621cb697bce1491845f11"
+        },
+        {
+          "path": "packages/svelte-db/tests/conformance.svelte.test.ts",
+          "sha256": "df98bf808e5ecc51962387440062d8763d43c6e5e1ce538d7a2d09cd01d046b2"
+        }
+      ]
+    },
+    {
+      "baseHead": "1443dc92e5417394acbdc98b782caa9802848ce6",
+      "treeStatus": "uncommitted; no PR",
+      "algorithm": "sha256 of sorted UTF-8 path, NUL, file bytes",
+      "combinedSha256": "2c1e7f6caaacc77e2e7c51edf177820466b1cf15723e460116399fcb95517fdf",
+      "files": [
+        {
+          "path": "docs/contributing/oracle-coverage.md",
+          "sha256": "3c9b9629c8247bc182ccd6700e1624d341fde19e1f98e0db09a1d610b099469a"
+        },
+        {
+          "path": "docs/framework/react/overview.md",
+          "sha256": "a385d3b261cbf5405b5f5ee3fb700d181937c3ab3ae4a0700662aebec669a0a6"
+        },
+        {
+          "path": "packages/db/src/live-query-observer.ts",
+          "sha256": "ddfc273f9206ad97f7bfd0152fa953188fa92440b053777c1d90c8c23e06c885"
+        },
+        {
+          "path": "packages/db/tests/conformance/client-window-history-oracle.ts",
+          "sha256": "3a25d706ca2c25eb78679468ef3c2ee8485d8dbd1053e076bb817415c457a2a3"
+        },
+        {
+          "path": "packages/db/tests/conformance/contract.ts",
+          "sha256": "0951d628168d86deadd9393312047abd654347ce7a26ce5d355effa65cb34f6d"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-config-oracle.ts",
+          "sha256": "0aba35b33bd3e2c656e04b65406368c8ad40bb3ae0879a0dc2976a4720f763ed"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-reuse-oracle.test.ts",
+          "sha256": "c5a7fd8da6ed46b9096962167e62f3ed08ea21e25de23712b1831549bfa05011"
+        },
+        {
+          "path": "packages/db/tests/conformance/window-history-oracle.ts",
+          "sha256": "bc8f2fc3c9c920d2226572e6eeb1d216a2edd3719e62a6c597cdd6c1534ad2ce"
+        },
+        {
+          "path": "packages/db/tests/live-query-cache-options-oracle.ts",
+          "sha256": "8e8f873e57fcf448636ad54b9a45100602f1d7a2460f4fff3599b46555d0b37f"
+        },
+        {
+          "path": "packages/db/tests/live-query-observer-hydration-oracle.property.test.ts",
+          "sha256": "b2ae5fb670e0d52a6eec0821217d01698e71e9358d1ead71e38cc4e4bbdfe22b"
+        },
+        {
+          "path": "packages/db/tests/oracle-config.ts",
+          "sha256": "dd288f2d9c552f82cdc818a04edc187b39389385bd6dc45032c9a549c1dbf9ca"
+        },
+        {
+          "path": "packages/preact-db/src/useLiveQuery.ts",
+          "sha256": "6fc91226b13950bd033ba5e7955b4b4427e4c3be1445074cfee19d25d531b986"
+        },
+        {
+          "path": "packages/react-db/src/useLiveQuery.ts",
+          "sha256": "7170c6e9447a73ef3bc392b05a54da5b2fd50bbb5a369fe1bcf242a920c13bed"
+        },
+        {
+          "path": "packages/react-db/src/useLiveSuspenseQuery.ts",
+          "sha256": "0e52d7f4a5f8644de1fdc2f959e2ab20209dcef3f43619b6377ed6db1b8d0836"
+        },
+        {
+          "path": "packages/react-db/tests/client-window-oracle.test.tsx",
+          "sha256": "084c8c82227827a4bd8357f8b8d0d300a9ccfa64da6eab29be4d56e9ed850b9f"
+        },
+        {
+          "path": "packages/react-db/tests/conformance.test.tsx",
+          "sha256": "4e713186cecf31d8c105f59edacfc5fbc52553c148a2ec67a916dced3664ff27"
+        },
+        {
+          "path": "packages/react-db/tests/source-id-reuse-oracle.test.tsx",
+          "sha256": "cd8dec3db947c3f688947ce1cae95a33e8564614d68baa5b40a18793b46b4207"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-indexing-config-oracle.test.tsx",
+          "sha256": "6e9e933c0d4778eb07761aac6aa6cafd954f0528349153fd61b8082a18bd52e6"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-local-options-oracle.test.tsx",
+          "sha256": "0fc239c55e3db14034ab075b9f93e2faadb60e267ec7449c2fe31d0abcf40e07"
+        },
+        {
+          "path": "packages/react-db/tests/useLiveQuery.uncommitted-render.test.tsx",
+          "sha256": "f4a365a23a04282cfab3018d121142040d52070f1de2c8a5ba9536423cd14a6d"
+        },
+        {
+          "path": "packages/react-db/tests/window-render-oracle.test.tsx",
+          "sha256": "6750c9412be8995ebf942b2c4af2ad043917cc34fa2a88e4f17a77b944fad527"
+        },
+        {
+          "path": "packages/svelte-db/src/useLiveQuery.svelte.ts",
+          "sha256": "33bfce543dd29ee44f4485769af0021b76bc7e6649e3fc370877efdaee173b28"
+        },
+        {
+          "path": "packages/svelte-db/tests/client-window-oracle.svelte.test.ts",
+          "sha256": "eb436bf1ae6fb5bda8d9a7a4c19463fbb7893c778348a6d84a71f1805c64c62c"
+        },
+        {
+          "path": "packages/svelte-db/tests/conformance.svelte.test.ts",
+          "sha256": "df98bf808e5ecc51962387440062d8763d43c6e5e1ce538d7a2d09cd01d046b2"
+        }
+      ]
+    },
+    {
+      "baseHead": "1443dc92e5417394acbdc98b782caa9802848ce6",
+      "treeStatus": "uncommitted; no PR",
+      "algorithm": "sha256 of sorted UTF-8 path, NUL, file bytes",
+      "combinedSha256": "d4899416d330bf345599932475fd273aa124e4ecb0f51ecf508162d87edc27d2",
+      "files": [
+        {
+          "path": "docs/contributing/oracle-coverage.md",
+          "sha256": "5f87d96768813ce8a58346b4d49b099a3a7c2b975f0ddf1af73cf101ffbac194"
+        },
+        {
+          "path": "docs/framework/react/overview.md",
+          "sha256": "a385d3b261cbf5405b5f5ee3fb700d181937c3ab3ae4a0700662aebec669a0a6"
+        },
+        {
+          "path": "packages/db/src/live-query-observer.ts",
+          "sha256": "ddfc273f9206ad97f7bfd0152fa953188fa92440b053777c1d90c8c23e06c885"
+        },
+        {
+          "path": "packages/db/tests/conformance/client-window-history-oracle.ts",
+          "sha256": "3a25d706ca2c25eb78679468ef3c2ee8485d8dbd1053e076bb817415c457a2a3"
+        },
+        {
+          "path": "packages/db/tests/conformance/contract.ts",
+          "sha256": "0951d628168d86deadd9393312047abd654347ce7a26ce5d355effa65cb34f6d"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-config-oracle.ts",
+          "sha256": "0aba35b33bd3e2c656e04b65406368c8ad40bb3ae0879a0dc2976a4720f763ed"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-reuse-oracle.test.ts",
+          "sha256": "c5a7fd8da6ed46b9096962167e62f3ed08ea21e25de23712b1831549bfa05011"
+        },
+        {
+          "path": "packages/db/tests/conformance/window-history-oracle.ts",
+          "sha256": "bc8f2fc3c9c920d2226572e6eeb1d216a2edd3719e62a6c597cdd6c1534ad2ce"
+        },
+        {
+          "path": "packages/db/tests/live-query-cache-options-oracle.ts",
+          "sha256": "8e8f873e57fcf448636ad54b9a45100602f1d7a2460f4fff3599b46555d0b37f"
+        },
+        {
+          "path": "packages/db/tests/live-query-observer-hydration-oracle.property.test.ts",
+          "sha256": "b2ae5fb670e0d52a6eec0821217d01698e71e9358d1ead71e38cc4e4bbdfe22b"
+        },
+        {
+          "path": "packages/db/tests/oracle-config.ts",
+          "sha256": "723c7dac2a6ec786f329aa9a5fa391e94870ed1dc24e6607d807ec375bb6714d"
+        },
+        {
+          "path": "packages/db/tests/oracle-replay-manifest.ts",
+          "sha256": "c6ad530ffc17eedcd06a76271ab5dbfa3ee648c0d0ec1d933e6104be7f207d3f"
+        },
+        {
+          "path": "packages/preact-db/src/useLiveQuery.ts",
+          "sha256": "6fc91226b13950bd033ba5e7955b4b4427e4c3be1445074cfee19d25d531b986"
+        },
+        {
+          "path": "packages/react-db/src/useLiveQuery.ts",
+          "sha256": "7170c6e9447a73ef3bc392b05a54da5b2fd50bbb5a369fe1bcf242a920c13bed"
+        },
+        {
+          "path": "packages/react-db/src/useLiveSuspenseQuery.ts",
+          "sha256": "0e52d7f4a5f8644de1fdc2f959e2ab20209dcef3f43619b6377ed6db1b8d0836"
+        },
+        {
+          "path": "packages/react-db/tests/client-window-oracle.test.tsx",
+          "sha256": "084c8c82227827a4bd8357f8b8d0d300a9ccfa64da6eab29be4d56e9ed850b9f"
+        },
+        {
+          "path": "packages/react-db/tests/conformance.test.tsx",
+          "sha256": "4e713186cecf31d8c105f59edacfc5fbc52553c148a2ec67a916dced3664ff27"
+        },
+        {
+          "path": "packages/react-db/tests/source-id-reuse-oracle.test.tsx",
+          "sha256": "cd8dec3db947c3f688947ce1cae95a33e8564614d68baa5b40a18793b46b4207"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-indexing-config-oracle.test.tsx",
+          "sha256": "6e9e933c0d4778eb07761aac6aa6cafd954f0528349153fd61b8082a18bd52e6"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-lifecycle-oracle.test.tsx",
+          "sha256": "a2ae9626f8df30774db0f9be923bce7f7a4d7c8e244645a6177542a57cb84a5c"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-local-options-oracle.test.tsx",
+          "sha256": "0fc239c55e3db14034ab075b9f93e2faadb60e267ec7449c2fe31d0abcf40e07"
+        },
+        {
+          "path": "packages/react-db/tests/useLiveQuery.uncommitted-render.test.tsx",
+          "sha256": "f4a365a23a04282cfab3018d121142040d52070f1de2c8a5ba9536423cd14a6d"
+        },
+        {
+          "path": "packages/react-db/tests/window-render-oracle.test.tsx",
+          "sha256": "6750c9412be8995ebf942b2c4af2ad043917cc34fa2a88e4f17a77b944fad527"
+        },
+        {
+          "path": "packages/svelte-db/src/useLiveQuery.svelte.ts",
+          "sha256": "33bfce543dd29ee44f4485769af0021b76bc7e6649e3fc370877efdaee173b28"
+        },
+        {
+          "path": "packages/svelte-db/tests/client-window-oracle.svelte.test.ts",
+          "sha256": "eb436bf1ae6fb5bda8d9a7a4c19463fbb7893c778348a6d84a71f1805c64c62c"
+        },
+        {
+          "path": "packages/svelte-db/tests/conformance.svelte.test.ts",
+          "sha256": "df98bf808e5ecc51962387440062d8763d43c6e5e1ce538d7a2d09cd01d046b2"
+        }
+      ]
+    },
+    {
+      "baseHead": "1443dc92e5417394acbdc98b782caa9802848ce6",
+      "treeStatus": "post-review repair on 8cf448391; PR #2348",
+      "algorithm": "sha256 of sorted UTF-8 path, NUL, file bytes",
+      "reviewedHead": "8cf448391e59c0ebdf6a05c2fa2fa7f8dadae711",
+      "pullRequest": "https://github.com/TanStack/db/pull/2348",
+      "combinedSha256": "a431a728438cb265f55001ef18d214794c6d78a543db18285b42b6f4a481e1e1",
+      "files": [
+        {
+          "path": "docs/contributing/oracle-coverage.md",
+          "sha256": "7049350ed863c3f4541d86936ac60ef49bee8ef2010a46632aaf68e4d11059b4"
+        },
+        {
+          "path": "docs/framework/react/overview.md",
+          "sha256": "a385d3b261cbf5405b5f5ee3fb700d181937c3ab3ae4a0700662aebec669a0a6"
+        },
+        {
+          "path": "packages/db/src/live-query-observer.ts",
+          "sha256": "ddfc273f9206ad97f7bfd0152fa953188fa92440b053777c1d90c8c23e06c885"
+        },
+        {
+          "path": "packages/db/tests/conformance/client-window-history-oracle.ts",
+          "sha256": "3a25d706ca2c25eb78679468ef3c2ee8485d8dbd1053e076bb817415c457a2a3"
+        },
+        {
+          "path": "packages/db/tests/conformance/contract.ts",
+          "sha256": "0951d628168d86deadd9393312047abd654347ce7a26ce5d355effa65cb34f6d"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-config-oracle.ts",
+          "sha256": "0aba35b33bd3e2c656e04b65406368c8ad40bb3ae0879a0dc2976a4720f763ed"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-reuse-oracle.test.ts",
+          "sha256": "c5a7fd8da6ed46b9096962167e62f3ed08ea21e25de23712b1831549bfa05011"
+        },
+        {
+          "path": "packages/db/tests/conformance/window-history-oracle.ts",
+          "sha256": "bc8f2fc3c9c920d2226572e6eeb1d216a2edd3719e62a6c597cdd6c1534ad2ce"
+        },
+        {
+          "path": "packages/db/tests/live-query-cache-options-oracle.ts",
+          "sha256": "8e8f873e57fcf448636ad54b9a45100602f1d7a2460f4fff3599b46555d0b37f"
+        },
+        {
+          "path": "packages/db/tests/live-query-observer-hydration-oracle.property.test.ts",
+          "sha256": "b2ae5fb670e0d52a6eec0821217d01698e71e9358d1ead71e38cc4e4bbdfe22b"
+        },
+        {
+          "path": "packages/db/tests/oracle-config.ts",
+          "sha256": "723c7dac2a6ec786f329aa9a5fa391e94870ed1dc24e6607d807ec375bb6714d"
+        },
+        {
+          "path": "packages/db/tests/oracle-replay-manifest.ts",
+          "sha256": "50a51b4c745fef7490ee46f280a3035bdff268dcc59565dc3959a2352c284ee0"
+        },
+        {
+          "path": "packages/db/tests/oracle-replay.test.ts",
+          "sha256": "535e7c58194cd25f1a6a27b01c6bcb3b0f4217eb040d0d431156d5c4cbe262ea"
+        },
+        {
+          "path": "packages/preact-db/src/useLiveQuery.ts",
+          "sha256": "6fc91226b13950bd033ba5e7955b4b4427e4c3be1445074cfee19d25d531b986"
+        },
+        {
+          "path": "packages/react-db/src/useLiveQuery.ts",
+          "sha256": "4ed56e4a554254bad590882ad12954a123ce178a6825d32fcd67927e49e35299"
+        },
+        {
+          "path": "packages/react-db/src/useLiveSuspenseQuery.ts",
+          "sha256": "0e52d7f4a5f8644de1fdc2f959e2ab20209dcef3f43619b6377ed6db1b8d0836"
+        },
+        {
+          "path": "packages/react-db/tests/client-window-oracle.test.tsx",
+          "sha256": "ced00d99ca8c7bfb89efc78ca7369b2ef77ad3f669de4efdf63d91e8b05fa881"
+        },
+        {
+          "path": "packages/react-db/tests/conformance.test.tsx",
+          "sha256": "4e713186cecf31d8c105f59edacfc5fbc52553c148a2ec67a916dced3664ff27"
+        },
+        {
+          "path": "packages/react-db/tests/source-id-reuse-oracle.test.tsx",
+          "sha256": "cd8dec3db947c3f688947ce1cae95a33e8564614d68baa5b40a18793b46b4207"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-indexing-config-oracle.test.tsx",
+          "sha256": "6e9e933c0d4778eb07761aac6aa6cafd954f0528349153fd61b8082a18bd52e6"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-lifecycle-oracle.test.tsx",
+          "sha256": "a2ae9626f8df30774db0f9be923bce7f7a4d7c8e244645a6177542a57cb84a5c"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-local-options-oracle.test.tsx",
+          "sha256": "0fc239c55e3db14034ab075b9f93e2faadb60e267ec7449c2fe31d0abcf40e07"
+        },
+        {
+          "path": "packages/react-db/tests/useLiveQuery.uncommitted-render.test.tsx",
+          "sha256": "f4a365a23a04282cfab3018d121142040d52070f1de2c8a5ba9536423cd14a6d"
+        },
+        {
+          "path": "packages/react-db/tests/window-render-oracle.test.tsx",
+          "sha256": "6750c9412be8995ebf942b2c4af2ad043917cc34fa2a88e4f17a77b944fad527"
+        },
+        {
+          "path": "packages/svelte-db/src/useLiveQuery.svelte.ts",
+          "sha256": "33bfce543dd29ee44f4485769af0021b76bc7e6649e3fc370877efdaee173b28"
+        },
+        {
+          "path": "packages/svelte-db/tests/client-window-oracle.svelte.test.ts",
+          "sha256": "eb436bf1ae6fb5bda8d9a7a4c19463fbb7893c778348a6d84a71f1805c64c62c"
+        },
+        {
+          "path": "packages/svelte-db/tests/conformance.svelte.test.ts",
+          "sha256": "df98bf808e5ecc51962387440062d8763d43c6e5e1ce538d7a2d09cd01d046b2"
+        }
+      ]
+    },
+    {
+      "baseHead": "1443dc92e5417394acbdc98b782caa9802848ce6",
+      "treeStatus": "immutable explicit-key enforcement on 69664f1d9; production unchanged; PR #2348",
+      "algorithm": "sha256 of sorted UTF-8 path, NUL, file bytes",
+      "reviewedHead": "69664f1d9215bfdbe7fb2d31e7e5ee0661506f20",
+      "pullRequest": "https://github.com/TanStack/db/pull/2348",
+      "combinedSha256": "0247b20dac86a5f8da38769860bf7c4d78c2baefab61c87c2b2bb06796f8ef3f",
+      "files": [
+        {
+          "path": "docs/contributing/oracle-coverage.md",
+          "sha256": "df58c69c97da0fd3f124748523b30cd4cddf0127744e1b79c95644f60d460f43"
+        },
+        {
+          "path": "docs/framework/react/overview.md",
+          "sha256": "fec4e59f6ce4507df1819913963390977e2981f31b44c49a3055238f2dbfe663"
+        },
+        {
+          "path": "docs/guides/live-queries.md",
+          "sha256": "a46cb2dba26ded881b62a2d94f335a786e06b3240209c6b3ceeedc4f23f41af2"
+        },
+        {
+          "path": "packages/db/src/live-query-observer.ts",
+          "sha256": "ddfc273f9206ad97f7bfd0152fa953188fa92440b053777c1d90c8c23e06c885"
+        },
+        {
+          "path": "packages/db/tests/conformance/client-window-history-oracle.ts",
+          "sha256": "3a25d706ca2c25eb78679468ef3c2ee8485d8dbd1053e076bb817415c457a2a3"
+        },
+        {
+          "path": "packages/db/tests/conformance/contract.ts",
+          "sha256": "94fbf8fa38608747b10330c3a307887c73393b0a64ff2157b824a9ff2e54afb9"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-config-oracle.ts",
+          "sha256": "0aba35b33bd3e2c656e04b65406368c8ad40bb3ae0879a0dc2976a4720f763ed"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-reuse-oracle.test.ts",
+          "sha256": "c5a7fd8da6ed46b9096962167e62f3ed08ea21e25de23712b1831549bfa05011"
+        },
+        {
+          "path": "packages/db/tests/conformance/window-history-oracle.ts",
+          "sha256": "21e167b8ef3d62a212c9bd9784a49eff34f18db8eac1fb2e70f1d7687b7289fd"
+        },
+        {
+          "path": "packages/db/tests/live-query-cache-options-oracle.ts",
+          "sha256": "8e8f873e57fcf448636ad54b9a45100602f1d7a2460f4fff3599b46555d0b37f"
+        },
+        {
+          "path": "packages/db/tests/live-query-observer-hydration-oracle.property.test.ts",
+          "sha256": "b2ae5fb670e0d52a6eec0821217d01698e71e9358d1ead71e38cc4e4bbdfe22b"
+        },
+        {
+          "path": "packages/db/tests/oracle-config.ts",
+          "sha256": "52562ef41c12463593f8f9be5a39ace850515f8b49a22181d536c1f5b80cdc99"
+        },
+        {
+          "path": "packages/db/tests/oracle-replay-manifest.ts",
+          "sha256": "18bfcba4421f3aab17e187921633082f13bc8500f95bb050109b99793e1505cf"
+        },
+        {
+          "path": "packages/db/tests/oracle-replay.test.ts",
+          "sha256": "7bf2f6e2f73858bf9dd2b61b1e86fd382943b89aa6038ea1f0e453ffcfae08f5"
+        },
+        {
+          "path": "packages/preact-db/src/useLiveQuery.ts",
+          "sha256": "6fc91226b13950bd033ba5e7955b4b4427e4c3be1445074cfee19d25d531b986"
+        },
+        {
+          "path": "packages/react-db/src/useLiveQuery.ts",
+          "sha256": "4ed56e4a554254bad590882ad12954a123ce178a6825d32fcd67927e49e35299"
+        },
+        {
+          "path": "packages/react-db/src/useLiveSuspenseQuery.ts",
+          "sha256": "0e52d7f4a5f8644de1fdc2f959e2ab20209dcef3f43619b6377ed6db1b8d0836"
+        },
+        {
+          "path": "packages/react-db/tests/client-window-oracle.test.tsx",
+          "sha256": "ced00d99ca8c7bfb89efc78ca7369b2ef77ad3f669de4efdf63d91e8b05fa881"
+        },
+        {
+          "path": "packages/react-db/tests/conformance.test.tsx",
+          "sha256": "4e713186cecf31d8c105f59edacfc5fbc52553c148a2ec67a916dced3664ff27"
+        },
+        {
+          "path": "packages/react-db/tests/source-id-reuse-oracle.test.tsx",
+          "sha256": "cd8dec3db947c3f688947ce1cae95a33e8564614d68baa5b40a18793b46b4207"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-indexing-config-oracle.test.tsx",
+          "sha256": "6e9e933c0d4778eb07761aac6aa6cafd954f0528349153fd61b8082a18bd52e6"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-lifecycle-oracle.test.tsx",
+          "sha256": "a2ae9626f8df30774db0f9be923bce7f7a4d7c8e244645a6177542a57cb84a5c"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-local-options-oracle.test.tsx",
+          "sha256": "0fc239c55e3db14034ab075b9f93e2faadb60e267ec7449c2fe31d0abcf40e07"
+        },
+        {
+          "path": "packages/react-db/tests/useLiveQuery.uncommitted-render.test.tsx",
+          "sha256": "f4a365a23a04282cfab3018d121142040d52070f1de2c8a5ba9536423cd14a6d"
+        },
+        {
+          "path": "packages/react-db/tests/window-render-oracle.test.tsx",
+          "sha256": "6750c9412be8995ebf942b2c4af2ad043917cc34fa2a88e4f17a77b944fad527"
+        },
+        {
+          "path": "packages/svelte-db/src/useLiveQuery.svelte.ts",
+          "sha256": "33bfce543dd29ee44f4485769af0021b76bc7e6649e3fc370877efdaee173b28"
+        },
+        {
+          "path": "packages/svelte-db/tests/client-window-oracle.svelte.test.ts",
+          "sha256": "eb436bf1ae6fb5bda8d9a7a4c19463fbb7893c778348a6d84a71f1805c64c62c"
+        },
+        {
+          "path": "packages/svelte-db/tests/conformance.svelte.test.ts",
+          "sha256": "df98bf808e5ecc51962387440062d8763d43c6e5e1ce538d7a2d09cd01d046b2"
+        }
+      ]
+    },
+    {
+      "baseHead": "1443dc92e5417394acbdc98b782caa9802848ce6",
+      "treeStatus": "high-effort review repair on d8bf49f2e; source digest excludes report and manifest",
+      "algorithm": "sha256 of sorted UTF-8 path, NUL, file bytes",
+      "reviewedHead": "d8bf49f2e2457dcd6da5977570e4bb83afd73eb4",
+      "pullRequest": "https://github.com/TanStack/db/pull/2348",
+      "combinedSha256": "d70fdf29acd5de0c9e24322f6a5e271a93e35d08ac1300657101c3be7781d657",
+      "files": [
+        {
+          "path": "docs/contributing/oracle-coverage.md",
+          "sha256": "b0c5967274542cd1612742993e045d15126e0eef068550cde2975444e3579cb3"
+        },
+        {
+          "path": "docs/framework/react/overview.md",
+          "sha256": "fec4e59f6ce4507df1819913963390977e2981f31b44c49a3055238f2dbfe663"
+        },
+        {
+          "path": "docs/guides/live-queries.md",
+          "sha256": "a46cb2dba26ded881b62a2d94f335a786e06b3240209c6b3ceeedc4f23f41af2"
+        },
+        {
+          "path": "packages/db/src/live-query-observer.ts",
+          "sha256": "ddfc273f9206ad97f7bfd0152fa953188fa92440b053777c1d90c8c23e06c885"
+        },
+        {
+          "path": "packages/db/src/live-query-options.ts",
+          "sha256": "41e653166c7daf5d4d422be294f1a98c2d50fc9200042637032d2932c692e532"
+        },
+        {
+          "path": "packages/db/tests/conformance/client-window-history-oracle.ts",
+          "sha256": "3a25d706ca2c25eb78679468ef3c2ee8485d8dbd1053e076bb817415c457a2a3"
+        },
+        {
+          "path": "packages/db/tests/conformance/contract.ts",
+          "sha256": "94fbf8fa38608747b10330c3a307887c73393b0a64ff2157b824a9ff2e54afb9"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-config-oracle.ts",
+          "sha256": "4d1b78fd610044d318a1cee7762930c7dece0b709df19b6bdc3322c252c0542f"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-reuse-oracle.test.ts",
+          "sha256": "f273af8197be4afd9cb4dad7fa17d07cdc15671b82f1704e0d7e12ea5cf0e702"
+        },
+        {
+          "path": "packages/db/tests/conformance/window-history-oracle.ts",
+          "sha256": "21e167b8ef3d62a212c9bd9784a49eff34f18db8eac1fb2e70f1d7687b7289fd"
+        },
+        {
+          "path": "packages/db/tests/live-query-cache-options-oracle.ts",
+          "sha256": "8e8f873e57fcf448636ad54b9a45100602f1d7a2460f4fff3599b46555d0b37f"
+        },
+        {
+          "path": "packages/db/tests/live-query-observer-hydration-oracle.property.test.ts",
+          "sha256": "b2ae5fb670e0d52a6eec0821217d01698e71e9358d1ead71e38cc4e4bbdfe22b"
+        },
+        {
+          "path": "packages/db/tests/oracle-config.ts",
+          "sha256": "497c18823374a7d0e769559f16499c7f90f76e2c99edf5fd6df7ace48a3ca6c0"
+        },
+        {
+          "path": "packages/db/tests/oracle-replay-manifest.ts",
+          "sha256": "e0480f10c1861a7960bae3100f06673a5e978ee95ee646d2e9d30937dd421327"
+        },
+        {
+          "path": "packages/db/tests/oracle-replay.test.ts",
+          "sha256": "7bf2f6e2f73858bf9dd2b61b1e86fd382943b89aa6038ea1f0e453ffcfae08f5"
+        },
+        {
+          "path": "packages/preact-db/src/useLiveQuery.ts",
+          "sha256": "6fc91226b13950bd033ba5e7955b4b4427e4c3be1445074cfee19d25d531b986"
+        },
+        {
+          "path": "packages/react-db/src/useLiveQuery.ts",
+          "sha256": "63f89e146567e69cf7ee9d51f9ba1481c83aa9bbf09ff390abd00b2928bb2826"
+        },
+        {
+          "path": "packages/react-db/src/useLiveSuspenseQuery.ts",
+          "sha256": "a72a250b94d6038b222c10c470ec37d3909f0ab12a92d9977c30a579c3c383a4"
+        },
+        {
+          "path": "packages/react-db/tests/client-window-oracle.test.tsx",
+          "sha256": "ced00d99ca8c7bfb89efc78ca7369b2ef77ad3f669de4efdf63d91e8b05fa881"
+        },
+        {
+          "path": "packages/react-db/tests/conformance.test.tsx",
+          "sha256": "4e713186cecf31d8c105f59edacfc5fbc52553c148a2ec67a916dced3664ff27"
+        },
+        {
+          "path": "packages/react-db/tests/source-id-reuse-oracle.test.tsx",
+          "sha256": "cd8dec3db947c3f688947ce1cae95a33e8564614d68baa5b40a18793b46b4207"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-indexing-config-oracle.test.tsx",
+          "sha256": "10c13bc46724c093d5caf77e3f14bb4325604ca1016ff13b1f7c608b0dcc14b0"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-lifecycle-oracle.test.tsx",
+          "sha256": "3394c4501cd00f66afe9c1766dd689673a8e2c4eb263dd208020b99a758dbc12"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-local-options-oracle.test.tsx",
+          "sha256": "138ce6f5153b03236cb1c8505d012ffea24b25f76f58961755911a0084c7a266"
+        },
+        {
+          "path": "packages/react-db/tests/useLiveQuery.uncommitted-render.test.tsx",
+          "sha256": "f4a365a23a04282cfab3018d121142040d52070f1de2c8a5ba9536423cd14a6d"
+        },
+        {
+          "path": "packages/react-db/tests/window-render-oracle.test.tsx",
+          "sha256": "e63fb6d7a09d41a7d9641b8aa1b46c96de71a3790806ba58362dde26bb201e4e"
+        },
+        {
+          "path": "packages/svelte-db/src/useLiveQuery.svelte.ts",
+          "sha256": "33bfce543dd29ee44f4485769af0021b76bc7e6649e3fc370877efdaee173b28"
+        },
+        {
+          "path": "packages/svelte-db/tests/client-window-oracle.svelte.test.ts",
+          "sha256": "a036b27849ede46ec6aa1bd5111552df9580e29b64607e492f0e080119cf5b5d"
+        },
+        {
+          "path": "packages/svelte-db/tests/conformance.svelte.test.ts",
+          "sha256": "df98bf808e5ecc51962387440062d8763d43c6e5e1ce538d7a2d09cd01d046b2"
+        }
+      ]
+    },
+    {
+      "baseHead": "1443dc92e5417394acbdc98b782caa9802848ce6",
+      "treeStatus": "CodeRabbit 5756985798 private startup failure repair on 2c605f92b; source digest excludes report and manifest",
+      "algorithm": "sha256 of sorted UTF-8 path, NUL, file bytes",
+      "reviewedHead": "2c605f92bd26ce722448446f6102b5e19d7f6919",
+      "pullRequest": "https://github.com/TanStack/db/pull/2348",
+      "combinedSha256": "c970caa0f5dc74b6fbc04da7c1092cf57ea7d2ec2fe7c05cbf195534bf3f79f5",
+      "files": [
+        {
+          "path": ".changeset/fix-client-pages-and-suspense-ownership.md",
+          "sha256": "e3a128c939fc118783be50ef03a0517de371d6aa2b25f5509125fff7889445dd"
+        },
+        {
+          "path": "docs/contributing/oracle-coverage.md",
+          "sha256": "cb02e32e49b08f3dc7b3eb8c83292996a1fac308afaea2ff48b9bc3ac202fb30"
+        },
+        {
+          "path": "docs/framework/react/overview.md",
+          "sha256": "fec4e59f6ce4507df1819913963390977e2981f31b44c49a3055238f2dbfe663"
+        },
+        {
+          "path": "docs/guides/live-queries.md",
+          "sha256": "a46cb2dba26ded881b62a2d94f335a786e06b3240209c6b3ceeedc4f23f41af2"
+        },
+        {
+          "path": "packages/db/src/live-query-observer.ts",
+          "sha256": "ddfc273f9206ad97f7bfd0152fa953188fa92440b053777c1d90c8c23e06c885"
+        },
+        {
+          "path": "packages/db/src/live-query-options.ts",
+          "sha256": "41e653166c7daf5d4d422be294f1a98c2d50fc9200042637032d2932c692e532"
+        },
+        {
+          "path": "packages/db/tests/conformance/client-window-history-oracle.ts",
+          "sha256": "3a25d706ca2c25eb78679468ef3c2ee8485d8dbd1053e076bb817415c457a2a3"
+        },
+        {
+          "path": "packages/db/tests/conformance/contract.ts",
+          "sha256": "94fbf8fa38608747b10330c3a307887c73393b0a64ff2157b824a9ff2e54afb9"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-config-oracle.ts",
+          "sha256": "4d1b78fd610044d318a1cee7762930c7dece0b709df19b6bdc3322c252c0542f"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-reuse-oracle.test.ts",
+          "sha256": "f273af8197be4afd9cb4dad7fa17d07cdc15671b82f1704e0d7e12ea5cf0e702"
+        },
+        {
+          "path": "packages/db/tests/conformance/window-history-oracle.ts",
+          "sha256": "21e167b8ef3d62a212c9bd9784a49eff34f18db8eac1fb2e70f1d7687b7289fd"
+        },
+        {
+          "path": "packages/db/tests/live-query-cache-options-oracle.ts",
+          "sha256": "8e8f873e57fcf448636ad54b9a45100602f1d7a2460f4fff3599b46555d0b37f"
+        },
+        {
+          "path": "packages/db/tests/live-query-observer-hydration-oracle.property.test.ts",
+          "sha256": "b2ae5fb670e0d52a6eec0821217d01698e71e9358d1ead71e38cc4e4bbdfe22b"
+        },
+        {
+          "path": "packages/db/tests/oracle-config.ts",
+          "sha256": "497c18823374a7d0e769559f16499c7f90f76e2c99edf5fd6df7ace48a3ca6c0"
+        },
+        {
+          "path": "packages/db/tests/oracle-replay-manifest.ts",
+          "sha256": "e0480f10c1861a7960bae3100f06673a5e978ee95ee646d2e9d30937dd421327"
+        },
+        {
+          "path": "packages/db/tests/oracle-replay.test.ts",
+          "sha256": "7bf2f6e2f73858bf9dd2b61b1e86fd382943b89aa6038ea1f0e453ffcfae08f5"
+        },
+        {
+          "path": "packages/preact-db/src/useLiveQuery.ts",
+          "sha256": "6fc91226b13950bd033ba5e7955b4b4427e4c3be1445074cfee19d25d531b986"
+        },
+        {
+          "path": "packages/react-db/src/useLiveQuery.ts",
+          "sha256": "63f89e146567e69cf7ee9d51f9ba1481c83aa9bbf09ff390abd00b2928bb2826"
+        },
+        {
+          "path": "packages/react-db/src/useLiveSuspenseQuery.ts",
+          "sha256": "4812eb283ea6a7ac922057a735942c733c979467710472ec427ba0a5cca285f6"
+        },
+        {
+          "path": "packages/react-db/tests/client-window-oracle.test.tsx",
+          "sha256": "ced00d99ca8c7bfb89efc78ca7369b2ef77ad3f669de4efdf63d91e8b05fa881"
+        },
+        {
+          "path": "packages/react-db/tests/conformance.test.tsx",
+          "sha256": "4e713186cecf31d8c105f59edacfc5fbc52553c148a2ec67a916dced3664ff27"
+        },
+        {
+          "path": "packages/react-db/tests/source-id-reuse-oracle.test.tsx",
+          "sha256": "cd8dec3db947c3f688947ce1cae95a33e8564614d68baa5b40a18793b46b4207"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-indexing-config-oracle.test.tsx",
+          "sha256": "10c13bc46724c093d5caf77e3f14bb4325604ca1016ff13b1f7c608b0dcc14b0"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-lifecycle-oracle.test.tsx",
+          "sha256": "93af6316c3bdb9958975ddda39fa87bb88acfa4c69aa7509353f89b7346638ba"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-local-options-oracle.test.tsx",
+          "sha256": "138ce6f5153b03236cb1c8505d012ffea24b25f76f58961755911a0084c7a266"
+        },
+        {
+          "path": "packages/react-db/tests/useLiveQuery.uncommitted-render.test.tsx",
+          "sha256": "f4a365a23a04282cfab3018d121142040d52070f1de2c8a5ba9536423cd14a6d"
+        },
+        {
+          "path": "packages/react-db/tests/window-render-oracle.test.tsx",
+          "sha256": "e63fb6d7a09d41a7d9641b8aa1b46c96de71a3790806ba58362dde26bb201e4e"
+        },
+        {
+          "path": "packages/svelte-db/src/useLiveQuery.svelte.ts",
+          "sha256": "33bfce543dd29ee44f4485769af0021b76bc7e6649e3fc370877efdaee173b28"
+        },
+        {
+          "path": "packages/svelte-db/tests/client-window-oracle.svelte.test.ts",
+          "sha256": "a036b27849ede46ec6aa1bd5111552df9580e29b64607e492f0e080119cf5b5d"
+        },
+        {
+          "path": "packages/svelte-db/tests/conformance.svelte.test.ts",
+          "sha256": "df98bf808e5ecc51962387440062d8763d43c6e5e1ce538d7a2d09cd01d046b2"
+        }
+      ]
+    },
+    {
+      "baseHead": "1443dc92e5417394acbdc98b782caa9802848ce6",
+      "treeStatus": "Second high-effort review and query-local seed-health repair on3cb5df960; digest excludes report and manifest",
+      "algorithm": "sha256 of sorted UTF-8 path, NUL, file bytes",
+      "reviewedHead": "3cb5df960508663d6b6b4c1e4d28a37cdde6f9f9",
+      "pullRequest": "https://github.com/TanStack/db/pull/2348",
+      "combinedSha256": "26ab15ef15c4b4237977ec64c6f271f094a74aead8de855871af7f74fd0fa86f",
+      "files": [
+        {
+          "path": ".changeset/fix-client-pages-and-suspense-ownership.md",
+          "sha256": "bb2841a86bccfbc4f2310ffa33e4e8f63918119ca1b2045684b59258906439a7"
+        },
+        {
+          "path": "docs/contributing/oracle-coverage.md",
+          "sha256": "a02aafefe165ae5a00171ab1236077dd236055f7b1455e576fa9c5056cfd3587"
+        },
+        {
+          "path": "docs/framework/react/overview.md",
+          "sha256": "fec4e59f6ce4507df1819913963390977e2981f31b44c49a3055238f2dbfe663"
+        },
+        {
+          "path": "docs/guides/live-queries.md",
+          "sha256": "a46cb2dba26ded881b62a2d94f335a786e06b3240209c6b3ceeedc4f23f41af2"
+        },
+        {
+          "path": "packages/db/src/live-query-observer.ts",
+          "sha256": "ddfc273f9206ad97f7bfd0152fa953188fa92440b053777c1d90c8c23e06c885"
+        },
+        {
+          "path": "packages/db/src/live-query-options.ts",
+          "sha256": "41e653166c7daf5d4d422be294f1a98c2d50fc9200042637032d2932c692e532"
+        },
+        {
+          "path": "packages/db/tests/conformance/client-window-history-oracle.ts",
+          "sha256": "3a25d706ca2c25eb78679468ef3c2ee8485d8dbd1053e076bb817415c457a2a3"
+        },
+        {
+          "path": "packages/db/tests/conformance/contract.ts",
+          "sha256": "94fbf8fa38608747b10330c3a307887c73393b0a64ff2157b824a9ff2e54afb9"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-config-oracle.ts",
+          "sha256": "4d1b78fd610044d318a1cee7762930c7dece0b709df19b6bdc3322c252c0542f"
+        },
+        {
+          "path": "packages/db/tests/conformance/indexing-reuse-oracle.test.ts",
+          "sha256": "f273af8197be4afd9cb4dad7fa17d07cdc15671b82f1704e0d7e12ea5cf0e702"
+        },
+        {
+          "path": "packages/db/tests/conformance/window-history-oracle.ts",
+          "sha256": "e5b26430f3f6e1cf82f19e6a1e9fdedf4553810dd88baae731033be4de860e92"
+        },
+        {
+          "path": "packages/db/tests/live-query-cache-options-oracle.ts",
+          "sha256": "8e8f873e57fcf448636ad54b9a45100602f1d7a2460f4fff3599b46555d0b37f"
+        },
+        {
+          "path": "packages/db/tests/live-query-observer-hydration-oracle.property.test.ts",
+          "sha256": "b2ae5fb670e0d52a6eec0821217d01698e71e9358d1ead71e38cc4e4bbdfe22b"
+        },
+        {
+          "path": "packages/db/tests/oracle-config.ts",
+          "sha256": "497c18823374a7d0e769559f16499c7f90f76e2c99edf5fd6df7ace48a3ca6c0"
+        },
+        {
+          "path": "packages/db/tests/oracle-replay-manifest.ts",
+          "sha256": "e0480f10c1861a7960bae3100f06673a5e978ee95ee646d2e9d30937dd421327"
+        },
+        {
+          "path": "packages/db/tests/oracle-replay.test.ts",
+          "sha256": "7bf2f6e2f73858bf9dd2b61b1e86fd382943b89aa6038ea1f0e453ffcfae08f5"
+        },
+        {
+          "path": "packages/preact-db/src/useLiveQuery.ts",
+          "sha256": "6fc91226b13950bd033ba5e7955b4b4427e4c3be1445074cfee19d25d531b986"
+        },
+        {
+          "path": "packages/react-db/src/useLiveQuery.ts",
+          "sha256": "5aab14a8d8f1b8bac879773029bad3b13c49a36ccefc23732c69178f5fe28a49"
+        },
+        {
+          "path": "packages/react-db/src/useLiveSuspenseQuery.ts",
+          "sha256": "3a7dffba5ce2493ae190b4e82462c78c4e79233ddcb7299b2498d3d8f56d3366"
+        },
+        {
+          "path": "packages/react-db/tests/client-window-oracle.test.tsx",
+          "sha256": "ced00d99ca8c7bfb89efc78ca7369b2ef77ad3f669de4efdf63d91e8b05fa881"
+        },
+        {
+          "path": "packages/react-db/tests/conformance.test.tsx",
+          "sha256": "4e713186cecf31d8c105f59edacfc5fbc52553c148a2ec67a916dced3664ff27"
+        },
+        {
+          "path": "packages/react-db/tests/source-id-reuse-oracle.test.tsx",
+          "sha256": "cd8dec3db947c3f688947ce1cae95a33e8564614d68baa5b40a18793b46b4207"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-indexing-config-oracle.test.tsx",
+          "sha256": "10c13bc46724c093d5caf77e3f14bb4325604ca1016ff13b1f7c608b0dcc14b0"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-lifecycle-oracle.test.tsx",
+          "sha256": "6abf1ed0fbf08e903b1389d13264d9b2640122688129ca335b6f5dc4281f0bc6"
+        },
+        {
+          "path": "packages/react-db/tests/suspense-local-options-oracle.test.tsx",
+          "sha256": "138ce6f5153b03236cb1c8505d012ffea24b25f76f58961755911a0084c7a266"
+        },
+        {
+          "path": "packages/react-db/tests/useLiveQuery.uncommitted-render.test.tsx",
+          "sha256": "f4a365a23a04282cfab3018d121142040d52070f1de2c8a5ba9536423cd14a6d"
+        },
+        {
+          "path": "packages/react-db/tests/window-render-oracle.test.tsx",
+          "sha256": "b63171cba5903d9869390ccffc8861d83413dec0ef52e159306c4af44a7c3769"
+        },
+        {
+          "path": "packages/svelte-db/src/useLiveQuery.svelte.ts",
+          "sha256": "33bfce543dd29ee44f4485769af0021b76bc7e6649e3fc370877efdaee173b28"
+        },
+        {
+          "path": "packages/svelte-db/tests/client-window-oracle.svelte.test.ts",
+          "sha256": "a036b27849ede46ec6aa1bd5111552df9580e29b64607e492f0e080119cf5b5d"
+        },
+        {
+          "path": "packages/svelte-db/tests/conformance.svelte.test.ts",
+          "sha256": "df98bf808e5ecc51962387440062d8763d43c6e5e1ce538d7a2d09cd01d046b2"
+        }
+      ]
+    }
+  ]
+}

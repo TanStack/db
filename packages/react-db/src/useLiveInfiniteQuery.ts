@@ -14,6 +14,7 @@ import {
 } from '@tanstack/db'
 import { useOptionalDbClient } from './DbProvider'
 import {
+  createDerivedIdentityProfiler,
   getIdentityScope,
   prepareDerivedQuery,
   prepareQueryValue,
@@ -147,12 +148,9 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   // the committed binding, which an uncommitted render never changes.
   const renderedRef = useRef<InfiniteQueryRender | null>(null)
   const sourceIdsRef = useRef<LiveQuerySourceIdClaims | null>(null)
-  const derivedIdentityProfilerRef = useRef<DerivedIdentityProfiler>({
-    renderCount: 0,
-    totalMs: 0,
-    maxMs: 0,
-    warned: false,
-  })
+  const derivedIdentityProfilerRef = useRef<
+    DerivedIdentityProfiler | undefined
+  >(createDerivedIdentityProfiler())
   const deferredCollections = new Set<
     CollectionImplType<any, string | number, any, any, any>
   >()

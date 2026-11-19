@@ -15,13 +15,10 @@ export function expectResultSurface<
   return result
 }
 
-/** Selected values, separate from virtual row metadata and framework internals. */
-export function selectedRow(row: unknown): Record<PropertyKey, unknown> {
-  expect(row).not.toBeNull()
-  expect(typeof row).toBe(`object`)
-  const value = row as Record<PropertyKey, unknown>
+/** The selected-value boundary shared by recorders and source drivers. */
+export function selectedRowKeys(value: object): Array<PropertyKey> {
   const virtual = [`$hasPendingWrites`, `$origin`, `$key`, `$collectionId`]
-  return Object.fromEntries(
+  return (
     Reflect.ownKeys(value)
       // Solid stores nonenumerable bookkeeping symbols on its row wrappers.
       // This shared law observes selected values, not all hidden wrapper state.
@@ -31,7 +28,16 @@ export function selectedRow(row: unknown): Record<PropertyKey, unknown> {
           Object.prototype.propertyIsEnumerable.call(value, key),
       )
       .filter((key) => typeof key !== `string` || !virtual.includes(key))
-      .map((key) => [key, value[key]]),
+  )
+}
+
+/** Selected values, separate from virtual row metadata and framework internals. */
+export function selectedRow(row: unknown): Record<PropertyKey, unknown> {
+  expect(row).not.toBeNull()
+  expect(typeof row).toBe(`object`)
+  const value = row as Record<PropertyKey, unknown>
+  return Object.fromEntries(
+    selectedRowKeys(value).map((key) => [key, value[key]]),
   )
 }
 

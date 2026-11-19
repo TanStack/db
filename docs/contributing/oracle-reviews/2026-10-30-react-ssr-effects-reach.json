@@ -1,0 +1,290 @@
+{
+  "head": "bfd1da1a7e752d66fd667adfd3cdf54f60732b22",
+  "source": "prep-final-react-integration.log",
+  "generatedPathCampaigns": [
+    {
+      "runtime": "react18",
+      "path": "ordinary-provider",
+      "campaign": "fixed",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35,
+        "cold": 4,
+        "prepared-ready": 8,
+        "prepared-loading": 10,
+        "rejected": 13
+      }
+    },
+    {
+      "runtime": "react18",
+      "path": "ordinary-provider",
+      "campaign": "random",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35,
+        "cold": 5,
+        "prepared-ready": 10,
+        "prepared-loading": 6,
+        "rejected": 13
+      }
+    },
+    {
+      "runtime": "react18",
+      "path": "ordinary-explicit",
+      "campaign": "fixed",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35,
+        "cold": 4,
+        "prepared-ready": 8,
+        "prepared-loading": 10,
+        "rejected": 13
+      }
+    },
+    {
+      "runtime": "react18",
+      "path": "ordinary-explicit",
+      "campaign": "random",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35,
+        "cold": 2,
+        "prepared-ready": 8,
+        "prepared-loading": 9,
+        "rejected": 11
+      }
+    },
+    {
+      "runtime": "react18",
+      "path": "suspense-provider",
+      "campaign": "fixed",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "react18",
+      "path": "suspense-provider",
+      "campaign": "random",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "react18",
+      "path": "suspense-explicit",
+      "campaign": "fixed",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "react18",
+      "path": "suspense-explicit",
+      "campaign": "random",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "react18",
+      "path": "standalone",
+      "campaign": "fixed",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "react18",
+      "path": "standalone",
+      "campaign": "random",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "react18",
+      "path": "supplied",
+      "campaign": "fixed",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "react18",
+      "path": "supplied",
+      "campaign": "random",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "current",
+      "path": "ordinary-provider",
+      "campaign": "fixed",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35,
+        "cold": 4,
+        "prepared-ready": 8,
+        "prepared-loading": 10,
+        "rejected": 13
+      }
+    },
+    {
+      "runtime": "current",
+      "path": "ordinary-provider",
+      "campaign": "random",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35,
+        "cold": 6,
+        "prepared-ready": 6,
+        "prepared-loading": 7,
+        "rejected": 12
+      }
+    },
+    {
+      "runtime": "current",
+      "path": "ordinary-explicit",
+      "campaign": "fixed",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35,
+        "cold": 4,
+        "prepared-ready": 8,
+        "prepared-loading": 10,
+        "rejected": 13
+      }
+    },
+    {
+      "runtime": "current",
+      "path": "ordinary-explicit",
+      "campaign": "random",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35,
+        "cold": 4,
+        "prepared-ready": 10,
+        "prepared-loading": 8,
+        "rejected": 10
+      }
+    },
+    {
+      "runtime": "current",
+      "path": "suspense-provider",
+      "campaign": "fixed",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "current",
+      "path": "suspense-provider",
+      "campaign": "random",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "current",
+      "path": "suspense-explicit",
+      "campaign": "fixed",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "current",
+      "path": "suspense-explicit",
+      "campaign": "random",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "current",
+      "path": "standalone",
+      "campaign": "fixed",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "current",
+      "path": "standalone",
+      "campaign": "random",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "current",
+      "path": "supplied",
+      "campaign": "fixed",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    },
+    {
+      "runtime": "current",
+      "path": "supplied",
+      "campaign": "random",
+      "generatedHistories": 24,
+      "fixedExamples": 11,
+      "counts": {
+        "rendered": 35
+      }
+    }
+  ],
+  "disabledReplays": {
+    "react18": {
+      "kind": "fixed shared-check replay",
+      "hookCallsPositive": true,
+      "comparisonsPassed": 1
+    },
+    "current": {
+      "kind": "fixed shared-check replay",
+      "hookCallsPositive": true,
+      "comparisonsPassed": 1
+    }
+  }
+}

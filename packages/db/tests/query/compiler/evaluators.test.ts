@@ -1110,7 +1110,7 @@ describe(`evaluators`, () => {
             it(`equivalent forms compare equal but eq returns false`, () => {
               // PT60M and PT1H represent the same duration. .compare() ranks them
               // as equal, but .equals() (structural, field-by-field) does not, so
-              // eq returns false. This pins the asymmetry — and verifies we
+              // eq returns false. This records the asymmetry — and verifies we
               // dispatch to .compare() rather than lex-comparing toString output,
               // which would say "PT1H" < "PT60M".
               const sixtyMinutes = Temporal.Duration.from(`PT60M`)

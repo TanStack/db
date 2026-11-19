@@ -1,8 +1,13 @@
-import { fc } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
+import { describe, expect } from 'vitest'
 import { stripVirtualProps } from '../utils.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
+import { oracleProperty } from '../oracle-config.js'
 import {
   BUCKETS,
   Driver,
@@ -109,8 +114,8 @@ import type {
  * positive is the only event a failed flush may publish.
  * The work counter wraps the iteration, `get` and `has` methods of
  * each facade's stored rows during the flush and records which facades the
- * flush read. A pinned case covers nested facades across two edges: the child
- * edge commits, then the parent edge throws. Pinned cases also cover a
+ * flush read. A fixed history covers nested facades across two edges: the child
+ * edge commits, then the parent edge throws. Fixed histories also cover a
  * facade subscriber that throws during publication, which must not hold back
  * another facade's events, and a restore that throws, which must still close
  * every facade's deferred events.
@@ -331,14 +336,18 @@ function checkEvents(
     )
     const touched = touchedIds(bucket, previous, ops)
     const named = messages.map((message) => message.key)
-    expect(
-      named.filter((id) => !touched.has(id)),
-      `${label}: events of ${bucket} for untouched rows`,
-    ).toEqual([])
-    expect(
-      named.filter((id, index) => named.indexOf(id) !== index),
-      `${label}: rows of ${bucket} published twice`,
-    ).toEqual([])
+    oracleAssertion(`${label}: events of ${bucket} for untouched rows`, () =>
+      expect(
+        named.filter((id) => !touched.has(id)),
+        `${label}: events of ${bucket} for untouched rows`,
+      ).toEqual([]),
+    )
+    oracleAssertion(`${label}: rows of ${bucket} published twice`, () =>
+      expect(
+        named.filter((id, index) => named.indexOf(id) !== index),
+        `${label}: rows of ${bucket} published twice`,
+      ).toEqual([]),
+    )
     const replayed = new Map(
       [...(previous.get(bucket)?.values() ?? [])].map((row) => [
         row.value.id,
@@ -362,10 +371,12 @@ function checkEvents(
       replayed.delete(id)
       expected.delete(id)
     }
-    expect(
-      Object.fromEntries(replayed),
-      `${label}: replayed events of ${bucket}`,
-    ).toEqual(Object.fromEntries(expected))
+    oracleAssertion(`${label}: replayed events of ${bucket}`, () =>
+      expect(
+        Object.fromEntries(replayed),
+        `${label}: replayed events of ${bucket}`,
+      ).toEqual(Object.fromEntries(expected)),
+    )
   }
 }
 
@@ -556,10 +567,12 @@ async function runHistory(
         driver.takeChanges()
         const created = driver.recordCreated()
         if (outcome !== `publish` && outcome !== `rollback`) {
-          expect(() => driver.adapter.flush(), label).toThrow(
-            outcome === `contradict`
-              ? `Bucket facade retired with rows the graph did not retract`
-              : `injected facade write failure`,
+          oracleAssertion(label, () =>
+            expect(() => driver.adapter.flush(), label).toThrow(
+              outcome === `contradict`
+                ? `Bucket facade retired with rows the graph did not retract`
+                : `injected facade write failure`,
+            ),
           )
           if (contradicted) driver.cancelRetirement(contradicted)
         } else {
@@ -579,10 +592,12 @@ async function runHistory(
           if (written.has(bucket)) continue
           const facade = driver.entry(bucket)?.collection
           if (!facade) continue
-          expect(
-            reads.get(facade) ?? 0,
-            `${label}: reads of untouched ${bucket}`,
-          ).toBe(0)
+          oracleAssertion(`${label}: reads of untouched ${bucket}`, () =>
+            expect(
+              reads.get(facade) ?? 0,
+              `${label}: reads of untouched ${bucket}`,
+            ).toBe(0),
+          )
         }
 
         if (open && open.remaining > 0) {
@@ -592,8 +607,10 @@ async function runHistory(
           // the facades the model shows.
           if (outcome !== `publish`)
             for (const facade of created)
-              expect(facade.status, `${label}: created facade disposed`).toBe(
-                `cleaned-up`,
+              oracleAssertion(`${label}: created facade disposed`, () =>
+                expect(facade.status, `${label}: created facade disposed`).toBe(
+                  `cleaned-up`,
+                ),
               )
           driver.checkHeld(
             outcome === `publish` ? applyOps(published, pending) : published,
@@ -637,13 +654,17 @@ async function runHistory(
               driver.local(facade),
             )
             if (expectation === `permitted`) {
-              expect(
-                advanced,
-                `${label}: layout revision of ${bucket}`,
-              ).toBeLessThanOrEqual(1)
+              oracleAssertion(`${label}: layout revision of ${bucket}`, () =>
+                expect(
+                  advanced,
+                  `${label}: layout revision of ${bucket}`,
+                ).toBeLessThanOrEqual(1),
+              )
             } else {
-              expect(advanced, `${label}: layout revision of ${bucket}`).toBe(
-                expectation === `required` ? 1 : 0,
+              oracleAssertion(`${label}: layout revision of ${bucket}`, () =>
+                expect(advanced, `${label}: layout revision of ${bucket}`).toBe(
+                  expectation === `required` ? 1 : 0,
+                ),
               )
             }
           }
@@ -658,8 +679,10 @@ async function runHistory(
         // neither row events nor a layout revision, and disposes of the
         // facades it created.
         for (const facade of created) {
-          expect(facade.status, `${label}: created facade disposed`).toBe(
-            `cleaned-up`,
+          oracleAssertion(`${label}: created facade disposed`, () =>
+            expect(facade.status, `${label}: created facade disposed`).toBe(
+              `cleaned-up`,
+            ),
           )
         }
         driver.check(published, `${label} (${outcome})`)
@@ -682,33 +705,40 @@ async function runHistory(
             : published.get(bucket)?.get(key)
         }
         for (const [facade, messages] of driver.takeChanges()) {
-          expect(
-            messages
-              .filter(
-                (message) =>
-                  !(
-                    settle &&
-                    message.type === `update` &&
-                    JSON.stringify(stripVirtualProps(message.value)) ===
-                      JSON.stringify(shownRow(facade, message.key)?.value)
-                  ),
-              )
-              .map((message) => message.key)
-              .filter((key) => !driver.heldIds.has(key)),
-            `${label}: events after ${outcome}`,
-          ).toEqual([])
+          oracleAssertion(`${label}: events after ${outcome}`, () =>
+            expect(
+              messages
+                .filter(
+                  (message) =>
+                    !(
+                      settle &&
+                      message.type === `update` &&
+                      JSON.stringify(stripVirtualProps(message.value)) ===
+                        JSON.stringify(shownRow(facade, message.key)?.value)
+                    ),
+                )
+                .map((message) => message.key)
+                .filter((key) => !driver.heldIds.has(key)),
+              `${label}: events after ${outcome}`,
+            ).toEqual([]),
+          )
         }
         const after = driver.eventCounts()
         for (const [facade, count] of before) {
           // The hold's own row adds events when the transaction settles.
           if (!settle)
-            expect(after.get(facade), `${label}: events after ${outcome}`).toBe(
-              count,
+            oracleAssertion(`${label}: events after ${outcome}`, () =>
+              expect(
+                after.get(facade),
+                `${label}: events after ${outcome}`,
+              ).toBe(count),
             )
-          expect(
-            layoutsAfter.get(facade),
-            `${label}: layout revision after ${outcome}`,
-          ).toBe(layoutsBefore.get(facade))
+          oracleAssertion(`${label}: layout revision after ${outcome}`, () =>
+            expect(
+              layoutsAfter.get(facade),
+              `${label}: layout revision after ${outcome}`,
+            ).toBe(layoutsBefore.get(facade)),
+          )
         }
       }
       // A hold still open at the end settles, and its writes must then match.
@@ -774,37 +804,32 @@ const step = fc.record({
   settleLocal: fc.integer({ min: 0, max: 5 }).map((n) => n === 0),
 })
 const history = fc.array(step, { minLength: 1, maxLength: 8 })
-// The parts this file declares. runHistory runs one generated or pinned
-// history through the real adapter and compares it with the model after each
-// flush; checkEvents is its exactly-once publication comparison. The model
-// predicts the rows that each flush owes, which events it may name, and which
-// layout revision it owes.
-declareOracle({
-  check: [runHistory, checkEvents],
-  model: [applyOps, layoutExpectation, shownLayoutExpectation, touchedIds],
-})
+// runHistory runs one generated or fixed history through the real adapter and
+// compares it with the model after each flush; checkEvents is its
+// exactly-once publication comparison. The model predicts the rows that each
+// flush owes, which events it may name, and which layout revision it owes.
 
-describe(`bucket facade rollback`, () => {
-  it(`restores written facades and reads no others (fixed campaign)`, async () => {
-    // A repeatable baseline. Seed 2081 is arbitrary.
-    await fc.assert(fc.asyncProperty(history, runHistory), {
-      numRuns: oracleRuns(150),
-      seed: 2081,
-    })
-  })
+// Shared optional fields of the last named history below.
+const plainStep = {
+  throwPick: 0,
+  local: 0,
+  hold: 0,
+  holdFor: 0,
+  shareId: false,
+  settleLocal: true,
+}
 
-  it(`restores written facades and reads no others (random or replayed)`, async () => {
-    await fc.assert(
-      fc.asyncProperty(history, runHistory),
-      oraclePropertyOptions(150, PROPERTY),
-    )
-  })
-
-  // Pinned: a flush that reorders a shown row throws. The retried flush must
+// Fixed histories and regressions of generated and CI failures.
+const fixedRollbackHistories: Array<{
+  name: string
+  steps: Parameters<typeof runHistory>[0]
+}> = [
+  // Fixed history: a flush that reorders a shown row throws. The retried flush must
   // still publish the layout change, so the failed flush must not leave its
   // new order behind as the facade's current order.
-  it(`publishes a reorder on retry after a failed reordering flush`, async () => {
-    await runHistory([
+  {
+    name: `publishes a reorder on retry after a failed reordering flush`,
+    steps: [
       {
         choices: [
           { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
@@ -824,14 +849,14 @@ describe(`bucket facade rollback`, () => {
         outcome: `publish`,
         throwPick: 0,
       },
-    ])
-  })
-
-  // Pinned: a reorder rolled back after `prepare()`, then sent again. The
+    ],
+  },
+  // Fixed history: a reorder rolled back after `prepare()`, then sent again. The
   // rollback must restore the facade's current order, or the second flush
   // sees no order change and owes a layout revision it does not publish.
-  it(`publishes a reorder sent again after a rolled-back reorder`, async () => {
-    await runHistory([
+  {
+    name: `publishes a reorder sent again after a rolled-back reorder`,
+    steps: [
       {
         choices: [
           { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
@@ -851,14 +876,14 @@ describe(`bucket facade rollback`, () => {
         outcome: `publish`,
         throwPick: 0,
       },
-    ])
-  })
-
-  // Pinned: a failed root commit, then a retry that carries only changes to
+    ],
+  },
+  // Fixed history: a failed root commit, then a retry that carries only changes to
   // other buckets, as a parent-only write would. The retry must still publish
   // the facade change that was pending when the root commit failed.
-  it(`publishes a pending facade change after a failed root commit`, async () => {
-    await runHistory([
+  {
+    name: `publishes a pending facade change after a failed root commit`,
+    steps: [
       {
         choices: [
           { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
@@ -877,14 +902,14 @@ describe(`bucket facade rollback`, () => {
         outcome: `publish`,
         throwPick: 0,
       },
-    ])
-  })
-
+    ],
+  },
   // A retired facade can still show rows the graph never sent: an optimistic
   // row from a pending user transaction, or a held sync commit behind a
   // persisting one. Retiring the bucket must not fail the flush.
-  it(`retires a bucket whose facade shows an optimistic row`, async () => {
-    await runHistory([
+  {
+    name: `retires a bucket whose facade shows an optimistic row`,
+    steps: [
       {
         choices: [
           { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
@@ -899,13 +924,13 @@ describe(`bucket facade rollback`, () => {
         throwPick: 0,
         local: 0,
       },
-    ])
-  })
-
-  // Pinned: a failed flush that writes two existing buckets and retires a
+    ],
+  },
+  // Fixed history: a failed flush that writes two existing buckets and retires a
   // third restores all three, then the retried flush applies everything.
-  it(`restores two written buckets and a retired bucket, then retries`, async () => {
-    await runHistory([
+  {
+    name: `restores two written buckets and a retired bucket, then retries`,
+    steps: [
       {
         choices: [
           { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
@@ -932,13 +957,13 @@ describe(`bucket facade rollback`, () => {
         outcome: `publish`,
         throwPick: 0,
       },
-    ])
-  })
-
-  // Pinned replay of a generated failure: an update to a row that an earlier
+    ],
+  },
+  // Fixed regression of a generated failure: an update to a row that an earlier
   // flush wrote behind a still-persisting transaction keeps the row.
-  it(`updates a row that a persisting transaction still holds`, async () => {
-    await runHistory([
+  {
+    name: `updates a row that a persisting transaction still holds`,
+    steps: [
       {
         choices: [{ kind: 0, bucket: 0, id: 0, v: 0, rank: 0 }],
         outcome: `publish`,
@@ -956,14 +981,14 @@ describe(`bucket facade rollback`, () => {
         outcome: `publish`,
         throwPick: 0,
       },
-    ])
-  })
-
-  // Pinned replay of a CI failure: a rollback restores a row that an earlier
+    ],
+  },
+  // Fixed regression of a CI failure: a rollback restores a row that an earlier
   // flush wrote behind a still-persisting transaction. The restore must write
   // it as an update, because the held insert lands first.
-  it(`restores a held row after a rolled-back update`, async () => {
-    await runHistory([
+  {
+    name: `restores a held row after a rolled-back update`,
+    steps: [
       {
         choices: [{ kind: 0, bucket: 3, id: 0, v: 0, rank: 0 }],
         outcome: `publish`,
@@ -984,36 +1009,28 @@ describe(`bucket facade rollback`, () => {
         outcome: `rollback`,
         throwPick: 0,
       },
-    ])
-  })
-
-  // Pinned replay of a generated failure: an optimistic row shares a graph
+    ],
+  },
+  // Fixed regression of a generated failure: an optimistic row shares a graph
   // id, is rolled back, and then a flush fails while writing the facade. The
   // failed flush publishes nothing.
-  it(`publishes nothing from a failed flush after a shared optimistic row leaves`, async () => {
-    const plain = {
-      throwPick: 0,
-      local: 0,
-      hold: 0,
-      holdFor: 0,
-      shareId: false,
-      settleLocal: true,
-    }
-    await runHistory([
+  {
+    name: `publishes nothing from a failed flush after a shared optimistic row leaves`,
+    steps: [
       {
-        ...plain,
+        ...plainStep,
         cleanup: 0,
         choices: [{ kind: 0, bucket: 1, id: 0, v: 0, rank: 0 }],
         outcome: `publish`,
       },
       {
-        ...plain,
+        ...plainStep,
         cleanup: 0,
         choices: [{ kind: 0, bucket: 0, id: 0, v: 0, rank: 0 }],
         outcome: `publish`,
       },
       {
-        ...plain,
+        ...plainStep,
         shareId: true,
         choices: [
           { kind: 0, bucket: 0, id: 2, v: 0, rank: 0 },
@@ -1022,11 +1039,69 @@ describe(`bucket facade rollback`, () => {
         outcome: `publish`,
       },
       {
-        ...plain,
+        ...plainStep,
         cleanup: 1,
         choices: [{ kind: 0, bucket: 0, id: 0, v: 0, rank: 0 }],
         outcome: `throwWrite`,
       },
-    ])
+    ],
+  },
+]
+
+describe(`bucket facade rollback`, () => {
+  // Keep the complete independent model and its comparisons at each flush.
+  // The shared adapter transports only authored assertion judgments; it does
+  // not classify production, setup, or cleanup exceptions as law violations.
+  oracleProperty({
+    id: PROPERTY,
+    law: {
+      statement: `Failed facade flushes restore all written facades without unrelated row reads, events, or layout revisions; successful flushes publish pending changes once.`,
+      authority: `ARCHITECTURE.md Coherent publication and the three facade laws stated above.`,
+      limits: `The unchanged one-edge, four-bucket, one-to-eight-step grammar; held spanning commits keep their existing row-only comparison.`,
+    },
+    owns: [
+      'src/query/live/bucket-facade-adapter.ts',
+      'src/transactions.ts#createTransaction',
+    ],
+    histories: {
+      arbitrary: history,
+      runs: 150,
+      fixedSeeds: [2081],
+      states: [],
+      constructed: [],
+    },
+    resolve: (steps) => ({ steps }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { steps: Parameters<typeof runHistory>[0] }, observe) =>
+      recordAssertionJudgment(PROPERTY, plan, observe, () =>
+        runHistory(plan.steps),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  // The named histories above lie outside the generated grammar: they leave
+  // out optional step fields, which the grammar's records always hold. Each
+  // replays through `runHistory`, the shared driver and comparison, under its
+  // old test name.
+  oracleProperty({
+    id: `bucket-facade.rollback-fixed`,
+    law: {
+      statement: `Failed facade flushes restore all written facades without unrelated row reads, events, or layout revisions; successful flushes publish pending changes once.`,
+      authority: `ARCHITECTURE.md Coherent publication and the three facade laws stated above.`,
+      limits: `Named regressions that the generated step grammar cannot take back; each replays through the same driver and comparison.`,
+    },
+    owns: [
+      'src/query/live/bucket-facade-adapter.ts',
+      'src/transactions.ts#createTransaction',
+    ],
+    histories: fixedRollbackHistories,
+    label: ({ name }) => name,
+    resolve: ({ steps }) => ({ steps }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { steps: Parameters<typeof runHistory>[0] }, observe) =>
+      recordAssertionJudgment(PROPERTY, plan, observe, () =>
+        runHistory(plan.steps),
+      ),
+    check: forwardAssertionJudgment,
   })
 })

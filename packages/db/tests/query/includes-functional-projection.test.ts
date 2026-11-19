@@ -14,11 +14,15 @@ import { flushPromises } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import {
   Projection,
+  cells,
   cleanupAfterOracle,
   collectionInputError,
   noPrimaryFailure,
+  operatorCells,
+  orderedPairCells,
   readChildren,
   rejectsCollectionInput,
+  renamedCells,
   valueCells,
 } from './includes-functional-projection-support.js'
 
@@ -1032,5 +1036,36 @@ describe(`functional include projection boundary grammar`, () => {
         () => parents.collection.cleanup(),
       ])
     }
+  })
+})
+
+// Grammar-size checks for the cell tables that
+// includes-functional-projection-oracle.test.ts enumerates. They test test
+// code, so they live here rather than in the oracle file.
+describe(`functional projection cell grammar`, () => {
+  it(`covers the declared output and renamed-field products`, () => {
+    expect(valueCells).toHaveLength(48)
+    expect(renamedCells).toHaveLength(24)
+    expect(operatorCells).toHaveLength(18)
+    expect(new Set(valueCells.map((cell) => JSON.stringify(cell))).size).toBe(
+      48,
+    )
+    expect(new Set(renamedCells.map((cell) => JSON.stringify(cell))).size).toBe(
+      24,
+    )
+    expect(
+      new Set(operatorCells.map((cell) => JSON.stringify(cell))).size,
+    ).toBe(18)
+  })
+
+  it(`covers every declared boundary product without duplicate cells`, () => {
+    expect(cells).toHaveLength(54)
+    expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(54)
+    expect(orderedPairCells).toHaveLength(27)
+    expect(
+      new Set(
+        [...cells, ...orderedPairCells].map((cell) => JSON.stringify(cell)),
+      ).size,
+    ).toBe(81)
   })
 })

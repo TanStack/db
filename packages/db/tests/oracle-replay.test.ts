@@ -5,7 +5,6 @@ import { dirname, join, resolve } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { stripVTControlCharacters } from 'node:util'
-import fc from 'fast-check'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { oracleReplayManifest } from './oracle-replay-manifest.js'
 import { oracleReplayReporter } from './oracle-replay-witness.js'
@@ -40,25 +39,28 @@ function runReplay(
   fault?: string,
   property = `oracle-replay.calibration`,
   cleanupFailure = false,
+  workingDirectory = packageDirectory,
+  unit?: string,
 ): { status: number | null; output: string } {
   const result = spawnSync(
     process.execPath,
     [
       `--import`,
       `tsx`,
-      `tests/oracle-replay.ts`,
+      join(packageDirectory, `tests/oracle-replay.ts`),
       ...args,
       `--maxWorkers=1`,
       `--coverage.enabled=false`,
     ],
     {
-      cwd: packageDirectory,
+      cwd: workingDirectory,
       env: {
         ...process.env,
         TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: `1`,
         TANSTACK_DB_ORACLE_SEED: `42`,
         TANSTACK_DB_ORACLE_PATH: `0`,
         TANSTACK_DB_ORACLE_PROPERTY: property,
+        TANSTACK_DB_ORACLE_UNIT: unit,
         TANSTACK_DB_ORACLE_REPLAY_CALIBRATION: fault,
         TANSTACK_DB_ORACLE_REPLAY_TEST_CLEANUP_FAILURE: cleanupFailure
           ? `1`
@@ -77,6 +79,110 @@ describe(`guarded oracle replay`, () => {
   // replays instead of starving Vitest's RPC channel across the whole suite.
   afterEach(() => setImmediate())
 
+  it(`rejects a window replay through a different framework driver`, () => {
+    const result = runReplay(
+      [`tests/conformance.test.tsx`],
+      undefined,
+      `framework.solid.window-history`,
+      false,
+      join(repositoryDirectory, `packages/react-db`),
+    )
+    expect(result.status, result.output).toBe(1)
+    expect(result.output).toContain(`oracle replay target never executed`)
+    expect(result.output).toContain(`"executions":0`)
+  }, 40_000)
+
+  it.each([
+    { name: `legacy-only target`, executions: 1, status: 0 },
+    {
+      name: `filtered target`,
+      executions: 0,
+      status: 0,
+      filter: `absent test`,
+    },
+    {
+      name: `unknown canonical property`,
+      executions: 0,
+      status: 1,
+      canonicalProperty: `absent.property`,
+      message: `unknown oracle property`,
+    },
+    {
+      name: `conflicting canonical unit`,
+      executions: 0,
+      status: 1,
+      canonicalProperty: `browser.shared-driver-fairness`,
+      message: `Conflicting legacy and canonical oracle replay coordinate: TANSTACK_DB_ORACLE_UNIT`,
+    },
+  ])(
+    `witnesses the browser alias with $name`,
+    ({ executions, status, filter, canonicalProperty, message }) => {
+      const property = `browser.shared-driver-fairness`
+      const directory = mkdtempSync(join(tmpdir(), `oracle-alias-replay-`))
+      const channel = join(directory, `witness.jsonl`)
+      try {
+        const result = spawnSync(
+          process.execPath,
+          [
+            join(repositoryDirectory, `node_modules/vitest/vitest.mjs`),
+            `run`,
+            `tests/shared-driver-fairness-oracle.test.ts`,
+            `-t`,
+            filter ?? property,
+            `--maxWorkers=1`,
+            `--coverage.enabled=false`,
+            `--typecheck.enabled=false`,
+          ],
+          {
+            cwd: join(
+              repositoryDirectory,
+              `packages/browser-db-sqlite-persistence`,
+            ),
+            env: {
+              ...process.env,
+              TANSTACK_DB_DRIVER_FAIRNESS_SEED: `165905`,
+              TANSTACK_DB_DRIVER_FAIRNESS_PATH: `0`,
+              TANSTACK_DB_ORACLE_SEED: canonicalProperty ? `165905` : undefined,
+              TANSTACK_DB_ORACLE_PATH: canonicalProperty ? `0` : undefined,
+              TANSTACK_DB_ORACLE_PROPERTY: canonicalProperty,
+              TANSTACK_DB_ORACLE_UNIT: canonicalProperty
+                ? `random seed: absent`
+                : undefined,
+              TANSTACK_DB_ORACLE_REPLAY_WITNESS: channel,
+              TANSTACK_DB_ORACLE_REPLAY_WITNESS_MODE: `async`,
+            },
+            encoding: `utf8`,
+            timeout: 30_000,
+          },
+        )
+        if (result.error) throw result.error
+        const output = result.stdout + result.stderr
+        const witnesses = existsSync(channel)
+          ? readFileSync(channel, `utf8`)
+              .trim()
+              .split(`\n`)
+              .map((line) => JSON.parse(line))
+          : []
+        expect(result.status, output).toBe(status)
+        expect(
+          witnesses.filter(
+            (witness) =>
+              witness.property === property &&
+              witness.seed === 165905 &&
+              witness.path === `0` &&
+              witness.numRuns === 1,
+          ),
+          output,
+        ).toHaveLength(executions)
+        expect(output).not.toContain(`fixed seed 165905: generated reach`)
+        if (message) expect(output).toContain(message)
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
+    },
+    40_000,
+  )
+
   it(`runs a named replay directly without the owner's fixed campaign`, () => {
     const result = runReplay([fixture])
     expect(result.status, result.output).toBe(0)
@@ -84,7 +190,19 @@ describe(`guarded oracle replay`, () => {
     expect(result.output).not.toContain(`unrelated fixed campaign ran`)
   }, 40_000)
 
-  it(`intersects a caller alternation with the named replay lane`, () => {
+  it(`rejects seed/path replay for enumerated cases and names their direct command`, () => {
+    const result = runReplay(
+      [`tests/replay-enumerated-oracle.fixture.test.ts`],
+      undefined,
+      `oracle-replay.enumerated-calibration`,
+    )
+    expect(result.status, result.output).toBe(1)
+    expect(result.output).toContain(`enumerated-campaign`)
+    expect(result.output).toContain(`Run its enumerated cases with:`)
+    expect(result.output).not.toContain(`oracle replay target never executed`)
+  }, 40_000)
+
+  it(`intersects a caller alternation with the named replay campaign`, () => {
     const result = runReplay([
       fixture,
       `-t`,
@@ -99,36 +217,67 @@ describe(`guarded oracle replay`, () => {
       `index-update.reference-model`,
       `tests/index-update-oracle.property.test.ts`,
       2,
+      `random seed: generated`,
     ],
     [
       `index-update.nullish-membership`,
       `tests/index-update-oracle.property.test.ts`,
       2,
+      `random seed: generated`,
     ],
     [
       `index-update.exact-identity`,
       `tests/index-update-oracle.property.test.ts`,
       2,
+      `random seed: generated`,
     ],
     [
       `index-update.custom-comparator`,
       `tests/index-update-oracle.property.test.ts`,
       2,
+      `random seed: generated`,
     ],
     [
       `pagination.matrix.window-0`,
       `tests/query/pagination-oracle.property.test.ts`,
       1,
+      `random seed: generated`,
     ],
     [
       `pagination.matrix.state-7`,
       `tests/query/pagination-oracle.property.test.ts`,
       1,
+      `random seed: generated`,
     ],
+    ...[
+      `builder`,
+      `unstarted`,
+      `ready`,
+      `initial-pending`,
+      `move-pending`,
+      `replay-pending`,
+    ].flatMap((path) =>
+      [`negative`, `valid`].map(
+        (admission) =>
+          [
+            `pagination.limit-admission-${path}-${admission}`,
+            `tests/query/pagination-oracle.property.test.ts`,
+            1,
+            `random seed: admission and settlement cuts`,
+          ] as const,
+      ),
+    ),
   ] as const)(
-    `selects only the requested %s replay lane`,
-    (property, file, expectedTests) => {
-      const result = runReplay([file], undefined, property)
+    `selects only the requested %s replay campaign`,
+    (property, file, expectedTests, unit) => {
+      const result = runReplay(
+        [file],
+        undefined,
+        property,
+        false,
+        packageDirectory,
+        unit,
+      )
       expect(result.status, result.output).toBe(0)
       expect(result.output).toContain(`"executions":${expectedTests}`)
       expect(stripVTControlCharacters(result.output)).toMatch(
@@ -139,46 +288,77 @@ describe(`guarded oracle replay`, () => {
   )
 
   it.each([
+    [undefined, `requires TANSTACK_DB_ORACLE_UNIT`],
+    [`random seed: absent`, `is no random unit of this property`],
+  ])(
+    `rejects a generated path replay with unit %s`,
+    (unit, message) => {
+      const result = runReplay(
+        [`tests/index-update-oracle.property.test.ts`],
+        undefined,
+        `index-update.reference-model`,
+        false,
+        packageDirectory,
+        unit,
+      )
+      expect(result.status, result.output).toBe(1)
+      expect(result.output).toContain(message)
+      expect(result.output).toContain(`"executions":0`)
+    },
+    40_000,
+  )
+
+  it.each([
     [
       `sorted-map.key`,
       `tests/SortedMap-oracle.test.ts`,
-      `SortedMap key history.*seed undefined`,
+      `sorted-map\\.key > random seed`,
     ],
     [
       `sorted-map.ascending`,
       `tests/SortedMap-oracle.test.ts`,
-      `SortedMap ascending history.*seed undefined`,
+      `sorted-map\\.ascending > random seed`,
     ],
     [
       `sorted-map.descending`,
       `tests/SortedMap-oracle.test.ts`,
-      `SortedMap descending history.*seed undefined`,
+      `sorted-map\\.descending > random seed`,
     ],
     [
       `collection-state.mixed-transaction`,
       `tests/optimistic-transaction-oracle.property.test.ts`,
-      `varies full payloads, seed=undefined`,
+      `collection-state\\.mixed-transaction > random seed`,
     ],
     [
       `query-identity.compiled-output`,
       `tests/query/identity-output-shape-oracle.test.ts`,
-      `varies safe aliases and payloads, seed=undefined`,
+      `query-identity\\.compiled-output > random seed`,
     ],
     [
       `load-subset.rejected-waiter`,
       `tests/query/load-subset-oracle.property.test.ts`,
-      `retries failed exact demand histories through fresh success for a random or replayed seed`,
+      `load-subset\\.rejected-waiter > random seed`,
     ],
   ])(
     `executes the actual named owner %s and rejects a filtered target`,
     (property, file, randomName) => {
-      const executed = runReplay([file, `-t`, randomName], undefined, property)
+      const executed = runReplay(
+        [file, `-t`, randomName],
+        undefined,
+        property,
+        false,
+        packageDirectory,
+        `random seed: generated`,
+      )
       expect(executed.status, executed.output).toBe(0)
       expect(executed.output).toContain(`"executions":1`)
       const excluded = runReplay(
         [file, `tests/utils.test.ts`, `-t`, `oracle run configuration`],
         undefined,
         property,
+        false,
+        packageDirectory,
+        `random seed: generated`,
       )
       expect(excluded.status, excluded.output).toBe(1)
       expect(excluded.output).toContain(`oracle replay target never executed`)
@@ -298,9 +478,12 @@ describe(`oracle replay reporting`, () => {
     directory = undefined
   })
 
-  it(`leaves ordinary seeded and random options unchanged`, () => {
+  it(`preserves explicit seeds and supplies a fresh seed for ordinary runs`, () => {
     vi.stubEnv(`TANSTACK_DB_ORACLE_REPLAY_WITNESS`, undefined)
-    expect(oracleRandomParameters(5, undefined)).toEqual({ numRuns: 5 })
+    expect(oracleRandomParameters(5, undefined)).toEqual({
+      numRuns: 5,
+      seed: expect.any(Number),
+    })
     expect(oracleRandomParameters(5, 42)).toEqual({ numRuns: 5, seed: 42 })
     expect(oracleReplayReporter(`oracle-replay.calibration`, 42, `0`)).toEqual(
       {},
@@ -310,7 +493,7 @@ describe(`oracle replay reporting`, () => {
   it(`runs a path replay once, and only for its selected property`, () => {
     vi.stubEnv(`TANSTACK_DB_ORACLE_REPLAY_WITNESS`, undefined)
     const replay = {
-      replaySeed: 42,
+      campaignSeed: 42,
       replayPath: `3`,
       replayProperty: `oracle-replay.calibration`,
     }
@@ -323,53 +506,162 @@ describe(`oracle replay reporting`, () => {
     })
   })
 
-  it.each([false, true])(
-    `preserves native async failure formatting and cause=%s`,
-    async (errorWithCause) => {
-      directory = mkdtempSync(join(tmpdir(), `oracle-reporter-test-`))
-      const channel = join(directory, `witness.jsonl`)
-      vi.stubEnv(`TANSTACK_DB_ORACLE_REPLAY_WITNESS`, channel)
-      vi.stubEnv(`TANSTACK_DB_ORACLE_PROPERTY`, `oracle-replay.calibration`)
-      vi.stubEnv(`TANSTACK_DB_ORACLE_SEED`, `42`)
-      vi.stubEnv(`TANSTACK_DB_ORACLE_PATH`, `0`)
-      const sentinel = new Error(`native cause sentinel`)
-      const value = {
-        [fc.asyncToStringMethod]: () => Promise.resolve(`async replay value`),
-      }
-      const property = fc.asyncProperty(fc.constant(value), () =>
-        Promise.reject(sentinel),
-      )
-      const options = { seed: 42, path: `0`, numRuns: 1, errorWithCause }
-      async function failure(instrumented: boolean): Promise<Error> {
-        try {
-          await fc.assert(property, {
-            ...options,
-            ...(instrumented
-              ? oracleReplayReporter(`oracle-replay.calibration`, 42, `0`)
-              : {}),
-          })
-        } catch (error) {
-          if (error instanceof Error) return error
-          throw error
-        }
-        throw new Error(`expected property failure`)
-      }
-      const native = await failure(false)
-      const instrumented = await failure(true)
-      expect(instrumented.message).toBe(native.message)
-      expect(instrumented.message).toContain(`async replay value`)
-      expect(Object.getOwnPropertyDescriptor(instrumented, `cause`)).toEqual(
-        Object.getOwnPropertyDescriptor(native, `cause`),
-      )
-      expect(JSON.parse(readFileSync(channel, `utf8`))).toMatchObject({
-        numRuns: 1,
-        failed: true,
-      })
-    },
-  )
+  // fast-check 4 always attaches the property's error as the cause. The
+  // framework reads the replay environment once, at configuration, so the
+  // comparison runs in a child process that starts with that environment.
+  it(`preserves native async failure formatting and cause`, () => {
+    directory = mkdtempSync(join(tmpdir(), `oracle-reporter-test-`))
+    const channel = join(directory, `witness.jsonl`)
+    const result = spawnSync(
+      process.execPath,
+      [
+        `--import`,
+        `tsx`,
+        join(packageDirectory, `tests/replay-reporter-format.fixture.ts`),
+      ],
+      {
+        cwd: packageDirectory,
+        env: {
+          ...process.env,
+          TANSTACK_DB_ORACLE_REPLAY_WITNESS: channel,
+          TANSTACK_DB_ORACLE_PROPERTY: `oracle-replay.calibration`,
+          TANSTACK_DB_ORACLE_SEED: `42`,
+          TANSTACK_DB_ORACLE_PATH: `0`,
+        },
+        encoding: `utf8`,
+        timeout: 30_000,
+      },
+    )
+    if (result.error) throw result.error
+    expect(result.status, result.stderr).toBe(0)
+    const { native, instrumented, witness } = JSON.parse(
+      result.stdout.trim().split(`\n`).at(-1)!,
+    )
+    expect(instrumented.message).toBe(native.message)
+    expect(instrumented.message).toContain(`async replay value`)
+    expect(native.cause).toMatchObject({ sentinel: true })
+    expect(instrumented.cause).toEqual(native.cause)
+    expect(witness).toMatchObject({ numRuns: 1, failed: true })
+  }, 40_000)
 })
 
 describe(`named oracle replay manifest`, () => {
+  it(`runs finite cases directly without seed/path replay coordinates`, () => {
+    const entry = oracleReplayManifest.find(
+      ({ property }) => property === `oracle-replay.enumerated-calibration`,
+    )!
+    expect(entry).toMatchObject({
+      status: `enumerated-campaign`,
+      file: `packages/db/tests/replay-enumerated-oracle.fixture.test.ts`,
+      cwd: `packages/db`,
+      environment: [],
+      testNamePattern: `oracle-replay\\.enumerated-calibration > `,
+      command: `env -u TANSTACK_DB_ORACLE_SEED -u TANSTACK_DB_ORACLE_PATH -u TANSTACK_DB_ORACLE_PROPERTY -u TANSTACK_DB_ORACLE_UNIT pnpm exec vitest run -t 'oracle-replay\\.enumerated-calibration > ' tests/replay-enumerated-oracle.fixture.test.ts`,
+    })
+    // Execute the advertised command itself. The neighbor fault proves that
+    // selecting this property's cases does not run a similarly named property.
+    const run = (fault: string) => {
+      const result = spawnSync(
+        `${entry.command!} --maxWorkers=1 --coverage.enabled=false`,
+        {
+          cwd: resolve(repositoryDirectory, entry.cwd!),
+          shell: true,
+          env: {
+            ...process.env,
+            // The advertised command must also work from the shell that
+            // exported these coordinates for the rejected guarded replay.
+            TANSTACK_DB_ORACLE_SEED: `42`,
+            TANSTACK_DB_ORACLE_PATH: `0`,
+            TANSTACK_DB_ORACLE_PROPERTY: entry.property,
+            TANSTACK_DB_ORACLE_UNIT: `random seed: generated`,
+            TANSTACK_DB_ORACLE_ENUMERATED_CALIBRATION: fault,
+          },
+          encoding: `utf8`,
+          timeout: 30_000,
+        },
+      )
+      if (result.error) throw result.error
+      return {
+        status: result.status,
+        output: stripVTControlCharacters(result.stdout + result.stderr),
+      }
+    }
+    const clean = run(`neighbor`)
+    expect(clean.status, clean.output).toBe(0)
+    expect(clean.output).toMatch(/Tests\s+3 passed \| 2 skipped/)
+    const wrong = run(`value`)
+    expect(wrong.status, wrong.output).toBe(1)
+    expect(wrong.output).toContain(`finite value`)
+    expect(wrong.output).not.toContain(`unrelated finite property ran`)
+  }, 70_000)
+  // ORC-007 requires the same production path during replay. A shared model
+  // does not make different framework schedulers interchangeable. Enumerate
+  // the finite driver × history grammar, including React's dependency-list
+  // path, and compare its independently named owner with the manifest.
+  it.each(
+    [
+      [`react`, `react-db/tests/conformance.test.tsx`],
+      [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
+      [`react-DbClient`, `react-db/tests/conformance.test.tsx`],
+      [`react-Suspense`, `react-db/tests/conformance.test.tsx`],
+      [`react-Suspense-DbClient`, `react-db/tests/conformance.test.tsx`],
+      [`preact`, `preact-db/tests/conformance.test.ts`],
+      [`vue`, `vue-db/tests/conformance.test.ts`],
+      [`solid`, `solid-db/tests/conformance.test.tsx`],
+      [`angular`, `angular-db/tests/conformance.test.ts`],
+      [`svelte`, `svelte-db/tests/conformance.svelte.test.ts`],
+      [`svelte-DbClient`, `svelte-db/tests/conformance.svelte.test.ts`],
+    ].flatMap(([driver, owner]) =>
+      [
+        `window-history`,
+        `pending-window-history`,
+        `publication-window-history`,
+        `peer-window-history`,
+        ...([
+          `react`,
+          `react-dependency-list`,
+          `react-DbClient`,
+          `react-Suspense`,
+          `react-Suspense-DbClient`,
+          `preact`,
+          `svelte-DbClient`,
+        ].includes(driver!)
+          ? [`immutable-key-history`]
+          : []),
+        ...([
+          `react`,
+          `react-dependency-list`,
+          `preact`,
+          `vue`,
+          `solid`,
+          `angular`,
+          `svelte`,
+        ].includes(driver!)
+          ? [`result-shape`]
+          : []),
+        ...([
+          `react`,
+          `react-dependency-list`,
+          `react-DbClient`,
+          `preact`,
+          `svelte-DbClient`,
+        ].includes(driver!)
+          ? [`keyed-admission`]
+          : []),
+      ].map((family) => [`framework.${driver}.${family}`, owner] as const),
+    ),
+  )(`keeps the originating driver for %s`, (property, owner) => {
+    const entry = oracleReplayManifest.find(
+      (candidate) => candidate.property === property,
+    )
+    expect(entry, property).toMatchObject({
+      file: `packages/${owner}`,
+      status: `assertion`,
+      source: `packages/db/tests/conformance/${property.endsWith(`.result-shape`) ? `result-shape-oracle` : `window-history-oracle`}.ts`,
+      testNamePattern: expect.any(String),
+    })
+  })
+
   it(`accounts for every registry name`, () => {
     expect(
       new Set(oracleReplayManifest.map(({ property }) => property)),
@@ -430,10 +722,169 @@ describe(`named oracle replay manifest`, () => {
         expect(source).toContain(
           family?.[1] ?? `includes.matrix.flat-materialization`,
         )
+      } else if (entry.property.startsWith(`framework.`)) {
+        const [, driver, family] = entry.property.split(`.`)
+        const driverSource = readFileSync(
+          join(repositoryDirectory, entry.file),
+          `utf8`,
+        )
+        const driverName =
+          driver === `react-dependency-list`
+            ? `react (dependency list)`
+            : driver
+        if (
+          [
+            `react-DbClient`,
+            `react-Suspense`,
+            `react-Suspense-DbClient`,
+          ].includes(driver!)
+        ) {
+          // These three names come from one finite runtime product. Require
+          // both generating axes and the exact naming expression; guarded
+          // receiving replays verify the resulting names actually execute.
+          expect(driverSource).toContain(
+            `for (const suspense of [false, true])`,
+          )
+          expect(driverSource).toContain(`for (const client of [false, true])`)
+          expect(driverSource).toContain(
+            'name: `react${suspense ? ` Suspense` : ``}${client ? ` (DbClient)` : ``}`',
+          )
+        } else {
+          expect(driverSource).toContain(
+            `name: \`${driverName === `svelte-DbClient` ? `svelte (DbClient)` : driverName}\``,
+          )
+        }
+        if (family === `result-shape`)
+          expect(source).toContain(`framework.\${id}.result-shape`)
+        else
+          expect(source).toContain(
+            `windowHistoryProperty(driver, \`${family}\`)`,
+          )
+      } else if (
+        entry.property ===
+        `adapter-conformance.eager-live-source.trailbase.chromium`
+      ) {
+        // This receiving owner declares its complete property ID and passes it
+        // to the shared registration, rather than deriving a variant suffix.
+        expect(entry.file).toBe(
+          `packages/browser-db-sqlite-persistence/tests/trailbase-eager-live-source-oracle.test.ts`,
+        )
+        expect(source).toContain(`const property = \`${entry.property}\``)
+        expect(source).toMatch(/registerTrailBaseEager\(\s*\{\s*property,/u)
+      } else if (
+        entry.property.startsWith(`adapter-conformance.eager-live-source.`)
+      ) {
+        const prefix = `adapter-conformance.eager-live-source.`
+        const [driver, ...variant] = entry.property
+          .slice(prefix.length)
+          .split(`.`)
+        expect(source).toContain(`\`${prefix}${driver}\``)
+        if (variant[0] === `ablation`) {
+          expect(driver).toBe(`reference`)
+          expect(source).toContain('id: `${property}.ablation.${name}`')
+          const [name, state] = variant.slice(1)
+          expect(source).toContain(`\`${name}\``)
+          if (state !== undefined) {
+            expect(source).toContain(`\`${state}\``)
+            expect(source).toContain(
+              'registerAblation(`${kind}.${lost}`, lost,',
+            )
+          }
+        } else if (variant.length > 0) {
+          expect(variant).toHaveLength(1)
+          expect(
+            source.includes(`id: \`\${property}.${variant[0]}\``) ||
+              (driver === `convex` &&
+                source.includes('id: `${property}.${client}`') &&
+                source.includes(`\`${variant[0]}\``)),
+          ).toBe(true)
+        }
+      } else if (entry.property.startsWith(`electric.sdk-resume-checkpoint.`)) {
+        const [, , tagged, consumer, emptySecond, delivery] =
+          entry.property.split(`.`)
+        expect(entry.property.split(`.`)).toHaveLength(6)
+        expect([`false`, `true`]).toContain(tagged)
+        expect([`direct`, `live-query`, `cursor`]).toContain(consumer)
+        expect([`false`, `true`]).toContain(emptySecond)
+        expect([`apply`, `hold`, `reject`]).toContain(delivery)
+        if (consumer === `cursor`) expect(delivery).toBe(`hold`)
+        expect(source).toContain(`for (const tagged of [false, true])`)
+        expect(source).toContain(`for (const emptySecond of [false, true])`)
+        expect(source).toContain('[`direct`, `live-query`, `cursor`] as const')
+        expect(source).toContain('[`apply`, `hold`, `reject`] as const')
+        expect(source).toContain(
+          'if (consumer === `cursor` && delivery !== `hold`) continue',
+        )
+        expect(source).toContain(
+          'electric.sdk-resume-checkpoint.${tagged}.${consumer}.${emptySecond}.${delivery}',
+        )
+      } else if (
+        /^adapter\.(rxdb|powersync)\.capability\.(controlled|node-sqlite)$/.test(
+          entry.property,
+        )
+      ) {
+        const [, adapter, , host] = entry.property.split(`.`)
+        expect([`rxdb`, `powersync`]).toContain(adapter)
+        expect([`controlled`, `node-sqlite`]).toContain(host)
+        expect(source).toContain('id: `adapter.${name}.capability.${host}`')
+        expect(source).toContain(
+          'for (const host of [`controlled`, `node-sqlite`] as const)',
+        )
+        const receivingSource = readFileSync(
+          resolve(repositoryDirectory, entry.file),
+          `utf8`,
+        )
+        expect(receivingSource).toContain(
+          `registerCapabilityConformance(\`${adapter}\`,`,
+        )
+      } else if (
+        /^trailbase\.lifecycle\.persisted-hydration\.(controlled|node-sqlite)$/.test(
+          entry.property,
+        )
+      ) {
+        expect(source).toContain(
+          '`trailbase.lifecycle.persisted-hydration.${host}`',
+        )
+        expect(source).toContain(
+          'for (const host of [`controlled`, `node-sqlite`] as const)',
+        )
+      } else if (entry.property.startsWith(`react.ssr-effects-`)) {
+        const [runtime, ...parts] = entry.property
+          .slice(`react.ssr-effects-`.length)
+          .split(`-`)
+        expect([`react18`, `current`]).toContain(runtime)
+        expect(source).toContain(`react.ssr-effects-\${runtime.name}-\${path}`)
+        expect(source).toContain(`\`${runtime}\``)
+        expect(source).toContain(`\`${parts.join(`-`)}\``)
       } else if (/^(utils|comparison)\.\d+$/.test(entry.property)) {
         // These oracles number their properties in file order.
         const [family] = entry.property.split(`.`)
         expect(source).toContain(`\`${family}.\${id}\``)
+      } else if (
+        entry.property.startsWith(`pagination.limit-admission-`) &&
+        // The fixed admission histories name their property literally.
+        entry.property !== `pagination.limit-admission-fixed`
+      ) {
+        const suffix = entry.property.slice(
+          `pagination.limit-admission-`.length,
+        )
+        const separator = suffix.lastIndexOf(`-`)
+        const path = suffix.slice(0, separator)
+        const admission = suffix.slice(separator + 1)
+        expect([
+          `builder`,
+          `unstarted`,
+          `ready`,
+          `initial-pending`,
+          `move-pending`,
+          `replay-pending`,
+        ]).toContain(path)
+        expect([`negative`, `valid`]).toContain(admission)
+        expect(source).toContain(`\`${path}\``)
+        expect(source).toContain(`for (const negative of [false, true])`)
+        expect(source).toContain(
+          'pagination.limit-admission-${path}-${negative ? `negative` : `valid`}',
+        )
       } else if (entry.property.startsWith(`pagination.matrix.`)) {
         const [, , familyCell] = entry.property.split(`.`)
         const [family, cell] = familyCell!.split(`-`)
@@ -513,33 +964,42 @@ describe(`named oracle replay manifest`, () => {
     ).toEqual([])
   })
 
-  it(`replays a property without a shrink path from its seed alone`, () => {
-    // The LIKE oracle draws its cases from its own seeded generator, so the
-    // guarded runner, which witnesses a seed and a path, cannot witness it.
+  it(`gives LIKE a direct seed-and-path assertion replay`, () => {
     expect(
-      oracleReplayManifest
-        .filter(({ status }) => status === `seed-replay`)
-        .map(({ property, command, environment }) => ({
-          property,
-          command,
-          environment,
-        })),
-    ).toEqual([
-      {
-        property: `evaluators.like`,
-        command: `pnpm exec vitest run tests/query/compiler/evaluators-oracle.test.ts`,
-        environment: [`TANSTACK_DB_ORACLE_SEED`],
-      },
-    ])
+      oracleReplayManifest.filter(
+        ({ status }) => status === `reseeded-campaign`,
+      ),
+    ).toEqual([])
+    expect(
+      oracleReplayManifest.find(
+        ({ property }) => property === `evaluators.like`,
+      ),
+    ).toMatchObject({
+      status: `assertion`,
+      testNamePattern: `evaluators\\.like > random seed`,
+      environment: [
+        `TANSTACK_DB_ORACLE_SEED`,
+        `TANSTACK_DB_ORACLE_PATH`,
+        `TANSTACK_DB_ORACLE_PROPERTY`,
+        `TANSTACK_DB_ORACLE_UNIT`,
+      ],
+    })
   })
 
   it(`gives every index and pagination matrix property a direct test selector`, () => {
     const direct = oracleReplayManifest.filter(({ property }) =>
       /^(index-update|pagination\.matrix)\./.test(property),
     )
-    expect(direct).toHaveLength(20)
+    // The 20 generated matrix properties replay a seed and path; the fixed
+    // index-update histories are enumerated sources that replay their cases.
+    expect(direct.filter(({ status }) => status === `assertion`)).toHaveLength(
+      20,
+    )
     for (const entry of direct) {
-      expect(entry.status).toBe(`assertion`)
+      if (entry.status !== `assertion`) {
+        expect(entry.property).toMatch(/^index-update\./)
+        expect(entry.status).toBe(`enumerated-campaign`)
+      }
       expect(entry.testNamePattern).toBeDefined()
     }
   })

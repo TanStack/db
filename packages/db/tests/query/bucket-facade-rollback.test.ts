@@ -1,6 +1,9 @@
 import { D2, MultiSet } from '@tanstack/db-ivm'
 import { describe, expect, it } from 'vitest'
-import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.js'
+import {
+  BucketFacadeAdapter,
+  resolvePublicValue,
+} from '../../src/query/live/bucket-facade-adapter.js'
 import { createTransaction } from '../../src/transactions.js'
 import { stripVirtualProps } from '../utils.js'
 import { BUCKET_FACADE_REF } from '../../src/query/live/materialized-pipeline.js'
@@ -26,7 +29,7 @@ function kidsOf(row: unknown): unknown {
 }
 
 describe(`bucket facade rollback`, () => {
-  // Pinned: a list of 50 buckets with 3 rows each, where one insert touches
+  // Fixed history: a list of 50 buckets with 3 rows each, where one insert touches
   // one bucket. The flush must read that bucket's rows and no others.
   it(`reads only the written facade in a wide list`, async () => {
     const driver = new Driver()
@@ -59,7 +62,7 @@ describe(`bucket facade rollback`, () => {
       () => driver.cleanup(),
     )
   })
-  // Pinned: nested facades. A parent facade's row refers to a child facade.
+  // Fixed history: nested facades. A parent facade's row refers to a child facade.
   // The child edge commits first, then the parent edge's commit throws. The
   // failed flush must restore the child's rows, keep the parent's reference
   // to the old child facade, and drop the child facade it created. The retry
@@ -87,6 +90,7 @@ describe(`bucket facade rollback`, () => {
         },
       ],
       () => {},
+      resolvePublicValue,
     )
     graph.finalize()
     const entries = (

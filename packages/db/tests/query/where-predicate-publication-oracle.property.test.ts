@@ -64,8 +64,8 @@
  * publication, and a restarted source) compare with written values, so they
  * are unit tests in where-predicate-publication.test.ts.
  *
- * Calibration: pinned histories separate Kleene from two-valued logic, and a
- * checker test requires the two-valued answer to fail. Hostile production
+ * Calibration: fixed histories separate Kleene from two-valued logic, and a
+ * checker test requires the two-valued answer to fail. Production
  * mutants that returned FALSE for `eq(string, null)`, prefiltered on `or`
  * operands as if they were conjuncts, prefiltered number literals past Date or
  * NaN rows, skipped an empty
@@ -82,19 +82,18 @@
  * them. The mock sync source is a controlled provider; this oracle claims only
  * how the Collection filters and routes the sync transactions it supplies.
  */
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { and, eq, not, or } from '../../src/query/builder/functions.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import {
-  oraclePropertyOptions,
-  oracleReplayRequested,
-  oracleReplayTest,
-  oracleRuns,
-} from '../oracle-config.js'
-import { declareOracle } from '../oracle-declaration.js'
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from '../oracle-assertion-adapter.js'
+import { oracleProperty } from '../oracle-config.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 import {
   MISSING,
@@ -102,6 +101,16 @@ import {
   irPredicate,
   recordVisibleKeys,
 } from './where-predicate-support.js'
+import {
+  PREFIXED,
+  equivalentFieldValues,
+  expectedVisible,
+  fixedChangeHistories,
+  fixedHistories,
+  fixedPrefilteredSnapshot,
+  historyArbitrary,
+  settledModelRow,
+} from './where-predicate-publication-model-oracle.js'
 import type {
   FieldValue,
   Operand,
@@ -109,409 +118,13 @@ import type {
   Row,
 } from './where-predicate-support.js'
 import type { BasicExpression } from '../../src/query/ir.js'
+import type {
+  History,
+  ModelRow,
+  SeedRow,
+} from './where-predicate-publication-model-oracle.js'
 
 const property = `where-predicate.publication`
-
-// A string whose content equals an internal normalized-key prefix must still
-// compare as an ordinary string.
-const PREFIXED = `\u0000tanstack-db:string:a`
-// A valid Date equals the number of its timestamp.
-const DATE_ONE = new Date(1)
-
-type Truth = boolean | null
-
-const fieldValues: ReadonlyArray<FieldValue> = [
-  `a`,
-  `b`,
-  PREFIXED,
-  true,
-  false,
-  1,
-  2,
-  Number.NaN,
-  DATE_ONE,
-  null,
-  MISSING,
-]
-const literalValues: ReadonlyArray<FieldValue> = [
-  `a`,
-  PREFIXED,
-  true,
-  false,
-  1,
-  Number.NaN,
-  null,
-]
-
-type SeedRow = { v: FieldValue; optimistic: boolean }
-type Operation =
-  | { type: `insert`; v: FieldValue; reuse?: number }
-  | { type: `update`; target: number; v: FieldValue }
-  | { type: `delete`; target: number }
-type History =
-  | { kind: `snapshot`; rows: Array<SeedRow>; predicate: Predicate }
-  | {
-      kind: `changes`
-      rows: Array<FieldValue>
-      predicate: Predicate
-      transactions: Array<Array<Operation>>
-    }
-
-// ---------------------------------------------------------------------------
-// Model
-// ---------------------------------------------------------------------------
-
-type ModelRow = {
-  id: string
-  v: FieldValue
-  $hasPendingWrites: boolean
-  $origin: `local` | `remote`
-  $key: string
-}
-
-function operandValue(operand: Operand, row: ModelRow): unknown {
-  switch (operand.kind) {
-    case `field`:
-      return row.v === MISSING ? undefined : row.v
-    case `literal`:
-      return operand.value === MISSING ? undefined : operand.value
-    case `virtual`:
-      return row[operand.name]
-  }
-}
-
-// SQL equality: nullish is UNKNOWN, NaN equals NaN, a Date compares as its
-// timestamp, and other values compare by type and value.
-function expectedEquality(a: unknown, b: unknown): Truth {
-  if (a === null || a === undefined || b === null || b === undefined) {
-    return null
-  }
-  const left = a instanceof Date ? a.getTime() : a
-  const right = b instanceof Date ? b.getTime() : b
-  if (Number.isNaN(left) && Number.isNaN(right)) return true
-  return typeof left === typeof right && left === right
-}
-
-// Kleene logic: FALSE dominates AND, TRUE dominates OR, NOT keeps UNKNOWN.
-function expectedTruth(predicate: Predicate, row: ModelRow): Truth {
-  switch (predicate.kind) {
-    case `eq`:
-      return expectedEquality(
-        operandValue(predicate.left, row),
-        operandValue(predicate.right, row),
-      )
-    case `not`: {
-      const value = expectedTruth(predicate.arg, row)
-      return value === null ? null : !value
-    }
-    case `and`: {
-      const values = predicate.args.map((arg) => expectedTruth(arg, row))
-      if (values.includes(false)) return false
-      return values.includes(null) ? null : true
-    }
-    case `or`: {
-      const values = predicate.args.map((arg) => expectedTruth(arg, row))
-      if (values.includes(true)) return true
-      return values.includes(null) ? null : false
-    }
-  }
-}
-
-// A subscriber without initial state sees a TRUE row only after a later
-// insert or update touches it.
-function expectedVisible(
-  predicate: Predicate,
-  rows: ReadonlyMap<string, ModelRow>,
-  touched?: ReadonlySet<string>,
-): Array<string> {
-  return [...rows.values()]
-    .filter(
-      (row) =>
-        expectedTruth(predicate, row) === true &&
-        (touched === undefined || touched.has(row.id)),
-    )
-    .map((row) => row.id)
-    .sort()
-}
-
-// Updates between these values are no-ops outside this grammar.
-function equivalentFieldValues(a: FieldValue, b: FieldValue): boolean {
-  if (a instanceof Date && b instanceof Date) {
-    return a.getTime() === b.getTime()
-  }
-  return Object.is(a, b)
-}
-
-function settledModelRow(id: string, v: FieldValue): ModelRow {
-  return { id, v, $hasPendingWrites: false, $origin: `remote`, $key: id }
-}
-
-// ---------------------------------------------------------------------------
-// History grammar
-// ---------------------------------------------------------------------------
-
-const fieldValueArbitrary = fc.constantFrom(...fieldValues)
-const operandArbitrary: fc.Arbitrary<Operand> = fc.oneof(
-  { weight: 4, arbitrary: fc.constant({ kind: `field` as const }) },
-  {
-    weight: 4,
-    arbitrary: fc
-      .constantFrom(...literalValues)
-      .map((value): Operand => ({ kind: `literal`, value })),
-  },
-  {
-    weight: 1,
-    arbitrary: fc
-      .constantFrom(
-        `$hasPendingWrites` as const,
-        `$origin` as const,
-        `$key` as const,
-      )
-      .map((name): Operand => ({ kind: `virtual`, name })),
-  },
-)
-const leafArbitrary: fc.Arbitrary<Predicate> = fc
-  .tuple(operandArbitrary, operandArbitrary)
-  .map(([left, right]) => ({ kind: `eq` as const, left, right }))
-
-const predicateArbitrary: fc.Arbitrary<Predicate> = fc.letrec<{
-  predicate: Predicate
-}>((tie) => ({
-  predicate: fc.oneof(
-    { depthSize: `small`, maxDepth: 3 },
-    leafArbitrary,
-    tie(`predicate`).map((arg) => ({ kind: `not` as const, arg })),
-    fc
-      .tuple(
-        fc.constantFrom(`and` as const, `or` as const),
-        tie(`predicate`),
-        tie(`predicate`),
-      )
-      .map(([kind, left, right]) => ({
-        kind,
-        args: [left, right] as [Predicate, Predicate],
-      })),
-  ),
-})).predicate
-
-// A top-level `eq(v, string | boolean)` conjunct lets a subscription skip
-// batches that cannot match and lets an unindexed snapshot reject stored rows
-// before copying them. Histories favor that shape so generated histories
-// exercise both shortcuts, not only the full filter.
-const prefilterablePredicateArbitrary: fc.Arbitrary<Predicate> = fc
-  .tuple(
-    fc.constantFrom<FieldValue>(`a`, PREFIXED, true),
-    fc.option(predicateArbitrary, { nil: undefined }),
-  )
-  .map(([value, rest]): Predicate => {
-    const conjunct: Predicate = {
-      kind: `eq`,
-      left: { kind: `field` },
-      right: { kind: `literal`, value },
-    }
-    return rest === undefined
-      ? conjunct
-      : { kind: `and`, args: [conjunct, rest] }
-  })
-
-// Histories favor one matching and one non-matching string so rows cross the
-// predicate boundary often; the full domain stays reachable.
-const changeValueArbitrary = fc.oneof(
-  { weight: 2, arbitrary: fc.constantFrom<FieldValue>(`a`, `b`) },
-  fieldValueArbitrary,
-)
-
-const operationArbitrary: fc.Arbitrary<Operation> = fc.oneof(
-  fc
-    .tuple(
-      changeValueArbitrary,
-      fc.option(fc.nat({ max: 7 }), { nil: undefined }),
-    )
-    .map(([v, reuse]): Operation =>
-      reuse === undefined
-        ? { type: `insert`, v }
-        : { type: `insert`, v, reuse },
-    ),
-  {
-    weight: 2,
-    arbitrary: fc
-      .tuple(fc.nat({ max: 7 }), changeValueArbitrary)
-      .map(([target, v]): Operation => ({ type: `update`, target, v })),
-  },
-  fc.nat({ max: 7 }).map((target): Operation => ({ type: `delete`, target })),
-)
-
-const historyArbitrary: fc.Arbitrary<History> = fc.oneof(
-  fc.record({
-    kind: fc.constant(`snapshot` as const),
-    rows: fc.array(
-      fc.record({ v: changeValueArbitrary, optimistic: fc.boolean() }),
-      { minLength: 1, maxLength: 6 },
-    ),
-    predicate: fc.oneof(predicateArbitrary, prefilterablePredicateArbitrary),
-  }),
-  {
-    weight: 2,
-    arbitrary: fc.record({
-      kind: fc.constant(`changes` as const),
-      rows: fc.array(changeValueArbitrary, { maxLength: 5 }),
-      predicate: fc.oneof(predicateArbitrary, {
-        weight: 2,
-        arbitrary: prefilterablePredicateArbitrary,
-      }),
-      transactions: fc.array(
-        fc.array(operationArbitrary, { minLength: 1, maxLength: 3 }),
-        { minLength: 1, maxLength: 6 },
-      ),
-    }),
-  },
-)
-
-// Kleene and two-valued logic disagree on each snapshot history. The first is
-// the negated nullish comparison that a FALSE-for-UNKNOWN fast path misses.
-const pinnedHistories: ReadonlyArray<History> = [
-  {
-    kind: `snapshot`,
-    rows: [
-      { v: `a`, optimistic: false },
-      { v: `b`, optimistic: false },
-      { v: null, optimistic: false },
-      { v: MISSING, optimistic: false },
-    ],
-    predicate: { kind: `not`, arg: fieldEq(`a`) },
-  },
-  {
-    kind: `snapshot`,
-    rows: [
-      { v: `a`, optimistic: true },
-      { v: null, optimistic: false },
-      { v: Number.NaN, optimistic: false },
-      { v: PREFIXED, optimistic: true },
-    ],
-    predicate: {
-      kind: `or`,
-      args: [
-        {
-          kind: `not`,
-          arg: {
-            kind: `eq`,
-            left: { kind: `literal`, value: true },
-            right: { kind: `field` },
-          },
-        },
-        {
-          kind: `eq`,
-          left: { kind: `virtual`, name: `$hasPendingWrites` },
-          right: { kind: `literal`, value: true },
-        },
-      ],
-    },
-  },
-  {
-    kind: `snapshot`,
-    rows: [
-      { v: PREFIXED, optimistic: false },
-      { v: `a`, optimistic: false },
-      { v: Number.NaN, optimistic: false },
-      { v: 1, optimistic: false },
-      { v: MISSING, optimistic: false },
-    ],
-    predicate: {
-      kind: `and`,
-      args: [
-        { kind: `not`, arg: fieldEq(PREFIXED) },
-        { kind: `not`, arg: fieldEq(Number.NaN) },
-      ],
-    },
-  },
-]
-
-// An unindexed snapshot may reject stored rows by one field before copying
-// them. A pending optimistic row is visible although it is not yet synced.
-const pinnedPrefilteredSnapshot: History = {
-  kind: `snapshot`,
-  rows: [
-    { v: `a`, optimistic: true },
-    { v: `a`, optimistic: false },
-    { v: `b`, optimistic: true },
-  ],
-  predicate: fieldEq(`a`),
-}
-
-// Each change history moves rows across a predicate whose equality operand a
-// skip-if-no-match shortcut can misread.
-const pinnedChangeHistories: ReadonlyArray<History> = [
-  {
-    // `or` operands are alternatives, not conjuncts.
-    kind: `changes`,
-    rows: [`b`, `a`],
-    predicate: { kind: `or`, args: [fieldEq(`a`), fieldEq(true)] },
-    transactions: [
-      [{ type: `update`, target: 0, v: true }],
-      [
-        { type: `update`, target: 1, v: false },
-        { type: `insert`, v: true },
-      ],
-    ],
-  },
-  {
-    // A valid Date equals its timestamp, so a number literal cannot prefilter
-    // by identity.
-    kind: `changes`,
-    rows: [2, 2],
-    predicate: fieldEq(1),
-    transactions: [
-      [{ type: `update`, target: 0, v: DATE_ONE }],
-      [
-        { type: `update`, target: 0, v: 2 },
-        { type: `update`, target: 1, v: 1 },
-      ],
-    ],
-  },
-  {
-    // NaN equals NaN, although NaN is not identical to itself.
-    kind: `changes`,
-    rows: [2],
-    predicate: fieldEq(Number.NaN),
-    transactions: [[{ type: `update`, target: 0, v: Number.NaN }]],
-  },
-  {
-    // A subscriber without initial state never saw the dropped `b` row.
-    // Deleting it and reinserting its key with a matching value must publish
-    // the new row, not treat it as a duplicate insert.
-    kind: `changes`,
-    rows: [],
-    predicate: fieldEq(`a`),
-    transactions: [
-      [
-        { type: `insert`, v: `a` },
-        { type: `insert`, v: `b` },
-      ],
-      [{ type: `delete`, target: 1 }],
-      [{ type: `insert`, v: `a`, reuse: 0 }],
-    ],
-  },
-  {
-    // A row that moves out must be retracted, including inside one batch.
-    kind: `changes`,
-    rows: [`a`, `a`, `b`],
-    predicate: {
-      kind: `and`,
-      args: [fieldEq(`a`), { kind: `not`, arg: fieldEq(PREFIXED) }],
-    },
-    transactions: [
-      [
-        { type: `update`, target: 0, v: `b` },
-        { type: `update`, target: 2, v: `a` },
-      ],
-      [
-        { type: `delete`, target: 1 },
-        { type: `insert`, v: `a` },
-        { type: `update`, target: 0, v: `a` },
-      ],
-    ],
-  },
-]
 
 // ---------------------------------------------------------------------------
 // Production driver
@@ -782,8 +395,10 @@ async function runHistory(history: History): Promise<void> {
     const path = `${indexed ? `index` : `scan`} path for ${describePredicate(history.predicate)}`
     const listObservations = (list: Array<Observation>) =>
       list.map((o) => `${o.checkpoint} ${o.consumer}: [${o.keys.join(`,`)}]`)
-    expect(listObservations(observations), path).toEqual(
-      listObservations(model),
+    oracleAssertion(path, () =>
+      expect(listObservations(observations), path).toEqual(
+        listObservations(model),
+      ),
     )
   }
 }
@@ -792,13 +407,11 @@ async function runHistory(history: History): Promise<void> {
 // BasicIndex, and compares every consumer's observed key set with the model's
 // keys after each checkpoint. The model is `expectedTruth`, the Kleene
 // evaluator, and `expectedVisible`, which adds the touched-row rule for a
-// subscriber without initial state. The pinned calibration and the generated
-// properties reach them; the witness tests in where-predicate-publication.test.ts
-// do not.
-declareOracle({
-  check: [runHistory],
-  model: [expectedTruth, expectedVisible],
-})
+// subscriber without initial state. The named and generated properties reach
+// them; the witness tests in where-predicate-publication.test.ts do not. The
+// model calibration, which runs no production, is in
+// where-predicate-publication-model.test.ts. The model, grammar, and named
+// histories live in where-predicate-publication-model-oracle.ts.
 
 function describeValue(value: FieldValue): string {
   if (value === MISSING) return `<missing>`
@@ -829,68 +442,70 @@ function describePredicate(predicate: Predicate): string {
 // Refinement check and calibration
 // ---------------------------------------------------------------------------
 
+const namedFixedHistories = new Map(
+  [...fixedHistories, fixedPrefilteredSnapshot, ...fixedChangeHistories].map(
+    (history): [string, History] => [
+      `publishes TRUE rows for ${history.kind} history ${describePredicate(history.predicate)}`,
+      history,
+    ],
+  ),
+)
+
 describe(`WHERE predicate publication oracle`, () => {
-  // The pinned histories and the fixed campaign stand aside during any path
-  // replay. The random campaign below is the one that a replay of this
-  // property selects.
-  if (!oracleReplayRequested()) {
-    it(`pinned snapshot histories distinguish Kleene logic from two-valued logic`, () => {
-      // A checker that folds UNKNOWN into FALSE before NOT must disagree with
-      // the model on each pinned snapshot, or the history does not calibrate.
-      const twoValued = (predicate: Predicate, row: ModelRow): boolean => {
-        switch (predicate.kind) {
-          case `eq`:
-            return (
-              expectedEquality(
-                operandValue(predicate.left, row),
-                operandValue(predicate.right, row),
-              ) === true
-            )
-          case `not`:
-            return !twoValued(predicate.arg, row)
-          case `and`:
-            return predicate.args.every((arg) => twoValued(arg, row))
-          case `or`:
-            return predicate.args.some((arg) => twoValued(arg, row))
-        }
-      }
-      for (const history of pinnedHistories) {
-        if (history.kind !== `snapshot`) throw new Error(`expected a snapshot`)
-        const rows = new Map(
-          history.rows.map((seed, index): [string, ModelRow] => [
-            `r${index}`,
-            {
-              ...settledModelRow(`r${index}`, seed.v),
-              $hasPendingWrites: seed.optimistic,
-              $origin: seed.optimistic ? `local` : `remote`,
-            },
-          ]),
-        )
-        const naive = [...rows.values()]
-          .filter((row) => twoValued(history.predicate, row))
-          .map((row) => row.id)
-          .sort()
-        expect(naive).not.toEqual(expectedVisible(history.predicate, rows))
-      }
-    })
+  // The complete existing helper keeps its independent Kleene model and all
+  // consumer comparisons. The adapter records data and retains assertion
+  // diagnostics separately; setup and cleanup errors remain driver errors.
+  oracleProperty({
+    id: property,
+    law: {
+      statement: `Every filtered consumer publishes exactly the TRUE rows at each original comparison checkpoint.`,
+      authority: `The SQL three-valued filtering and subscription contract stated at the start of this owner.`,
+      limits: `The unchanged bounded predicate and source-transaction grammar, on scan and BasicIndex paths; cleanup and restart remain outside generated histories.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/basic-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: {
+      arbitrary: historyArbitrary,
+      runs: 80,
+      fixedSeeds: [44_500_301],
+      states: [],
+      constructed: [],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { history: History }, observe) =>
+      recordAssertionJudgment(property, plan, observe, () =>
+        runHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 
-    for (const history of [
-      ...pinnedHistories,
-      pinnedPrefilteredSnapshot,
-      ...pinnedChangeHistories,
-    ]) {
-      it(`publishes TRUE rows for ${history.kind} history ${describePredicate(history.predicate)}`, () =>
-        runHistory(history))
-    }
-
-    fcTest.prop([historyArbitrary], {
-      seed: 44_500_301,
-      numRuns: oracleRuns(80),
-    })(`publishes exactly the TRUE rows (fixed)`, runHistory)
-  }
-
-  oracleReplayTest(fcTest, property).prop(
-    [historyArbitrary],
-    oraclePropertyOptions(80, property),
-  )(`publishes exactly the TRUE rows (random)`, runHistory)
+  // The named histories hold `MISSING` and Date values, which the generated
+  // grammar cannot take back and which are not enumerated history data. Each
+  // is named by its old test name and replays through the same `runHistory`.
+  oracleProperty({
+    id: `where-predicate.publication-fixed`,
+    law: {
+      statement: `Every filtered consumer publishes exactly the TRUE rows at each original comparison checkpoint.`,
+      authority: `The SQL three-valued filtering and subscription contract stated at the start of this owner.`,
+      limits: `Named regressions that the generated predicate grammar cannot take back; each is replayed through the same driver and comparison.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/basic-index.ts',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+    ],
+    histories: [...namedFixedHistories.keys()],
+    label: (name) => name,
+    resolve: (name) => ({ history: namedFixedHistories.get(name)! }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { history: History }, observe) =>
+      recordAssertionJudgment(property, plan, observe, () =>
+        runHistory(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

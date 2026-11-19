@@ -18,17 +18,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [browser, desktop, cloud-mobile]
+        group: [browser, adapter-browser, desktop, cloud-mobile]
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # Browser runs provider, IndexedDB, OPFS and SSR suites sequentially.
+    # Allow the full suite to finish on slower runners.
+    timeout-minutes: ${{ matrix.group == 'browser' && 60 || 35 }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@739bfe42ca9233c5e6aca07c1a25a9d34aca49b0 # v6.0.7
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           cache: false
 
@@ -57,6 +59,7 @@ jobs:
           --filter '@tanstack/electric-db-collection...'
           --filter '@tanstack/query-db-collection...'
           --filter '@tanstack/convex-db-collection...'
+          --filter '@tanstack/trailbase-db-collection...'
           --filter '@tanstack/db...'
           build
 
@@ -92,6 +95,10 @@ jobs:
       - name: Run Convex backend E2E tests
         if: matrix.group == 'browser'
         run: pnpm --filter @tanstack/convex-db-collection test:e2e
+
+      - name: Run TrailBase E2E tests
+        if: matrix.group == 'browser'
+        run: pnpm --filter @tanstack/trailbase-db-collection test:e2e
 
       - name: Run Query E2E tests
         if: matrix.group == 'browser'
@@ -141,6 +148,13 @@ jobs:
           cd packages/browser-db-sqlite-persistence
           pnpm test:opfs-fairness
 
+      - name: Run adapter oracle browser receivers
+        if: matrix.group == 'adapter-browser'
+        working-directory: packages/browser-db-sqlite-persistence
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm test:oracles:adapters-browser
+
       - name: Run Browser SQLite packaged consumer E2E tests
         if: matrix.group == 'browser'
         # Build browser dependencies already built this package's workspace
@@ -181,6 +195,17 @@ jobs:
         run: |
           cd packages/electron-db-sqlite-persistence
           pnpm exec vitest --config vitest.e2e.config.ts --run
+
+      - name: Check Electron example SQLite native module
+        if: matrix.group == 'desktop'
+        working-directory: examples/electron/offline-first
+        env:
+          ELECTRON_RUN_AS_NODE: '1'
+        run: |
+          node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close()"
+          pnpm rebuild:electron
+          pnpm exec electron -e "const { createRequire } = require('node:module'); const Database = createRequire(require('node:path').resolve('.electron-native/package.json'))('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close()"
+          node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close()"
 
       - name: Run Cloudflare Durable Object persisted collection E2E tests
         if: matrix.group == 'cloud-mobile'

@@ -22,14 +22,16 @@ Work in this order when a production change is part of the task:
 2. Inventory the materially affected public receiving paths and their promised
    observation cuts. Include required real-host receiving witnesses in this
    pre-edit gate; a controlled core witness does not supply their evidence.
-3. Extend the history grammar, driver, or observation until generated
-   histories reach the state where the law matters. Declare that state with
-   `createOracleReach` (ORC-015) for each required receiving path.
+3. Extend the history grammar, production driver, or observation until generated
+   histories reach the state where the law matters. Declare it in
+   `histories.states` of `oracleProperty` and supply `histories.constructed` builders for each
+   required receiving path (ORC-015). Builders splice the required state into
+   generated histories; literal fixed histories do not count toward reach.
 4. Run those comparisons on unchanged production. Record the defect's RED
    result and the neighboring guarantees' results. A setup failure or missing
    required witness blocks production edits; repair the test path first.
 5. Change production, with the oracle running after each attempt.
-6. Record the GREEN result and a hostile mutant that fails.
+6. Record the GREEN result and a mutant that fails.
 
 Do not change production before step 4. Retrospective runs or a documented
 process gap do not satisfy this gate. If a model rule disagrees with
@@ -38,7 +40,7 @@ change only so that it matches production output is model hacking.
 
 Read [the oracle guide](../../../docs/contributing/oracle-rubric.md) and
 [the glossary](../../../docs/contributing/glossary.md) in full, then read the
-relevant owner and limits in
+relevant oracle owner and limits in
 [the coverage map](../../../docs/contributing/oracle-coverage.md).
 
 After a handoff or compaction, reopen required sources whose relevant contents
@@ -50,12 +52,30 @@ concepts. Delegated agents must do the reading relevant to their own scope.
 
 Follow the subsystem reading requirements in AGENTS.md.
 
-Keep unit tests and standalone concrete type assertions out of oracle files
-(ORC-016). Fixed regressions are inputs to the same model, driver, and
-comparison as the broader campaign, without their own expected answers.
-Compile-time oracles generate legal TypeScript inputs and compare public
-types with a reusable independent law; a matrix of fixed assertions does not
-satisfy this requirement. Supplemental examples belong in ordinary test files.
+Name the production code that the oracle judges in `owns` on each
+`oracleProperty` call, as an inline literal array; the law has no owner field.
+A file that registers through a wrapper passes the list in the wrapper call's
+options literal, and the wrapper forwards it to `oracleProperty`.
+The [oracle guide](../../../docs/contributing/oracle-rubric.md#name-oracle-files-consistently)
+states the form that the gap report reads.
+
+An oracle file registers its tests only through `oracleProperty`; the
+`oracle/no-unit-test` rule reports any other registration. Keep unit tests and
+standalone concrete type assertions out of oracle files (ORC-016). A fixed
+regression is a `histories.fixed` entry, or a history of an enumerated
+property with the same driver, model, and check, without its own expected
+answer. A finite table of cases is an enumerated source; a check that rejects a
+wrong answer is a `calibrations` entry; a reach check over fixed scenarios is
+an enumerated source with declared `states`. Never register a list of closures
+under one property. Compile-time oracles generate legal TypeScript inputs and
+compare public types with a reusable independent law; a matrix of fixed
+assertions does not satisfy this requirement. Supplemental examples, model-rule
+expectations, and grammar-size checks belong in ordinary test files. An
+`it.fails` witness of a known defect goes in an ordinary
+`<subject>-known-defects.test.ts` that reuses the oracle's driver and check,
+with the defect open in the coverage map. A spec for a runtime where
+`oracleProperty` cannot load, such as Playwright or a bundled WebView suite, is
+a receiving witness named `*-witness.*`.
 
 Use the [instrument library](../../../docs/contributing/instruments/index.md)
 when there is a material uncertainty. Select cards within the authorized task;
@@ -90,9 +110,15 @@ when requested by the task. A proposal with unresolved authority can be explored
 in a scratch model; do not silently make it a product expectation.
 
 At closeout, write the evidence block from AGENTS.md (law, reach, RED, GREEN,
-mutant, limits). Connect the law to the evidence actually obtained: which histories
-and paths ran, which wrong behavior was rejected, and what remains untested.
-Use concise prose suited to the change; no particular report template is
-required. When changing repository coverage, update the existing owner and
-coverage map to reflect the changed scope. A scratch law-design experiment
+mutant, limits). Connect the law to the evidence actually obtained: which
+histories and paths ran, which wrong behavior was rejected, and what remains
+untested. Use concise prose suited to the change; no particular report template
+is required. When changing repository coverage, update the existing oracle owner
+and coverage map to reflect the changed scope. A scratch law-design experiment
 retains its proposals and limits without claiming new repository coverage.
+
+For a bug fix or feature, close gaps in changed functions by
+an oracle kill or an explicit maintainer allowance for the anchored gaps. A
+coverage-map entry, equivalent-mutant claim, or unobservable-effect claim does
+not close a gap. For a pure conversion, compare before/after gap reports with
+the same seed and retain every previously killed mutant by stable key.

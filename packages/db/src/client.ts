@@ -1,4 +1,5 @@
 import { createCollection } from './collection/index.js'
+import { validateCollectionIndexing } from './collection/validate-indexing.js'
 import {
   collectionOptionsBrand,
   collectionOptionsClaim,
@@ -516,6 +517,7 @@ export class DbClient {
     registration?: { queryHash: string; record: LiveQueryRecord }
   } {
     const prepared = prepareLiveQueryValue(options, this, deferredCollections)
+    validateCollectionIndexing(prepared as LiveQueryOptions)
     const queryHash = getLiveQueryHash(prepared, options.queryKey)
     const sources = getPreparedLiveQuerySources(prepared)
     const existing = this.liveQueries.get(queryHash)

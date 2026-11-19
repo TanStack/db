@@ -186,7 +186,10 @@ describe('subquery boundaries preserve operators and user rows', () => {
           .innerJoin({ group: groups }, ({ person, group }) =>
             eq(person.groupId, group.groupId),
           )
-          .where(({ group }) => eq(group.$key, 2))
+          .where(({ group }) => {
+            // @ts-expect-error A projected QueryRef has no generated row key.
+            return eq(group.$key, 2)
+          })
           .select(({ group }) => ({ groupId: group.groupId }))
       },
       getKey: () => 1,

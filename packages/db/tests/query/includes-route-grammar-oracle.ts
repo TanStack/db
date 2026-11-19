@@ -37,7 +37,7 @@ import type { ChildRow, RootRow } from './includes-structural-support.js'
  * the expected result.
  *
  * The trace runner checks each intermediate cut that the contract exposes.
- * Focused pinned histories preserve small boundary cases. Random or replayed
+ * Focused fixed histories preserve small boundary cases. Random or replayed
  * campaigns explore longer action sequences and wider route values. Other
  * include suites own Collection facades, demand lifetime, functional callbacks,
  * and publication coherence.

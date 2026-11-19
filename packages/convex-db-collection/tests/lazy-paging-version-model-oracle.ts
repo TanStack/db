@@ -1,4 +1,3 @@
-import { declareOracle } from '../../db/tests/oracle-declaration'
 import type { LazyRow } from './lazy-paging-model-oracle'
 
 /**
@@ -54,6 +53,3 @@ export class LazyVersionModel {
     )
   }
 }
-
-// The revision model: it decides which public observations a history permits.
-declareOracle({ model: [LazyVersionModel] })

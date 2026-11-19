@@ -41,25 +41,36 @@
  * Its admission releases that deferral. A failed sync start remains an error
  * in that run; releasing the old render handle does not implicitly retry it.
  *
- * Limits: source Collections load synchronously, so every checkpoint is
- * settled. The grammar crosses seven source states, two query shapes, and one or
+ * Limits: the broad grammar uses synchronous source loads and settled
+ * checkpoints. It crosses seven source states, two query shapes, and one or
  * two live-query levels, with one peer consumer and one truncate before the
- * first subscriber. It does not generate source failure, asynchronous loads,
- * or several live-query consumers; the subscription lifecycle oracle owns
- * those once acquisition has resumed. Pinned blocks cover pooled views,
+ * first subscriber. The separate sibling-resumption grammar below uses
+ * controlled asynchronous loads. The broad grammar does not generate source
+ * failure, asynchronous loads, or several live-query consumers. The
+ * subscription lifecycle oracle owns those once acquisition has resumed. Fixed blocks cover pooled views,
  * `DbClient` stream preloads, a subscriber that outlives cleanup, and reads
  * that wait for readiness.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
-import { createCollection } from '../src'
+import {
+  BTreeIndex,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+} from '../src'
+import { CollectionSubscription } from '../src/collection/subscription.js'
 import { resumeDeferredLiveQueryCollections } from '../src/live-query-options.js'
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
 import { expectedStartHandoff } from './collection-subscription-lifecycle-grammar-oracle.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
-import { createOracleReach } from './oracle-reach.js'
-import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty } from './oracle-property.js'
+import {
+  forwardAssertionJudgment,
+  oracleAssertion,
+  recordAssertionJudgment,
+  recordedAssertionJudgment,
+} from './oracle-assertion-adapter.js'
 import {
   EXPECTED_IDS,
   QUERY_SHAPES,
@@ -68,6 +79,8 @@ import {
   pooledQuery,
   settle,
 } from './live-query-deferred-acquisition-support.js'
+import type { Verdict } from './oracle-property.js'
+import type { StartHandoffHistory } from './collection-subscription-lifecycle-grammar-oracle.js'
 import type {
   QueryShape,
   Row,
@@ -405,18 +418,55 @@ async function runAcquisitionHistory(
   }
 }
 
+type AcquisitionCase = {
+  state: SourceState
+  shape: QueryShape
+  depth: 1 | 2
+  name: string
+}
+
 describe(`live-query deferred acquisition`, () => {
-  for (const state of SOURCE_STATES) {
-    for (const shape of QUERY_SHAPES) {
-      for (const depth of [1, 2] as const) {
-        for (const [name, commands] of Object.entries(HISTORIES)) {
-          it(`${state}, ${shape}, depth ${depth}: ${name}`, async () => {
-            return runAcquisitionHistory(state, shape, depth, commands)
-          })
-        }
-      }
-    }
-  }
+  oracleProperty({
+    id: `live-query.deferred-acquisition`,
+    law: {
+      statement: `A live-query Collection starts no provider work of its own: its source subscriptions defer acquisition until it has a subscriber that asks for data or a preload, and readiness and rows follow the model after every command.`,
+      authority: `The deferred-acquisition contract and independent command model stated above`,
+      limits: `Every source state, query shape, nesting depth 1 or 2, and named command history.`,
+    },
+    owns: [
+      `src/live-query-options.ts#resumeDeferredLiveQueryCollections`,
+      `src/query/pooled-live-query.ts#createPooledLiveQuery`,
+      `src/collection/index.ts#CollectionImpl._deferSyncStart`,
+      `src/collection/index.ts#CollectionImpl._resumeSyncStart`,
+    ],
+    histories: SOURCE_STATES.flatMap((state) =>
+      QUERY_SHAPES.flatMap((shape) =>
+        ([1, 2] as const).flatMap((depth) =>
+          Object.keys(HISTORIES).map((name): AcquisitionCase => ({
+            state,
+            shape,
+            depth,
+            name,
+          })),
+        ),
+      ),
+    ),
+    label: ({ state, shape, depth, name }) =>
+      `${state}, ${shape}, depth ${depth}: ${name}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `live-query.deferred-acquisition`,
+        plan,
+        observe,
+        () => {
+          const { state, shape, depth, name } = plan.history
+          return runAcquisitionHistory(state, shape, depth, HISTORIES[name]!)
+        },
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -434,11 +484,6 @@ describe(`live-query deferred acquisition`, () => {
  * client, which must not mistake the absent config for a live-query builder.
  */
 // The pooled entry point takes the internal builder, as its own oracle does.
-declareOracle({
-  check: [runAcquisitionHistory, runPooledHistory],
-  model: [initialModel, applyModel, expectedReplacementRun],
-})
-
 async function runPooledHistory(
   state: SourceState,
   commands: ReadonlyArray<Command>,
@@ -503,13 +548,34 @@ describe(`pooled live-query deferred acquisition`, () => {
     'subscribe after build': [`start`, `read`, `subscribe`],
     'preload after build': [`start`, `preload`],
   }
-  for (const state of [`eager-idle`, `eager-running`] as const) {
-    for (const [name, commands] of Object.entries(pooledHistories)) {
-      it(`${state}: ${name}`, async () => {
-        return runPooledHistory(state, commands)
-      })
-    }
-  }
+  oracleProperty({
+    id: `live-query.deferred-pooled`,
+    law: {
+      statement: `A pooled view's partition subscription defers acquisition until the view has a subscriber or a preload, and readiness and rows follow the model after every command.`,
+      authority: `The deferred-acquisition contract and independent command model stated above`,
+      limits: `Eager idle and running sources with the three pooled histories without cleanup.`,
+    },
+    owns: [
+      `src/live-query-options.ts#resumeDeferredLiveQueryCollections`,
+      `src/query/pooled-live-query.ts#createPooledLiveQuery`,
+      `src/collection/index.ts#CollectionImpl._deferSyncStart`,
+      `src/collection/index.ts#CollectionImpl._resumeSyncStart`,
+    ],
+    histories: ([`eager-idle`, `eager-running`] as const).flatMap((state) =>
+      Object.keys(pooledHistories).map((name) => ({ state, name })),
+    ),
+    label: ({ state, name }) => `${state}: ${name}`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`live-query.deferred-pooled`, plan, observe, () =>
+        runPooledHistory(
+          plan.history.state,
+          pooledHistories[plan.history.name]!,
+        ),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -531,6 +597,92 @@ function expectedReplacementRun(
   }
 }
 
+type SurvivorCase = {
+  state: `eager-idle` | `on-demand-idle`
+  shape: QueryShape
+  depth: 1 | 2
+  reader: `ordinary` | `resumed` | `deferred`
+  renderGate: boolean
+  cleanupAt: `loading` | `ready`
+  restartFromCleanup: boolean
+}
+
+async function survivorAfterCleanup({
+  state,
+  shape,
+  depth,
+  reader,
+  renderGate,
+  cleanupAt,
+  restartFromCleanup,
+}: SurvivorCase) {
+  const expected = expectedReplacementRun(state, reader)
+  const { collection: source, counts } = makeSource(state)
+  const { outer, collections } = makeLiveQuery(source, shape, depth)
+  if (renderGate) expect(outer._deferSyncStart()).toBe(true)
+  let subscription: ReturnType<typeof outer.subscribeChanges> | undefined
+  if (reader !== `ordinary`) {
+    subscription = outer.subscribeChanges(() => {}, {
+      deferAcquisition: true,
+    })
+  }
+  let pending: Promise<void> | undefined
+  let reached = false
+  const retiredStatuses: Array<string> = []
+  const stopTarget = outer.on(`status:change`, ({ status }) => {
+    if (reached) {
+      retiredStatuses.push(status)
+      if (restartFromCleanup && status === `cleaned-up`)
+        outer.startSyncImmediate()
+    }
+  })
+  const stopSource = source.on(`status:change`, ({ status }) => {
+    if (status === cleanupAt && !reached) {
+      reached = true
+      pending = outer.cleanup()
+    }
+  })
+  try {
+    if (reader === `ordinary`) subscription = outer.subscribeChanges(() => {})
+    else if (reader === `resumed`) subscription!.resumeDeferredAcquisition()
+    else source.startSyncImmediate()
+    expect(reached, `source startup reached cleanup`).toBe(true)
+    await pending
+    if (!restartFromCleanup) {
+      expect(outer.status, `cleanup must not retry admission`).toBe(
+        `cleaned-up`,
+      )
+      expect(retiredStatuses).toEqual([`cleaned-up`])
+    } else {
+      expect(retiredStatuses[0]).toBe(`cleaned-up`)
+      expect(
+        retiredStatuses.filter((status) => status === `loading`),
+      ).toHaveLength(1)
+    }
+    expect(outer.subscriberCount).toBe(expected.acquiring)
+    stopSource()
+    stopTarget()
+    outer.startSyncImmediate()
+    await settle()
+    expect(counts.acquisitions > 0, `replacement has acquisition`).toBe(
+      expected.acquires,
+    )
+    expect(outer.status === `ready`, `replacement readiness`).toBe(
+      expected.ready,
+    )
+    expect(outer.toArray.map((row) => row.id)).toEqual(
+      expected.ready ? EXPECTED_IDS[shape] : [],
+    )
+    expect(outer.subscriberCount).toBe(expected.acquiring)
+  } finally {
+    stopSource()
+    stopTarget()
+    subscription?.unsubscribe()
+    for (const collection of collections) await collection.cleanup()
+    await source.cleanup()
+  }
+}
+
 describe(`a subscriber that outlives cleanup`, () => {
   // Admission may still be transferring ownership when a source status callback
   // cleans up the live-query Collection. Cleanup retires that start, not the
@@ -538,8 +690,20 @@ describe(`a subscriber that outlives cleanup`, () => {
   // The model counts a returned acquiring handle as demand for the next run;
   // a still-deferred handle contributes none. This extends the settled-cleanup
   // histories below with the construction boundary, both shapes and depths.
-  it.each(
-    ([`eager-idle`, `on-demand-idle`] as const).flatMap((state) =>
+  oracleProperty({
+    id: `live-query.deferred-cleanup-survivor`,
+    law: {
+      statement: `Cleanup during admission retires that start, not the surviving logical subscription: the replacement run's subscribers, readiness and acquisition follow from how the surviving subscriber read.`,
+      authority: `The deferred-acquisition contract and independent command model stated above`,
+      limits: `Eager and on-demand idle sources, every query shape, depth 1 or 2, three reader kinds, with and without a render gate, cleanup at loading or ready, with and without a restart from cleanup.`,
+    },
+    owns: [
+      `src/live-query-options.ts#resumeDeferredLiveQueryCollections`,
+      `src/query/pooled-live-query.ts#createPooledLiveQuery`,
+      `src/collection/index.ts#CollectionImpl._deferSyncStart`,
+      `src/collection/index.ts#CollectionImpl._resumeSyncStart`,
+    ],
+    histories: ([`eager-idle`, `on-demand-idle`] as const).flatMap((state) =>
       QUERY_SHAPES.flatMap((shape) =>
         ([1, 2] as const).flatMap((depth) =>
           ([`ordinary`, `resumed`, `deferred`] as const).flatMap((reader) =>
@@ -560,9 +724,7 @@ describe(`a subscriber that outlives cleanup`, () => {
         ),
       ),
     ),
-  )(
-    `$state $shape depth=$depth $reader gate=$renderGate survives $cleanupAt cleanup during admission (restart=$restartFromCleanup)`,
-    async ({
+    label: ({
       state,
       shape,
       depth,
@@ -570,75 +732,19 @@ describe(`a subscriber that outlives cleanup`, () => {
       renderGate,
       cleanupAt,
       restartFromCleanup,
-    }) => {
-      const expected = expectedReplacementRun(state, reader)
-      const { collection: source, counts } = makeSource(state)
-      const { outer, collections } = makeLiveQuery(source, shape, depth)
-      if (renderGate) expect(outer._deferSyncStart()).toBe(true)
-      let subscription: ReturnType<typeof outer.subscribeChanges> | undefined
-      if (reader !== `ordinary`) {
-        subscription = outer.subscribeChanges(() => {}, {
-          deferAcquisition: true,
-        })
-      }
-      let pending: Promise<void> | undefined
-      let reached = false
-      const retiredStatuses: Array<string> = []
-      const stopTarget = outer.on(`status:change`, ({ status }) => {
-        if (reached) {
-          retiredStatuses.push(status)
-          if (restartFromCleanup && status === `cleaned-up`)
-            outer.startSyncImmediate()
-        }
-      })
-      const stopSource = source.on(`status:change`, ({ status }) => {
-        if (status === cleanupAt && !reached) {
-          reached = true
-          pending = outer.cleanup()
-        }
-      })
-      try {
-        if (reader === `ordinary`)
-          subscription = outer.subscribeChanges(() => {})
-        else if (reader === `resumed`) subscription!.resumeDeferredAcquisition()
-        else source.startSyncImmediate()
-        expect(reached, `source startup reached cleanup`).toBe(true)
-        await pending
-        if (!restartFromCleanup) {
-          expect(outer.status, `cleanup must not retry admission`).toBe(
-            `cleaned-up`,
-          )
-          expect(retiredStatuses).toEqual([`cleaned-up`])
-        } else {
-          expect(retiredStatuses[0]).toBe(`cleaned-up`)
-          expect(
-            retiredStatuses.filter((status) => status === `loading`),
-          ).toHaveLength(1)
-        }
-        expect(outer.subscriberCount).toBe(expected.acquiring)
-        stopSource()
-        stopTarget()
-        outer.startSyncImmediate()
-        await settle()
-        expect(counts.acquisitions > 0, `replacement has acquisition`).toBe(
-          expected.acquires,
-        )
-        expect(outer.status === `ready`, `replacement readiness`).toBe(
-          expected.ready,
-        )
-        expect(outer.toArray.map((row) => row.id)).toEqual(
-          expected.ready ? EXPECTED_IDS[shape] : [],
-        )
-        expect(outer.subscriberCount).toBe(expected.acquiring)
-      } finally {
-        stopSource()
-        stopTarget()
-        subscription?.unsubscribe()
-        for (const collection of collections) await collection.cleanup()
-        await source.cleanup()
-      }
-    },
-  )
+    }) =>
+      `${state} ${shape} depth=${depth} ${reader} gate=${renderGate} survives ${cleanupAt} cleanup during admission (restart=${restartFromCleanup})`,
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(
+        `live-query.deferred-cleanup-survivor`,
+        plan,
+        observe,
+        () => survivorAfterCleanup(plan.history),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })
 
 /**
@@ -652,98 +758,353 @@ describe(`a subscriber that outlives cleanup`, () => {
  * release, so both are declared reach states. No second start
  * without cleanup is legal. The shared judgment also feeds the React driver.
  */
+const startHandoffHistory = fc.record({
+  outcome: fc.constantFrom(`ready` as const, `fail` as const, `throw` as const),
+  timing: fc.constantFrom(`before-release` as const, `during-release` as const),
+  cause: fc.constantFrom(`error` as const, `undefined` as const),
+})
+async function runStartHandoffHistory(
+  history: StartHandoffHistory,
+  observe: (checkpoint: string, value: unknown) => void,
+): Promise<void> {
+  const expected = expectedStartHandoff(history)
+  const failure =
+    history.cause === `error` ? new Error(`source failure`) : undefined
+  let starts = 0
+  const source = createCollection<{ id: string }>({
+    getKey: (row) => row.id,
+    gcTime: 0,
+    sync: {
+      sync: ({ markReady, fail }) => {
+        starts++
+        if (history.outcome === `throw`) throw failure
+        if (history.outcome === `fail`) fail(failure)
+        else markReady()
+      },
+    },
+  })
+  source._deferSyncStart()
+  source.startSyncImmediate()
+  try {
+    if (history.timing === `before-release`) {
+      try {
+        source._resumeSyncStart()
+      } catch {
+        /* Independent reader owns this error. */
+      }
+    }
+    if (source.status === `error`) observe(`reach`, `prior-error`)
+    if (source.status === `crashed`) observe(`reach`, `prior-crash`)
+    if (history.outcome === `fail`) observe(`reach`, `failed`)
+    if (expected.throws) observe(`reach`, `own-throw`)
+    if (history.cause === `undefined`) observe(`reach`, `undefined-cause`)
+    if (history.outcome === `ready`) observe(`reach`, `healthy`)
+    const pending = new Set([source])
+    let result: { threw: boolean; error?: unknown } = { threw: false }
+    try {
+      resumeDeferredLiveQueryCollections(pending)
+    } catch (error) {
+      result = { threw: true, error }
+    }
+    oracleAssertion(`runStartHandoffHistory:744`, () =>
+      expect(result.threw, JSON.stringify(history)).toBe(expected.throws),
+    )
+    if (expected.throws)
+      oracleAssertion(`runStartHandoffHistory:747`, () =>
+        expect(result.error).toBe(failure),
+      )
+    oracleAssertion(`runStartHandoffHistory:748`, () =>
+      expect(source.status).toBe(expected.status),
+    )
+    oracleAssertion(`runStartHandoffHistory:749`, () =>
+      expect(starts).toBe(expected.starts),
+    )
+    oracleAssertion(`runStartHandoffHistory:750`, () =>
+      expect(pending.size).toBe(0),
+    )
+    resumeDeferredLiveQueryCollections(pending)
+    source._resumeSyncStart()
+    oracleAssertion(`runStartHandoffHistory:753`, () =>
+      expect(starts, `old render handles never retry`).toBe(1),
+    )
+  } finally {
+    await source.cleanup()
+  }
+}
 describe(`render sync-start handoff error provenance`, () => {
-  for (const campaign of [`fixed`, `random`] as const) {
-    it(`reports only its own thrown starts (${campaign})`, async () => {
-      const reach = createOracleReach(`start-handoff`, [
+  oracleProperty<StartHandoffHistory, Verdict>({
+    id: `live-query.start-handoff`,
+    law: {
+      statement: `A handoff reports only its own throwing sync start, preserves the source outcome, and never retries an old render handle.`,
+      authority: `The shared expectedStartHandoff model and source-error ownership contract above.`,
+      limits: `The unchanged ready/fail/throw, before/during-release, Error/undefined grammar; no source rows or recovery.`,
+    },
+    owns: [
+      `src/live-query-options.ts#resumeDeferredLiveQueryCollections`,
+      `src/query/pooled-live-query.ts#createPooledLiveQuery`,
+      `src/collection/index.ts#CollectionImpl._deferSyncStart`,
+      `src/collection/index.ts#CollectionImpl._resumeSyncStart`,
+    ],
+    histories: {
+      arbitrary: startHandoffHistory,
+      runs: 100,
+      fixedSeeds: [2229],
+      states: [
         `prior-error`,
         `prior-crash`,
         `failed`,
         `own-throw`,
         `undefined-cause`,
         `healthy`,
-      ])
-      await fc.assert(
-        fc.asyncProperty(
-          fc.record({
-            outcome: fc.constantFrom(
-              `ready` as const,
-              `fail` as const,
-              `throw` as const,
-            ),
-            timing: fc.constantFrom(
-              `before-release` as const,
-              `during-release` as const,
-            ),
-            cause: fc.constantFrom(`error` as const, `undefined` as const),
+      ],
+      constructed: [
+        {
+          name: `independent earlier loading error`,
+          enters: [`prior-error`, `failed`, `undefined-cause`],
+          build: (generated) => ({
+            ...generated,
+            outcome: `fail` as const,
+            timing: `before-release` as const,
+            cause: `undefined` as const,
           }),
-          async (history) => {
-            reach.beginHistory()
-            const expected = expectedStartHandoff(history)
-            const failure =
-              history.cause === `error`
-                ? new Error(`source failure`)
-                : undefined
-            let starts = 0
-            const source = createCollection<{ id: string }>({
-              getKey: (row) => row.id,
-              gcTime: 0,
-              sync: {
-                sync: ({ markReady, fail }) => {
-                  starts++
-                  if (history.outcome === `throw`) throw failure
-                  if (history.outcome === `fail`) fail(failure)
-                  else markReady()
-                },
-              },
-            })
-            source._deferSyncStart()
-            source.startSyncImmediate()
-            try {
-              if (history.timing === `before-release`) {
-                try {
-                  source._resumeSyncStart()
-                } catch {
-                  /* Independent reader owns this error. */
-                }
-              }
-              if (source.status === `error`) reach.reach(`prior-error`)
-              if (source.status === `crashed`) reach.reach(`prior-crash`)
-              if (history.outcome === `fail`) reach.reach(`failed`)
-              if (expected.throws) reach.reach(`own-throw`)
-              if (history.cause === `undefined`) reach.reach(`undefined-cause`)
-              if (history.outcome === `ready`) reach.reach(`healthy`)
-              const pending = new Set([source])
-              let result: { threw: boolean; error?: unknown } = { threw: false }
-              try {
-                resumeDeferredLiveQueryCollections(pending)
-              } catch (error) {
-                result = { threw: true, error }
-              }
-              expect(result.threw, JSON.stringify(history)).toBe(
-                expected.throws,
-              )
-              if (expected.throws) expect(result.error).toBe(failure)
-              expect(source.status).toBe(expected.status)
-              expect(starts).toBe(expected.starts)
-              expect(pending.size).toBe(0)
-              resumeDeferredLiveQueryCollections(pending)
-              source._resumeSyncStart()
-              expect(starts, `old render handles never retry`).toBe(1)
-            } finally {
-              await source.cleanup()
+        },
+        {
+          name: `independent earlier crash`,
+          enters: [`prior-crash`],
+          build: (generated) => ({
+            ...generated,
+            outcome: `throw` as const,
+            timing: `before-release` as const,
+          }),
+        },
+        {
+          name: `owned throwing start`,
+          enters: [`own-throw`],
+          build: (generated) => ({
+            ...generated,
+            outcome: `throw` as const,
+            timing: `during-release` as const,
+          }),
+        },
+        {
+          name: `healthy source start`,
+          enters: [`healthy`],
+          build: (generated) => ({ ...generated, outcome: `ready` as const }),
+        },
+      ],
+    },
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(
+        `sync-start handoff provenance`,
+        history,
+        observe,
+        () => runStartHandoffHistory(history, observe),
+      ),
+    check: forwardAssertionJudgment,
+  })
+})
+
+/**
+ * A first subscriber resumes source subscriptions in registration order. The
+ * first source load can synchronously deliver rows that create a lazy demand
+ * in another, still-deferred subscription to that same source. Law 15 keeps
+ * that demand detached until its own resumption; laws 9 and 10 require the
+ * completed query once every resumed load has applied. A sibling's publication
+ * and the initial-query waiter must not wait for one another in a cycle.
+ *
+ * This finite grammar crosses subscriber/preload, one/two rows, and literal or
+ * held Promise results for each acquisition, and both settlement orders.
+ * It uses the real self-join builder, without a supplied publication-control
+ * callback. Request instrumentation records the
+ * actual deferred-to-joined transition; it supplies no expected row values.
+ * The independent self-join law below retains each input row exactly once.
+ * No provider or framework scheduling promise follows from this core path.
+ */
+type DeferredSiblingHistory = {
+  reader: `subscribe` | `preload`
+  rowCount: 1 | 2
+  rootAsync: boolean
+  siblingAsync: boolean
+  newestFirst: boolean
+}
+const deferredSiblingHistories: Array<DeferredSiblingHistory> = (
+  [`subscribe`, `preload`] as const
+).flatMap((reader) =>
+  ([1, 2] as const).flatMap((rowCount) =>
+    [false, true].flatMap((rootAsync) =>
+      [false, true].flatMap((siblingAsync) =>
+        [false, true].map((newestFirst) => ({
+          reader,
+          rowCount,
+          rootAsync,
+          siblingAsync,
+          newestFirst,
+        })),
+      ),
+    ),
+  ),
+)
+function deferredSiblingRows(rows: ReadonlyArray<{ id: string }>) {
+  return rows.map(({ id }) => ({ id, peer: id }))
+}
+async function runDeferredSiblingHistory(
+  history: DeferredSiblingHistory,
+  observe: (checkpoint: string, value: unknown) => void,
+) {
+  const rows = Array.from({ length: history.rowCount }, (_, i) => ({
+    id: `row-${i}`,
+  }))
+  const gates: Array<() => void> = []
+  let loads = 0
+  let wrote = false
+  const source = createCollection<{ id: string }>({
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    gcTime: 0,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            loads++
+            if (!wrote) {
+              wrote = true
+              begin()
+              for (const row of rows)
+                write({ type: `insert`, value: { ...row } })
+              commit()
             }
+            if (!(loads === 1 ? history.rootAsync : history.siblingAsync))
+              return true
+            return new Promise<void>((resolve) => gates.push(resolve))
           },
-        ),
-        campaign === `fixed`
-          ? { numRuns: oracleRuns(100), seed: 2229 }
-          : oraclePropertyOptions(100, `live-query.start-handoff`),
-      )
-      reach.assertReached()
-      console.info(
-        `start-handoff ${campaign}`,
-        Object.fromEntries(reach.counts()),
-      )
+        }
+      },
+    },
+  })
+  const query = createLiveQueryCollection({
+    query: (q) =>
+      q
+        .from({ left: source })
+        .leftJoin({ right: source }, ({ left, right }) => eq(left.id, right.id))
+        .select(({ left, right }) => ({ id: left.id, peer: right.id })),
+    gcTime: 0,
+  })
+  let joinedDemand = false
+  const original = CollectionSubscription.prototype.requestSnapshot
+  const spy = vi
+    .spyOn(CollectionSubscription.prototype, `requestSnapshot`)
+    .mockImplementation(function (this: CollectionSubscription, ...args) {
+      const deferred = this.isDeferringAcquisition()
+      const isPending = () => this.hasPendingTruncateReplacement
+      const before = isPending()
+      const result = original.apply(this, args)
+      if (deferred && !before && isPending()) {
+        joinedDemand = true
+        observe(`reach`, `deferred joined demand`)
+      }
+      return result
     })
+  let subscription: ReturnType<typeof query.subscribeChanges> | undefined
+  let preloadSettled = false
+  let preloadFailure: unknown
+  try {
+    query.startSyncImmediate()
+    await settle()
+    oracleAssertion(`runDeferredSiblingHistory:914`, () =>
+      expect(loads, `deferred query starts no acquisition`).toBe(0),
+    )
+    if (history.reader === `subscribe`)
+      subscription = query.subscribeChanges(() => {})
+    else
+      void query.preload().then(
+        () => {
+          preloadSettled = true
+        },
+        (error: unknown) => {
+          preloadFailure = error
+        },
+      )
+    // The provider promises are semantic gates. Drain every issued gate,
+    // including any continuation produced by their settlement. No truncate,
+    // abort, window move or extra preload is allowed to repair this history.
+    await settle()
+    if (history.rootAsync || history.siblingAsync) {
+      oracleAssertion(`runDeferredSiblingHistory:931`, () =>
+        expect(query.status, `held acquisition gates initial readiness`).toBe(
+          `loading`,
+        ),
+      )
+      oracleAssertion(`runDeferredSiblingHistory:934`, () =>
+        expect(preloadSettled).toBe(false),
+      )
+    }
+    for (let turn = 0; turn < 12; turn++) {
+      const resolve = history.newestFirst ? gates.pop() : gates.shift()
+      resolve?.()
+      await settle()
+    }
+    console.info(`deferred-sibling reach`, history, {
+      'deferred joined demand': Number(joinedDemand),
+    })
+    oracleAssertion(`runDeferredSiblingHistory:946`, () =>
+      expect(joinedDemand, `deferred sibling entered joined demand`).toBe(true),
+    )
+    oracleAssertion(`runDeferredSiblingHistory:947`, () =>
+      expect(loads, `each source subscription acquires once`).toBe(2),
+    )
+    oracleAssertion(`runDeferredSiblingHistory:948`, () =>
+      expect(query.status, `resumed sibling replay must finish`).toBe(`ready`),
+    )
+    if (history.reader === `preload`) {
+      oracleAssertion(`runDeferredSiblingHistory:950`, () =>
+        expect(preloadFailure).toBeUndefined(),
+      )
+      oracleAssertion(`runDeferredSiblingHistory:951`, () =>
+        expect(preloadSettled).toBe(true),
+      )
+    }
+    oracleAssertion(`runDeferredSiblingHistory:953`, () =>
+      expect(
+        query.toArray
+          .map(({ id, peer }) => ({ id, peer }))
+          .sort((a, b) => a.id.localeCompare(b.id)),
+      ).toEqual(deferredSiblingRows(rows)),
+    )
+  } finally {
+    spy.mockRestore()
+    for (const resolve of gates.splice(0)) resolve()
+    subscription?.unsubscribe()
+    await query.cleanup()
+    await source.cleanup()
   }
+}
+describe(`deferred demand joining a sibling replay`, () => {
+  oracleProperty<DeferredSiblingHistory, Verdict>({
+    id: `live-query.deferred-sibling`,
+    law: {
+      statement: `Deferred joined demand resumes without a readiness cycle, acquires each source subscription once, and publishes the independent self-join result.`,
+      authority: `ARCHITECTURE laws 9, 10, and 15 and the self-join rule stated above.`,
+      limits: `The unchanged finite subscriber/preload, one/two rows, synchronous/held root and sibling results, and both release orders; no general provider or framework schedule.`,
+    },
+    owns: [
+      `src/live-query-options.ts#resumeDeferredLiveQueryCollections`,
+      `src/query/pooled-live-query.ts#createPooledLiveQuery`,
+      `src/collection/index.ts#CollectionImpl._deferSyncStart`,
+      `src/collection/index.ts#CollectionImpl._resumeSyncStart`,
+    ],
+    histories: deferredSiblingHistories,
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(
+        `deferred sibling resumption`,
+        history,
+        observe,
+        () => runDeferredSiblingHistory(history, observe),
+      ),
+    check: forwardAssertionJudgment,
+  })
 })

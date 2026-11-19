@@ -185,3 +185,58 @@ export function checkCacheOptionPublications(
   for (const publication of publications)
     checkCacheOptionRows(publication, rows, key)
 }
+
+/** Independent Suspense callers own distinct output Collections, even with equal
+ * declarations. Authority: maintainer decision, 2026-11-03, superseding the
+ * compatible-sharing rule from PR #2314. Portable
+ * query identity and mounted first-options retention remain separate laws.
+ * Declaration names abstract absent or exact runtime references/scalar values.
+ * Each option varies alone, so a combined-option guard cannot hide a gap.
+ * Omission and explicit undefined both declare absence (the same decision).
+ * Their two orders retain the property-presence distinction in the driver,
+ * while the model judges their effective declarations as equal.
+ */
+export const localOptionHistories = [
+  `getKey`,
+  `schema`,
+  `onInsert`,
+  `onUpdate`,
+  `onDelete`,
+  `id`,
+  `startSync`,
+  `gcTime`,
+  `singleResult`,
+  `defaultStringCollation`,
+] as const
+export const localOptionPairs = localOptionHistories.flatMap((option) =>
+  ([...declarations, [`absent`, `undefined`], [`undefined`, `absent`]] as const)
+    .filter(
+      (pair) =>
+        option !== `singleResult` ||
+        (pair[0] !== `other` && pair[1] !== `other`),
+    )
+    .flatMap((pair) =>
+      ([`derived`, `same-key`, `different-key`] as const).map((identity) => ({
+        option,
+        declarations: pair,
+        identity,
+      })),
+    ),
+)
+export type LocalOptionHistory = (typeof localOptionPairs)[number]
+export function equalLocalDeclarations(history: LocalOptionHistory) {
+  const effective = history.declarations.map((declaration) =>
+    declaration === `undefined` ? `absent` : declaration,
+  )
+  return history.identity !== `different-key` && effective[0] === effective[1]
+}
+export function checkLocalOutputOwnership(
+  left: object,
+  right: object,
+  history: LocalOptionHistory,
+) {
+  expect(
+    right,
+    `independent Suspense output (${history.option}/${history.identity})`,
+  ).not.toBe(left)
+}

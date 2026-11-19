@@ -1,0 +1,59 @@
+{
+  "head": "bfd1da1a7e752d66fd667adfd3cdf54f60732b22",
+  "state": "uncommitted task snapshot before optional simplification decision",
+  "sources": {
+    "docs/contributing/glossary.md": "962575e2ca0c357c81c2e505d98f78db79d44d43dc16de9187eb32658cf31f65",
+    "docs/contributing/oracle-coverage.md": "ce3bed9d55a4033f138b7e5da5aac87ba25e826417d1a1203058fee63f73c8bd",
+    "packages/angular-db/src/index.ts": "b856d0a98c47071691583a370edffc25764d529fa33fecc28c383ed54deb3fe8",
+    "packages/db-ivm/src/operators/topKArray.ts": "ff21d0f944043db4d28c9be7c429594d668763f634443801a8dc65188ee8d9f1",
+    "packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts": "1ef076cdca0976323847511681d6d4c75a25bd2c345377a8df4b1d52a9625577",
+    "packages/db/src/live-query-options.ts": "189a4f2ba266cf93a75d373b5fe115b4d940ca8cd404f5dec4c02f6ef25f6792",
+    "packages/db/src/query/effect.ts": "354bbbcf9683c91047c61da1ea2323ed89623628eb6059dacfbb79bd56b85ce4",
+    "packages/db/tests/conformance/contract.ts": "b6f345576497c94aeb2720b11ff188a55f27b74905ae2c69ec42e9421f232b41",
+    "packages/db/tests/conformance/lagging-source.ts": "19feb3b6f87e89fd60cf22605f81c755d94e43db39a11a19e1d49f42accc1097",
+    "packages/db/tests/conformance/suite.ts": "be7929e6d0d0838f4214c7af473c77b91d32741b347d91d20041a5f8c790ebd2",
+    "packages/db/tests/conformance/window-history-oracle.ts": "531dbc269de8663de5ba5c7eb4b70f94b8056e2d438ca0960122588991b25168",
+    "packages/db/tests/failure-fidelity.test.ts": "5072d609cde0a399f41e24e90929377497ec4a7f8276dfbab520ce3a4bd0bf64",
+    "packages/db/tests/oracle-config.ts": "c2c3269f5ce27662cf0eb8e5a2b972c6df307d33482b85b7abda0581e8432d63",
+    "packages/db/tests/oracle-failure-fidelity.ts": "f95203e1c3f7d9f256f10862dd7b9627e85879321fd82b214a3f40ad01ed6901",
+    "packages/db/tests/query/effect-callback-oracle.ts": "ca9e1336e7ceeb243a8e32a49ad2c3c881deaa38334540e85f848122cbaf2d38",
+    "packages/db/tests/query/virtual-row-fields-effect-oracle.test.ts": "47e862b092e643309bd804acab7c61c036ed7a345c873ca480f63b807aa4f24d",
+    "packages/preact-db/src/useLiveQuery.ts": "fe381f9c87cfdd5b57e9cc9ff77a6d1dbfa1fc84191c69fa7247fa9953223f0d",
+    "packages/preact-db/tests/window-render-oracle.test.tsx": "994f5702a0ff4649369f44bc7ea8341519b19c0260c887b458b97b3f951c06a1",
+    "packages/react-db/package.json": "2136a1486e15558a8cd8ec57615db17f6aa5e4032b1afe803404bdd83d99ec0a",
+    "packages/react-db/src/useLiveQuery.ts": "ffa5a4fa3e68e9dfbfea2ff3b988db852ecc14f688aeeabbad5ac1a79a09b6e9",
+    "packages/react-db/tests/effect-callback-oracle.test.tsx": "9ed573ae14bf9bd87058c9136ef1de57f33422da235f6253a9c97f90599cf98e",
+    "packages/react-db/tests/ssr-effects-driver.tsx": "9cf27fdbe6f1fbd72629d9ba11880ab650421feb58d82ad174891043b53845c5",
+    "packages/react-db/tests/ssr-effects-oracle.test.ts": "4052260aa9b192c3773e3147a6d31b568152f563ea869f195f9b602ad66555ce",
+    "packages/react-db/tests/window-render-oracle.test.tsx": "819359c432c167bf2f23462c6fa8e63de443569aba66a6838def2183eca539cb",
+    "packages/solid-db/src/useLiveQuery.ts": "8e414683931992f72d3208d1f5952d2f33625eac7b0b88aaf5755a210d19ded2",
+    "packages/svelte-db/src/useLiveQuery.svelte.ts": "23e316c6515bcbdd159121c9497911075ed3d54670a6d7b19a76089eef2212bc",
+    "packages/vue-db/src/useLiveQuery.ts": "5c4d910952e54b58002459b21d86c9ba6c25fcc67e7cce677e0c6b66b7aecc3c",
+    "pnpm-lock.yaml": "aad3ef34e9f98129d6929b4b9c46880b8c9758971da14a5686f479824d1549f4"
+  },
+  "evidenceLogs": {
+    "prep-ssr-red-final.log": "d2751221d8343e429308bd24e6e615768666b3b0656f65a6dc3a4fa771c773d2",
+    "prep-ssr-mutant-final.log": "7fb5e7cb2c63e9a41818cb39275acdc312291770b87af4f837b6e90e1aa5dd70",
+    "prep-ssr-replay-final.log": "4ad627db3deed1c885ab3012278303859942f2ac334fbeb5013c737f2bc22d46",
+    "prep-final-changed-lint.log": "ec4182d730ce311d890924a35a5e282747fa1350561b28cec7df03c773184dfd",
+    "prep-final-core-integration.log": "4b1f10dac222b39518b1b2779e267b5f8db626270e2d939443c13ec7478561b4",
+    "prep-final-db-types.log": "07a23be87a598a26bdfab6304f0ff2dfcd4ed39642e1b2c8214237565ca6790f",
+    "prep-final-react-integration.log": "7f848542f5ccd8e23fd923391d858df448acaa600667bf5b9141cddafdfce7c4",
+    "prep-final-react-shared-windows.log": "cdf5ff7645e1b9c4fdd75e83ea4880695dfd3ca6b31fab75dbed19585e355540",
+    "prep-final-react-types.log": "00cb5d0046a00ec92dadbe1fc7c10ac3080f8c5332605e5f3cfbcf59e374d1a8",
+    "prep-final-size.log": "49f32fe2e54d1625ea3a1d407efacd8eb6dfc6eabb96783169db6a4cdf2609f1",
+    "prep-final-whitespace.log": "3d4d50cd32af92c6d4df37c1df74a96622fca8cfb5643a155c91f034a42f2068"
+  },
+  "tests": {
+    "coreIntegration": 391,
+    "reactIntegration": 154,
+    "sharedReactWindows": 44,
+    "totalDistinct": 589
+  },
+  "sizeGzip": {
+    "sevenPackages": 791,
+    "typicalReactApp": 561,
+    "sveltePriorUnchangedSource": 110
+  },
+  "limits": "Historical manifests remain historical. This is a local integrated-tree checkpoint; no pushed-head or CI claim."
+}

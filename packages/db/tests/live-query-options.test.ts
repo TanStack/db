@@ -515,6 +515,28 @@ describe(`pooling is opt-in`, () => {
     for (const subscription of subscriptions) subscription.unsubscribe()
   })
 
+  it.each([
+    { autoIndex: undefined },
+    { autoIndex: `off` as const },
+    { defaultIndexType: undefined },
+  ])(
+    `compiles a Collection when an indexing field is supplied: %j`,
+    async (options) => {
+      const rows = source()
+      const output = resolveLiveQueryValue({
+        query: eqQuery(rows),
+        pool: pooledLiveQueries,
+        ...options,
+      })!
+      try {
+        expect(output.config).toBeDefined()
+      } finally {
+        await output.cleanup()
+        await rows.cleanup({ dependents: true })
+      }
+    },
+  )
+
   it(`does not pool when the hook passes pool: false`, () => {
     const rows = source()
     expect(

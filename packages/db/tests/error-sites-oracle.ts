@@ -31,7 +31,6 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import ts from 'typescript'
-import { declareOracle } from './oracle-declaration.js'
 
 export type CodedSite = {
   file: string
@@ -662,5 +661,3 @@ export function findErrorSites(
   }
   return { coded, plain, classGuards, developmentOnly }
 }
-
-declareOracle({ model: [findErrorSites] })

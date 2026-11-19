@@ -72,7 +72,7 @@ describe(`LiveQueryObserver generated histories`, () => {
 
 /**
  * Failed subscription setup transfers no listener ownership to the observer:
- * the caller received no release handle. These fixed cases pin each failure
+ * the caller received no release handle. These fixed cases check each failure
  * point, cleanup rejection and a real sync startup throw, in both modes, with
  * one or two failed attempts before an explicit retry. They compare with
  * written lease counts. The generated ownership law that these cases illustrate
