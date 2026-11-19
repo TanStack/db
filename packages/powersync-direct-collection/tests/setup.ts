@@ -1,5 +1,6 @@
-// We run tests on Node 24, which is missing these methods used by @powersync/standalone-client. This is not an exact
-// polyfill, but good enough to run the client.
+// Node 22 and 24 lack these methods used by @powersync/standalone-client.
+// Test subprocesses import this same host setup; consumer compatibility still
+// requires the separate SDK release. This is not an exact polyfill.
 
 function defineMapMethod(name: string, implementation: unknown) {
   if (name in Map.prototype) return

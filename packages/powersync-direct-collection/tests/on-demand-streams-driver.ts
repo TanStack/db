@@ -153,7 +153,9 @@ export function directOnDemandStreamsAdapter({
         // optimistic transaction. Their provider cut records pending receipts
         // rather than waiting away the state the shared model must inspect.
         const holdsApplication =
-          (h.kind === `settlement` && h.timing === `before-application`) ||
+          (h.kind === `settlement` &&
+            h.timing === `before-application` &&
+            version >= 0) ||
           (h.kind === `mapper` && h.operation === `empty` && version === 1)
         const delivery = {
           requestRevision: () => service.requestRevision,

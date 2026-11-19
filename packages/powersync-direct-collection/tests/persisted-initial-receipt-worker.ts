@@ -1,4 +1,5 @@
 /** An isolated native process preserves detached errors as oracle observations. */
+import './setup'
 import process from 'node:process'
 import { readFileSync } from 'node:fs'
 import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'

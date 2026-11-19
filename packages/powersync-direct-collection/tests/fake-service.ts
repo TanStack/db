@@ -24,6 +24,7 @@ export class FakeService {
   #signal?: AbortSignal
   #errored = false
   #opId = 0
+  #replay?: () => void
   /** Runs before responding to a checkpoint request. */
   beforeCheckpointResponse?: () => Promise<void>
 
@@ -51,6 +52,9 @@ export class FakeService {
                 c.close()
               } catch {}
             })
+            // Initial query application can replace its SDK request. The
+            // successor receives the last complete authored source answer.
+            this.#replay?.()
           },
         },
         // Lines stay queued until the client reads them (see `drained`).
@@ -78,6 +82,7 @@ export class FakeService {
 
   /** Fails the latest sync request's response body, as a dropped network connection does. */
   error(cause: Error) {
+    this.#replay = undefined
     this.#errored = true
     this.#stream!.error(cause)
   }
@@ -98,6 +103,7 @@ export class FakeService {
   }
 
   close() {
+    this.#replay = undefined
     this.#stream!.close()
   }
 
@@ -105,6 +111,7 @@ export class FakeService {
     buckets: Array<string>,
     options: { streams?: Array<unknown>; writeCheckpoint?: string } = {},
   ) {
+    this.#replay = undefined
     const request = this.lastRequest
     this.send({
       checkpoint: {
@@ -165,5 +172,6 @@ export class FakeService {
     for (const [id, row] of Object.entries(rows))
       this.put(bucket, table, id, row)
     this.complete()
+    this.#replay = () => this.sync(bucket, table, rows, options)
   }
 }

@@ -186,12 +186,12 @@ it('requests streams for on-demand subsets', async () => {
   await vi.waitFor(() =>
     expect(service.lastRequest.streams.subscriptions).toHaveLength(1),
   )
-  const requests = service.requests.length
   service.sync('a', 'tasks', { '1': { title: 'task', board: 'work' } })
   await preload
   expect(loaded).toBe(true)
   expect(live.toArray.map((t) => t.title)).toEqual(['task'])
 
+  const requests = service.requests.length
   await live.cleanup()
   await service.waitForRequest(requests + 1)
   expect(service.lastRequest.streams.subscriptions).toEqual([])

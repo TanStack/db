@@ -3,6 +3,7 @@
  * unhandledRejection events and still exits normally, so the oracle's shared
  * comparison supplies a detached-error failure rather than a worker crash.
  */
+import './setup'
 import process from 'node:process'
 import { readFileSync } from 'node:fs'
 import { createCollection } from '@tanstack/db'
