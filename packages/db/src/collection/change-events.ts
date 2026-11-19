@@ -67,29 +67,36 @@ export function compileStoredRowPrefilter(
  * @param options - Options including optional where filter, orderBy, and limit
  * @returns An array of changes
  * @example
+ * import { eq, IR } from '@tanstack/db'
+ *
+ * // Given an existing collection with status, name, and score fields:
  * // Get all items as changes
  * const allChanges = currentStateAsChanges(collection)
  *
- * // Get only items matching a condition
- * const activeChanges = currentStateAsChanges(collection, {
- *   where: (row) => row.status === 'active'
- * })
- *
- * // Get only items using a pre-compiled expression
- * const activeChanges = currentStateAsChanges(collection, {
- *   where: eq(row.status, 'active')
- * })
+ * // Use a single-row expression to filter by status.
+ * const active = eq(new IR.PropRef<string>(['status']), 'active')
+ * const activeChanges = currentStateAsChanges(collection, { where: active })
  *
  * // Get items ordered by name with limit
  * const topUsers = currentStateAsChanges(collection, {
- *   orderBy: [{ expression: row.name, compareOptions: { direction: 'asc' } }],
+ *   orderBy: [
+ *     {
+ *       expression: new IR.PropRef<string>(['name']),
+ *       compareOptions: { direction: 'asc', nulls: 'last' },
+ *     },
+ *   ],
  *   limit: 10
  * })
  *
  * // Get active users ordered by score (highest score first)
  * const topActiveUsers = currentStateAsChanges(collection, {
- *   where: eq(row.status, 'active'),
- *   orderBy: [{ expression: row.score, compareOptions: { direction: 'desc' } }],
+ *   where: active,
+ *   orderBy: [
+ *     {
+ *       expression: new IR.PropRef<number>(['score']),
+ *       compareOptions: { direction: 'desc', nulls: 'last' },
+ *     },
+ *   ],
  * })
  */
 export function currentStateAsChanges<
