@@ -2181,6 +2181,13 @@ oracleProperty({
       enters: [constructedStates[index]],
       build,
     })),
+    // Each base builds checkouts and runs ESLint in child processes, about
+    // 5 s on CI, so 5 fixed bases per constructed history cost about 840 s
+    // on this file. Two fixed bases keep its CI job under 10 minutes, and
+    // the random-seed units build their bases from a fresh seed on every PR
+    // run (register M, 2026-11-17, "2 fixed bases for three oracles": the
+    // same choice for the oracles repository's ESLint plugin oracles).
+    bases: 2,
   },
   resolve: programOf,
   model: (program) => {

@@ -79,7 +79,13 @@ import type { Deferred } from '../src/deferred.js'
  * is entered at the end, a cleanup while a transaction persists, also drops
  * the generated settlements, so the opening insert is still pending at the
  * cleanup. Every builder's output stays inside the grammar, so its failures
- * shrink like generated ones. Half of a campaign's histories are constructed.
+ * shrink like generated ones. Each constructed history runs in its own unit
+ * on 5 bases, the framework's default, and each base must enter the states
+ * that it names. The generated unit draws only from the arbitrary, so its
+ * counts of the rarer states (one millisecond before the deadline, a write
+ * while a discarded row persists) are measured and may be zero; the
+ * constructed units reach each of them at least five times in every
+ * campaign (register M, 2026-11-16, "N bases per constructed history").
  *
  * The production driver uses two real Collections with a synchronous ready
  * sync, public `subscribeChanges`, `insert`, `createTransaction`, and
@@ -642,9 +648,11 @@ const cleanupStep = (side: Side): Step => ({ kind: `cleanup`, side })
 // TANSTACK_DB_ORACLE_UNIT, TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH,
 // and TANSTACK_DB_ORACLE_PROPERTY=collection-lifecycle.gc-persisting-transaction.
 // Each constructed history names the states it enters, with the steps that
-// enter it, and every declared state has at least one. The constructed
-// histories run beside the generated ones in each campaign, so a path recorded
-// before they were added may select a different history.
+// enter it, and every declared state has at least one. Each constructed
+// history and the generated histories run as separate units of each campaign,
+// from separate streams. A generated-unit path printed before @tanstack/oracles
+// 6d05f05 selects a different history: that version shifted each fixed seed
+// once. A constructed unit's first path index still selects its first base.
 oracleProperty({
   id: `collection-lifecycle.gc-persisting-transaction`,
   law: {

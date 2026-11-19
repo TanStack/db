@@ -25,5 +25,13 @@ describe(`persisted startup conformance: PowerSync`, () => {
     // for 80 histories plus constructed reach, and for their determinism replay.
     // Keep every history, calibration and comparison in the shared suite.
     timeout: 180_000,
+    // Each base opens real PowerSync databases, so 5 fixed bases per
+    // constructed history cost about 195 s of CI time on this file alone.
+    // Two fixed bases keep the file inside its CI job (P12). Each PR run's
+    // random-seed units still build their bases from a fresh seed, so the
+    // bases vary from run to run (register M, 2026-11-17, "2 fixed bases for
+    // three oracles" and "Random bases at today's cost for expensive
+    // oracles"); no bases are drawn on top of the fixed ones.
+    bases: 2,
   })
 })
