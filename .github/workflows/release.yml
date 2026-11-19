@@ -77,6 +77,7 @@ jobs:
             collections-1,
             collections-2,
             collections-3,
+            collections-4,
           ]
     env:
       TEST_GROUP: ${{ matrix.group }}

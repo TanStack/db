@@ -116,6 +116,9 @@ that each CI job stays under 10 minutes:
   `sync-metadata-session.sqlite-kept-metadata-durability`: 1 base. The
   construction is the identity, so the generated unit's 8 histories already
   explore it and the constructed unit only makes the reach required.
+- `scripts.lint-scope` (`scripts/lint-scope-oracle.property.test.js`): 2
+  bases. Each base builds checkouts and runs ESLint in child processes; 5
+  bases cost about 840 s of CI time on its file.
 
 `scripts/ci-tests.mjs` splits the package jobs so that each stays under 10
 minutes; see [PR CI](ci.md).

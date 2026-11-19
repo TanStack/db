@@ -19,8 +19,13 @@ import { fileURLToPath } from 'node:url'
 //   enumerated histories). An oracle file whose units alone outlast a job is
 //   split this way, in all three parts.
 //
-// Every package with a test script has exactly one `{ package }` entry, so a
-// new test file runs without an edit here. Each test runs exactly once.
+// An entry with `config` in place of `package` runs the repository scripts'
+// oracles under that Vitest config, from the repository root.
+//
+// Every package with a test script, and every config, has exactly one entry
+// without a file, so a new test file runs without an edit here. Each test runs
+// exactly once. The times beside the jobs are the entries' seconds on CI
+// (TanStack/db run 44577798618), with four entries at a time.
 const testParts = {
   fixed: `fixed seed `,
   random: `^(?!.*fixed seed ).*random seed`,
@@ -29,9 +34,23 @@ const testParts = {
 const pkg = (name, file, part) => ({ package: name, file, part })
 const parts = (name, file) =>
   Object.keys(testParts).map((part) => pkg(name, file, part))
+const scripts = (file, part) => ({
+  config: `scripts/oracle-scripts.vitest.config.mjs`,
+  file,
+  part,
+})
 const powersync = `@tanstack/powersync-db-collection`
+const electric = `@tanstack/electric-db-collection`
+const conformance = `@tanstack/db-adapter-conformance`
+const query = `@tanstack/query-db-collection`
 const sqliteCore = `@tanstack/db-sqlite-persistence-core`
 const browserSqlite = `@tanstack/browser-db-sqlite-persistence`
+const reload = `tests/eager-reload-conformance-oracle.property.test.ts`
+const baseline = `tests/persisted-baseline-lifecycle-oracle.test.ts`
+const liveSource = `tests/eager-live-source-conformance-oracle.property.test.ts`
+const startup = `tests/persisted-startup-conformance-oracle.property.test.ts`
+const reference = `tests/reference-adapter-oracle.property.test.ts`
+const lintScope = `lint-scope-oracle.property.test.js`
 const packageJobs = {
   'ivm-offline': [
     pkg(`@tanstack/offline-transactions`),
@@ -43,21 +62,21 @@ const packageJobs = {
       `tests/sync-metadata-session-persisted-oracle.test.ts`,
     ),
     pkg(sqliteCore, `tests/persisted-demand-coverage-campaign-oracle.test.ts`),
-    pkg(sqliteCore, `tests/persisted-options.test.ts`),
     pkg(sqliteCore),
     pkg(sqliteCore, `tests/sync-metadata-missing-row-oracle.test.ts`),
+    pkg(sqliteCore, `tests/persisted-options.test.ts`),
   ],
   'sqlite-adapters': [
     pkg(browserSqlite, `tests/multi-tab-electric-oracle.test.ts`),
     pkg(browserSqlite, `tests/persisted-options.test.ts`),
     pkg(browserSqlite),
     pkg(`@tanstack/electron-db-sqlite-persistence`),
+    pkg(`@tanstack/tauri-db-sqlite-persistence`),
     pkg(`@tanstack/node-db-sqlite-persistence`),
     pkg(`@tanstack/capacitor-db-sqlite-persistence`),
-    pkg(`@tanstack/tauri-db-sqlite-persistence`),
+    pkg(`@tanstack/react-native-db-sqlite-persistence`),
     pkg(`@tanstack/expo-db-sqlite-persistence`),
     pkg(`@tanstack/cloudflare-durable-objects-db-sqlite-persistence`),
-    pkg(`@tanstack/react-native-db-sqlite-persistence`),
   ],
   frameworks: [
     pkg(`@tanstack/react-db`),
@@ -68,78 +87,50 @@ const packageJobs = {
     pkg(`@tanstack/preact-db`),
     pkg(`@tanstack/react-router-with-db`),
   ],
+  // About 1,300 entry-seconds each, no entry above about 430.
   'collections-1': [
-    pkg(powersync, `tests/eager-reload-conformance-oracle.property.test.ts`),
-    pkg(powersync, `tests/persisted-baseline-lifecycle-oracle.test.ts`),
-    pkg(
-      powersync,
-      `tests/eager-live-source-conformance-oracle.property.test.ts`,
-      `random`,
-    ),
-    pkg(
-      `@tanstack/electric-db-collection`,
-      `tests/eager-live-source-conformance-oracle.property.test.ts`,
-    ),
-    pkg(
-      powersync,
-      `tests/persisted-startup-conformance-oracle.property.test.ts`,
-      `fixed`,
-    ),
-    pkg(`@tanstack/trailbase-db-collection`),
+    pkg(powersync, liveSource, `random`), // 434
+    pkg(electric, liveSource, `fixed`), // ~230
+    pkg(conformance, reference, `other`), // 212
+    pkg(powersync), // 144
+    pkg(powersync, liveSource, `other`), // 121
+    pkg(powersync, startup, `random`), // 120
+    pkg(`@tanstack/db-collection-e2e`), // 1
   ],
   'collections-2': [
-    pkg(
-      powersync,
-      `tests/persisted-startup-conformance-oracle.property.test.ts`,
-      `other`,
-    ),
-    pkg(
-      powersync,
-      `tests/eager-live-source-conformance-oracle.property.test.ts`,
-      `fixed`,
-    ),
-    pkg(`@tanstack/query-db-collection`),
-    pkg(
-      `@tanstack/query-db-collection`,
-      `tests/refetch-ordered-prefix-oracle.test.ts`,
-    ),
-    pkg(`@tanstack/electric-db-collection`),
-    pkg(`@tanstack/db-adapter-conformance`),
+    pkg(powersync, reload, `other`), // ~396
+    pkg(conformance, reference, `random`), // 241
+    pkg(powersync, liveSource, `fixed`), // 215
+    pkg(`@tanstack/trailbase-db-collection`), // 179
+    pkg(powersync, reload, `random`), // ~120
+    pkg(`@tanstack/rxdb-db-collection`), // 93
+    pkg(conformance), // 72
   ],
   'collections-3': [
-    pkg(
-      `@tanstack/db-adapter-conformance`,
-      `tests/reference-adapter-oracle.property.test.ts`,
-      `other`,
-    ),
-    pkg(
-      `@tanstack/convex-db-collection`,
-      `tests/eager-live-source-conformance-oracle.property.test.ts`,
-    ),
-    pkg(
-      powersync,
-      `tests/eager-live-source-conformance-oracle.property.test.ts`,
-      `other`,
-    ),
-    pkg(
-      `@tanstack/db-adapter-conformance`,
-      `tests/reference-adapter-oracle.property.test.ts`,
-      `fixed`,
-    ),
-    pkg(`@tanstack/rxdb-db-collection`),
-    pkg(
-      `@tanstack/db-adapter-conformance`,
-      `tests/reference-adapter-oracle.property.test.ts`,
-      `random`,
-    ),
-    pkg(powersync),
-    pkg(
-      powersync,
-      `tests/persisted-startup-conformance-oracle.property.test.ts`,
-      `random`,
-    ),
-    pkg(`@tanstack/convex-db-collection`),
-    pkg(`@tanstack/db-collection-e2e`),
+    pkg(powersync, baseline, `other`), // ~358
+    pkg(electric, liveSource, `random`), // ~250
+    pkg(`@tanstack/convex-db-collection`, liveSource), // 225
+    pkg(powersync, startup, `fixed`), // 189
+    pkg(powersync, reload, `fixed`), // ~120
+    pkg(`@tanstack/convex-db-collection`), // 118
+    pkg(electric, liveSource, `other`), // ~15
+  ],
+  'collections-4': [
+    pkg(powersync, startup, `other`), // 310
+    pkg(query), // 262
+    pkg(conformance, reference, `fixed`), // 230
+    pkg(query, `tests/refetch-ordered-prefix-oracle.test.ts`), // 211
+    pkg(electric), // 138
+    pkg(powersync, baseline, `fixed`), // ~86
+    pkg(powersync, baseline, `random`), // ~79
+  ],
+  // The repository scripts' oracles, which the lint job ran before.
+  'lint-rules': [
+    scripts(`publish-http-oracle.property.test.js`),
+    scripts(lintScope, `fixed`),
+    scripts(lintScope, `random`),
+    scripts(),
+    scripts(lintScope, `other`),
   ],
 }
 
@@ -157,12 +148,23 @@ const testPackages = [...manifests.values()]
   .map(({ manifest }) => manifest)
   .filter((manifest) => manifest.scripts?.test)
 const entries = Object.values(packageJobs).flat()
-const assigned = [`@tanstack/db`, ...entries.map((entry) => entry.package)]
-for (const { name } of testPackages) {
-  if (!assigned.includes(name))
+// An entry's owner: its package, or the scripts config that it runs under.
+const owner = (entry) => entry.package ?? entry.config
+const assigned = [
+  `@tanstack/db`,
+  ...entries.filter((entry) => entry.package).map((entry) => entry.package),
+]
+for (const name of [
+  ...testPackages.map((manifest) => manifest.name),
+  ...new Set(entries.filter((entry) => entry.config).map(owner)),
+]) {
+  if (
+    name !== `@tanstack/db` &&
+    !entries.some((entry) => owner(entry) === name)
+  )
     throw new Error(`Assign ${name} to a CI test group`)
   const rest = entries.filter(
-    (entry) => entry.package === name && entry.file === undefined,
+    (entry) => owner(entry) === name && entry.file === undefined,
   )
   if (name !== `@tanstack/db` && rest.length !== 1)
     throw new Error(
@@ -176,21 +178,30 @@ for (const name of new Set(assigned)) {
     )
   }
 }
-// A named file is excluded from its package's other entry by its own name, so
-// that name must be unique in the package. A file runs whole once, or in each
-// of the three parts once.
+// The directory whose files an entry names: its package, or its config's.
+const entryDirectory = (entry) =>
+  entry.package === undefined
+    ? dirname(entry.config)
+    : manifests.get(entry.package).directory
+// A named file is excluded from its owner's other entry by its own name, so
+// that name must be unique there. A file runs whole once, or in each of the
+// three parts once. A named file is never a type-test file (`*.test-d.ts`):
+// those stay with the entry that runs Vitest's typecheck.
 for (const entry of entries.filter((candidate) => candidate.file)) {
-  const directory = manifests.get(entry.package).directory
   const named = globSync(`**/${basename(entry.file)}`, {
-    cwd: join(root, directory),
+    cwd: join(root, entryDirectory(entry)),
     exclude: [`**/node_modules/**`, `**/dist/**`],
   })
-  if (named.length !== 1 || named[0] !== join(entry.file))
+  if (
+    named.length !== 1 ||
+    named[0] !== join(entry.file) ||
+    /\.test-d\./.test(entry.file)
+  )
     throw new Error(
-      `CI entry ${entry.package} ${entry.file} must name exactly one file, by a name no other file in the package has`,
+      `CI entry ${owner(entry)} ${entry.file} must name exactly one runtime test file, by a name no other file there has`,
     )
   const same = entries.filter(
-    (other) => other.package === entry.package && other.file === entry.file,
+    (other) => owner(other) === owner(entry) && other.file === entry.file,
   )
   const whole = same.length === 1 && same[0].part === undefined
   const split =
@@ -200,7 +211,7 @@ for (const entry of entries.filter((candidate) => candidate.file)) {
     )
   if (!whole && !split)
     throw new Error(
-      `CI entries for ${entry.package} ${entry.file} must run it whole once, or once in each part (${Object.keys(testParts).join(`, `)})`,
+      `CI entries for ${owner(entry)} ${entry.file} must run it whole once, or once in each part (${Object.keys(testParts).join(`, `)})`,
     )
 }
 
@@ -224,10 +235,19 @@ if (missingTypeOracles.length > 0)
     `db-3 names missing test files: ${missingTypeOracles.join(`, `)}`,
   )
 
+const entryLabel = (entry) =>
+  [
+    (entry.package ?? `scripts`).replace(`@tanstack/`, ``),
+    entry.file && basename(entry.file),
+    entry.part,
+  ]
+    .filter(Boolean)
+    .join(` `)
+
 /** The pnpm arguments that run one package-job entry. */
 function entryArgs(entry) {
   const named = entries
-    .filter((other) => other.package === entry.package && other.file)
+    .filter((other) => owner(other) === owner(entry) && other.file)
     .map((other) => other.file)
   const selection =
     entry.file === undefined
@@ -239,7 +259,23 @@ function entryArgs(entry) {
           ...(entry.part === undefined
             ? []
             : [`--testNamePattern=${testParts[entry.part]}`]),
+          // Vitest's typecheck writes one temporary tsconfig beside the
+          // package's tsconfig, so two processes of one package that both
+          // typecheck overwrite each other's. It checks the package's type
+          // tests, which a named file never is, so only the entry without a
+          // file runs it.
+          `--typecheck.enabled=false`,
         ]
+  if (entry.config !== undefined)
+    return [
+      `exec`,
+      `vitest`,
+      `run`,
+      `--config`,
+      entry.config,
+      ...selection,
+      `--maxWorkers=1`,
+    ]
   // Concurrent entries of one package must not share a coverage directory:
   // Vitest refuses a directory that another process holds.
   const coverage = entryLabel(entry).replace(/[^a-z0-9]+/gi, `-`)
@@ -253,15 +289,6 @@ function entryArgs(entry) {
     `--coverage.reportsDirectory=coverage/ci-${coverage}`,
   ]
 }
-
-const entryLabel = (entry) =>
-  [
-    entry.package.replace(`@tanstack/`, ``),
-    entry.file && basename(entry.file),
-    entry.part,
-  ]
-    .filter(Boolean)
-    .join(` `)
 
 /**
  * Run one entry, prefixing each output line with its label so that the
@@ -335,15 +362,22 @@ if (command === `check`) {
           Object.entries(packageJobs)
             .filter(([name]) => name.replace(/-\d+$/, ``) === family)
             .flatMap(([, jobEntries]) =>
-              jobEntries.map((entry) => entry.package),
+              jobEntries.flatMap((entry) => entry.package ?? []),
             ),
         ),
       ]
-  execFileSync(
-    `pnpm`,
-    [...packages.flatMap((name) => [`--filter`, `${name}...`]), `run`, `build`],
-    { cwd: root, stdio: `inherit` },
-  )
+  // A job of scripts' oracles alone builds nothing: pnpm with no filter
+  // would build every package.
+  if (packages.length > 0)
+    execFileSync(
+      `pnpm`,
+      [
+        ...packages.flatMap((name) => [`--filter`, `${name}...`]),
+        `run`,
+        `build`,
+      ],
+      { cwd: root, stdio: `inherit` },
+    )
 } else if (isDb) {
   const selection =
     group === `db-replay`

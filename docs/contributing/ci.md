@@ -1,6 +1,6 @@
 # PR CI
 
-The PR workflow runs eleven test jobs independently. Each job builds its
+The PR workflow runs thirteen test jobs independently. Each job builds its
 selected packages and their workspace dependencies before running tests.
 Builds retain pnpm's dependency order; package tests run without that
 ordering. The DB jobs run one Vitest process with two workers. A package job
@@ -17,7 +17,8 @@ line prefixed by its entry.
 | `sqlite-core` | SQLite persistence core |
 | `sqlite-adapters` | Browser, Node, Electron, Cloudflare, React Native, Expo, Capacitor, and Tauri persistence |
 | `frameworks` | React, React Router, Preact, Solid, Vue, Svelte, and Angular |
-| `collections-1` to `collections-3` | Electric, Query, PowerSync, RxDB, TrailBase, Convex, the adapter conformance package, and the shared E2E suite container |
+| `collections-1` to `collections-4` | Electric, Query, PowerSync, RxDB, TrailBase, Convex, the adapter conformance package, and the shared E2E suite container |
+| `lint-rules` | The oracles of the repository scripts (`scripts/*.property.test.js`): the lint hooks' scope, run budgets, and the release and publish scripts. The release workflow does not run this group. |
 
 `scripts/ci-tests.mjs` owns the package assignments. An entry runs a package's
 remaining test files, one named file, or one part of a named oracle file: its
