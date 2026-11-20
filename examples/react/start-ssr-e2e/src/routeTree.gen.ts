@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DisabledQueryRouteImport } from './routes/disabled-query'
 import { Route as SsrDbRouteImport } from './routes/ssr-db'
 import { Route as SsrDbStreamRouteImport } from './routes/ssr-db-stream'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DisabledQueryRoute = DisabledQueryRouteImport.update({
+  id: '/disabled-query',
+  path: '/disabled-query',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SsrDbRoute = SsrDbRouteImport.update({
@@ -31,30 +37,34 @@ const SsrDbStreamRoute = SsrDbStreamRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/disabled-query': typeof DisabledQueryRoute
   '/ssr-db': typeof SsrDbRoute
   '/ssr-db-stream': typeof SsrDbStreamRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/disabled-query': typeof DisabledQueryRoute
   '/ssr-db': typeof SsrDbRoute
   '/ssr-db-stream': typeof SsrDbStreamRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/disabled-query': typeof DisabledQueryRoute
   '/ssr-db': typeof SsrDbRoute
   '/ssr-db-stream': typeof SsrDbStreamRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/ssr-db' | '/ssr-db-stream'
+  fullPaths: '/' | '/disabled-query' | '/ssr-db' | '/ssr-db-stream'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/ssr-db' | '/ssr-db-stream'
-  id: '__root__' | '/' | '/ssr-db' | '/ssr-db-stream'
+  to: '/' | '/disabled-query' | '/ssr-db' | '/ssr-db-stream'
+  id: '__root__' | '/' | '/disabled-query' | '/ssr-db' | '/ssr-db-stream'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DisabledQueryRoute: typeof DisabledQueryRoute
   SsrDbRoute: typeof SsrDbRoute
   SsrDbStreamRoute: typeof SsrDbStreamRoute
 }
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/disabled-query': {
+      id: '/disabled-query'
+      path: '/disabled-query'
+      fullPath: '/disabled-query'
+      preLoaderRoute: typeof DisabledQueryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ssr-db': {
@@ -87,6 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DisabledQueryRoute: DisabledQueryRoute,
   SsrDbRoute: SsrDbRoute,
   SsrDbStreamRoute: SsrDbStreamRoute,
 }
