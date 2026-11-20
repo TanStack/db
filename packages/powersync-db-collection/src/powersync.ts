@@ -9,7 +9,7 @@ import { compileSQLite } from './sqlite-compiler'
 import { PendingOperationStore } from './PendingOperationStore'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
 import { DEFAULT_BATCH_SIZE } from './definitions'
-import { asPowerSyncRecord, mapOperation } from './helpers'
+import { mapOperation } from './helpers'
 import { convertTableToSchema } from './schema'
 import { serializeForSQLite } from './serialization'
 import type {
@@ -30,6 +30,7 @@ import type {
   ConfigWithSQLiteInputType,
   ConfigWithSQLiteTypes,
   EnhancedPowerSyncCollectionConfig,
+  InferPowerSyncKey,
   InferPowerSyncOutputType,
   PowerSyncCollectionConfig,
   PowerSyncCollectionUtils,
@@ -256,6 +257,7 @@ function createPowerSyncCollectionConfig<
     schema: inputSchema,
     syncBatchSize = DEFAULT_BATCH_SIZE,
     syncMode = 'eager',
+    numericIds = false,
     ...restConfig
   } = config
 
@@ -272,6 +274,7 @@ function createPowerSyncCollectionConfig<
 
   // The collection output type
   type OutputType = InferPowerSyncOutputType<TTable, TSchema>
+  type PowerSyncKey = InferPowerSyncKey<OutputType>
 
   const { viewName, trackMetadata: metadataIsTracked } = table
 
@@ -282,6 +285,18 @@ function createPowerSyncCollectionConfig<
     const validationSchema = deserializationSchema || schema
     const validation = validationSchema[`~standard`].validate(value)
     if (`value` in validation) {
+      // A numeric key must name exactly one stored id, so eviction and
+      // writes can derive one from the other.
+      const id = (validation.value as { id?: unknown }).id
+      if (
+        numericIds &&
+        !(Number.isSafeInteger(id) && String(id) === value.id)
+      ) {
+        const message = `A numeric PowerSync id must round-trip as a canonical safe integer`
+        database.logger.log({ level: LogLevels.error, message })
+        onDeserializationError?.({ issues: [{ path: [`id`], message }] })
+        throw new Error(message)
+      }
       return validation.value
     } else if (`issues` in validation) {
       const issueMessage = `Failed to validate incoming data for ${viewName}. Issues: ${validation.issues.map((issue) => `${issue.path} - ${issue.message}`)}`
@@ -328,7 +343,7 @@ function createPowerSyncCollectionConfig<
    * Notice that this describes the Sync between the local SQLite table
    * and the in-memory tanstack-db collection.
    */
-  const sync: SyncConfig<OutputType, string> = {
+  const sync: SyncConfig<OutputType, PowerSyncKey> = {
     sync: (params) => {
       const persistence =
         params.metadata === undefined
@@ -442,9 +457,9 @@ function createPowerSyncCollectionConfig<
           // holds.
           snapshot?: boolean
           afterRead?: () => Promise<void>
-          onInitialRow?: (value: OutputType) => void
+          onInitialRow?: (key: PowerSyncKey) => void
           when: Record<DiffTriggerOperation, string>
-          writeType: (rowId: string) => OperationType
+          writeType: (key: PowerSyncKey) => OperationType
           batchQuery: (
             lockContext: LockContext,
             batchSize: number,
@@ -473,16 +488,21 @@ function createPowerSyncCollectionConfig<
             beforeCreate: async (context) => {
               // A retained reload uses one snapshot across its source reads.
               // Other initial loads and subset loads keep batch commits. A
-              // transaction begins only once its rows are read, so a batch
-              // that fails leaves none open.
+              // transaction begins only once its rows are read, deserialized,
+              // and keyed, so a batch that fails leaves none open.
               const batches: Array<Array<TableType>> = []
               const apply = () => {
+                const entries = batches
+                  .splice(0)
+                  .flat()
+                  .map((row) => {
+                    const value = deserializeSyncRow(row)
+                    return [getKey(value), value] as const
+                  })
                 begin({ snapshot })
-                for (const row of batches.splice(0).flat()) {
-                  const type = writeType(row.id)
-                  const value = deserializeSyncRow(row)
-                  onInitialRow?.(value)
-                  write({ type, value })
+                for (const [key, value] of entries) {
+                  onInitialRow?.(key)
+                  write({ type: writeType(key), value })
                 }
                 const applied = commit()
                 if (applied !== true) void applied.catch(() => undefined)
@@ -549,18 +569,20 @@ function createPowerSyncCollectionConfig<
         }
 
         try {
-          begin()
           const operations = await context.getAll<TriggerDiffRecord>(
             `SELECT * FROM ${trackedTableName} ORDER BY operation_id ASC`,
           )
           const pendingOperations: Array<PendingOperation> = []
 
-          for (const op of operations) {
+          const changes = operations.map((op): Parameters<typeof write>[0] => {
             const { id, operation, timestamp, value } = op
             const parsedValue = deserializeSyncRow({
               id,
               ...JSON.parse(value),
             })
+            // write() derives the key inside the transaction; a key getKey
+            // rejects must fail here, before the transaction opens.
+            getKey(parsedValue)
             const parsedPreviousValue =
               op.operation == DiffTriggerOperation.UPDATE
                 ? deserializeSyncRow({
@@ -568,18 +590,20 @@ function createPowerSyncCollectionConfig<
                     ...JSON.parse(op.previous_value),
                   })
                 : undefined
-            write({
-              type: mapOperation(operation),
-              value: parsedValue,
-              previousValue: parsedPreviousValue,
-            })
             pendingOperations.push({
               id,
               operation,
               timestamp,
               tableName: viewName,
             })
-          }
+            return {
+              type: mapOperation(operation),
+              value: parsedValue,
+              previousValue: parsedPreviousValue,
+            }
+          })
+          begin()
+          for (const change of changes) write(change)
 
           // clear the current operations
           await context.execute(`DELETE FROM ${trackedTableName}`)
@@ -650,7 +674,9 @@ function createPowerSyncCollectionConfig<
 
           const appliedReceipts: Array<SyncAppliedReceipt> = []
           const listed =
-            persistence && !replacesRetainedRows ? new Set<string>() : undefined
+            persistence && !replacesRetainedRows
+              ? new Set<PowerSyncKey>()
+              : undefined
           await establishTracking(
             {
               // Retained reloads replace atomically; fresh persisted startup
@@ -667,7 +693,7 @@ function createPowerSyncCollectionConfig<
                       // Copy omitted keys before committing: a synchronous
                       // commit can change the accepted-row iterator's backing map.
                       // Source rows remain batched; only omitted keys are retained.
-                      const gone: Array<string> = []
+                      const gone: Array<PowerSyncKey> = []
                       for (const [
                         key,
                       ] of collection._state.acceptedSyncedEntries()) {
@@ -698,11 +724,11 @@ function createPowerSyncCollectionConfig<
                 [DiffTriggerOperation.DELETE]: `TRUE`,
               },
               onInitialRow: listed
-                ? (value) => {
-                    listed.add(asPowerSyncRecord(value).id)
+                ? (key) => {
+                    listed.add(key)
                   }
                 : undefined,
-              writeType: (_rowId: string) => `insert`,
+              writeType: () => `insert`,
               batchQuery: (
                 lockContext: LockContext,
                 batchSize: number,
@@ -863,18 +889,15 @@ function createPowerSyncCollectionConfig<
                   active.length === 1
                     ? active[0]
                     : or(active[0], active[1], ...active.slice(2))
-                const compiledNewData = compileSQLite(
-                  { where: combinedWhere },
-                  { jsonColumn: 'NEW.data' },
+                const newDataWhenClause = compileWhere(
+                  combinedWhere,
+                  'NEW.data',
                 )
-                const compiledOldData = compileSQLite(
-                  { where: combinedWhere },
-                  { jsonColumn: 'OLD.data' },
+                const oldDataWhenClause = compileWhere(
+                  combinedWhere,
+                  'OLD.data',
                 )
-                const compiledView = compileSQLite({ where: combinedWhere })
-                const newDataWhenClause = toInlinedWhereClause(compiledNewData)
-                const oldDataWhenClause = toInlinedWhereClause(compiledOldData)
-                const viewWhereClause = toInlinedWhereClause(compiledView)
+                const viewWhereClause = compileWhere(combinedWhere)
                 await establishTracking(
                   {
                     setupContext: ctx,
@@ -883,22 +906,19 @@ function createPowerSyncCollectionConfig<
                       [DiffTriggerOperation.UPDATE]: `(${newDataWhenClause}) OR (${oldDataWhenClause})`,
                       [DiffTriggerOperation.DELETE]: oldDataWhenClause,
                     },
-                    writeType: (rowId: string) =>
-                      collection.has(rowId) ? `update` : `insert`,
+                    writeType: (key) => {
+                      missing?.delete(key)
+                      return collection.has(key) ? `update` : `insert`
+                    },
                     batchQuery: (
                       lockContext: LockContext,
                       batchSize: number,
                       cursor: number,
                     ) =>
-                      lockContext
-                        .getAll<TableType>(
-                          `SELECT * FROM ${viewName} WHERE ${viewWhereClause} LIMIT ? OFFSET ?`,
-                          [batchSize, cursor],
-                        )
-                        .then((rows) => {
-                          for (const row of rows) missing?.delete(row.id)
-                          return rows
-                        }),
+                      lockContext.getAll<TableType>(
+                        `SELECT * FROM ${viewName} WHERE ${viewWhereClause} LIMIT ? OFFSET ?`,
+                        [batchSize, cursor],
+                      ),
                   },
                   appliedReceipts,
                 )
@@ -1004,10 +1024,16 @@ function createPowerSyncCollectionConfig<
           return task
         }
 
-        const toInlinedWhereClause = (compiled: {
-          where?: string
-          params: Array<unknown>
-        }): string => {
+        // Loading, tracking, and eviction all compile predicates here, so
+        // they compare `id` the same way.
+        const compileWhere = (
+          where: LoadSubsetOptions[`where`],
+          jsonColumn?: string,
+        ): string => {
+          const compiled = compileSQLite(
+            { where },
+            { jsonColumn, numericId: numericIds },
+          )
           if (!compiled.where) return 'TRUE'
           const sqlParts = compiled.where.split('?')
           return sanitizeSQL(
@@ -1080,8 +1106,7 @@ function createPowerSyncCollectionConfig<
         const performPhysicalRelease = async (
           options: LoadSubsetOptions,
         ): Promise<void> => {
-          const compiledDeparting = compileSQLite({ where: options.where })
-          const departingWhereSQL = toInlinedWhereClause(compiledDeparting)
+          const departingWhereSQL = compileWhere(options.where)
           let rowsToEvict: Array<{ id: string }>
           for (;;) {
             if (stopped) return
@@ -1095,10 +1120,7 @@ function createPowerSyncCollectionConfig<
                 active.length === 1
                   ? active[0]!
                   : or(active[0], active[1], ...active.slice(2))
-              const compiledRemaining = compileSQLite({
-                where: combinedRemaining,
-              })
-              const remainingWhereSQL = toInlinedWhereClause(compiledRemaining)
+              const remainingWhereSQL = compileWhere(combinedRemaining)
               evictionSQL = `SELECT id FROM ${viewName} WHERE (${departingWhereSQL}) AND NOT (${remainingWhereSQL})`
             }
 
@@ -1107,11 +1129,16 @@ function createPowerSyncCollectionConfig<
             if (stopped) return
             if (trackingRevision === revision) break
           }
-          if (rowsToEvict.length > 0) {
+          // Eviction does not revalidate rows. A loaded row's key is its stored
+          // id, or with numericIds the number that round-trips to it; a row
+          // with any other id was never loaded.
+          const keys = rowsToEvict.flatMap(({ id }) => {
+            const key = numericIds ? Number(id) : id
+            return String(key) === id ? [key as PowerSyncKey] : []
+          })
+          if (keys.length > 0) {
             begin()
-            for (const { id } of rowsToEvict) {
-              write({ type: `delete`, key: id })
-            }
+            for (const key of keys) write({ type: `delete`, key })
             void commit()
           }
           await rebuildTracking()
@@ -1251,7 +1278,17 @@ function createPowerSyncCollectionConfig<
     getSyncMetadata: undefined,
   }
 
-  const getKey = (record: OutputType) => asPowerSyncRecord(record).id
+  const getKey = (record: OutputType): PowerSyncKey => {
+    const { id } = record as { id?: unknown }
+    if (numericIds ? !Number.isSafeInteger(id) : typeof id !== `string`) {
+      throw new Error(
+        numericIds
+          ? `With numericIds, a record id must be a safe integer`
+          : `Record must have a string id field; set numericIds for number ids`,
+      )
+    }
+    return id as PowerSyncKey
+  }
 
   // Keep adapter hooks and serialization options out of the core config.
   const {

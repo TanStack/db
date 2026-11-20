@@ -2,7 +2,7 @@ import { LogLevels, sanitizeSQL } from '@powersync/common'
 import { LoadSubsetOperationAbortedError, isFailedStatus } from '@tanstack/db'
 import DebugModule from 'debug'
 import { PendingOperationStore } from './PendingOperationStore'
-import { asPowerSyncRecord, mapOperationToPowerSync } from './helpers'
+import { mapOperationToPowerSync } from './helpers'
 import type { CommonPowerSyncDatabase, LockContext } from '@powersync/common'
 import type { PendingMutation, Transaction } from '@tanstack/db'
 import type { PendingOperation } from './PendingOperationStore'
@@ -247,7 +247,7 @@ export class PowerSyncTransactor {
         SET ${keys.map((key) => `${key} = ?`).join(`, `)}
         WHERE id = ?
         `,
-          [...queryParameters, asPowerSyncRecord(mutation.original).id],
+          [...queryParameters, String(mutation.key)],
         )
 
         return
@@ -278,14 +278,14 @@ export class PowerSyncTransactor {
             `
             UPDATE ${tableName} SET _deleted = TRUE, _metadata = ? WHERE id = ?
             `,
-            [metadataValue, asPowerSyncRecord(mutation.original).id],
+            [metadataValue, String(mutation.key)],
           )
         } else {
           await context.execute(
             `
             DELETE FROM ${tableName} WHERE id = ?
             `,
-            [asPowerSyncRecord(mutation.original).id],
+            [String(mutation.key)],
           )
         }
       },

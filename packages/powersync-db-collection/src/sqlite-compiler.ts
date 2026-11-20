@@ -1,4 +1,5 @@
-import type { IR, LoadSubsetOptions } from '@tanstack/db'
+import { IR } from '@tanstack/db'
+import type { LoadSubsetOptions } from '@tanstack/db'
 
 /**
  * Result of compiling LoadSubsetOptions to SQLite
@@ -24,6 +25,11 @@ export interface CompileSQLiteOptions {
    * as a direct column in the tracked table.
    */
   jsonColumn?: string
+  /**
+   * When set, `id` references compile to `CAST(<id> AS INTEGER)`, so a
+   * collection with numeric ids compares them as numbers, not as text.
+   */
+  numericId?: boolean
 }
 
 /**
@@ -100,10 +106,14 @@ function compileExpression(
       // JSON `data` object, so we skip json_extract. However, when compiling for
       // trigger WHEN clauses we still need the OLD./NEW. prefix. Extract it from
       // the jsonColumn option.
-      if (compileOptions?.jsonColumn && columnName === `id`) {
-        const prefix = compileOptions.jsonColumn.split('.')[0]!
-        return `${prefix}.${quoteIdentifier(columnName)}`
-      } else if (compileOptions?.jsonColumn) {
+      if (columnName === `id`) {
+        const prefix = compileOptions?.jsonColumn?.split('.')[0]
+        const id = prefix
+          ? `${prefix}.${quoteIdentifier(columnName)}`
+          : quoteIdentifier(columnName)
+        return compileOptions?.numericId ? `CAST(${id} AS INTEGER)` : id
+      }
+      if (compileOptions?.jsonColumn) {
         return `json_extract(${compileOptions.jsonColumn}, '$.${columnName}')`
       }
       return quoteIdentifier(columnName)
@@ -183,9 +193,35 @@ function compileFunction(
     }
   }
 
+  // A numeric id equals a number exactly when its stored text is the number's
+  // canonical form, which every loaded numeric id is. Comparing that text,
+  // instead of CAST(id), lets SQLite look the id up in its primary key index.
+  const [column, value] = args
+  const idText =
+    compileOptions?.numericId &&
+    (name === `eq` || name === `in`) &&
+    column?.type === `ref` &&
+    column.path.join() === `id` &&
+    value?.type === `val`
+
   // Compile arguments
-  const compiledArgs = args.map((arg: IR.BasicExpression) =>
-    compileExpression(arg, params, compileOptions),
+  const compiledArgs = (
+    idText
+      ? [
+          column,
+          new IR.Value(
+            Array.isArray(value.value)
+              ? value.value.map(String)
+              : String(value.value),
+          ),
+        ]
+      : args
+  ).map((arg: IR.BasicExpression) =>
+    compileExpression(
+      arg,
+      params,
+      idText ? { ...compileOptions, numericId: false } : compileOptions,
+    ),
   )
 
   // Handle different operator types
