@@ -3016,6 +3016,8 @@ represented with `coalesce` alone. For example, to display a fallback for both
 
 ### Aggregate Functions
 
+Aggregates leave out `null` and `undefined` values. A group whose values are all `null` or `undefined` returns `0` from `count`, `sum`, and `avg`, and `null` from `min` and `max`.
+
 #### `count(value)`
 Count non-null values:
 ```ts

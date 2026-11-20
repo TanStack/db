@@ -170,18 +170,18 @@ Count non-null values in a group.
 count(user.id)
 ```
 
-### sum(value), avg(value) -> Aggregate\<number | null | undefined\>
+### sum(value), avg(value) -> Aggregate\<number\>
 
-Sum or average of numeric values.
+Sum or average of numeric values, leaving out `null` and `undefined`. A group with no value returns `0`.
 
 ```ts
 sum(order.amount)
 avg(user.salary)
 ```
 
-### min(value), max(value) -> Aggregate\<T\>
+### min(value), max(value) -> Aggregate\<T\> or Aggregate\<T | null\>
 
-Minimum/maximum value (numbers, strings, dates).
+Minimum/maximum value (numbers, strings, dates), leaving out `null` and `undefined`. A group with no value returns `null`, so the result type includes `null` for a nullable or optional field, or a column on the nullable side of a join.
 
 ```ts
 min(order.amount)
