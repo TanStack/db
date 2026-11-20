@@ -275,5 +275,45 @@ describe(`applyMutations merge logic`, () => {
       expect(transaction.mutations).toHaveLength(1)
       expect(transaction.mutations[0]!.changes).toEqual({ value: 0 })
     })
+
+    it(`keeps a written-back field when sync moved another field meanwhile`, () => {
+      type LabeledRow = { id: number; value: number; label: string }
+      const collection = createCollection(
+        mockSyncCollectionOptions<LabeledRow>({
+          id: `update-pair-authoritative-labeled`,
+          getKey: (row) => row.id,
+          initialData: [{ id: 1, value: 0, label: `A` }],
+        }),
+      )
+      const transaction = createTransaction<LabeledRow>({
+        mutationFn: async () => {},
+        autoCommit: false,
+      })
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 1
+        })
+      })
+
+      collection.utils.begin()
+      collection.utils.write({
+        type: `update`,
+        value: { id: 1, value: 0, label: `B` },
+      })
+      collection.utils.commit()
+
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 0
+          draft.label = `C`
+        })
+      })
+
+      expect(transaction.mutations).toHaveLength(1)
+      expect(transaction.mutations[0]!.changes).toEqual({
+        value: 0,
+        label: `C`,
+      })
+    })
   })
 })
