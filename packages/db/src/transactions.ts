@@ -242,16 +242,12 @@ function mergePendingMutations<T extends object>(
         // row. Otherwise the latest write stays.
         const original = existing.original as T
         const synced = existing.collection._state.syncedData.get(existing.key)
-        if (synced !== undefined) {
-          const restores =
-            sameRowValue(synced, original) &&
-            sameRowValue(synced, incoming.modified)
+        if (synced !== undefined && sameRowValue(synced, original)) {
+          const restores = sameRowValue(synced, incoming.modified)
           const restored = (Object.keys(changes) as Array<keyof T>).filter(
             (key) =>
               Object.hasOwn(original, key) &&
-              Object.hasOwn(synced, key) &&
-              sameRowValue(original[key], changes[key]) &&
-              sameRowValue(synced[key], changes[key]),
+              sameRowValue(original[key], changes[key]),
           )
           // Scan other transactions only when something would be dropped.
           if ((restores || restored.length > 0) && !hasOtherWrite(existing)) {
