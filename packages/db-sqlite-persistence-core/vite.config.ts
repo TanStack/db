@@ -20,6 +20,7 @@ const config = defineConfig({
         `tests/persisted-options.test.ts`,
         `tests/reserved-commit-sqlite-adapter-oracle.test.ts`,
         `tests/sqlite-boolean-arity-oracle.test.ts`,
+        `tests/sqlite-ordered-page-oracle.test.ts`,
 
         `tests/collection-setup-reopen-oracle.test.ts`,
         `tests/persisted-demand-coverage-campaign-oracle.test.ts`,

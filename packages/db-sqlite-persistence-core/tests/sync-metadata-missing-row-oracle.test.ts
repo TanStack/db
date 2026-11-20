@@ -64,10 +64,9 @@ for (const [host, property] of [
       authority: `Sync metadata session oracle decisions D9, D11, D15, D16 and D18 (packages/db/tests/sync-metadata-session-oracle.ts).`,
       limits: `One sync run per history over the three peer production paths; restart and intermediate SQL statements are outside it.`,
     },
-    owns:
-      host === `sqlite`
-        ? [`src/persisted.ts`, `src/sqlite-core-adapter.ts`]
-        : [`src/persisted.ts`],
+    // The gap report reads only a literal list, and judges ownership per file
+    // as the union of its lists, which the SQLite receiver sets.
+    owns: [`src/persisted.ts`, `src/sqlite-core-adapter.ts`],
     histories: {
       arbitrary: missingRowMetadataRepeatsArbitrary,
       runs: 8,
