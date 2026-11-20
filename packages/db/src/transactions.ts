@@ -175,13 +175,41 @@ function getTransactionAmbientScope(transaction: object): TransactionScope {
 }
 
 /**
+ * Returns a check for whether a write from a transaction other than `owner`
+ * to the same row is still tracked or held, so the server may not end on the
+ * authoritative row without `owner`. Each collection's keys are indexed once,
+ * on first use, so one batch does not rescan every mutation per row.
+ */
+function createOtherWriteCheck(
+  owner: Transaction<any>,
+): (existing: PendingMutation<any>) => boolean {
+  const keysByCollection = new Map<object, Set<string>>()
+  return (existing) => {
+    const state = existing.collection._state
+    if (state.heldOptimisticRows.has(existing.key)) return true
+    let keys = keysByCollection.get(state)
+    if (keys === undefined) {
+      keys = new Set()
+      for (const transaction of state.transactions.values()) {
+        if (transaction === owner || transaction.state === `failed`) continue
+        for (const mutation of transaction.mutations)
+          keys.add(mutation.globalKey)
+      }
+      keysByCollection.set(state, keys)
+    }
+    return keys.has(existing.globalKey)
+  }
+}
+
+/**
  * Merges two pending mutations for the same item within a transaction
  *
  * Merge behavior truth table:
  * - (insert, update) → insert (merge changes, keep empty original)
  * - (insert, delete) → null (cancel both mutations)
  * - (update, delete) → delete (delete dominates)
- * - (update, update) → update (replace with latest, union changes)
+ * - (update, update) → null if restoring the authoritative row, otherwise
+ *   update (replace with latest, union changes)
  * - (delete, delete) → delete (replace with latest)
  * - (insert, insert) → insert (replace with latest)
  * - (delete, insert) → insert without an authoritative row, null if restoring
@@ -192,11 +220,13 @@ function getTransactionAmbientScope(transaction: object): TransactionScope {
  *
  * @param existing - The existing mutation in the transaction
  * @param incoming - The new mutation being applied
+ * @param hasOtherWrite - Whether another transaction wrote `existing`'s row
  * @returns The merged mutation, or null if both should be removed
  */
 function mergePendingMutations<T extends object>(
   existing: PendingMutation<T>,
   incoming: PendingMutation<T>,
+  hasOtherWrite: (existing: PendingMutation<T>) => boolean,
 ): PendingMutation<T> | null {
   // Dispatch on the arriving operation without constructing a composite key.
   switch (incoming.type) {
@@ -205,11 +235,34 @@ function mergePendingMutations<T extends object>(
       // An insert keeps its identity and optimistic policy. An update uses
       // the newest envelope. Both merge fields and keep the first original.
       const inserted = existing.type === `insert`
+      const changes: Partial<T> = { ...existing.changes, ...incoming.changes }
+      if (!inserted) {
+        // A value written back is no longer a change only while the
+        // authoritative row still holds it and no other transaction wrote the
+        // row. Otherwise the latest write stays.
+        const original = existing.original as T
+        const synced = existing.collection._state.syncedData.get(existing.key)
+        if (synced !== undefined && sameRowValue(synced, original)) {
+          const restores = sameRowValue(synced, incoming.modified)
+          const restored = (Object.keys(changes) as Array<keyof T>).filter(
+            (key) =>
+              Object.hasOwn(original, key) &&
+              sameRowValue(original[key], changes[key]),
+          )
+          // Scan other transactions only when something would be dropped.
+          if ((restores || restored.length > 0) && !hasOtherWrite(existing)) {
+            // An update pair that restores the authoritative row cancels, as
+            // a restoring reinsert does.
+            if (restores) return null
+            for (const key of restored) delete changes[key]
+          }
+        }
+      }
       return {
         ...(inserted ? existing : incoming),
         original: inserted ? {} : existing.original,
         modified: incoming.modified,
-        changes: { ...existing.changes, ...incoming.changes },
+        changes,
         // Merge metadata (last-write-wins)
         metadata: incoming.metadata ?? existing.metadata,
         syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
@@ -555,7 +608,8 @@ class Transaction<T extends object = Record<string, unknown>> {
    * - **insert + update** → insert (merge changes, keep empty original)
    * - **insert + delete** → removed (mutations cancel each other out)
    * - **update + delete** → delete (delete dominates)
-   * - **update + update** → update (union changes, keep first original)
+   * - **update + update** → removed if restored, otherwise update (union
+   *   changes without fields written back, keep first original)
    * - **delete + insert** → removed if restored, otherwise update
    * - **same type** → replace with latest
    *
@@ -571,6 +625,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     // in one call). Map preserves insertion order, matching the previous
     // replace-in-place / remove / append semantics.
     const merged = new Map<string, PendingMutation<any>>()
+    const hasOtherWrite = createOtherWriteCheck(this)
     for (const mutation of this.mutations) {
       merged.set(mutation.globalKey, mutation)
     }
@@ -580,7 +635,7 @@ class Transaction<T extends object = Record<string, unknown>> {
       const existingMutation = merged.get(globalKey)
 
       const mergeResult = existingMutation
-        ? mergePendingMutations(existingMutation, newMutation)
+        ? mergePendingMutations(existingMutation, newMutation, hasOtherWrite)
         : newMutation
       if (mergeResult === null) {
         // Remove the mutation (e.g., delete after insert cancels both).

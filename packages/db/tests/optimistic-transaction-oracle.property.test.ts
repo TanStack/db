@@ -96,9 +96,11 @@ const sameKeySequences = [
 ] as const
 // The bounded history grammar is two authored operations on one numeric key:
 // insert/update followed by update/delete, or a delete followed by a reinsert.
-// The applyMutations truth table gives the net request: a reinsert that
-// restores the original row cancels the pair; otherwise it is an update from
-// the original row whose changes hold exactly the differing fields. A field
+// The applyMutations truth table gives the net request: a reinsert or an
+// update pair that restores the original row cancels the pair; otherwise it is
+// an update from the original row whose changes hold exactly the differing
+// fields. In an update pair the second update can also write the value back
+// (`restoresValue`), so a reverted field must leave the changes. A field
 // differs by `Object.is`: -0 and 0 are distinct row values, for user writes
 // too (maintainer decision 2026-10-29), so a reinsert of -0 over the original
 // 0 is an update. Each of the five sequences and both
@@ -114,6 +116,7 @@ type SameKeyScenario = {
   value: number
   note: string
   success: boolean
+  restoresValue?: boolean
 }
 
 async function runSameKey(
@@ -124,9 +127,15 @@ async function runSameKey(
   const startsAbsent = sequence.startsWith(`insert`)
   const endsAbsent = sequence.endsWith(`delete`)
   const reinserts = sequence === `delete-insert`
+  const restores =
+    sequence === `update-update` && scenario.restoresValue === true
   const original = { id: 1, value: 0, note: `original` }
   const first = { id: 1, value, note: startsAbsent ? `created` : original.note }
-  const final = { ...first, note }
+  const final = {
+    ...first,
+    note,
+    ...(restores ? { value: original.value } : {}),
+  }
   // Fields of the final row that differ from the original row: a reinsert's
   // or an update's changes. An update that writes a field's own value back
   // records no change for it (the proxy's write law).
@@ -191,6 +200,7 @@ async function runSameKey(
         else
           source.update(1, (draft) => {
             draft.note = note
+            if (restores) draft.value = original.value
           })
         expectRows(
           source.values(),
@@ -202,7 +212,8 @@ async function runSameKey(
       await Promise.resolve()
       const canceled =
         sequence === `insert-delete` ||
-        (reinserts && Object.keys(changedFields).length === 0)
+        ((reinserts || sequence === `update-update`) &&
+          Object.keys(changedFields).length === 0)
       if (fault === `dropped-field`)
         request = request.map((mutation) => ({
           ...mutation,
@@ -298,6 +309,30 @@ describe(`Same-key transaction laws`, () => {
         },
       ],
     })),
+    ...[true, false].map((success) => ({
+      name: `cancels an update pair that restores the row (success=${success})`,
+      scenarios: [
+        {
+          sequence: `update-update` as const,
+          value: 7,
+          note: `original`,
+          success,
+          restoresValue: true,
+        },
+      ],
+    })),
+    ...[true, false].map((success) => ({
+      name: `drops a field that a later update writes back (success=${success})`,
+      scenarios: [
+        {
+          sequence: `update-update` as const,
+          value: 7,
+          note: `last`,
+          success,
+          restoresValue: true,
+        },
+      ],
+    })),
     ...sameKeySequences.map((sequence) => ({
       name: `preserves authored sequence ${sequence}`,
       scenarios: [false, true].map((success) => ({
@@ -313,7 +348,7 @@ describe(`Same-key transaction laws`, () => {
     law: {
       statement: `Same-key authored operations collapse to one net request while retaining exact original, modified and changed fields.`,
       authority: `The public manual transaction and Collection mutation contracts in docs/guides/mutations.md and the same-key truth table stated above`,
-      limits: `The restoring delete-insert pair and each authored two-operation sequence with both handler outcomes, through the same runSameKey driver and checks as the generated campaign.`,
+      limits: `The restoring delete-insert pair, the fully and partly restoring update pairs, and each authored two-operation sequence with both handler outcomes, through the same runSameKey driver and checks as the generated campaign.`,
     },
     owns: [`src/transactions.ts`, `src/collection/mutations.ts`],
     histories: sameKeyCases,
@@ -403,6 +438,7 @@ describe(`Same-key transaction laws`, () => {
             arbitrary: fc.record({
               sequence: fc.constantFrom(...sameKeySequences),
               success: fc.boolean(),
+              restoresValue: fc.boolean(),
               value: fc.oneof(fc.integer({ min: 1, max: 50 }), fc.constant(-0)),
               note: fc.oneof(
                 fc

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createTransaction } from '../src/transactions'
 import { createCollection } from '../src/collection'
+import { mockSyncCollectionOptions } from './utils'
 
 describe(`applyMutations merge logic`, () => {
   // Create a shared collection for all tests
@@ -163,5 +164,156 @@ describe(`applyMutations merge logic`, () => {
 
     // Should have no mutations (all canceled out)
     expect(transaction.mutations).toHaveLength(0)
+  })
+  describe(`update pair against the authoritative row`, () => {
+    type Row = { id: number; value: number }
+    const createSyncedCollection = () =>
+      createCollection(
+        mockSyncCollectionOptions<Row>({
+          id: `update-pair-authoritative`,
+          getKey: (row) => row.id,
+          initialData: [{ id: 1, value: 0 }],
+        }),
+      )
+    const manualTransaction = () =>
+      createTransaction<Row>({
+        mutationFn: async () => {},
+        autoCommit: false,
+      })
+
+    it(`keeps the latest write when another transaction still holds the row`, () => {
+      const collection = createSyncedCollection()
+      const other = manualTransaction()
+      other.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 1
+        })
+      })
+
+      const transaction = manualTransaction()
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 2
+        })
+      })
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 0
+        })
+      })
+
+      expect(transaction.mutations).toHaveLength(1)
+      expect(transaction.mutations[0]!.modified).toEqual({ id: 1, value: 0 })
+      expect(transaction.mutations[0]!.changes).toEqual({ value: 0 })
+      expect(collection.get(1)?.value).toBe(0)
+    })
+
+    it(`keeps the restoring write when another transaction wrote the row in between`, () => {
+      const collection = createSyncedCollection()
+      const transaction = manualTransaction()
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 2
+        })
+      })
+
+      const other = manualTransaction()
+      other.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 1
+        })
+      })
+
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 0
+        })
+      })
+
+      expect(transaction.mutations).toHaveLength(1)
+      expect(transaction.mutations[0]!.modified).toEqual({ id: 1, value: 0 })
+      expect(transaction.mutations[0]!.changes).toEqual({ value: 0 })
+    })
+
+    it(`cancels a restoring pair when one batch repeats a held key`, () => {
+      const collection = createSyncedCollection()
+      const transaction = manualTransaction()
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 2
+        })
+      })
+      transaction.mutate(() => {
+        collection.update([1, 1], (drafts) => {
+          drafts[0]!.value = 3
+          drafts[1]!.value = 0
+        })
+      })
+
+      expect(transaction.mutations).toHaveLength(0)
+    })
+
+    it(`keeps a written-back field when sync moved the row meanwhile`, () => {
+      const collection = createSyncedCollection()
+      const transaction = manualTransaction()
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 1
+        })
+      })
+
+      collection.utils.begin()
+      collection.utils.write({ type: `update`, value: { id: 1, value: 5 } })
+      collection.utils.commit()
+
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 0
+        })
+      })
+
+      expect(transaction.mutations).toHaveLength(1)
+      expect(transaction.mutations[0]!.changes).toEqual({ value: 0 })
+    })
+
+    it(`keeps a written-back field when sync moved another field meanwhile`, () => {
+      type LabeledRow = { id: number; value: number; label: string }
+      const collection = createCollection(
+        mockSyncCollectionOptions<LabeledRow>({
+          id: `update-pair-authoritative-labeled`,
+          getKey: (row) => row.id,
+          initialData: [{ id: 1, value: 0, label: `A` }],
+        }),
+      )
+      const transaction = createTransaction<LabeledRow>({
+        mutationFn: async () => {},
+        autoCommit: false,
+      })
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 1
+        })
+      })
+
+      collection.utils.begin()
+      collection.utils.write({
+        type: `update`,
+        value: { id: 1, value: 0, label: `B` },
+      })
+      collection.utils.commit()
+
+      transaction.mutate(() => {
+        collection.update(1, (draft) => {
+          draft.value = 0
+          draft.label = `C`
+        })
+      })
+
+      expect(transaction.mutations).toHaveLength(1)
+      expect(transaction.mutations[0]!.changes).toEqual({
+        value: 0,
+        label: `C`,
+      })
+    })
   })
 })

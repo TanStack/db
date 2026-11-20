@@ -146,7 +146,8 @@ the following rules:
 - **insert + update** → insert (merge changes, keep empty original)
 - **insert + delete** → removed (mutations cancel each other out)
 - **update + delete** → delete (delete dominates)
-- **update + update** → update (union changes, keep first original)
+- **update + update** → removed if restored, otherwise update (union
+  changes without fields written back, keep first original)
 - **delete + insert** → removed if restored, otherwise update
 - **same type** → replace with latest
 
