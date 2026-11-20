@@ -1582,11 +1582,11 @@ importers:
         specifier: 2.5.0
         version: 2.5.0
       '@powersync/node':
-        specifier: 0.21.0
-        version: 0.21.0(@powersync/common@2.5.0)(better-sqlite3@12.11.1)
+        specifier: ^1.3.0
+        version: 1.3.1(@powersync/common@2.5.0)(better-sqlite3@12.11.1)
       '@powersync/web':
         specifier: 2.6.0
-        version: 2.6.0(@powersync/common@2.5.0)(@powersync/shared-internals@1.5.0(@powersync/common@2.5.0))
+        version: 2.6.0(@powersync/common@2.5.0)(@powersync/shared-internals@1.6.0(@powersync/common@2.5.0))
       '@types/debug':
         specifier: ^4.1.13
         version: 4.1.13
@@ -5370,24 +5370,22 @@ packages:
   '@powersync/common@2.5.0':
     resolution: {integrity: sha512-kMlAfrQddGIAFuO7qCyYxf2yxAKdCrwGany9VcHs8Rx9f5KuqxqaCikzq/SC4Evf/f/sTS5eIwczZPPQboTjxw==}
 
-  '@powersync/node@0.21.0':
-    resolution: {integrity: sha512-mNDQ7dXmwdEf/jUXdN5IfFiI6hKczdoxqGzu3BKnuRhzeX2utWDZiW44Hnsihuqtryw1U2g5DATifQcx/gmlsg==}
+  '@powersync/node@1.3.1':
+    resolution: {integrity: sha512-pP5IzmhEdLPuhzAIckUoz7hXS7KJ8KXvYpd5YcGqNe8g38b0N5fnbohlRH6XvGgc9fxoiDY3A+SpqQ4LYPP82g==}
     peerDependencies:
-      '@powersync/common': ^2.1.0
-      better-sqlite3: 12.x
+      '@powersync/common': ^2.5.0
+      better-sqlite3: 12.x || 13.x
     peerDependenciesMeta:
       better-sqlite3:
         optional: true
 
-  '@powersync/shared-internals@1.1.1':
-    resolution: {integrity: sha512-EiYxTbqbD6lfpDERLyECBsORDfrrgLSf4nmQ35Ug4cUNKFBwO4tGPZaquGeXbr4O+uJk0QFE/f6+33MLCDurIA==}
-    peerDependencies:
-      '@powersync/common': 2.0.0
-
-  '@powersync/shared-internals@1.5.0':
-    resolution: {integrity: sha512-dIaMenW6gJNyKzD93d4X4CiBtJxyJ63pvK2CYGjqBtVqubGBt9d+jg6V6JTKw4VLPjFCZh7/zrXMV34wl7kzGw==}
+  '@powersync/shared-internals@1.6.0':
+    resolution: {integrity: sha512-UduDSVv9qfonIezOklBUR6c3KNlwOQ8/XCsTDwrBUXnVv4wmAZuIDO7C2hX2KKcQGKn+rU0Z5R9uPtgl1uK7Vg==}
     peerDependencies:
       '@powersync/common': ^2.5.0
+    peerDependenciesMeta:
+      '@powersync/common':
+        optional: true
 
   '@powersync/web@2.6.0':
     resolution: {integrity: sha512-/B8u/sPHyNiPH1bj+vOfN/9sHlbp9lwQGtS6BHJJjqWlhBaUxzh4xQMydyQcS6puHaDXzddpOlkZIvTLOTLMnw==}
@@ -17473,28 +17471,24 @@ snapshots:
 
   '@powersync/common@2.5.0': {}
 
-  '@powersync/node@0.21.0(@powersync/common@2.5.0)(better-sqlite3@12.11.1)':
+  '@powersync/node@1.3.1(@powersync/common@2.5.0)(better-sqlite3@12.11.1)':
     dependencies:
       '@powersync/common': 2.5.0
-      '@powersync/shared-internals': 1.1.1(@powersync/common@2.5.0)
+      '@powersync/shared-internals': 1.6.0(@powersync/common@2.5.0)
       comlink: 4.4.2
-      undici: 7.24.4
+      undici: 7.30.1
     optionalDependencies:
       better-sqlite3: 12.11.1
 
-  '@powersync/shared-internals@1.1.1(@powersync/common@2.5.0)':
-    dependencies:
+  '@powersync/shared-internals@1.6.0(@powersync/common@2.5.0)':
+    optionalDependencies:
       '@powersync/common': 2.5.0
 
-  '@powersync/shared-internals@1.5.0(@powersync/common@2.5.0)':
-    dependencies:
-      '@powersync/common': 2.5.0
-
-  '@powersync/web@2.6.0(@powersync/common@2.5.0)(@powersync/shared-internals@1.5.0(@powersync/common@2.5.0))':
+  '@powersync/web@2.6.0(@powersync/common@2.5.0)(@powersync/shared-internals@1.6.0(@powersync/common@2.5.0))':
     dependencies:
       '@journeyapps/wa-sqlite': 2.0.10
       '@powersync/common': 2.5.0
-      '@powersync/shared-internals': 1.5.0(@powersync/common@2.5.0)
+      '@powersync/shared-internals': 1.6.0(@powersync/common@2.5.0)
       comlink: 4.4.2
       commander: 12.1.0
 

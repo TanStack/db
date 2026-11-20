@@ -24,6 +24,13 @@ export interface CompileSQLiteOptions {
    * as a direct column in the tracked table.
    */
   jsonColumn?: string
+  /**
+   * When set, column references emit `<rowPrefix>."<columnName>"` instead of
+   * `"<columnName>"`. This is used for managed (`direct: true`) tables, where
+   * trigger `when` clauses must reference the real columns of the NEW or OLD
+   * row instead of a JSON `data` column. Mutually exclusive with `jsonColumn`.
+   */
+  rowPrefix?: 'NEW' | 'OLD'
 }
 
 /**
@@ -105,6 +112,8 @@ function compileExpression(
         return `${prefix}.${quoteIdentifier(columnName)}`
       } else if (compileOptions?.jsonColumn) {
         return `json_extract(${compileOptions.jsonColumn}, '$.${columnName}')`
+      } else if (compileOptions?.rowPrefix) {
+        return `${compileOptions.rowPrefix}.${quoteIdentifier(columnName)}`
       }
       return quoteIdentifier(columnName)
     }

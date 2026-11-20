@@ -506,6 +506,40 @@ class Connector implements PowerSyncBackendConnector {
 
 **Note**: If metadata is provided to an operation but the table doesn't have `trackMetadata: true`, a warning will be logged and the metadata will be ignored.
 
+### Managed Tables (`direct: true`)
+
+PowerSync supports [managed tables](https://docs.powersync.com/client-sdks/advanced/performance-optimization#managed-views-vs-managed-tables), which store synced rows as real SQLite columns instead of a JSON `data` column behind a view:
+
+```typescript
+const APP_SCHEMA = new Schema({
+  documents: new Table(
+    {
+      name: column.text,
+      author: column.text,
+    },
+    {
+      // Store data as real SQLite rows
+      direct: true,
+    },
+  ),
+})
+```
+
+The collection supports managed tables everywhere the view-based layout is supported:
+
+- Eager mode loads rows from the real columns.
+- On-demand mode compiles live query predicates into trigger `WHEN` clauses against the real `NEW.`/`OLD.` columns.
+- Optimistic mutations write to the managed table and are tracked exactly once (no double writes).
+
+PowerSync's own diff trigger machinery does not support managed tables yet (its trigger payloads assume the JSON `data` column of a managed view). This collection handles that itself: for managed tables it creates the tracking table and `AFTER INSERT/UPDATE/DELETE` triggers on the real table, with payloads built from the real columns. The tracking table shape, trigger naming and cleanup contract match the SDK's behavior, so disposal leaves no leaked triggers or tables.
+
+Caveats:
+
+- Managed tables require a PowerSync SDK with managed table support (`@powersync/common` >= 2.5.0 and a matching platform SDK such as `@powersync/web` 2.6+ or `@powersync/node` 1.3+).
+- `trackMetadata: true` is not supported for managed tables yet (the SDK does not materialize the metadata columns). Configuring this combination throws an error.
+- Like the view-based path, tracking triggers and the tracking table are `TEMP` per database connection, so each tab tracks its own diffs.
+- Reopening a database that stored a table as a view with a managed-table schema migrates the storage; the collection recreates its triggers against the real table and loads the migrated rows.
+
 ## Configuration Options
 
 The `powerSyncCollectionOptions` function accepts the following options:
