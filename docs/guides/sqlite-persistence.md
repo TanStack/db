@@ -264,10 +264,14 @@ persistedCollectionOptions({
 
 A Collection with restored rows then becomes `ready` from them immediately. Network sync continues, and its changes apply over the restored rows when they arrive. An empty restore still waits for the network, so the Collection never shows an empty list that the network did not confirm. An on-demand Collection applies this to each query demand, as [On-demand Collections offline](#on-demand-collections-offline) describes.
 
-The timeout controls when a completed restore can make an eager Collection
-ready. On a shared SQLite database, a restore may wait for a running
-transaction. A fast source can deliver a large snapshot whose durable write
-delays another Collection's restore. A screen that waits for several
+The eager timeout starts when the persistence wrapper starts. The source
+starts after the wrapper loads its startup metadata, so time spent waiting
+for SQLite can use part or all of the network-first window.
+
+Collections that share a SQLite driver in one runtime queue their SQLite work.
+A large snapshot write can delay another Collection's startup metadata read
+or restore. Applying a source snapshot can also require a durable write before
+the source can mark the Collection ready. A screen that waits for several
 Collections can therefore stay loading after the first cache restore completes.
 
 When tuning reload performance, measure the time to the first usable render
