@@ -271,10 +271,11 @@ delays another Collection's restore. A screen that waits for several
 Collections can therefore stay loading after the first cache restore completes.
 
 When tuning reload performance, measure the time to the first usable render
-with both a fast source and a held network response. On a screen with several
-Collections, measure readiness for each one to see which restore the screen
-is waiting for. The sync adapter still controls which rows it requests from
-the server, including whether it can resume from a saved position.
+with both a fast source and a held network response. For each Collection on
+the screen, time the SQLite restore and the transition to `ready` separately.
+A restore can finish with zero rows while the Collection still waits for
+the source. The sync adapter controls which rows it requests from the server,
+including whether it can resume from a saved position.
 
 The status is the only signal. Every hook, Suspense, and `preload()` follow it, so you do not need a separate persisted flag:
 
