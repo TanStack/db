@@ -51,6 +51,7 @@ import {
   getRuntimeReferenceIdentity,
 } from '../../src/query/runtime-reference-identity.js'
 import { createValueIdentity } from '../../src/query/equality-value-identity.js'
+import { normalizeValue } from '../../src/utils/comparison.js'
 import {
   createAlphaRenamedImplicitJoinQuery,
   createProfileValueQuery,
@@ -1165,6 +1166,37 @@ describe(`value classes`, () => {
     expect(() =>
       getStableValueHash(Temporal.PlainDate.from(`2026-01-02`)),
     ).toThrow(UnhashableQueryIRError)
+  })
+
+  it(`keep the built-in rules of Map, Set and ArrayBuffer subclasses with toJSON`, () => {
+    class IdMap extends Map<never, never> {
+      toJSON() {
+        return `user:abc`
+      }
+    }
+    class IdSet extends Set<never> {
+      toJSON() {
+        return `user:abc`
+      }
+    }
+    class IdBuffer extends ArrayBuffer {
+      toJSON() {
+        return `user:abc`
+      }
+    }
+
+    for (const [instance, base] of [
+      [new IdMap(), new Map()],
+      [new IdSet(), new Set()],
+      [new IdBuffer(1), new ArrayBuffer(1)],
+    ] as const) {
+      // Equality and hashing both follow the base type, not toJSON().
+      expect(normalizeValue(instance)).toBe(instance)
+      expect(getStableValueHash(instance)).toBe(getStableValueHash(base))
+      expect(normalizeValue(instance)).not.toBe(
+        normalizeValue(new RecordId(`user`, `abc`)),
+      )
+    }
   })
 
   it(`give equal captures one query identity`, () => {

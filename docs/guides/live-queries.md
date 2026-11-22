@@ -904,7 +904,7 @@ This applies to `eq`, `inArray`, join conditions, `groupBy`, indexes and orderin
 - A value class instance never equals a plain value, even one equal to its serialization: `eq(user.id, 'user:abc')` does not match a `RecordId` that serializes to `'user:abc'`.
 - Instances of two classes that serialize to the same value are equal.
 - Ordering a value class sorts by its serialized value.
-- Built-in values keep their own rules: a `Date` compares by its timestamp, binary data by its bytes, and Temporal values by their own rules. Plain objects, arrays, and class instances without `toJSON()` compare by reference.
+- Built-in values keep their own rules: a `Date` compares by its timestamp, binary data by its bytes, and Temporal values by their own rules. Plain objects, arrays, and class instances without `toJSON()` compare by reference. A `Map`, `Set` or `ArrayBuffer` keeps its built-in rule even in a subclass that defines `toJSON()`, so it is not a value class.
 - Treat value class instances as immutable while they are in a query or a row.
 
 ## Select

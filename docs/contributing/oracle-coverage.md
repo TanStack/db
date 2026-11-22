@@ -2463,7 +2463,10 @@ BTreeIndex, compare scans before and after indexing, an ordered read (equal
 values in one run), a live-query `eq` filter, an inner join, query identity,
 demand keys and `getStableValueHash`. Every row and probe is a fresh instance,
 and a constructed history replaces an indexed group's first instance with an
-equal one. It does not cover `inArray` (fixed tests in
+equal one. Rows and join rows also hold Map, Set and ArrayBuffer subclasses
+whose `toJSON()` spells a record reference; they keep their built-in rule and
+never match a record probe or join row, and a constructed history places one
+among equal records. It does not cover `inArray` (fixed tests in
 `ir-stable-identity.test.ts`), on-demand or persisted sources, exact-output
 identity, which keeps reference semantics, or throwing `toJSON()` methods.
 

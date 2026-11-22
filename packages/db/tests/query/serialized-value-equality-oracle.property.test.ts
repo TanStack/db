@@ -10,6 +10,11 @@
  * `getStableValueHash` follow the same relation. Authority: issue #2459 and
  * the "Value classes" section of `docs/guides/live-queries.md`.
  *
+ * A Map, Set or ArrayBuffer is a built-in value even when a subclass defines
+ * `toJSON()`: it keeps its built-in rule, comparing by reference, so it never
+ * equals a value class that serializes alike. Authority: the same section's
+ * built-in rule, which names these types.
+ *
  * Why an example can miss the failure: a probe that is the stored instance
  * matches under reference equality too, an index can agree with a scan until
  * the instance that represents a group of equal values leaves it, and a join
@@ -19,9 +24,13 @@
  * Model: `modelEq` compares record references by their table and ID fields.
  * It never calls `toJSON()` and imports no query normalization. A text value
  * spelled like a record reference is a different kind, and null is UNKNOWN.
+ * A built-in carrier (a Map, Set or ArrayBuffer subclass whose `toJSON()`
+ * spells a record reference) compares by reference, and every materialized
+ * value is a fresh instance, so it equals nothing.
  *
  * History grammar: up to four source rows and three join rows hold a record
- * reference, its text look-alike, or null, over two tables and two IDs. The
+ * reference, its text look-alike, a built-in carrier look-alike, or null, over
+ * two tables and two IDs. The
  * source has no index, a BasicIndex, or a BTreeIndex. Up to three synced
  * updates follow; a weighted one replaces a row's reference with a distinct
  * equal instance, so an index must keep a group when its first instance
@@ -37,7 +46,9 @@
  *
  * Refinement check: every read returns exactly the model's keys or pairs, and
  * the identities of equal probes are equal, while a record probe's identity
- * differs from its text look-alike's.
+ * differs from its text look-alike's. A built-in carrier spelled like the
+ * probe never matches it, in a scan, an index, a filter or a join, and sorts
+ * as its own run.
  *
  * Known omissions: ordering by a value class, `inArray`, on-demand and
  * persisted sources, exact-output (`select`) identity, which keeps reference
@@ -77,6 +88,8 @@ const reachStates = [
   `join-matched`,
   // An ordered read held two distinct, equal record references.
   `ordered-equal-run`,
+  // A source row held a built-in carrier spelled like a record probe.
+  `builtin-lookalike-held`,
 ] as const
 type ReachState = (typeof reachStates)[number]
 
@@ -84,7 +97,9 @@ type Table = `user` | `org`
 type RefSpec =
   | { kind: `record`; table: Table; id: `a` | `b` }
   | { kind: `text`; table: Table; id: `a` | `b` }
+  | { kind: `builtin`; carrier: Carrier; table: Table; id: `a` | `b` }
   | { kind: `null` }
+type Carrier = `Map` | `Set` | `ArrayBuffer`
 type IndexMode = `none` | `basic` | `btree`
 type History = {
   rows: Array<RefSpec>
@@ -93,7 +108,7 @@ type History = {
   // `sameValue` replaces the row's current value with a distinct, equal
   // instance; otherwise the row takes `value`. `row` wraps to the rows.
   updates: Array<{ row: number; value: RefSpec; sameValue: boolean }>
-  probe: Exclude<RefSpec, { kind: `null` }>
+  probe: Extract<RefSpec, { kind: `record` | `text` }>
 }
 
 /** A record reference shaped like the `surrealdb` SDK's `RecordId`. */
@@ -119,7 +134,40 @@ class RecordRef {
   }
 }
 
-type Row = { id: string; ref: RecordRef | string | null }
+// Built-in carriers: subclasses of Map, Set and ArrayBuffer whose toJSON()
+// spells a record reference, as RecordRef's does.
+class RecordMap extends Map<never, never> {
+  readonly ref: string
+  constructor(ref: string) {
+    super()
+    this.ref = ref
+  }
+  toJSON(): string {
+    return this.ref
+  }
+}
+class RecordSet extends Set<never> {
+  readonly ref: string
+  constructor(ref: string) {
+    super()
+    this.ref = ref
+  }
+  toJSON(): string {
+    return this.ref
+  }
+}
+class RecordBuffer extends ArrayBuffer {
+  readonly ref: string
+  constructor(ref: string) {
+    super(0)
+    this.ref = ref
+  }
+  toJSON(): string {
+    return this.ref
+  }
+}
+
+type Row = { id: string; ref: object | string | null }
 
 // ---------------------------------------------------------------------------
 // Model
@@ -127,9 +175,12 @@ type Row = { id: string; ref: RecordRef | string | null }
 
 // `eq` keeps a pair only when TRUE: null is UNKNOWN, a record reference
 // equals a record reference with the same table and ID, a text value equals
-// the same text, and the two kinds never equal each other.
+// the same text, and the two kinds never equal each other. A built-in carrier
+// compares by reference and every value here is a fresh instance, so it
+// equals nothing.
 function modelEq(left: RefSpec, right: RefSpec): boolean {
   if (left.kind === `null` || right.kind === `null`) return false
+  if (left.kind === `builtin` || right.kind === `builtin`) return false
   return (
     left.kind === right.kind &&
     left.table === right.table &&
@@ -144,9 +195,12 @@ function modelKeys(rows: ReadonlyMap<string, RefSpec>, probe: RefSpec) {
     .sort()
 }
 
-// Sorting keeps equal values together: each sort class occupies one run.
-function sortClass(spec: RefSpec): string {
-  return spec.kind === `null` ? `null` : `${spec.kind}:${spec.table}:${spec.id}`
+// Sorting keeps equal values together: each sort class occupies one run. A
+// built-in carrier equals only itself, so it is its own class.
+function sortClass(spec: RefSpec, key: string): string {
+  if (spec.kind === `null`) return `null`
+  if (spec.kind === `builtin`) return `builtin:${key}`
+  return `${spec.kind}:${spec.table}:${spec.id}`
 }
 
 function expectContiguousRuns(
@@ -158,7 +212,7 @@ function expectContiguousRuns(
   const closed = new Set<string>()
   let current: string | undefined
   for (const key of keys) {
-    const next = sortClass(rows.get(key)!)
+    const next = sortClass(rows.get(key)!, key)
     if (next === current) continue
     expect(closed.has(next), `${label}: ${next} split by ${current}`).toBe(
       false,
@@ -185,7 +239,7 @@ function modelPairs(
 
 const tableArbitrary = fc.constantFrom<Table>(`user`, `org`)
 const idArbitrary = fc.constantFrom<`a` | `b`>(`a`, `b`)
-const nonNullRefArbitrary = fc.oneof(
+const probeArbitrary = fc.oneof(
   {
     weight: 3,
     arbitrary: fc.record({
@@ -200,8 +254,16 @@ const nonNullRefArbitrary = fc.oneof(
     id: idArbitrary,
   }),
 )
+const carrierArbitrary = fc.constantFrom<Carrier>(`Map`, `Set`, `ArrayBuffer`)
+const builtinArbitrary = fc.record({
+  kind: fc.constant(`builtin` as const),
+  carrier: carrierArbitrary,
+  table: tableArbitrary,
+  id: idArbitrary,
+})
 const refArbitrary: fc.Arbitrary<RefSpec> = fc.oneof(
-  { weight: 6, arbitrary: nonNullRefArbitrary },
+  { weight: 6, arbitrary: probeArbitrary },
+  { weight: 2, arbitrary: builtinArbitrary },
   fc.record({ kind: fc.constant(`null` as const) }),
 )
 const historyArbitrary: fc.Arbitrary<History> = fc.record({
@@ -216,7 +278,7 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
     }),
     { maxLength: 3 },
   ),
-  probe: nonNullRefArbitrary,
+  probe: probeArbitrary,
 })
 
 // ---------------------------------------------------------------------------
@@ -225,12 +287,20 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
 
 // Every call builds a fresh instance, so equal references are never the same
 // object.
-function materialize(spec: RefSpec): RecordRef | string | null {
+function materialize(spec: RefSpec): object | string | null {
   switch (spec.kind) {
     case `record`:
       return new RecordRef(spec.table, spec.id)
     case `text`:
       return `${spec.table}:${spec.id}`
+    case `builtin`: {
+      const ref = `${spec.table}:${spec.id}`
+      return spec.carrier === `Map`
+        ? new RecordMap(ref)
+        : spec.carrier === `Set`
+          ? new RecordSet(ref)
+          : new RecordBuffer(ref)
+    }
     case `null`:
       return null
   }
@@ -357,9 +427,20 @@ async function runHistory(
       expectContiguousRuns(orderedKeys(), model, `${checkpoint}: ordered`)
       const recordClasses = [...model.values()]
         .filter((spec) => spec.kind === `record`)
-        .map(sortClass)
+        .map((spec) => sortClass(spec, ``))
       if (new Set(recordClasses).size < recordClasses.length)
         reach(`ordered-equal-run`)
+      const probe = history.probe
+      if (
+        probe.kind === `record` &&
+        [...model.values()].some(
+          (spec) =>
+            spec.kind === `builtin` &&
+            spec.table === probe.table &&
+            spec.id === probe.id,
+        )
+      )
+        reach(`builtin-lookalike-held`)
       if (lookup !== undefined) {
         lookup.mockClear()
         expect(scanKeys(), `${checkpoint}: indexed scan`).toEqual(expectedKeys)
@@ -448,12 +529,13 @@ describe(`value classes compare by their serialized value`, () => {
   oracleProperty({
     id: property,
     law: {
-      statement: `Query equality, exact index lookup, live-query filters and joins match distinct class instances whose toJSON() values are equal, never a plain value equal to that serialization; query identity and getStableValueHash follow the same relation.`,
+      statement: `Query equality, exact index lookup, live-query filters and joins match distinct class instances whose toJSON() values are equal, never a plain value equal to that serialization; query identity and getStableValueHash follow the same relation. A Map, Set or ArrayBuffer subclass with toJSON() keeps its built-in rule and never equals a value class.`,
       authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
-      limits: `One toJSON() class over two tables and two IDs, its text look-alike and null; up to four source rows, three join rows and three synced updates; no ordering, inArray, on-demand or persisted sources, or exact-output identity.`,
+      limits: `One toJSON() class over two tables and two IDs, its text look-alike, empty Map, Set and ArrayBuffer subclass look-alikes (never probes), and null; up to four source rows, three join rows and three synced updates; no ordering, inArray, on-demand or persisted sources, or exact-output identity.`,
     },
     owns: [
       'src/utils/comparison.ts#normalizeValue',
+      'src/utils/comparison.ts#serializedClassValue',
       'src/query/ir-stable-identity.ts#getStableValueHash',
       'src/indexes/basic-index.ts#BasicIndex.lookup',
       'src/indexes/btree-index.ts#BTreeIndex.lookup',
@@ -466,7 +548,12 @@ describe(`value classes compare by their serialized value`, () => {
       constructed: [
         {
           name: `an indexed group keeps an equal reference after its first instance is replaced`,
-          enters: reachStates,
+          enters: [
+            `distinct-instance-matched`,
+            `indexed-equal-replacement`,
+            `join-matched`,
+            `ordered-equal-run`,
+          ],
           build: (generated): History => {
             const probe = {
               kind: `record` as const,
@@ -482,6 +569,39 @@ describe(`value classes compare by their serialized value`, () => {
                 { row: 0, value: probe, sameValue: true },
                 ...generated.updates.slice(0, 2),
               ],
+              probe,
+            }
+          },
+        },
+        {
+          name: `a built-in carrier spelled like the record probe sits among equal records`,
+          enters: [
+            `builtin-lookalike-held`,
+            `distinct-instance-matched`,
+            `join-matched`,
+            `ordered-equal-run`,
+          ],
+          build: (generated): History => {
+            const probe = {
+              kind: `record` as const,
+              table: generated.probe.table,
+              id: generated.probe.id,
+            }
+            const carriers: ReadonlyArray<Carrier> = [
+              `Map`,
+              `Set`,
+              `ArrayBuffer`,
+            ]
+            const lookalike = {
+              kind: `builtin` as const,
+              carrier: carriers[generated.rows.length % carriers.length]!,
+              table: probe.table,
+              id: probe.id,
+            }
+            return {
+              ...generated,
+              rows: [probe, lookalike, probe, ...generated.rows.slice(3)],
+              joinRows: [lookalike, probe, ...generated.joinRows.slice(2)],
               probe,
             }
           },

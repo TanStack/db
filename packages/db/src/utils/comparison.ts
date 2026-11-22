@@ -266,8 +266,9 @@ function normalizeBinary(value: Uint8Array): string {
 /**
  * The serialized value of a value class: an instance of a class with a
  * `toJSON()` method, such as a record ID or a decimal, that no other rule
- * covers. Built-in values (Dates, Temporal values, binary data) keep their
- * own rules, and plain records and arrays are not value classes. Record keys
+ * covers. Built-in values (Dates, Temporal values, binary data, Maps and
+ * Sets), including subclasses that define `toJSON()`, keep their own rules,
+ * and plain records and arrays are not value classes. Record keys
  * in the serialized value are sorted, so key order does not change it.
  */
 export function serializedClassValue(value: object): string | undefined {
@@ -276,6 +277,9 @@ export function serializedClassValue(value: object): string | undefined {
     isPlainObject(value) ||
     Array.isArray(value) ||
     value instanceof Date ||
+    value instanceof Map ||
+    value instanceof Set ||
+    value instanceof ArrayBuffer ||
     ArrayBuffer.isView(value) ||
     isTemporal(value)
   ) {
