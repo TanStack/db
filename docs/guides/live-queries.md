@@ -884,6 +884,29 @@ Comparisons follow SQL/PostgreSQL conventions rather than raw JavaScript:
 - **`null` / `undefined` use three-valued logic.** Any comparison involving `null` or `undefined` evaluates to `UNKNOWN`, so the row is not matched. For example `eq(user.score, null)` matches nothing — use a dedicated null check (e.g. `isUndefined`) to match missing values.
 - **`NaN` follows PostgreSQL float semantics.** `NaN` is treated as equal to itself and greater than every other (non-null) value. So `eq(row.value, NaN)` matches `NaN` rows, `gt(row.value, x)` includes `NaN`, and ordering by such a field places `NaN` last. (Invalid `Date` values, whose timestamp is `NaN`, behave the same way.) This differs from JavaScript, where `NaN === NaN` is `false`, and matches how PostgreSQL orders and indexes floating-point values.
 
+#### Value classes
+
+A value class is a class whose instances define a `toJSON()` method, such as the `RecordId` of the `surrealdb` SDK or a decimal type. Queries compare its instances by their serialized value rather than by reference, so a distinct instance with the same `toJSON()` result matches:
+
+```tsx
+// userId and user.id are both RecordId instances, not the same object
+const { data: user } = useLiveQuery({
+  query: (q) =>
+    q
+      .from({ user: usersCollection })
+      .where(({ user }) => eq(user.id, userId))
+      .findOne(),
+})
+```
+
+This applies to `eq`, `inArray`, join conditions, `groupBy`, indexes and ordering, and to query identity: two captures with equal `toJSON()` results are the same query, so the hook needs no `queryKey`, and a `queryKey` may contain value class instances.
+
+- A value class instance never equals a plain value, even one equal to its serialization: `eq(user.id, 'user:abc')` does not match a `RecordId` that serializes to `'user:abc'`.
+- Instances of two classes that serialize to the same value are equal.
+- Ordering a value class sorts by its serialized value.
+- Built-in values keep their own rules: a `Date` compares by its timestamp, binary data by its bytes, and Temporal values by their own rules. Plain objects, arrays, and class instances without `toJSON()` compare by reference.
+- Treat value class instances as immutable while they are in a query or a row.
+
 ## Select
 
 Use `select` to specify which fields to include in your results and transform your data. Without `select`, you get the full schema.

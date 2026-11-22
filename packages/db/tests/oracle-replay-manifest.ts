@@ -1202,6 +1202,11 @@ const ownerGroups: ReadonlyArray<
     `compiled-output equality-partition`,
   ],
   [
+    `db/tests/query/serialized-value-equality-oracle.property.test.ts`,
+    `serialized-value`,
+    `query-equality`,
+  ],
+  [
     `trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
     `trailbase`,
     `lifecycle lifecycle.persisted-hydration.controlled lifecycle.persisted-hydration.node-sqlite`,
@@ -2103,6 +2108,7 @@ const replayTestNames = new Map([
     `ir-identity.output-denotation`,
     `ir-identity.union-output-aliases`,
     `ir-identity.reference-queries`,
+    `serialized-value.query-equality`,
     `query.public-container-copy`,
     `query-identity.compiled-output`,
     `query-identity.equality-partition`,

@@ -2454,6 +2454,19 @@ The deep-equality and Collection change-event history owners check a Duration
 field replacement and its subscriber mirror. These fixed histories do not
 establish arbitrary multirow Duration updates or live-query publication.
 
+The [value class equality oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/serialized-value-equality-oracle.property.test.ts)
+(`serialized-value.query-equality`, issue #2459) owns query equality for class
+instances with `toJSON()`. An independent model compares record references by
+their table and ID fields. Generated histories of up to four source rows, three
+join rows and three synced updates, with no index, a BasicIndex or a
+BTreeIndex, compare scans before and after indexing, an ordered read (equal
+values in one run), a live-query `eq` filter, an inner join, query identity,
+demand keys and `getStableValueHash`. Every row and probe is a fresh instance,
+and a constructed history replaces an indexed group's first instance with an
+equal one. It does not cover `inArray` (fixed tests in
+`ir-stable-identity.test.ts`), on-demand or persisted sources, exact-output
+identity, which keeps reference semantics, or throwing `toJSON()` methods.
+
 The
 [Temporal index order tests](https://github.com/TanStack/db/blob/main/packages/db/tests/temporal-index-order.test.ts)
 (fixed tests; no oracle owner (tracked in #2264)) covers ZonedDateTime instant

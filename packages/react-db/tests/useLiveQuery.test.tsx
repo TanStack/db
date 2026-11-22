@@ -3324,6 +3324,76 @@ describe(`Query Collections`, () => {
       warnSpy.mockRestore()
     })
 
+    it(`matches and keeps identity for equal value-class captures without queryKey`, async () => {
+      // A record ID shaped like the `surrealdb` SDK's `RecordId` (#2459).
+      class RecordId {
+        readonly table: string
+        readonly id: string
+        constructor(table: string, id: string) {
+          this.table = table
+          this.id = id
+        }
+        toString() {
+          return `${this.table}:${this.id}`
+        }
+        toJSON() {
+          return this.toString()
+        }
+      }
+      type User = { id: RecordId; name: string }
+      const users = createCollection(
+        localOnlyCollectionOptions({
+          id: `derived-identity-value-class`,
+          getKey: (user: User) => user.id.toString(),
+          initialData: [
+            { id: new RecordId(`user`, `abc`), name: `A` },
+            { id: new RecordId(`user`, `xyz`), name: `B` },
+          ],
+        }),
+      )
+
+      // Each render builds a new, equal instance, as code that reads a
+      // route parameter does.
+      const { result, rerender } = renderHook(
+        ({ id }) =>
+          useLiveQuery({
+            query: (q) =>
+              q
+                .from({ user: users })
+                .where(({ user }) => eq(user.id, new RecordId(`user`, id)))
+                .findOne(),
+          }),
+        { initialProps: { id: `abc` } },
+      )
+
+      await waitFor(() => {
+        expect(result.current.data?.name).toBe(`A`)
+      })
+      const firstCollection = result.current.collection
+      rerender({ id: `abc` })
+      expect(result.current.collection).toBe(firstCollection)
+      rerender({ id: `xyz` })
+      await waitFor(() => {
+        expect(result.current.data?.name).toBe(`B`)
+      })
+
+      // A queryKey may hold a value class too.
+      const keyed = renderHook(() =>
+        useLiveQuery({
+          queryKey: [`user`, new RecordId(`user`, `abc`)],
+          query: (q) =>
+            q
+              .from({ user: users })
+              .where(({ user }) => eq(user.id, new RecordId(`user`, `abc`))),
+        }),
+      )
+      await waitFor(() => {
+        expect(keyed.result.current.data.map((user) => user.name)).toEqual([
+          `A`,
+        ])
+      })
+    })
+
     it(`uses explicit queryKey for functional query variants`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({

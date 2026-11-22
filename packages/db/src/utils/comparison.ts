@@ -1,6 +1,7 @@
 import { durationFields, isTemporal } from '../utils'
 import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
 import { codedMessage, devBuild } from '../error-message'
+import { isPlainObject } from './type-guards'
 import type { DurationFields } from '../utils'
 import type { CompareOptions } from '../query/builder/types'
 
@@ -92,8 +93,17 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   const bIsObject = typeof b === `object`
 
   if (aIsObject || bIsObject) {
-    // Symbols and objects share the runtime's reference-identity sequence.
     if (aIsObject && bIsObject) {
+      // Value classes order by their serialized value, before other objects,
+      // so equal instances compare equal in sorts and tree indexes.
+      const aJSON = serializedClassValue(a)
+      const bJSON = serializedClassValue(b)
+      if (aJSON !== undefined || bJSON !== undefined) {
+        if (aJSON === undefined) return 1
+        if (bJSON === undefined) return -1
+        return aJSON < bJSON ? -1 : aJSON > bJSON ? 1 : 0
+      }
+      // Symbols and objects share the runtime's reference-identity sequence.
       const aId = getRuntimeReferenceIdentity(a)[2]
       const bId = getRuntimeReferenceIdentity(b)[2]
       return aId - bId
@@ -254,6 +264,35 @@ function normalizeBinary(value: Uint8Array): string {
 }
 
 /**
+ * The serialized value of a value class: an instance of a class with a
+ * `toJSON()` method, such as a record ID or a decimal, that no other rule
+ * covers. Built-in values (Dates, Temporal values, binary data) keep their
+ * own rules, and plain records and arrays are not value classes. Record keys
+ * in the serialized value are sorted, so key order does not change it.
+ */
+export function serializedClassValue(value: object): string | undefined {
+  if (
+    typeof (value as { toJSON?: unknown }).toJSON !== `function` ||
+    isPlainObject(value) ||
+    Array.isArray(value) ||
+    value instanceof Date ||
+    ArrayBuffer.isView(value) ||
+    isTemporal(value)
+  ) {
+    return undefined
+  }
+  return JSON.stringify(value, (_key, field: unknown) =>
+    isPlainObject(field)
+      ? Object.fromEntries(
+          Object.keys(field)
+            .sort()
+            .map((key) => [key, field[key]]),
+        )
+      : field,
+  )
+}
+
+/**
  * Normalize a value for comparison and Map key usage
  * Converts values that can't be directly compared or used as Map keys
  * into comparable primitive representations
@@ -289,6 +328,13 @@ export function normalizeValue(value: any): any {
   // This enables content-based equality for binary data like ULIDs
   if (isUint8Array(value)) {
     return normalizeBinary(value)
+  }
+
+  // A value class compares by its serialized value, in a namespace no plain
+  // string or other normalized value occupies.
+  const serialized = serializedClassValue(value)
+  if (serialized !== undefined) {
+    return normalizedKey(`toJSON`, serialized)
   }
 
   return value

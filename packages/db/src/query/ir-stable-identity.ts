@@ -1,6 +1,6 @@
 import { isPlainObject } from '../utils/type-guards.js'
 import { UnhashableQueryIRError } from '../errors.js'
-import { normalizeValue } from '../utils/comparison.js'
+import { normalizeValue, serializedClassValue } from '../utils/comparison.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/query-ir.js'
 import {
@@ -1034,6 +1034,13 @@ function canonicalizeRuntimeValue(
 
   if (isPlainObject(value)) {
     return canonicalizeObject(value, path, seen)
+  }
+
+  // A value class hashes by its serialized value. The tag keeps it apart from
+  // a plain string or record equal to that serialization.
+  const serialized = serializedClassValue(value)
+  if (serialized !== undefined) {
+    return [`toJSON`, serialized]
   }
 
   throw new UnhashableQueryIRError(path, `non-plain object value`)

@@ -808,6 +808,7 @@ const staticOracleProperties = [
   `ir-identity.output-denotation`,
   `ir-identity.union-output-aliases`,
   `ir-identity.reference-queries`,
+  `serialized-value.query-equality`,
   `query-identity.compiled-output`,
   `query-identity.equality-partition`,
   `where-predicate.publication`,
