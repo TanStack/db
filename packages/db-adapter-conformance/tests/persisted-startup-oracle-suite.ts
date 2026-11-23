@@ -54,6 +54,7 @@ export function registerPersistedStartupConformance<
   scopedStartupCommit = false,
   timeout = 60_000,
   owns,
+  bases,
 }: {
   property: string
   adapter: PersistedStartupAdapter<H>
@@ -65,6 +66,11 @@ export function registerPersistedStartupConformance<
   origin?: (history: H) => string | undefined
   /** The receiving adapter's production entry, forwarded to oracleProperty. */
   owns?: ReadonlyArray<string>
+  /**
+   * Fixed bases per constructed history (`histories.bases`), for a host whose
+   * constructed histories are too costly for the framework's default of 5.
+   */
+  bases?: number
 }) {
   const states = [
     ...startupRequiredStates(
@@ -401,6 +407,7 @@ export function registerPersistedStartupConformance<
           fixedSeeds: [2367],
           states,
           constructed,
+          ...(bases === undefined ? {} : { bases }),
           fixed: histories.map((history) => ({
             name: JSON.stringify(history),
             history,
