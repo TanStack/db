@@ -7,15 +7,18 @@
  * sync adapter's cause is an Error, the boundary receives that exact object.
  * When it is not, such as an HTTP response body, the boundary receives an
  * Error whose message is the problem's message (`health.error.message`) and
- * whose `cause` is the exact value the adapter reported. Solid's own resource
- * wrapper would otherwise turn a non-Error into a generic "Unknown error".
- * The failure can happen while sync starts or after the query has suspended.
- * A crash during the first load follows the same rule.
+ * whose `cause` is the exact value the adapter reported. A wrapper that turned
+ * a non-Error into a generic "Unknown error" would lose both.
+ * The failure can happen while sync starts or after the query has begun
+ * waiting. A crash during the first load follows the same rule.
+ *
+ * Production path: `useLiveQuery` on the Solid 2 host. The gated read
+ * `query.loaded()` waits under `<Loading>` and throws at `<Errored>`.
  */
 import { describe, expect, it } from 'vitest'
 import { render, waitFor } from '@solidjs/testing-library'
 import { createCollection } from '@tanstack/db'
-import { ErrorBoundary, Suspense } from 'solid-js'
+import { Errored, Loading } from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
 
 type Post = { id: string; title: string }
@@ -46,19 +49,19 @@ describe(`useLiveQuery first-load failure at an error boundary`, () => {
       const caught: Array<unknown> = []
       function Titles() {
         const query = useLiveQuery((q) => q.from({ post: source }))
-        return <div>{query().length} posts</div>
+        return <div>{query.loaded().length} posts</div>
       }
       const view = render(() => (
-        <ErrorBoundary
-          fallback={(error) => {
-            caught.push(error)
+        <Errored
+          fallback={(err) => {
+            caught.push(err())
             return <div>Boundary caught</div>
           }}
         >
-          <Suspense fallback={<div>Loading</div>}>
+          <Loading fallback={<div>Loading</div>}>
             <Titles />
-          </Suspense>
-        </ErrorBoundary>
+          </Loading>
+        </Errored>
       ))
       try {
         if (deferred) {
@@ -116,19 +119,19 @@ describe(`useLiveQuery first-load failure at an error boundary`, () => {
       const caught: Array<unknown> = []
       function Titles() {
         const query = useLiveQuery((q) => q.from({ post: source }))
-        return <div>{query().length} posts</div>
+        return <div>{query.loaded().length} posts</div>
       }
       const view = render(() => (
-        <ErrorBoundary
-          fallback={(error) => {
-            caught.push(error)
+        <Errored
+          fallback={(err) => {
+            caught.push(err())
             return <div>Boundary caught</div>
           }}
         >
-          <Suspense fallback={<div>Loading</div>}>
+          <Loading fallback={<div>Loading</div>}>
             <Titles />
-          </Suspense>
-        </ErrorBoundary>
+          </Loading>
+        </Errored>
       ))
       try {
         if (deferred) {

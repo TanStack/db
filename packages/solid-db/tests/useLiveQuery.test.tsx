@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { render, renderHook, waitFor } from '@solidjs/testing-library'
 import {
   Query,
@@ -8,12 +8,26 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  include,
   toArray,
 } from '@tanstack/db'
-import { For, Loading, createEffect, createRoot, createSignal, flush, isPending } from 'solid-js'
+import {
+  For,
+  Loading,
+  createEffect,
+  createRoot,
+  createSignal,
+  flush,
+  isPending,
+  untrack,
+} from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
-import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import {
+  mockSyncCollectionOptions,
+  mockSyncCollectionOptionsNoInitialState,
+} from '../../db/tests/utils'
 import type { Accessor } from 'solid-js'
+import type { Collection } from '@tanstack/db'
 
 type Person = {
   id: string
@@ -814,11 +828,12 @@ describe(`Query Collections`, () => {
 
       // Track each render state
       createEffect(
-        () => [
-          queryResult.state.size,
-          queryResult.state.has(`["temp-key","1"]`),
-          queryResult.state.has(`["4","1"]`),
-        ] as [number, boolean, boolean],
+        () =>
+          [
+            queryResult.state.size,
+            queryResult.state.has(`["temp-key","1"]`),
+            queryResult.state.has(`["4","1"]`),
+          ] as [number, boolean, boolean],
         ([stateSize, hasTempKey, hasPermKey]) => {
           renderStates.push({
             stateSize,
@@ -907,7 +922,7 @@ describe(`Query Collections`, () => {
     expect(result.state.get(`["4","1"]`)).toBeUndefined()
 
     // Wait for the transaction to be committed
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
 
     await waitFor(() => {
       // Wait for the permanent key to appear
@@ -1308,6 +1323,150 @@ describe(`Query Collections`, () => {
     })
   })
 
+  describe(`Loading ownership`, () => {
+    /**
+     * A gated owner can disappear before its initial preload settles. Its
+     * later completion belongs to that disposed owner and must not publish
+     * resource state or touch the released preload observer.
+     */
+    it(`discards a pending preload after its Loading owner unmounts`, async () => {
+      let markReady: (() => void) | undefined
+      const source = createCollection<Person>({
+        id: `solid-loading-abandoned-pending-preload`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady: ready }) => {
+            begin()
+            write({ type: `insert`, value: initialPersons[0]! })
+            commit()
+            markReady = ready
+          },
+        },
+      })
+      let queryCollection: Collection<any, any, any> | undefined
+      let readAbandoned: (() => unknown) | undefined
+      let readAbandonedStatus: (() => string) | undefined
+
+      function Pending() {
+        const query = useLiveQuery((q) => q.from({ person: source }))
+        queryCollection = untrack(() => query.collection)
+        readAbandoned = () => query()
+        readAbandonedStatus = () => query.status
+        return (
+          <span data-testid="pending-person">{query.loaded()[0]?.name}</span>
+        )
+      }
+
+      const view = render(() => (
+        <Loading fallback={<div data-testid="pending-waiting">Waiting</div>}>
+          <Pending />
+        </Loading>
+      ))
+
+      try {
+        await waitFor(() => expect(markReady).toBeDefined())
+        expect(view.getByTestId(`pending-waiting`)).toBeTruthy()
+        view.unmount()
+        markReady!()
+        await queryCollection!.preload()
+        await waitFor(() => expect(queryCollection!.status).toBe(`cleaned-up`))
+        expect(readAbandonedStatus!()).not.toBe(`error`)
+        expect(readAbandoned!).not.toThrow()
+      } finally {
+        view.unmount()
+        await source.cleanup()
+      }
+    })
+
+    /**
+     * A query that becomes ready while a sibling still waits has settled its
+     * gate, but the boundary has not revealed the sibling yet. The binding
+     * must keep that live-query Collection alive until the boundary reaches
+     * commit, or until the owner is abandoned, and then ordinary 1 ms
+     * retirement applies after unmount.
+     */
+    it.each([`commit`, `abandon`] as const)(
+      `retains a ready sibling until the Loading boundary reaches %s`,
+      async (outcome) => {
+        type Controls = { markReady: () => void }
+        const controls: Array<Controls> = []
+        const makePendingSource = (id: string, person: Person) =>
+          createCollection<Person>({
+            id,
+            getKey: (row) => row.id,
+            sync: {
+              sync: ({ begin, write, commit, markReady }) => {
+                begin()
+                write({ type: `insert`, value: person })
+                commit()
+                controls.push({ markReady })
+              },
+            },
+          })
+        const first = makePendingSource(
+          `solid-loading-retained-first`,
+          initialPersons[0]!,
+        )
+        const second = makePendingSource(
+          `solid-loading-retained-second`,
+          initialPersons[1]!,
+        )
+        let firstQueryCollection: Collection<any, any, any> | undefined
+
+        function First() {
+          const query = useLiveQuery((q) => q.from({ person: first }))
+          firstQueryCollection = untrack(() => query.collection)
+          return (
+            <span data-testid="loading-first">{query.loaded()[0]?.name}</span>
+          )
+        }
+
+        function Second() {
+          const query = useLiveQuery((q) => q.from({ person: second }))
+          return (
+            <span data-testid="loading-second">{query.loaded()[0]?.name}</span>
+          )
+        }
+
+        vi.useFakeTimers()
+        const view = render(() => (
+          <Loading fallback={<div data-testid="sibling-waiting">Waiting</div>}>
+            <First />
+            <Second />
+          </Loading>
+        ))
+
+        try {
+          expect(controls).toHaveLength(2)
+          controls[0]!.markReady()
+          await firstQueryCollection!.preload()
+          await vi.advanceTimersByTimeAsync(100)
+          vi.useRealTimers()
+          expect(firstQueryCollection!.status).not.toBe(`cleaned-up`)
+
+          if (outcome === `commit`) {
+            controls[1]!.markReady()
+            expect((await view.findByTestId(`loading-first`)).textContent).toBe(
+              `John Doe`,
+            )
+            expect(
+              (await view.findByTestId(`loading-second`)).textContent,
+            ).toBe(`Jane Doe`)
+          }
+
+          view.unmount()
+          await waitFor(() =>
+            expect(firstQueryCollection!.status).toBe(`cleaned-up`),
+          )
+        } finally {
+          vi.useRealTimers()
+          view.unmount()
+          await first.cleanup()
+          await second.cleanup()
+        }
+      },
+    )
+  })
 
   describe(`eager rendering during sync`, () => {
     it(`should show filtered results during sync while still loading`, async () => {
@@ -1639,62 +1798,62 @@ describe(`Query Collections`, () => {
   })
 
   it(`should update isReady when source collection is marked ready with no data`, async () => {
-      let syncMarkReady: (() => void) | undefined
+    let syncMarkReady: (() => void) | undefined
 
-      const collection = createCollection<Person>({
-        id: `ready-no-data-test-solid`,
-        getKey: (person: Person) => person.id,
-        startSync: false,
-        sync: {
-          sync: ({ markReady }) => {
-            syncMarkReady = markReady
-            // Don't call begin/commit - just provide markReady
-          },
+    const collection = createCollection<Person>({
+      id: `ready-no-data-test-solid`,
+      getKey: (person: Person) => person.id,
+      startSync: false,
+      sync: {
+        sync: ({ markReady }) => {
+          syncMarkReady = markReady
+          // Don't call begin/commit - just provide markReady
         },
-        onInsert: () => Promise.resolve(),
-        onUpdate: () => Promise.resolve(),
-        onDelete: () => Promise.resolve(),
-      })
-
-      const { result } = renderHook(() => {
-        return useLiveQuery((q) =>
-          q
-            .from({ persons: collection })
-            .where(({ persons }) => gt(persons.age, 30))
-            .select(({ persons }) => ({
-              id: persons.id,
-              name: persons.name,
-            })),
-        )
-      })
-
-      // Initially isLoading should be true
-      expect(result.status).toBe(`loading`)
-      expect(result.isReady).toBe(false)
-      expect(result.state.size).toBe(0)
-      expect(result()).toEqual([])
-
-      // Start sync manually
-      collection.preload()
-
-      await new Promise((resolve) => setTimeout(resolve, 10))
-
-      // Still loading
-      expect(result.status).toBe(`loading`)
-      expect(result.isReady).toBe(false)
-
-      // Mark ready without any data commits
-      syncMarkReady!()
-
-      // Should now be ready, even with no data
-      await waitFor(() => {
-        expect(result.isReady).toBe(true)
-      })
-      expect(result.status).not.toBe(`loading`)
-      expect(result.state.size).toBe(0) // Still no data
-      expect(result()).toEqual([]) // Empty array
-      expect(result.status).toBe(`ready`)
+      },
+      onInsert: () => Promise.resolve(),
+      onUpdate: () => Promise.resolve(),
+      onDelete: () => Promise.resolve(),
     })
+
+    const { result } = renderHook(() => {
+      return useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          })),
+      )
+    })
+
+    // Initially isLoading should be true
+    expect(result.status).toBe(`loading`)
+    expect(result.isReady).toBe(false)
+    expect(result.state.size).toBe(0)
+    expect(result()).toEqual([])
+
+    // Start sync manually
+    collection.preload()
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    // Still loading
+    expect(result.status).toBe(`loading`)
+    expect(result.isReady).toBe(false)
+
+    // Mark ready without any data commits
+    syncMarkReady!()
+
+    // Should now be ready, even with no data
+    await waitFor(() => {
+      expect(result.isReady).toBe(true)
+    })
+    expect(result.status).not.toBe(`loading`)
+    expect(result.state.size).toBe(0) // Still no data
+    expect(result()).toEqual([]) // Empty array
+    expect(result.status).toBe(`ready`)
+  })
 
   describe(`Fine-grained reactivity`, () => {
     it(`should only trigger reactive updates for the row whose field changed, not all rows`, async () => {
@@ -1934,7 +2093,7 @@ describe(`Query Collections`, () => {
 
       // Resolve the pending sync to complete the transaction
       collection.utils.resolveSync()
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // After sync, should still have 4 items (no duplicates)
       await waitFor(() => {
@@ -2007,7 +2166,7 @@ describe(`Query Collections`, () => {
 
       // Resolve the pending sync
       collection.utils.resolveSync()
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // After sync, should still have 3 items with the update persisted
       await waitFor(() => {
@@ -2076,7 +2235,7 @@ describe(`Query Collections`, () => {
 
       // Resolve the pending sync
       collection.utils.resolveSync()
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // After sync, should still have 2 items
       await waitFor(() => {
@@ -2172,8 +2331,8 @@ describe(`Query Collections`, () => {
 
       // Resolve the shared sync promise — both onInsert and onUpdate complete
       collection.utils.resolveSync()
-      await txInsert.isPersisted.promise
-      await txUpdate.isPersisted.promise
+      await txInsert.when(`settled`)
+      await txUpdate.when(`settled`)
 
       // After sync complete, should have 4 items with correct data
       await waitFor(() => {
@@ -2605,18 +2764,35 @@ describe(`Query Collections`, () => {
       collection.utils.begin()
       collection.utils.write({
         type: `update`,
-        value: { id: `3`, name: `John Smith Updated`, age: 50, email: `js@example.com`, isActive: true, team: `team3` },
+        value: {
+          id: `3`,
+          name: `John Smith Updated`,
+          age: 50,
+          email: `js@example.com`,
+          isActive: true,
+          team: `team3`,
+        },
       })
       collection.utils.commit()
 
       await waitFor(() => {
-        expect(rendered.result()).toMatchObject({ id: `3`, name: `John Smith Updated` })
+        expect(rendered.result()).toMatchObject({
+          id: `3`,
+          name: `John Smith Updated`,
+        })
       })
 
       collection.utils.begin()
       collection.utils.write({
         type: `delete`,
-        value: { id: `3`, name: `John Smith Updated`, age: 50, email: `js@example.com`, isActive: true, team: `team3` },
+        value: {
+          id: `3`,
+          name: `John Smith Updated`,
+          age: 50,
+          email: `js@example.com`,
+          isActive: true,
+          team: `team3`,
+        },
       })
       collection.utils.commit()
 
@@ -2627,12 +2803,22 @@ describe(`Query Collections`, () => {
       collection.utils.begin()
       collection.utils.write({
         type: `insert`,
-        value: { id: `3`, name: `John Smith Reborn`, age: 45, email: `jsr@example.com`, isActive: true, team: `team3` },
+        value: {
+          id: `3`,
+          name: `John Smith Reborn`,
+          age: 45,
+          email: `jsr@example.com`,
+          isActive: true,
+          team: `team3`,
+        },
       })
       collection.utils.commit()
 
       await waitFor(() => {
-        expect(rendered.result()).toMatchObject({ id: `3`, name: `John Smith Reborn` })
+        expect(rendered.result()).toMatchObject({
+          id: `3`,
+          name: `John Smith Reborn`,
+        })
       })
     })
 
@@ -2646,8 +2832,8 @@ describe(`Query Collections`, () => {
           }),
         )
         const [enabled, setEnabled] = createSignal(false, {
-            ownedWrite: true,
-          })
+          ownedWrite: true,
+        })
         const rendered = renderHook(() =>
           useLiveQuery((q) =>
             enabled()
@@ -2703,28 +2889,12 @@ describe(`Query Collections`, () => {
       }),
     )
 
+    // The new source starts without rows and readies when the test says so:
+    // the switch lands while the new collection's first load is in flight.
     const newSource = createCollection(
-      mockSyncCollectionOptions<Person>({
+      mockSyncCollectionOptionsNoInitialState<Person>({
         id: `first-change-new-source`,
         getKey: (person: Person) => person.id,
-        initialData: [
-          {
-            id: `new-only`,
-            name: `New Only`,
-            age: 40,
-            email: `new.only@example.com`,
-            isActive: true,
-            team: `new`,
-          },
-          {
-            id: `same`,
-            name: `New Same`,
-            age: 41,
-            email: `new.same@example.com`,
-            isActive: true,
-            team: `new`,
-          },
-        ],
       }),
     )
 
@@ -2746,20 +2916,11 @@ describe(`Query Collections`, () => {
       startSync: true,
     })
 
-    // The hook awaits the observer's preload, which routes to the
-    // collection's preload — delay it to force the switch mid-flight.
-    let resolveNewLiveQuery: (() => void) | undefined
-    const originalPreload = newLiveQuery.preload.bind(newLiveQuery)
-    newLiveQuery.preload = () =>
-      new Promise<void>((resolve) => {
-        resolveNewLiveQuery = resolve
-      }).then(originalPreload)
-
+    // `query()` returns the current rows at once and waits for nothing, so
+    // the switch lands while the new collection is still loading.
     const [activeCollection, setActiveCollection] = createSignal(oldLiveQuery)
 
-    const rendered = renderHook(() => {
-      return useLiveQuery(activeCollection)
-    })
+    const rendered = renderHook(() => useLiveQuery(activeCollection))
 
     await waitFor(() => {
       expect(new Set(rendered.result().map((person) => person.id))).toEqual(
@@ -2769,7 +2930,35 @@ describe(`Query Collections`, () => {
     })
 
     setActiveCollection(newLiveQuery)
+    await waitFor(() =>
+      expect(rendered.result.collection.status).toBe(`loading`),
+    )
 
+    newSource.utils.begin()
+    newSource.utils.write({
+      type: `insert`,
+      value: {
+        id: `new-only`,
+        name: `New Only`,
+        age: 40,
+        email: `new.only@example.com`,
+        isActive: true,
+        team: `new`,
+      },
+    })
+    newSource.utils.write({
+      type: `insert`,
+      value: {
+        id: `same`,
+        name: `New Same`,
+        age: 41,
+        email: `new.same@example.com`,
+        isActive: true,
+        team: `new`,
+      },
+    })
+    newSource.utils.commit()
+    // The first change after the switch.
     newSource.update(`same`, (draft) => {
       draft.name = `New Same Updated`
     })
@@ -2785,23 +2974,22 @@ describe(`Query Collections`, () => {
         name: `New Same Updated`,
       })
     })
-
-    resolveNewLiveQuery!()
+    expect(rendered.result.collection.status).toBe(`loading`)
   })
 
   it(`a superseded collection's late error does not poison the replacement`, async () => {
+    // Both sources start without rows and ready when the test says so: the
+    // gate awaits a preload only while its collection is not ready.
     const sourceA = createCollection(
-      mockSyncCollectionOptions<Person>({
+      mockSyncCollectionOptionsNoInitialState<Person>({
         id: `late-error-source-a`,
         getKey: (p) => p.id,
-        initialData: [initialPersons[0]!],
       }),
     )
     const sourceB = createCollection(
-      mockSyncCollectionOptions<Person>({
+      mockSyncCollectionOptionsNoInitialState<Person>({
         id: `late-error-source-b`,
         getKey: (p) => p.id,
-        initialData: [initialPersons[1]!],
       }),
     )
 
@@ -2820,9 +3008,9 @@ describe(`Query Collections`, () => {
       startSync: false,
     })
 
-    // liveA's preload never settles until we reject it — after the hook has
-    // already moved on to liveB. The hook captures sync errors through the
-    // observer's preload, which routes here.
+    // liveA's preload never settles until we reject it: after the hook has
+    // already moved on to liveB. The gate awaits it (the observer's preload
+    // routes here); the ungated rows do not.
     let rejectA: ((error: unknown) => void) | undefined
     liveA.preload = () =>
       new Promise((_resolve, reject) => {
@@ -2830,24 +3018,53 @@ describe(`Query Collections`, () => {
       })
 
     const [useA, setUseA] = createSignal(true)
-    const rendered = renderHook(() =>
-      useLiveQuery(() => (useA() ? liveA : liveB)),
-    )
-
-    await waitFor(() => {
-      expect(rendered.result()).toMatchObject([{ id: `1` }])
+    let rows: Accessor<Array<{ id: string }>> | undefined
+    const view = render(() => {
+      const query = useLiveQuery(() => (useA() ? liveA : liveB))
+      rows = query
+      return (
+        <Loading fallback={<div data-testid="waiting">Waiting</div>}>
+          <For each={query.loaded()}>
+            {(person) => <li data-testid="gated">{person.id}</li>}
+          </For>
+        </Loading>
+      )
     })
+
+    // The query starts each source when it subscribes to it.
+    await settle()
+    sourceA.utils.begin()
+    sourceA.utils.write({ type: `insert`, value: initialPersons[0]! })
+    sourceA.utils.commit()
+    await waitFor(() => {
+      expect(rows!()).toMatchObject([{ id: `1` }])
+    })
+    // Ungated rows are visible while the gate still waits.
+    await waitFor(() => expect(view.getByTestId(`waiting`)).toBeTruthy())
 
     setUseA(false)
+    await settle()
+    sourceB.utils.begin()
+    sourceB.utils.write({ type: `insert`, value: initialPersons[1]! })
+    sourceB.utils.commit()
     await waitFor(() => {
-      expect(rendered.result()).toMatchObject([{ id: `2` }])
+      expect(rows!()).toMatchObject([{ id: `2` }])
     })
+    sourceB.utils.markReady()
+    await waitFor(() =>
+      expect(
+        view.getAllByTestId(`gated`).map((item) => item.textContent),
+      ).toEqual([`2`]),
+    )
 
     rejectA!(new Error(`late error from superseded collection`))
     await settle()
 
-    expect(() => rendered.result()).not.toThrow()
-    expect(rendered.result()).toMatchObject([{ id: `2` }])
+    expect(() => rows!()).not.toThrow()
+    expect(rows!()).toMatchObject([{ id: `2` }])
+    expect(
+      view.getAllByTestId(`gated`).map((item) => item.textContent),
+    ).toEqual([`2`])
   })
 
   it(`remounts overlapping row keys when switching collection identity`, async () => {
@@ -2892,8 +3109,7 @@ describe(`Query Collections`, () => {
     })
     const row = () =>
       rendered.getByTestId(`overlapping-switch-list`).children[0] as
-        | HTMLLIElement
-        | undefined
+        HTMLLIElement | undefined
 
     try {
       await waitFor(() => expect(row()?.textContent).toBe(`First`))
@@ -2930,13 +3146,15 @@ describe(`Query Collections`, () => {
       try {
         collection.startSyncImmediate()
       } catch {
-        // expected: engine catches the sync error and sets status to 'error'
+        // expected: the engine catches the sync error and crashes the collection
       }
 
       const { result } = renderHook(() => useLiveQuery(() => collection))
 
-      await waitFor(() => expect(result.collection.status).toBe('error'))
-      expect(() => result()).toThrow()
+      // A throwing sync function crashes the Collection: it can no longer
+      // serve reads, so the status is `crashed`, not a loading error.
+      await waitFor(() => expect(result.collection.status).toBe('crashed'))
+      expect(() => result()).toThrow(Error)
     })
   })
 
@@ -3078,7 +3296,9 @@ describe(`Query Collections`, () => {
           sync: ({ begin, write, commit, markReady }) => {
             secondMarkReady = markReady
             begin()
-            initialPersons.slice(0, 2).forEach((p) => write({ type: `insert`, value: p }))
+            initialPersons
+              .slice(0, 2)
+              .forEach((p) => write({ type: `insert`, value: p }))
             commit()
           },
         },
@@ -3097,9 +3317,7 @@ describe(`Query Collections`, () => {
         )
         return (
           <Loading fallback={<div data-testid="loading">Loading</div>}>
-            <div data-testid="content">
-              {`${query.loaded().length} items`}
-            </div>
+            <div data-testid="content">{`${query.loaded().length} items`}</div>
           </Loading>
         )
       }
@@ -3174,14 +3392,16 @@ describe(`includes subqueries`, () => {
       useLiveQuery((q) =>
         q.from({ project: projects }).select(({ project }) => ({
           id: project.id,
-          issues: q
-            .from({ issue: issues })
-            .where(({ issue }) => eq(issue.projectId, project.id))
-            .select(({ issue }) => ({
-              id: issue.id,
-              projectId: issue.projectId,
-              title: issue.title,
-            })),
+          issues: include(
+            q
+              .from({ issue: issues })
+              .where(({ issue }) => eq(issue.projectId, project.id))
+              .select(({ issue }) => ({
+                id: issue.id,
+                projectId: issue.projectId,
+                title: issue.title,
+              })),
+          ),
         })),
       ),
     )

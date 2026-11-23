@@ -1,17 +1,17 @@
 /**
- * Suspense after initial-query readiness witness.
+ * Loading after initial-query readiness witness.
  *
  * Law (packages/db/src/query/live/ARCHITECTURE.md, law 16): after a live
  * query's initial-query readiness, a source's sync problem leaves the query's
- * status and rows alone and shows on the source's node. A Suspense boundary
+ * status and rows alone and shows on the source's node. A Loading boundary
  * therefore keeps showing the rows: it does not fall back, and nothing throws.
  * The shared conformance scenario `sync-errors-after-readiness` checks the
- * same law for the hook without a Suspense boundary.
+ * same law for the hook without a Loading boundary.
  */
 import { describe, expect, it } from 'vitest'
 import { render, waitFor } from '@solidjs/testing-library'
 import { createCollection } from '@tanstack/db'
-import { Suspense } from 'solid-js'
+import { Loading } from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
 import type { SyncConfig } from '@tanstack/db'
 
@@ -20,11 +20,11 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 type Post = { id: string; title: string }
 type SyncParams = Parameters<SyncConfig<Post, string | number>[`sync`]>[0]
 
-describe(`useLiveQuery under Suspense after readiness`, () => {
+describe(`useLiveQuery under Loading after readiness`, () => {
   it(`keeps the rows shown when the source reports a problem or stops`, async () => {
     let params: SyncParams | undefined
     const source = createCollection<Post>({
-      id: `solid-suspense-after-readiness`,
+      id: `solid-loading-after-readiness`,
       getKey: (post) => post.id,
       sync: {
         sync: (next) => {
@@ -42,12 +42,12 @@ describe(`useLiveQuery under Suspense after readiness`, () => {
       const query = useLiveQuery((q) => q.from({ post: source }))
       status = () => query.status
       cleanupQuery = () => query.collection.cleanup()
-      return <div data-testid="title">{query()[0]?.title}</div>
+      return <div data-testid="title">{query.loaded()[0]?.title}</div>
     }
     const view = render(() => (
-      <Suspense fallback={<div data-testid="waiting">Waiting</div>}>
+      <Loading fallback={<div data-testid="waiting">Waiting</div>}>
         <Title />
-      </Suspense>
+      </Loading>
     ))
     try {
       const title = await view.findByTestId(`title`)
