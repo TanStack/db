@@ -10,6 +10,7 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  gte,
   include,
   localOnlyCollectionOptions,
   lte,
@@ -3445,6 +3446,55 @@ describe(`Query Collections`, () => {
       await waitFor(() => {
         expect(result.current.data.map((row) => row.id)).toEqual([`row`])
       })
+    })
+
+    it(`keeps array range results across shared and distinct object leaves`, async () => {
+      class Bound {
+        constructor(readonly json: string) {}
+        toJSON() {
+          return this.json
+        }
+      }
+      type Row = { id: string; pair: Array<unknown> }
+      const shared = { shape: 1 }
+      const rows = createCollection(
+        localOnlyCollectionOptions({
+          id: `derived-identity-mixed-array-range`,
+          getKey: (row: Row) => row.id,
+          initialData: [{ id: `row`, pair: [shared, new Bound(`a`)] }],
+        }),
+      )
+      const render = (initialLeaf: object) =>
+        renderHook(
+          ({ leaf }) =>
+            useLiveQuery({
+              query: (q) =>
+                q
+                  .from({ row: rows })
+                  .where(({ row }) =>
+                    gte(row.pair as never, [leaf, new Bound(`a`)] as never),
+                  ),
+            }),
+          { initialProps: { leaf: initialLeaf } },
+        )
+
+      const reused = render(shared)
+      await waitFor(() => {
+        expect(reused.result.current.data.map((row) => row.id)).toEqual([`row`])
+      })
+      const firstCollection = reused.result.current.collection
+      reused.rerender({ leaf: { shape: 1 } })
+      expect(reused.result.current.collection).toBe(firstCollection)
+      expect(reused.result.current.data.map((row) => row.id)).toEqual([`row`])
+
+      // Compiled on its own, the replacement query has the same result.
+      const independent = render({ shape: 1 })
+      await waitFor(() => {
+        expect(independent.result.current.status).toBe(`ready`)
+      })
+      expect(independent.result.current.data.map((row) => row.id)).toEqual([
+        `row`,
+      ])
     })
 
     it(`uses explicit queryKey for functional query variants`, async () => {

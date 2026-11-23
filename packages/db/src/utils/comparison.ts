@@ -390,17 +390,87 @@ const VALUE_CLASS_ORDER: CompareOptions = {
   stringSort: `lexical`,
 }
 
-function holdsValueClass(
-  value: unknown,
-  seen: Set<unknown> = new Set(),
+function arrayHoldsValueClass(
+  array: ReadonlyArray<unknown>,
+  seen?: Set<unknown>,
 ): boolean {
-  if (typeof value !== `object` || value === null || seen.has(value)) {
-    return false
+  for (const item of array) {
+    if (typeof item !== `object` || item === null) continue
+    if (!Array.isArray(item)) {
+      if (serializedClassValue(item) !== undefined) return true
+      continue
+    }
+    // Cycle tracking starts at the first nested array.
+    seen ??= new Set([array])
+    if (seen.has(item)) continue
+    seen.add(item)
+    if (arrayHoldsValueClass(item, seen)) return true
   }
-  seen.add(value)
+  return false
+}
+
+function holdsValueClass(value: unknown): boolean {
+  if (typeof value !== `object` || value === null) return false
   return Array.isArray(value)
-    ? value.some((item) => holdsValueClass(item, seen))
+    ? arrayHoldsValueClass(value)
     : serializedClassValue(value) !== undefined
+}
+
+/**
+ * Order two values when at least one holds a value class. Query identity hashes
+ * plain objects by shape, so this order must not read an object's reference:
+ * inside an array, objects without a value class keep the native comparison,
+ * and an array sorts after any such object.
+ */
+function compareHoldingValueClass(
+  a: unknown,
+  b: unknown,
+  visiting?: Set<unknown>,
+): number {
+  const aIsArray = Array.isArray(a)
+  const bIsArray = Array.isArray(b)
+  if (aIsArray && bIsArray) {
+    const active = visiting ?? new Set<unknown>()
+    if (active.has(a) || active.has(b)) return 0
+    active.add(a)
+    active.add(b)
+    for (let index = 0; index < Math.min(a.length, b.length); index++) {
+      const left = a[index]
+      const right = b[index]
+      const result =
+        left == null || right == null
+          ? Math.sign(ascComparator(left, right, VALUE_CLASS_ORDER))
+          : compareNonNullValues(left, right, active)
+      if (result !== 0) return result
+    }
+    active.delete(a)
+    active.delete(b)
+    return Math.sign(a.length - b.length)
+  }
+  if (aIsArray !== bIsArray) {
+    const other = aIsArray ? b : a
+    if (
+      typeof other === `object` &&
+      serializedClassValue(other as object) === undefined
+    ) {
+      return aIsArray ? 1 : -1
+    }
+  }
+  return Math.sign(ascComparator(a, b, VALUE_CLASS_ORDER))
+}
+
+function compareNonNullValues(
+  a: unknown,
+  b: unknown,
+  visiting?: Set<unknown>,
+): number {
+  if (isTemporal(a) && isTemporal(b)) {
+    return compareTemporalValues(a, b)
+  }
+  if (holdsValueClass(a) || holdsValueClass(b)) {
+    return compareHoldingValueClass(a, b, visiting)
+  }
+  return (a as any) < (b as any) ? -1 : (a as any) > (b as any) ? 1 : 0
 }
 
 /**
@@ -418,13 +488,7 @@ function holdsValueClass(
  * arguments are non-null.
  */
 export function compareValues(a: unknown, b: unknown): number {
-  if (isTemporal(a) && isTemporal(b)) {
-    return compareTemporalValues(a, b)
-  }
-  if (holdsValueClass(a) || holdsValueClass(b)) {
-    return Math.sign(ascComparator(a, b, VALUE_CLASS_ORDER))
-  }
-  return (a as any) < (b as any) ? -1 : (a as any) > (b as any) ? 1 : 0
+  return compareNonNullValues(a, b)
 }
 
 /**

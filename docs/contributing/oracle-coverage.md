@@ -2469,7 +2469,10 @@ equal one. Rows and join rows also hold Map, Set and ArrayBuffer subclasses
 whose `toJSON()` spells a record reference; they keep their built-in rule and
 never match a record probe or join row, and a constructed history places one
 among equal records. Plain records and arrays hold a throwing `toJSON`
-accessor that must not be read. It does not cover `inArray` (fixed tests in
+accessor that must not be read. Array range filters compare captures with
+shared and distinct object leaves, and a constructed history replaces an indexed
+reference value with a deep-equal one before updating its row. It does not cover
+`inArray` (fixed tests in
 `ir-stable-identity.test.ts`), on-demand or persisted sources, exact-output
 identity, which keeps reference semantics, or throwing `toJSON()` methods.
 

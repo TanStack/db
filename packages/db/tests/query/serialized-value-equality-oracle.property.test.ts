@@ -20,7 +20,13 @@
  * and any other object after it. Equal captures are one query, so a predicate
  * must not depend on anything outside the serialization. Plain records, arrays
  * and other excluded objects keep reference semantics without their `toJSON`
- * property being read.
+ * property being read. Inside an array range, an excluded object leaf does not
+ * break a tie, so two captures with one query identity keep one result whether
+ * they share that object or hold a distinct one of the same shape.
+ *
+ * An index follows the stored row. A sync write can replace a reference-valued
+ * field with a deep-equal instance without publishing a change, and a later
+ * update must still remove that row from the index.
  *
  * Why an example can miss the failure: a probe that is the stored instance
  * matches under reference equality too, an index can agree with a scan until
@@ -112,6 +118,10 @@ const reachStates = [
   `unequal-record-probe`,
   // A plain record or array held a toJSON accessor that must not be read.
   `excluded-accessor-held`,
+  // An array range compared captures with shared and distinct object leaves.
+  `mixed-array-range`,
+  // A sync write replaced an indexed reference value with a deep-equal one.
+  `indexed-reference-replaced`,
 ] as const
 type ReachState = (typeof reachStates)[number]
 
@@ -617,6 +627,12 @@ async function runHistory(
         modelEq(previous, history.probe)
       )
         reach(`indexed-equal-replacement`)
+      if (
+        index !== undefined &&
+        update.sameValue &&
+        previous.kind === `builtin`
+      )
+        reach(`indexed-reference-replaced`)
       model.set(key, value)
       source.utils.begin()
       source.utils.write({
@@ -683,6 +699,62 @@ async function runHistory(
       expect(nestedKey(first), `unequal records: nested query key`).not.toBe(
         nestedKey(unequal),
       )
+
+      // Array ranges: an object leaf does not break a tie, so a shared and a
+      // distinct leaf of one shape are one query with one result.
+      const sharedLeaf = { shape: 1 }
+      const mixed = createCollection(
+        mockSyncCollectionOptions<Row>({
+          id: `serialized-value-mixed-${run}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `m`, ref: [sharedLeaf, materialize(recordProbe)!] },
+          ],
+          autoIndex: `off`,
+        }),
+      )
+      cleanup(() => mixed.cleanup())
+      await mixed.stateWhenReady()
+      const spelled = (spec: { table: string; id: string }) =>
+        `${spec.table}:${spec.id}`
+      const others = [
+        recordProbe,
+        unequalRecord(recordProbe, history.unequalBy),
+      ]
+      for (const [position, other] of others.entries()) {
+        const expected =
+          spelled(recordProbe) >= spelled(other) ? [`m`] : ([] as Array<string>)
+        const captures = [sharedLeaf, { shape: 1 }].map((leaf) => [
+          leaf,
+          materialize(other),
+        ])
+        const identities = captures.map((capture) =>
+          getQueryIdentity(
+            getQueryIR(
+              new Query()
+                .from({ item: mixed })
+                .where(({ item }) => gte(item.ref as never, capture as never)),
+            ),
+          ),
+        )
+        expect(identities[0], `mixed array: identity`).toBe(identities[1])
+        for (const [leaf, capture] of captures.entries()) {
+          const live = createLiveQueryCollection({
+            id: `serialized-value-mixed-${run}-${position}-${leaf}`,
+            query: (q) =>
+              q
+                .from({ item: mixed })
+                .where(({ item }) => gte(item.ref as never, capture as never)),
+          })
+          cleanup(() => live.cleanup())
+          await live.preload()
+          expect(
+            live.toArray.map((row) => row.id),
+            `mixed array: ${leaf === 0 ? `shared` : `distinct`} leaf`,
+          ).toEqual(expected)
+        }
+      }
+      reach(`mixed-array-range`)
     }
   }, cleanups)
 }
@@ -699,6 +771,7 @@ describe(`value classes compare by their serialized value`, () => {
       'src/utils/comparison.ts#normalizeValue',
       'src/utils/comparison.ts#serializedClassValue',
       'src/utils/comparison.ts#compareValues',
+      'src/collection/state.ts#CollectionStateManager.commitPendingTransactions',
       'src/query/ir-stable-identity.ts#getStableValueHash',
       'src/indexes/basic-index.ts#BasicIndex.lookup',
       'src/indexes/btree-index.ts#BTreeIndex.lookup',
@@ -708,7 +781,66 @@ describe(`value classes compare by their serialized value`, () => {
       runs: 60,
       fixedSeeds: [2459],
       states: reachStates,
+      fixed: [
+        {
+          // Replay: seed 778307668, path 26:1:1:6:6:9:8:8.
+          name: `a replaced indexed Map leaves the index when its row updates`,
+          history: {
+            rows: [
+              { kind: `text`, table: `user`, id: `a` },
+              { kind: `builtin`, carrier: `Map`, table: `user`, id: `a` },
+            ],
+            joinRows: [],
+            index: `btree`,
+            updates: [
+              {
+                row: 3,
+                value: { kind: `record`, table: `user`, id: `a` },
+                sameValue: true,
+              },
+              { row: 1, value: { kind: `null` }, sameValue: false },
+            ],
+            probe: { kind: `record`, table: `user`, id: `a` },
+            unequalBy: `table`,
+          },
+        },
+      ],
       constructed: [
+        {
+          name: `an indexed reference value is replaced by a deep-equal one and then updated`,
+          enters: [`indexed-reference-replaced`, `mixed-array-range`],
+          build: (generated): History => {
+            const carriers: ReadonlyArray<Carrier> = [
+              `Map`,
+              `Set`,
+              `PlainRecord`,
+              `Array`,
+            ]
+            const probe = {
+              kind: `record` as const,
+              table: generated.probe.table,
+              id: generated.probe.id,
+            }
+            return {
+              ...generated,
+              rows: [
+                { kind: `text`, table: probe.table, id: probe.id },
+                {
+                  kind: `builtin`,
+                  carrier: carriers[generated.rows.length % carriers.length]!,
+                  table: probe.table,
+                  id: probe.id,
+                },
+              ],
+              index: generated.index === `basic` ? `basic` : `btree`,
+              updates: [
+                { row: 1, value: probe, sameValue: true },
+                { row: 1, value: { kind: `null` }, sameValue: false },
+              ],
+              probe,
+            }
+          },
+        },
         {
           name: `an indexed group keeps an equal reference after its first instance is replaced`,
           enters: [
