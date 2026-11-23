@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
+import { createEffect } from '../../src/query/effect.js'
+import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import {
   compareValues,
@@ -243,6 +245,152 @@ describe(`a reference filter follows a deep-equal row replacement`, () => {
     expect(unfiltered).toEqual([])
     for (const subscription of subscriptions) subscription.unsubscribe()
     await collection.cleanup()
+  })
+})
+
+describe(`queries follow a deep-equal row replacement`, () => {
+  type Row = { id: string; ref: object | string }
+  let sources = 0
+  const sourceOf = async (rows: Array<Row>) => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `query-replacement-${sources++}`,
+        getKey: (row) => row.id,
+        initialData: rows,
+        autoIndex: `off`,
+      }),
+    )
+    await collection.stateWhenReady()
+    return collection
+  }
+  const replace = (
+    collection: Awaited<ReturnType<typeof sourceOf>>,
+    id: string,
+    ref: object,
+  ) => {
+    collection.utils.begin()
+    collection.utils.write({ type: `update`, value: { id, ref } })
+    collection.utils.commit()
+  }
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it(`leaves and rejoins a join on a shared instance`, async () => {
+    const shared = new Map()
+    const left = await sourceOf([{ id: `l`, ref: shared }])
+    const right = await sourceOf([{ id: `r`, ref: shared }])
+    const pairs = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ a: left })
+          .join({ b: right }, ({ a, b }) => eq(a.ref, b.ref), `inner`)
+          .select(({ a, b }) => ({ a: a.id, b: b.id })),
+    })
+    await pairs.preload()
+    expect(pairs.size).toBe(1)
+    replace(right, `r`, new Map())
+    await flush()
+    expect(pairs.size).toBe(0)
+    replace(right, `r`, shared)
+    await flush()
+    expect(pairs.size).toBe(1)
+  })
+
+  it(`follows a functional filter`, async () => {
+    const shared = new Map()
+    const source = await sourceOf([{ id: `a`, ref: shared }])
+    const filtered = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ item: source }).fn.where((row) => row.item.ref === shared),
+    })
+    await filtered.preload()
+    expect(filtered.size).toBe(1)
+    replace(source, `a`, new Map())
+    await flush()
+    expect(filtered.size).toBe(0)
+    replace(source, `a`, shared)
+    await flush()
+    expect(filtered.size).toBe(1)
+  })
+
+  it(`follows a filter over a projection`, async () => {
+    const shared = new Map()
+    const source = await sourceOf([{ id: `a`, ref: shared }])
+    const projected = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ item: source })
+          .select(({ item }) => ({ id: item.id, ref: item.ref })),
+    })
+    const filtered = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ item: projected })
+          .where(({ item }) => eq(item.ref as never, shared as never)),
+    })
+    await filtered.preload()
+    expect(filtered.size).toBe(1)
+    replace(source, `a`, new Map())
+    await flush()
+    expect(filtered.size).toBe(0)
+    replace(source, `a`, shared)
+    await flush()
+    expect(filtered.size).toBe(1)
+  })
+
+  it(`tells nothing to readers that keep the row`, async () => {
+    const source = await sourceOf([{ id: `a`, ref: new Map() }])
+    const live = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ item: source }).where(({ item }) => eq(item.id, `a`)),
+    })
+    await live.preload()
+    const seen: Array<string> = []
+    const record = (changes: Array<{ type: string }>) => {
+      for (const change of changes) seen.push(change.type)
+    }
+    const subscriptions = [
+      live.subscribeChanges(record),
+      source.subscribeChanges(record, {
+        where: (row) => eq(row.id, `a`),
+      }),
+    ]
+    const effect = createEffect<Row, string>({
+      query: (q) =>
+        q.from({ item: source }).where(({ item }) => eq(item.id, `a`)),
+      skipInitial: true,
+      onEnter: () => void seen.push(`enter`),
+      onExit: () => void seen.push(`exit`),
+      onUpdate: () => void seen.push(`update`),
+    })
+    await flush()
+    replace(source, `a`, new Map())
+    await flush()
+    expect(seen).toEqual([])
+    for (const subscription of subscriptions) subscription.unsubscribe()
+    await effect.dispose()
+  })
+
+  it(`ends an Effect's row when its join stops matching`, async () => {
+    const shared = new Map()
+    const left = await sourceOf([{ id: `l`, ref: shared }])
+    const right = await sourceOf([{ id: `r`, ref: shared }])
+    const seen: Array<string> = []
+    const effect = createEffect({
+      query: (q) =>
+        q
+          .from({ a: left })
+          .join({ b: right }, ({ a, b }) => eq(a.ref, b.ref), `inner`)
+          .select(({ a, b }) => ({ a: a.id, b: b.id })),
+      skipInitial: true,
+      onEnter: () => void seen.push(`enter`),
+      onExit: () => void seen.push(`exit`),
+      onUpdate: () => void seen.push(`update`),
+    })
+    await flush()
+    replace(right, `r`, new Map())
+    await flush()
+    expect(seen).toEqual([`exit`])
+    await effect.dispose()
   })
 })
 

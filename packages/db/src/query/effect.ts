@@ -3,7 +3,8 @@ import { createSourceRecord } from '../utils/source-record.js'
 import { createDeferred, resolveOnAbort } from '../deferred.js'
 import { reportUncaught, runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
-import { samePublishedValue } from '../utils.js'
+import { samePublishedValue, sameRowValue } from '../utils.js'
+import { isSilentReplacement } from '../collection/change-events.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import { buildHealthTree, healthNode } from '../collection/health-tree.js'
 import { isFailedStatus } from '../live-query-primitives.js'
@@ -488,6 +489,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // repairs additionally need the preceding coherent values across graph runs.
   private publishedRows: Set<unknown> | Map<unknown, TRow> = new Set()
 
+  // A deep-equal source replacement entered the graph since the last flush.
+  private pendingSilentReplacement = false
+
   // skipInitial state
   private readonly skipInitial: boolean
   private initialLoadComplete = false
@@ -686,6 +690,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           whereExpression,
         ),
         owner: this.dependent,
+        observesRowIdentity: true,
         onTruncateReplayStart: (completion) => {
           // A replay can replace initial demand before its adapter call returns.
           this.trackInitialLoad(completion)
@@ -887,6 +892,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     changes: Array<ChangeMessage<any, string | number>>,
     scheduleGraph = true,
   ): void {
+    this.pendingSilentReplacement ||= changes.some(isSilentReplacement)
     if (this.optimizableOrderByCollections[sourceId]) {
       const source = this.collectionSources.find(
         (candidate) => candidate.sourceId === sourceId,
@@ -1059,7 +1065,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** Classify accumulated changes into DeltaEvents and invoke the callback */
   private flushPendingChanges(): void {
-    if (this.pendingChanges.size === 0) return
+    if (this.pendingChanges.size === 0) {
+      this.pendingSilentReplacement = false
+      return
+    }
 
     if (
       this.orderedPublicationFailed ||
@@ -1081,6 +1090,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         key as TKey,
         changes,
         this.publishedRows,
+        this.pendingSilentReplacement,
       )
       if (event) {
         if (event.type === `exit`) this.publishedRows.delete(key)
@@ -1092,6 +1102,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
 
     this.pendingChanges = new Map()
+    this.pendingSilentReplacement = false
 
     if (events.length > 0) {
       this.onBatchProcessed(events)
@@ -1337,6 +1348,9 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
   key: TKey,
   changes: EffectChanges<TRow>,
   publishedRows: ReadonlySet<unknown> | ReadonlyMap<unknown, TRow>,
+  // A deep-equal source replacement reaches the graph only so that reference
+  // predicates can re-evaluate. A row it leaves in the result did not change.
+  silentReplacement: boolean,
 ): DeltaEvent<TRow, TKey> | undefined {
   const { inserts, deletes, insertValue, deleteValue } = changes
   const wasPresent = publishedRows.has(key)
@@ -1359,6 +1373,7 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
     wasPresent &&
     isPresent &&
     insertValue !== undefined &&
+    !(silentReplacement && sameRowValue(previousValue, insertValue)) &&
     (publishedRows instanceof Set ||
       !samePublishedValue(previousValue, insertValue))
   ) {

@@ -96,6 +96,8 @@ type CollectionSubscriptionOptions = {
   owner?: CollectionDependent
   /** The subscriber drops its rows when the Collection is cleaned up. */
   discardsRowsOnCleanup?: boolean
+  /** The subscriber evaluates rows by reference, so it sees deep-equal writes. */
+  observesRowIdentity?: boolean
 }
 
 type TruncateReplayPublicationControl = NonNullable<
@@ -1331,8 +1333,9 @@ export class CollectionSubscription
   }
 
   /**
-   * Drops deep-equal replacements this subscription cannot observe: one is
-   * visible only where it changes the filter's answer.
+   * Drops deep-equal replacements this subscription cannot observe. A query
+   * reads rows by reference and sees them all; for anyone else one is visible
+   * only where it changes the filter's answer.
    */
   visibleChanges(
     changes: Array<ChangeMessage<any, any>>,
@@ -1340,6 +1343,7 @@ export class CollectionSubscription
     return changes.filter(
       (change) =>
         !isSilentReplacement(change) ||
+        this.options.observesRowIdentity === true ||
         (this.matchesWhere !== undefined &&
           this.matchesWhere(change.previousValue) !==
             this.matchesWhere(change.value)),
