@@ -1,7 +1,7 @@
-import { $PROXY, createSignal, untrack } from 'solid-js'
-import { $RAW, createStore, produce, unwrap } from 'solid-js/store'
+import { $PROXY, createStore, createSignal, snapshot, untrack } from 'solid-js'
 
 type RecordValue = Record<PropertyKey, unknown>
+type RowStore = Record<PropertyKey, unknown>
 function container(value: unknown): value is RecordValue {
   if (value === null || typeof value !== `object`) return false
   const proto: unknown = Object.getPrototypeOf(value)
@@ -36,13 +36,13 @@ export function createStoreReadView<T extends object>(store: T): T {
   const views = new WeakMap<object, object>()
   function exposed<V>(value: V): V {
     if (!container(value) || !($PROXY in value)) return value
-    const target = unwrap(value)
+    const target = snapshot(value)
     if (views.has(target)) return views.get(target) as V
     const native = Reflect.get(target, $PROXY) as RecordValue
     const view = new Proxy(native, {
       get(current, key, receiver) {
         // Native bookkeeping has fixed identities and must remain transparent.
-        if (key === $RAW || key === $PROXY) return Reflect.get(current, key)
+        if (key === $PROXY) return Reflect.get(current, key)
         if (key === `__proto__`) {
           ownFieldRevision(target)[0]()
           return exposed(Reflect.get(target, key, receiver))
@@ -85,7 +85,7 @@ export function createRowStore<T extends object>(source: T) {
     if (!container(value)) return value
     const native = $PROXY in value
     const original = (
-      native ? unwrap(Reflect.get(value, $PROXY)) : value
+      native ? snapshot(Reflect.get(value, $PROXY)) : value
     ) as RecordValue
     if (!root && copies.has(original)) return copies.get(original) as V
     const target: RecordValue = Array.isArray(original)
@@ -94,7 +94,7 @@ export function createRowStore<T extends object>(source: T) {
           Object.getPrototypeOf(original),
         )
       : Object.create(Object.getPrototypeOf(original))
-    const [view, setView] = createStore(target)
+    const [view, setView] = createStore(target as RowStore)
     if (!root) copies.set(original, view)
     for (const key of Reflect.ownKeys(original)) {
       if (Array.isArray(original) && key === `length`) continue
@@ -129,26 +129,24 @@ export function createRowStore<T extends object>(source: T) {
         typeof descriptor.value !== `function`
       )
         continue
-      setView(
-        produce((draft) => {
-          draft[key] = null
-          draft[key] = descriptor.value
-        }),
-      )
+      setView((draft) => {
+        draft[key] = null
+        draft[key] = descriptor.value
+      })
       Object.defineProperty(target, key, descriptor)
     }
     return view as V
   }
   return untrack(() => {
-    let [row, setRow] = createStore(unwrap(detached(source, true)))
+    let [row, setRow] = createStore(snapshot(detached(source, true)) as RowStore)
     const entry = {
-      value: createStoreReadView(row),
+      value: createStoreReadView(row) as T,
       update(nextSource: T) {
         if (nextSource === source) return
         untrack(() => {
           const next = detached(nextSource, true)
-          const target = unwrap(next) as RecordValue
-          const current = unwrap(row) as RecordValue
+          const target = snapshot(next) as RecordValue
+          const current = snapshot(row) as RecordValue
           // Native setters do not replace accessor definitions. A root-accessor
           // row is a separate boundary; nested accessors remain immutable views.
           const rootAccessor = [...keys(current), ...keys(target)].some(
@@ -157,85 +155,81 @@ export function createRowStore<T extends object>(source: T) {
               Object.getOwnPropertyDescriptor(target, key)?.get,
           )
           if (rootAccessor) {
-            ;[row, setRow] = createStore(target as T)
-            entry.value = createStoreReadView(row)
+            ;[row, setRow] = createStore(target as RowStore)
+            entry.value = createStoreReadView(row) as T
           } else
-            setRow(
-              produce((draft: RecordValue) => {
-                const previousReserved = Object.getOwnPropertyDescriptor(
-                  current,
-                  `__proto__`,
-                )
-                const nextReserved = Object.getOwnPropertyDescriptor(
-                  target,
-                  `__proto__`,
-                )
-                if (nextReserved)
-                  Object.defineProperty(current, `__proto__`, nextReserved)
-                else delete current.__proto__
-                if (
-                  !Object.is(previousReserved?.value, nextReserved?.value) ||
-                  previousReserved?.enumerable !== nextReserved?.enumerable ||
-                  !!previousReserved !== !!nextReserved
-                )
-                  // The facade tracks this same unwrap(row) target. A missing
-                  // signal means no reader registered an observer yet.
-                  ownFieldRevisions.get(current)?.[1](
-                    (revision) => revision + 1,
-                  )
-                for (const key of keys(current))
-                  if (key !== `__proto__` && !Object.hasOwn(target, key)) {
-                    if (draft[key] === undefined) draft[key] = null
-                    delete draft[key]
-                  }
-                for (const key of keys(target)) {
-                  if (key === `__proto__`) continue
-                  const desc = Object.getOwnPropertyDescriptor(target, key)!
-                  const value: unknown = Reflect.get(next, key)
-                  const existed = Object.hasOwn(current, key)
-                  const visibility =
-                    existed &&
-                    Object.prototype.propertyIsEnumerable.call(current, key) !==
-                      desc.enumerable
-                  // Shadow inherited names before native setters compare them.
-                  if (!existed)
+            setRow((draft: RowStore) => {
+              const previousReserved = Object.getOwnPropertyDescriptor(
+                current,
+                `__proto__`,
+              )
+              const nextReserved = Object.getOwnPropertyDescriptor(
+                target,
+                `__proto__`,
+              )
+              if (nextReserved)
+                Object.defineProperty(current, `__proto__`, nextReserved)
+              else delete current.__proto__
+              if (
+                !Object.is(previousReserved?.value, nextReserved?.value) ||
+                previousReserved?.enumerable !== nextReserved?.enumerable ||
+                !!previousReserved !== !!nextReserved
+              )
+                // The facade tracks this same snapshot(row) target. A missing
+                // signal means no reader registered an observer yet.
+                ownFieldRevisions.get(current)?.[1]((revision) => revision + 1)
+              for (const key of keys(current))
+                if (key !== `__proto__` && !Object.hasOwn(target, key)) {
+                  if (draft[key] === undefined) draft[key] = null
+                  delete draft[key]
+                }
+              for (const key of keys(target)) {
+                if (key === `__proto__`) continue
+                const desc = Object.getOwnPropertyDescriptor(target, key)!
+                const value: unknown = Reflect.get(next, key)
+                const existed = Object.hasOwn(current, key)
+                const visibility =
+                  existed &&
+                  Object.prototype.propertyIsEnumerable.call(current, key) !==
+                    desc.enumerable
+                // Shadow inherited names before native setters compare them.
+                if (!existed)
+                  Object.defineProperty(current, key, {
+                    value: undefined,
+                    enumerable: desc.enumerable,
+                    writable: true,
+                    configurable: true,
+                  })
+                if (value === undefined) {
+                  if (!existed || current[key] !== undefined || visibility) {
+                    draft[key] = null
+                    draft[key] = undefined
                     Object.defineProperty(current, key, {
                       value: undefined,
                       enumerable: desc.enumerable,
                       writable: true,
                       configurable: true,
                     })
-                  if (value === undefined) {
-                    if (!existed || current[key] !== undefined || visibility) {
-                      draft[key] = null
-                      draft[key] = undefined
-                      Object.defineProperty(current, key, {
-                        value: undefined,
-                        enumerable: desc.enumerable,
-                        writable: true,
-                        configurable: true,
-                      })
-                    }
-                  } else {
-                    const sameValue = Object.is(current[key], unwrap(value))
-                    // Native setters compare with ===. Force their node through
-                    // a different value for signed zero or descriptor changes.
-                    if (
-                      (visibility && sameValue) ||
-                      (!sameValue && current[key] === unwrap(value))
-                    )
-                      draft[key] = value === null ? undefined : null
-                    if (!Object.is(current[key], unwrap(value)))
-                      draft[key] = value
-                    if (!existed || visibility)
-                      Object.defineProperty(current, key, {
-                        enumerable: desc.enumerable,
-                      })
                   }
+                } else {
+                  const sameValue = Object.is(current[key], snapshot(value))
+                  // Native setters compare with ===. Force their node through
+                  // a different value for signed zero or descriptor changes.
+                  if (
+                    (visibility && sameValue) ||
+                    (!sameValue && current[key] === snapshot(value))
+                  )
+                    draft[key] = value === null ? undefined : null
+                  if (!Object.is(current[key], snapshot(value)))
+                    draft[key] = value
+                  if (!existed || visibility)
+                    Object.defineProperty(current, key, {
+                      enumerable: desc.enumerable,
+                    })
                 }
-                if (Array.isArray(target)) draft.length = target.length
-              }) as (previous: T) => T,
-            )
+              }
+              if (Array.isArray(target)) draft.length = target.length
+            })
           source = nextSource
         })
       },

@@ -41,12 +41,18 @@ it.each([`root`, `nested`] as const)(
         const memberships: Array<boolean> = []
         createRoot((dispose) => {
           resources.defer(dispose)
-          createRenderEffect(() => {
-            enumerated.push(Object.keys(container()).includes(`optional`))
-          })
-          createRenderEffect(() => {
-            memberships.push(`optional` in container())
-          })
+          createRenderEffect(
+            () => Object.keys(container()).includes(`optional`),
+            (present) => {
+              enumerated.push(present)
+            },
+          )
+          createRenderEffect(
+            () => `optional` in container(),
+            (present) => {
+              memberships.push(present)
+            },
+          )
         })
         let publications = 0
         const subscription = collection.subscribeChanges(

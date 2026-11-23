@@ -22,8 +22,13 @@
  */
 import { createCollection } from '@tanstack/db'
 import { render, waitFor } from '@solidjs/testing-library'
-import { For, createRenderEffect, createRoot, createSignal } from 'solid-js'
-import { createStore } from 'solid-js/store'
+import {
+  For,
+  createRenderEffect,
+  createRoot,
+  createStore,
+  createSignal,
+} from 'solid-js'
 import { expect, vi } from 'vitest'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { createRowStore } from '../src/store-materialization'
@@ -246,9 +251,12 @@ async function runHistory(history: History, observe: Observer) {
         let observed: Array<number> = []
         createRoot((dispose) => {
           resources.defer(dispose)
-          createRenderEffect(() => {
-            observed = elements(current()).map((element) => element.value)
-          })
+          createRenderEffect(
+            () => elements(current()).map((element) => element.value),
+            (values) => {
+              observed = values
+            },
+          )
         })
         view = render(() => (
           <For each={elements(current())}>
@@ -410,10 +418,14 @@ async function runHistory(history: History, observe: Observer) {
         ))
         createRoot((dispose) => {
           disposeEffects = dispose
-          createRenderEffect(() => {
-            void elements(current())[0]
-            reads++
-          })
+          // The count law needs the read itself: an unchanged reference must
+          // not invalidate this observer.
+          createRenderEffect(
+            () => elements(current())[0],
+            () => {
+              reads++
+            },
+          )
         })
         compare(current(), 0, admitted, mounts, reads)
       }
@@ -474,7 +486,9 @@ async function runHistory(history: History, observe: Observer) {
       // A native source write supplies a tracked read premise, not a Collection
       // change. Its liveness policy is outside this law; binding lifetime is not.
       const starts = subscriptions.mock.calls.length
-      setNativePayload(`value`, 1)
+      setNativePayload((draft) => {
+        draft.value = 1
+      })
       await new Promise<void>((resolve) => queueMicrotask(resolve))
       oracleAssertion(`row reads cannot rebind the hook`, () =>
         expect(
@@ -650,9 +664,12 @@ async function runVisibilityHistory(
     let observed: Array<string> = []
     createRoot((dispose) => {
       resources.defer(dispose)
-      createRenderEffect(() => {
-        observed = Object.keys(row)
-      })
+      createRenderEffect(
+        () => Object.keys(row),
+        (keys) => {
+          observed = keys
+        },
+      )
     })
     compareVisibility(observed, row, initial, key)
     for (const visible of [initial, !initial, initial, !initial]) {
@@ -834,14 +851,25 @@ async function runGetterHistory(history: GetterHistory, observe: Observer) {
       let keys: Array<string> = []
       createRoot((dispose) => {
         resources.defer(dispose)
-        createRenderEffect(() => {
-          observed = query()[0]?.config?.label
-        })
-        createRenderEffect(() => {
-          const config = query()[0]?.config
-          member = config !== null && config !== undefined && `label` in config
-          keys = config ? Object.keys(config) : []
-        })
+        createRenderEffect(
+          () => query()[0]?.config?.label,
+          (label) => {
+            observed = label
+          },
+        )
+        createRenderEffect(
+          () => {
+            const config = query()[0]?.config
+            return [
+              config !== null && config !== undefined && `label` in config,
+              config ? Object.keys(config) : [],
+            ] as const
+          },
+          ([isMember, keys]) => {
+            member = isMember
+            keys = keys
+          },
+        )
       })
       for (let value = history.later ? 0 : 1; value <= 2; value++) {
         source.utils.begin()
@@ -1503,15 +1531,22 @@ async function runCallableHistory(history: CallableHistory, observe: Observer) {
       // comparison cannot establish callable usability or dependency tracking.
       createRoot((dispose) => {
         resources.defer(dispose)
-        createRenderEffect(() => {
-          const current = container(requiredFirstRow(query()))
-          observed = { callable: current.format, value: current.format?.() }
-          reads++
-        })
-        createRenderEffect(() => {
-          void query()[0]!.unchanged
-          unchangedReads++
-        })
+        createRenderEffect(
+          () => {
+            const current = container(requiredFirstRow(query()))
+            return { callable: current.format, value: current.format?.() }
+          },
+          (next) => {
+            observed = next
+            reads++
+          },
+        )
+        createRenderEffect(
+          () => query()[0]!.unchanged,
+          () => {
+            unchangedReads++
+          },
+        )
       })
       compareCallable(observed, expectedCallable(history, 0, signal(), choices))
       entered.add(`tracked-initial`)
@@ -1814,17 +1849,28 @@ async function runReservedFieldHistory(
       let unchangedReads = 0
       createRoot((dispose) => {
         resources.defer(dispose)
-        createRenderEffect(() => {
-          observed = query()[0]![history.key]
-        })
-        createRenderEffect(() => {
-          observedKeys = Object.keys(requiredFirstRow(query()))
-          observedOwn = Object.hasOwn(requiredFirstRow(query()), history.key)
-        })
-        createRenderEffect(() => {
-          void query()[0]!.unchanged
-          unchangedReads++
-        })
+        createRenderEffect(
+          () => query()[0]![history.key],
+          (value) => {
+            observed = value
+          },
+        )
+        createRenderEffect(
+          () => {
+            const row = requiredFirstRow(query())
+            return [Object.keys(row), Object.hasOwn(row, history.key)] as const
+          },
+          ([ownKeys, own]) => {
+            observedKeys = ownKeys
+            observedOwn = own
+          },
+        )
+        createRenderEffect(
+          () => query()[0]!.unchanged,
+          () => {
+            unchangedReads++
+          },
+        )
       })
       compareReservedField(
         observed,
@@ -2109,13 +2155,18 @@ async function runMethodHistory(history: MethodHistory, observe: Observer) {
       }
       createRoot((dispose) => {
         resources.defer(dispose)
-        createRenderEffect(() => {
-          observed = readMethods(query()[0]!.values)
-        })
-        createRenderEffect(() => {
-          void query()[0]!.unchanged
-          unchangedReads++
-        })
+        createRenderEffect(
+          () => readMethods(query()[0]!.values),
+          (methods) => {
+            observed = methods
+          },
+        )
+        createRenderEffect(
+          () => query()[0]!.unchanged,
+          () => {
+            unchangedReads++
+          },
+        )
       })
       compareMethods(observed, 0)
       entered.add(`tracked-methods`)

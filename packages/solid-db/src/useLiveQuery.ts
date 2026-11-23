@@ -1,38 +1,67 @@
 import { ReactiveMap } from '@solid-primitives/map'
 import {
-  BaseQueryBuilder,
-  createLiveQueryCollection,
   createLiveQueryObserver,
   getPublicCollection,
   isCollection,
   isSingleResultCollection,
+  prepareLiveQueryValue,
   resolveLiveQueryValue,
+  toBoundaryError,
 } from '@tanstack/db'
-import { createEffect, createMemo, createProjection, createSignal } from 'solid-js'
+import { createMemo, createProjection, from, untrack } from 'solid-js'
 import type { Accessor } from 'solid-js'
 import type {
   Collection,
-  CollectionStatus,
   Context,
-  GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryCollectionConfig,
-  LiveQueryPersistedStatus,
+  LiveQueryHookConfig,
   LiveQuerySnapshot,
+  LiveQueryStatusFlags,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
 
-export type UseLiveQueryStatus = CollectionStatus | `disabled`
+const DEFAULT_GC_TIME_MS = 1
 
-type AnySnapshot = LiveQuerySnapshot<any, any>
+// The snapshot's status surface, exposed one property per flag.
+const FLAG_KEYS = [
+  `status`,
+  `isLoading`,
+  `isReady`,
+  `isIdle`,
+  `isLoadingError`,
+  `isCrashed`,
+  `isCleanedUp`,
+  `isSyncError`,
+  `health`,
+] as const
+type FlagKey = (typeof FLAG_KEYS)[number]
 
 type InferConditionalResultType<TContext extends Context> =
   TContext extends SingleResult
     ? InferResultType<TContext> | []
     : InferResultType<TContext>
+
+type Result<TResult> = Accessor<TResult> & {
+  /** Keyed rows by the live Collection's result key. */
+  state: ReactiveMap<string | number, any>
+  /** The live query backing this result (its pooled public view, if pooled). */
+  collection: Collection<any, any, any> | null
+  status: LiveQuerySnapshot<any, any>[`status`]
+  /**
+   * The rows once the first load has settled. Reading it before that throws
+   * `NotReadyError`, so call it under `<Loading>`:
+   *
+   * ```tsx
+   * <Loading fallback={<Spinner />}>
+   *   <For each={query.loaded()}>{(row) => <Row row={row} />}</For>
+   * </Loading>
+   * ```
+   */
+  loaded: Accessor<TResult>
+} & LiveQueryStatusFlags
 
 /**
  * Create a live query using a query function
@@ -56,39 +85,19 @@ type InferConditionalResultType<TContext extends Context> =
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-): Accessor<InferResultType<TContext>> & {
-  state: ReactiveMap<string | number, GetResult<TContext>>
-  collection: Collection<GetResult<TContext>, string | number, {}>
-  status: UseLiveQueryStatus
-  isReady: boolean
-  isError: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  loaded: Accessor<InferResultType<TContext>>
-}
+): Result<InferResultType<TContext>>
 
 // Overload 1b: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
   queryFn: (
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-): Accessor<InferConditionalResultType<TContext>> & {
-  state: ReactiveMap<string | number, GetResult<TContext>>
-  collection: Collection<GetResult<TContext>, string | number, {}> | null
-  status: UseLiveQueryStatus
-  isReady: boolean
-  isError: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  loaded: Accessor<InferConditionalResultType<TContext>>
-}
+): Result<InferConditionalResultType<TContext>>
 
 /**
  * Create a live query using configuration object
  * @param config - Configuration object with query and options
- * @returns Accessor that returns the current rows synchronously, with state, collection, status, and persisted-readiness properties
+ * @returns Accessor that returns the current rows synchronously, with state, collection, status, and readiness properties
  * @example
  * const todosQuery = useLiveQuery(() => ({
  *   query: (q) => q.from({ todos: todosCollection }),
@@ -97,23 +106,13 @@ export function useLiveQuery<TContext extends Context>(
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
-  config: Accessor<LiveQueryCollectionConfig<TContext>>,
-): Accessor<InferResultType<TContext>> & {
-  state: ReactiveMap<string | number, GetResult<TContext>>
-  collection: Collection<GetResult<TContext>, string | number, {}>
-  status: UseLiveQueryStatus
-  isReady: boolean
-  isError: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  loaded: Accessor<InferResultType<TContext>>
-}
+  config: Accessor<LiveQueryHookConfig<TContext>>,
+): Result<InferResultType<TContext>>
 
 /**
  * Subscribe to an existing live query collection
  * @param liveQueryCollection - Pre-created live query collection to subscribe to
- * @returns Accessor that returns the current rows synchronously, with state, collection, status, and persisted-readiness properties
+ * @returns Accessor that returns the current rows synchronously, with state, collection, status, and readiness properties
  * @example
  * const myLiveQuery = createLiveQueryCollection((q) =>
  *   q.from({ todos: todosCollection }).where(({ todos }) => eq(todos.active, true))
@@ -129,17 +128,7 @@ export function useLiveQuery<
   liveQueryCollection: Accessor<
     Collection<TResult, TKey, TUtils> & NonSingleResult
   >,
-): Accessor<Array<TResult>> & {
-  state: ReactiveMap<TKey, TResult>
-  collection: Collection<TResult, TKey, TUtils>
-  status: UseLiveQueryStatus
-  isReady: boolean
-  isError: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  loaded: Accessor<Array<TResult>>
-}
+): Result<Array<TResult>>
 
 // Overload 3b: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
@@ -150,86 +139,107 @@ export function useLiveQuery<
   liveQueryCollection: Accessor<
     Collection<TResult, TKey, TUtils> & SingleResult
   >,
-): Accessor<TResult | undefined> & {
-  state: ReactiveMap<TKey, TResult>
-  collection: Collection<TResult, TKey, TUtils> & SingleResult
-  status: UseLiveQueryStatus
-  isReady: boolean
-  isError: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  loaded: Accessor<TResult | undefined>
-}
+): Result<TResult | undefined>
 
 // The observer owns the subscription and publishes stable snapshots; Solid
-// state stays fully derived from the latest snapshot. The snapshot signal is
-// written from observer notifies (outside any owned scope) and seeded once
+// state below is fully derived from the latest snapshot. The snapshot signal
+// is written from observer notifies (outside any owned scope) and seeded once
 // from the effect's apply phase, which is why it opts into `ownedWrite`.
 export function useLiveQuery(
   configOrQueryOrCollection: (queryFn?: any) => any,
-) {
-  let collectionError: unknown = null
-
+): Result<any> {
+  let inputError: unknown
+  let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
+  const resolveNext = (value: unknown) =>
+    (previousCollection = resolveLiveQueryValue(value, {
+      gcTime: DEFAULT_GC_TIME_MS,
+      previousCollection,
+      windowOwner: resolveNext,
+    }))
   const collection = createMemo(
     () => {
-      collectionError = null
+      const value =
+        configOrQueryOrCollection.length === 1
+          ? configOrQueryOrCollection
+          : configOrQueryOrCollection()
+      // Query-input reads define binding dependencies. Compilation can drain
+      // source rows synchronously; those reads belong to the result instead.
+      // Query-input reads define binding dependencies. Compilation can
+      // drain source rows synchronously; those reads belong to the result.
+      // An invalid input is the caller's error: a computation must not throw
+      // it (the runtime wraps it and later updates are lost), so keep it and
+      // throw it from the accessor.
+      inputError = undefined
       try {
-        if (configOrQueryOrCollection.length === 1) {
-          const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
-          const result = configOrQueryOrCollection(queryBuilder)
-
-          if (result === undefined || result === null) {
-            return null
+        const prepared = prepareLiveQueryValue(value, undefined)
+        return untrack(() => {
+          if (isCollection(prepared)) {
+            previousCollection = null
+            return prepared as Collection
           }
-
-          // resolveLiveQueryValue pools eq-filtered queries so identical
-          // hooks share one live-query Collection and subscription.
-          return resolveLiveQueryValue(result)
-        }
-
-        const innerCollection = configOrQueryOrCollection()
-
-        if (innerCollection === undefined || innerCollection === null) {
-          return null
-        }
-
-        if (isCollection(innerCollection)) {
-          innerCollection.startSyncImmediate()
-          return innerCollection as Collection
-        }
-
-        return createLiveQueryCollection({
-          ...innerCollection,
-          startSync: true,
+          return resolveNext(prepared)
         })
       } catch (error) {
-        collectionError = error
+        inputError = error
         return null
       }
     },
-    { name: `TanstackDBCollectionMemo` },
+    { name: `TanstackDBCollection`, sync: true },
   )
 
-  const [snapshot, setSnapshot] = createSignal<AnySnapshot | null>(null, {
-    name: `TanstackDBSnapshot`,
-    // Seeded from the effect's apply phase — an owned scope where this
-    // intentional internal write is only legal with the opt-in.
-    ownedWrite: true,
-  })
+  type AnySnapshot = LiveQuerySnapshot<any, any>
+  let observer: ReturnType<typeof createLiveQueryObserver> | undefined
 
-  const status = createMemo<UseLiveQueryStatus>(
+  // `from` turns the observer into a memo: every value below is then derived,
+  // never relayed through an effect, so rows and status are consistent at
+  // every cut of a flush. The source emits during `subscribe`, so the first
+  // read is served without a loading frame, and it closes when the collection
+  // is replaced or the owner disposed.
+  const snapshot = createMemo(
     () => {
-      const currentSnapshot = snapshot()
-      if (currentSnapshot) return currentSnapshot.status
-      if (collectionError) return `error`
-      // Before the observer seeds the first snapshot, a live collection is
-      // already syncing — only a missing collection is disabled.
-      return collection() ? `loading` : `disabled`
+      const current = collection()
+      return from<AnySnapshot>((next, error) => {
+        const attached = createLiveQueryObserver(current, {
+          mode: `wholesale`,
+        })
+        observer = attached
+        const publish = () => {
+          try {
+            next(attached.getSnapshot())
+          } catch (cause) {
+            error(cause)
+          }
+        }
+        const unsubscribe = attached.subscribe(publish)
+        publish()
+        return () => {
+          if (observer === attached) observer = undefined
+          unsubscribe()
+          attached.dispose()
+        }
+      })
     },
-    { name: `TanstackDBStatus` },
+    { name: `TanstackDBSnapshot` },
   )
 
+  // One scalar memo per flag, so a flag's readers re-run only when that flag
+  // changes; a row update must not wake a component reading `isReady`.
+  const flag = <K extends FlagKey>(key: K) =>
+    createMemo(() => snapshot()[key], {
+      name: `TanstackDB.${key}`,
+      sync: true,
+    })
+  const flags = {
+    status: flag(`status`),
+    isLoading: flag(`isLoading`),
+    isReady: flag(`isReady`),
+    isIdle: flag(`isIdle`),
+    isLoadingError: flag(`isLoadingError`),
+    isCrashed: flag(`isCrashed`),
+    isCleanedUp: flag(`isCleanedUp`),
+    isSyncError: flag(`isSyncError`),
+    health: flag(`health`),
+  }
   // One stable store node per logical row, keyed by the live Collection's
   // RESULT keys — the rule from #1825. A row's public $key belongs to an
   // upstream collection and is not necessarily unique in a derived result
@@ -244,159 +254,123 @@ export function useLiveQuery(
   let identityEpoch = 0
   const data = createProjection(
     () => {
-      const currentSnapshot = snapshot()
-      const entries = currentSnapshot?.state
-      if (currentSnapshot?.collection !== identityCollection) {
-        identityCollection = currentSnapshot?.collection
+      const current = snapshot()
+      const entries = current.state
+      if (current.collection !== identityCollection) {
+        identityCollection = current.collection
         identityEpoch++
       }
       if (!entries) return []
       const rows: Array<any> = []
-      for (const [key, row] of entries) {
-        rowIdentities.set(row, `${identityEpoch}:${String(key)}`)
-        rows.push(row)
+      // Two results can alias one object; each is its own row, so a repeated
+      // object is admitted as a copy rather than merged into the first.
+      const admitted = new Set<object>()
+      for (const [key, value] of entries) {
+        if (admitted.has(value)) {
+          rows.push({ ...value })
+          continue
+        }
+        admitted.add(value)
+        // Type-qualified so numeric 1 and string "1" stay distinct rows.
+        rowIdentities.set(
+          value,
+          `${identityEpoch}:${typeof key}:${String(key)}`,
+        )
+        rows.push(value)
       }
       return rows
     },
     [],
-    { key: (row: object) => rowIdentities.get(row), name: `TanstackDBData` },
+    {
+      key: (row: object) => rowIdentities.get(row),
+      name: `TanstackDBData`,
+    },
   )
 
-  // Granular keyed state, synced incrementally per snapshot so only changed
-  // keys notify. The ReactiveMap's trigger signals opt into owned writes, so
-  // syncing from the effect is legal.
+  // Granular keyed state, synced on read from the current snapshot so it can
+  // never lead or lag `query()`.
   const state = new ReactiveMap<string | number, any>()
-  let stateSyncedSnapshot: AnySnapshot | null | undefined
-
-  const syncState = (currentSnapshot: AnySnapshot | null) => {
-    if (stateSyncedSnapshot === currentSnapshot) return
-    stateSyncedSnapshot = currentSnapshot
-    const next = currentSnapshot?.state
-    if (!next) {
-      state.clear()
-      return
-    }
+  const readState = () => {
+    const entries = snapshot().state
+    const next = entries ? [...entries] : []
+    const retained = new Set<string | number>()
     for (const [key, value] of next) {
+      retained.add(key)
       if (state.get(key) !== value) state.set(key, value)
     }
-    const staleKeys: Array<string | number> = []
     for (const key of state.keys()) {
-      if (!next.has(key)) staleKeys.push(key)
+      if (!retained.has(key)) state.delete(key)
     }
-    for (const key of staleKeys) state.delete(key)
+    return state
   }
 
-  // Opt-in render gate. Reading `loaded` while the initial render is in
-  // flight throws NotReadyError for a <Loading> boundary to catch. It settles
-  // at network readiness or a permitted persisted fallback — the same gate
-  // the React adapter's suspense hook uses — so persisted data can reveal
-  // content before the network answers. Eager, not lazy: a lazily
-  // autodisposed memo freezes at its last commit once unobserved, which
-  // would hide revalidation from isPending() readers.
-  // Opt-in render gate, internal: reading it while the initial render is in
-  // flight throws NotReadyError for a <Loading> boundary to catch. It settles
-  // at network readiness or a permitted persisted fallback — the same gate
-  // the React adapter's suspense hook uses — so persisted data can reveal
-  // content before the network answers. Eager, not lazy: a lazily
-  // autodisposed memo freezes at its last commit once unobserved, which
-  // would hide revalidation from isPending() readers.
-  const readinessGate = createMemo(async () => {
-    const col = collection()
-    if (!col) return null
-    // status works for pooled eq-filter views too, which expose no isReady.
-    if (col.status === `ready`) return col
-    const observer = createLiveQueryObserver(col)
-    try {
-      await observer.preloadForInitialRender()
-    } finally {
-      observer.dispose()
-    }
-    return col
-  })
+  const readyOnce = new WeakSet<object>()
 
-  // The effect's apply phase owns the observer lifecycle per collection.
-  // Wholesale mode delivers nothing during subscribe, so the initial
-  // snapshot is pulled synchronously after attach.
-  createEffect(
-    () => collection(),
-    (currentCollection) => {
-      if (!currentCollection) {
-        setSnapshot(null)
-        syncState(null)
-        return
-      }
-
-      const observer = createLiveQueryObserver(currentCollection, {
-        mode: `wholesale`,
-      })
-
-      const sync = () => {
-        const currentSnapshot = observer.getSnapshot()
-        setSnapshot(currentSnapshot)
-        syncState(currentSnapshot)
-      }
-
-      const unsubscribe = observer.subscribe(sync)
-
-      // Wholesale delivers nothing during subscribe — seed synchronously.
-      sync()
-
-      // Capture the sync error object for getData() to re-throw; the error
-      // STATUS itself arrives through the observer's status notifications.
-      // The guard drops rejections from a collection this effect has already
-      // torn down, so a superseded query cannot poison its replacement.
-      // The observer's preload works for pooled eq-filter views, which
-      // expose no toArrayWhenReady of their own.
-      let active = true
-      observer.preload().catch((error: unknown) => {
-        if (active) collectionError = error
-      })
-
-      return () => {
-        active = false
-        unsubscribe()
-        observer.dispose()
-      }
+  // The gate is the React suspense adapter's rule: a failed first load throws
+  // only before the first ready, and later sync problems surface in `health`
+  // with the data kept. A crash throws at any time: the Collection can no
+  // longer serve reads. `query()` tracks only this scalar memo besides the
+  // rows, so a publication that changes neither leaves its readers asleep.
+  const failed = createMemo(
+    () => {
+      const current = snapshot()
+      const live = collection()
+      if (live && current.isReady) readyOnce.add(live)
+      return (
+        current.isCrashed ||
+        (current.isLoadingError && !!live && !readyOnce.has(live))
+      )
     },
-    { name: `TanstackDBObserver` },
+    { name: `TanstackDB.failed`, sync: true },
   )
 
-  // Data reads never suspend: rows synced before readiness render
-  // immediately (progressive sync, on-demand loading). Only the error path
-  // throws, for an <Errored> boundary.
-  function getData() {
-    if (collectionError) throw collectionError
-
-    const s = status()
-    if (s === `error`) {
-      // Collections do not yet expose their last error object (#671); name
-      // the failed query, matching the React suspense adapter's fallback.
-      throw (
-        collectionError ??
-        new Error(`Collection "${collection()?.id}" failed to load`)
-      )
-    }
-
-    const currentCollection = collection()
-    if (!currentCollection) {
-      return data
-    }
-    if (isSingleResultCollection(currentCollection)) {
-      return data[0]
-    }
-    return data
+  // A crash, or a failed first load, reaches an <Errored> boundary as an
+  // Error: the cause itself when it is an Error, else an Error wrapping it.
+  const throwFailure = (current: Collection<any, any, any> | null) => {
+    if (!current) return
+    const cause = observer?.getError() ?? current.health.error?.cause
+    // Collections do not always record a cause; name the failed query.
+    throw cause === undefined
+      ? new Error(`Collection "${current.id}" failed to load`)
+      : toBoundaryError(cause)
   }
 
-  // The gated read: suspends the caller's boundary until the initial render
-  // is ready (or the preload errors), then returns exactly what getData()
-  // returns — the data read runs in the CALLER's reactive scope, so row
-  // granularity and replacement tracking are identical to query().
+  // Opt-in render gate. Reading `loaded` while the first load is in flight
+  // throws NotReadyError for a <Loading> boundary to catch. Eager, not lazy:
+  // a lazily autodisposed memo freezes at its last commit once unobserved,
+  // which would hide revalidation from isPending() readers.
+  const readiness = createMemo(async () => {
+    const current = collection()
+    if (!current || snapshot().isReady) return
+    const preload = createLiveQueryObserver(current)
+    try {
+      await preload.preload()
+    } catch (error) {
+      // The preload's rejection may be opaque (a client request can reject
+      // with undefined); the Collection's own cause names the failure.
+      if (untrack(failed)) throwFailure(current)
+      throw error
+    } finally {
+      preload.dispose()
+    }
+    // Past the `await` nothing is tracked: these are one-time reads.
+    if (untrack(failed)) throwFailure(current)
+  })
+
+  function getData() {
+    collection()
+    if (inputError !== undefined) throw inputError
+    if (failed()) throwFailure(collection())
+    const current = collection()
+    return current && isSingleResultCollection(current) ? data[0] : data
+  }
+
   function gatedData() {
-    readinessGate()
+    readiness()
     return getData()
   }
 
-  Object.defineProperties(getData, {
+  return Object.defineProperties(getData, {
     collection: {
       get() {
         return getPublicCollection(collection())
@@ -404,41 +378,7 @@ export function useLiveQuery(
     },
     state: {
       get() {
-        syncState(snapshot())
-        return state
-      },
-    },
-    status: {
-      get() {
-        return status()
-      },
-    },
-    isReady: {
-      get() {
-        const currentSnapshot = snapshot()
-        return currentSnapshot
-          ? currentSnapshot.isReady
-          : status() === `disabled`
-      },
-    },
-    isError: {
-      get() {
-        return status() === `error`
-      },
-    },
-    persistedStatus: {
-      get() {
-        return snapshot()?.persistedStatus ?? `unavailable`
-      },
-    },
-    isPersistedReady: {
-      get() {
-        return snapshot()?.isPersistedReady ?? false
-      },
-    },
-    persistedError: {
-      get() {
-        return snapshot()?.persistedError
+        return readState()
       },
     },
     loaded: {
@@ -446,6 +386,15 @@ export function useLiveQuery(
         return gatedData
       },
     },
-  })
-  return getData
+    ...Object.fromEntries(
+      FLAG_KEYS.map((key) => [
+        key,
+        {
+          get() {
+            return (flags as any)[key]()
+          },
+        },
+      ]),
+    ),
+  }) as Result<any>
 }
