@@ -21,6 +21,7 @@ import type {
   ChangeMessage,
   CollectionDependent,
   LoadSubsetOptions,
+  LoadSubsetRelation,
   LoadSubsetRequestResult,
   SubscribeChangesOptions,
   Subscription,
@@ -76,6 +77,8 @@ type CollectionSubscriptionOptions = {
   includeInitialState?: boolean
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
+  /** Semi/anti-join filters forwarded with every loadSubset request */
+  relations?: Array<LoadSubsetRelation>
   /** Callback to call when the subscription is unsubscribed */
   onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
   /** Callback for subset-load failures scoped to this subscription. */
@@ -1380,6 +1383,7 @@ export class CollectionSubscription
       where: stateOpts.where,
       signal: opts?.signal,
       subscription: this,
+      ...(this.options.relations && { relations: this.options.relations }),
       // Include orderBy and limit if provided so sync layer can optimize the query
       orderBy: opts?.orderBy,
       // A local optimistic row can hide one source row from a bounded prefix.
@@ -1805,6 +1809,7 @@ export class CollectionSubscription
       cursor: cursorExpressions, // Cursor expressions passed separately
       offset: offset ?? 0,
       subscription: this,
+      ...(this.options.relations && { relations: this.options.relations }),
     }
 
     const {

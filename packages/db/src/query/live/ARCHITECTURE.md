@@ -1297,6 +1297,15 @@ row, so the joined source becoming ready schedules that run itself. Joined-side 
 so a removed match can refill a short window. An empty joined replay still
 releases held Effect callbacks.
 
+Such a window also forwards its joined filter on every `loadSubset` as
+`relations`, a semi/anti-join hint, when every cross-alias conjunct maps to one.
+An existence check is `some` or `none`. A conjunct that fails on a missing joined
+row is `some(where)`. One that passes on a missing row is `none(not where)`, only
+when the join is on the joined collection's key. An adapter may apply the hint
+or ignore it and return a superset, and it must not drop a row that passes. Local
+evaluation stays authoritative. The hint is part of the demand key. Windows that
+share a source send it only when they ask for the same joined filter.
+
 A finite indexed window is proven only up to the loader's settled boundary.
 Live root rows past the bounded prefix still enter the graph, so a window row
 after that boundary does not count toward a full window: an earlier eligible

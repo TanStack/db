@@ -4,6 +4,7 @@ import {
 } from '@tanstack/db-ivm'
 import { defaultComparator, makeComparator } from '../../utils/comparison.js'
 import {
+  Func,
   PropRef,
   collectCollectionSources,
   followRef,
@@ -20,14 +21,25 @@ import { hasVirtualPropPath } from '../../virtual-props.js'
 import { deepEquals } from '../../utils.js'
 import { devBuild } from '../../error-message.js'
 import { compileExpression } from './evaluators.js'
-import { getSourceAliasesFromExpression } from './expressions.js'
+import {
+  getSourceAliasesFromExpression,
+  normalizeExpressionPaths,
+} from './expressions.js'
 import type { CompareOptions } from '../builder/types.js'
 import type { WindowOptions } from './types.js'
 import type { Grouping } from './grouping.js'
 import type { CompiledSingleRowExpression } from './evaluators.js'
-import type { OrderBy, OrderByClause, QueryIR, Select } from '../ir.js'
+import type {
+  BasicExpression,
+  JoinClause,
+  OrderBy,
+  OrderByClause,
+  QueryIR,
+  Select,
+} from '../ir.js'
 import type {
   CollectionLike,
+  LoadSubsetRelation,
   NamespacedAndKeyedStream,
   NamespacedRow,
 } from '../../types.js'
@@ -69,6 +81,142 @@ export type OrderByOptimizationInfo = {
   sourceHoldsAllRows: boolean
   /** Sources whose lazy demand must settle before a joined-filter page. */
   joinedFilterSourceIds?: ReadonlyArray<string>
+  /** The joined filter as semi/anti-join hints for the source's loadSubset. */
+  relations?: Array<LoadSubsetRelation>
+}
+
+function flattenConjuncts(
+  expression: BasicExpression,
+  out: Array<BasicExpression> = [],
+): Array<BasicExpression> {
+  if (expression.type === `func` && expression.name === `and`) {
+    for (const arg of expression.args) flattenConjuncts(arg, out)
+  } else {
+    out.push(expression)
+  }
+  return out
+}
+
+// The join's `eq(root.<parent>, joined.<child>)` key paths, relative to each row.
+function joinKeyOf(
+  join: JoinClause,
+  rootAlias: string,
+  joinedAlias: string,
+): { parent: Array<string>; child: Array<string> } | undefined {
+  const on = join.on
+  if (on.type !== `func` || on.name !== `eq` || on.args.length !== 2) {
+    return undefined
+  }
+  const [a, b] = on.args
+  if (a?.type !== `ref` || b?.type !== `ref`) return undefined
+  const root =
+    a.path[0] === rootAlias && b.path[0] === joinedAlias
+      ? a.path
+      : b.path[0] === rootAlias && a.path[0] === joinedAlias
+        ? b.path
+        : undefined
+  if (!root) return undefined
+  const joined = root === a.path ? b.path : a.path
+  if (root.length < 2 || joined.length !== 2) return undefined
+  return { parent: root.slice(1), child: joined.slice(1) }
+}
+
+function joinsOnKey(collection: CollectionLike<any, any>, field: string) {
+  const probe = `__tanstack_db_key_probe__`
+  try {
+    return (
+      (collection as Collection).config.getKey({ [field]: probe }) === probe
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * A conjunct over the joined alias as a relation on the root row:
+ * - `not(isUndefined(j.<child>))` keeps a root row with a related row (some);
+ *   `isUndefined(j.<child>)` keeps one without (none).
+ * - Any other conjunct over the joined alias alone fails or passes on a
+ *   missing related row. Failing, it keeps a root row only when a related row
+ *   passes it: `some(conjunct)`. Passing, it drops a root row only when its
+ *   related row fails it: `none(not conjunct)`, exact only when the join
+ *   matches at most one row, so on the joined collection's key.
+ */
+function relationOf(
+  join: JoinClause,
+  rootAlias: string,
+  conjunct: BasicExpression,
+): LoadSubsetRelation | undefined {
+  if (join.from.type !== `collectionRef`) return undefined
+  const joinedAlias = join.from.alias
+  const aliases = [...getSourceAliasesFromExpression(conjunct)]
+  if (aliases.length !== 1 || aliases[0] !== joinedAlias) return undefined
+  const key = joinKeyOf(join, rootAlias, joinedAlias)
+  if (!key) return undefined
+  const collection = join.from.collection
+  const collectionId = collection.id
+
+  let quantifier: `some` | `none` = `none`
+  let check = conjunct
+  if (
+    check.type === `func` &&
+    check.name === `not` &&
+    check.args.length === 1
+  ) {
+    quantifier = `some`
+    check = check.args[0]!
+  }
+  if (
+    check.type === `func` &&
+    check.name === `isUndefined` &&
+    check.args.length === 1 &&
+    check.args[0]?.type === `ref` &&
+    check.args[0].path.length === 2 &&
+    check.args[0].path[1] === key.child[0]
+  ) {
+    return { quantifier, collectionId, on: key }
+  }
+
+  let passesMissing: boolean
+  try {
+    passesMissing = Boolean(compileExpression(conjunct)({ [rootAlias]: {} }))
+  } catch {
+    return undefined
+  }
+  const where = normalizeExpressionPaths(
+    conjunct as BasicExpression<boolean>,
+    joinedAlias,
+  )
+  if (!passesMissing)
+    return { quantifier: `some`, collectionId, on: key, where }
+  if (!joinsOnKey(collection, key.child[0]!)) return undefined
+  return {
+    quantifier: `none`,
+    collectionId,
+    on: key,
+    where: new Func(`not`, [where]),
+  }
+}
+
+// Every cross-alias conjunct of a joined-filter query as a relation, or none:
+// a hint is exact only when it carries the whole joined filter.
+function joinedFilterRelations(
+  rawQuery: QueryIR,
+  rootAlias: string,
+): Array<LoadSubsetRelation> | undefined {
+  const join = rawQuery.join?.[0]
+  if (!join) return undefined
+  const relations: Array<LoadSubsetRelation> = []
+  for (const where of rawQuery.where ?? []) {
+    for (const conjunct of flattenConjuncts(getWhereExpression(where))) {
+      const aliases = [...getSourceAliasesFromExpression(conjunct)]
+      if (aliases.every((alias) => alias === rootAlias)) continue
+      const relation = relationOf(join, rootAlias, conjunct)
+      if (!relation) return undefined
+      relations.push(relation)
+    }
+  }
+  return relations.length > 0 ? relations : undefined
 }
 
 function warnOrderIndexFallback(
@@ -297,6 +445,9 @@ export function processOrderBy(
         joinedFilterSourceIds: joinedFilterSourceId
           ? [joinedFilterSourceId]
           : undefined,
+        ...(joinedFilterSourceId !== undefined && {
+          relations: joinedFilterRelations(rawQuery, orderByAlias),
+        }),
         sourceHoldsAllRows:
           followRefResult.collection.config.syncMode !== `on-demand`,
         requiresFullSource:
@@ -338,6 +489,11 @@ export function processOrderBy(
                 ...(info.joinedFilterSourceIds ?? []),
               ]),
             ],
+            // One subscription serves every window, so a hint holds only when
+            // each window asks for the same filter.
+            relations: deepEquals(previous.relations, info.relations)
+              ? info.relations
+              : undefined,
             get offset() {
               return Math.min(previous.offset, info.offset)
             },

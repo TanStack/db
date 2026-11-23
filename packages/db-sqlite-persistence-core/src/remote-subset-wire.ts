@@ -161,6 +161,8 @@ function visitLoadSubsetOptions(
     `refetch`,
     `signal`,
     `subscription`,
+    // An optional hint: not transported, so the remote side returns a superset.
+    `relations`,
   ])
 
   const state: ProjectionState = {
