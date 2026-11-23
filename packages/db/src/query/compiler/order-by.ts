@@ -2,7 +2,11 @@ import {
   groupedOrderByWithFractionalIndex,
   orderByWithFractionalIndex,
 } from '@tanstack/db-ivm'
-import { defaultComparator, makeComparator } from '../../utils/comparison.js'
+import {
+  defaultComparator,
+  isUntrustedCustomOrder,
+  makeComparator,
+} from '../../utils/comparison.js'
 import {
   PropRef,
   collectCollectionSources,
@@ -80,7 +84,7 @@ function warnOrderIndexFallback(
   if (devBuild() && process.env.NODE_ENV !== `production`) {
     const field = path.join(`.`)
     const prefix = `[TanStack DB]${collection.id ? ` [${collection.id}]` : ``} orderBy with limit`
-    if (options.stringSort === `custom`) {
+    if (options.stringSort === `custom` && !options.trustProviderOrder) {
       console.warn(
         `${prefix} uses a custom string comparator on "${field}". On-demand sources require a filtered full source request for local sorting. An index with the same compare function reference can sort installed rows, but cannot make provider pagination safe.`,
       )
@@ -300,8 +304,8 @@ export function processOrderBy(
         sourceHoldsAllRows:
           followRefResult.collection.config.syncMode !== `on-demand`,
         requiresFullSource:
-          sourceOrderBy.some(
-            ({ compareOptions }) => compareOptions.stringSort === `custom`,
+          sourceOrderBy.some(({ compareOptions }) =>
+            isUntrustedCustomOrder(compareOptions),
           ) ||
           !sourceOrderIsDirect ||
           rawQuery.from.type !== `collectionRef` ||

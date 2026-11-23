@@ -31,7 +31,20 @@ function followsBoundary(
   }
 
   const operator = clause.compareOptions.direction === `asc` ? gt : lt
-  const comparison = operator(clause.expression, new Value(value))
+  const options = clause.compareOptions
+  const comparison = operator(
+    clause.expression,
+    new Value(value),
+    typeof value === `string` &&
+      options.stringSort === `custom` &&
+      options.trustProviderOrder
+      ? {
+          stringSort: `custom`,
+          compare: options.compare,
+          trustProviderOrder: true,
+        }
+      : undefined,
+  )
   return clause.compareOptions.nulls === `last`
     ? or(comparison, nullish)
     : comparison
@@ -90,7 +103,11 @@ export function canExpressCursorOrder(
   if (value == null) return false
   if (value instanceof Date) return Number.isFinite(value.getTime())
   if (typeof value === `string`) {
-    return orderBy[0]!.compareOptions.stringSort === `lexical`
+    const options = orderBy[0]!.compareOptions
+    return (
+      options.stringSort === `lexical` ||
+      (options.stringSort === `custom` && options.trustProviderOrder === true)
+    )
   }
   return (
     (typeof value === `number` && Number.isFinite(value)) ||

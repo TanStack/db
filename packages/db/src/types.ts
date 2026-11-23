@@ -40,10 +40,23 @@ export type StringCollationConfig =
       locale?: string
       localeOptions?: object
     }
-  | {
-      stringSort: `custom`
-      compare: (a: string, b: string) => number
-    }
+  | CustomStringCollation
+
+/**
+ * A custom string collation: strings order by `compare`.
+ *
+ * By default the provider's order is untrusted, so an on-demand query sorted
+ * by it requests its complete filtered source and sorts locally. Set
+ * `trustProviderOrder` when the sync backend orders and compares strings with
+ * this exact collation: ordered queries then pass `orderBy` and `limit` to
+ * `loadSubset`, and string cursors compare with `compare`, as they do for
+ * lexical order.
+ */
+export type CustomStringCollation = {
+  stringSort: `custom`
+  compare: (a: string, b: string) => number
+  trustProviderOrder?: boolean
+}
 
 /**
  * Helper type to extract the output type from a standard schema

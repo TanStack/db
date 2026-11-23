@@ -3,6 +3,7 @@ import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity
 import { codedMessage, devBuild } from '../error-message'
 import type { DurationFields } from '../utils'
 import type { CompareOptions } from '../query/builder/types'
+import type { StringCollationConfig } from '../types'
 
 /**
  * Whether a value has no IEEE-754 natural order: `NaN`, or an invalid Date
@@ -12,6 +13,16 @@ import type { CompareOptions } from '../query/builder/types'
  * evaluator treat them explicitly instead of letting `NaN` compare unequal to
  * everything (which has no consistent order and cannot be indexed or sorted).
  */
+/**
+ * Whether an order uses a custom string collation that the provider is not
+ * trusted to apply, so its rows cannot come from a provider-limited window.
+ */
+export function isUntrustedCustomOrder(
+  options: StringCollationConfig,
+): boolean {
+  return options.stringSort === `custom` && !options.trustProviderOrder
+}
+
 export function isUnorderable(value: any): boolean {
   return (
     (typeof value === `number` && Number.isNaN(value)) ||

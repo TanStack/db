@@ -730,7 +730,7 @@ export function replaceAggregatesByRefs(
         (arg: BasicExpression | Aggregate) =>
           replaceAggregatesByRefs(arg, selectClause),
       )
-      return new Func(funcExpr.name, transformedArgs)
+      return new Func(funcExpr.name, transformedArgs, funcExpr.collation)
     }
 
     case `ref`:
@@ -819,7 +819,7 @@ function extractAndReplaceAggregates(
       return result.transformed as BasicExpression
     })
     return {
-      transformed: new Func(expr.name, newArgs),
+      transformed: new Func(expr.name, newArgs, expr.collation),
       extracted: allExtracted,
     }
   }
@@ -953,6 +953,7 @@ function replaceGroupByRefsInExpression(
       expr.args.map((arg) =>
         replaceGroupByRefsInExpression(arg, groupByClause, groupKeyRefs),
       ),
+      expr.collation,
     )
   }
 

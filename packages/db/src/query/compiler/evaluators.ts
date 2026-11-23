@@ -278,6 +278,13 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
   const compiledArgs = func.args.map((arg) =>
     compileExpressionInternal(arg, isSingleRow),
   )
+  const collation = func.collation
+  const order = collation
+    ? (a: any, b: any) =>
+        typeof a === `string` && typeof b === `string`
+          ? collation.compare(a, b)
+          : compareValues(a, b)
+    : compareValues
 
   switch (func.name) {
     case `array`:
@@ -322,7 +329,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnorderable(a) || isUnorderable(b)) {
           return isUnorderable(a) && !isUnorderable(b)
         }
-        return compareValues(a, b) > 0
+        return order(a, b) > 0
       }
     }
     case `gte`: {
@@ -338,7 +345,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnorderable(a) || isUnorderable(b)) {
           return isUnorderable(a)
         }
-        return compareValues(a, b) >= 0
+        return order(a, b) >= 0
       }
     }
     case `lt`: {
@@ -354,7 +361,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnorderable(a) || isUnorderable(b)) {
           return isUnorderable(b) && !isUnorderable(a)
         }
-        return compareValues(a, b) < 0
+        return order(a, b) < 0
       }
     }
     case `lte`: {
@@ -370,7 +377,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnorderable(a) || isUnorderable(b)) {
           return isUnorderable(b)
         }
-        return compareValues(a, b) <= 0
+        return order(a, b) <= 0
       }
     }
 
