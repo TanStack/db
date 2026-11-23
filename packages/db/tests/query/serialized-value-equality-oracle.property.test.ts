@@ -15,6 +15,13 @@
  * equals a value class that serializes alike. Authority: the same section's
  * built-in rule, which names these types.
  *
+ * A range predicate uses the documented order of value classes: their
+ * serialized value, never `valueOf()`. A primitive sorts before a value class
+ * and any other object after it. Equal captures are one query, so a predicate
+ * must not depend on anything outside the serialization. Plain records, arrays
+ * and other excluded objects keep reference semantics without their `toJSON`
+ * property being read.
+ *
  * Why an example can miss the failure: a probe that is the stored instance
  * matches under reference equality too, an index can agree with a scan until
  * the instance that represents a group of equal values leaves it, and a join
@@ -46,11 +53,13 @@
  *
  * Refinement check: every read returns exactly the model's keys or pairs, and
  * the identities of equal probes are equal, while a record probe's identity
- * differs from its text look-alike's. A built-in carrier spelled like the
+ * differs from its text look-alike's and from an unequal record's, including
+ * inside a nested query key. Each record instance has its own `valueOf()`, so
+ * a range read that used it disagrees with the model. A built-in carrier spelled like the
  * probe never matches it, in a scan, an index, a filter or a join, and sorts
  * as its own run.
  *
- * Known omissions: ordering by a value class, `inArray`, on-demand and
+ * Known omissions: `inArray`, on-demand and
  * persisted sources, exact-output (`select`) identity, which keeps reference
  * semantics, and classes whose `toJSON()` throws or returns a non-JSON value.
  */
@@ -60,7 +69,14 @@ import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { Query, getQueryIR } from '../../src/query/builder/index.js'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import {
+  createLiveQueryCollection,
+  eq,
+  gt,
+  gte,
+  lt,
+  lte,
+} from '../../src/query/index.js'
 import {
   getLoadSubsetDemandKey,
   getQueryIdentity,
@@ -90,6 +106,12 @@ const reachStates = [
   `ordered-equal-run`,
   // A source row held a built-in carrier spelled like a record probe.
   `builtin-lookalike-held`,
+  // A range read compared a distinct record equal to the probe.
+  `range-equal-record`,
+  // Identity compared a record probe with an unequal record.
+  `unequal-record-probe`,
+  // A plain record or array held a toJSON accessor that must not be read.
+  `excluded-accessor-held`,
 ] as const
 type ReachState = (typeof reachStates)[number]
 
@@ -99,7 +121,8 @@ type RefSpec =
   | { kind: `text`; table: Table; id: `a` | `b` }
   | { kind: `builtin`; carrier: Carrier; table: Table; id: `a` | `b` }
   | { kind: `null` }
-type Carrier = `Map` | `Set` | `ArrayBuffer`
+type Carrier = `Map` | `Set` | `ArrayBuffer` | `PlainRecord` | `Array`
+type UnequalBy = `table` | `id` | `both`
 type IndexMode = `none` | `basic` | `btree`
 type History = {
   rows: Array<RefSpec>
@@ -109,12 +132,17 @@ type History = {
   // instance; otherwise the row takes `value`. `row` wraps to the rows.
   updates: Array<{ row: number; value: RefSpec; sameValue: boolean }>
   probe: Extract<RefSpec, { kind: `record` | `text` }>
+  unequalBy: UnequalBy
 }
+
+let nextRank = 0
 
 /** A record reference shaped like the `surrealdb` SDK's `RecordId`. */
 class RecordRef {
   readonly table: string
   readonly id: string
+  // Differs per instance, so an order that reads valueOf() splits equal values.
+  readonly rank = nextRank++
   constructor(table: string, id: string) {
     this.table = table
     this.id = id
@@ -124,6 +152,9 @@ class RecordRef {
   }
   toJSON(): string {
     return this.toString()
+  }
+  valueOf(): number {
+    return this.rank
   }
   equals(other: unknown): boolean {
     return (
@@ -167,6 +198,15 @@ class RecordBuffer extends ArrayBuffer {
   }
 }
 
+// Excluded objects keep reference semantics, so their toJSON is never read.
+function withThrowingToJSON<T extends object>(target: T): T {
+  return Object.defineProperty(target, `toJSON`, {
+    get() {
+      throw new Error(`an excluded object's toJSON was read`)
+    },
+  })
+}
+
 type Row = { id: string; ref: object | string | null }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +226,50 @@ function modelEq(left: RefSpec, right: RefSpec): boolean {
     left.table === right.table &&
     left.id === right.id
   )
+}
+
+type RangeOp = `gt` | `gte` | `lt` | `lte`
+
+// A record probe's order: text before it, other objects after it, and records
+// by their table and ID text. Null is UNKNOWN, so it never matches.
+function modelRangeKeys(
+  rows: ReadonlyMap<string, RefSpec>,
+  probe: Extract<RefSpec, { kind: `record` }>,
+  op: RangeOp,
+) {
+  const spelled = `${probe.table}:${probe.id}`
+  const order = (spec: RefSpec): number => {
+    if (spec.kind === `text`) return -1
+    if (spec.kind === `builtin`) return 1
+    if (spec.kind === `null`) return 0
+    const value = `${spec.table}:${spec.id}`
+    return value < spelled ? -1 : value > spelled ? 1 : 0
+  }
+  const keep = (result: number) =>
+    op === `gt`
+      ? result > 0
+      : op === `gte`
+        ? result >= 0
+        : op === `lt`
+          ? result < 0
+          : result <= 0
+  return [...rows]
+    .filter(([, spec]) => spec.kind !== `null` && keep(order(spec)))
+    .map(([key]) => key)
+    .sort()
+}
+
+function unequalRecord(
+  probe: Extract<RefSpec, { kind: `record` }>,
+  by: UnequalBy,
+): Extract<RefSpec, { kind: `record` }> {
+  const table = probe.table === `user` ? `org` : `user`
+  const id = probe.id === `a` ? `b` : `a`
+  return {
+    kind: `record`,
+    table: by === `id` ? probe.table : table,
+    id: by === `table` ? probe.id : id,
+  }
 }
 
 function modelKeys(rows: ReadonlyMap<string, RefSpec>, probe: RefSpec) {
@@ -254,7 +338,13 @@ const probeArbitrary = fc.oneof(
     id: idArbitrary,
   }),
 )
-const carrierArbitrary = fc.constantFrom<Carrier>(`Map`, `Set`, `ArrayBuffer`)
+const carrierArbitrary = fc.constantFrom<Carrier>(
+  `Map`,
+  `Set`,
+  `ArrayBuffer`,
+  `PlainRecord`,
+  `Array`,
+)
 const builtinArbitrary = fc.record({
   kind: fc.constant(`builtin` as const),
   carrier: carrierArbitrary,
@@ -279,11 +369,27 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
     { maxLength: 3 },
   ),
   probe: probeArbitrary,
+  unequalBy: fc.constantFrom<UnequalBy>(`table`, `id`, `both`),
 })
 
 // ---------------------------------------------------------------------------
 // Production driver
 // ---------------------------------------------------------------------------
+
+function materializeCarrier(carrier: Carrier, ref: string): object {
+  switch (carrier) {
+    case `Map`:
+      return new RecordMap(ref)
+    case `Set`:
+      return new RecordSet(ref)
+    case `ArrayBuffer`:
+      return new RecordBuffer(ref)
+    case `PlainRecord`:
+      return withThrowingToJSON({ ref })
+    case `Array`:
+      return withThrowingToJSON([ref])
+  }
+}
 
 // Every call builds a fresh instance, so equal references are never the same
 // object.
@@ -293,14 +399,8 @@ function materialize(spec: RefSpec): object | string | null {
       return new RecordRef(spec.table, spec.id)
     case `text`:
       return `${spec.table}:${spec.id}`
-    case `builtin`: {
-      const ref = `${spec.table}:${spec.id}`
-      return spec.carrier === `Map`
-        ? new RecordMap(ref)
-        : spec.carrier === `Set`
-          ? new RecordSet(ref)
-          : new RecordBuffer(ref)
-    }
+    case `builtin`:
+      return materializeCarrier(spec.carrier, `${spec.table}:${spec.id}`)
     case `null`:
       return null
   }
@@ -408,6 +508,29 @@ async function runHistory(
     await filtered.preload()
     await pairs.preload()
 
+    const recordProbe =
+      history.probe.kind === `record` ? history.probe : undefined
+    const rangeOps = { gt, gte, lt, lte }
+    const ranges = recordProbe
+      ? (Object.keys(rangeOps) as Array<RangeOp>).map((op) => {
+          const live = createLiveQueryCollection({
+            id: `serialized-value-${op}-${run}`,
+            query: (q) =>
+              q
+                .from({ item: source })
+                .where(({ item }) =>
+                  rangeOps[op](
+                    item.ref as never,
+                    materialize(recordProbe) as never,
+                  ),
+                ),
+          })
+          cleanup(() => live.cleanup())
+          return { op, live }
+        })
+      : []
+    for (const range of ranges) await range.live.preload()
+
     const orderedKeys = () =>
       source
         .currentStateAsChanges({
@@ -456,6 +579,23 @@ async function runHistory(
       ).toEqual(expectedPairs)
       if (history.probe.kind === `record` && expectedKeys.length > 0)
         reach(`distinct-instance-matched`)
+      if (recordProbe !== undefined) {
+        for (const { op, live } of ranges) {
+          expect(
+            live.toArray.map((row) => row.id).sort(),
+            `${checkpoint}: ${op}`,
+          ).toEqual(modelRangeKeys(model, recordProbe, op))
+        }
+        if (expectedKeys.length > 0) reach(`range-equal-record`)
+      }
+      if (
+        [...model.values()].some(
+          (spec) =>
+            spec.kind === `builtin` &&
+            (spec.carrier === `PlainRecord` || spec.carrier === `Array`),
+        )
+      )
+        reach(`excluded-accessor-held`)
       if (
         expectedPairs.some((pair) => {
           const [left] = pair.split(`|`)
@@ -522,6 +662,28 @@ async function runHistory(
         getStableValueHash(text),
       )
     }
+    if (recordProbe !== undefined) {
+      reach(`unequal-record-probe`)
+      const unequal = materialize(unequalRecord(recordProbe, history.unequalBy))
+      const nestedKey = (value: unknown) =>
+        getStableValueHash([`items`, { owners: [value] }], `queryKey`)
+      expect(
+        getQueryIdentity(queryFor(first)),
+        `unequal records: query identity`,
+      ).not.toBe(getQueryIdentity(queryFor(unequal)))
+      expect(demandFor(first), `unequal records: demand key`).not.toBe(
+        demandFor(unequal),
+      )
+      expect(getStableValueHash(first), `unequal records: value hash`).not.toBe(
+        getStableValueHash(unequal),
+      )
+      expect(nestedKey(first), `equal records: nested query key`).toBe(
+        nestedKey(second),
+      )
+      expect(nestedKey(first), `unequal records: nested query key`).not.toBe(
+        nestedKey(unequal),
+      )
+    }
   }, cleanups)
 }
 
@@ -529,13 +691,14 @@ describe(`value classes compare by their serialized value`, () => {
   oracleProperty({
     id: property,
     law: {
-      statement: `Query equality, exact index lookup, live-query filters and joins match distinct class instances whose toJSON() values are equal, never a plain value equal to that serialization; query identity and getStableValueHash follow the same relation. A Map, Set or ArrayBuffer subclass with toJSON() keeps its built-in rule and never equals a value class.`,
+      statement: `Query equality, exact index lookup, live-query filters and joins match distinct class instances whose toJSON() values are equal, never a plain value equal to that serialization; query identity and getStableValueHash follow the same relation and separate unequal values. Range predicates order a value class by that serialization, never valueOf(). A Map, Set or ArrayBuffer subclass with toJSON() keeps its built-in rule and never equals a value class, and a plain record or array keeps reference semantics without its toJSON property being read.`,
       authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
-      limits: `One toJSON() class over two tables and two IDs, its text look-alike, empty Map, Set and ArrayBuffer subclass look-alikes (never probes), and null; up to four source rows, three join rows and three synced updates; no ordering, inArray, on-demand or persisted sources, or exact-output identity.`,
+      limits: `One toJSON() class over two tables and two IDs, its text look-alike, empty Map, Set and ArrayBuffer subclass look-alikes, plain records and arrays with a throwing toJSON accessor (never probes), and null; up to four source rows, three join rows and three synced updates; range reads use record probes; no inArray, on-demand or persisted sources, or exact-output identity.`,
     },
     owns: [
       'src/utils/comparison.ts#normalizeValue',
       'src/utils/comparison.ts#serializedClassValue',
+      'src/utils/comparison.ts#compareValues',
       'src/query/ir-stable-identity.ts#getStableValueHash',
       'src/indexes/basic-index.ts#BasicIndex.lookup',
       'src/indexes/btree-index.ts#BTreeIndex.lookup',
@@ -553,6 +716,8 @@ describe(`value classes compare by their serialized value`, () => {
             `indexed-equal-replacement`,
             `join-matched`,
             `ordered-equal-run`,
+            `range-equal-record`,
+            `unequal-record-probe`,
           ],
           build: (generated): History => {
             const probe = {
@@ -602,6 +767,43 @@ describe(`value classes compare by their serialized value`, () => {
               ...generated,
               rows: [probe, lookalike, probe, ...generated.rows.slice(3)],
               joinRows: [lookalike, probe, ...generated.joinRows.slice(2)],
+              probe,
+            }
+          },
+        },
+        {
+          name: `excluded objects with a toJSON accessor sit among equal records`,
+          enters: [
+            `excluded-accessor-held`,
+            `distinct-instance-matched`,
+            `range-equal-record`,
+            `unequal-record-probe`,
+          ],
+          build: (generated): History => {
+            const probe = {
+              kind: `record` as const,
+              table: generated.probe.table,
+              id: generated.probe.id,
+            }
+            const excluded = (carrier: Carrier) => ({
+              kind: `builtin` as const,
+              carrier,
+              table: probe.table,
+              id: probe.id,
+            })
+            return {
+              ...generated,
+              rows: [
+                probe,
+                excluded(`PlainRecord`),
+                excluded(`Array`),
+                ...generated.rows.slice(3),
+              ],
+              joinRows: [
+                excluded(`PlainRecord`),
+                probe,
+                ...generated.joinRows.slice(2),
+              ],
               probe,
             }
           },

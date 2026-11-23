@@ -3394,6 +3394,59 @@ describe(`Query Collections`, () => {
       })
     })
 
+    it(`orders value-class bounds by serialization through rerenders`, async () => {
+      class Bound {
+        constructor(
+          readonly json: string,
+          readonly rank: number,
+        ) {}
+        toJSON() {
+          return this.json
+        }
+        valueOf() {
+          return this.rank
+        }
+      }
+      type Row = { id: string; bound: Bound }
+      const rows = createCollection(
+        localOnlyCollectionOptions({
+          id: `derived-identity-value-class-range`,
+          getKey: (row: Row) => row.id,
+          initialData: [{ id: `row`, bound: new Bound(`b`, 1) }],
+        }),
+      )
+      const { result, rerender } = renderHook(
+        ({ json, rank }) =>
+          useLiveQuery({
+            query: (q) =>
+              q
+                .from({ row: rows })
+                .where(({ row }) => gt(row.bound, new Bound(json, rank))),
+          }),
+        { initialProps: { json: `a`, rank: 5 } },
+      )
+
+      await waitFor(() => {
+        expect(result.current.data.map((row) => row.id)).toEqual([`row`])
+      })
+      const firstCollection = result.current.collection
+
+      // valueOf() changed but the serialization did not: the same query.
+      rerender({ json: `a`, rank: 0 })
+      expect(result.current.collection).toBe(firstCollection)
+      expect(result.current.data.map((row) => row.id)).toEqual([`row`])
+
+      // A changed bound is a new query with its own result.
+      rerender({ json: `c`, rank: 0 })
+      await waitFor(() => {
+        expect(result.current.data).toEqual([])
+      })
+      rerender({ json: `a`, rank: 9 })
+      await waitFor(() => {
+        expect(result.current.data.map((row) => row.id)).toEqual([`row`])
+      })
+    })
+
     it(`uses explicit queryKey for functional query variants`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({

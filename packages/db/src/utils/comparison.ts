@@ -272,8 +272,9 @@ function normalizeBinary(value: Uint8Array): string {
  * in the serialized value are sorted, so key order does not change it.
  */
 export function serializedClassValue(value: object): string | undefined {
+  // Excluded objects keep their own rules, so their `toJSON` is never read: it
+  // can be an accessor that throws.
   if (
-    typeof (value as { toJSON?: unknown }).toJSON !== `function` ||
     isPlainObject(value) ||
     Array.isArray(value) ||
     value instanceof Date ||
@@ -281,7 +282,8 @@ export function serializedClassValue(value: object): string | undefined {
     value instanceof Set ||
     value instanceof ArrayBuffer ||
     ArrayBuffer.isView(value) ||
-    isTemporal(value)
+    isTemporal(value) ||
+    typeof (value as { toJSON?: unknown }).toJSON !== `function`
   ) {
     return undefined
   }
@@ -382,13 +384,35 @@ export function compareTemporalValues(a: unknown, b: unknown): number {
   return compare(a, b)
 }
 
+const VALUE_CLASS_ORDER: CompareOptions = {
+  direction: `asc`,
+  nulls: `first`,
+  stringSort: `lexical`,
+}
+
+function holdsValueClass(
+  value: unknown,
+  seen: Set<unknown> = new Set(),
+): boolean {
+  if (typeof value !== `object` || value === null || seen.has(value)) {
+    return false
+  }
+  seen.add(value)
+  return Array.isArray(value)
+    ? value.some((item) => holdsValueClass(item, seen))
+    : serializedClassValue(value) !== undefined
+}
+
 /**
  * Order two non-null values, returning -1, 0, or 1.
  *
  * Temporal types intentionally throw from `valueOf` to prevent silent
  * miscomparison via the native relational operators — delegate to
- * `compareTemporalValues` for them. For everything else (numbers, strings,
- * Dates via `valueOf`, etc.) the native operators do the right thing.
+ * `compareTemporalValues` for them. A value class, alone or inside an array,
+ * uses the sort order, which reads its serialized value: equal captures are
+ * one query, so a range must not depend on `valueOf`. For everything else
+ * (numbers, strings, Dates via `valueOf`, etc.) the native operators do the
+ * right thing.
  *
  * Callers must handle null/undefined themselves — this helper assumes both
  * arguments are non-null.
@@ -396,6 +420,9 @@ export function compareTemporalValues(a: unknown, b: unknown): number {
 export function compareValues(a: unknown, b: unknown): number {
   if (isTemporal(a) && isTemporal(b)) {
     return compareTemporalValues(a, b)
+  }
+  if (holdsValueClass(a) || holdsValueClass(b)) {
+    return Math.sign(ascComparator(a, b, VALUE_CLASS_ORDER))
   }
   return (a as any) < (b as any) ? -1 : (a as any) > (b as any) ? 1 : 0
 }
