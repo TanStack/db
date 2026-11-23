@@ -9,7 +9,7 @@ id: adapter
 npm install @tanstack/solid-db
 ```
 
-Requires `solid-js@>=2.0.0-rc.0` and `@solidjs/web@>=2.0.0-rc.0` as peer dependencies.
+Requires `solid-js@^2.0.0` and `@solidjs/web@^2.0.0` as peer dependencies.
 
 ## Solid Primitives
 

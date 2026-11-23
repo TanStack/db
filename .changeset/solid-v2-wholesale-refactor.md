@@ -5,10 +5,10 @@
 # Solid v2 RC migration + wholesale observer refactor
 
 Migrates `@tanstack/solid-db` from Solid v1 to **Solid v2 RC** (developed
-against `solid-js@2.0.0-rc.13`) and reworks the adapter to derive all Solid
+against `solid-js@2.0.3`) and reworks the adapter to derive all Solid
 state from the shared `LiveQueryObserver`'s wholesale snapshots. This is a
 **breaking** release — the peer dependency is now
-`solid-js: >=2.0.0-rc.0` and `@solidjs/web: >=2.0.0-rc.0`.
+`solid-js: ^2.0.0` and `@solidjs/web: ^2.0.0`.
 
 Ship this as a **prerelease** until `solid-js` 2.0 final is out.
 

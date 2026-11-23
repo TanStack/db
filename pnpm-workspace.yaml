@@ -7,12 +7,6 @@ trustPolicyExclude:
   # Babel, ESLint React, and Istanbul still require semver 6, whose last release lacks provenance.
   - 'semver@6.3.1'
 
-# @solidjs/vite-plugin dedupes solid-js to the importing project, so rollup
-# resolves solid-js's own imports from each project's node_modules; hoist the
-# signals package to keep it resolvable there.
-publicHoistPattern:
-  - '@solidjs/signals'
-
 packages:
   - packages/**
   - '!packages/convex-db-collection/e2e/auth-app/runtime'
