@@ -19,6 +19,11 @@ export function registerBaselineLifecycle(
     streamFailure: boolean
     /** The receiving adapter's production entry, forwarded to oracleProperty. */
     owns?: ReadonlyArray<string>
+    /**
+     * Fixed bases per constructed history (`histories.bases`), for a host
+     * whose constructed histories are too costly for the default of 5.
+     */
+    bases?: number
   },
   receive: (
     h: BaselineLifecycleHistory,
@@ -139,6 +144,7 @@ export function registerBaselineLifecycle(
           return history
         },
       })),
+      ...(config.bases === undefined ? {} : { bases: config.bases }),
       fixed: [
         ...baselineLifecycleHistories,
         ...(config.streamFailure
