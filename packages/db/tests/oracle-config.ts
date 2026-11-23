@@ -436,6 +436,7 @@ const staticOracleProperties = [
   `offline.leadership.startup`,
   `offline.leadership.stale-read`,
   `offline.leadership.storage-failure`,
+  `offline.web-locks-leader`,
   `offline.serializer.mutation-wire`,
   `offline.serializer.date-marker`,
   `offline.serializer.version-two`,

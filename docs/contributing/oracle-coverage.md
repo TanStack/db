@@ -4241,6 +4241,9 @@ The post-merge review added three missing domains to existing owners:
   contribution bag and source-row identity, as well as output length and zero
   getter reads. A multiple-key constructed history and duplicate-key/omitted-key
   calibration protect that distinction.
+- [Web Locks leadership](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/web-locks-leader-oracle.property.test.ts)
+  checks FIFO takeover across three tabs that request, release and close over a
+  controlled lock manager. It does not cover real browser contexts.
 - [Leadership replay](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/leadership-replay-oracle.property.test.ts)
   holds real storage-read delivery across successful and permanently rejected
   durable removals, with bounded scans, concurrent loads, and unfinished peers.
