@@ -8,7 +8,7 @@
  * loads root rows a page at a time and waits for the joined rows of each page.
  * A subquery that only filters and projects one collection reads that
  * collection's rows by key in the same way, so it pages too. A subquery that
- * can change which joined rows exist for a key (a limit, an offset, grouping,
+ * can change which joined rows exist for a key (a limit, an offset, grouping or an aggregate,
  * another join, a function clause, a single-row result or a nested source)
  * keeps the full-source read.
  *
@@ -40,6 +40,7 @@ import {
   createLiveQueryCollection,
   eq,
   isUndefined,
+  max,
   not,
 } from '../../src/query/index.js'
 import { compileSingleRowExpression } from '../../src/query/compiler/evaluators.js'
@@ -76,6 +77,7 @@ const fullSourceShapes = [
   `fn-where`,
   `fn-select`,
   `fn-having`,
+  `implicit-aggregate`,
   `single`,
   `nested`,
 ] as const
@@ -87,7 +89,12 @@ const subqueryCases = [`some`, `none`].flatMap((filter) =>
 )
 type SubqueryCase = (typeof subqueryCases)[number]
 
-const planOnly: ReadonlyArray<string> = [`single`, `fn-select`, `fn-having`]
+const planOnly: ReadonlyArray<string> = [
+  `single`,
+  `fn-select`,
+  `fn-having`,
+  `implicit-aggregate`,
+]
 
 const pages = ({ shape }: SubqueryCase) =>
   (pagingShapes as ReadonlyArray<string>).includes(shape)
@@ -195,6 +202,8 @@ function visibleRuns(
         .select(({ run }) => ({ k: run.seekId }))
     case `fn-select`:
       return visible.fn.select(({ run }) => ({ k: run.seekId }))
+    case `implicit-aggregate`:
+      return visible.select(({ run }) => ({ k: max(run.seekId) }))
     case `fn-having`:
       return project().fn.having(() => true)
     case `single`:
@@ -286,7 +295,7 @@ describe(`ordered window filtered through a joined subquery`, () => {
     law: {
       statement: `A filter through a LEFT join to a subquery that only filters and projects one collection pages its root source; any other subquery keeps the full-source read, and both publish the same window.`,
       authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery.`,
-      limits: `Two existence checks by eleven subquery shapes over one window; joined-demand scheduling belongs to ordered-work.work-joined-plan.`,
+      limits: `Two existence checks by twelve subquery shapes over one window; joined-demand scheduling belongs to ordered-work.work-joined-plan.`,
     },
     owns: ['src/query/compiler/order-by.ts#processOrderBy'],
     histories: subqueryCases,

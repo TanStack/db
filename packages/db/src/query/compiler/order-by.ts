@@ -20,6 +20,7 @@ import { hasVirtualPropPath } from '../../virtual-props.js'
 import { deepEquals } from '../../utils.js'
 import { devBuild } from '../../error-message.js'
 import { compileExpression } from './evaluators.js'
+import { findAggregate } from './find-aggregate.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
 import type { CompareOptions } from '../builder/types.js'
 import type { WindowOptions } from './types.js'
@@ -90,6 +91,7 @@ function filterSubqueryOf(
     sub.from.type !== `collectionRef` ||
     (sub.join?.length ?? 0) > 0 ||
     sub.groupBy !== undefined ||
+    findAggregate(sub.select) !== undefined ||
     sub.fnHaving !== undefined ||
     (sub.fnWhere?.length ?? 0) > 0 ||
     sub.fnSelect !== undefined ||
