@@ -17,7 +17,8 @@
  * hook, a hook that says held, one that says not held, one that throws, and one
  * that returns a truthy non-boolean. A
  * hook that claims rows the Collection does not hold is outside the contract.
- * Joined windows and an open truncate replay are not exercised here.
+ * One joined window covers a held root whose joined source has not answered.
+ * An open truncate replay is not exercised here.
  *
  * ## Model
  *
@@ -31,8 +32,9 @@
  * installs the rows, and the second query is observed before and after its
  * first subscriber through public status, rows and `loadSubset` calls.
  */
-import { describe, expect } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { compileSingleRowExpression } from '../../src/query/compiler/evaluators.js'
@@ -176,7 +178,219 @@ async function runHookCell(cell: HookCase): Promise<void> {
   }
 }
 
+// More reads than any terminating drain makes.
+const joinedReadBudget = 1000
+
+// A held root answers its page and tie synchronously while its joined source
+// has started no work. The refill then waits for that work: the deferred query
+// must return, and its first subscriber must still reach the right window.
+async function runJoinedHeldCell(): Promise<void> {
+  const owners = rows.map(({ id }) => ({ id, active: id % 2 === 0 }))
+  const root = createCollection<Row>({
+    id: `deferred-loaded-subset-joined-root`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const row of rows) write({ type: `insert`, value: { ...row } })
+        commit()
+        markReady()
+        return {
+          loadSubset: () => true as const,
+          isSubsetLoaded: () => true,
+        }
+      },
+    },
+  })
+  const joined = createCollection<{ id: number; active: boolean }>({
+    id: `deferred-loaded-subset-joined-owners`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        const written = new Set<number>()
+        markReady()
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            const where = options.where
+              ? compileSingleRowExpression(options.where)
+              : undefined
+            return new Promise<void>((resolve) =>
+              setTimeout(() => {
+                begin()
+                for (const owner of owners) {
+                  if ((where && where(owner) !== true) || written.has(owner.id))
+                    continue
+                  written.add(owner.id)
+                  write({ type: `insert`, value: owner })
+                }
+                const receipt = commit()
+                void (receipt === true ? resolve() : receipt.then(resolve))
+              }, 1),
+            )
+          },
+        }
+      },
+    },
+  })
+  const original = CollectionConfigBuilder.prototype.hasPendingJoinedWork
+  let joinedReads = 0
+  const reads = vi
+    .spyOn(CollectionConfigBuilder.prototype, `hasPendingJoinedWork`)
+    .mockImplementation(function (this: never, id: string) {
+      if (++joinedReads > joinedReadBudget) {
+        throw new Error(`joined-work read budget exceeded`)
+      }
+      return original.call(this, id)
+    })
+  let live: ReturnType<typeof buildJoined> | undefined
+  function buildJoined() {
+    return createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ row: root })
+          .leftJoin({ owner: joined }, ({ row, owner }) => eq(row.id, owner.id))
+          .where(({ owner }) => eq(owner.active, true))
+          .orderBy(({ row }) => row.rank, `desc`)
+          .limit(3)
+          .select(({ row }) => ({ id: row.id })),
+    })
+  }
+  try {
+    try {
+      live = buildJoined()
+    } catch {
+      // The read budget ended a spinning drain; the comparison below names it.
+    }
+    expect(joinedReads, `the deferred query returns`).toBeLessThanOrEqual(
+      joinedReadBudget,
+    )
+    const subscription = live!.subscribeChanges(() => {})
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(
+      Array.from(live!.values(), ({ id }) => id),
+      `window after a subscriber`,
+    ).toEqual(expectedIds)
+    subscription.unsubscribe()
+  } finally {
+    reads.mockRestore()
+    await live?.cleanup()
+    await root.cleanup()
+    await joined.cleanup()
+  }
+}
+
+// A source that becomes ready after the hook settled a deferred demand owes
+// that demand nothing: its window is published and it is not loading.
+async function runSourceReadyCell({
+  source: history,
+}: {
+  source: `late-ready` | `released`
+}): Promise<void> {
+  let ready!: () => void
+  let holds = true
+  const source = createCollection<Row>({
+    id: `deferred-loaded-subset-source-${history}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const row of rows) write({ type: `insert`, value: { ...row } })
+        commit()
+        ready = markReady
+        return {
+          loadSubset: () => true as const,
+          isSubsetLoaded: () => holds,
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    startSync: true,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .where(({ row }) => eq(row.group, `even`))
+        .orderBy(({ row }) => row.rank, `desc`)
+        .limit(3)
+        .select(({ row }) => ({ id: row.id })),
+  })
+  try {
+    // Once the adapter no longer vouches for the rows, the demand is
+    // unanswered and the deferred query is waiting on it.
+    if (history === `released`) holds = false
+    ready()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    if (history === `released`) {
+      expect(live.isLoadingSubset, `an unanswered demand is loading`).toBe(true)
+    } else {
+      expect(
+        Array.from(live.values(), ({ id }) => id),
+        `published window`,
+      ).toEqual(expectedIds)
+      expect(live.isLoadingSubset, `a settled demand is not loading`).toBe(
+        false,
+      )
+    }
+  } finally {
+    await live.cleanup()
+    await source.cleanup()
+  }
+}
+
 describe(`deferred window over a held subset`, () => {
+  oracleProperty({
+    id: `deferred-loaded-subset.joined`,
+    law: {
+      statement: `A deferred joined window over a held root returns while its joined source has not answered, and reaches the right window after its first subscriber.`,
+      authority: `query/live/ARCHITECTURE.md: Deferred acquisition; Ordered requests, continuation, and recovery.`,
+      limits: `One LEFT-joined filter whose root answers synchronously.`,
+    },
+    owns: ['src/query/live/ordered-source-loader.ts'],
+    histories: [{ root: `held` }],
+    label: ({ root }) => `${root} root with an unanswered joined source`,
+    resolve: (cell) => ({ cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`deferred joined window`, plan, observe, () =>
+        runJoinedHeldCell(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `deferred-loaded-subset.source-ready`,
+    law: {
+      statement: `A deferred demand the hook settled is not reported as loading when its source later becomes ready, unless the adapter no longer vouches for its rows.`,
+      authority: `query/live/ARCHITECTURE.md: Deferred acquisition.`,
+      limits: `One ordered window whose source becomes ready after the hook answered, with the hook still holding and after it stopped.`,
+    },
+    owns: ['src/collection/subscription.ts'],
+    histories: [{ source: `late-ready` }, { source: `released` }] as Array<{
+      source: `late-ready` | `released`
+    }>,
+    label: ({ source }) => `${source} source`,
+    resolve: (cell) => ({ cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`deferred source ready`, plan, observe, () =>
+        runSourceReadyCell(plan.cell),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
   oracleProperty({
     id: `deferred-loaded-subset.window`,
     law: {

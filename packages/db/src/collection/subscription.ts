@@ -309,7 +309,13 @@ export class CollectionSubscription
         const replayState = this.truncateReplayState
         if (
           this.subsetDemands.some(
-            (demand) => demand.acquisitionState === `detached`,
+            (demand) =>
+              demand.acquisitionState === `detached` &&
+              // A deferred demand whose rows are held owes no load yet.
+              !(
+                this.defersAcquisition &&
+                this.isSubsetLoadedLocally(demand.requestOptions)
+              ),
           )
         ) {
           this.setStatus(`loadingSubset`)
