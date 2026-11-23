@@ -1187,6 +1187,16 @@ export class CollectionSubscription
     }
   }
 
+  private isSubsetLoadedLocally(options: LoadSubsetOptions): boolean {
+    const isSubsetLoaded = this.collection._sync.syncIsSubsetLoadedFn
+    if (!isSubsetLoaded) return false
+    try {
+      return isSubsetLoaded(options) === true
+    } catch {
+      return false
+    }
+  }
+
   /** Start and retain the first acquisition for one logical subset demand. */
   private startSubsetDemand(requestOptions: LoadSubsetOptions): {
     demand: SubsetDemand
@@ -1208,11 +1218,13 @@ export class CollectionSubscription
     const replayState = this.truncateReplayState
     const replayAttempt = replayState?.currentAttempt
     try {
+      const deferred =
+        this.defersAcquisition &&
+        this.collection.config.syncMode === `on-demand`
       const detached =
         this.collection.status === `cleaned-up` ||
         // A deferring subscription starts no acquisition attempt until it resumes.
-        (this.defersAcquisition &&
-          this.collection.config.syncMode === `on-demand`) ||
+        deferred ||
         // Ready/error callbacks can run before sync returns its loader. Idle
         // deferred starts still acquire through the sync manager's queue.
         (this.collection.config.syncMode === `on-demand` &&
@@ -1252,6 +1264,15 @@ export class CollectionSubscription
             initialResult.promise,
             requestOptions.signal,
           )
+        // Rows the Collection already holds whole answer a deferred demand
+        // now. Its acquisition still starts when the subscription resumes.
+        if (
+          deferred &&
+          !replayState &&
+          this.isSubsetLoadedLocally(requestOptions)
+        ) {
+          return { demand, result: true, started: false }
+        }
         return { demand, result: initialResult.promise, started: false }
       }
       const syncRunGeneration = acquisition.syncRunGeneration
