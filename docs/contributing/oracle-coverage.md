@@ -7646,6 +7646,17 @@ guide's Suspense contract, hook JSDoc, the shared conformance contract's retry
 progress and exclusive output laws, and the established cleanup/request recovery
 contract examples.
 
+[The startup property](../../packages/react-db/tests/suspense-startup-oracle.test.tsx)
+uses an independent model, driver, and comparison for the first commit of a
+newly selected query over a retained on-demand source. Standalone, provider, and
+explicit-client inputs distinguish a synchronous match or empty result from
+the same demand held behind an unresolved acquisition. A constructed history
+opens an unrelated stream on the same client before mounting the detail in a
+client render. A matching pending result instead keeps the fallback until
+delivery, but the local acquisition starts before that delivery. The model
+compares the first view before release, the commit sequence, and whether the
+local acquisition started. The Router witness owns first hydration reads.
+
 Fixed and fresh campaigns generate source fail/crash/abandon, pending rerenders,
 boundary reset/root remount, retired rejection, successful peers, and source
 failure after readiness. Derived/keyed queries run without a client, with a
