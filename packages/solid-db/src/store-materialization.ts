@@ -1,239 +1,221 @@
-import { $PROXY, createStore, createSignal, snapshot, untrack } from 'solid-js'
+import { createSignal, createStore, markRaw } from 'solid-js'
+import type { Signal } from 'solid-js'
 
-type RecordValue = Record<PropertyKey, unknown>
-type RowStore = Record<PropertyKey, unknown>
-function container(value: unknown): value is RecordValue {
+type Fields = Record<PropertyKey, unknown>
+type Descriptors = Map<PropertyKey, PropertyDescriptor>
+
+// Solid's store leaves this name to the prototype: it is never an own field of
+// a store, and reading it yields undefined. A row store keeps the user's own
+// field of that name beside the store and serves it through a read facade.
+const RESERVED = `__proto__`
+
+function isContainer(value: unknown): value is Fields {
   if (value === null || typeof value !== `object`) return false
-  const proto: unknown = Object.getPrototypeOf(value)
-  return Array.isArray(value) || proto === Object.prototype || proto === null
-}
-function keys(value: object) {
-  return Reflect.ownKeys(value).filter(
-    (key) =>
-      (typeof key !== `symbol` ||
-        Object.prototype.propertyIsEnumerable.call(value, key)) &&
-      !(Array.isArray(value) && key === `length`),
+  const prototype: unknown = Object.getPrototypeOf(value)
+  return (
+    Array.isArray(value) || prototype === Object.prototype || prototype === null
   )
 }
-// Solid deliberately excludes __proto__ from native setters and tracking.
-// A sidecar tracks this own data field on detached rows without invoking the
-// inherited prototype setter or changing Solid's guarded update paths.
-const ownFieldRevisions = new WeakMap<
-  object,
-  ReturnType<typeof createSignal<number>>
->()
-function ownFieldRevision(target: object) {
-  let revision = ownFieldRevisions.get(target)
-  if (!revision) {
-    revision = createSignal(0)
-    ownFieldRevisions.set(target, revision)
-  }
-  return revision
+
+// An array's length follows its indices, so it is not a field of its own.
+function descriptors(fields: Fields): Descriptors {
+  const keys = Reflect.ownKeys(fields).filter(
+    (key) => !Array.isArray(fields) || key !== `length`,
+  )
+  return new Map(
+    keys.map((key) => [key, Object.getOwnPropertyDescriptor(fields, key)!]),
+  )
 }
-// Native setters and data nodes own updates. The read view preserves accessor
-// results and prototype methods when a user field shadows hasOwnProperty.
-export function createStoreReadView<T extends object>(store: T): T {
-  const views = new WeakMap<object, object>()
-  function exposed<V>(value: V): V {
-    if (!container(value) || !($PROXY in value)) return value
-    const target = snapshot(value)
-    if (views.has(target)) return views.get(target) as V
-    const native = Reflect.get(target, $PROXY) as RecordValue
-    const view = new Proxy(native, {
-      get(current, key, receiver) {
-        // Native bookkeeping has fixed identities and must remain transparent.
-        if (key === $PROXY) return Reflect.get(current, key)
-        if (key === `__proto__`) {
-          ownFieldRevision(target)[0]()
-          return exposed(Reflect.get(target, key, receiver))
-        }
-        const descriptor = Object.getOwnPropertyDescriptor(target, key)
-        let result: unknown
-        if (descriptor?.get)
-          result = Reflect.apply(descriptor.get, receiver, [])
-        else if (!descriptor && key in target) {
-          // The own-field admission shim notifies native membership nodes.
-          Reflect.has(current, key)
-          result = Reflect.get(target, key, receiver)
-        } else result = Reflect.get(current, key, receiver)
-        return exposed(result)
-      },
-      has(current, key) {
-        if (key !== `__proto__`) return Reflect.has(current, key)
-        ownFieldRevision(target)[0]()
-        return Reflect.has(target, key)
-      },
-      ownKeys(current) {
-        ownFieldRevision(target)[0]()
-        return Reflect.ownKeys(current)
-      },
-      getOwnPropertyDescriptor(current, key) {
-        if (key === `__proto__`) ownFieldRevision(target)[0]()
-        return Reflect.getOwnPropertyDescriptor(current, key)
-      },
-    })
-    views.set(target, view)
-    return view as V
-  }
-  return exposed(store)
+
+/** The own reserved field's data, or undefined when the row has none. */
+type Reserved = { value: unknown; enumerable: boolean }
+function reservedOf(fields: Fields): Reserved | undefined {
+  const own = Object.getOwnPropertyDescriptor(fields, RESERVED)
+  return own && `value` in own
+    ? { value: own.value, enumerable: own.enumerable === true }
+    : undefined
 }
+function sameReserved(a: Reserved | undefined, b: Reserved | undefined) {
+  return (
+    a === b ||
+    (a !== undefined &&
+      b !== undefined &&
+      Object.is(a.value, b.value) &&
+      a.enumerable === b.enumerable)
+  )
+}
+
+/**
+ * A row store for one result row: what `query()` hands the component.
+ *
+ * The adapter must not write into a Collection's borrowed row, so each admitted
+ * container is a copy the store owns. A copy keeps its descriptors: an accessor
+ * stays an accessor, so a getter read in a consumer's scope keeps tracking the
+ * signals it reads, and a function or a reserved name stays ordinary user data.
+ * A nested container is admitted once per source object and is then immutable,
+ * so an unchanged one keeps its identity and its readers stay quiet.
+ *
+ * The public value is a facade over the native store. It serves the store's
+ * fine-grained reads and adds the one field the store cannot hold.
+ */
 export function createRowStore<T extends object>(source: T) {
-  // Every nested node is immutable after admission. Native stores supply reads
-  // and getter tracking, while one per-row memo preserves source identities.
-  const copies = new WeakMap<object, object>()
-  function detached<V>(value: V, root = false): V {
-    if (!container(value)) return value
-    const native = $PROXY in value
-    const original = (
-      native ? snapshot(Reflect.get(value, $PROXY)) : value
-    ) as RecordValue
-    if (!root && copies.has(original)) return copies.get(original) as V
-    const target: RecordValue = Array.isArray(original)
-      ? Object.setPrototypeOf(
-          new Array(original.length),
-          Object.getPrototypeOf(original),
-        )
-      : Object.create(Object.getPrototypeOf(original))
-    const [view, setView] = createStore(target as RowStore)
-    if (!root) copies.set(original, view)
+  // One view per admitted source object, shared across the row's updates.
+  const views = new WeakMap<object, Fields>()
+  const apply = new WeakMap<Fields, (next: Fields) => void>()
+
+  /** A detached copy: own data and accessors, with nested containers admitted. */
+  function copy(original: Fields): Fields {
+    // A real array of the same length and prototype, so array methods and
+    // Array.isArray keep working; any other container keeps its prototype.
+    const detached = (
+      Array.isArray(original)
+        ? Object.setPrototypeOf(
+            new Array(original.length),
+            Object.getPrototypeOf(original),
+          )
+        : Object.create(Object.getPrototypeOf(original))
+    ) as Fields
     for (const key of Reflect.ownKeys(original)) {
-      if (Array.isArray(original) && key === `length`) continue
-      const desc = Object.getOwnPropertyDescriptor(original, key)!
-      if (native && typeof key === `symbol` && !desc.enumerable) continue
+      if (key === RESERVED || (Array.isArray(original) && key === `length`))
+        continue
+      const own = Object.getOwnPropertyDescriptor(original, key)!
       Object.defineProperty(
-        target,
+        detached,
         key,
-        `value` in desc
+        `value` in own
           ? {
-              value: detached(desc.value),
-              enumerable: desc.enumerable,
+              value: isContainer(own.value) ? view(own.value) : own.value,
+              enumerable: own.enumerable,
               writable: true,
               configurable: true,
             }
-          : desc.enumerable && desc.get
-            ? {
-                get: () => detached(Reflect.get(original, key)),
-                enumerable: true,
-                configurable: true,
-              }
-            : { ...desc, configurable: true },
+          : {
+              ...own,
+              // The getter keeps reading its source, so it stays live.
+              get: () => {
+                const value: unknown = Reflect.get(original, key)
+                return isContainer(value) ? view(value) : value
+              },
+              configurable: true,
+            },
       )
     }
-    // Native reads skip callable nodes behind a shadowed hasOwnProperty.
-    // Seed those nodes before observation; reserved user data uses the facade.
-    for (const key of keys(target)) {
-      const descriptor = Object.getOwnPropertyDescriptor(target, key)!
-      if (
-        key === `__proto__` ||
-        !(`value` in descriptor) ||
-        typeof descriptor.value !== `function`
-      )
-        continue
-      setView((draft) => {
-        draft[key] = null
-        draft[key] = descriptor.value
-      })
-      Object.defineProperty(target, key, descriptor)
-    }
-    return view as V
+    return detached
   }
-  return untrack(() => {
-    let [row, setRow] = createStore(snapshot(detached(source, true)) as RowStore)
-    const entry = {
-      value: createStoreReadView(row) as T,
-      update(nextSource: T) {
-        if (nextSource === source) return
-        untrack(() => {
-          const next = detached(nextSource, true)
-          const target = snapshot(next) as RecordValue
-          const current = snapshot(row) as RecordValue
-          // Native setters do not replace accessor definitions. A root-accessor
-          // row is a separate boundary; nested accessors remain immutable views.
-          const rootAccessor = [...keys(current), ...keys(target)].some(
-            (key) =>
-              Object.getOwnPropertyDescriptor(current, key)?.get ||
-              Object.getOwnPropertyDescriptor(target, key)?.get,
-          )
-          if (rootAccessor) {
-            ;[row, setRow] = createStore(target as RowStore)
-            entry.value = createStoreReadView(row) as T
-          } else
-            setRow((draft: RowStore) => {
-              const previousReserved = Object.getOwnPropertyDescriptor(
-                current,
-                `__proto__`,
-              )
-              const nextReserved = Object.getOwnPropertyDescriptor(
-                target,
-                `__proto__`,
-              )
-              if (nextReserved)
-                Object.defineProperty(current, `__proto__`, nextReserved)
-              else delete current.__proto__
-              if (
-                !Object.is(previousReserved?.value, nextReserved?.value) ||
-                previousReserved?.enumerable !== nextReserved?.enumerable ||
-                !!previousReserved !== !!nextReserved
-              )
-                // The facade tracks this same snapshot(row) target. A missing
-                // signal means no reader registered an observer yet.
-                ownFieldRevisions.get(current)?.[1]((revision) => revision + 1)
-              for (const key of keys(current))
-                if (key !== `__proto__` && !Object.hasOwn(target, key)) {
-                  if (draft[key] === undefined) draft[key] = null
-                  delete draft[key]
-                }
-              for (const key of keys(target)) {
-                if (key === `__proto__`) continue
-                const desc = Object.getOwnPropertyDescriptor(target, key)!
-                const value: unknown = Reflect.get(next, key)
-                const existed = Object.hasOwn(current, key)
-                const visibility =
-                  existed &&
-                  Object.prototype.propertyIsEnumerable.call(current, key) !==
-                    desc.enumerable
-                // Shadow inherited names before native setters compare them.
-                if (!existed)
-                  Object.defineProperty(current, key, {
-                    value: undefined,
-                    enumerable: desc.enumerable,
-                    writable: true,
-                    configurable: true,
-                  })
-                if (value === undefined) {
-                  if (!existed || current[key] !== undefined || visibility) {
-                    draft[key] = null
-                    draft[key] = undefined
-                    Object.defineProperty(current, key, {
-                      value: undefined,
-                      enumerable: desc.enumerable,
-                      writable: true,
-                      configurable: true,
-                    })
-                  }
-                } else {
-                  const sameValue = Object.is(current[key], snapshot(value))
-                  // Native setters compare with ===. Force their node through
-                  // a different value for signed zero or descriptor changes.
-                  if (
-                    (visibility && sameValue) ||
-                    (!sameValue && current[key] === snapshot(value))
-                  )
-                    draft[key] = value === null ? undefined : null
-                  if (!Object.is(current[key], snapshot(value)))
-                    draft[key] = value
-                  if (!existed || visibility)
-                    Object.defineProperty(current, key, {
-                      enumerable: desc.enumerable,
-                    })
-                }
-              }
-              if (Array.isArray(target)) draft.length = target.length
-            })
-          source = nextSource
-        })
+
+  function view(original: Fields): Fields {
+    const existing = views.get(original)
+    if (existing) return existing
+
+    // What the store was last told, by descriptor. Compared with the next
+    // copy, this keeps an unchanged field's readers asleep.
+    let admitted = descriptors(original)
+    const [store, setStore] = createStore(copy(original))
+    const [reserved, setReserved] = createSignal<Reserved | undefined>(
+      reservedOf(original),
+    )
+    // A store node compares the two zeros as equal, so it cannot hold -0 over
+    // +0. The admitted sign is kept beside the store, one signal per key that
+    // holds a zero, so a reader of that key follows a flip and no other.
+    const negativeZero = new Map<PropertyKey, Signal<boolean>>()
+    for (const [key, own] of admitted)
+      if (`value` in own && own.value === 0)
+        negativeZero.set(key, createSignal(Object.is(own.value, -0)))
+
+    const facade = new Proxy(store, {
+      get(target, key) {
+        if (key === RESERVED) {
+          const own = reserved()
+          // Without an own field the read is the ordinary inherited one.
+          return own ? own.value : Object.getPrototypeOf(target)
+        }
+        // The store is the receiver, so its own getters see the store.
+        const value: unknown = Reflect.get(target, key, target)
+        const sign = negativeZero.get(key)
+        return value === 0 && sign?.[0]() ? -0 : value
       },
-    }
-    return entry
-  })
+      getOwnPropertyDescriptor(target, key) {
+        const own = reserved()
+        if (key !== RESERVED)
+          return Reflect.getOwnPropertyDescriptor(target, key)
+        return own && { ...own, writable: true, configurable: true }
+      },
+      has(target, key) {
+        if (key !== RESERVED) return Reflect.has(target, key)
+        const prototype = Object.getPrototypeOf(target)
+        return !!reserved() || (prototype !== null && key in prototype)
+      },
+      ownKeys(target) {
+        const keys = Reflect.ownKeys(target)
+        return reserved() ? [...keys, RESERVED] : keys
+      },
+    })
+    // A parent store serves the facade as is instead of wrapping it again:
+    // a wrapped array would no longer read as an array.
+    views.set(original, markRaw(facade))
+
+    apply.set(facade, (next) => {
+      const detached = copy(next)
+      const nextDescriptors = descriptors(detached)
+      const reservedNext = reservedOf(next)
+      // A visibility change moves no membership, so a single transaction
+      // would collapse it: delete first, then define.
+      const settled: Array<[PropertyKey, PropertyDescriptor]> = []
+      setStore((draft) => {
+        const target = draft
+        // Own keys only: an inherited name such as toString stays `in` the
+        // copy after the source drops its own field of that name.
+        for (const key of admitted.keys())
+          if (!nextDescriptors.has(key)) delete target[key]
+        // An equal length notifies nobody.
+        if (Array.isArray(detached)) target.length = detached.length
+        for (const [key, own] of nextDescriptors) {
+          const previous = admitted.get(key)
+          if (!(`value` in own)) {
+            // An accessor is defined, never evaluated. An absent key is
+            // written first so its membership is observable.
+            if (!previous) target[key] = undefined
+            Object.defineProperty(target, key, own)
+          } else if (!previous || !(`value` in previous)) {
+            Object.defineProperty(target, key, own)
+          } else if (!Object.is(previous.value, own.value)) {
+            if (previous.value !== own.value) target[key] = own.value
+            // Otherwise a signed-zero flip: the store keeps its zero and the
+            // facade serves the sign.
+          } else if (previous.enumerable !== own.enumerable) {
+            delete target[key]
+            settled.push([key, own])
+          }
+        }
+      })
+      if (settled.length)
+        setStore((draft) => {
+          for (const [key, own] of settled)
+            Object.defineProperty(draft, key, own)
+        })
+      admitted = nextDescriptors
+      setReserved((previous) =>
+        sameReserved(previous, reservedNext) ? previous : reservedNext,
+      )
+      for (const [key, own] of nextDescriptors) {
+        if (!(`value` in own) || own.value !== 0) continue
+        const negative = Object.is(own.value, -0)
+        const sign = negativeZero.get(key)
+        if (sign) sign[1](negative)
+        else negativeZero.set(key, createSignal(negative))
+      }
+    })
+    return facade
+  }
+
+  const value = view(source as Fields) as T
+  let current = source
+  return {
+    value,
+    update(next: T) {
+      if (next === current) return
+      current = next
+      apply.get(value as unknown as Fields)!(next as Fields)
+    },
+  }
 }

@@ -8,11 +8,13 @@ import {
   resolveLiveQueryValue,
   toBoundaryError,
 } from '@tanstack/db'
-import { createMemo, createProjection, from, untrack } from 'solid-js'
+import { createEffect, createMemo, createStore, from, untrack } from 'solid-js'
+import { createRowStore } from './store-materialization'
 import type { Accessor } from 'solid-js'
 import type {
   Collection,
   Context,
+  GetResult,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryHookConfig,
@@ -44,11 +46,15 @@ type InferConditionalResultType<TContext extends Context> =
     ? InferResultType<TContext> | []
     : InferResultType<TContext>
 
-type Result<TResult> = Accessor<TResult> & {
-  /** Keyed rows by the live Collection's result key. */
-  state: ReactiveMap<string | number, any>
+/**
+ * What every `useLiveQuery` accessor carries beside the rows: `query()`
+ * returns the rows, and the properties below describe them.
+ */
+type Result<TRows, TRow, TCollection> = Accessor<TRows> & {
+  /** Keyed rows, by the live query's result key. */
+  state: ReactiveMap<string | number, TRow>
   /** The live query backing this result (its pooled public view, if pooled). */
-  collection: Collection<any, any, any> | null
+  collection: TCollection
   status: LiveQuerySnapshot<any, any>[`status`]
   /**
    * The rows once the first load has settled. Reading it before that throws
@@ -60,7 +66,7 @@ type Result<TResult> = Accessor<TResult> & {
    * </Loading>
    * ```
    */
-  loaded: Accessor<TResult>
+  loaded: Accessor<TRows>
 } & LiveQueryStatusFlags
 
 /**
@@ -85,14 +91,22 @@ type Result<TResult> = Accessor<TResult> & {
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-): Result<InferResultType<TContext>>
+): Result<
+  InferResultType<TContext>,
+  GetResult<TContext>,
+  Collection<GetResult<TContext>, string | number, {}>
+>
 
 // Overload 1b: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
   queryFn: (
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-): Result<InferConditionalResultType<TContext>>
+): Result<
+  InferConditionalResultType<TContext>,
+  GetResult<TContext>,
+  Collection<GetResult<TContext>, string | number, {}> | null
+>
 
 /**
  * Create a live query using configuration object
@@ -107,7 +121,11 @@ export function useLiveQuery<TContext extends Context>(
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: Accessor<LiveQueryHookConfig<TContext>>,
-): Result<InferResultType<TContext>>
+): Result<
+  InferResultType<TContext>,
+  GetResult<TContext>,
+  Collection<GetResult<TContext>, string | number, {}>
+>
 
 /**
  * Subscribe to an existing live query collection
@@ -128,7 +146,7 @@ export function useLiveQuery<
   liveQueryCollection: Accessor<
     Collection<TResult, TKey, TUtils> & NonSingleResult
   >,
-): Result<Array<TResult>>
+): Result<Array<TResult>, TResult, Collection<TResult, TKey, TUtils>>
 
 // Overload 3b: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
@@ -139,15 +157,21 @@ export function useLiveQuery<
   liveQueryCollection: Accessor<
     Collection<TResult, TKey, TUtils> & SingleResult
   >,
-): Result<TResult | undefined>
+): Result<
+  TResult | undefined,
+  TResult,
+  Collection<TResult, TKey, TUtils> & SingleResult
+>
 
-// The observer owns the subscription and publishes stable snapshots; Solid
-// state below is fully derived from the latest snapshot. The snapshot signal
-// is written from observer notifies (outside any owned scope) and seeded once
-// from the effect's apply phase, which is why it opts into `ownedWrite`.
+// The observer owns the subscription and the snapshot; every value below is
+// derived from the snapshot, so rows and status agree at every cut.
+// The overloads are the public contract. The parameter is `any` because an
+// implementation signature must be assignable to every overload's parameter
+// in both directions, and a query function, a config accessor and a
+// collection accessor share no other type.
 export function useLiveQuery(
   configOrQueryOrCollection: (queryFn?: any) => any,
-): Result<any> {
+) {
   let inputError: unknown
   let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
   const resolveNext = (value: unknown) =>
@@ -164,8 +188,6 @@ export function useLiveQuery(
           : configOrQueryOrCollection()
       // Query-input reads define binding dependencies. Compilation can drain
       // source rows synchronously; those reads belong to the result instead.
-      // Query-input reads define binding dependencies. Compilation can
-      // drain source rows synchronously; those reads belong to the result.
       // An invalid input is the caller's error: a computation must not throw
       // it (the runtime wraps it and later updates are lost), so keep it and
       // throw it from the accessor.
@@ -188,6 +210,7 @@ export function useLiveQuery(
   )
 
   type AnySnapshot = LiveQuerySnapshot<any, any>
+  type RowStore = ReturnType<typeof createRowStore>
   let observer: ReturnType<typeof createLiveQueryObserver> | undefined
 
   // `from` turns the observer into a memo: every value below is then derived,
@@ -210,7 +233,16 @@ export function useLiveQuery(
             error(cause)
           }
         }
-        const unsubscribe = attached.subscribe(publish)
+        // A source that throws while it starts crashes its Collection, and
+        // core rethrows that from `subscribe`. The crash is the query's to
+        // report: the snapshot shows it and the accessor throws it as an
+        // Error, so it must not become this memo's own error.
+        let unsubscribe = () => {}
+        try {
+          unsubscribe = attached.subscribe(publish)
+        } catch {
+          // Reported through the snapshot's status.
+        }
         publish()
         return () => {
           if (observer === attached) observer = undefined
@@ -240,69 +272,67 @@ export function useLiveQuery(
     isSyncError: flag(`isSyncError`),
     health: flag(`health`),
   }
-  // One stable store node per logical row, keyed by the live Collection's
+  // One stable row store per logical row, keyed by the live Collection's
   // RESULT keys — the rule from #1825. A row's public $key belongs to an
-  // upstream collection and is not necessarily unique in a derived result
-  // (e.g. two unionAll branches publishing the same $key). Identities are
-  // stamped at derive time as `<epoch>:<result key>`, where the epoch bumps
-  // on collection replacement: overlapping keys from different collections
-  // are different entities. The registry persists across derives (the
-  // matcher re-keys existing nodes) and is a WeakMap so superseded rows
-  // drop out with GC.
-  const rowIdentities = new WeakMap<object, string>()
-  let identityCollection: unknown
-  let identityEpoch = 0
-  const data = createProjection(
-    () => {
-      const current = snapshot()
-      const entries = current.state
-      if (current.collection !== identityCollection) {
-        identityCollection = current.collection
-        identityEpoch++
-      }
-      if (!entries) return []
-      const rows: Array<any> = []
-      // Two results can alias one object; each is its own row, so a repeated
-      // object is admitted as a copy rather than merged into the first.
-      const admitted = new Set<object>()
-      for (const [key, value] of entries) {
-        if (admitted.has(value)) {
-          rows.push({ ...value })
-          continue
-        }
-        admitted.add(value)
-        // Type-qualified so numeric 1 and string "1" stay distinct rows.
-        rowIdentities.set(
-          value,
-          `${identityEpoch}:${typeof key}:${String(key)}`,
-        )
-        rows.push(value)
-      }
-      return rows
-    },
-    [],
+  // upstream Collection and is not necessarily unique in a derived result
+  // (e.g. two unionAll branches publishing the same $key). Rows are dropped
+  // when their collection is replaced, so an overlapping key of a new
+  // collection is a different row.
+  const rowsByKey = new Map<string | number, RowStore>()
+  let rowsCollection: unknown
+  const state = new ReactiveMap<string | number, any>()
+
+  // Resolves each row of one snapshot to its row store, in result order. The
+  // keyed map changes with them, so `state` can never hold rows that
+  // `query()` does not.
+  const resolveRows = (current: AnySnapshot): Array<object> => {
+    if (current.collection !== rowsCollection) {
+      rowsCollection = current.collection
+      rowsByKey.clear()
+      state.clear()
+    }
+    const rows: Array<object> = []
+    const retained = new Set<string | number>()
+    // A disabled query has no state; iterate nothing then.
+    const entries: Iterable<[string | number, object]> = current.state ?? []
+    for (const [key, value] of entries) {
+      retained.add(key)
+      let row = rowsByKey.get(key)
+      if (!row) {
+        row = createRowStore(value)
+        rowsByKey.set(key, row)
+      } else row.update(value)
+      rows.push(row.value)
+      if (state.get(key) !== value) state.set(key, value)
+    }
+    for (const key of rowsByKey.keys())
+      if (!retained.has(key)) rowsByKey.delete(key)
+    for (const key of state.keys()) if (!retained.has(key)) state.delete(key)
+    return rows
+  }
+
+  // Solid 2 forbids a store write inside an owner's scope, and an effect's
+  // first run happens there when the owner is a component. Creating a store
+  // with its first value is the one write that scope allows, so the rows are
+  // seeded at creation and the effect only applies later snapshots.
+  const [data, setData] = createStore(
+    untrack(() => resolveRows(snapshot())),
     {
-      key: (row: object) => rowIdentities.get(row),
       name: `TanstackDBData`,
     },
   )
-
-  // Granular keyed state, synced on read from the current snapshot so it can
-  // never lead or lag `query()`.
-  const state = new ReactiveMap<string | number, any>()
-  const readState = () => {
-    const entries = snapshot().state
-    const next = entries ? [...entries] : []
-    const retained = new Set<string | number>()
-    for (const [key, value] of next) {
-      retained.add(key)
-      if (state.get(key) !== value) state.set(key, value)
-    }
-    for (const key of state.keys()) {
-      if (!retained.has(key)) state.delete(key)
-    }
-    return state
-  }
+  createEffect(
+    () => snapshot(),
+    (current) => {
+      const rows = resolveRows(current)
+      setData((draft) => {
+        for (let index = 0; index < rows.length; index++)
+          draft[index] = rows[index]!
+        draft.length = rows.length
+      })
+    },
+    { name: `TanstackDBRows`, defer: true },
+  )
 
   const readyOnce = new WeakSet<object>()
 
@@ -378,7 +408,7 @@ export function useLiveQuery(
     },
     state: {
       get() {
-        return readState()
+        return state
       },
     },
     loaded: {
@@ -391,10 +421,10 @@ export function useLiveQuery(
         key,
         {
           get() {
-            return (flags as any)[key]()
+            return (flags[key] as Accessor<unknown>)()
           },
         },
       ]),
     ),
-  }) as Result<any>
+  }) as Result<never, never, never>
 }

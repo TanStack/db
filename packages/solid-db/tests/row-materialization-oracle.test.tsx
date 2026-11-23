@@ -26,8 +26,8 @@ import {
   For,
   createRenderEffect,
   createRoot,
-  createStore,
   createSignal,
+  createStore,
 } from 'solid-js'
 import { expect, vi } from 'vitest'
 import { useLiveQuery } from '../src/useLiveQuery'
@@ -865,9 +865,9 @@ async function runGetterHistory(history: GetterHistory, observe: Observer) {
               config ? Object.keys(config) : [],
             ] as const
           },
-          ([isMember, keys]) => {
+          ([isMember, ownKeys]) => {
             member = isMember
-            keys = keys
+            keys = ownKeys
           },
         )
       })
