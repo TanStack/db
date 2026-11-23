@@ -6,17 +6,32 @@ import {
   isNull,
   isUndefined,
   lt,
+  lte,
   not,
   or,
 } from '../query/builder/functions.js'
 import { Value } from '../query/ir.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import type { BasicExpression, OrderBy, OrderByClause } from '../query/ir.js'
+import type { CustomStringCollation } from '../types.js'
 
 function isNullish(
   expression: OrderByClause[`expression`],
 ): BasicExpression<boolean> {
   return or(isNull(expression), isUndefined(expression))
+}
+
+/** The custom collation a provider is trusted to apply to this order term. */
+function trustedCollationOf({
+  compareOptions: options,
+}: OrderByClause): CustomStringCollation | undefined {
+  return options.stringSort === `custom` && options.trustProviderOrder
+    ? {
+        stringSort: `custom`,
+        compare: options.compare,
+        trustProviderOrder: true,
+      }
+    : undefined
 }
 
 function followsBoundary(
@@ -31,19 +46,10 @@ function followsBoundary(
   }
 
   const operator = clause.compareOptions.direction === `asc` ? gt : lt
-  const options = clause.compareOptions
   const comparison = operator(
     clause.expression,
     new Value(value),
-    typeof value === `string` &&
-      options.stringSort === `custom` &&
-      options.trustProviderOrder
-      ? {
-          stringSort: `custom`,
-          compare: options.compare,
-          trustProviderOrder: true,
-        }
-      : undefined,
+    typeof value === `string` ? trustedCollationOf(clause) : undefined,
   )
   return clause.compareOptions.nulls === `last`
     ? or(comparison, nullish)
@@ -86,6 +92,16 @@ export function buildCursorCurrent(
     )
   }
   if (typeof value === `object`) return undefined
+  // Distinct strings can tie under a collation, and all of them are the
+  // boundary's ties.
+  const collation =
+    typeof value === `string` ? trustedCollationOf(orderBy[0]!) : undefined
+  if (collation) {
+    return and(
+      gte(expression, new Value(value), collation),
+      lte(expression, new Value(value), collation),
+    )
+  }
   return eq(expression, new Value(value))
 }
 

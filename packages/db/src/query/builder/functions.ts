@@ -215,7 +215,11 @@ export function gt<T extends string | number>(
   right: ComparisonOperandPrimitive<T>,
   collation?: CustomStringCollation,
 ): BasicExpression<boolean>
-export function gt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
+export function gt<T>(
+  left: Aggregate<T>,
+  right: any,
+  collation?: CustomStringCollation,
+): BasicExpression<boolean>
 export function gt(
   left: any,
   right: any,
@@ -238,7 +242,11 @@ export function gte<T extends string | number>(
   right: ComparisonOperandPrimitive<T>,
   collation?: CustomStringCollation,
 ): BasicExpression<boolean>
-export function gte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
+export function gte<T>(
+  left: Aggregate<T>,
+  right: any,
+  collation?: CustomStringCollation,
+): BasicExpression<boolean>
 export function gte(
   left: any,
   right: any,
@@ -261,7 +269,11 @@ export function lt<T extends string | number>(
   right: ComparisonOperandPrimitive<T>,
   collation?: CustomStringCollation,
 ): BasicExpression<boolean>
-export function lt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
+export function lt<T>(
+  left: Aggregate<T>,
+  right: any,
+  collation?: CustomStringCollation,
+): BasicExpression<boolean>
 export function lt(
   left: any,
   right: any,
@@ -284,7 +296,11 @@ export function lte<T extends string | number>(
   right: ComparisonOperandPrimitive<T>,
   collation?: CustomStringCollation,
 ): BasicExpression<boolean>
-export function lte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
+export function lte<T>(
+  left: Aggregate<T>,
+  right: any,
+  collation?: CustomStringCollation,
+): BasicExpression<boolean>
 export function lte(
   left: any,
   right: any,

@@ -149,12 +149,12 @@ describe(`custom string collation with trustProviderOrder`, () => {
       expectedOrder.slice(3, 6),
     )
     // Pages carry a limit; the only other loads are each boundary's ties,
-    // bounded by equality on the order field.
+    // bounded by the collation on both sides.
     expect(
       loads.every(
         (load) =>
           load.limit !== undefined ||
-          (load.where?.type === `func` && load.where.name === `eq`),
+          (load.where?.type === `func` && load.where.name === `and`),
       ),
     ).toBe(true)
     const cursor = loads.find((load) => load.cursor)?.cursor

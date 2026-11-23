@@ -608,6 +608,9 @@ function expressionsEqual(expr1: any, expr2: any): boolean {
     case `func`:
       return (
         expr1.name === expr2.name &&
+        expr1.collation?.compare === expr2.collation?.compare &&
+        expr1.collation?.trustProviderOrder ===
+          expr2.collation?.trustProviderOrder &&
         expr1.args?.length === expr2.args?.length &&
         (expr1.args || []).every((arg: any, i: number) =>
           expressionsEqual(arg, expr2.args[i]),

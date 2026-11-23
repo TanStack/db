@@ -433,7 +433,205 @@ function runHintCell({
   }
 }
 
+// Rows the comparator treats as equal can straddle a page. The loader reads
+// the boundary's ties, so a tie that differs only in case must still arrive.
+// The model orders by the comparator and then by ascending key.
+const compareIgnoringCase = (left: string, right: string) => {
+  const a = left.toLowerCase()
+  const b = right.toLowerCase()
+  return a === b ? 0 : a < b ? -1 : 1
+}
+const tieRows: Array<Row> = [
+  { id: 1, label: `A` },
+  { id: 2, label: `a` },
+  { id: 3, label: `b` },
+  { id: 4, label: `B` },
+  { id: 5, label: `c` },
+]
+const tieCases = [`asc`, `desc`].flatMap((direction) =>
+  [1, 2].map((limit) => ({
+    direction: direction as `asc` | `desc`,
+    limit,
+  })),
+)
+
+async function runTieCell({
+  direction,
+  limit,
+}: (typeof tieCases)[number]): Promise<void> {
+  const sign = direction === `asc` ? 1 : -1
+  const ordered = [...tieRows].sort(
+    (a, b) => sign * compareIgnoringCase(a.label, b.label) || a.id - b.id,
+  )
+  const delivered = new Set<number>()
+  const source = createCollection<Row>({
+    id: `trusted-collation-ties-${direction}-${limit}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    defaultStringCollation: {
+      stringSort: `custom`,
+      compare: compareIgnoringCase,
+      trustProviderOrder: true,
+    },
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            const where = options.where
+              ? compileSingleRowExpression(options.where)
+              : undefined
+            const from = options.cursor
+              ? compileSingleRowExpression(options.cursor.whereFrom)
+              : undefined
+            const offset = from ? 0 : (options.offset ?? 0)
+            const matching = ordered.filter(
+              (row) =>
+                (!where || where(row) === true) &&
+                (!from || from(row) === true),
+            )
+            const answer =
+              options.limit === undefined
+                ? matching
+                : matching.slice(offset, offset + options.limit)
+            begin()
+            for (const row of answer) {
+              if (delivered.has(row.id)) continue
+              delivered.add(row.id)
+              write({ type: `insert`, value: { ...row } })
+            }
+            const receipt = commit()
+            return receipt === true ? Promise.resolve() : receipt
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    query: (query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.label, { direction, nulls: `first` })
+        .limit(limit)
+        .select(({ row }) => ({ id: row.id })),
+  })
+  try {
+    await live.preload()
+    for (let offset = 0; offset < ordered.length; offset += limit) {
+      await live.utils.setWindow({ offset, limit })
+      expect(
+        Array.from(live.values(), ({ id }) => id),
+        `window at ${offset}`,
+      ).toEqual(ordered.slice(offset, offset + limit).map(({ id }) => id))
+    }
+  } finally {
+    await live.cleanup()
+    await source.cleanup()
+  }
+}
+
+// A grouped select reads a group key by its expression, so a collated and an
+// uncollated comparison of the same operands are different keys.
+const groupKeyCases = [
+  { name: `the same collation`, sameCollation: true },
+  { name: `no collation on the key`, sameCollation: false },
+]
+
+async function runGroupKeyCell({
+  sameCollation,
+}: (typeof groupKeyCases)[number]): Promise<void> {
+  const source = createCollection<Row>({
+    id: `trusted-group-key-${sameCollation}`,
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const row of rows) write({ type: `insert`, value: { ...row } })
+        commit()
+        markReady()
+      },
+    },
+  })
+  const build = (query: InitialQueryBuilder) =>
+    query
+      .from({ row: source })
+      .groupBy(({ row }) =>
+        sameCollation
+          ? (gt as never as CollatedGt)(row.label, `3`, trustedCollation)
+          : gt(row.label, `3`),
+      )
+      .select(({ row }) => ({
+        over: (gt as never as CollatedGt)(row.label, `3`, trustedCollation),
+        rows: count(row.id),
+      }))
+  try {
+    if (sameCollation) {
+      const live = createLiveQueryCollection({
+        query: build as never,
+      }) as unknown as Collection<{ over: boolean }>
+      await live.preload()
+      expect(live.size, `one row per collated key`).toBe(2)
+      await live.cleanup()
+    } else {
+      expect(() => {
+        createLiveQueryCollection({ query: build as never })
+      }, `an uncollated key does not stand in for a collated select`).toThrow()
+    }
+  } finally {
+    await source.cleanup()
+  }
+}
+
+type CollatedGt = (
+  left: unknown,
+  right: unknown,
+  collation: CustomStringCollation,
+) => ReturnType<typeof gt>
+
 describe(`custom string collation trusted to the provider`, () => {
+  oracleProperty({
+    id: `trusted-provider-collation.group-key`,
+    law: {
+      statement: `A grouped select matches a group key only when both comparisons carry the same collation.`,
+      authority: `The collation parameter of gt, gte, lt and lte in query/builder/functions.ts.`,
+      limits: `One comparison selected against a collated and an uncollated key.`,
+    },
+    owns: ['src/query/compiler/group-by.ts'],
+    histories: groupKeyCases,
+    label: ({ name }) => `grouped by ${name}`,
+    resolve: (cell) => ({ cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`collated group key`, plan, observe, () =>
+        runGroupKeyCell(plan.cell),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `trusted-provider-collation.ties`,
+    law: {
+      statement: `Rows the trusted comparator treats as equal are not lost when they straddle a page boundary.`,
+      authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery.`,
+      limits: `One case-insensitive comparator, two directions and two page sizes.`,
+    },
+    owns: ['src/utils/cursor.ts'],
+    histories: tieCases,
+    label: ({ direction, limit }) =>
+      `keeps ties ${direction} in pages of ${limit}`,
+    resolve: (cell) => ({ cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`trusted collation ties`, plan, observe, () =>
+        runTieCell(plan.cell),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
   oracleProperty({
     id: `trusted-provider-collation.predicate`,
     law: {
