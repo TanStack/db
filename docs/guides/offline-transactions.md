@@ -189,6 +189,8 @@ console.log(executor.storageDiagnostic)
 console.log(executor.isOfflineEnabled)
 ```
 
+Set `followerWrites: 'durable'` to keep a follower's writes when it goes offline or closes. The follower saves each write to the shared outbox, and the current or next leader sends it. The follower's transaction settles with the leader's result. This requires BroadcastChannel, and a tab without it uses the online path. A write made before `waitForInit()` resolves also uses the online path. A reloaded follower does not show another tab's pending writes optimistically until they sync. If a leader closes between removing a row and reporting its result, the next leader reports that write as completed.
+
 Use `onStorageFailure` when the built-in web stores are unavailable. Use `onLeadershipChange` when the UI needs to show which tab owns the outbox. A follower can become the leader after the current leader leaves.
 
 ## React Native and Expo

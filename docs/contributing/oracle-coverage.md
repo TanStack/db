@@ -4245,6 +4245,11 @@ The post-merge review added three missing domains to existing owners:
   holds real storage-read delivery across successful and permanently rejected
   durable removals, with bounded scans, concurrent loads, and unfinished peers.
   This is distinct from exactly-once execution across independent owners.
+- [Durable follower writes](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/durable-follower-oracle.property.test.ts)
+  checks delivery and settlement of `followerWrites: 'durable'` across three
+  tabs that write, close, reopen and hand over leadership, with controlled
+  election, connectivity and BroadcastChannel. It does not cover real browser
+  contexts.
 - Settlement-time drop of optimistic state is owned by the
   [optimistic history model](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts)
   and

@@ -130,6 +130,14 @@ export interface OfflineConfig {
   onStorageFailure?: (diagnostic: StorageDiagnostic) => void
   leaderElection?: LeaderElection
   /**
+   * How a follower tab sends a write. `'online'` (default) calls the mutation
+   * function directly, with no outbox entry. `'durable'` saves the write to the
+   * shared outbox, and the current or next leader sends it. Requires
+   * BroadcastChannel, and falls back to `'online'` without it. A write made
+   * before the executor initializes uses the online path.
+   */
+  followerWrites?: `online` | `durable`
+  /**
    * Custom online detector implementation.
    * Defaults to WebOnlineDetector for browser environments.
    * The '@tanstack/offline-transactions/react-native' entry point uses ReactNativeOnlineDetector automatically.

@@ -109,7 +109,7 @@ An optimistic change does not prove that the outbox write succeeded. Handle tran
 Only one tab acts as the "leader" to safely manage the outbox:
 
 - **Leader tab**: Full offline support with outbox persistence
-- **Non-leader tabs**: Online-only mode for safety
+- **Non-leader tabs**: Online-only mode by default, or a shared durable outbox with `followerWrites: 'durable'`
 - **Leadership transfer**: Automatic failover when leader tab closes
 
 ### FIFO Sequential Processing

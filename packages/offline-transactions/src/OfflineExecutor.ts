@@ -40,6 +40,21 @@ import type {
 } from './types'
 import type { Transaction } from '@tanstack/db'
 
+/** Messages between tabs that share an outbox with durable follower writes. */
+type OutboxMessage =
+  | { type: `added`; id: string }
+  | { type: `settled`; id: string; error?: { name: string; message: string } }
+  | { type: `leader` }
+
+function outboxMessageError(error: { name: string; message: string }): Error {
+  const restored =
+    error.name === `NonRetriableError`
+      ? new NonRetriableError(error.message)
+      : new Error(error.message)
+  restored.name = error.name
+  return restored
+}
+
 /** How many settled ids an executor remembers to reject late waiters. */
 const SETTLED_TRANSACTIONS_REMEMBERED = 1000
 
@@ -92,6 +107,8 @@ export class OfflineExecutor {
       promise: Promise<any>
       resolve: (result: any) => void
       reject: (error: Error) => void
+      // Set once a follower's save starts; resolves to whether it succeeded.
+      saved?: Promise<boolean>
     }
   > = new Map()
 
@@ -104,6 +121,8 @@ export class OfflineExecutor {
   // Track restoration transactions for cleanup when offline transactions complete
   private restorationTransactions: Map<string, Transaction> = new Map()
 
+  // Carries follower writes to the leader and their outcomes back.
+  private outboxChannel: BroadcastChannel | null = null
   constructor(config: OfflineConfig) {
     this.config = config
     this.scheduler = new KeyScheduler()
@@ -329,6 +348,7 @@ export class OfflineExecutor {
         this,
       )
       this.leaderElection = this.createLeaderElection()
+      this.openOutboxChannel()
 
       // Request leadership first
       const isLeader = await this.leaderElection.requestLeadership()
@@ -368,10 +388,84 @@ export class OfflineExecutor {
     // Startup must observe a failed read instead of reporting an empty outbox.
     await this.executor.loadPendingTransactions()
 
+    // A leader that closed can leave a removed row with an undelivered outcome.
+    if (this.outboxChannel) {
+      this.outboxChannel.postMessage({
+        type: `leader`,
+      } satisfies OutboxMessage)
+    }
+    this.reconcileFollowerWrites()
+
     // Replay completion is separate from initialization and durable admission.
     this.executor.executeAll().catch((error) => {
       console.warn(`Failed to execute transactions:`, error)
     })
+  }
+
+  private openOutboxChannel(): void {
+    if (
+      this.config.followerWrites !== `durable` ||
+      typeof BroadcastChannel === `undefined`
+    ) {
+      return
+    }
+    const collectionIds = Object.values(this.config.collections)
+      .map((collection) => collection.id)
+      .sort()
+    this.outboxChannel = new BroadcastChannel(
+      `tanstack-offline-outbox:${collectionIds.join(`,`)}`,
+    )
+    this.outboxChannel.onmessage = (event: MessageEvent<OutboxMessage>) => {
+      this.handleOutboxMessage(event.data)
+    }
+  }
+
+  private handleOutboxMessage(message: OutboxMessage): void {
+    if (message.type === `leader`) {
+      this.reconcileFollowerWrites()
+    } else if (message.type === `added`) {
+      this.executor!.admitTransaction(message.id).catch((error) => {
+        console.warn(`Failed to run follower write:`, error)
+      })
+    } else {
+      this.settleTransaction(
+        message.id,
+        undefined,
+        message.error && outboxMessageError(message.error),
+      )
+    }
+  }
+
+  private reconcileFollowerWrites(): void {
+    this.settleRemovedWrites().catch((error) => {
+      console.warn(`Failed to reconcile follower writes:`, error)
+    })
+  }
+
+  // A saved write that left the outbox was settled by a leader whose message
+  // never arrived.
+  private async settleRemovedWrites(): Promise<void> {
+    for (const [id, waiter] of [...this.pendingTransactionPromises]) {
+      if (!(await waiter.saved)) continue
+      if (await this.outbox!.get(id)) continue
+      this.settleTransaction(id, undefined)
+    }
+  }
+
+  private announceSettled(id: string, error?: Error): void {
+    if (this.outboxChannel) {
+      this.outboxChannel.postMessage({
+        type: `settled`,
+        id,
+        ...(error
+          ? { error: { name: error.name, message: error.message } }
+          : {}),
+      } satisfies OutboxMessage)
+    }
+  }
+
+  private get writesToSharedOutbox(): boolean {
+    return this.outboxChannel !== null
   }
 
   get isOfflineEnabled(): boolean {
@@ -396,7 +490,7 @@ export class OfflineExecutor {
     }
 
     // Check leadership immediately and use the appropriate primitive
-    if (!this.isOfflineEnabled) {
+    if (!this.isOfflineEnabled && !this.writesToSharedOutbox) {
       // Non-leader: use createTransaction directly with the resolved mutation function
       // We need to wrap it to add the idempotency key
       return createTransaction({
@@ -429,7 +523,7 @@ export class OfflineExecutor {
     // Return a wrapper that checks leadership status at call time
     return (variables: T) => {
       // Check leadership when action is called, not when it's created
-      if (!this.isOfflineEnabled) {
+      if (!this.isOfflineEnabled && !this.writesToSharedOutbox) {
         // Non-leader: use createOptimisticAction directly
         const action = createOptimisticAction({
           mutationFn: (vars, params) =>
@@ -460,13 +554,30 @@ export class OfflineExecutor {
     // Wait for initialization to complete
     await this.initPromise
 
-    if (!this.isOfflineEnabled || !this.outbox || !this.executor) {
+    if (
+      (!this.isOfflineEnabled && !this.writesToSharedOutbox) ||
+      !this.outbox ||
+      !this.executor
+    ) {
       throw new NonRetriableError(`Offline transaction was not admitted`)
     }
 
     try {
       this.executor.assertHealthy()
-      await this.outbox.add(transaction)
+      const saved = this.outbox.add(transaction)
+      // The transaction registered this waiter before it asked to persist.
+      this.pendingTransactionPromises.get(transaction.id)!.saved = saved.then(
+        () => true,
+        () => false,
+      )
+      await saved
+      if (this.outboxChannel && !this.isOfflineEnabled) {
+        this.outboxChannel.postMessage({
+          type: `added`,
+          id: transaction.id,
+        } satisfies OutboxMessage)
+        return
+      }
       // A shared queue error belongs to its execution, not every caller
       // that durably admitted a transaction. Per-ID signals settle callers.
       this.executor.execute(transaction).catch((error) => {
@@ -518,12 +629,20 @@ export class OfflineExecutor {
 
   // Method for TransactionExecutor to signal completion
   resolveTransaction(transactionId: string, result: any): void {
-    this.settleTransaction(transactionId, result)
+    try {
+      this.settleTransaction(transactionId, result)
+    } finally {
+      this.announceSettled(transactionId)
+    }
   }
 
   // Method for TransactionExecutor to signal failure
   rejectTransaction(transactionId: string, error: Error): void {
-    this.settleTransaction(transactionId, undefined, error)
+    try {
+      this.settleTransaction(transactionId, undefined, error)
+    } finally {
+      this.announceSettled(transactionId, error)
+    }
   }
 
   private trackCompletion(): void {
@@ -697,6 +816,11 @@ export class OfflineExecutor {
       if (`dispose` in this.leaderElection) {
         ;(this.leaderElection as any).dispose()
       }
+    }
+
+    if (this.outboxChannel) {
+      this.outboxChannel.close()
+      this.outboxChannel = null
     }
 
     this.onlineDetector.dispose()

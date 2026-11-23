@@ -428,6 +428,16 @@ export class TransactionExecutor {
     }
   }
 
+  /** Runs one transaction that a follower tab saved to the shared outbox. */
+  async admitTransaction(id: string): Promise<void> {
+    const transaction = await this.outbox.get(id)
+    if (!transaction || !this.offlineExecutor.isOfflineEnabled) return
+    // A duplicate message is harmless: both steps ignore a known transaction.
+    this.scheduler.schedule(transaction)
+    this.restoreOptimisticState([transaction])
+    await this.executeAll()
+  }
+
   /**
    * Restore optimistic state from loaded transactions.
    * Creates internal transactions to hold the mutations so the collection's
