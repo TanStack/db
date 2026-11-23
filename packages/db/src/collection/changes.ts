@@ -7,6 +7,7 @@ import {
 } from '../query/builder/ref-proxy.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import { getBuilderFromConfig } from '../query/live/collection-registry.js'
+import { isSilentReplacement, markSilentReplacement } from './change-events.js'
 import { CollectionSubscription } from './subscription.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { ChangeMessage, SubscribeChangesOptions } from '../types'
@@ -120,7 +121,10 @@ export class CollectionChangesManager<
   private enrichChangeWithVirtualProps(
     change: ChangeMessage<TOutput, TKey>,
   ): ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey> {
-    return this.state.enrichChangeMessage(change)
+    const enriched = this.state.enrichChangeMessage(change)
+    return isSilentReplacement(change)
+      ? markSilentReplacement(enriched)
+      : enriched
   }
 
   // Reduce unpublished same-key changes relative to the subscriber's last
@@ -159,7 +163,8 @@ export class CollectionChangesManager<
   ): void {
     // The visible state was already committed by the caller, so the revision
     // advances even when the events below end up batched for later emission.
-    if (changes.length > 0) this.stateRevision++
+    // A deep-equal replacement leaves every row's value as it was.
+    if (!changes.every(isSilentReplacement)) this.stateRevision++
     if (layoutChanged) this.layoutRevision++
 
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
@@ -273,10 +278,17 @@ export class CollectionChangesManager<
     const layoutListeners = [...this.layoutChangeListeners]
     const subscriptions = [...this.changeSubscriptions]
     withPublicationContext(() => {
+      // A deep-equal replacement reaches only a filter it moves a row into or
+      // out of. A batch of nothing else is, for everyone else, the layout-only
+      // publication or the silence it was before.
       const callbacks: Array<() => void> = subscriptions.map(
-        (subscription) => () => subscription.emitEvents(enrichedEvents),
+        (subscription) => () => {
+          const visible = subscription.visibleChanges(enrichedEvents)
+          if (visible.length > 0 || layoutChanged)
+            subscription.emitEvents(visible)
+        },
       )
-      if (rawEvents.length === 0) {
+      if (layoutChanged && rawEvents.every(isSilentReplacement)) {
         callbacks.unshift(...layoutListeners)
       }
       try {

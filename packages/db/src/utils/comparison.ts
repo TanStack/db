@@ -425,15 +425,18 @@ function holdsValueClass(value: unknown): boolean {
 function compareHoldingValueClass(
   a: unknown,
   b: unknown,
-  visiting?: Set<unknown>,
+  visiting?: Map<unknown, Set<unknown>>,
 ): number {
   const aIsArray = Array.isArray(a)
   const bIsArray = Array.isArray(b)
   if (aIsArray && bIsArray) {
-    const active = visiting ?? new Set<unknown>()
-    if (active.has(a) || active.has(b)) return 0
-    active.add(a)
-    active.add(b)
+    // Only this pair coming up again inside its own comparison is a cycle. An
+    // array that both operands share at different depths is compared in full.
+    const active = visiting ?? new Map<unknown, Set<unknown>>()
+    let partners = active.get(a)
+    if (partners === undefined) active.set(a, (partners = new Set()))
+    if (partners.has(b)) return 0
+    partners.add(b)
     for (let index = 0; index < Math.min(a.length, b.length); index++) {
       const left = a[index]
       const right = b[index]
@@ -443,8 +446,7 @@ function compareHoldingValueClass(
           : compareNonNullValues(left, right, active)
       if (result !== 0) return result
     }
-    active.delete(a)
-    active.delete(b)
+    partners.delete(b)
     return Math.sign(a.length - b.length)
   }
   if (aIsArray !== bIsArray) {
@@ -462,7 +464,7 @@ function compareHoldingValueClass(
 function compareNonNullValues(
   a: unknown,
   b: unknown,
-  visiting?: Set<unknown>,
+  visiting?: Map<unknown, Set<unknown>>,
 ): number {
   if (isTemporal(a) && isTemporal(b)) {
     return compareTemporalValues(a, b)

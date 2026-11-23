@@ -260,6 +260,20 @@ export function createFilterFunctionFromExpression<T extends object>(
  * @param options - The subscription options containing the where clause
  * @returns A filtered callback function
  */
+// Updates that replace a row with a deep-equal one. Nothing a subscriber reads
+// by value changed, so only a filter that the replacement moves the row into
+// or out of reports them.
+const silentReplacements = new WeakSet<object>()
+
+export function markSilentReplacement<T extends object>(change: T): T {
+  silentReplacements.add(change)
+  return change
+}
+
+export function isSilentReplacement(change: object): boolean {
+  return silentReplacements.has(change)
+}
+
 export function createFilteredCallback<
   T extends object,
   TKey extends string | number = string | number,

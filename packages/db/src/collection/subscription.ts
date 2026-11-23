@@ -14,6 +14,7 @@ import { codedMessage, devBuild } from '../error-message.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
+  isSilentReplacement,
 } from './change-events.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { IndexReader } from '../indexes/base-index.js'
@@ -216,6 +217,7 @@ export class CollectionSubscription
   private stalePublishedRows = new Map<string | number, object>()
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
+  private matchesWhere: ((row: any) => boolean) | undefined
 
   private orderByIndex: IndexReader<string | number> | undefined
 
@@ -287,6 +289,10 @@ export class CollectionSubscription
       }
       callback(changes)
     }
+
+    this.matchesWhere = options.whereExpression
+      ? createFilterFunctionFromExpression(options.whereExpression)
+      : undefined
 
     // Create a filtered callback if where clause is provided
     this.filteredCallback = options.whereExpression
@@ -1322,6 +1328,22 @@ export class CollectionSubscription
     // missing content. Delegated publication keeps its private D2 contributions.
     if (this.bufferPrivately(newChanges)) return false
     return this.filteredCallback(newChanges)
+  }
+
+  /**
+   * Drops deep-equal replacements this subscription cannot observe: one is
+   * visible only where it changes the filter's answer.
+   */
+  visibleChanges(
+    changes: Array<ChangeMessage<any, any>>,
+  ): Array<ChangeMessage<any, any>> {
+    return changes.filter(
+      (change) =>
+        !isSilentReplacement(change) ||
+        (this.matchesWhere !== undefined &&
+          this.matchesWhere(change.previousValue) !==
+            this.matchesWhere(change.value)),
+    )
   }
 
   /** Keep direct snapshot reads private while an authoritative replay is open. */

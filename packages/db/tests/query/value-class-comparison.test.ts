@@ -179,6 +179,105 @@ describe(`indexes follow a deep-equal row replacement`, () => {
   )
 })
 
+describe(`a reference filter follows a deep-equal row replacement`, () => {
+  type Row = { id: string; ref: object | string }
+
+  it.each([
+    [`no index`, undefined],
+    [`BasicIndex`, BasicIndex],
+    [`BTreeIndex`, BTreeIndex],
+  ] as const)(`drops and regains the row with %s`, async (name, indexType) => {
+    const first = new Map([[`k`, 1]])
+    const second = new Map([[`k`, 1]])
+    const collection = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `reference-filter-${name}`,
+        getKey: (row) => row.id,
+        initialData: [
+          { id: `a`, ref: first },
+          { id: `b`, ref: `text` },
+        ],
+        autoIndex: `off`,
+        ...(indexType === undefined ? {} : { defaultIndexType: indexType }),
+      }),
+    )
+    await collection.stateWhenReady()
+    if (indexType !== undefined) collection.createIndex((row) => row.ref)
+    const where = new Func<boolean>(`eq`, [
+      new PropRef([`ref`]),
+      new Value(first),
+    ])
+    const filtered: Array<string> = []
+    const unfiltered: Array<string> = []
+    const subscriptions = [
+      collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes)
+            filtered.push(`${change.type}:${change.key}`)
+        },
+        { includeInitialState: true, whereExpression: where },
+      ),
+      collection.subscribeChanges((changes) => {
+        for (const change of changes)
+          unfiltered.push(`${change.type}:${change.key}`)
+      }),
+    ]
+    const fresh = () =>
+      collection.currentStateAsChanges({ where })!.map((change) => change.key)
+    const replace = (ref: object) => {
+      collection.utils.begin()
+      collection.utils.write({ type: `update`, value: { id: `a`, ref } })
+      collection.utils.commit()
+    }
+
+    replace(second)
+    expect(fresh()).toEqual([])
+    replace(first)
+    expect(fresh()).toEqual([`a`])
+    // Row b is rewritten deep-equal: no filter changes its answer.
+    collection.utils.begin()
+    collection.utils.write({ type: `update`, value: { id: `b`, ref: `text` } })
+    collection.utils.commit()
+
+    expect(filtered).toEqual([`insert:a`, `delete:a`, `insert:a`])
+    expect(unfiltered).toEqual([])
+    for (const subscription of subscriptions) subscription.unsubscribe()
+    await collection.cleanup()
+  })
+})
+
+describe(`arrays shared between the operands of a range`, () => {
+  it(`orders a row that holds the capture like one that holds a copy`, () => {
+    const capture = [[new Bound(`one`, 1)]]
+    const copy = [[new Bound(`one`, 2)]]
+    expect(compareValues([capture], capture)).toBe(1)
+    expect(compareValues([copy], capture)).toBe(1)
+    expect(compareValues(capture, [capture])).toBe(-1)
+    expect(compareValues(capture, [copy])).toBe(-1)
+    // The same array on both sides at one depth is still equal to itself.
+    expect(compareValues([capture, capture], [capture, copy])).toBe(0)
+  })
+
+  it(`ends on arrays that contain themselves`, () => {
+    const loop = (): Array<unknown> => {
+      const array: Array<unknown> = [new Bound(`x`, 1)]
+      array.push(array)
+      return array
+    }
+    const a = loop()
+    const b = loop()
+    const unrolled: Array<unknown> = [new Bound(`x`, 1)]
+    unrolled.push([new Bound(`x`, 2), unrolled])
+    expect(compareValues(a, a)).toBe(0)
+    expect(compareValues(a, b)).toBe(0)
+    expect(compareValues(a, unrolled)).toBe(0)
+    const later = loop()
+    later[0] = new Bound(`y`, 0)
+    expect(compareValues(a, later)).toBe(-1)
+    expect(compareValues(later, a)).toBe(1)
+  })
+})
+
 describe(`excluded objects with a throwing toJSON accessor`, () => {
   const excluded = (): Array<[string, object]> => [
     [`plain record`, throwing({ a: 1 })],

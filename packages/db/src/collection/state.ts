@@ -6,6 +6,7 @@ import {
   SyncQueueInvariantError,
   SyncTransactionAbortedError,
 } from '../errors.js'
+import { markSilentReplacement } from './change-events.js'
 import type { DuplicateKeySyncError } from '../errors.js'
 import type {
   VirtualOrigin,
@@ -1403,10 +1404,6 @@ export class CollectionStateManager<
         reappliedKeys = new Set(this.optimisticUpserts.keys())
       }
 
-      // A deep-equal row publishes nothing, but an index holds the stored
-      // instance of a reference-valued field and must follow its replacement.
-      const indexRefreshes: Array<ChangeMessage<TOutput, TKey>> = []
-
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
         // Truncate already published each re-applied upsert as an insert.
@@ -1475,12 +1472,16 @@ export class CollectionStateManager<
             previousValue: withPreviousVirtualProps(previousVisibleValue),
           })
         } else if (previousVisibleValue !== newVisibleValue) {
-          indexRefreshes.push({
-            type: `update`,
-            key,
-            value: newVisibleValue,
-            previousValue: previousVisibleValue,
-          })
+          // A deep-equal row publishes nothing by value, but an index and a
+          // filter on a reference-valued field must follow the new instance.
+          events.push(
+            markSilentReplacement({
+              type: `update`,
+              key,
+              value: newVisibleValue,
+              previousValue: withPreviousVirtualProps(previousVisibleValue),
+            }),
+          )
         }
       }
 
@@ -1488,8 +1489,8 @@ export class CollectionStateManager<
       this.size = this.calculateSize()
 
       // Update indexes for all events before emitting
-      if (events.length > 0 || indexRefreshes.length > 0) {
-        this.indexes.updateIndexes([...events, ...indexRefreshes])
+      if (events.length > 0) {
+        this.indexes.updateIndexes(events)
       }
 
       // End batching and emit all events (combines any batched events with sync events)
