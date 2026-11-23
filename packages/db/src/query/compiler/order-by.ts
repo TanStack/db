@@ -25,7 +25,14 @@ import type { CompareOptions } from '../builder/types.js'
 import type { WindowOptions } from './types.js'
 import type { Grouping } from './grouping.js'
 import type { CompiledSingleRowExpression } from './evaluators.js'
-import type { OrderBy, OrderByClause, QueryIR, Select } from '../ir.js'
+import type {
+  CollectionRef,
+  JoinClause,
+  OrderBy,
+  OrderByClause,
+  QueryIR,
+  Select,
+} from '../ir.js'
 import type {
   CollectionLike,
   NamespacedAndKeyedStream,
@@ -69,6 +76,37 @@ export type OrderByOptimizationInfo = {
   sourceHoldsAllRows: boolean
   /** Sources whose lazy demand must settle before a joined-filter page. */
   joinedFilterSourceIds?: ReadonlyArray<string>
+}
+
+/**
+ * The one collection a LEFT-joined subquery only filters and projects. Its rows
+ * load by key like a joined collection's, so the joined-filter gate can wait on
+ * that source. Any clause that changes which rows exist for a key disqualifies it.
+ */
+function filterSubqueryOf(
+  sub: QueryIR,
+): (QueryIR & { from: CollectionRef }) | undefined {
+  if (
+    sub.from.type !== `collectionRef` ||
+    (sub.join?.length ?? 0) > 0 ||
+    sub.groupBy !== undefined ||
+    sub.fnHaving !== undefined ||
+    (sub.fnWhere?.length ?? 0) > 0 ||
+    sub.fnSelect !== undefined ||
+    sub.limit !== undefined ||
+    sub.offset !== undefined ||
+    sub.singleResult
+  ) {
+    return undefined
+  }
+  return sub as QueryIR & { from: CollectionRef }
+}
+
+function joinedFilterSourceOf(join: JoinClause): string | undefined {
+  if (join.from.type === `collectionRef`) return join.from.sourceId
+  return join.from.type === `queryRef`
+    ? filterSubqueryOf(join.from.query)?.from.sourceId
+    : undefined
 }
 
 function warnOrderIndexFallback(
@@ -280,9 +318,8 @@ export function processOrderBy(
       const joinedFilterSourceId =
         hasCrossAliasWhere &&
         rawQuery.join?.length === 1 &&
-        rawQuery.join[0]!.type === `left` &&
-        rawQuery.join[0]!.from.type === `collectionRef`
-          ? rawQuery.join[0]!.from.sourceId
+        rawQuery.join[0]!.type === `left`
+          ? joinedFilterSourceOf(rawQuery.join[0]!)
           : undefined
 
       const info: OrderByOptimizationInfo = {

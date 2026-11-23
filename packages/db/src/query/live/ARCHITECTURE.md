@@ -1295,7 +1295,10 @@ page, core waits for the current lazy join demand and any joined subset load to
 settle, then reruns the graph. A joined load can settle without delivering a
 row, so the joined source becoming ready schedules that run itself. Joined-side changes also recheck ordered demand
 so a removed match can refill a short window. An empty joined replay still
-releases held Effect callbacks.
+releases held Effect callbacks. A LEFT join to a subquery that only filters and
+projects one collection pages the same way, waiting on that collection. A
+subquery with a join, grouping, a function clause, a limit, an offset or a
+single-row result keeps the full-source read.
 
 A finite indexed window is proven only up to the loader's settled boundary.
 Live root rows past the bounded prefix still enter the graph, so a window row
