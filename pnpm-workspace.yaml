@@ -20,6 +20,9 @@ overrides:
   'chokidar@^4.0.0': '4.0.1'
   # UUID 13.0.2 includes the security fix and retains trusted publishing evidence.
   'trailbase>uuid': '13.0.2'
+  # Solid 2 serializes with seroval-plugins 1.8, which needs seroval 1.8. The
+  # router's wider range would otherwise dedupe the pair onto seroval 1.6.
+  seroval: '^1.8.0'
   metro: '0.82.5'
   metro-babel-transformer: '0.82.5'
   metro-cache: '0.82.5'

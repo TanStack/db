@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/solid-router'
-import { For, Show, createSignal } from 'solid-js'
+import { For, Show, createMemo, createSignal } from 'solid-js'
 import type { Collection } from '@tanstack/solid-db'
 import type { SelectConfig, SelectTodo } from '../db/validation'
 
@@ -45,7 +45,9 @@ export function TodoApp(props: TodoAppProps) {
     })
   }
 
-  const backgroundColor = getConfigValue(`backgroundColor`)
+  // Props and rows are reactive: read them where the value is used (JSX, a
+  // memo, an event handler), never once in the component body.
+  const backgroundColor = createMemo(() => getConfigValue(`backgroundColor`))
 
   // Function to generate a complementary color
   const getComplementaryColor = (hexColor: string): string => {
@@ -91,37 +93,44 @@ export function TodoApp(props: TodoAppProps) {
     return compHex
   }
 
-  const titleColor = getComplementaryColor(backgroundColor)
+  const titleColor = createMemo(() => getComplementaryColor(backgroundColor()))
 
   const handleColorChange = (e: { currentTarget: { value: string } }) => {
     setConfigValue(`backgroundColor`, e.currentTarget.value)
   }
 
-  const handleSubmit = (e: SubmitEvent) => {
-      e.preventDefault()
-      if (!newTodo().trim()) return
+  const handleSubmit = (e: SubmitEvent): void => {
+    e.preventDefault()
+    if (!newTodo().trim()) return
 
-      props.todoCollection.insert({
-        text: newTodo(),
-        completed: false,
-        id: Math.round(Math.random() * 1000000),
-        created_at: new Date(),
-        updated_at: new Date(),
-      })
-      setNewTodo(``)
-    }
+    props.todoCollection.insert({
+      text: newTodo(),
+      completed: false,
+      id: Math.round(Math.random() * 1000000),
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    setNewTodo(``)
+  }
 
-  const activeTodos = props.todos.filter((todo) => !todo.completed)
-  const completedTodos = props.todos.filter((todo) => todo.completed)
+  const activeTodos = createMemo(() =>
+    props.todos.filter((todo) => !todo.completed),
+  )
+  const completedTodos = createMemo(() =>
+    props.todos.filter((todo) => todo.completed),
+  )
 
   return (
     <div
       class="min-h-screen flex items-start justify-center overflow-auto py-8"
-      style={{ 'background-color': backgroundColor }}
+      style={{ 'background-color': backgroundColor() }}
     >
       <div style={{ width: `550px` }} class="mx-auto relative">
         <div class="text-center mb-8">
-          <h1 class="text-[70px] font-bold mb-4" style={{ color: titleColor }}>
+          <h1
+            class="text-[70px] font-bold mb-4"
+            style={{ color: titleColor() }}
+          >
             {props.title}
           </h1>
 
@@ -159,14 +168,14 @@ export function TodoApp(props: TodoAppProps) {
             <label
               for="colorPicker"
               class="mr-2 text-sm font-medium text-gray-700"
-              style={{ color: titleColor }}
+              style={{ color: titleColor() }}
             >
               Background Color:
             </label>
             <input
               type="color"
               id="colorPicker"
-              value={backgroundColor}
+              value={backgroundColor()}
               onInput={handleColorChange}
               class="cursor-pointer border border-gray-300 rounded"
             />
@@ -181,10 +190,10 @@ export function TodoApp(props: TodoAppProps) {
                 class="absolute left-0 w-12 h-full text-[30px] text-[#e6e6e6] hover:text-[#4d4d4d]"
                 onClick={() => {
                   const allCompleted =
-                    completedTodos.length === props.todos.length
+                    completedTodos().length === props.todos.length
                   const todosToToggle = allCompleted
-                    ? completedTodos
-                    : activeTodos
+                    ? completedTodos()
+                    : activeTodos()
                   props.todoCollection.update(
                     todosToToggle.map((todo) => todo.id),
                     (drafts) => {
@@ -250,15 +259,15 @@ export function TodoApp(props: TodoAppProps) {
 
               <footer class="text-[14px] text-[#777] py-[10px] px-[15px] h-[40px] relative border-t border-[#e6e6e6] flex justify-between items-center">
                 <span class="text-[inherit]">
-                  {activeTodos.length}
+                  {activeTodos().length}
                   {` `}
-                  {activeTodos.length === 1 ? `item` : `items`} left
+                  {activeTodos().length === 1 ? `item` : `items`} left
                 </span>
-                {completedTodos.length > 0 && (
+                {completedTodos().length > 0 && (
                   <button
                     onClick={() => {
                       props.todoCollection.delete(
-                        completedTodos.map((todo) => todo.id),
+                        completedTodos().map((todo) => todo.id),
                       )
                     }}
                     class="text-inherit hover:underline"
