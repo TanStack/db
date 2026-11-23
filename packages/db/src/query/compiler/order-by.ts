@@ -445,9 +445,13 @@ export function processOrderBy(
         joinedFilterSourceIds: joinedFilterSourceId
           ? [joinedFilterSourceId]
           : undefined,
-        ...(joinedFilterSourceId !== undefined && {
-          relations: joinedFilterRelations(rawQuery, orderByAlias),
-        }),
+        // A subquery root can rename fields, so only a direct root's rows
+        // have the paths a hint names.
+        ...(joinedFilterSourceId !== undefined &&
+          rawQuery.from.type === `collectionRef` &&
+          rawQuery.from.sourceId === orderBySourceId && {
+            relations: joinedFilterRelations(rawQuery, orderByAlias),
+          }),
         sourceHoldsAllRows:
           followRefResult.collection.config.syncMode !== `on-demand`,
         requiresFullSource:

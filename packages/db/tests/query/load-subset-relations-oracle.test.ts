@@ -413,7 +413,100 @@ function runSharedWindowCell({ same }: (typeof sharedWindowCases)[number]) {
   expect(plan.relations !== undefined, `shared window hint`).toBe(same)
 }
 
+// A root that is itself a subquery can rename the join key, so its fields are
+// not the source's. It sends no hint, and its window is still right.
+async function runSubqueryRootCell(): Promise<void> {
+  const loads: Array<OptionsWithRelations> = []
+  const answer = <T extends object>(data: ReadonlyArray<T>) => ({
+    sync: {
+      sync: ({ begin, write, commit, markReady }: any) => {
+        begin()
+        for (const row of data) write({ type: `insert`, value: { ...row } })
+        commit()
+        markReady()
+        return {
+          loadSubset: (options: OptionsWithRelations) => {
+            loads.push(options)
+            return true as const
+          },
+        }
+      },
+    },
+  })
+  const root = createCollection<Seek>({
+    id: `load-subset-relations-subquery-root`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    ...answer(seeks),
+  })
+  const joined = createCollection<Owner>({
+    id: `load-subset-relations-subquery-owners`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    ...answer(owners),
+  })
+  const renamed = new Query().from({ seek: root }).select(({ seek }) => ({
+    id: seek.id,
+    rank: seek.rank,
+    renamedOwner: seek.ownerId,
+  }))
+  const live = createLiveQueryCollection({
+    query: ((query: InitialQueryBuilder) =>
+      query
+        .from({ seek: renamed })
+        .leftJoin({ owner: joined }, ({ seek, owner }: any) =>
+          eq(seek.renamedOwner, owner.id),
+        )
+        .where(({ owner }: any) => eq(owner.active, true))
+        .orderBy(({ seek }: any) => seek.rank, `desc`)
+        .limit(4)
+        .select(({ seek }: any) => ({ id: seek.id }))) as never,
+  }) as unknown as Collection<{ id: number }>
+  try {
+    await live.preload()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(
+      Array.from(live.values(), ({ id }) => id),
+      `published window`,
+    ).toEqual(
+      seeks
+        .filter((seek) => passes(`match`, seek))
+        .slice(0, 4)
+        .map(({ id }) => id),
+    )
+    expect(
+      loads.filter((load) => load.relations !== undefined),
+      `a subquery root sends no hint`,
+    ).toEqual([])
+  } finally {
+    await live.cleanup()
+    await root.cleanup()
+    await joined.cleanup()
+  }
+}
+
 describe(`loadSubset relation hints`, () => {
+  oracleProperty({
+    id: `load-subset-relations.subquery-root`,
+    law: {
+      statement: `A window whose root is a subquery sends no relation hint and publishes the window local evaluation gives.`,
+      authority: `Issue #2124: an adapter must never drop a root row that passes.`,
+      limits: `One root subquery that renames the join key.`,
+    },
+    owns: ['src/query/compiler/order-by.ts#processOrderBy'],
+    histories: [{ root: `renamed` }],
+    label: ({ root }) => `${root} subquery root`,
+    resolve: (cell) => ({ cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`subquery root hint`, plan, observe, () =>
+        runSubqueryRootCell(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
   oracleProperty({
     id: `load-subset-relations.demand-key`,
     law: {
