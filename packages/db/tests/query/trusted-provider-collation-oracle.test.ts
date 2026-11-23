@@ -449,23 +449,35 @@ const tieRows: Array<Row> = [
   { id: 5, label: `c` },
 ]
 const tieCases = [`asc`, `desc`].flatMap((direction) =>
-  [1, 2].map((limit) => ({
-    direction: direction as `asc` | `desc`,
-    limit,
-  })),
+  [1, 2].flatMap((limit) =>
+    [`key`, `reversed`].map((providerTies) => ({
+      direction: direction as `asc` | `desc`,
+      limit,
+      providerTies: providerTies as `key` | `reversed`,
+    })),
+  ),
 )
 
 async function runTieCell({
   direction,
   limit,
+  providerTies,
 }: (typeof tieCases)[number]): Promise<void> {
   const sign = direction === `asc` ? 1 : -1
   const ordered = [...tieRows].sort(
     (a, b) => sign * compareIgnoringCase(a.label, b.label) || a.id - b.id,
   )
+  // The caller's statement covers the comparator, not how a provider orders
+  // the rows it treats as equal.
+  const providerOrder =
+    providerTies === `key`
+      ? ordered
+      : [...tieRows].sort(
+          (a, b) => sign * compareIgnoringCase(a.label, b.label) || b.id - a.id,
+        )
   const delivered = new Set<number>()
   const source = createCollection<Row>({
-    id: `trusted-collation-ties-${direction}-${limit}`,
+    id: `trusted-collation-ties-${direction}-${limit}-${providerTies}`,
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     startSync: true,
@@ -488,7 +500,7 @@ async function runTieCell({
               ? compileSingleRowExpression(options.cursor.whereFrom)
               : undefined
             const offset = from ? 0 : (options.offset ?? 0)
-            const matching = ordered.filter(
+            const matching = providerOrder.filter(
               (row) =>
                 (!where || where(row) === true) &&
                 (!from || from(row) === true),
@@ -617,12 +629,12 @@ describe(`custom string collation trusted to the provider`, () => {
     law: {
       statement: `Rows the trusted comparator treats as equal are not lost when they straddle a page boundary.`,
       authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery.`,
-      limits: `One case-insensitive comparator, two directions and two page sizes.`,
+      limits: `One case-insensitive comparator, two directions, two page sizes and two provider tie orders.`,
     },
     owns: ['src/utils/cursor.ts'],
     histories: tieCases,
-    label: ({ direction, limit }) =>
-      `keeps ties ${direction} in pages of ${limit}`,
+    label: ({ direction, limit, providerTies }) =>
+      `keeps ties ${direction} in pages of ${limit} with ${providerTies} provider ties`,
     resolve: (cell) => ({ cell }),
     model: recordedAssertionJudgment,
     driver: (plan, observe) =>
