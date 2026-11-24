@@ -29,6 +29,8 @@ export class TransactionExecutor {
   private offlineExecutor: TransactionSignaler
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private fatalError: Error | null = null
+  // Writes beforeRetry excluded whose rejection cleanup has not finished.
+  private readonly excluding = new Set<string>()
 
   constructor(
     scheduler: KeyScheduler,
@@ -114,10 +116,14 @@ export class TransactionExecutor {
         ? transaction
         : { ...transaction, outboxPhase: `deletion-pending` }
       try {
-        await this.removeSettledTransaction(
-          deletionPending,
-          !transaction.outboxPhase,
+        // A rejection waits until it is recorded and its row removed.
+        if (
+          !(await this.removeSettledTransaction(
+            deletionPending,
+            !transaction.outboxPhase,
+          ))
         )
+          return
       } catch (error) {
         const storageError = error as Error
         // A cleanup fault is not the write's outcome. Another tab's writer
@@ -247,7 +253,9 @@ export class TransactionExecutor {
           this.scheduler.getPendingCount() > 1,
         )
       try {
-        await this.removeSettledTransaction(rejectionPending, true)
+        // A rejection waits until it is recorded and its row removed.
+        if (!(await this.removeSettledTransaction(rejectionPending, true)))
+          return
       } catch (storageError) {
         this.offlineExecutor.rejectTransaction(transaction.id, terminalError)
         throw storageError
@@ -301,10 +309,11 @@ export class TransactionExecutor {
     }
   }
 
+  /** False when the row stays because its rejection could not be recorded. */
   private async removeSettledTransaction(
     transaction: OfflineTransaction,
     persistMarker: boolean,
-  ): Promise<void> {
+  ): Promise<boolean> {
     // Read by this function's development-only oracle probes, as above.
     const probing =
       typeof process === `undefined`
@@ -334,13 +343,31 @@ export class TransactionExecutor {
         this.config.followerWrites === `durable` &&
         transaction.outboxPhase === `rejection-pending`
       ) {
-        await this.outbox.recordRejection(
-          transaction.id,
-          this.getTerminalError(transaction),
-        )
+        try {
+          await this.outbox.recordRejection(
+            transaction.id,
+            this.getTerminalError(transaction),
+          )
+        } catch (error) {
+          // The terminal row stays; a later attempt records the rejection and
+          // removes it without calling the provider. Other writes keep running.
+          console.warn(
+            `Failed to record rejection of transaction ${transaction.id}:`,
+            error,
+          )
+          this.scheduler.updateTransaction({
+            ...transaction,
+            nextAttemptAt:
+              Date.now() +
+              this.retryPolicy.calculateDelay(transaction.retryCount),
+          })
+          this.scheduler.markFailed(transaction)
+          return false
+        }
       }
       await this.outbox.remove(transaction.id)
       this.scheduler.markCompleted(transaction)
+      return true
     } catch (error) {
       const storageError = toError(error)
       // Development-only oracle probe; a production build removes it. The
@@ -407,6 +434,8 @@ export class TransactionExecutor {
         .filter(({ id }) => !selectedById.has(id))
         .map(({ id }) => id)
       removedIds = this.scheduler.removePendingTransactions(removedIds)
+      // A late admission must not run a write this hook excluded.
+      for (const id of removedIds) this.excluding.add(id)
 
       // Restore optimistic state for loaded transactions
       // This ensures the UI shows the optimistic data while transactions are pending
@@ -438,6 +467,8 @@ export class TransactionExecutor {
               id,
               cleanupError,
             )
+          } finally {
+            this.excluding.delete(id)
           }
         }),
       )
@@ -457,7 +488,8 @@ export class TransactionExecutor {
     if (
       !transaction ||
       !this.offlineExecutor.isOfflineEnabled ||
-      term !== this.offlineExecutor.leadershipTerm
+      term !== this.offlineExecutor.leadershipTerm ||
+      this.excluding.has(id)
     )
       return
     // A duplicate message is harmless: both steps ignore a known transaction.
@@ -531,6 +563,17 @@ export class TransactionExecutor {
 
   pause(): void {
     // Retain queued work and let the issued call finish its acknowledgment.
+    this.clearRetryTimer()
+  }
+
+  /**
+   * Drops queued work that has not started. Another leader may send and
+   * remove it; a later leadership gain loads what remains from the outbox.
+   */
+  dropPending(): void {
+    this.scheduler.removePendingTransactions(
+      this.scheduler.getAllPendingTransactions().map(({ id }) => id),
+    )
     this.clearRetryTimer()
   }
 

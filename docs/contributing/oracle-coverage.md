@@ -4256,7 +4256,12 @@ The post-merge review added three missing domains to existing owners:
   records remain. It also covers a failed row removal after a successful send,
   an undecodable saved row, a follower's failed outbox check, an admission read
   across a change of leadership, and a `beforeRetry` exclusion whose settlement
-  is lost. It does not cover real browser contexts.
+  is lost. It also covers a failed rejection record, a late admission during an
+  exclusion, a write removed before it was sent, a save acknowledged after a
+  handover, a faulted former leader that saves for its successor, a failed
+  start, a save that ends after its tab closed, and tabs that name their
+  collections differently under one key. It does not cover real browser
+  contexts.
 - Settlement-time drop of optimistic state is owned by the
   [optimistic history model](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts)
   and

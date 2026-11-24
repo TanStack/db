@@ -223,7 +223,7 @@ mutation function after restart; an unmarked row may replay.
 
 - `createOfflineTransaction(options)` - Create a manual offline transaction
 - `waitForTransactionCompletion(id)` - Wait for a specific transaction to complete. Call it before the transaction settles: a waiter for a transaction that this executor recently settled (one of its last 1,000) rejects. A waiter for an older settled id keeps waiting. A waiter for an id the executor does not know yet keeps waiting, because another tab can still queue that transaction.
-- `removeFromOutbox(id)` - Manually remove transaction from outbox
+- `removeFromOutbox(id)` - Manually remove transaction from outbox. A removed transaction that has not started does not run, and with `followerWrites: 'durable'` its writer's transaction fails
 - `clearOutbox()` - Manually remove all outbox transactions
 - `peekOutbox()` - View all pending transactions
 - `dispose()` - Stop new processing and release executor resources. Pending durable transactions and optimistic state on surviving Collections remain live.

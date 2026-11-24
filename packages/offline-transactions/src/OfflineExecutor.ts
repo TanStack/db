@@ -105,6 +105,9 @@ export class OfflineExecutor {
   private readonly unadmitted = new Set<string>()
   // A follower's outbox check failed; it runs again on connectivity.
   private reconcileFailed = false
+  // Only the newest outbox check sets or clears reconcileFailed.
+  private sweeps = 0
+  private outboxChannelName: string | null = null
   private initialized = false
   private term = 0
   private pendingTransactionPromises: Map<
@@ -267,7 +270,10 @@ export class OfflineExecutor {
           if (this.disposed || isLeader === this.isLeaderState) return
           this.isLeaderState = isLeader
           if (isLeader) this.term++
-          else this.executor?.pause()
+          else {
+            this.executor?.pause()
+            this.executor?.dropPending()
+          }
 
           if (this.config.onLeadershipChange) {
             this.config.onLeadershipChange(isLeader)
@@ -386,6 +392,10 @@ export class OfflineExecutor {
       this.initResolve()
     } catch (error) {
       console.warn(`Failed to initialize offline executor:`, error)
+      // A failed start releases what it opened, without waiting for dispose().
+      this.outboxChannel?.close()
+      this.outboxChannel = null
+      this.leaderElection?.releaseLeadership()
       this.initReject(error instanceof Error ? error : new Error(String(error)))
     }
   }
@@ -419,12 +429,11 @@ export class OfflineExecutor {
     ) {
       return
     }
-    const collectionIds = Object.values(this.config.collections)
-      .map((collection) => collection.id)
-      .sort()
-    this.outboxChannel = new BroadcastChannel(
-      `tanstack-offline-outbox:${collectionIds.join(`,`)}`,
-    )
+    // Tabs that share an outbox register the same keys; their collection
+    // ids may differ.
+    const registryKeys = Object.keys(this.config.collections).sort()
+    this.outboxChannelName = `tanstack-offline-outbox:${registryKeys.join(`,`)}`
+    this.outboxChannel = new BroadcastChannel(this.outboxChannelName)
     this.outboxChannel.onmessage = (event: MessageEvent<OutboxMessage>) => {
       this.handleOutboxMessage(event.data)
     }
@@ -475,6 +484,7 @@ export class OfflineExecutor {
   // row removed with no record completed. A failed read leaves that write
   // pending, and the check runs again when connectivity changes.
   private async settleRemovedWrites(): Promise<void> {
+    const sweep = ++this.sweeps
     let failed = false
     for (const [id, waiter] of [...this.pendingTransactionPromises]) {
       try {
@@ -487,12 +497,26 @@ export class OfflineExecutor {
         console.warn(`Failed to reconcile follower writes:`, error)
       }
     }
-    this.reconcileFailed = failed
+    if (sweep === this.sweeps) this.reconcileFailed = failed
   }
 
   /** Counts later leadership gains, so work begun in an earlier term can tell. */
   get leadershipTerm(): number {
     return this.term
+  }
+
+  // Tells the leader about a saved write, even when this tab was disposed
+  // while the save ran.
+  private announceAdded(id: string): void {
+    const message = { type: `added`, id } satisfies OutboxMessage
+    if (this.outboxChannel) {
+      this.outboxChannel.postMessage(message)
+      return
+    }
+    if (this.outboxChannelName === null) return
+    const channel = new BroadcastChannel(this.outboxChannelName)
+    channel.postMessage(message)
+    channel.close()
   }
 
   private announceSettled(id: string, error?: Error, own = false): void {
@@ -609,7 +633,11 @@ export class OfflineExecutor {
     }
 
     try {
-      this.executor.assertHealthy()
+      const term = this.term
+      // A follower's save goes to the shared outbox for whichever tab leads;
+      // this executor's own faults only stop work it would run itself.
+      if (this.isOfflineEnabled || !this.writesToSharedOutbox)
+        this.executor.assertHealthy()
       const saved = this.outbox.add(transaction)
       // The transaction registered this waiter before it asked to persist.
       this.pendingTransactionPromises.get(transaction.id)!.saved = saved.then(
@@ -617,11 +645,14 @@ export class OfflineExecutor {
         () => false,
       )
       await saved
-      if (this.outboxChannel && !this.isOfflineEnabled) {
-        this.outboxChannel.postMessage({
-          type: `added`,
-          id: transaction.id,
-        } satisfies OutboxMessage)
+      if (!this.isOfflineEnabled) {
+        this.announceAdded(transaction.id)
+        return
+      }
+      // Leadership changed while the row was saved: another leader may have
+      // sent and removed it, so admit it only if it is still there.
+      if (term !== this.term) {
+        this.admitFollowerWrite(transaction.id)
         return
       }
       // A shared queue error belongs to its execution, not every caller
@@ -805,7 +836,16 @@ export class OfflineExecutor {
     if (!this.outbox) {
       return
     }
+    // A follower that saved this write and has not heard an outcome must not
+    // read the removal as success.
+    if (this.outboxChannelName !== null && (await this.outbox.get(id)))
+      await this.outbox.recordRejection(
+        id,
+        new NonRetriableError(`Transaction removed from the outbox`),
+      )
     await this.outbox.remove(id)
+    // A removed transaction that has not started does not run.
+    this.scheduler.removePendingTransactions([id])
   }
 
   async peekOutbox(): Promise<Array<OfflineTransaction>> {

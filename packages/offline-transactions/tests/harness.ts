@@ -101,16 +101,19 @@ interface TestOfflineEnvironmentOptions {
   mutationFn?: TestMutationFn
   storage?: FakeStorageAdapter
   config?: Partial<OfflineConfig>
+  // The collection's id, and the key the executor registers it under.
+  collectionId?: string
+  registryKey?: string
 }
 
-function createDefaultCollection(): {
+function createDefaultCollection(id = `test-items`): {
   collection: Collection<TestItem, string, {}>
   controller: SyncController
 } {
   let controller!: SyncController
 
   const collection = createCollection<TestItem, string, {}>({
-    id: `test-items`,
+    id,
     getKey: (item) => item.id,
     startSync: true,
     sync: {
@@ -147,7 +150,9 @@ export function createTestOfflineEnvironment(
   const mutationCalls: Array<OfflineMutationFnParams & { attempt: number }> = []
   const attemptCounter = new Map<string, number>()
 
-  const { collection, controller } = createDefaultCollection()
+  const { collection, controller } = createDefaultCollection(
+    options.collectionId,
+  )
   const serverState = new Map<string, TestItem>()
 
   const applyMutations = (mutations: ReadonlyArray<PendingMutation>) => {
@@ -226,7 +231,7 @@ export function createTestOfflineEnvironment(
     ...options.config,
     collections: {
       ...(options.config?.collections ?? {}),
-      [collection.id]: collection,
+      [options.registryKey ?? collection.id]: collection,
     },
     mutationFns: {
       ...(options.config?.mutationFns ?? {}),
