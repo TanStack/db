@@ -52,11 +52,11 @@
   "devDependencies": {
     "@electric-sql/client": "^1.5.28",
     "@solidjs/testing-library": "^1.0.0-rc.2",
+    "@solidjs/vite-plugin": "^3.0.1",
     "@solidjs/web": "^2.0.3",
     "@vitest/coverage-istanbul": "^5.1.0",
     "jsdom": "^27.4.0",
     "solid-js": "^2.0.3",
-    "@solidjs/vite-plugin": "^3.0.1",
     "vitest": "^5.1.0"
   }
 }

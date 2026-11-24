@@ -1130,6 +1130,306 @@ describe(`Query Collections`, () => {
     })
   })
 
+  // The accessor's status flags across a first load. A Collection created with
+  // `startSync: false` keeps its query loading until its sync reports ready.
+  describe(`status flags`, () => {
+    // A Collection whose sync hands its transaction controls to the test and
+    // then waits for the test to drive them.
+    function heldCollection<T extends { id: string }>(id: string) {
+      const controls = {
+        begin: () => {},
+        commit: () => {},
+        markReady: () => {},
+      }
+      const collection = createCollection<T>({
+        id,
+        getKey: (row) => row.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            controls.begin = begin
+            controls.commit = commit
+            controls.markReady = markReady
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+      return { collection, controls }
+    }
+
+    it(`isLoading is true before the first load and false once the Collection is ready`, async () => {
+      const { collection, controls } = heldCollection<Person>(`has-loaded-test`)
+      const { result } = renderHook(() => {
+        return useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
+        )
+      })
+
+      expect(result.isLoading).toBe(true)
+
+      // Start sync, then report the first transaction as the ready state.
+      collection.preload()
+      controls.begin()
+      controls.commit()
+      controls.markReady()
+      collection.insert({
+        id: `1`,
+        name: `John Doe`,
+        age: 35,
+        email: `john.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+
+      // Rows may take a moment to reach the result; the flag follows the
+      // Collection's status.
+      await waitFor(() => {
+        expect(result.isLoading).toBe(false)
+      })
+    })
+
+    it(`isLoading is false for a pre-created live query Collection that is already syncing`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `pre-created-has-loaded-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
+        startSync: true,
+      })
+
+      // Let the Collection start syncing before the hook reads it.
+      await settle()
+
+      const { result } = renderHook(() => {
+        return useLiveQuery(() => liveQueryCollection)
+      })
+
+      // A Collection that is already syncing is first read at its current
+      // state, with no loading frame before it.
+      expect(result.isLoading).toBe(false)
+      expect(result.state.size).toBe(1)
+    })
+
+    it(`should update isLoading when collection status changes`, async () => {
+      const { collection, controls } = heldCollection<Person>(
+        `status-change-has-loaded-test`,
+      )
+      const { result } = renderHook(() => {
+        return useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
+        )
+      })
+
+      expect(result.isLoading).toBe(true)
+
+      collection.preload()
+      controls.begin()
+      controls.commit()
+      controls.markReady()
+      collection.insert({
+        id: `1`,
+        name: `John Doe`,
+        age: 35,
+        email: `john.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+
+      await waitFor(() => {
+        expect(result.isLoading).toBe(false)
+      })
+      expect(result.isReady).toBe(true)
+      expect(result.status).toBe(`ready`)
+    })
+
+    it(`should maintain isReady state during live updates`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `live-updates-has-loaded-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result } = renderHook(() => {
+        return useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
+        )
+      })
+
+      await waitFor(() => {
+        expect(result.isLoading).toBe(false)
+      })
+
+      const initialIsReady = result.isReady
+
+      // A live write changes the rows, not the Collection's readiness.
+      collection.utils.begin()
+      collection.utils.write({
+        type: `insert`,
+        value: {
+          id: `4`,
+          name: `Kyle Doe`,
+          age: 40,
+          email: `kyle.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      collection.utils.commit()
+
+      await waitFor(() => {
+        expect(result.state.size).toBe(2)
+      })
+
+      // isReady should remain true during live updates
+      expect(result.isReady).toBe(true)
+      expect(result.isReady).toBe(initialIsReady)
+    })
+
+    it(`should handle isLoading with complex queries including joins`, async () => {
+      const personSource = heldCollection<Person>(`join-has-loaded-persons`)
+      const issueSource = heldCollection<Issue>(`join-has-loaded-issues`)
+
+      const { result } = renderHook(() => {
+        return useLiveQuery((q) =>
+          q
+            .from({ issues: issueSource.collection })
+            .join({ persons: personSource.collection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id),
+            )
+            .select(({ issues, persons }) => ({
+              id: issues.id,
+              title: issues.title,
+              name: persons.name,
+            })),
+        )
+      })
+
+      expect(result.isLoading).toBe(true)
+
+      // A join is ready once both of its Collections are.
+      for (const { collection, controls } of [personSource, issueSource]) {
+        collection.preload()
+        controls.begin()
+        controls.commit()
+        controls.markReady()
+      }
+      personSource.collection.insert({
+        id: `1`,
+        name: `John Doe`,
+        age: 30,
+        email: `john.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+      issueSource.collection.insert({
+        id: `1`,
+        title: `Issue 1`,
+        description: `Issue 1 description`,
+        userId: `1`,
+      })
+
+      await waitFor(() => {
+        expect(result.isReady).toBe(true)
+      })
+      expect(result.isLoading).toBe(false)
+    })
+
+    it(`should handle isLoading with parameterized queries`, async () => {
+      return createRoot(async (dispose) => {
+        const { collection, controls } = heldCollection<Person>(
+          `params-has-loaded-test`,
+        )
+
+        const [minAge, setMinAge] = createSignal(30)
+        const { result } = renderHook(
+          (props: { minAge: Accessor<number> }) => {
+            return useLiveQuery((q) =>
+              q
+                .from({ collection })
+                .where(({ collection: c }) => gt(c.age, props.minAge()))
+                .select(({ collection: c }) => ({
+                  id: c.id,
+                  name: c.name,
+                })),
+            )
+          },
+          { initialProps: [{ minAge }] },
+        )
+
+        expect(result.isLoading).toBe(true)
+
+        collection.preload()
+        controls.begin()
+        controls.commit()
+        controls.markReady()
+        collection.insert({
+          id: `1`,
+          name: `John Doe`,
+          age: 35,
+          email: `john.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        })
+        collection.insert({
+          id: `2`,
+          name: `Jane Doe`,
+          age: 25,
+          email: `jane.doe@example.com`,
+          isActive: true,
+          team: `team2`,
+        })
+
+        await waitFor(() => {
+          expect(result.isLoading).toBe(false)
+        })
+
+        // Change parameters
+        setMinAge(25)
+
+        // isReady should remain true even when parameters change
+        await waitFor(() => {
+          expect(result.isReady).toBe(true)
+        })
+
+        dispose()
+      })
+    })
+  })
+
   describe(`Disabled queries`, () => {
     it(`should handle callback returning undefined with proper state`, async () => {
       return createRoot(async (dispose) => {

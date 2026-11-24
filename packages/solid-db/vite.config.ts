@@ -12,6 +12,11 @@ const config = defineConfig({
     setupFiles: [`./tests/test-setup.ts`],
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: { enabled: true },
+    // The plugin inlines Solid's runtime into the test module graph and
+    // leaves `@solid-primitives` to Node, which loads a second copy: a
+    // `ReactiveMap` then notifies no computation of the first. Inlined, the
+    // keyed view `state` is reactive in tests, as it is in an application.
+    server: { deps: { inline: [/@solid-primitives\//] } },
   },
 })
 

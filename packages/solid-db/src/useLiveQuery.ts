@@ -8,8 +8,9 @@ import {
   resolveLiveQueryValue,
   toBoundaryError,
 } from '@tanstack/db'
-import { createEffect, createMemo, createStore, from, untrack } from 'solid-js'
-import { createRowStore } from './store-materialization'
+import { createEffect, createMemo, createSignal, from, untrack } from 'solid-js'
+import { createRowView } from './row-view'
+import type { RowView } from './row-view'
 import type { Accessor } from 'solid-js'
 import type {
   Collection,
@@ -72,7 +73,7 @@ type Result<TRows, TRow, TCollection> = Accessor<TRows> & {
 /**
  * Create a live query using a query function
  * @param queryFn - Query function that defines what data to fetch
- * @returns Accessor that returns the current rows synchronously; gate rendering on `loaded()` inside `<Loading>` for a first-data boundary
+ * @returns Accessor that returns the current rows synchronously, with the status flags, `state`, `collection`, and the `loaded` first-data gate
  * @example
  * const todosQuery = useLiveQuery((q) =>
  *   q.from({ todos: todosCollection })
@@ -83,10 +84,51 @@ type Result<TRows, TRow, TCollection> = Accessor<TRows> & {
  * <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
  *
  * @example
- * // Opt-in gate: `loaded()` participates in <Loading> and returns the rows
- * <Loading fallback={<div>Loading...</div>}>
- *   <For each={todosQuery.loaded()}>{(todo) => <li>{todo.text}</li>}</For>
- * </Loading>
+ * // With dependencies that trigger re-execution
+ * const todosQuery = useLiveQuery(
+ *   (q) => q.from({ todos: todosCollection })
+ *          .where(({ todos }) => gt(todos.priority, minPriority())),
+ * )
+ *
+ * @example
+ * // Join pattern
+ * const personIssues = useLiveQuery((q) =>
+ *   q.from({ issues: issueCollection })
+ *    .join({ persons: personCollection }, ({ issues, persons }) =>
+ *      eq(issues.userId, persons.id)
+ *    )
+ *    .select(({ issues, persons }) => ({
+ *      id: issues.id,
+ *      title: issues.title,
+ *      userName: persons.name
+ *    }))
+ * )
+ *
+ * @example
+ * // Handle loading and error states with boundaries
+ * const todosQuery = useLiveQuery((q) => q.from({ todos: todoCollection }))
+ *
+ * return (
+ *   <Errored fallback={(err) => <div>Error: {String(err())}</div>}>
+ *     <Loading fallback={<div>Loading...</div>}>
+ *       <For each={todosQuery.loaded()}>
+ *         {(todo) => <li>{todo.text}</li>}
+ *       </For>
+ *     </Loading>
+ *   </Errored>
+ * )
+ *
+ * @example
+ * // Without boundaries: branch on the status flags instead
+ * <Switch>
+ *   <Match when={todosQuery.isLoadingError || todosQuery.isCrashed}>
+ *     <div>Could not load todos</div>
+ *   </Match>
+ *   <Match when={todosQuery.isLoading}><div>Loading...</div></Match>
+ *   <Match when={todosQuery.isReady}>
+ *     <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
+ *   </Match>
+ * </Switch>
  */
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
@@ -97,6 +139,17 @@ export function useLiveQuery<TContext extends Context>(
   Collection<GetResult<TContext>, string | number, {}>
 >
 
+/**
+ * Create a live query using a query function that can return `null` or
+ * `undefined` to disable the query. The accessor returns no rows, `status` is
+ * `disabled`, `isReady` is `true`, and `collection` is `null`.
+ * @param queryFn - Query function that defines what data to fetch
+ * @returns Accessor that returns the current rows synchronously, with the status flags, `state`, `collection` (`null` while disabled), and the `loaded` first-data gate
+ * @example
+ * const todosQuery = useLiveQuery((q) =>
+ *   enabled() ? q.from({ todos: todosCollection }) : null,
+ * )
+ */
 // Overload 1b: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
   queryFn: (
@@ -111,12 +164,26 @@ export function useLiveQuery<TContext extends Context>(
 /**
  * Create a live query using configuration object
  * @param config - Configuration object with query and options
- * @returns Accessor that returns the current rows synchronously, with state, collection, status, and readiness properties
+ * @returns Accessor that returns the current rows synchronously, with the status flags, `state`, `collection`, and the `loaded` first-data gate
  * @example
  * const todosQuery = useLiveQuery(() => ({
  *   query: (q) => q.from({ todos: todosCollection }),
  *   gcTime: 60000
  * }))
+ *
+ * @example
+ * // Handle loading and errors through boundaries
+ * const itemsQuery = useLiveQuery(() => ({
+ *   query: (q) => q.from({ items: itemCollection })
+ * }))
+ *
+ * return (
+ *   <Errored fallback={(err) => <div>Something went wrong: {String(err())}</div>}>
+ *     <Loading fallback={<div>Loading...</div>}>
+ *       <div>{itemsQuery.loaded().length} items loaded</div>
+ *     </Loading>
+ *   </Errored>
+ * )
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
@@ -130,12 +197,18 @@ export function useLiveQuery<TContext extends Context>(
 /**
  * Subscribe to an existing live query collection
  * @param liveQueryCollection - Pre-created live query collection to subscribe to
- * @returns Accessor that returns the current rows synchronously, with state, collection, status, and readiness properties
+ * @returns Accessor that returns the current rows synchronously, with the status flags, `state`, `collection`, and the `loaded` first-data gate
  * @example
  * const myLiveQuery = createLiveQueryCollection((q) =>
  *   q.from({ todos: todosCollection }).where(({ todos }) => eq(todos.active, true))
  * )
  * const todosQuery = useLiveQuery(() => myLiveQuery)
+ *
+ * @example
+ * // Use the collection for mutations
+ * const handleToggle = (id: string) => {
+ *   todosQuery.collection.update(id, draft => { draft.completed = !draft.completed })
+ * }
  */
 // Overload 3: Accept pre-created live query collection (non-single result)
 export function useLiveQuery<
@@ -148,6 +221,17 @@ export function useLiveQuery<
   >,
 ): Result<Array<TResult>, TResult, Collection<TResult, TKey, TUtils>>
 
+/**
+ * Subscribe to an existing single-result live query collection (one built
+ * with `findOne`). The accessor returns one row, or `undefined` until there is
+ * one.
+ * @param liveQueryCollection - Pre-created single-result live query collection to subscribe to
+ * @returns Accessor that returns the current row synchronously (`undefined` when there is none), with the status flags, `state`, `collection`, and the `loaded` first-data gate
+ * @example
+ * const userQuery = useLiveQuery(() => currentUserQuery)
+ *
+ * return <Show when={userQuery()}>{(user) => <div>{user().name}</div>}</Show>
+ */
 // Overload 3b: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
   TResult extends object,
@@ -210,7 +294,8 @@ export function useLiveQuery(
   )
 
   type AnySnapshot = LiveQuerySnapshot<any, any>
-  type RowStore = ReturnType<typeof createRowStore>
+  // A result row's view, beside the key it is in the result by.
+  type RowEntry = { key: string | number; row: RowView<object> }
   let observer: ReturnType<typeof createLiveQueryObserver> | undefined
 
   // `from` turns the observer into a memo: every value below is then derived,
@@ -221,18 +306,12 @@ export function useLiveQuery(
   const snapshot = createMemo(
     () => {
       const current = collection()
-      return from<AnySnapshot>((next, error) => {
+      return from<AnySnapshot>((next) => {
         const attached = createLiveQueryObserver(current, {
           mode: `wholesale`,
         })
         observer = attached
-        const publish = () => {
-          try {
-            next(attached.getSnapshot())
-          } catch (cause) {
-            error(cause)
-          }
-        }
+        const publish = () => next(attached.getSnapshot())
         // A source that throws while it starts crashes its Collection, and
         // core rethrows that from `subscribe`. The crash is the query's to
         // report: the snapshot shows it and the accessor throws it as an
@@ -244,8 +323,11 @@ export function useLiveQuery(
           // Reported through the snapshot's status.
         }
         publish()
+        // `from` closes a superseded source ahead of the pass that replaces
+        // it, and otherwise on owner disposal, so the closing observer is
+        // still the current one here.
         return () => {
-          if (observer === attached) observer = undefined
+          observer = undefined
           unsubscribe()
           attached.dispose()
         }
@@ -278,58 +360,106 @@ export function useLiveQuery(
   // (e.g. two unionAll branches publishing the same $key). Rows are dropped
   // when their collection is replaced, so an overlapping key of a new
   // collection is a different row.
-  const rowsByKey = new Map<string | number, RowStore>()
+  const rowsByKey = new Map<string | number, RowEntry>()
   let rowsCollection: unknown
-  const state = new ReactiveMap<string | number, any>()
+  // The row views of the last publication, in its order.
+  let ordered: Array<RowEntry> = []
+  // The public keyed view. Created by the first read of `state`, from the
+  // rows then current, and kept with them after: a query nobody reads
+  // through it never pays for a write per row per publication.
+  let keyed: ReactiveMap<string | number, any> | undefined
+  const keyedRows = (): ReactiveMap<string | number, any> =>
+    (keyed ??= new ReactiveMap(untrack(() => snapshot().state ?? [])))
 
-  // Resolves each row of one snapshot to its row store, in result order. The
-  // keyed map changes with them, so `state` can never hold rows that
-  // `query()` does not.
+  // Resolves each row of one snapshot to its view, in result order.
   const resolveRows = (current: AnySnapshot): Array<object> => {
     if (current.collection !== rowsCollection) {
       rowsCollection = current.collection
       rowsByKey.clear()
-      state.clear()
+      ordered = []
+      keyed?.clear()
     }
-    const rows: Array<object> = []
-    const retained = new Set<string | number>()
-    // A disabled query has no state; iterate nothing then.
-    const entries: Iterable<[string | number, object]> = current.state ?? []
-    for (const [key, value] of entries) {
-      retained.add(key)
-      let row = rowsByKey.get(key)
-      if (!row) {
-        row = createRowStore(value)
-        rowsByKey.set(key, row)
-      } else row.update(value)
-      rows.push(row.value)
-      if (state.get(key) !== value) state.set(key, value)
+    // A disabled query has no rows.
+    const state = current.state
+    const rows: Array<object> = new Array(state?.size ?? 0)
+    const next: Array<RowEntry> = new Array(rows.length)
+    // A publication usually keeps the order: each row is the one the last
+    // publication had at its index, and no key is looked up.
+    let aligned = true
+    let index = 0
+    for (const [key, value] of state ?? []) {
+      let entry = aligned ? ordered[index] : undefined
+      if (entry === undefined || entry.key !== key) {
+        aligned = false
+        entry = rowsByKey.get(key)
+        if (entry === undefined) {
+          entry = { key, row: createRowView(value) }
+          rowsByKey.set(key, entry)
+        }
+      }
+      entry.row.update(value)
+      next[index] = entry
+      rows[index] = entry.row.value
+      index++
+      if (keyed !== undefined && keyed.get(key) !== value) keyed.set(key, value)
     }
-    for (const key of rowsByKey.keys())
-      if (!retained.has(key)) rowsByKey.delete(key)
-    for (const key of state.keys()) if (!retained.has(key)) state.delete(key)
+    // Every current key is in the map, so a row left only if the map holds
+    // more of them than the publication lists.
+    if (rowsByKey.size !== index) {
+      const present = new Set(state?.keys())
+      for (const key of rowsByKey.keys())
+        if (!present.has(key)) rowsByKey.delete(key)
+      if (keyed !== undefined)
+        for (const key of keyed.keys()) if (!present.has(key)) keyed.delete(key)
+    }
+    ordered = next
     return rows
   }
 
-  // Solid 2 forbids a store write inside an owner's scope, and an effect's
-  // first run happens there when the owner is a component. Creating a store
-  // with its first value is the one write that scope allows, so the rows are
-  // seeded at creation and the effect only applies later snapshots.
-  const [data, setData] = createStore(
-    untrack(() => resolveRows(snapshot())),
-    {
-      name: `TanstackDBData`,
+  const seeded = untrack(() => resolveRows(snapshot()))
+  // The rows in result order, and the one signal a reader of the array
+  // follows. A row view keeps its identity while its key is in the result,
+  // so a slot comes to hold another row only when membership or order
+  // changed. That alone turns the signal, and a publication that changed
+  // values only leaves every reader of the array asleep: the rows they read
+  // notify them themselves.
+  const slots: Array<object> = [...seeded]
+  const [layout, relayout] = createSignal(0, {
+    name: `TanstackDBRows`,
+    equals: false,
+  })
+  const data = new Proxy(slots, {
+    get(target, key) {
+      layout()
+      return Reflect.get(target, key)
     },
-  )
+    // An enumeration reads the array's keys, not its slots: it follows too.
+    ownKeys(target) {
+      layout()
+      return Reflect.ownKeys(target)
+    },
+    getOwnPropertyDescriptor(target, key) {
+      layout()
+      return Reflect.getOwnPropertyDescriptor(target, key)
+    },
+    // The Collection orders the rows: the array is read, not written.
+    set: () => false,
+    defineProperty: () => false,
+    deleteProperty: () => false,
+    preventExtensions: () => false,
+  })
   createEffect(
     () => snapshot(),
     (current) => {
       const rows = resolveRows(current)
-      setData((draft) => {
-        for (let index = 0; index < rows.length; index++)
-          draft[index] = rows[index]!
-        draft.length = rows.length
-      })
+      let moved = rows.length !== slots.length
+      for (let index = 0; !moved && index < rows.length; index++)
+        moved = rows[index] !== slots[index]
+      if (!moved) return
+      slots.length = 0
+      for (const row of rows) slots.push(row)
+      // The value is nothing; the write is.
+      relayout(0)
     },
     { name: `TanstackDBRows`, defer: true },
   )
@@ -356,8 +486,9 @@ export function useLiveQuery(
 
   // A crash, or a failed first load, reaches an <Errored> boundary as an
   // Error: the cause itself when it is an Error, else an Error wrapping it.
-  const throwFailure = (current: Collection<any, any, any> | null) => {
-    if (!current) return
+  // It is only ever raised for a Collection: a query without one is disabled,
+  // and a disabled query is ready and never failed.
+  const throwFailure = (current: Collection<any, any, any>) => {
     const cause = observer?.getError() ?? current.health.error?.cause
     // Collections do not always record a cause; name the failed query.
     throw cause === undefined
@@ -388,10 +519,9 @@ export function useLiveQuery(
   })
 
   function getData() {
-    collection()
-    if (inputError !== undefined) throw inputError
-    if (failed()) throwFailure(collection())
     const current = collection()
+    if (inputError !== undefined) throw inputError
+    if (current && failed()) throwFailure(current)
     return current && isSingleResultCollection(current) ? data[0] : data
   }
 
@@ -408,7 +538,7 @@ export function useLiveQuery(
     },
     state: {
       get() {
-        return state
+        return keyedRows()
       },
     },
     loaded: {
