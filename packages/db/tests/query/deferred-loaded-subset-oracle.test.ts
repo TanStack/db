@@ -307,10 +307,14 @@ async function runJoinedHeldCell({
 async function runSourceReadyCell({
   source: history,
 }: {
-  source: `late-ready` | `released` | `held-later` | `never-held`
+  source:
+    `late-ready` | `released` | `held-later` | `never-held` | `ready-in-sync`
 }): Promise<void> {
   let ready!: () => void
-  const startsLate = history === `held-later` || history === `never-held`
+  const startsLate =
+    history === `held-later` ||
+    history === `never-held` ||
+    history === `ready-in-sync`
   let holds = !startsLate
   const asked: Array<LoadSubsetOptions> = []
   const source = createCollection<Row>({
@@ -326,6 +330,8 @@ async function runSourceReadyCell({
         for (const row of rows) write({ type: `insert`, value: { ...row } })
         commit()
         ready = markReady
+        // The adapter is ready before it returns its hook.
+        if (history === `ready-in-sync`) markReady()
         return {
           loadSubset: () => true as const,
           isSubsetLoaded: (options: LoadSubsetOptions) => {
@@ -358,11 +364,13 @@ async function runSourceReadyCell({
       : undefined
     if (deferred) {
       deferred.requestSnapshot({ where: eq(new PropRef([`group`]), `even`) })
+      if (history === `ready-in-sync`) holds = true
       source.startSyncImmediate()
-      expect(deferred.status, `loading while not held`).toBe(`loadingSubset`)
-      holds = history === `held-later`
+      if (history !== `ready-in-sync`)
+        expect(deferred.status, `loading while not held`).toBe(`loadingSubset`)
+      holds = history !== `never-held`
     }
-    ready()
+    if (history !== `ready-in-sync`) ready()
     await new Promise((resolve) => setTimeout(resolve, 5))
     if (history === `never-held`) {
       expect(deferred!.status, `an unheld demand keeps loading`).toBe(
@@ -379,7 +387,7 @@ async function runSourceReadyCell({
       ).toEqual([])
       expect(live.isLoadingSubset, `an unheld window is loading`).toBe(true)
       deferred!.unsubscribe()
-    } else if (history === `held-later`) {
+    } else if (history === `held-later` || history === `ready-in-sync`) {
       expect(deferred!.status, `a held demand stops loading`).toBe(`ready`)
       expect(
         Array.from(live.values(), ({ id }) => id),
@@ -431,7 +439,7 @@ describe(`deferred window over a held subset`, () => {
     law: {
       statement: `A deferred demand the hook settled is not reported as loading when its source later becomes ready, unless the adapter no longer vouches for its rows, and stops being reported as loading once the adapter does.`,
       authority: `query/live/ARCHITECTURE.md: Deferred acquisition.`,
-      limits: `One ordered window whose source becomes ready after the hook answered, with the hook still holding, after it stopped, after it began holding, and when it never held.`,
+      limits: `One ordered window whose source becomes ready after the hook answered, with the hook still holding, after it stopped, after it began holding, when it never held, and when the source is ready before it returns the hook.`,
     },
     owns: ['src/collection/subscription.ts'],
     histories: [
@@ -439,8 +447,14 @@ describe(`deferred window over a held subset`, () => {
       { source: `released` },
       { source: `held-later` },
       { source: `never-held` },
+      { source: `ready-in-sync` },
     ] as Array<{
-      source: `late-ready` | `released` | `held-later` | `never-held`
+      source:
+        | `late-ready`
+        | `released`
+        | `held-later`
+        | `never-held`
+        | `ready-in-sync`
     }>,
     label: ({ source }) => `${source} source`,
     resolve: (cell) => ({ cell }),
