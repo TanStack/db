@@ -319,6 +319,10 @@ export class CollectionSubscription
           )
         ) {
           this.setStatus(`loadingSubset`)
+        } else if (this.defersAcquisition && this.status === `loadingSubset`) {
+          // The queued restart returns while acquisition is deferred, so a
+          // demand that became held leaves the loading state here.
+          this.setReadyIfIdle()
         }
         queueMicrotask(() => {
           if (this.truncateReplayState === replayState) {

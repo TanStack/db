@@ -38,6 +38,7 @@ import { CollectionConfigBuilder } from '../../src/query/live/collection-config-
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { compileSingleRowExpression } from '../../src/query/compiler/evaluators.js'
+import { PropRef } from '../../src/query/ir.js'
 import { oracleProperty } from '../oracle-config.js'
 import {
   forwardAssertionJudgment,
@@ -293,15 +294,15 @@ async function runJoinedHeldCell(): Promise<void> {
 async function runSourceReadyCell({
   source: history,
 }: {
-  source: `late-ready` | `released`
+  source: `late-ready` | `released` | `held-later`
 }): Promise<void> {
   let ready!: () => void
-  let holds = true
+  let holds = history !== `held-later`
   const source = createCollection<Row>({
     id: `deferred-loaded-subset-source-${history}`,
     getKey: (row) => row.id,
     syncMode: `on-demand`,
-    startSync: true,
+    startSync: history !== `held-later`,
     autoIndex: `eager`,
     defaultIndexType: BTreeIndex,
     sync: {
@@ -331,9 +332,25 @@ async function runSourceReadyCell({
     // Once the adapter no longer vouches for the rows, the demand is
     // unanswered and the deferred query is waiting on it.
     if (history === `released`) holds = false
+    // The source starts while the hook says not held, so the demand is
+    // reported as loading. Once the hook holds it and the source is ready,
+    // nothing is left to load until a subscriber resumes acquisition.
+    const deferred =
+      history === `held-later`
+        ? source.subscribeChanges(() => {}, { deferAcquisition: true })
+        : undefined
+    if (deferred) {
+      deferred.requestSnapshot({ where: eq(new PropRef([`group`]), `even`) })
+      source.startSyncImmediate()
+      expect(deferred.status, `loading while not held`).toBe(`loadingSubset`)
+      holds = true
+    }
     ready()
     await new Promise((resolve) => setTimeout(resolve, 5))
-    if (history === `released`) {
+    if (history === `held-later`) {
+      expect(deferred!.status, `a held demand stops loading`).toBe(`ready`)
+      deferred!.unsubscribe()
+    } else if (history === `released`) {
       expect(live.isLoadingSubset, `an unanswered demand is loading`).toBe(true)
     } else {
       expect(
@@ -373,13 +390,17 @@ describe(`deferred window over a held subset`, () => {
   oracleProperty({
     id: `deferred-loaded-subset.source-ready`,
     law: {
-      statement: `A deferred demand the hook settled is not reported as loading when its source later becomes ready, unless the adapter no longer vouches for its rows.`,
+      statement: `A deferred demand the hook settled is not reported as loading when its source later becomes ready, unless the adapter no longer vouches for its rows, and stops being reported as loading once the adapter does.`,
       authority: `query/live/ARCHITECTURE.md: Deferred acquisition.`,
-      limits: `One ordered window whose source becomes ready after the hook answered, with the hook still holding and after it stopped.`,
+      limits: `One ordered window whose source becomes ready after the hook answered, with the hook still holding, after it stopped, and after it began holding.`,
     },
     owns: ['src/collection/subscription.ts'],
-    histories: [{ source: `late-ready` }, { source: `released` }] as Array<{
-      source: `late-ready` | `released`
+    histories: [
+      { source: `late-ready` },
+      { source: `released` },
+      { source: `held-later` },
+    ] as Array<{
+      source: `late-ready` | `released` | `held-later`
     }>,
     label: ({ source }) => `${source} source`,
     resolve: (cell) => ({ cell }),
