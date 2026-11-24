@@ -23,6 +23,8 @@ export interface GroupedOrderByWithFractionalIndexOptions<
    * Elements with the same group key will be sorted and limited together.
    */
   groupKeyFn: (key: KeyType, value: ValueType) => unknown
+  /** Whether `next` is a different row from the structurally equal `previous`. */
+  replacesRow?: (previous: ValueType, next: ValueType) => boolean
 }
 
 /**

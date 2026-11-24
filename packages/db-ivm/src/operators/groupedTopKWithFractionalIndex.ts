@@ -2,6 +2,7 @@ import { UnaryOperator } from '../graph.js'
 import { unaryOperator } from '../unary-operator.js'
 import { TopKState, topKBatch } from './topKState.js'
 import { createKeyedComparator } from './topKArray.js'
+import type { TopKReplacement } from './topKState.js'
 import type { IndexedValue } from './topKArray.js'
 import type {
   DifferenceStreamReader,
@@ -21,6 +22,11 @@ export interface GroupedTopKWithFractionalIndexOptions<K, T> {
    * Elements with the same group key will be sorted and limited together.
    */
   groupKeyFn: (key: K, value: T) => unknown
+  /**
+   * Whether `next` is a different row from the structurally equal `previous`.
+   * Without it, equal versions of a key cancel and the first one stays.
+   */
+  replacesRow?: (previous: T, next: T) => boolean
 }
 
 /**
@@ -40,6 +46,7 @@ export class GroupedTopKWithFractionalIndexOperator<
   #groupKeyFn: (key: K, value: T) => unknown
   #comparator: (a: [K, T], b: [K, T]) => number
   #window: { offset: number; limit: number }
+  #replacesRow: ((previous: T, next: T) => boolean) | undefined
 
   constructor(
     id: number,
@@ -50,6 +57,7 @@ export class GroupedTopKWithFractionalIndexOperator<
   ) {
     super(id, inputA, output)
     this.#groupKeyFn = options.groupKeyFn
+    this.#replacesRow = options.replacesRow
     this.#window = {
       limit: options.limit ?? Infinity,
       offset: options.offset ?? 0,
@@ -86,29 +94,54 @@ export class GroupedTopKWithFractionalIndexOperator<
 
   run(): void {
     const result: Array<[[K, IndexedValue<T>], number]> = []
+    const replacesRow = this.#replacesRow
+    const replacements: Array<TopKReplacement<K, T>> = []
     for (const [[key, value], multiplicity] of topKBatch(
       this.inputMessages(),
+      replacesRow && replacements,
     )) {
-      const groupKey = this.#groupKeyFn(key, value)
-      let state = this.#groupStates.get(groupKey)
-      if (!state) {
-        state = new TopKState(
-          this.#window.offset,
-          this.#window.limit,
-          this.#comparator,
-        )
-        this.#groupStates.set(groupKey, state)
+      this.#apply(key, value, multiplicity, result)
+    }
+    for (const { key, retracted, added } of replacements) {
+      if (!replacesRow!(retracted, added)) continue
+      const groupKey = this.#groupKeyFn(key, retracted)
+      const state = this.#groupStates.get(groupKey)
+      if (!state?.holdsVersion(key, retracted, replacesRow!)) continue
+      if (this.#groupKeyFn(key, added) === groupKey) {
+        state.replaceElement(key, retracted, added, result)
+      } else {
+        // State that hashing does not read can move the row to another group.
+        this.#apply(key, retracted, -1, result)
+        this.#apply(key, added, 1, result)
       }
-
-      state.processElement(key, value, multiplicity, result)
-
-      // Cleanup empty groups to prevent memory leaks
-      if (state.isEmpty) this.#groupStates.delete(groupKey)
     }
 
     if (result.length > 0) {
       this.output.sendData(result)
     }
+  }
+
+  #apply(
+    key: K,
+    value: T,
+    multiplicity: number,
+    result: Array<[[K, IndexedValue<T>], number]>,
+  ): void {
+    const groupKey = this.#groupKeyFn(key, value)
+    let state = this.#groupStates.get(groupKey)
+    if (!state) {
+      state = new TopKState(
+        this.#window.offset,
+        this.#window.limit,
+        this.#comparator,
+      )
+      this.#groupStates.set(groupKey, state)
+    }
+
+    state.processElement(key, value, multiplicity, result)
+
+    // Cleanup empty groups to prevent memory leaks
+    if (state.isEmpty) this.#groupStates.delete(groupKey)
   }
 }
 

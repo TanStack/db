@@ -390,6 +390,7 @@ export function processOrderBy(
     limit,
     offset,
     comparator: compare,
+    replacesRow: holdsReplacedSourceRow,
     setSizeCallback,
     setWindowFn: (windowFn: (options: WindowOptions) => void) => {
       // Keep demand calculations aligned with the operator's current window.
@@ -411,6 +412,21 @@ export function processOrderBy(
           groupKeyFn,
         })
       : orderByWithFractionalIndex(valueExtractor, options),
+  )
+}
+
+/**
+ * Whether two structurally equal pipeline rows read different source rows. A
+ * deep-equal source write replaces the row object, and readers that compare a
+ * field by reference need the new one. A projection can allocate fresh values
+ * for each side of a pair, so only the rows under source aliases decide this.
+ */
+function holdsReplacedSourceRow(
+  previous: NamespacedRow,
+  next: NamespacedRow,
+): boolean {
+  return Object.keys(next).some(
+    (alias) => alias !== `$selected` && previous[alias] !== next[alias],
   )
 }
 

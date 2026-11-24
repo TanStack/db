@@ -4272,6 +4272,12 @@ The post-merge review added three missing domains to existing owners:
   contribution bag and source-row identity, as well as output length and zero
   getter reads. A multiple-key constructed history and duplicate-key/omitted-key
   calibration protect that distinction.
+- [Top-K row replacement](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/topk-row-replacement-oracle.property.test.ts)
+  checks that an ordered window with `replacesRow` holds the latest instance of
+  each key, in the position and group that instance sorts to, through deep-equal
+  replacements in either delta order, fresh wrappers and transient pairs. It
+  covers plain and grouped windows of up to four keys. Without the option, equal
+  versions keep the first row, as the batch contracts above require.
 - [Leadership replay](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/leadership-replay-oracle.property.test.ts)
   holds real storage-read delivery across successful and permanently rejected
   durable removals, with bounded scans, concurrent loads, and unfinished peers.

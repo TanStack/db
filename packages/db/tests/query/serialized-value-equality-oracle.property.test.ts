@@ -30,9 +30,9 @@
  * is told nothing, a subscriber filtered on the old instance loses the row, one
  * filtered on the new instance gains it, one whose filter still matches is told
  * nothing, and a later update must still remove that row from the index. A
- * query reads the new instance too: its joins, functional filters and filters
- * downstream of a projection follow it, as do pooled views, and a row it keeps
- * is not republished. An Effect's update for one row survives a deep-equal
+ * query reads the new instance too: its joins, functional filters, ordered
+ * results and filters downstream of a projection follow it, as do pooled views,
+ * and a row it keeps is not republished. An Effect's update for one row survives a deep-equal
  * replacement of another row in the same batch.
  *
  * Why an example can miss the failure: a probe that is the stored instance
@@ -803,9 +803,26 @@ async function runHistory(
             .limit(MAX_ORDERED_ROWS),
       })
       cleanup(() => ordered.cleanup())
+      const orderedProjection = createLiveQueryCollection({
+        id: `serialized-value-ordered-projection-${run}-${position}`,
+        query: (q) =>
+          q
+            .from({ item: source })
+            .orderBy(({ item }) => item.id)
+            .select(({ item }) => ({ id: item.id, ref: item.ref })),
+      })
+      cleanup(() => orderedProjection.cleanup())
+      const overOrdered = createLiveQueryCollection({
+        id: `serialized-value-over-ordered-${run}-${position}`,
+        query: (q) =>
+          q
+            .from({ item: orderedProjection })
+            .where(({ item }) => eq(item.ref as never, instance as never)),
+      })
+      cleanup(() => overOrdered.cleanup())
       await Promise.all(
-        [live, functional, downstream, sharedJoin, ordered].map((query) =>
-          query.preload(),
+        [live, functional, downstream, sharedJoin, ordered, overOrdered].map(
+          (query) => query.preload(),
         ),
       )
       const inEffect = new Set<string>()
@@ -864,6 +881,7 @@ async function runHistory(
           'filter over a projection': idsOf(downstream),
           'shared-reference join': idsOf(sharedJoin),
           'ordered query': idsOf(ordered),
+          'filter over an ordered projection': idsOf(overOrdered),
           'pooled view, attached': pooledIds(`attached`),
           'pooled view, detached': pooledIds(`detached`),
         },
@@ -1330,6 +1348,10 @@ async function runHistory(
       })
       ordering.utils.commit()
       // A query built now reads the stored rows in their current order.
+      expect(
+        orderedLive.toArray.map((row) => (row as ScopedRow).id),
+        `live order after a replacement`,
+      ).toEqual([`b`, `a`])
       const orderedFresh = createLiveQueryCollection({
         id: `serialized-value-ordering-fresh-${run}`,
         query: () => orderedByRef() as never,
@@ -1350,7 +1372,7 @@ describe(`value classes compare by their serialized value`, () => {
   oracleProperty({
     id: property,
     law: {
-      statement: `Query equality, exact index lookup, live-query filters and joins match distinct class instances whose toJSON() values are equal, never a plain value equal to that serialization; query identity and getStableValueHash follow the same relation and separate unequal values. Range predicates order a value class by that serialization, never valueOf(), and order an array the row and the capture share like a copy of it. A Map, Set or ArrayBuffer subclass with toJSON() keeps its built-in rule and never equals a value class, and a plain record or array keeps reference semantics without its toJSON property being read. When a sync write replaces such a value with a deep-equal instance, a filter on either instance, a join, a functional filter, a filter over a projection and a pooled view follow the stored one by the time the commit returns, a subscriber, live query or Effect that keeps the row is told nothing, and another row's update in the same batch still reaches an Effect.`,
+      statement: `Query equality, exact index lookup, live-query filters and joins match distinct class instances whose toJSON() values are equal, never a plain value equal to that serialization; query identity and getStableValueHash follow the same relation and separate unequal values. Range predicates order a value class by that serialization, never valueOf(), and order an array the row and the capture share like a copy of it. A Map, Set or ArrayBuffer subclass with toJSON() keeps its built-in rule and never equals a value class, and a plain record or array keeps reference semantics without its toJSON property being read. When a sync write replaces such a value with a deep-equal instance, a filter on either instance, a join, a functional filter, a filter over a projection or an ordered result and a pooled view follow the stored one by the time the commit returns, an ordered query takes the new instance's position, a subscriber, live query or Effect that keeps the row is told nothing, and another row's update in the same batch still reaches an Effect.`,
       authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
       limits: `One toJSON() class over two tables and two IDs, its text look-alike, empty Map, Set and ArrayBuffer subclass look-alikes, plain records and arrays with a throwing toJSON accessor (never probes), and null; up to four source rows, three join rows and three synced updates; range reads use record probes; no inArray, on-demand or persisted sources, or exact-output identity.`,
     },
@@ -1362,6 +1384,7 @@ describe(`value classes compare by their serialized value`, () => {
       'src/collection/subscription.ts#CollectionSubscription.visibleChanges',
       'src/query/effect.ts#classifyDelta',
       'src/query/pooled-live-query.ts#Partition.apply',
+      'src/query/compiler/order-by.ts#holdsReplacedSourceRow',
       'src/query/pooled-live-query.ts#PooledLiveQuery.noteReplacement',
       'src/collection/change-events.ts#markSilentReplacement',
       'src/collection/change-events.ts#isSilentReplacement',
