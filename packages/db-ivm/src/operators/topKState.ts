@@ -5,9 +5,6 @@ import type { IndexedValue } from './topKArray.js'
 
 type TopKOutput<K, T> = Array<[[K, IndexedValue<T>], number]>
 
-/** Two structurally equal versions of a key that a batch cancelled. */
-export type TopKReplacement<K, T> = { key: K; retracted: T; added: T }
-
 /** Apply a keyed batch's retractions before additions. An outer join can emit
  * a replacement in the opposite order; key multiplicity alone would hide it.
  * Consolidate first so a transient value added and removed in this same turn
@@ -16,17 +13,9 @@ export type TopKReplacement<K, T> = { key: K; retracted: T; added: T }
  * pair, and -0 and 0 are distinct row values (maintainer decision
  * 2026-11-02), so a change of only a zero's sign is a replacement.
  * No state survives the run.
- *
- * A caller that distinguishes instances passes `replacements`, which receives
- * each cancelled group of a key's versions, with its first retraction and last
- * addition. The batch itself is the same with or without it.
  */
-export function* topKBatch<K, T>(
-  messages: Array<MultiSet<[K, T]>>,
-  replacements?: Array<TopKReplacement<K, T>>,
-) {
+export function* topKBatch<K, T>(messages: Array<MultiSet<[K, T]>>) {
   const keyed = new Map<K, Array<[[K, T], number]>>()
-  const versions = new Map<[[K, T], number], { retracted?: T; added?: T }>()
   for (const message of messages) {
     for (const [value, weight] of message.getInner()) {
       const entries = keyed.get(value[0])
@@ -39,30 +28,8 @@ export function* topKBatch<K, T>(
       const previous = entries.find(([candidate]) =>
         compareHashValues(candidate[1], value[1], true),
       )
-      if (previous) {
-        if (replacements) {
-          let sides = versions.get(previous)
-          if (!sides) {
-            sides =
-              previous[1] < 0
-                ? { retracted: previous[0][1] }
-                : { added: previous[0][1] }
-            versions.set(previous, sides)
-          }
-          if (weight > 0) sides.added = value[1]
-          else sides.retracted ??= value[1]
-        }
-        previous[1] += weight
-      } else entries.push([value, weight])
-    }
-  }
-  for (const [entry, sides] of versions) {
-    if (entry[1] === 0) {
-      replacements!.push({
-        key: entry[0][0],
-        retracted: sides.retracted!,
-        added: sides.added!,
-      })
+      if (previous) previous[1] += weight
+      else entries.push([value, weight])
     }
   }
   for (const entries of keyed.values())
@@ -113,43 +80,6 @@ export class TopKState<K extends string | number, T> extends TopKArray<[K, T]> {
       appendMove(changes.moveIn, result, 1)
       appendMove(changes.moveOut, result, -1)
     }
-  }
-
-  /**
-   * Whether this key's stored row is the version `retracted` stands for, so a
-   * cancelled pair replaces it. A transient pair names some other version.
-   */
-  holdsVersion(
-    key: K,
-    retracted: T,
-    replacesRow: (previous: T, next: T) => boolean,
-  ): boolean {
-    const stored = this.find([key, retracted])
-    return (
-      stored !== undefined &&
-      stored[0] === key &&
-      !replacesRow(stored[1], retracted)
-    )
-  }
-
-  /**
-   * Install an instance that replaces a structurally equal row. The batch
-   * cancelled the pair, but readers of the row's instance need the new one,
-   * and its order can differ when it depends on state hashing does not read.
-   */
-  replaceElement(
-    key: K,
-    retracted: T,
-    added: T,
-    result: TopKOutput<K, T>,
-  ): void {
-    const stored = this.find([key, retracted])!
-    const removed = super.delete(stored)
-    appendMove(removed.moveIn, result, 1)
-    appendMove(removed.moveOut, result, -1)
-    const inserted = super.insert([key, added])
-    appendMove(inserted.moveIn, result, 1)
-    appendMove(inserted.moveOut, result, -1)
   }
 
   /**

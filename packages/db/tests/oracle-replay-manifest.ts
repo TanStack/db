@@ -1880,11 +1880,6 @@ const ownerGroups: ReadonlyArray<
     `topk-batch-relations topk-batch-file-independent topk-batch-shared-subtrees topk-batch-unrelated-payloads topk-batch-long-cancellation`,
   ],
   [
-    `db-ivm/tests/operators/topk-row-replacement-oracle.property.test.ts`,
-    `ivm`,
-    `topk-row-replacement`,
-  ],
-  [
     `db-ivm/tests/operators/topk-support-window-oracle.test.ts`,
     `ivm`,
     `topk-support-window topk-numeric-window topk-negative-window-array topk-negative-window-grouped topk-negative-window-orderBy`,

@@ -11,7 +11,6 @@ export interface OrderByOptions<Ve> {
 }
 
 type OrderByWithFractionalIndexOptions<Ve> = OrderByOptions<Ve> & {
-  replacesRow?: (previous: any, next: any) => boolean
   setSizeCallback?: SetSizeCallback
   setWindowFn?: (
     windowFn: (options: { offset?: number; limit?: number }) => void,

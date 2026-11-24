@@ -83,7 +83,8 @@
  * filter and the Effect each receive one update when the row's value changed
  * and nothing when it was replaced by a deep-equal row.
  *
- * Known omissions: `inArray`, on-demand and
+ * Known omissions: a `distinct` query keeps its group's first instance, since
+ * rows that hash alike have no one right representative, `inArray`, on-demand and
  * persisted sources, exact-output (`select`) identity, which keeps reference
  * semantics, and classes whose `toJSON()` throws or returns a non-JSON value.
  */
@@ -641,6 +642,43 @@ async function runHistory(
     })
     cleanup(() => projected.cleanup())
     await projected.preload()
+    // Joined on row IDs, so a replacement changes no join key.
+    const links = createCollection(
+      mockSyncCollectionOptions<{ id: string; item: string }>({
+        id: `serialized-value-links-${run}`,
+        getKey: (row) => row.id,
+        initialData: [...model.keys()].map((key) => ({ id: key, item: key })),
+        autoIndex: `off`,
+      }),
+    )
+    cleanup(() => links.cleanup())
+    await links.stateWhenReady()
+    const joinedProjection = (ordered: boolean) => {
+      const query = createLiveQueryCollection({
+        id: `serialized-value-joined-${ordered}-${run}`,
+        query: (q) => {
+          const joined = q
+            .from({ link: links })
+            .join(
+              { item: source },
+              ({ link, item }) => eq(link.item, item.id),
+              `inner`,
+            )
+          return (
+            ordered ? joined.orderBy(({ link }) => link.id) : joined
+          ).select(({ item }) => ({ id: item.id, ref: item.ref }))
+        },
+      })
+      cleanup(() => query.cleanup())
+      return query
+    }
+    const joinedProjections = {
+      'filter over a joined projection': joinedProjection(false),
+      'filter over an ordered join': joinedProjection(true),
+    }
+    await Promise.all(
+      Object.values(joinedProjections).map((query) => query.preload()),
+    )
 
     // Readers of every row. A deep-equal replacement must reach none of them.
     const stableEvents = new Map<string, Array<string>>()
@@ -841,6 +879,19 @@ async function runHistory(
       await new Promise((resolve) => setTimeout(resolve, 0))
       const idsOf = (query: { toArray: Array<{ id: string }> }) => () =>
         query.toArray.map((row) => row.id).sort()
+      const overJoins: Record<string, () => Array<string>> = {}
+      for (const [name, base] of Object.entries(joinedProjections)) {
+        const overJoin = createLiveQueryCollection({
+          id: `serialized-value-over-join-${name}-${run}-${position}`,
+          query: (q) =>
+            q
+              .from({ item: base })
+              .where(({ item }) => eq(item.ref as never, instance as never)),
+        })
+        cleanup(() => overJoin.cleanup())
+        await overJoin.preload()
+        overJoins[name] = idsOf(overJoin)
+      }
       // A pooled view needs an equality to group by, so each row has its own.
       const pooledObservers = [...model.keys()].flatMap((key) => {
         const view = poolQuery(
@@ -882,6 +933,7 @@ async function runHistory(
           'shared-reference join': idsOf(sharedJoin),
           'ordered query': idsOf(ordered),
           'filter over an ordered projection': idsOf(overOrdered),
+          ...overJoins,
           'pooled view, attached': pooledIds(`attached`),
           'pooled view, detached': pooledIds(`detached`),
         },
@@ -1374,7 +1426,7 @@ describe(`value classes compare by their serialized value`, () => {
     law: {
       statement: `Query equality, exact index lookup, live-query filters and joins match distinct class instances whose toJSON() values are equal, never a plain value equal to that serialization; query identity and getStableValueHash follow the same relation and separate unequal values. Range predicates order a value class by that serialization, never valueOf(), and order an array the row and the capture share like a copy of it. A Map, Set or ArrayBuffer subclass with toJSON() keeps its built-in rule and never equals a value class, and a plain record or array keeps reference semantics without its toJSON property being read. When a sync write replaces such a value with a deep-equal instance, a filter on either instance, a join, a functional filter, a filter over a projection or an ordered result and a pooled view follow the stored one by the time the commit returns, an ordered query takes the new instance's position, a subscriber, live query or Effect that keeps the row is told nothing, and another row's update in the same batch still reaches an Effect.`,
       authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
-      limits: `One toJSON() class over two tables and two IDs, its text look-alike, empty Map, Set and ArrayBuffer subclass look-alikes, plain records and arrays with a throwing toJSON accessor (never probes), and null; up to four source rows, three join rows and three synced updates; range reads use record probes; no inArray, on-demand or persisted sources, or exact-output identity.`,
+      limits: `One toJSON() class over two tables and two IDs, its text look-alike, empty Map, Set and ArrayBuffer subclass look-alikes, plain records and arrays with a throwing toJSON accessor (never probes), and null; up to four source rows, three join rows and three synced updates; range reads use record probes; no distinct representative instances, inArray, on-demand or persisted sources, or exact-output identity.`,
     },
     owns: [
       'src/utils/comparison.ts#normalizeValue',
@@ -1384,7 +1436,7 @@ describe(`value classes compare by their serialized value`, () => {
       'src/collection/subscription.ts#CollectionSubscription.visibleChanges',
       'src/query/effect.ts#classifyDelta',
       'src/query/pooled-live-query.ts#Partition.apply',
-      'src/query/compiler/order-by.ts#holdsReplacedSourceRow',
+      'src/collection/changes.ts#CollectionChangesManager.enrichChangeWithVirtualProps',
       'src/query/pooled-live-query.ts#PooledLiveQuery.noteReplacement',
       'src/collection/change-events.ts#markSilentReplacement',
       'src/collection/change-events.ts#isSilentReplacement',

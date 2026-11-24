@@ -161,12 +161,6 @@ export class TopKArray<V> implements TopK<V> {
     return this.#windowChanges(index, true)
   }
 
-  /** The stored value at the position `value` sorts to, if any. */
-  find(value: V): V | undefined {
-    const index = binarySearch(this.#sortedValues, value, this.#comparator)
-    return this.#sortedValues[index]?.[0]
-  }
-
   /**
    * Deletes a value that may or may not be in the topK.
    * IMPORTANT: this assumes that the value is present in the collection

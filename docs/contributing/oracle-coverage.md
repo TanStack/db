@@ -2474,13 +2474,13 @@ shared and distinct object leaves, and a row that holds the capture array
 itself. A constructed history replaces an indexed reference value with a
 deep-equal one before updating its row. Each stored built-in carrier is also a
 reference probe: a filtered subscription, a live query, a functional filter, a
-filter over a projection, a join with a Collection holding the same instance,
-pooled views with attached and detached observers, and a fresh scan hold exactly
+filter over a plain, ordered or joined projection, a join with a Collection
+holding the same instance, pooled views with attached and detached observers, and a fresh scan hold exactly
 the rows that store it when each commit returns, and an Effect does once it has
 run. An unfiltered subscriber and live query, ID filters and pooled ID views
 that stay matched, and an Effect receive a change only when a row's value
 changed, and a real update beside a replacement in one batch still reaches an
-Effect. It does not cover
+Effect. It does not cover a `distinct` query's representative instance,
 `inArray` (fixed tests in
 `ir-stable-identity.test.ts`), on-demand or persisted sources, exact-output
 identity, which keeps reference semantics, or throwing `toJSON()` methods.
@@ -4272,12 +4272,6 @@ The post-merge review added three missing domains to existing owners:
   contribution bag and source-row identity, as well as output length and zero
   getter reads. A multiple-key constructed history and duplicate-key/omitted-key
   calibration protect that distinction.
-- [Top-K row replacement](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/topk-row-replacement-oracle.property.test.ts)
-  checks that an ordered window with `replacesRow` holds the latest instance of
-  each key, in the position and group that instance sorts to, through deep-equal
-  replacements in either delta order, fresh wrappers and transient pairs. It
-  covers plain and grouped windows of up to four keys. Without the option, equal
-  versions keep the first row, as the batch contracts above require.
 - [Leadership replay](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/leadership-replay-oracle.property.test.ts)
   holds real storage-read delivery across successful and permanently rejected
   durable removals, with bounded scans, concurrent loads, and unfinished peers.

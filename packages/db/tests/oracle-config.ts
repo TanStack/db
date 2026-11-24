@@ -173,7 +173,6 @@ const staticOracleProperties = [
   `ivm.topk-batch-shared-subtrees`,
   `ivm.topk-batch-unrelated-payloads`,
   `ivm.topk-batch-long-cancellation`,
-  `ivm.topk-row-replacement`,
   `ivm.topk-negative-window-array`,
   `ivm.topk-negative-window-grouped`,
   `ivm.topk-negative-window-orderBy`,

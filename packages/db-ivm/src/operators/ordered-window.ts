@@ -11,7 +11,7 @@ type OrderedRow<T> = [StreamKey<T>, [StreamValue<T>, string]]
 
 export type OrderedTopK<T extends KeyValue<unknown, unknown>> = (
   comparator: (a: StreamValue<T>, b: StreamValue<T>) => number,
-  options: TopKWithFractionalIndexOptions<StreamValue<T>> & {
+  options: TopKWithFractionalIndexOptions & {
     groupKeyFn?: (key: StreamKey<T>, value: StreamValue<T>) => unknown
   },
 ) => PipedOperator<T, OrderedRow<T>>
@@ -27,10 +27,6 @@ export function orderedWindow<T extends KeyValue<unknown, unknown>, Ve>(
         setSizeCallback?: SetSizeCallback
         setWindowFn?: TopKWithFractionalIndexOptions[`setWindowFn`]
         groupKeyFn?: (key: StreamKey<T>, value: StreamValue<T>) => unknown
-        replacesRow?: (
-          previous: StreamValue<T>,
-          next: StreamValue<T>,
-        ) => boolean
       }
     | undefined,
   topK: OrderedTopK<T>,
@@ -41,7 +37,6 @@ export function orderedWindow<T extends KeyValue<unknown, unknown>, Ve>(
     setSizeCallback: options?.setSizeCallback,
     setWindowFn: options?.setWindowFn,
     groupKeyFn: options?.groupKeyFn,
-    replacesRow: options?.replacesRow,
   }
   const comparator =
     options?.comparator ??

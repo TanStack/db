@@ -2,7 +2,6 @@ import { UnaryOperator } from '../graph.js'
 import { unaryOperator } from '../unary-operator.js'
 import { TopKState, topKBatch } from './topKState.js'
 import { createKeyedComparator } from './topKArray.js'
-import type { TopKReplacement } from './topKState.js'
 import type { IndexedValue } from './topKArray.js'
 import type {
   DifferenceStreamReader,
@@ -10,18 +9,13 @@ import type {
 } from '../graph.js'
 import type { PipedOperator } from '../types.js'
 
-export interface TopKWithFractionalIndexOptions<T = any> {
+export interface TopKWithFractionalIndexOptions {
   limit?: number
   offset?: number
   setSizeCallback?: SetSizeCallback
   setWindowFn?: (
     windowFn: (options: { offset?: number; limit?: number }) => void,
   ) => void
-  /**
-   * Whether `next` is a different row from the structurally equal `previous`.
-   * Without it, equal versions of a key cancel and the first one stays.
-   */
-  replacesRow?: (previous: T, next: T) => boolean
 }
 
 /**
@@ -42,17 +36,15 @@ export class TopKWithFractionalIndexOperator<
   T,
 > extends UnaryOperator<[K, T], [K, IndexedValue<T>]> {
   #state: TopKState<K, T>
-  #replacesRow: ((previous: T, next: T) => boolean) | undefined
 
   constructor(
     id: number,
     inputA: DifferenceStreamReader<[K, T]>,
     output: DifferenceStreamWriter<[K, IndexedValue<T>]>,
     comparator: (a: T, b: T) => number,
-    options: TopKWithFractionalIndexOptions<T>,
+    options: TopKWithFractionalIndexOptions,
   ) {
     super(id, inputA, output)
-    this.#replacesRow = options.replacesRow
     this.#state = new TopKState(
       options.offset ?? 0,
       options.limit ?? Infinity,
@@ -82,21 +74,10 @@ export class TopKWithFractionalIndexOperator<
 
   run(): void {
     const result: Array<[[K, IndexedValue<T>], number]> = []
-    const replacesRow = this.#replacesRow
-    const replacements: Array<TopKReplacement<K, T>> = []
     for (const [[key, value], multiplicity] of topKBatch(
       this.inputMessages(),
-      replacesRow && replacements,
     )) {
       this.processElement(key, value, multiplicity, result)
-    }
-    for (const { key, retracted, added } of replacements) {
-      if (
-        replacesRow!(retracted, added) &&
-        this.#state.holdsVersion(key, retracted, replacesRow!)
-      ) {
-        this.#state.replaceElement(key, retracted, added, result)
-      }
     }
 
     if (result.length > 0) {
@@ -126,7 +107,7 @@ export class TopKWithFractionalIndexOperator<
  */
 export function topKWithFractionalIndex<KType extends string | number, T>(
   comparator: (a: T, b: T) => number,
-  options?: TopKWithFractionalIndexOptions<T>,
+  options?: TopKWithFractionalIndexOptions,
 ): PipedOperator<[KType, T], [KType, IndexedValue<T>]> {
   return unaryOperator(
     TopKWithFractionalIndexOperator<KType, T>,
