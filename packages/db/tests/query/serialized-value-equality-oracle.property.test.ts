@@ -2373,3 +2373,217 @@ describe(`a truncate replay follows a deep-equal reference replacement`, () => {
     check: forwardAssertionJudgment,
   })
 })
+
+// A deep-equal replacement of a joined reference loads the joined side, and
+// the provider can deliver a real update while the replacement runs. That
+// update keeps its provenance: the Effect reports it even when the selected
+// output is unchanged, as it does when a normal change opened the load.
+type EffectLoadHistory = { name: string; opener: `silent` | `normal` }
+
+async function runEffectLoadHistory(history: EffectLoadHistory) {
+  type Left = { id: string; n: number; ref: Map<string, number> }
+  type Right = { id: string; ref: Map<string, number>; version: number }
+  const first = new Map([[`k`, 1]])
+  const second = new Map([[`k`, 1]])
+  const left = createCollection(
+    mockSyncCollectionOptions<Left>({
+      id: `serialized-value-effect-load-left-${history.opener}`,
+      getKey: (row) => row.id,
+      initialData: [{ id: `l`, n: 0, ref: first }],
+    }),
+  )
+  let loads = 0
+  const right = createCollection<Right>({
+    id: `serialized-value-effect-load-right-${history.opener}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BasicIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            loads++
+            begin()
+            write(
+              loads === 1
+                ? { type: `insert`, value: { id: `r`, ref: first, version: 0 } }
+                : {
+                    type: `update`,
+                    value: { id: `r`, ref: second, version: 1 },
+                  },
+            )
+            commit()
+            return true
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const events: Array<string> = []
+  const effect = createEffect({
+    query: (q) =>
+      q
+        .from({ l: left })
+        .join({ r: right }, ({ l, r }) => eq(l.ref, r.ref), `left`)
+        .select(({ l, r }) => ({ id: l.id, rid: r.id })),
+    onEnter: () => {
+      events.push(`enter`)
+    },
+    onUpdate: () => {
+      events.push(`update`)
+    },
+    onExit: () => {
+      events.push(`exit`)
+    },
+  })
+  try {
+    await flushPromises()
+    expect(events, `initial load`).toEqual([`enter`])
+    events.length = 0
+    left.utils.begin()
+    left.utils.write({
+      type: `update`,
+      value: { id: `l`, n: history.opener === `silent` ? 0 : 1, ref: second },
+    })
+    left.utils.commit()
+    await flushPromises()
+    expect(loads, `joined loads`).toBe(2)
+    expect(right.get(`r`)?.version, `provider version`).toBe(1)
+    expect(events, `Effect after the load`).toEqual([`update`])
+  } finally {
+    await effect.dispose()
+  }
+}
+
+const effectLoadProperty = `serialized-value.effect-joined-load`
+
+describe(`an Effect keeps a joined load's update beside a replacement`, () => {
+  oracleProperty<
+    EffectLoadHistory,
+    ReturnType<typeof recordedAssertionJudgment>
+  >({
+    id: effectLoadProperty,
+    law: {
+      statement: `A real update that a joined source delivers while an Effect applies deep-equal replacements reaches the Effect, even when the selected output is unchanged, exactly as when a normal change opened the same load.`,
+      authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md; review of PR #2460.`,
+      limits: `One eager source and one on-demand source joined by a Map reference; the provider answers the second load synchronously with one real update; a deep-equal or a normal left update opens it.`,
+    },
+    owns: [
+      'src/query/effect.ts#EffectPipelineRunner.runGraph',
+      'src/query/effect.ts#EffectPipelineRunner.handleSourceChanges',
+    ],
+    histories: [
+      { name: `a deep-equal replacement opens the load`, opener: `silent` },
+      { name: `a normal update opens the load`, opener: `normal` },
+    ],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(effectLoadProperty, history, observe, () =>
+        runEffectLoadHistory(history),
+      ),
+    check: forwardAssertionJudgment,
+  })
+})
+
+// A residual pooled view rechecks which rows pass when it is read. Two
+// deep-equal replacements in one batch can swap one row out and another in,
+// leaving the count alone, and a real update can change a passing row's value
+// without changing which rows pass. Readers see both.
+async function runPooledSwapHistory() {
+  type SwapRow = {
+    id: string
+    team: string
+    n: number
+    ref: Map<string, number>
+  }
+  const first = new Map([[`k`, 1]])
+  const source = createCollection(
+    mockSyncCollectionOptions<SwapRow>({
+      id: `serialized-value-pooled-swap`,
+      getKey: (row) => row.id,
+      initialData: [
+        { id: `a`, team: `t`, n: 0, ref: first },
+        { id: `b`, team: `t`, n: 0, ref: new Map([[`k`, 1]]) },
+      ],
+      autoIndex: `off`,
+    }),
+  )
+  await source.stateWhenReady()
+  const view = poolQuery(
+    new Query()
+      .from({ item: source })
+      .where(({ item }) =>
+        and(eq(item.team, `t`), eq(item.ref, first as never)),
+      ),
+  )!
+  const attached = createLiveQueryObserver<SwapRow, string>(view as never)
+  const stop = attached.subscribe(() => {})
+  const detached = createLiveQueryObserver<SwapRow, string>(view as never)
+  const rows = (observer: typeof attached) =>
+    (observer.getSnapshot().data as Array<SwapRow>).map(
+      (row) => `${row.id}:${row.n}`,
+    )
+  const expectRows = (label: string, expected: Array<string>) => {
+    expect(rows(attached), `${label}: attached`).toEqual(expected)
+    expect(rows(detached), `${label}: detached`).toEqual(expected)
+  }
+  try {
+    expectRows(`initial`, [`a:0`])
+    source.utils.begin()
+    source.utils.write({
+      type: `update`,
+      value: { id: `a`, team: `t`, n: 0, ref: new Map([[`k`, 1]]) },
+    })
+    source.utils.write({
+      type: `update`,
+      value: { id: `b`, team: `t`, n: 0, ref: first },
+    })
+    source.utils.commit()
+    expectRows(`swap`, [`b:0`])
+    source.utils.begin()
+    source.utils.write({
+      type: `update`,
+      value: { id: `b`, team: `t`, n: 1, ref: first },
+    })
+    source.utils.commit()
+    expectRows(`real update`, [`b:1`])
+  } finally {
+    stop()
+    attached.dispose()
+    detached.dispose()
+    await view.cleanup()
+    await source.cleanup()
+  }
+}
+
+const pooledSwapProperty = `serialized-value.pooled-residual-swap`
+
+describe(`a residual pooled view rechecks its rows when read`, () => {
+  oracleProperty<
+    { name: string },
+    ReturnType<typeof recordedAssertionJudgment>
+  >({
+    id: pooledSwapProperty,
+    law: {
+      statement: `A pooled view with a residual reference filter shows, to attached and detached readers alike, the rows that pass it by the time a commit returns: two deep-equal replacements in one batch that swap one row out and another in change its rows, and a real update to a passing row changes its value.`,
+      authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md; review of PR #2460.`,
+      limits: `One pooled group of two rows with a Map reference filter; one swapping batch and one real update.`,
+    },
+    owns: [
+      'src/query/pooled-live-query.ts#PooledLiveQuery._stateRevision',
+      'src/query/pooled-live-query.ts#Partition.apply',
+    ],
+    histories: [{ name: `a swap, then a real update` }],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(pooledSwapProperty, history, observe, () =>
+        runPooledSwapHistory(),
+      ),
+    check: forwardAssertionJudgment,
+  })
+})

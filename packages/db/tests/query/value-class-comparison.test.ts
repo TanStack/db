@@ -844,3 +844,73 @@ describe(`an update between values that hash alike`, () => {
     expect(filtered.toArray).toEqual([])
   })
 })
+
+describe(`abandoned pooled views`, () => {
+  it(`cost a deep-equal replacement nothing while a peer stays mounted`, async () => {
+    type Row = { id: string; meta: { n: number } }
+    let reads = 0
+    // Counts reads of `meta.n`, which each residual filter evaluates. A row is
+    // stored as a shallow copy, so the nested getter still runs on reads. Two
+    // rows that hold the same `n` are deep-equal.
+    const counted = (): Row => ({
+      id: `a`,
+      meta: Object.defineProperty({} as { n: number }, `n`, {
+        enumerable: true,
+        get: () => {
+          reads++
+          return 1
+        },
+      }),
+    })
+    const source = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `abandoned-pooled-views`,
+        getKey: (row) => row.id,
+        initialData: [counted()],
+        autoIndex: `off`,
+      }),
+    )
+    await source.stateWhenReady()
+    // A mounted peer with no residual filter keeps the partition alive.
+    const peer = createLiveQueryObserver<Row, string>(
+      poolQuery(
+        new Query()
+          .from({ item: source })
+          .where(({ item }) => eq(item.id, `a`)),
+      ) as never,
+    )
+    const stopPeer = peer.subscribe(() => {})
+    const replace = () => {
+      source.utils.begin()
+      source.utils.write({
+        type: `update`,
+        value: counted(),
+      })
+      source.utils.commit()
+    }
+    replace()
+    reads = 0
+    replace()
+    const baseline = reads
+
+    for (let index = 0; index < 20; index++) {
+      const view = poolQuery(
+        new Query()
+          .from({ item: source })
+          .where(({ item }) => and(eq(item.id, `a`), gte(item.meta.n, -index))),
+      )
+      const observer = createLiveQueryObserver<Row, string>(view as never)
+      // Mounted, read, then unmounted without cleaning the view up.
+      observer.subscribe(() => {})()
+      observer.getSnapshot()
+      observer.dispose()
+    }
+    reads = 0
+    replace()
+    expect(reads).toBe(baseline)
+
+    stopPeer()
+    peer.dispose()
+    await source.cleanup()
+  })
+})

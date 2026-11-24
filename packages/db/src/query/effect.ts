@@ -496,6 +496,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     Map<string | number, ChangeMessage<any, string | number>>
   >()
   private applyingSilentChanges = false
+  // Other changes that arrive while replacements run, such as rows a join loads
+  // for a replaced reference. They run after them, keeping their provenance.
+  private readonly normalDuringSilent: Array<
+    [string, Array<ChangeMessage<any, string | number>>]
+  > = []
   // Output keys that a change other than a deep-equal replacement touched.
   private readonly normallyChangedKeys = new Set<unknown>()
 
@@ -916,7 +921,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     })
     // An empty batch still settles ordered demand.
     if (normal.length > 0 || changes.length === 0) {
-      this.deliverSourceChanges(sourceId, normal)
+      if (this.applyingSilentChanges)
+        this.normalDuringSilent.push([sourceId, normal])
+      else this.deliverSourceChanges(sourceId, normal)
     }
     if (scheduleGraph) this.scheduleGraphRun()
   }
@@ -1068,14 +1075,20 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       if (!this.isDisposed() && this.pendingSilentChanges.size > 0) {
         this.applyingSilentChanges = true
         try {
-          for (const [sourceId, silent] of this.pendingSilentChanges) {
-            this.deliverSourceChanges(sourceId, [...silent.values()])
-          }
+          const silent = [...this.pendingSilentChanges]
           this.pendingSilentChanges.clear()
+          for (const [sourceId, changes] of silent) {
+            this.deliverSourceChanges(sourceId, [...changes.values()])
+          }
           this.runGraphToQuiescence()
         } finally {
           this.applyingSilentChanges = false
         }
+        const normal = this.normalDuringSilent.splice(0)
+        for (const [sourceId, changes] of normal) {
+          this.deliverSourceChanges(sourceId, changes)
+        }
+        this.runGraphToQuiescence()
       }
       // Emit all accumulated events once the graph reaches quiescence
       this.flushPendingChanges()
@@ -1313,6 +1326,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.sentToD2RowsBySource.clear()
     this.pendingChanges.clear()
     this.pendingSilentChanges.clear()
+    this.normalDuringSilent.length = 0
     this.normallyChangedKeys.clear()
     this.publishedRows.clear()
     this.pendingOrderedPublications.clear()

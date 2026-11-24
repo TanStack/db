@@ -2494,7 +2494,13 @@ serialized at most once. A third, fixed property
 (`serialized-value.truncate-replay`) replaces a row's reference with a
 deep-equal instance during a direct subscriber's truncate replay and requires
 the completed replay to drop it from a filter on the old instance while an
-unchanged row stays silent. The distinct representative oracle
+unchanged row stays silent. A fixed property
+(`serialized-value.effect-joined-load`) lets a deep-equal replacement of a
+joined reference load an on-demand source whose provider delivers a real update,
+and requires the Effect to report it as it does after a normal opener. Another
+(`serialized-value.pooled-residual-swap`) swaps two rows across a residual
+pooled view in one batch and then really updates one, for attached and detached
+readers. The distinct representative oracle
 requires a shown payload to stay while the inputs that hold it do, and a fixed
 history retires a row whose hash collides with a live one.
 

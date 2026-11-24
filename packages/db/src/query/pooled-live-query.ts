@@ -56,6 +56,9 @@ interface PartitionGroup {
   listeners: Set<Listener>
   revision: number
   layoutRevision: number
+  // Bumped by each deep-equal replacement, which leaves `revision` alone; a
+  // residual view reads it to recheck which rows pass.
+  replacements: number
 }
 
 const partitionsBySource = new WeakMap<object, Map<string, Partition>>()
@@ -68,6 +71,7 @@ const EMPTY_GROUP: PartitionGroup = {
   listeners: new Set(),
   revision: 0,
   layoutRevision: 0,
+  replacements: 0,
 }
 
 // Length-prefixed, so no two part lists share an encoding.
@@ -77,9 +81,6 @@ function appendGroupKeyPart(groupKey: string, part: string): string {
 
 class Partition {
   private readonly groups = new Map<string, PartitionGroup>()
-  // Views with residual conjuncts, by group. A deep-equal replacement can move
-  // a row across one without changing anything the group's other views read.
-  private readonly residualViews = new Map<string, Set<PooledLiveQuery>>()
   // Revisions for every group, so a recreated group never repeats one.
   private clock = 0
   private subscription: CollectionSubscription | undefined
@@ -146,6 +147,7 @@ class Partition {
         rows: new SortedMap(this.compareRows),
         listeners: new Set(),
         revision,
+        replacements: 0,
         layoutRevision: revision,
       }
       this.groups.set(key, group)
@@ -294,19 +296,6 @@ class Partition {
         }
   }
 
-  addResidualView(groupKey: string, view: PooledLiveQuery): void {
-    let views = this.residualViews.get(groupKey)
-    if (!views) this.residualViews.set(groupKey, (views = new Set()))
-    views.add(view)
-  }
-
-  removeResidualView(groupKey: string, view: PooledLiveQuery): void {
-    const views = this.residualViews.get(groupKey)
-    if (views?.delete(view) && views.size === 0) {
-      this.residualViews.delete(groupKey)
-    }
-  }
-
   /** A revision no group or view of this partition has used. */
   nextRevision(): number {
     return ++this.clock
@@ -404,11 +393,7 @@ class Partition {
           existed &&
           isSilentReplacement(change) &&
           (this.compareRows?.(stored!, change.value) ?? 0) === 0
-        if (silent) {
-          for (const view of this.residualViews.get(group.key) ?? []) {
-            view.noteReplacement(stored!, change.value)
-          }
-        }
+        if (silent) group.replacements++
         record(
           group,
           existed
@@ -626,8 +611,10 @@ class PooledLiveQuery {
   // This view's share of its partition ends once, at its first cleanup.
   private released = false
   private collectionHold: { unsubscribe: () => void } | undefined = undefined
-  private residualMoved = false
   private seenGroupRevision = -1
+  private seenReplacements = -1
+  // The keys of the group's rows that passed the residual conjuncts.
+  private passingKeys: Array<string | number> = []
   private residualRevision = 0
 
   constructor(
@@ -641,7 +628,6 @@ class PooledLiveQuery {
     private readonly alias: string,
   ) {
     partition.retain(gcTime)
-    if (passes) partition.addResidualView(groupKey, this)
     registerPooledSource(this, source)
   }
 
@@ -698,20 +684,27 @@ class PooledLiveQuery {
   // so a reader that cached its rows reads them again.
   get _stateRevision(): number {
     if (this.released) return -1
-    const revision = this.group.revision
-    if (!this.passes) return revision
-    // A residual view also moves when a replacement changes only its answer.
-    if (this.residualMoved || revision !== this.seenGroupRevision) {
-      this.residualMoved = false
-      this.seenGroupRevision = revision
-      this.residualRevision = this.partition.nextRevision()
+    const group = this.group
+    if (!this.passes) return group.revision
+    // A residual view also moves when a deep-equal replacement changes only
+    // its answer. It rechecks when read, so the partition holds no views.
+    if (
+      group.revision !== this.seenGroupRevision ||
+      group.replacements !== this.seenReplacements
+    ) {
+      const passing = Array.from(this.entries(), ([key]) => key)
+      if (
+        group.revision !== this.seenGroupRevision ||
+        passing.length !== this.passingKeys.length ||
+        passing.some((key, index) => key !== this.passingKeys[index])
+      ) {
+        this.residualRevision = this.partition.nextRevision()
+      }
+      this.seenGroupRevision = group.revision
+      this.seenReplacements = group.replacements
+      this.passingKeys = passing
     }
     return this.residualRevision
-  }
-
-  /** A deep-equal row replaced `previous`; note a change in this view's rows. */
-  noteReplacement(previous: Row, next: Row): void {
-    this.residualMoved ||= this.passes!(previous) !== this.passes!(next)
   }
 
   get _layoutRevision(): number {
@@ -837,7 +830,6 @@ class PooledLiveQuery {
       (this.collection?._lifecycle.hasStartedCleanup() ?? true)
     ) {
       this.released = true
-      this.partition.removeResidualView(this.groupKey, this)
       this.partition.releaseView()
     }
     return cleanup
