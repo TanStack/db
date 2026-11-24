@@ -325,6 +325,16 @@ export class TransactionExecutor {
           }
         }
       }
+      // A follower that wrote this transaction reads its outcome here when
+      // the settlement message never reaches it.
+      if (this.config.followerWrites === `durable`) {
+        await this.outbox.recordOutcome(
+          transaction.id,
+          transaction.outboxPhase === `rejection-pending`
+            ? this.getTerminalError(transaction)
+            : undefined,
+        )
+      }
       await this.outbox.remove(transaction.id)
       this.scheduler.markCompleted(transaction)
     } catch (error) {
@@ -430,7 +440,8 @@ export class TransactionExecutor {
 
   /** Runs one transaction that a follower tab saved to the shared outbox. */
   async admitTransaction(id: string): Promise<void> {
-    const transaction = await this.outbox.get(id)
+    // A read that the transaction's removal overtakes returns null.
+    const transaction = await this.outbox.getCurrent(id)
     if (!transaction || !this.offlineExecutor.isOfflineEnabled) return
     // A duplicate message is harmless: both steps ignore a known transaction.
     this.scheduler.schedule(transaction)

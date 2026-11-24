@@ -55,6 +55,9 @@ function outboxMessageError(error: { name: string; message: string }): Error {
   return restored
 }
 
+/** How long a recorded outcome waits for a writer that never returns. */
+const OUTCOME_RETENTION_MS = 24 * 60 * 60 * 1000
+
 /** How many settled ids an executor remembers to reject late waiters. */
 const SETTLED_TRANSACTIONS_REMEMBERED = 1000
 
@@ -101,6 +104,9 @@ export class OfflineExecutor {
   private initReject!: (error: Error) => void
 
   // Coordination mechanism for blocking transactions
+  // Follower writes this leader could not read; retried on connectivity.
+  private readonly unadmitted = new Set<string>()
+  private initialized = false
   private pendingTransactionPromises: Map<
     string,
     {
@@ -278,6 +284,7 @@ export class OfflineExecutor {
     this.unsubscribeOnline = this.onlineDetector.subscribe(() => {
       if (this.isOfflineEnabled && this.executor) {
         this.executor.resetRetryDelays()
+        this.retryAdmissions()
 
         if (this.scheduler.getPendingCount() > 0) {
           const barrierPromise = this.executor.executeAll()
@@ -373,6 +380,7 @@ export class OfflineExecutor {
       if (isLeader) {
         await this.loadAndReplayTransactions()
       }
+      this.initialized = true
       this.initResolve()
     } catch (error) {
       console.warn(`Failed to initialize offline executor:`, error)
@@ -393,6 +401,10 @@ export class OfflineExecutor {
       this.outboxChannel.postMessage({
         type: `leader`,
       } satisfies OutboxMessage)
+      // Housekeeping only: a later leader prunes again.
+      this.outbox!.pruneOutcomes(Date.now() - OUTCOME_RETENTION_MS).catch(
+        () => {},
+      )
     }
     this.reconcileFollowerWrites()
 
@@ -424,16 +436,35 @@ export class OfflineExecutor {
     if (message.type === `leader`) {
       this.reconcileFollowerWrites()
     } else if (message.type === `added`) {
-      this.executor!.admitTransaction(message.id).catch((error) => {
-        console.warn(`Failed to run follower write:`, error)
-      })
+      this.admitFollowerWrite(message.id)
     } else {
-      this.settleTransaction(
+      this.settleFollowerWrite(
         message.id,
-        undefined,
         message.error && outboxMessageError(message.error),
       )
     }
+  }
+
+  private admitFollowerWrite(id: string): void {
+    this.unadmitted.delete(id)
+    this.executor!.admitTransaction(id).catch((error) => {
+      console.warn(`Failed to run follower write:`, error)
+      // The row is still saved. This leader tries again when connectivity
+      // changes, which is harmless if it was scheduled; a later leader loads
+      // it from the outbox.
+      this.unadmitted.add(id)
+    })
+  }
+
+  private retryAdmissions(): void {
+    for (const id of [...this.unadmitted]) this.admitFollowerWrite(id)
+  }
+
+  // Every tab hears a settlement; only the writer removes its outcome record.
+  private settleFollowerWrite(id: string, error?: Error): void {
+    const own = this.pendingTransactionPromises.has(id)
+    this.settleTransaction(id, undefined, error)
+    if (own) this.outbox!.removeOutcome(id).catch(() => {})
   }
 
   private reconcileFollowerWrites(): void {
@@ -443,17 +474,21 @@ export class OfflineExecutor {
   }
 
   // A saved write that left the outbox was settled by a leader whose message
-  // never arrived.
+  // never arrived. The leader recorded the outcome before removing the row; a
+  // row removed with no record, such as by an older leader, completed.
   private async settleRemovedWrites(): Promise<void> {
     for (const [id, waiter] of [...this.pendingTransactionPromises]) {
       if (!(await waiter.saved)) continue
       if (await this.outbox!.get(id)) continue
-      this.settleTransaction(id, undefined)
+      const error = (await this.outbox!.getOutcome(id))?.error
+      this.settleFollowerWrite(id, error && outboxMessageError(error))
     }
   }
 
-  private announceSettled(id: string, error?: Error): void {
+  private announceSettled(id: string, own: boolean, error?: Error): void {
     if (this.outboxChannel) {
+      // This tab's own write needs no record for another tab.
+      if (own) this.outbox!.removeOutcome(id).catch(() => {})
       this.outboxChannel.postMessage({
         type: `settled`,
         id,
@@ -464,8 +499,9 @@ export class OfflineExecutor {
     }
   }
 
+  // A write made before initialization keeps the online path.
   private get writesToSharedOutbox(): boolean {
-    return this.outboxChannel !== null
+    return this.outboxChannel !== null && this.initialized
   }
 
   get isOfflineEnabled(): boolean {
@@ -629,19 +665,21 @@ export class OfflineExecutor {
 
   // Method for TransactionExecutor to signal completion
   resolveTransaction(transactionId: string, result: any): void {
+    const own = this.pendingTransactionPromises.has(transactionId)
     try {
       this.settleTransaction(transactionId, result)
     } finally {
-      this.announceSettled(transactionId)
+      this.announceSettled(transactionId, own)
     }
   }
 
   // Method for TransactionExecutor to signal failure
   rejectTransaction(transactionId: string, error: Error): void {
+    const own = this.pendingTransactionPromises.has(transactionId)
     try {
       this.settleTransaction(transactionId, undefined, error)
     } finally {
-      this.announceSettled(transactionId, error)
+      this.announceSettled(transactionId, own, error)
     }
   }
 

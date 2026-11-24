@@ -4248,8 +4248,12 @@ The post-merge review added three missing domains to existing owners:
 - [Durable follower writes](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/durable-follower-oracle.property.test.ts)
   checks delivery and settlement of `followerWrites: 'durable'` across three
   tabs that write, close, reopen and hand over leadership, with controlled
-  election, connectivity and BroadcastChannel. It does not cover real browser
-  contexts.
+  election, connectivity and BroadcastChannel. It also checks that only the
+  leader sends a durable write, that a lost settlement (including a rejection)
+  is recovered for the same write, that a leader retries a saved write it could
+  not read, that a stale admission read cannot send a write twice, that a write
+  made before initialization takes the online path, and which outcome records
+  remain. It does not cover real browser contexts.
 - Settlement-time drop of optimistic state is owned by the
   [optimistic history model](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts)
   and

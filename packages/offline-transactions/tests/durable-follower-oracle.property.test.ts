@@ -12,34 +12,42 @@
  * once after some tab leads while online, whether or not its tab is still open.
  * It stays pending until then, and the leader shows it optimistically. A write
  * the server rejects permanently fails in its open tab with the server's error,
- * and every other write completes. When a settlement message is lost, the next
- * leader's outbox check settles the waiter. Stale and duplicate channel
- * messages change nothing. In online mode, a follower's write made offline
- * fails and is never sent.
+ * and every other write completes. Only the leader sends a durable write. When
+ * a settlement message is lost, the outcome the leader recorded settles the
+ * waiter at the next leader's outbox check, with the server's error for a
+ * rejected write. A leader that cannot read a saved write tries again when
+ * connectivity changes. Stale and duplicate channel messages change nothing.
+ * A write made before its tab initializes, and in online mode a follower's
+ * write, uses the online path: the writing tab sends it, and offline it fails
+ * and is never sent.
  *
  * History grammar: a mode and up to twelve actions over three tabs: write, a
  * write the server rejects, a write whose save is held or fails while a leader
- * message arrives, close a tab, reopen a tab, go online or offline,
- * lose the next successful settlement, deliver a stale or duplicate message,
- * and fail the storage read of an admission or an outbox check.
+ * message arrives, close a tab, reopen a tab, reopen a tab and write before it
+ * initializes, go online or offline, lose the next settlement, deliver a stale
+ * or duplicate message, fail the leader's admission read of a follower's saved
+ * write, fail an outbox check's storage read, and return a leader's admission
+ * read only after a duplicate message sent and removed its write.
  *
  * Production driver: real executors over one shared storage adapter, with a
  * controlled leader election, online detector and BroadcastChannel.
  *
  * Refinement check: after every action, pending writes stay pending and shown
- * by the leader, open channels match open tabs, and warnings match the injected
- * failures. After the history ends online with a leader, each deliverable write
- * reached the server exactly once, the outbox is empty, and each open tab's
- * transaction has the model's outcome and error.
+ * by the leader once it read them, open channels match open tabs, and warnings
+ * match the injected failures. After the history ends online with a leader,
+ * each deliverable write reached the server exactly once from the tab the
+ * model names, the outbox is empty, and each open tab's transaction has the
+ * model's outcome and error. A lost settlement is recovered for the same write,
+ * by the writer itself if it became leader, or else after one handover.
  *
- * Known omissions: writes made before a tab initializes use the online path; a
- * reloaded follower does not show another tab's pending writes optimistically;
- * a settlement lost for a permanently rejected write would report success; and
- * no real browser contexts.
+ * Known omissions: a reloaded follower does not show another tab's pending
+ * writes optimistically; outcomes are pruned by age only for a record placed a
+ * day old before the tabs open; and no real browser contexts.
  */
 import fc from 'fast-check'
 import { expect, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
+import { OutboxManager } from '../src/outbox/OutboxManager'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
@@ -87,6 +95,14 @@ const reachStates = [
   `follower-save-failed`,
   // A leader's write completed in the default mode.
   `online-mode-leader-write-delivered`,
+  // A write made before its tab initialized used the online path.
+  `pre-initialization-write`,
+  // A lost settlement of a rejected write still failed with its error.
+  `lost-rejection-recovered`,
+  // A saved write the leader could not read was sent after connectivity changed.
+  `admission-retried`,
+  // An admission read returned after its write was sent and removed.
+  `stale-admission-ignored`,
 ] as const
 type ReachState = (typeof reachStates)[number]
 
@@ -97,6 +113,7 @@ type TabActionType =
   | `write-save-fails`
   | `close`
   | `open`
+  | `open-and-write`
 type SharedActionType =
   | `online`
   | `offline`
@@ -105,6 +122,7 @@ type SharedActionType =
   | `duplicate-added`
   | `fail-admission-read`
   | `fail-outbox-check`
+  | `stale-admission-read`
 type Action = { type: TabActionType; tab: number } | { type: SharedActionType }
 type Mode = `durable` | `online`
 type History = { mode: Mode; actions: Array<Action> }
@@ -124,6 +142,7 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   { weight: 1, arbitrary: tabAction(`write-save-fails`) },
   { weight: 2, arbitrary: tabAction(`close`) },
   { weight: 2, arbitrary: tabAction(`open`) },
+  { weight: 1, arbitrary: tabAction(`open-and-write`) },
   { weight: 2, arbitrary: sharedAction(`offline`) },
   { weight: 2, arbitrary: sharedAction(`online`) },
   { weight: 1, arbitrary: sharedAction(`lose-settlement`) },
@@ -131,6 +150,7 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   { weight: 1, arbitrary: sharedAction(`duplicate-added`) },
   { weight: 1, arbitrary: sharedAction(`fail-admission-read`) },
   { weight: 1, arbitrary: sharedAction(`fail-outbox-check`) },
+  { weight: 1, arbitrary: sharedAction(`stale-admission-read`) },
 )
 const historyArbitrary: fc.Arbitrary<History> = fc.record({
   mode: fc.constantFrom<Mode>(`durable`, `durable`, `durable`, `online`),
@@ -149,7 +169,8 @@ const spliced = (
         (action) =>
           action.type !== `lose-settlement` &&
           action.type !== `fail-admission-read` &&
-          action.type !== `fail-outbox-check`,
+          action.type !== `fail-outbox-check` &&
+          action.type !== `stale-admission-read`,
       )
       .slice(0, MAX_ACTIONS - prefix.length),
   ],
@@ -176,9 +197,13 @@ class ControlledElection {
 class TabElection implements LeaderElection {
   private leader = false
   private readonly listeners = new Set<(isLeader: boolean) => void>()
-  constructor(private readonly shared: ControlledElection) {}
+  constructor(
+    private readonly shared: ControlledElection,
+    private readonly hold?: Promise<void>,
+  ) {}
 
-  requestLeadership(): Promise<boolean> {
+  async requestLeadership(): Promise<boolean> {
+    await this.hold
     if (!this.shared.holder) {
       this.shared.holder = this
       this.leader = true
@@ -188,7 +213,7 @@ class TabElection implements LeaderElection {
     ) {
       this.shared.queue.push(this)
     }
-    return Promise.resolve(this.leader)
+    return this.leader
   }
   releaseLeadership(): void {
     this.shared.leave(this)
@@ -239,6 +264,8 @@ class ControlledOnline {
 
 class ReadFailingStorage extends FakeStorageAdapter {
   failReads = 0
+  // The next read captures its value at once and returns it on release.
+  private staleRead: { release: () => void } | null | undefined
   private heldWrites: Array<(fail: boolean) => void> | null = null
 
   holdWrites(): void {
@@ -257,10 +284,24 @@ class ReadFailingStorage extends FakeStorageAdapter {
     }
     return super.set(key, value)
   }
+  holdNextRead(): void {
+    this.staleRead = null
+  }
+  releaseRead(): void {
+    this.staleRead?.release()
+    this.staleRead = undefined
+  }
   override async get(key: string): Promise<string | null> {
     if (this.failReads > 0) {
       this.failReads -= 1
       throw new Error(`storage read failed`)
+    }
+    if (this.staleRead === null) {
+      const value = await super.get(key)
+      await new Promise<void>((release) => {
+        this.staleRead = { release }
+      })
+      return value
     }
     return super.get(key)
   }
@@ -270,7 +311,12 @@ type ChannelMessage = { type: string; id?: string; error?: unknown }
 
 function controlledChannels() {
   const open = new Set<ControlledChannel>()
-  const state = { loseSettlement: false, lost: 0, created: 0 }
+  const state = {
+    loseSettlement: false,
+    lost: 0,
+    lostIds: [] as Array<string>,
+    created: 0,
+  }
   const deliver = (from: ControlledChannel | null, data: ChannelMessage) => {
     const copy = structuredClone(data)
     for (const channel of open) {
@@ -288,9 +334,10 @@ function controlledChannels() {
       open.add(this)
     }
     postMessage(data: ChannelMessage): void {
-      if (state.loseSettlement && data.type === `settled` && !data.error) {
+      if (state.loseSettlement && data.type === `settled`) {
         state.loseSettlement = false
         state.lost += 1
+        state.lostIds.push(data.id!)
         return
       }
       deliver(this, data)
@@ -325,6 +372,10 @@ type Write = {
   deliverable: boolean
   fromFollower: boolean
   session: number
+  // Made before its tab initialized, so it took the online path.
+  preInit: boolean
+  // The leader's admission read failed and connectivity has not changed since.
+  unadmitted: boolean
   outcome?: `completed` | `failed`
   error?: unknown
 }
@@ -348,6 +399,8 @@ async function runHistory(
   const online = new ControlledOnline()
   const writes: Array<Write> = []
   const calls: Array<string> = []
+  // Which tab called the server for each write, and which tab led then.
+  const sends: Array<{ id: string; sender: number; leader?: number }> = []
   const rejected = new Set<string>()
   const expectedWarnings = { admission: 0, check: 0 }
   type Tab = {
@@ -358,8 +411,13 @@ async function runHistory(
   const tabs: Array<Tab | undefined> = Array.from({ length: TABS })
   let sessions = 0
 
-  const openTab = async (index: number) => {
-    const tabElection = new TabElection(election)
+  const openTab = async (
+    index: number,
+    beforeInit?: () => Promise<void>,
+    hold?: Promise<void>,
+  ) => {
+    const tabElection = new TabElection(election, hold)
+    const session = ++sessions
     const env = createTestOfflineEnvironment({
       storage,
       mutationFn: (params: OfflineMutationFnParams) => {
@@ -367,6 +425,11 @@ async function runHistory(
         // The server is unreachable while offline, whichever path sends it.
         if (!online.online) throw new Error(`offline`)
         calls.push(id)
+        sends.push({
+          id,
+          sender: session,
+          leader: tabs[leaderIndex()]?.session,
+        })
         if (rejected.has(id)) throw new NonRetriableError(`rejected ${id}`)
         return { ok: true }
       },
@@ -377,7 +440,8 @@ async function runHistory(
         jitter: false,
       } as never,
     })
-    tabs[index] = { env, election: tabElection, session: ++sessions }
+    tabs[index] = { env, election: tabElection, session }
+    await beforeInit?.()
     await env.executor.waitForInit()
     await settle()
   }
@@ -421,7 +485,7 @@ async function runHistory(
           undefined,
         )
       }
-      if (leader) {
+      if (leader && !write.unadmitted) {
         expect(
           leader.env.collection.has(write.id),
           `${label}: leader shows ${write.id}`,
@@ -430,7 +494,85 @@ async function runHistory(
     }
   }
 
+  type WriteType =
+    | `write`
+    | `write-rejected`
+    | `write-during-leader-message`
+    | `write-save-fails`
+  const doWrite = async (
+    index: number,
+    type: WriteType,
+    preInit = false,
+  ): Promise<Write | undefined> => {
+    const tab = tabs[index]
+    if (!tab) return undefined
+    const fromFollower = leaderIndex() !== index
+    const id = `write-${writes.length}`
+    // Durable writes go through the shared outbox once the tab is ready.
+    const shared = durable && !preInit
+    const write: Write = {
+      id,
+      tab: index,
+      rejected: type === `write-rejected`,
+      deliverable: shared || (!preInit && !fromFollower) || online.online,
+      fromFollower,
+      session: tab.session,
+      preInit,
+      unadmitted: false,
+    }
+    writes.push(write)
+    if (write.rejected) rejected.add(id)
+    const saveFails = shared && type === `write-save-fails`
+    const heldSave =
+      saveFails || (shared && type === `write-during-leader-message`)
+    if (saveFails) write.deliverable = false
+    if (heldSave) storage.holdWrites()
+    if (!durable && !fromFollower && online.online) {
+      reach(`online-mode-leader-write-delivered`)
+    }
+    if (!durable && fromFollower && !online.online) {
+      reach(`online-mode-follower-write-failed`)
+    }
+    const transaction = tab.env.executor.createOfflineTransaction({
+      mutationFnName: tab.env.mutationFnName,
+      autoCommit: false,
+    })
+    write.transactionId = transaction.id
+    const settled = transaction.mutate(() => {
+      tab.env.collection.insert({
+        id,
+        value: id,
+        completed: false,
+        updatedAt: new Date(),
+      })
+    })
+    void transaction.commit().catch(() => undefined)
+    void settled.when(`settled`).then(
+      () => {
+        write.outcome = `completed`
+      },
+      (error: unknown) => {
+        write.outcome = `failed`
+        write.error = error
+      },
+    )
+    await settle()
+    if (heldSave) {
+      channels.inject({ type: `leader` })
+      await settle()
+      expect(write.outcome, `${id} waits for its save`).toBe(undefined)
+      reach(`leader-message-during-save`)
+      if (saveFails && fromFollower) reach(`follower-save-failed`)
+      storage.releaseWrites(saveFails)
+      await settle()
+    }
+    return write
+  }
+
   try {
+    // A day-old outcome of a writer that never returned; the first leader
+    // prunes it.
+    if (durable) await storage.set(`outcome:aged`, JSON.stringify({ at: 0 }))
     for (let index = 0; index < TABS; index++) await openTab(index)
     expect(channels.state.created, `channels created`).toBe(durable ? TABS : 0)
 
@@ -439,68 +581,9 @@ async function runHistory(
         case `write`:
         case `write-rejected`:
         case `write-during-leader-message`:
-        case `write-save-fails`: {
-          const tab = tabs[action.tab]
-          if (!tab) break
-          const fromFollower = leaderIndex() !== action.tab
-          const id = `write-${writes.length}`
-          const write: Write = {
-            id,
-            tab: action.tab,
-            rejected: action.type === `write-rejected`,
-            deliverable: durable || !fromFollower || online.online,
-            fromFollower,
-            session: tab.session,
-          }
-          writes.push(write)
-          if (write.rejected) rejected.add(id)
-          const saveFails = durable && action.type === `write-save-fails`
-          const heldSave =
-            saveFails ||
-            (durable && action.type === `write-during-leader-message`)
-          if (saveFails) write.deliverable = false
-          if (heldSave) storage.holdWrites()
-          if (!durable && !fromFollower && online.online) {
-            reach(`online-mode-leader-write-delivered`)
-          }
-          if (!durable && fromFollower && !online.online) {
-            reach(`online-mode-follower-write-failed`)
-          }
-          const transaction = tab.env.executor.createOfflineTransaction({
-            mutationFnName: tab.env.mutationFnName,
-            autoCommit: false,
-          })
-          write.transactionId = transaction.id
-          const settled = transaction.mutate(() => {
-            tab.env.collection.insert({
-              id,
-              value: id,
-              completed: false,
-              updatedAt: new Date(),
-            })
-          })
-          void transaction.commit().catch(() => undefined)
-          void settled.when(`settled`).then(
-            () => {
-              write.outcome = `completed`
-            },
-            (error: unknown) => {
-              write.outcome = `failed`
-              write.error = error
-            },
-          )
-          await settle()
-          if (heldSave) {
-            channels.inject({ type: `leader` })
-            await settle()
-            expect(write.outcome, `${id} waits for its save`).toBe(undefined)
-            reach(`leader-message-during-save`)
-            if (saveFails && fromFollower) reach(`follower-save-failed`)
-            storage.releaseWrites(saveFails)
-            await settle()
-          }
+        case `write-save-fails`:
+          await doWrite(action.tab, action.type)
           break
-        }
         case `close`: {
           const leader = leaderIndex() === action.tab
           if (
@@ -528,9 +611,40 @@ async function runHistory(
         case `open`:
           if (!tabs[action.tab]) await openTab(action.tab)
           break
+        case `open-and-write`: {
+          if (tabs[action.tab]) break
+          // The write lands after the tab opens its channel, while its
+          // election is still pending.
+          let release!: () => void
+          const hold = new Promise<void>((resolve) => {
+            release = resolve
+          })
+          let made: Promise<Write | undefined> | undefined
+          const channelsBefore = channels.state.created
+          await openTab(
+            action.tab,
+            async () => {
+              for (let turn = 0; turn < 50; turn++) {
+                if (!durable || channels.state.created > channelsBefore) break
+                await new Promise((resolve) => setTimeout(resolve, 0))
+              }
+              if (durable)
+                expect(channels.state.created, `channel opened`).toBe(
+                  channelsBefore + 1,
+                )
+              made = doWrite(action.tab, `write`, true)
+              await Promise.resolve()
+              release()
+            },
+            hold,
+          )
+          if (await made) reach(`pre-initialization-write`)
+          break
+        }
         case `online`:
           online.set(true)
           await settle()
+          for (const write of writes) write.unadmitted = false
           break
         case `offline`:
           online.set(false)
@@ -552,14 +666,37 @@ async function runHistory(
           await settle()
           break
         }
-        case `fail-admission-read`:
-          if (!durable || !tabs.some(Boolean)) break
+        case `fail-admission-read`: {
+          // The leader's first read of a follower's saved write fails.
+          const follower = tabs.findIndex(
+            (tab, index) => tab && index !== leaderIndex(),
+          )
+          if (!durable || leaderIndex() < 0 || follower < 0) break
           reach(`admission-read-failed`)
           storage.failReads = 1
           expectedWarnings.admission += 1
-          channels.inject({ type: `added`, id: `not-in-outbox` })
-          await settle()
+          const write = await doWrite(follower, `write`)
+          write!.unadmitted = true
           break
+        }
+        case `stale-admission-read`: {
+          // The leader's admission read stalls with the saved row; a duplicate
+          // message sends and removes the write before the read returns.
+          const follower = tabs.findIndex(
+            (tab, index) => tab && index !== leaderIndex(),
+          )
+          if (!durable || !online.online || leaderIndex() < 0 || follower < 0)
+            break
+          storage.holdNextRead()
+          const write = await doWrite(follower, `write`)
+          if (!write) break
+          channels.inject({ type: `added`, id: write.transactionId })
+          await settle()
+          storage.releaseRead()
+          await settle()
+          if (calls.includes(write.id)) reach(`stale-admission-ignored`)
+          break
+        }
         case `fail-outbox-check`: {
           const sessionsOpen = openSessions()
           const waiting = writes.some(
@@ -577,31 +714,55 @@ async function runHistory(
       check(`step ${step} ${action.type}`)
     }
 
-    // End online with a leader, handing over once if a settlement was lost.
+    // End online with a leader. A lost settlement is recovered for its own
+    // write: by the writer itself if it became leader, or else after one
+    // handover to another tab.
     channels.state.loseSettlement = false
     online.set(true)
     await settle()
-    if (channels.state.lost > 0) {
+    const lostWrites = writes.filter(
+      (write) =>
+        write.transactionId !== undefined &&
+        channels.state.lostIds.includes(write.transactionId),
+    )
+    if (lostWrites.length > 0) {
+      reach(`lost-settlement-recovered`)
       const holder = leaderIndex()
-      const stranded = writes.some(
+      const leaderSession = tabs[holder]?.session
+      for (const write of lostWrites) {
+        if (write.session === leaderSession) {
+          expect(write.outcome, `${write.id} recovered by its leader`).not.toBe(
+            undefined,
+          )
+        }
+      }
+      const stranded = lostWrites.filter(
         (write) =>
-          write.session !== tabs[holder]?.session &&
+          write.session !== leaderSession &&
           openSessions().has(write.session) &&
           write.outcome === undefined,
       )
-      if (holder >= 0) await closeTab(holder)
-      reach(`lost-settlement-recovered`)
-      const nextLeader = tabs[leaderIndex()]?.session
+      if (stranded.length > 0 && holder >= 0) {
+        await closeTab(holder)
+        const nextLeader = tabs[leaderIndex()]?.session
+        if (
+          stranded.some(
+            (write) =>
+              write.session !== nextLeader && write.outcome !== undefined,
+          )
+        ) {
+          reach(`lost-settlement-recovered-by-follower`)
+        }
+      }
       if (
-        stranded &&
-        writes.some(
+        lostWrites.some(
           (write) =>
-            write.session !== nextLeader &&
+            write.rejected &&
             openSessions().has(write.session) &&
-            write.outcome !== undefined,
+            write.outcome === `failed`,
         )
       ) {
-        reach(`lost-settlement-recovered-by-follower`)
+        reach(`lost-rejection-recovered`)
       }
     }
     if (tabs.every((tab) => !tab)) await openTab(0)
@@ -617,6 +778,21 @@ async function runHistory(
         reach(`follower-write-rejected`)
       }
     }
+    if (writes.some((write) => write.unadmitted && calls.includes(write.id)))
+      reach(`admission-retried`)
+    for (const send of sends) {
+      const write = writes.find((candidate) => candidate.id === send.id)!
+      if (write.preInit || !durable) continue
+      // A durable write is sent only by the tab that leads at that moment.
+      expect(send.sender, `${send.id} sent by the leader`).toBe(send.leader)
+    }
+    for (const write of writes) {
+      if (!write.preInit) continue
+      for (const send of sends.filter((candidate) => candidate.id === write.id))
+        expect(send.sender, `${write.id} sent by its own tab`).toBe(
+          write.session,
+        )
+    }
     expect([...calls].sort(), `each write reached the server once`).toEqual(
       writes
         .filter((write) => write.deliverable)
@@ -625,6 +801,32 @@ async function runHistory(
     )
     const executor = tabs[leaderIndex()]!.env.executor
     expect(await executor.peekOutbox(), `the outbox is empty`).toEqual([])
+    // An outcome record stays only for a sent durable write whose tab closed
+    // before it settled; a tab that settles its write removes the record.
+    const outcomes = (await storage.keys())
+      .filter((key) => key.startsWith(`outcome:`))
+      .map((key) => key.slice(`outcome:`.length))
+      .sort()
+    expect(outcomes, `outcome records`).toEqual(
+      writes
+        .filter(
+          (write) =>
+            durable &&
+            !write.preInit &&
+            write.deliverable &&
+            write.outcome === undefined,
+        )
+        .map((write) => write.transactionId)
+        .sort(),
+    )
+    // Every recorded outcome carries its age, so a day later all are pruned.
+    await new OutboxManager(storage, {}).pruneOutcomes(
+      Date.now() + 2 * 24 * 60 * 60 * 1000,
+    )
+    expect(
+      (await storage.keys()).filter((key) => key.startsWith(`outcome:`)),
+      `outcome records a day later`,
+    ).toEqual([])
     for (const write of writes) {
       if (!sessionsOpen.has(write.session)) continue
       expect(write.outcome, `${write.id} outcome`).toBe(
@@ -657,16 +859,26 @@ const loseSettlement: Action = { type: `lose-settlement` }
 oracleProperty({
   id: property,
   law: {
-    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until it reaches the server exactly once after some tab leads while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome. Stale and duplicate messages change nothing. The default mode keeps the online path with no channel.`,
+    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until the leading tab sends it to the server exactly once while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome, also when the settlement message is lost. A leader that could not read a saved write sends it once connectivity changes. Stale and duplicate messages change nothing. A write made before its tab initializes, and the default mode, keep the online path.`,
     authority: `Issue #2464 and the followerWrites option in docs/guides/offline-transactions.md.`,
-    limits: `Three tabs over one storage adapter with controlled election, connectivity and BroadcastChannel; up to twelve actions; no real browser contexts, and a lost settlement of a rejected write is not modeled.`,
+    limits: `Three tabs over one storage adapter with controlled election, connectivity and BroadcastChannel; up to twelve actions; no real browser contexts, and no outcome old enough to be pruned.`,
   },
   owns: [
+    `src/OfflineExecutor.ts`,
     `src/OfflineExecutor.ts#OfflineExecutor.handleOutboxMessage`,
     `src/OfflineExecutor.ts#OfflineExecutor.settleRemovedWrites`,
     `src/OfflineExecutor.ts#OfflineExecutor.openOutboxChannel`,
     `src/OfflineExecutor.ts#OfflineExecutor.announceSettled`,
     `src/executor/TransactionExecutor.ts#TransactionExecutor.admitTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.admitFollowerWrite`,
+    `src/OfflineExecutor.ts#OfflineExecutor.retryAdmissions`,
+    `src/OfflineExecutor.ts#OfflineExecutor.settleFollowerWrite`,
+    `src/OfflineExecutor.ts#OfflineExecutor.writesToSharedOutbox`,
+    `src/outbox/OutboxManager.ts#OutboxManager.getCurrent`,
+    `src/outbox/OutboxManager.ts#OutboxManager.recordOutcome`,
+    `src/outbox/OutboxManager.ts#OutboxManager.getOutcome`,
+    `src/outbox/OutboxManager.ts#OutboxManager.removeOutcome`,
+    `src/outbox/OutboxManager.ts#OutboxManager.pruneOutcomes`,
   ],
   histories: {
     arbitrary: historyArbitrary,
@@ -758,6 +970,42 @@ oracleProperty({
             offline,
             write(1),
             { type: `fail-outbox-check` },
+          ]),
+      },
+      {
+        name: `a leader retries a saved write it could not read`,
+        enters: [`admission-read-failed`, `admission-retried`],
+        build: (): History => ({
+          mode: `durable`,
+          actions: [{ type: `fail-admission-read` }],
+        }),
+      },
+      {
+        name: `a lost rejection still fails its writer`,
+        enters: [`lost-settlement-recovered`, `lost-rejection-recovered`],
+        build: (): History => ({
+          mode: `durable`,
+          actions: [loseSettlement, { type: `write-rejected`, tab: 2 }],
+        }),
+      },
+      {
+        name: `a stale admission read does not send a write again`,
+        enters: [`stale-admission-ignored`],
+        build: (): History => ({
+          mode: `durable`,
+          actions: [{ type: `stale-admission-read` }],
+        }),
+      },
+      {
+        name: `a write before initialization takes the online path`,
+        enters: [`pre-initialization-write`],
+        build: (generated: History): History =>
+          spliced(generated, [
+            close(1),
+            { type: `open-and-write`, tab: 1 },
+            offline,
+            close(2),
+            { type: `open-and-write`, tab: 2 },
           ]),
       },
     ],

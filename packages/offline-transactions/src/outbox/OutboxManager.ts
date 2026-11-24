@@ -12,10 +12,17 @@ import type { Collection } from '@tanstack/db'
 
 export class OutboxTransactionNotFoundError extends Error {}
 
+/** How a removed transaction settled, kept for a writer in another tab. */
+export type OutboxOutcome = {
+  at: number
+  error?: { name: string; message: string }
+}
+
 export class OutboxManager {
   private storage: StorageAdapter
   private serializer: TransactionSerializer
   private keyPrefix = `tx:`
+  private outcomePrefix = `outcome:`
   private removalRevision = 0
   private activeReads = new Set<{ revision: number }>()
   private removedAtRevision = new Map<string, number>()
@@ -76,6 +83,55 @@ export class OutboxManager {
       }
       console.warn(`Failed to deserialize transaction ${id}:`, error)
       return null
+    }
+  }
+
+  /**
+   * Reads one transaction, or null if it was removed after this read began,
+   * so a stale read cannot bring back a transaction that already settled.
+   */
+  async getCurrent(id: string): Promise<OfflineTransaction | null> {
+    const read = { revision: this.removalRevision }
+    this.activeReads.add(read)
+    try {
+      const transaction = await this.get(id)
+      return (this.removedAtRevision.get(id) ?? 0) <= read.revision
+        ? transaction
+        : null
+    } finally {
+      this.activeReads.delete(read)
+      this.pruneRemovalHistory()
+    }
+  }
+
+  /** Records how a transaction settled before its row is removed. */
+  async recordOutcome(id: string, error?: Error): Promise<void> {
+    const outcome: OutboxOutcome = {
+      at: Date.now(),
+      ...(error ? { error: { name: error.name, message: error.message } } : {}),
+    }
+    await this.storage.set(
+      `${this.outcomePrefix}${id}`,
+      JSON.stringify(outcome),
+    )
+  }
+
+  async getOutcome(id: string): Promise<OutboxOutcome | null> {
+    const data = await this.storage.get(`${this.outcomePrefix}${id}`)
+    return data === null ? null : (JSON.parse(data) as OutboxOutcome)
+  }
+
+  async removeOutcome(id: string): Promise<void> {
+    await this.storage.delete(`${this.outcomePrefix}${id}`)
+  }
+
+  /** Removes outcomes recorded before `before`, whose writers are gone. */
+  async pruneOutcomes(before: number): Promise<void> {
+    for (const key of await this.storage.keys()) {
+      if (!key.startsWith(this.outcomePrefix)) continue
+      const data = await this.storage.get(key)
+      if (data !== null && (JSON.parse(data) as OutboxOutcome).at < before)
+        await this.storage.delete(key)
     }
   }
 
