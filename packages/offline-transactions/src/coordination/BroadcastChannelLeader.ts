@@ -96,13 +96,13 @@ export class BroadcastChannelLeader extends BaseLeaderElection {
     })
 
     this.electionTimeout = window.setTimeout(() => {
+      // Cleared first: a listener told of the claim may start the next one.
+      this.electionTimeout = null
       const timeSinceLastHeartbeat = Date.now() - this.lastLeaderHeartbeat
 
       if (timeSinceLastHeartbeat > this.electionTimeoutMs) {
         this.claimLeadership()
       }
-
-      this.electionTimeout = null
     }, this.electionTimeoutMs)
   }
 
@@ -115,6 +115,8 @@ export class BroadcastChannelLeader extends BaseLeaderElection {
 
   private claimLeadership(): void {
     this.notifyLeadershipChange(true)
+    // A listener may have released already, leaving nothing to announce.
+    if (!this.isLeaderState) return
     this.sendMessage({
       type: `leadership-claim`,
       tabId: this.tabId,

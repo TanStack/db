@@ -1802,6 +1802,11 @@ const ownerGroups: ReadonlyArray<
     `web-locks-leader`,
   ],
   [
+    `offline-transactions/tests/broadcast-channel-leader-oracle.property.test.ts`,
+    `offline`,
+    `broadcast-channel-leader`,
+  ],
+  [
     `offline-transactions/tests/transaction-serializer-oracle.property.test.ts`,
     `offline`,
     `serializer.mutation-wire serializer.date-marker serializer.version-two`,
