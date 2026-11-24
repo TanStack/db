@@ -307,6 +307,17 @@ export class CollectionSubscription
         if (status !== `loading` && status !== `ready`) return
         const syncRunGeneration = this.collection._sync.getSyncRunGeneration()
         const replayState = this.truncateReplayState
+        if (this.defersAcquisition && !replayState) {
+          // Rows that became held answer a deferred demand's waiting caller.
+          for (const demand of this.subsetDemands) {
+            if (
+              demand.acquisitionState === `detached` &&
+              this.isSubsetLoadedLocally(demand.requestOptions)
+            ) {
+              demand.initialResult?.resolve()
+            }
+          }
+        }
         if (
           this.subsetDemands.some(
             (demand) =>

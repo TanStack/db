@@ -185,13 +185,19 @@ const joinedReadBudget = 1000
 // A held root answers its page and tie synchronously while its joined source
 // has started no work. The refill then waits for that work: the deferred query
 // must return, and its first subscriber must still reach the right window.
-async function runJoinedHeldCell(): Promise<void> {
+async function runJoinedHeldCell({
+  root: history,
+}: {
+  root: `held` | `held-later`
+}): Promise<void> {
+  let holds = history === `held`
+  let ready = () => {}
   const owners = rows.map(({ id }) => ({ id, active: id % 2 === 0 }))
   const root = createCollection<Row>({
-    id: `deferred-loaded-subset-joined-root`,
+    id: `deferred-loaded-subset-joined-root-${history}`,
     getKey: (row) => row.id,
     syncMode: `on-demand`,
-    startSync: true,
+    startSync: history === `held`,
     autoIndex: `eager`,
     defaultIndexType: BTreeIndex,
     sync: {
@@ -199,16 +205,17 @@ async function runJoinedHeldCell(): Promise<void> {
         begin()
         for (const row of rows) write({ type: `insert`, value: { ...row } })
         commit()
-        markReady()
+        if (history === `held`) markReady()
+        else ready = markReady
         return {
           loadSubset: () => true as const,
-          isSubsetLoaded: () => true,
+          isSubsetLoaded: () => holds,
         }
       },
     },
   })
   const joined = createCollection<{ id: number; active: boolean }>({
-    id: `deferred-loaded-subset-joined-owners`,
+    id: `deferred-loaded-subset-joined-owners-${history}`,
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     startSync: true,
@@ -268,6 +275,12 @@ async function runJoinedHeldCell(): Promise<void> {
   try {
     try {
       live = buildJoined()
+      if (history === `held-later`) {
+        root.startSyncImmediate()
+        holds = true
+        ready()
+        await new Promise((resolve) => setTimeout(resolve, 2))
+      }
     } catch {
       // The read budget ended a spinning drain; the comparison below names it.
     }
@@ -294,15 +307,17 @@ async function runJoinedHeldCell(): Promise<void> {
 async function runSourceReadyCell({
   source: history,
 }: {
-  source: `late-ready` | `released` | `held-later`
+  source: `late-ready` | `released` | `held-later` | `never-held`
 }): Promise<void> {
   let ready!: () => void
-  let holds = history !== `held-later`
+  const startsLate = history === `held-later` || history === `never-held`
+  let holds = !startsLate
+  const asked: Array<LoadSubsetOptions> = []
   const source = createCollection<Row>({
     id: `deferred-loaded-subset-source-${history}`,
     getKey: (row) => row.id,
     syncMode: `on-demand`,
-    startSync: history !== `held-later`,
+    startSync: !startsLate,
     autoIndex: `eager`,
     defaultIndexType: BTreeIndex,
     sync: {
@@ -313,7 +328,10 @@ async function runSourceReadyCell({
         ready = markReady
         return {
           loadSubset: () => true as const,
-          isSubsetLoaded: () => holds,
+          isSubsetLoaded: (options: LoadSubsetOptions) => {
+            asked.push(options)
+            return holds
+          },
         }
       },
     },
@@ -335,20 +353,39 @@ async function runSourceReadyCell({
     // The source starts while the hook says not held, so the demand is
     // reported as loading. Once the hook holds it and the source is ready,
     // nothing is left to load until a subscriber resumes acquisition.
-    const deferred =
-      history === `held-later`
-        ? source.subscribeChanges(() => {}, { deferAcquisition: true })
-        : undefined
+    const deferred = startsLate
+      ? source.subscribeChanges(() => {}, { deferAcquisition: true })
+      : undefined
     if (deferred) {
       deferred.requestSnapshot({ where: eq(new PropRef([`group`]), `even`) })
       source.startSyncImmediate()
       expect(deferred.status, `loading while not held`).toBe(`loadingSubset`)
-      holds = true
+      holds = history === `held-later`
     }
     ready()
     await new Promise((resolve) => setTimeout(resolve, 5))
-    if (history === `held-later`) {
+    if (history === `never-held`) {
+      expect(deferred!.status, `an unheld demand keeps loading`).toBe(
+        `loadingSubset`,
+      )
+      expect(live.size, `an unheld window stays unpublished`).toBe(0)
+      // Its first page never settled, so the loader asked for no tie.
+      expect(
+        asked.filter(
+          (options) =>
+            options.subscription !== deferred && options.limit === undefined,
+        ),
+        `an unheld page starts no tie`,
+      ).toEqual([])
+      expect(live.isLoadingSubset, `an unheld window is loading`).toBe(true)
+      deferred!.unsubscribe()
+    } else if (history === `held-later`) {
       expect(deferred!.status, `a held demand stops loading`).toBe(`ready`)
+      expect(
+        Array.from(live.values(), ({ id }) => id),
+        `a demand that became held publishes its window`,
+      ).toEqual(expectedIds)
+      expect(live.isLoadingSubset, `the held window is not loading`).toBe(false)
       deferred!.unsubscribe()
     } else if (history === `released`) {
       expect(live.isLoadingSubset, `an unanswered demand is loading`).toBe(true)
@@ -376,13 +413,15 @@ describe(`deferred window over a held subset`, () => {
       limits: `One LEFT-joined filter whose root answers synchronously.`,
     },
     owns: ['src/query/live/ordered-source-loader.ts'],
-    histories: [{ root: `held` }],
+    histories: [{ root: `held` }, { root: `held-later` }] as Array<{
+      root: `held` | `held-later`
+    }>,
     label: ({ root }) => `${root} root with an unanswered joined source`,
     resolve: (cell) => ({ cell }),
     model: recordedAssertionJudgment,
     driver: (plan, observe) =>
       recordAssertionJudgment(`deferred joined window`, plan, observe, () =>
-        runJoinedHeldCell(),
+        runJoinedHeldCell(plan.cell),
       ),
     check: forwardAssertionJudgment,
   })
@@ -392,15 +431,16 @@ describe(`deferred window over a held subset`, () => {
     law: {
       statement: `A deferred demand the hook settled is not reported as loading when its source later becomes ready, unless the adapter no longer vouches for its rows, and stops being reported as loading once the adapter does.`,
       authority: `query/live/ARCHITECTURE.md: Deferred acquisition.`,
-      limits: `One ordered window whose source becomes ready after the hook answered, with the hook still holding, after it stopped, and after it began holding.`,
+      limits: `One ordered window whose source becomes ready after the hook answered, with the hook still holding, after it stopped, after it began holding, and when it never held.`,
     },
     owns: ['src/collection/subscription.ts'],
     histories: [
       { source: `late-ready` },
       { source: `released` },
       { source: `held-later` },
+      { source: `never-held` },
     ] as Array<{
-      source: `late-ready` | `released` | `held-later`
+      source: `late-ready` | `released` | `held-later` | `never-held`
     }>,
     label: ({ source }) => `${source} source`,
     resolve: (cell) => ({ cell }),
