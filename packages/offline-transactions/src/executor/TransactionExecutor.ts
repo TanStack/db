@@ -434,7 +434,10 @@ export class TransactionExecutor {
         .filter(({ id }) => !selectedById.has(id))
         .map(({ id }) => id)
       removedIds = this.scheduler.removePendingTransactions(removedIds)
-      // A late admission must not run a write this hook excluded.
+      // A late admission must not run a write this hook excluded; one a
+      // later replay accepts is admissible again.
+      for (const id of this.excluding)
+        if (selectedById.has(id)) this.excluding.delete(id)
       for (const id of removedIds) this.excluding.add(id)
 
       // Restore optimistic state for loaded transactions
@@ -460,15 +463,16 @@ export class TransactionExecutor {
             if (this.config.followerWrites === `durable`)
               await this.outbox.recordRejection(id, error)
             await this.outbox.remove(id)
+            this.excluding.delete(id)
             this.offlineExecutor.rejectTransaction(id, error)
           } catch (cleanupError) {
+            // The row stays for a later replay to decide; until then no
+            // admission runs it.
             console.warn(
               `Failed to remove transaction excluded by beforeRetry:`,
               id,
               cleanupError,
             )
-          } finally {
-            this.excluding.delete(id)
           }
         }),
       )

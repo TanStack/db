@@ -125,6 +125,9 @@ const reachStates = [
   `outcome-record-retried`,
   // A late admission during an exclusion's cleanup sent nothing.
   `excluded-admission-ignored`,
+  // An exclusion whose record failed kept its row for a later replay, and
+  // an admission meanwhile sent nothing.
+  `exclusion-cleanup-kept`,
   // A saved write removed before any leader sent it failed its writer.
   `removed-unsent-failed`,
   // A save acknowledged after a change of leadership was admitted by id.
@@ -135,6 +138,8 @@ const reachStates = [
   `failed-start-released`,
   // A save that finished after its tab closed still reached the leader.
   `save-announced-after-dispose`,
+  // A save that finished after its writer began to lead was sent.
+  `save-finished-after-gain`,
   // A rejection whose writer had closed kept its record.
   `orphan-rejection-kept`,
 ] as const
@@ -166,6 +171,7 @@ type SharedActionType =
   | `ack-after-handover`
   | `open-failing`
   | `dispose-during-save`
+  | `save-after-gain`
 type Action = { type: TabActionType; tab: number } | { type: SharedActionType }
 type Mode = `durable` | `online`
 type History = { mode: Mode; actions: Array<Action> }
@@ -203,6 +209,7 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   { weight: 1, arbitrary: sharedAction(`ack-after-handover`) },
   { weight: 1, arbitrary: sharedAction(`open-failing`) },
   { weight: 1, arbitrary: sharedAction(`dispose-during-save`) },
+  { weight: 1, arbitrary: sharedAction(`save-after-gain`) },
 )
 const historyArbitrary: fc.Arbitrary<History> = fc.record({
   mode: fc.constantFrom<Mode>(`durable`, `durable`, `durable`, `online`),
@@ -243,7 +250,8 @@ const spliced = (
           action.type !== `remove-unsent` &&
           action.type !== `ack-after-handover` &&
           action.type !== `open-failing` &&
-          action.type !== `dispose-during-save`,
+          action.type !== `dispose-during-save` &&
+          action.type !== `save-after-gain`,
       )
       .slice(0, MAX_ACTIONS - prefix.length),
   ],
@@ -344,6 +352,8 @@ class ReadFailingStorage extends FakeStorageAdapter {
   failReadKey: string | undefined
   // The next outcome record write fails.
   failOutcomeWrites = 0
+  // Outcome keys whose write failed.
+  readonly failedOutcomeKeys = new Set<string>()
   // The next write lands at once and acknowledges on release.
   private heldAck: { release: () => void } | null | undefined
   holdNextAck(): void {
@@ -376,6 +386,7 @@ class ReadFailingStorage extends FakeStorageAdapter {
   override async set(key: string, value: string): Promise<void> {
     if (this.failOutcomeWrites > 0 && key.startsWith(`outcome:`)) {
       this.failOutcomeWrites -= 1
+      this.failedOutcomeKeys.add(key)
       throw new Error(`storage write failed`)
     }
     if (this.heldAck === null && key.startsWith(`tx:`)) {
@@ -495,6 +506,8 @@ type Write = {
   retried?: boolean
   // The next leader's beforeRetry excluded it.
   excluded?: boolean
+  // That exclusion's rejection record failed, so its row stayed.
+  exclusionKept?: boolean
   // removeFromOutbox removed it before any leader sent it.
   removed?: boolean
   // Its rejection record failed once.
@@ -606,6 +619,8 @@ async function runHistory(
   const leaderIndex = () =>
     tabs.findIndex((tab) => tab && tab.election === election.holder)
   const openSessions = () => new Set(tabs.flatMap((tab) => tab?.session ?? []))
+  // No earlier write is still queued, so a new one is sent at once.
+  const queueIdle = () => !writes.some(isUnsent)
 
   const check = (label: string) => {
     expect(
@@ -852,6 +867,7 @@ async function runHistory(
           )
           if (!durable || !online.online || leaderIndex() < 0 || follower < 0)
             break
+          if (!queueIdle()) break
           storage.failDeletes = 1
           const write = await doWrite(follower, `write`)
           // A queue still busy with earlier writes leaves the fault unused.
@@ -867,6 +883,14 @@ async function runHistory(
           // finishes the removal. A write from the faulted tab is saved for
           // that leader, which sends it.
           const faulted = leaderIndex()
+          // While it leads, its fault refuses its own writes.
+          const refused = await doWrite(faulted, `write`)
+          if (refused) {
+            refused.deliverable = false
+            expect(refused.outcome, `${refused.id} refused by a fault`).toBe(
+              `failed`,
+            )
+          }
           const successor = tabs.findIndex(
             (tab, index) => tab && index !== faulted,
           )
@@ -959,6 +983,23 @@ async function runHistory(
             reach(`excluded-admission-ignored`)
             storage.releaseWrites(false)
             await settle()
+            // A leftover record fault: the row stays for a later replay to
+            // decide, and an admission meanwhile sends nothing.
+            if (
+              storage.failedOutcomeKeys.has(`outcome:${write.transactionId}`)
+            ) {
+              write.exclusionKept = true
+              const holder = tabs[leaderIndex()]
+              if (holder) {
+                expect(
+                  (await holder.env.executor.peekOutbox()).map(({ id }) => id),
+                  `${write.id} kept for a later replay`,
+                ).toContain(write.transactionId)
+              }
+              channels.inject({ type: `added`, id: write.transactionId })
+              await settle()
+              reach(`exclusion-cleanup-kept`)
+            }
           }
           channels.state.loseSettlement = false
           if (write.outcome === `failed`) reach(`exclusion-recovered`)
@@ -972,7 +1013,8 @@ async function runHistory(
           )
           if (!durable || !online.online || leaderIndex() < 0 || follower < 0)
             break
-          storage.failOutcomeWrites = 1
+          // The first retry fails too; a later one records the rejection.
+          storage.failOutcomeWrites = 2
           const rejectedWrite = await doWrite(follower, `write-rejected`)
           const next = await doWrite(follower, `write`)
           // The later write waits its turn behind the rejected one, which
@@ -997,6 +1039,17 @@ async function runHistory(
           await tabs[leader]!.env.executor.removeFromOutbox(
             write.transactionId!,
           )
+          // Removing a row that is already gone records nothing.
+          const gone = writes.find(
+            (candidate) =>
+              candidate !== write &&
+              candidate.transactionId !== undefined &&
+              calls.includes(candidate.id),
+          )
+          if (gone)
+            await tabs[leader]!.env.executor.removeFromOutbox(
+              gone.transactionId!,
+            )
           write.removed = true
           write.deliverable = false
           channels.inject({ type: `leader` })
@@ -1036,7 +1089,7 @@ async function runHistory(
           // A tab whose start fails leaves no channel open and no claim on
           // leadership, without being disposed.
           const index = tabs.findIndex((tab) => !tab)
-          if (!durable || index < 0) break
+          if (!durable || index < 0 || !queueIdle()) break
           const before = channels.openCount()
           await openTab(index, undefined, undefined, true)
           const failed = tabs[index]!
@@ -1061,7 +1114,14 @@ async function runHistory(
           const follower = tabs.findIndex(
             (tab, index) => tab && index !== leader,
           )
-          if (!durable || !online.online || leader < 0 || follower < 0) break
+          if (
+            !durable ||
+            !online.online ||
+            leader < 0 ||
+            follower < 0 ||
+            !queueIdle()
+          )
+            break
           storage.holdWrites()
           const write = await doWrite(follower, `write`)
           if (!write) break
@@ -1072,6 +1132,32 @@ async function runHistory(
             write.id,
           )
           reach(`save-announced-after-dispose`)
+          break
+        }
+        case `save-after-gain`: {
+          // A follower's save lands only after it began to lead, so its
+          // leadership load missed the row; the save still sends it.
+          const leader = leaderIndex()
+          const writer = tabs.findIndex((tab, index) => tab && index !== leader)
+          if (
+            !durable ||
+            !online.online ||
+            leader < 0 ||
+            writer < 0 ||
+            !queueIdle()
+          )
+            break
+          storage.holdWrites()
+          const write = await doWrite(writer, `write`)
+          if (!write) {
+            storage.releaseWrites(false)
+            break
+          }
+          await rotateTo(tabs[writer]!.election)
+          storage.releaseWrites(false)
+          await settle()
+          expect(calls, `${write.id} sent after its save`).toContain(write.id)
+          reach(`save-finished-after-gain`)
           break
         }
         case `fail-outbox-check`: {
@@ -1167,6 +1253,15 @@ async function runHistory(
     }
     if (tabs.every((tab) => !tab)) await openTab(0)
     if (leaderIndex() < 0) await openTab(tabs.findIndex((tab) => !tab))
+    // A kept exclusion is decided by a later replay: hand over once, with
+    // no record fault left.
+    if (writes.some((write) => write.exclusionKept)) {
+      storage.failOutcomeWrites = 0
+      if (tabs.filter(Boolean).length < 2)
+        await openTab(tabs.findIndex((tab) => !tab))
+      await closeTab(leaderIndex())
+      if (leaderIndex() < 0) await openTab(tabs.findIndex((tab) => !tab))
+    }
     online.set(true)
     for (let round = 0; round < 8; round++) await settle()
 
@@ -1278,7 +1373,7 @@ const loseSettlement: Action = { type: `lose-settlement` }
 oracleProperty({
   id: property,
   law: {
-    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until the leading tab sends it to the server exactly once while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome, also when the settlement message is lost. A leader that could not read a saved write sends it once connectivity changes, a row it cannot decode is reported, a failed row removal after a successful send is not reported as the outcome, and a follower's failed outbox check runs again on connectivity. An admission read across a change of leadership schedules nothing, and a write excluded by beforeRetry fails its writer even when the message is lost. Stale and duplicate messages change nothing. A write made before its tab initializes, and the default mode, keep the online path.`,
+    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until the leading tab sends it to the server exactly once while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome, also when the settlement message is lost. A leader that could not read a saved write sends it once connectivity changes, a row it cannot decode is reported, a failed row removal after a successful send is not reported as the outcome, and a follower's failed outbox check runs again on connectivity. An admission read across a change of leadership schedules nothing, and a write excluded by beforeRetry fails its writer even when the message is lost; if its rejection record fails, its row stays for a later replay and nothing sends it meanwhile. Stale and duplicate messages change nothing. A write made before its tab initializes, and the default mode, keep the online path.`,
     authority: `Issue #2464 and the followerWrites option in docs/guides/offline-transactions.md.`,
     limits: `Three tabs over one storage adapter with controlled election, connectivity and BroadcastChannel; up to twelve actions; no real browser contexts; rejection records of writers that never return are kept, and none is ever expired.`,
   },
@@ -1540,6 +1635,25 @@ oracleProperty({
             { type: `fail-outcome-record` },
             { type: `stale-admission-across-terms` },
           ]),
+      },
+      {
+        name: `a save that finishes after its writer leads is sent`,
+        enters: [`save-finished-after-gain`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `save-after-gain` }]),
+      },
+      {
+        name: `a failed record before an exclusion sends nothing twice`,
+        enters: [`exclusion-cleanup-kept`],
+        // The benign tail keeps this leader, so the queue retries the failed
+        // exclusion cleanup rather than another leader's replay.
+        build: (generated: History): History =>
+          spliced(
+            generated,
+            [{ type: `fail-outcome-record` }, { type: `exclude-on-handover` }],
+            `durable`,
+            true,
+          ),
       },
       {
         name: `a write before initialization takes the online path`,

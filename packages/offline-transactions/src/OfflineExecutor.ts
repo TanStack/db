@@ -270,10 +270,8 @@ export class OfflineExecutor {
           if (this.disposed || isLeader === this.isLeaderState) return
           this.isLeaderState = isLeader
           if (isLeader) this.term++
-          else {
-            this.executor?.pause()
-            this.executor?.dropPending()
-          }
+          // Its unstarted queue goes; the next leader loads the outbox.
+          else this.executor!.dropPending()
 
           if (this.config.onLeadershipChange) {
             this.config.onLeadershipChange(isLeader)
@@ -519,7 +517,11 @@ export class OfflineExecutor {
     channel.close()
   }
 
-  private announceSettled(id: string, error?: Error, own = false): void {
+  private announceSettled(
+    id: string,
+    error: Error | undefined,
+    own: boolean,
+  ): void {
     if (this.outboxChannel) {
       // This tab's own rejected write needs no record for another tab.
       if (own) this.outbox!.removeOutcome(id).catch(() => {})
@@ -709,7 +711,7 @@ export class OfflineExecutor {
     try {
       this.settleTransaction(transactionId, result)
     } finally {
-      this.announceSettled(transactionId)
+      this.announceSettled(transactionId, undefined, false)
     }
   }
 
