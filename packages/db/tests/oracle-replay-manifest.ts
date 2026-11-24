@@ -1077,6 +1077,11 @@ const ownerGroups: ReadonlyArray<
     `source-fifo-order abort-graph owner-isolation open-transaction-boundary`,
   ],
   [
+    `db-sqlite-persistence-core/tests/persisted-source-fifo-sqlite-oracle.test.ts`,
+    `sqlite-persistence.source-fifo-order`,
+    `node-sqlite`,
+  ],
+  [
     `db/tests/optimistic-transaction-oracle.property.test.ts`,
     `collection-state`,
     `mixed-transaction same-key`,
@@ -1868,6 +1873,11 @@ const ownerGroups: ReadonlyArray<
     `powersync-direct`,
   ],
   [
+    `browser-db-sqlite-persistence/e2e/powersync-direct-eager-source-oracle.browser.test.ts`,
+    `adapter-conformance.eager-live-source.powersync-direct`,
+    `chromium`,
+  ],
+  [
     `electric-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
     `adapter-conformance.eager-live-source`,
     `electric electric.no-on-error`,
@@ -2510,6 +2520,7 @@ function directReplayTestName(property: string): string | undefined {
   if (enumeratedProperties.has(property))
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
   if (
+    property === `sqlite-persistence.source-fifo-order.node-sqlite` ||
     property.startsWith(`adapter.powersync-direct.`) ||
     property.startsWith(`adapter.convex.eager-`) ||
     property.startsWith(`adapter.convex.initial-receipt.`) ||
@@ -2549,7 +2560,9 @@ function directReplayTestName(property: string): string | undefined {
     property.startsWith(
       `adapter-conformance.decode-refusal.powersync-direct`,
     ) ||
-    property === `adapter-conformance.eager-live-source.powersync-direct`
+    property === `adapter-conformance.eager-live-source.powersync-direct` ||
+    property ===
+      `adapter-conformance.eager-live-source.powersync-direct.chromium`
   )
     return `${property.replaceAll(`.`, `\\.`)} > random seed`
   if (nativeSyncMetadataProperties.has(property))
@@ -2705,6 +2718,7 @@ const ownerReplayConfigs = new Map([
     `query-cross-adapter-oracle.browser.test.ts`,
     `powersync-direct-shared-client-oracle.browser.test.ts`,
     `powersync-direct-eager-oracle.browser.test.ts`,
+    `powersync-direct-eager-source-oracle.browser.test.ts`,
     `powersync-direct-persisted-receipt-oracle.browser.test.ts`,
     `powersync-direct-subsets-oracle.browser.test.ts`,
     `powersync-direct-persisted-subsets-oracle.browser.test.ts`,

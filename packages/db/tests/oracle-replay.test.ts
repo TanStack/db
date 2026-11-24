@@ -782,6 +782,16 @@ describe(`named oracle replay manifest`, () => {
         )
         expect(source).toContain(`property: \`${entry.property}\``)
       } else if (
+        entry.property ===
+        `adapter-conformance.eager-live-source.powersync-direct.chromium`
+      ) {
+        expect(entry.file).toBe(
+          `packages/browser-db-sqlite-persistence/e2e/powersync-direct-eager-source-oracle.browser.test.ts`,
+        )
+        expect(source).toMatch(
+          /registerDirectEagerSource\(\s*`adapter-conformance\.eager-live-source\.powersync-direct\.chromium`/u,
+        )
+      } else if (
         entry.property.startsWith(
           `adapter-conformance.eager-live-source.neon-sdk`,
         )

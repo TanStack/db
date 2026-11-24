@@ -29,11 +29,6 @@ import {
 import { observeDirectSharedClient } from '../../powersync-direct-collection/tests/shared-client-driver'
 import { directConformanceDriver } from '../../powersync-direct-collection/tests/conformance-driver'
 import { observeEagerLiveSourceHistory } from '../../db-adapter-conformance/tests/eager-live-source-framework-oracle'
-import type { EagerSourceCorruption } from '../../db-adapter-conformance/tests/eager-live-source-framework-oracle'
-import type {
-  EagerLiveSourceHistory,
-  EagerLiveSourceReachState,
-} from '../../db-adapter-conformance/src'
 import {
   runDirectMutationConfirmation as receiveMutationConfirmation,
   transportMutationTrace,
@@ -55,6 +50,11 @@ import {
   startupOPFSArtifacts,
 } from './persisted-startup-opfs-cleanup'
 import { removeClosedArtifacts } from './query-rejected-write-cutoff-cleanup'
+import type { EagerSourceCorruption } from '../../db-adapter-conformance/tests/eager-live-source-framework-oracle'
+import type {
+  EagerLiveSourceHistory,
+  EagerLiveSourceReachState,
+} from '../../db-adapter-conformance/src'
 import type { PersistedStartupHistory } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import type {
   EagerGateHistory,
