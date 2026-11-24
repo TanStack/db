@@ -714,7 +714,7 @@ describe(`SQLite expression-index oracle`, () => {
   )
 
   it.each([`eq`, `in`] as const)(
-    `keeps Date epoch matches when a numeric $operator predicate falls back`,
+    `keeps Date epoch matches in an indexed numeric $operator candidate`,
     async (operator) => {
       const field = new IR.PropRef([`n`])
       const observation = await observeExpressionIndexScenario({
@@ -732,8 +732,36 @@ describe(`SQLite expression-index oracle`, () => {
       })
 
       expect(observation.adapterKeys).toEqual([`date`, `number`])
+      expect(observation.directSqlKeys).toEqual([`date`, `number`])
+      expect(
+        planUsesNamedIndex(
+          observation.plan,
+          observation.tableName,
+          observation.indexName,
+        ),
+      ).toBe(true)
+    },
+  )
+
+  it.each([`eq`, `in`] as const)(
+    `keeps a full read for a fractional numeric $operator`,
+    async (operator) => {
+      const field = new IR.PropRef([`n`])
+      const observation = await observeExpressionIndexScenario({
+        label: `fractional-${operator}`,
+        indexExpression: field,
+        where: new IR.Func<boolean>(operator, [
+          field,
+          new IR.Value(operator === `eq` ? 0.1 : [0.1]),
+        ]),
+        rows: [
+          { key: `fraction`, value: { n: 0.1 } },
+          { key: `other`, value: { n: 0.2 } },
+        ],
+      })
+
+      expect(observation.adapterKeys).toEqual([`fraction`])
       expect(observation.predicateQuery.sql).not.toContain(` WHERE `)
-      expect(observation.directSqlKeys).toEqual([`date`, `number`, `other`])
     },
   )
 

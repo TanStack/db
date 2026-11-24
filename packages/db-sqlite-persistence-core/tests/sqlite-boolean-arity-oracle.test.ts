@@ -2,7 +2,7 @@
 import { fc } from '@fast-check/vitest'
 import { expect } from 'vitest'
 import { IR } from '@tanstack/db'
-import { oracleProperty } from '../../db/tests/oracle-property'
+import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -12,6 +12,7 @@ import {
 import { SQLiteCorePersistenceAdapter } from '../src'
 import { CountingDriver } from './sqlite-boolean-arity-support'
 import type { Read } from './sqlite-boolean-arity-support'
+import type { Observation } from '../../db/tests/oracle-property'
 
 /**
  * # Boolean arity at the SQLite persistence boundary
@@ -31,7 +32,7 @@ import type { Read } from './sqlite-boolean-arity-support'
  * SQLite compiler. `canPush` describes this oracle's deliberately small
  * known-boolean domain, not production's support classifier.
  *
- * Grammar: AND/OR roots have 0..3 children; a child is one of twenty-one atoms or
+ * Grammar: AND/OR roots have 0..3 children; a child is one of twenty-five atoms or
  * a nested AND/OR of 0..3 atoms. The bounded matrix exhausts all atom pairs
  * for root arity 0..2 and samples triples and nested forms. Removing operator
  * choice loses empty true/false; removing arity 0 loses both identities;
@@ -39,8 +40,15 @@ import type { Read } from './sqlite-boolean-arity-support'
  * loses SQL under-selection; removing unsupported atoms loses fallback; and
  * removing nesting loses inner empty-OR work. Unicode LIKE/ILIKE, tagged
  * NaN ordering, lone-surrogate equality, and null-vs-missing under NOT
- * challenge SQL equivalence. Fixed mixed AND cases cover child order,
- * nesting, an unsafe OR sibling, and final rejection of an indexed candidate.
+ * challenge SQL equivalence. Number equality and membership atoms read a
+ * field that stores Dates beside numbers: the evaluator equates a Date with
+ * its epoch milliseconds, while SQLite holds the Date as ISO text. Their
+ * coerced twins read a field that also stores 1n, true, '1', the epoch's ISO
+ * text, NaN, 1.5 and null, which SQLite may admit and JavaScript must reject.
+ * Removing the Dates loses the Date-as-text candidate; removing the coerced
+ * field loses the extra candidates JavaScript must reject. Fixed mixed AND
+ * cases cover child order, nesting, an unsafe OR sibling, and final rejection
+ * of an indexed candidate.
  * A fixed 50,582-string-ID OR scope checks that both indexed branches retain
  * SQL candidate filtering with two bindings. Lone-surrogate, NUL, and paired
  * surrogate IDs challenge the JSON boundary used by that large scope.
@@ -49,6 +57,17 @@ import type { Read } from './sqlite-boolean-arity-support'
  * Fixed-seed and unseeded generated campaigns use the same grammar, driver,
  * refinement check, and budget. The seed/path environment variables below
  * replay a reduced failure directly.
+ *
+ * Declared states (generated campaigns): a number equality or membership atom
+ * decides some row while the whole predicate is pushable and selective, so
+ * the work law judges its SQL candidate; and a coerced number atom decides
+ * some row, so the public law judges the candidates that JavaScript must
+ * reject. An atom decides a row when forcing it true rather than false changes
+ * that row's membership. Two constructed histories per state splice the atom
+ * into a generated predicate: as a root child beside the generated children,
+ * or inside a nested group beside a generated group's atoms. Each records the
+ * state it must enter, and the generated campaign's check rejects a history
+ * that missed one.
  *
  * Driver/checkpoint: the real adapter runs against `node:sqlite`; a counting
  * driver records the SQL and raw row count of each Collection SELECT. At
@@ -66,9 +85,11 @@ import type { Read } from './sqlite-boolean-arity-support'
  * This work observation does not assert a latency or total-allocation bound.
  *
  * Limits: simple rows, one SQLite process, ordinary loads and one cursor
- * composition. No native host, OPFS worker, multi-process WAL, ordering
- * comparator, typed bigint/date expression, index-expression, arbitrary
- * depth beyond the fixed 80-level work witness, or unbounded arity claim.
+ * composition. Number atoms use safe integers; fractional and unsafe numbers
+ * keep a full read and are not exercised here. No native host, OPFS worker,
+ * multi-process WAL, ordering comparator, typed bigint/date expression
+ * beyond number equality, index-expression, arbitrary depth beyond the fixed
+ * 80-level work witness, or unbounded arity claim.
  * Raw-row work and the one named-index plan are not elapsed-time assertions.
  */
 
@@ -94,6 +115,10 @@ type Atom =
   | 'not-is-undefined'
   | 'not-is-null'
   | 'like-emoji-two'
+  | 'eq-number'
+  | 'in-number'
+  | 'eq-number-coerced'
+  | 'in-number-coerced'
 type Model =
   | { kind: 'atom'; atom: Atom }
   | {
@@ -106,6 +131,8 @@ type Row = {
   name: string
   n: number
   x?: null
+  at: number | Date
+  coerced?: unknown
 }
 type Failure = {
   law: 'public' | 'work' | 'compile' | 'candidate'
@@ -116,12 +143,30 @@ type Failure = {
   read: Read
 }
 
+// Stored values that SQLite compares with the number 1 in some way: equal
+// numbers and Dates, coerced BigInt and boolean, the epoch's ISO text, NaN,
+// a fraction, and null.
+const coercedValues: Array<unknown> = [
+  1,
+  new Date(1),
+  1n,
+  true,
+  '1',
+  new Date(1).toISOString(),
+  Number.NaN,
+  1.5,
+  null,
+  new Date(2),
+  2,
+]
 const fixture: Array<Row> = Array.from({ length: 20 }, (_, index) => ({
   id: `row-${index + 1}`,
   'meta-field': index === 0 ? 'yes' : 'no',
   name: ['Ä', 'Äland', 'Alpha', '😀', '\uD800'][index] ?? 'other',
   n: index === 0 ? Number.NaN : index - 1,
   ...(index === 0 ? { x: null } : {}),
+  at: [new Date(7), 7, 8, new Date(8), 70][index] ?? index * 100,
+  ...(index < coercedValues.length ? { coerced: coercedValues[index] } : {}),
 }))
 const atoms: Array<Atom> = [
   'first',
@@ -145,6 +190,10 @@ const atoms: Array<Atom> = [
   'not-is-undefined',
   'not-is-null',
   'like-emoji-two',
+  'eq-number',
+  'in-number',
+  'eq-number-coerced',
+  'in-number-coerced',
 ]
 const atom = (name: Atom): Model => ({ kind: 'atom', atom: name })
 const op = (kind: 'and' | 'or', ...children: Array<Model>): Model => ({
@@ -152,8 +201,18 @@ const op = (kind: 'and' | 'or', ...children: Array<Model>): Model => ({
   children,
 })
 
-function valueOf(model: Model, row: Row): unknown {
+// The evaluator compares a Date by its epoch milliseconds and every other
+// value by strict equality, so 1n, true and '1' never equal the number 1.
+function equalsNumber(value: unknown, target: number): boolean {
+  return value instanceof Date ? value.getTime() === target : value === target
+}
+
+// Atoms whose value is forced, for `decides`.
+type Forced = { names: ReadonlyArray<Atom>; value: boolean }
+
+function valueOf(model: Model, row: Row, forced?: Forced): unknown {
   if (model.kind === 'atom') {
+    if (forced?.names.includes(model.atom)) return forced.value
     switch (model.atom) {
       case 'first':
       case 'unsupported-function':
@@ -194,9 +253,19 @@ function valueOf(model: Model, row: Row): unknown {
         return row.x !== null
       case 'like-emoji-two':
         return row.id === 'row-4'
+      case 'eq-number':
+        return equalsNumber(row.at, 7)
+      case 'in-number':
+        return equalsNumber(row.at, 8) || equalsNumber(row.at, 70)
+      case 'eq-number-coerced':
+        return row.coerced == null ? null : equalsNumber(row.coerced, 1)
+      case 'in-number-coerced':
+        return row.coerced == null
+          ? null
+          : equalsNumber(row.coerced, 1) || equalsNumber(row.coerced, 2)
     }
   }
-  const values = model.children.map((child) => valueOf(child, row))
+  const values = model.children.map((child) => valueOf(child, row, forced))
   if (model.kind === 'and') {
     if (values.some((value) => value === false)) return false
     if (values.some((value) => value == null)) return null
@@ -229,6 +298,8 @@ function canPush(model: Model): boolean {
       'not-is-undefined',
       'not-is-null',
       'like-emoji-two',
+      'eq-number-coerced',
+      'in-number-coerced',
     ].includes(model.atom)
   }
   return model.children.every(canPush)
@@ -313,6 +384,20 @@ function toIR(model: Model): IR.BasicExpression {
           new IR.PropRef(['name']),
           new IR.Value('__'),
         ])
+      case 'eq-number':
+        return new IR.Func('eq', [new IR.PropRef(['at']), new IR.Value(7)])
+      case 'in-number':
+        return new IR.Func('in', [
+          new IR.PropRef(['at']),
+          new IR.Value([8, 70]),
+        ])
+      case 'eq-number-coerced':
+        return new IR.Func('eq', [new IR.Value(1), new IR.PropRef(['coerced'])])
+      case 'in-number-coerced':
+        return new IR.Func('in', [
+          new IR.PropRef(['coerced']),
+          new IR.Value([1, 2]),
+        ])
     }
   }
   return new IR.Func(model.kind, model.children.map(toIR))
@@ -359,7 +444,13 @@ function matrix(): Array<Model> {
   return cases
 }
 
-const atomArb = fc.constantFrom(...atoms).map(atom)
+// The unmapper lets fixed and constructed histories shrink as generated ones.
+const atomArb = fc.constantFrom(...atoms).map(atom, (value) => {
+  const name = (value as { kind?: unknown; atom?: unknown } | null)?.atom
+  if ((value as Model | null)?.kind !== 'atom' || !atoms.includes(name as Atom))
+    throw new Error('not an atom')
+  return name as Atom
+})
 const nestedArb = fc.record({
   kind: fc.constantFrom('and' as const, 'or' as const),
   children: fc.array(atomArb, { minLength: 0, maxLength: 3 }),
@@ -371,6 +462,81 @@ const modelArb = fc.record({
     maxLength: 3,
   }),
 })
+type History = Extract<Model, { kind: 'and' | 'or' }>
+
+// Whether forcing these atoms true rather than false changes some fixture
+// row's membership, so the public rows depend on how SQL and the evaluator
+// read them.
+function decides(model: Model, names: ReadonlyArray<Atom>): boolean {
+  return fixture.some(
+    (row) =>
+      (valueOf(model, row, { names, value: true }) === true) !==
+      (valueOf(model, row, { names, value: false }) === true),
+  )
+}
+
+const numberAtoms: ReadonlyArray<Atom> = ['eq-number', 'in-number']
+const coercedAtoms: ReadonlyArray<Atom> = [
+  'eq-number-coerced',
+  'in-number-coerced',
+]
+// The declared states, each with the atoms it splices and its premise.
+const numberStates = {
+  'number equality decides a row in SQL': {
+    atoms: numberAtoms,
+    enters: (model: Model) =>
+      canPush(model) &&
+      expectedKeys(model).length < fixture.length &&
+      decides(model, numberAtoms),
+  },
+  'coerced number equality decides a row': {
+    atoms: coercedAtoms,
+    enters: (model: Model) => decides(model, coercedAtoms),
+  },
+} as const
+type NumberState = keyof typeof numberStates
+const numberStateNames = Object.keys(numberStates) as Array<NumberState>
+const statesOf = (model: Model) =>
+  numberStateNames.filter((state) => numberStates[state].enters(model))
+
+// Construction obligations, by the identity of each builder's fresh history.
+const constructionStates = new WeakMap<History, ReadonlyArray<NumberState>>()
+
+// Splices one of the state's atoms into a generated predicate, as a root
+// child or inside a nested group, keeping the generated children that the
+// state allows. A splice whose other children hide the atom falls back to the
+// atom alone in the same position, which always decides a row.
+function splice(state: NumberState, nested: boolean) {
+  const { atoms: names, enters } = numberStates[state]
+  return (generated: History): History => {
+    const name = names[generated.children.length % names.length]!
+    const kept = generated.children.filter(
+      (child) =>
+        state !== 'number equality decides a row in SQL' || canPush(child),
+    )
+    const group = kept.find((child): child is History => child.kind !== 'atom')
+    const inner = generated.kind === 'and' ? 'or' : 'and'
+    const place = (siblings: Array<Model>, groupAtoms: Array<Model>) => ({
+      kind: generated.kind,
+      children: nested
+        ? [op(inner, atom(name), ...groupAtoms.slice(0, 2)), ...siblings]
+        : [atom(name), ...siblings],
+    })
+    const others = kept.filter((child) => !nested || child !== group)
+    const spliced = place(others.slice(0, 2), group?.children ?? [])
+    const history = enters(spliced) ? spliced : place([], [])
+    constructionStates.set(history, [state])
+    return history
+  }
+}
+
+const constructions = numberStateNames.flatMap((state) =>
+  [false, true].map((nested) => ({
+    name: `${state}, spliced ${nested ? 'in a nested group' : 'at the root'}`,
+    enters: [state],
+    build: splice(state, nested),
+  })),
+)
 
 function brief(failure: Failure | undefined) {
   if (!failure) return undefined
@@ -394,14 +560,33 @@ async function judgeBooleanHistory(history: Model | undefined) {
 
   async function check(model: Model): Promise<Array<Failure>> {
     driver.reads = []
-    const result = await adapter.loadSubset(
-      { kind: `eager`, collectionId: 'boolean-arity' },
-      {
-        where: toIR(model),
-      },
-    )
-    const actual = result.map((row) => String(row.key)).sort()
     const expected = expectedKeys(model)
+    let result
+    try {
+      result = await adapter.loadSubset(
+        { kind: `eager`, collectionId: 'boolean-arity' },
+        {
+          where: toIR(model),
+        },
+      )
+    } catch (error) {
+      // A legal predicate owes its rows, so a rejection fails the public law.
+      return [
+        {
+          law: 'public',
+          checkpoint: 'loadSubset-return',
+          model,
+          expected,
+          actual: [],
+          read: {
+            sql: `rejected: ${error instanceof Error ? error.message : String(error)}`,
+            rawRows: 0,
+            parameters: 0,
+          },
+        },
+      ]
+    }
+    const actual = result.map((row) => String(row.key)).sort()
     const read = driver.reads[0]
     if (driver.reads.length !== 1 || !read) {
       throw new Error(
@@ -540,6 +725,10 @@ async function judgeBooleanHistory(history: Model | undefined) {
       'not-is-undefined',
       'not-is-null',
       'like-emoji-two',
+      'eq-number',
+      'in-number',
+      'eq-number-coerced',
+      'in-number-coerced',
     ] as const) {
       directFailures.push(...(await check(atom(name))))
     }
@@ -737,16 +926,62 @@ oracleProperty({
   law: {
     statement: `The retained independent SQLite model judges the existing legal histories at every original observation checkpoint.`,
     authority: `The existing contract and authority stated beside this oracle's model.`,
-    limits: `The existing bounded SQLite histories, production paths, and observations; no expanded coverage claim.`,
+    limits: `The existing bounded SQLite histories, production paths, and observations, with declared reach only for the number equality atoms.`,
   },
-  histories: { arbitrary: modelArb, runs: 150, fixedSeeds: [1994] },
-  resolve: (history) => ({ history }),
-  model: recordedAssertionJudgment,
-  driver: (plan, observe) =>
-    recordAssertionJudgment(`existing SQLite judgment`, plan, observe, () =>
-      judgeBooleanHistory(plan.history),
-    ),
-  check: forwardAssertionJudgment,
+  owns: [`src/sqlite-core-adapter.ts`],
+  histories: {
+    arbitrary: modelArb,
+    runs: 150,
+    fixedSeeds: [1994],
+    states: numberStateNames,
+    constructed: constructions,
+  },
+  resolve: (history) => ({
+    history,
+    requiredStates: constructionStates.get(history) ?? [],
+  }),
+  model: (plan, trace) => ({
+    judgment: recordedAssertionJudgment(plan, trace),
+    requiredStates: plan.requiredStates,
+  }),
+  // The declared states come from the history; the existing judgment decides
+  // the laws. A driver error leaves no reach, so it stays a setup error.
+  driver: async (plan, observe) => {
+    await recordAssertionJudgment(
+      `existing SQLite judgment`,
+      plan,
+      observe,
+      () => judgeBooleanHistory(plan.history),
+    )
+    for (const state of statesOf(plan.history)) observe(`reach`, state)
+  },
+  check: (_plan, trace, owed) => {
+    if (owed.judgment.kind !== `pass`) return owed.judgment
+    const missing = owed.requiredStates.filter(
+      (state) =>
+        !trace.some(
+          ({ checkpoint, value }) => checkpoint === `reach` && value === state,
+        ),
+    )
+    return missing.length > 0
+      ? violation(
+          `constructed states`,
+          `the constructed history did not enter ${missing.join(`, `)}`,
+          `constructed reach`,
+        )
+      : pass
+  },
+  // One missing-state control per builder.
+  calibrations: constructions.map(({ name, enters }) => ({
+    name: `${name} omits its state`,
+    law: `constructed reach`,
+    history: { constructed: name },
+    corrupt: (trace: ReadonlyArray<Observation>) =>
+      trace.filter(
+        ({ checkpoint, value }) =>
+          checkpoint !== `reach` || !enters.includes(value as NumberState),
+      ),
+  })),
 })
 oracleProperty({
   id: `sqlite-persistence.boolean-arity-fixed`,
