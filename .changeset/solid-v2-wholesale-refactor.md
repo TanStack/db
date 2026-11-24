@@ -2,100 +2,88 @@
 '@tanstack/solid-db': major
 ---
 
-# Solid v2 RC migration + wholesale observer refactor
+# Solid v2 migration
 
-Migrates `@tanstack/solid-db` from Solid v1 to **Solid v2 RC** (developed
-against `solid-js@2.0.3`) and reworks the adapter to derive all Solid
-state from the shared `LiveQueryObserver`'s wholesale snapshots. This is a
-**breaking** release — the peer dependency is now
-`solid-js: ^2.0.0` and `@solidjs/web: ^2.0.0`.
-
-Ship this as a **prerelease** until `solid-js` 2.0 final is out.
+Migrates `@tanstack/solid-db` from Solid v1 to **Solid v2** (built and tested
+against `solid-js@2.0.3`). This is a **breaking** release: the peer
+dependencies are now `solid-js: ^2.0.0` and `@solidjs/web: ^2.0.0`.
 
 ## Breaking changes
 
-### Solid v2 RC migration
+### Solid v2
 
-Peer dependencies require Solid v2 RC. Code consuming `@tanstack/solid-db`
-must be migrated to Solid v2:
+Code consuming `@tanstack/solid-db` runs on Solid v2 and follows its rules:
 
-- `Suspense` → `Loading` (from `@solidjs/web`)
-- `ErrorBoundary` → `Errored` (from `@solidjs/web`)
-- `createResource` → async `createMemo` (internal)
-- `batch()` removed — v2 auto-batches
-- Store APIs import from `solid-js` root (not `solid-js/store`)
+- `Suspense` → `Loading`, `ErrorBoundary` → `Errored`
+- Store APIs import from `solid-js` (not `solid-js/store`)
+- Read props and rows where they are used (JSX, a memo, an effect, a
+  handler), never once in a component body
 
-### Removed accessor properties
+### Data reads no longer suspend
 
-The `data`, `isLoading`, `isIdle`, and `isCleanedUp` properties are removed.
-`data` was a deprecated duplicate of calling the accessor; the removed flags
-are derivable from `status`.
-
-```diff
-- query.data        // removed — use query()
-- query.isLoading   // removed — use query.status === 'loading'
-- query.isIdle      // removed — use query.status === 'idle'
-- query.isCleanedUp // removed — use query.status === 'cleaned-up'
-```
-
-## Behavior changes
-
-### Data reads never suspend; the first-data gate is opt-in
-
-`query()` now always returns the current rows synchronously — including rows
-that synced before the collection is ready (progressive sync, on-demand
-loading). Reading an errored query still throws the captured error for an
-`<Errored>` boundary.
-
-Gating is opt-in through the new `loaded` accessor, named for the
-`<Loading>` boundary it participates in: reading `query.loaded()` while
-the initial render is in flight throws `NotReadyError` for the boundary
-to catch. It settles at network
-readiness or a permitted persisted fallback — the same gate as the React
-adapter's suspense hook — so persisted data can reveal content before the
-network answers. Once settled it returns the rows exactly like `query()`,
-so it can feed `<For>` directly:
+On Solid v1, reading the accessor suspended to the nearest `Suspense`
+boundary until the query was ready. Now `query()` always returns the current
+rows synchronously, including rows that synced before the collection is
+ready (progressive sync, on-demand loading):
 
 ```tsx
 const todosQuery = useLiveQuery((q) => q.from({ todos: todosCollection }))
 
 // Rows render as they sync — no boundary required:
 <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
+```
 
-// Opt-in first-data gate:
+Wrapping that read in a boundary no longer shows a fallback.
+
+### New: `loaded`, the opt-in first-data gate
+
+To wait for the first load, read `query.loaded()` inside a `<Loading>`
+boundary. It throws `NotReadyError` until the query's first load has settled,
+then returns the rows exactly like `query()`, so it feeds `<For>` directly:
+
+```tsx
 <Loading fallback={<div>Loading…</div>}>
   <For each={todosQuery.loaded()}>{(todo) => <li>{todo.text}</li>}</For>
 </Loading>
-
-// Revalidation progress (solid-js built-ins):
-<Show when={isPending(() => todosQuery.loaded())}><Spinner /></Show>
 ```
 
-### Wholesale observer mode
+While `query.loaded()` waits on a changed input's new collection, Solid 2
+holds the rest of that update: `query()` in the same component keeps
+returning the rows from before the change, and `isPending(() =>
+query.loaded())` reports the wait.
 
-`useLiveQuery` now subscribes to the `LiveQueryObserver` in **wholesale**
-mode instead of granular. The observer delivers wake-up notifies into a
-snapshot signal; Solid state stays fully derived from the latest snapshot —
-a keyed `createProjection` materializes rows with per-field granularity, a
-memo derives status, and the `state` map syncs incrementally (only changed
-keys notify). On-demand collections that relied on the granular adapter's
-`includeInitialState: true` behavior must load initial data explicitly —
-matching the React adapter's wholesale policy.
+### Errors reach `<Errored>` as an `Error`
 
-Row identity keeps the rule from #1825: store nodes are keyed by the live
-Collection's **result keys** (stamped with a per-collection epoch), never by
-a row's public `$key` — derived results such as `unionAll` can publish
-different rows sharing one `$key`, and a replaced collection's rows never
-adopt the previous collection's nodes.
+Reading the accessor throws when the query cannot serve data: its first load
+failed, or its collection crashed. The cause is thrown as is when it is an
+`Error`, and otherwise wrapped in an `Error` whose `cause` is the reported
+value. A failure that reports no cause at all is thrown as an `Error` that
+names the Collection: `Collection "<id>" failed to load`. A sync problem after
+the first load does not throw: the rows stay and the problem shows in
+`query.health` and `query.isSyncError`.
 
-Query-function inputs resolve through `resolveLiveQueryValue`, so identical
-eq-filtered queries share one pooled live-query Collection and subscription
-(`collection` exposes its public view); pre-created collections and config
-objects keep their own.
+## Unchanged API
 
-## Retained API
+`status`, `state`, `collection`, `isLoading`, `isReady`, `isIdle`,
+`isLoadingError`, `isCrashed`, `isCleanedUp`, `isSyncError`, and `health`
+remain on the accessor, as on Solid v1. Each flag is its own reactive value.
 
-`status` (`CollectionStatus | 'disabled'`), `isReady`, `isError`, the
-persisted-readiness trio (`persistedStatus`, `isPersistedReady`,
-`persistedError`), `state` (`ReactiveMap`), and `collection` remain on the
-accessor, matching the React and Vue adapters.
+## Behavior notes
+
+- Identical eq-filtered queries share one pooled live-query Collection and
+  subscription; `collection` exposes its public view.
+- A row keeps its identity by the live query's result key, never by its
+  public `$key`: derived results such as `unionAll` can publish different rows
+  that share one `$key` (#1825).
+- A row is the Collection's own row behind a stable, read-only view: a nested
+  getter stays live, a function field stays a function, and an own `__proto__`
+  data field or a signed zero survives. A nested object is the Collection's
+  object itself, as it is in the React, Vue and Svelte adapters, so update
+  through the Collection. Writing to a row, freezing it or changing its
+  prototype throws a `TypeError` in strict mode.
+- Reactivity is per field, and it is created as fields are read in tracking
+  scopes: a reader of one field is not re-run by a change to another, and a
+  publication costs an unchanged row one comparison.
+- The array `query()` returns is one object for the life of the query. A
+  reader of the array, or of one of its slots, follows membership and order:
+  it re-runs when rows join, leave or move, and not when a value changes.
