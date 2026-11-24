@@ -688,3 +688,17 @@ were reached in each fixed/random campaign on each host. It accepts the erased
 type annotation and the historical bounded source-domain carry. No actionable
 finding remains within this decoder scope. Package TypeScript, scoped ESLint,
 Prettier, `pnpm lint:changed` and `git diff --check` pass.
+
+
+## 2026-11-23 correction: request-scoped subscription results
+
+The [request-fixture review](2026-11-23-powersync-request-fixtures.md) supersedes
+this record's same-response subscription-error and SDK checkpoint-event
+dependency claims. The real service resolves subscription arguments once per
+HTTP request. Transient delivery failure interrupts transport, and SDK 0.1.1
+already exposes recovery on an unchanged empty successor checkpoint. Historical
+commands and verdicts above retain their original scope and premises; they do
+not establish a missing SDK event for a legal service history. The corrected
+eager and shared-client receivers preserve recovery and distinct-error checks
+through actual successor requests. Node Map compatibility remains a separate
+SDK concern.

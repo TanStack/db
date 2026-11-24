@@ -4,7 +4,11 @@
  * cleanup uses production. No fixture gate delays passive Collection readiness.
  */
 import { createCollection } from '@tanstack/db'
-import { PowerSyncClient, powerSyncCollectionOptions } from '../src'
+import {
+  PowerSyncClient,
+  StreamError,
+  powerSyncCollectionOptions,
+} from '../src'
 import {
   sortedStartupRows,
   startupRows,
@@ -12,6 +16,7 @@ import {
 import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
 import { FakeService } from './fake-service'
 import { eagerProtocolTurn, untilEagerProtocol } from './eager-protocol-service'
+import { resolveStreams } from './protocol-request'
 import type {
   SharedClientCut,
   SharedClientHistory,
@@ -33,6 +38,7 @@ export async function observeDirectSharedClient(
     retryDelayMs: 1,
   })
   const resources: Array<SharedClientResource> = []
+  const connectionFailures = new Map<unknown, number>()
   let allocating = -1
   const retain = (kind: string, release: () => void) => {
     const resource = {
@@ -48,7 +54,18 @@ export async function observeDirectSharedClient(
     }
   }
   const listen = client.listen.bind(client)
-  client.listen = (...args) => retain(`table-listener`, listen(...args))
+  client.listen = (table, listener) =>
+    retain(
+      `table-listener`,
+      listen(table, {
+        ...listener,
+        onError: (error) => {
+          if (!connectionFailures.has(error))
+            connectionFailures.set(error, connectionFailures.size + 1)
+          listener.onError?.(error)
+        },
+      }),
+    )
   const status = client.subscribeStatus.bind(client)
   Object.defineProperty(client, `subscribeStatus`, {
     value: (...args: Parameters<PowerSyncClient['subscribeStatus']>) =>
@@ -95,7 +112,30 @@ export async function observeDirectSharedClient(
   const snapshot = (): SharedClientCut => ({
     rows: [sortedStartupRows(first.toArray), sortedStartupRows(second.toArray)],
     statuses: [first.status, second.status],
+    terminalErrors: [first.health.error !== null, second.health.error !== null],
+    newestIsLast: [first, second].map((collection) => {
+      const problem = collection.health.failureReason
+      return !problem || problem.cause === problem.errors.at(-1)?.cause
+    }) as [boolean, boolean],
     targetSettled,
+    problems: [first, second].map(
+      (collection) =>
+        collection.health.failureReason?.errors.map((error) => {
+          const cause = error.cause
+          return cause instanceof StreamError
+            ? {
+                kind: `stream` as const,
+                stream: cause.stream.name,
+                messages: [...cause.messages],
+              }
+            : connectionFailures.has(cause)
+              ? {
+                  kind: `connection` as const,
+                  attempt: connectionFailures.get(cause)!,
+                }
+              : { kind: `other` as const }
+        }) ?? [],
+    ) as SharedClientCut['problems'],
   })
   const propagate = async () => {
     await service.drained()
@@ -115,9 +155,21 @@ export async function observeDirectSharedClient(
     masks: [number, number],
     version: number,
     owners: Array<number>,
+    failure?: { stream: 0 | 1; version: number },
   ) => {
     const buckets = owners.map((owner) => (owner === 0 ? `alpha` : `beta`))
-    service.checkpoint(buckets)
+    service.checkpoint(buckets, {
+      streams: resolveStreams(service.lastRequest.streams, (subscription) =>
+        subscription.stream ===
+        (failure?.stream === 0
+          ? `alpha`
+          : failure?.stream === 1
+            ? `beta`
+            : undefined)
+          ? `rejected-${failure!.version}-${subscription.stream}`
+          : undefined,
+      ),
+    })
     for (const owner of owners) {
       const bucket = owner === 0 ? `alpha` : `beta`
       for (const row of startupRows(held[owner]! & ~masks[owner]!, version))
@@ -128,6 +180,14 @@ export async function observeDirectSharedClient(
     held = masks
     service.complete()
     await propagate()
+  }
+  const reconnect = async () => {
+    const before = service.requests.length
+    service.close()
+    await untilEagerProtocol(
+      () => service.live && service.requests.length > before,
+      `configuration change opened a successor request`,
+    )
   }
   return withOracleCleanup(
     async () => {
@@ -147,6 +207,54 @@ export async function observeDirectSharedClient(
       await deliver([h.first, h.second], 2, h.join === `passive` ? [0] : [0, 1])
       await target
       const both = snapshot()
+      let failed: SharedClientCut | undefined
+      let failedAgain: SharedClientCut | undefined
+      let peer: SharedClientCut | undefined
+      let recovered: SharedClientCut | undefined
+      let recoveryPending: SharedClientCut | undefined
+      if (h.failure) {
+        const fault = h.failure
+        const healthy = fault.stream === 0 ? 1 : 0
+        const healthyMask = healthy === 0 ? h.first : h.second
+        const masks = (mask: number): [number, number] =>
+          healthy === 0 ? [mask, 0] : [0, mask]
+        await reconnect()
+        await deliver(masks(healthyMask), 3, [healthy], {
+          stream: fault.stream,
+          version: 3,
+        })
+        failed = snapshot()
+        if (fault.repeat) {
+          await reconnect()
+          await deliver(masks(healthyMask), 3, [healthy], {
+            stream: fault.stream,
+            version: 4,
+          })
+          failedAgain = snapshot()
+        }
+        const peerMask =
+          fault.peer === `delete`
+            ? healthyMask & (healthyMask - 1)
+            : healthyMask
+        await deliver(masks(peerMask), 4, [healthy], {
+          stream: fault.stream,
+          version: fault.repeat ? 4 : 3,
+        })
+        peer = snapshot()
+        if (fault.recovery !== `none`) {
+          await reconnect()
+          await propagate()
+          recoveryPending = snapshot()
+          await deliver(
+            fault.recovery === `unchanged`
+              ? [peerMask, peerMask]
+              : [h.first, h.second],
+            fault.recovery === `unchanged` ? 4 : 5,
+            [0, 1],
+          )
+          recovered = snapshot()
+        }
+      }
       const resourcesBeforeRetirement = structuredClone(resources)
       await collections[h.retire]!.cleanup()
       await requested([h.retire === 0 ? `beta` : `alpha`])
@@ -155,7 +263,11 @@ export async function observeDirectSharedClient(
       const resourcesAtRetirement = structuredClone(resources)
       const requestedAfterRetirement = streams()
       const survivor = h.retire === 0 ? 1 : 0
-      await deliver(survivor === 0 ? [h.next, 0] : [0, h.next], 3, [survivor])
+      await deliver(
+        survivor === 0 ? [h.next, 0] : [0, h.next],
+        h.failure ? 6 : 3,
+        [survivor],
+      )
       const later = snapshot()
       await collections[survivor]!.cleanup()
       const reached: Array<SharedClientState> = [
@@ -172,9 +284,57 @@ export async function observeDirectSharedClient(
         )
       if ((h.first | h.second) & ~h.next) reached.push(`later-omission`)
       if (!h.next) reached.push(`later-empty`)
+      if (h.failure && failed && peer) {
+        const owner = h.failure.stream
+        if (
+          failed.problems[owner].some((p) => p.kind === `stream`) &&
+          failed.problems[owner === 0 ? 1 : 0].length === 0
+        )
+          reached.push(`rejected-scope`)
+        if (
+          failedAgain &&
+          failedAgain.problems[owner].filter((p) => p.kind === `stream`)
+            .length >
+            failed.problems[owner].filter((p) => p.kind === `stream`).length
+        )
+          reached.push(`changed-rejection`)
+        if (peer.rows[0].length < failed.rows[0].length)
+          reached.push(`healthy-peer-delete`)
+        if (
+          peer.rows[0].length === failed.rows[0].length &&
+          JSON.stringify(peer.rows[0]) !== JSON.stringify(failed.rows[0])
+        )
+          reached.push(`healthy-peer-update`)
+        if (
+          recovered &&
+          recovered.problems.every((problems) => problems.length === 0)
+        )
+          reached.push(
+            JSON.stringify(recovered.rows) === JSON.stringify(peer.rows)
+              ? `recovered-unchanged`
+              : `recovered-changed`,
+          )
+        if (
+          recoveryPending?.problems[owner].some(
+            (problem) => problem.kind === `stream`,
+          )
+        )
+          reached.push(`recovery-request-open`)
+        if (!recovered && retired.statuses[h.retire] === `cleaned-up`)
+          reached.push(
+            h.retire === owner
+              ? `failed-owner-retired`
+              : `healthy-owner-retired`,
+          )
+      }
       return {
         joined,
         both,
+        ...(failed ? { failed } : {}),
+        ...(failedAgain ? { failedAgain } : {}),
+        ...(peer ? { peer } : {}),
+        ...(recovered ? { recovered } : {}),
+        ...(recoveryPending ? { recoveryPending } : {}),
         retired,
         later,
         resourcesBeforeRetirement,

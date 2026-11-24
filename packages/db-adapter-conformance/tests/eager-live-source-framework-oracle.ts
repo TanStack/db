@@ -24,11 +24,13 @@ export type EagerHistoryResult = {
     cleanup: Array<string>
   }
 }
+export type EagerSourceCorruption =
+  `values` | `delivery-errors` | `stale-health`
 
 export async function observeEagerLiveSourceHistory(
   driver: EagerLiveSourceDriver,
   history: EagerLiveSourceHistory,
-  corruption?: `values` | `delivery-errors`,
+  corruption?: EagerSourceCorruption,
   additionalStates: ReadonlyArray<EagerLiveSourceReachState> = [],
 ): Promise<EagerHistoryResult> {
   const reached: Array<EagerLiveSourceReachState> = []
@@ -38,6 +40,7 @@ export async function observeEagerLiveSourceHistory(
         create: () => {
           const fixture = driver.create()
           const collection = fixture.collection
+          let retained: typeof collection.health | undefined
           return {
             ...fixture,
             collection: {
@@ -48,6 +51,10 @@ export async function observeEagerLiveSourceHistory(
               get health() {
                 const health = collection.health
                 const problem = health.failureReason
+                if (corruption === `stale-health`) {
+                  if (problem) retained = health
+                  return retained ?? health
+                }
                 if (corruption !== `delivery-errors` || !problem) return health
                 // A plausible wrong receiver retains only its first error.
                 // Retry policy permits that for later attempts of one outage,

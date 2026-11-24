@@ -36,6 +36,8 @@ import { plainLoadSnapshot } from '../../db-sqlite-persistence-core/tests/contra
 import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'
 import { PowerSyncClient, powerSyncCollectionOptions } from '../src'
 import { createDirectInputLedger } from './direct-input-receiving'
+import { RequestResolution, resolveStreams } from './protocol-request'
+import type { RequestedStreams } from './protocol-request'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type { PersistedCollectionPersistence } from '../../db-sqlite-persistence-core/src'
 import type {
@@ -68,10 +70,15 @@ class DemandService {
   private operation = 0
   private stream?: ReadableStreamDefaultController<Uint8Array>
   private signal?: AbortSignal
-  private subscriptions: Array<{ stream: string }> = []
+  private subscriptions: RequestedStreams['subscriptions'] = []
+  private resolution?: RequestResolution
   readonly fetch: typeof fetch = (_url, init) => {
     this.requests++
     this.subscriptions = JSON.parse(String(init?.body)).streams.subscriptions
+    this.resolution = new RequestResolution({
+      subscriptions: this.subscriptions,
+      include_defaults: false,
+    })
     this.signal = init?.signal ?? undefined
     return Promise.resolve(
       new Response(
@@ -103,7 +110,7 @@ class DemandService {
   async checkpoint(
     next: ReadonlyArray<Row>,
     removed: ReadonlyArray<string> = [],
-    reject = false,
+    reject: boolean | `exact` = false,
   ) {
     await until(() => this.active, `real SDK opened controlled HTTP`)
     const requestRevision = this.requests
@@ -113,17 +120,22 @@ class DemandService {
     const last = String(this.operation + next.length + removed.length + 10)
     const line = (value: unknown) =>
       target.enqueue(new TextEncoder().encode(`${JSON.stringify(value)}\n`))
+    const descriptions = resolveStreams(
+      { subscriptions: this.subscriptions },
+      (subscription) =>
+        reject && (reject !== `exact` || subscription.parameters?.group === `a`)
+          ? `offline demand`
+          : undefined,
+    )
+    const buckets = this.resolution!.hasResolvedSubscription(descriptions)
+      ? [`rows`]
+      : []
+    this.resolution!.validate(descriptions, buckets)
     line({
       checkpoint: {
         last_op_id: last,
-        buckets: [{ bucket: `rows`, checksum: 0 }],
-        streams: this.subscriptions.map((subscription, index) => ({
-          name: subscription.stream,
-          is_default: false,
-          errors: reject
-            ? [{ subscription: index, message: `offline demand` }]
-            : [],
-        })),
+        buckets: buckets.map((bucket) => ({ bucket, checksum: 0 })),
+        streams: descriptions,
       },
     })
     const operations = [
@@ -143,7 +155,8 @@ class DemandService {
         checksum: 0,
       })),
     ]
-    if (operations.length) line({ data: { bucket: `rows`, data: operations } })
+    if (operations.length && buckets.length)
+      line({ data: { bucket: `rows`, data: operations } })
     line({ checkpoint_complete: { last_op_id: last } })
     await until(
       () => signal?.aborted === true || target.desiredSize === 0,
@@ -456,7 +469,10 @@ export function source(
         aborted: signal?.aborted === true,
       })),
     receiveCommits,
-    checkpointAndApply: async (next: ReadonlyArray<Row>, reject = false) => {
+    checkpointAndApply: async (
+      next: ReadonlyArray<Row>,
+      reject: boolean | `exact` = false,
+    ) => {
       // A permitted replacement can replay the active demand and restart its
       // SDK connection. The provider answers that actual successor request with
       // the same authored rows, rather than waiting for expected query rows.
@@ -563,7 +579,11 @@ export async function observeDirectPersistedDemand(
   }
   try {
     if (history.first === `never`) await online.collection.preload()
-    else if ([`overlap`, `incomplete`, `failed`].includes(history.first)) {
+    else if (
+      [`overlap`, `incomplete`, `failed`, `failed-with-peer`].includes(
+        history.first,
+      )
+    ) {
       if (await answer(donor, rows.slice(0, 1)))
         result.reached.push(`overlapping first load`)
       if (history.first !== `overlap`) {
@@ -576,15 +596,33 @@ export async function observeDirectPersistedDemand(
             online.service.active,
           `new exact demand after donor`,
         )
-        if (history.first === `failed`) {
+        if (
+          history.first === `failed` ||
+          history.first === `failed-with-peer`
+        ) {
           const exact = new Set(online.currentRequests())
-          await online.checkpointAndApply([], true)
+          // The earlier donor authored a1 in the only row bucket. Rejecting
+          // that shared stream withdraws the bucket at this checkpoint. This
+          // is source-table membership loss, not proof of a backend deletion;
+          // it is independent of the later load rejection and adapter writes.
+          if (history.first === `failed`)
+            events.push({ type: `delete`, id: `a1` })
+          await online.checkpointAndApply(
+            [],
+            history.first === `failed` ? true : `exact`,
+          )
           if (
             events.some(
               (event) => event.type === `failed` && exact.has(event.load),
             )
-          )
+          ) {
             result.reached.push(`failed exact first load`)
+            if (
+              history.first === `failed-with-peer` &&
+              online.collection.has(`a1`)
+            )
+              result.reached.push(`failed exact first load retains peer rows`)
+          }
         } else result.reached.push(`pending exact first load`)
       }
     } else {

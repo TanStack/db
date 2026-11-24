@@ -2405,6 +2405,8 @@ export type EagerLiveSourceReachState =
   | `delivery-error-identities-retained`
   | `delivery-error-recovered-with-row-change`
   | `delivery-error-recovered-without-row-change`
+  | `transient-failure-recovered-with-row-change`
+  | `transient-failure-recovered-without-row-change`
   | `sync-run-resources-released`
 
 const capabilityOfState: Partial<
@@ -2703,6 +2705,7 @@ export async function checkEagerLiveSourceHistory(
   // optional report of the same retry outage. Its identity remains mandatory
   // even when the SDK constructs the Error value from a transport message.
   const deliveryFailures = new Set<number>()
+  const transientFailures = new Set<number>()
   const failureCounter = { next: 0 }
   const waits: Array<{ current: Settlement }> = []
   const syncWaits: Array<{ current: Settlement }> = []
@@ -3098,6 +3101,10 @@ export async function checkEagerLiveSourceHistory(
           ),
         ).length ?? 0
       const phaseBefore = state.phase
+      const reportedTransientBefore =
+        collection.health.failureReason?.errors.some((entry) =>
+          [...transientFailures].some((index) => matches(entry.cause, index)),
+        ) ?? false
       const transientBefore = state.transient.length
       // Support is decided before the model moves, so a skipped step leaves
       // the model unchanged.
@@ -3226,6 +3233,7 @@ export async function checkEagerLiveSourceHistory(
             `conformance transient failure ${done.failure}`,
           )
           failures[done.failure] = error
+          transientFailures.add(done.failure)
           await provider.transientFailure!(error, done.variant)
           const kind = driver.transientVariants?.[done.variant]
           if (wasReady && kind !== undefined) reach(`transient:${kind}`)
@@ -3341,6 +3349,17 @@ export async function checkEagerLiveSourceHistory(
           sameRows(rowsBefore, observedRows(collection))
             ? `delivery-error-recovered-without-row-change`
             : `delivery-error-recovered-with-row-change`,
+        )
+      }
+      if (
+        (done.kind === `snapshot` || done.kind === `changes`) &&
+        reportedTransientBefore &&
+        collection.health.failureReason === null
+      ) {
+        reachAdditional(
+          sameRows(rowsBefore, observedRows(collection))
+            ? `transient-failure-recovered-without-row-change`
+            : `transient-failure-recovered-with-row-change`,
         )
       }
       if (done.kind !== `restart`) {

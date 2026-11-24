@@ -3886,6 +3886,25 @@ preserves the live-host and mutant evidence.
 
 ### Source durability inside a shared hydration scope
 
+The shared [source FIFO owner](../../packages/db-sqlite-persistence-core/tests/persisted-source-fifo-oracle.ts)
+now supplies the existing persisted oracle and a
+[real Node SQLite receiver](../../packages/db-sqlite-persistence-core/tests/persisted-source-fifo-sqlite-oracle.test.ts).
+Both retain the four-run fixed/random budget and seed 18,530,101. Six axes cross
+ordinary same-key/disjoint commits, equal-value restoration, a queued subset
+read before an older ordinary commit, failed hydration with a later partial
+update, and independent abort. Five fresh constructions per axis enforce reach;
+all six axes remain in every generated history. The held-read premise records
+the older unapplied commit and the newer commit during the read. Comparisons
+retain the held public baseline and check settled receipts, complete public and
+durable rows, changing disjoint-write order, partial-update metadata, status,
+and pending markers. Both hosts were RED before production repair. Direct's
+real SDK/Chromium/worker/OPFS receiver separately exposed the same ordering
+defect at its original loaded cut. The repair preserves ordinary FIFO admission
+and reuses the existing baseline helper at the deferred transaction's actual
+turn. See the [review and evidence](oracle-reviews/2026-11-23-powersync-request-fixtures.md).
+These controlled schedules and one-process native receiver do not establish
+multi-tab or mobile-host behavior.
+
 The `hydration source durability routing` owner in
 `packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts` now runs
 144 bounded histories: startup/subscription/after-ready × scoped/unscheduled ×
@@ -8957,14 +8976,14 @@ shares its owner's model and comparison.
 
 | Contract and oracle owner | Receiving paths and observations | Evidence |
 | --- | --- | --- |
-| Eager lifecycle/health: `db-adapter-conformance/src/eager-live-source-oracle.ts` | Real standalone SDK; changed/distinct stream errors, changed/unchanged same-connection recovery, table/status/lease release at failure and cleanup | [Eager review](oracle-reviews/2026-11-17-powersync-direct-eager.md) |
+| Eager lifecycle/health: `db-adapter-conformance/src/eager-live-source-oracle.ts` | Real standalone SDK in Node and Chromium; transport interruptions, changed/unchanged successor checkpoints, table/status/lease release at failure and cleanup | [Eager review](oracle-reviews/2026-11-17-powersync-direct-eager.md) and [request-fixture correction](oracle-reviews/2026-11-23-powersync-request-fixtures.md) |
 | Complete replacement and initial gate: `db-adapter-conformance/tests/eager-reload-oracle.ts` | Node and Chromium; fresh/reload/shared-failed provider, explicit/default streams, empty/nonempty rows, retry in a new run, optimistic settlement and applied receipts | [Reload review](oracle-reviews/2026-11-17-powersync-direct-reload.md) |
 | Initial receipt cleanup: `powersync-direct-collection/tests/initial-receipt-oracle.ts` | Controlled receipt, actual controlled persistence, Node SQLite and worker/OPFS; receipt created/pending/rejected, public cleanup and detached failure, with late teardown diagnostics preserved | [Reload review](oracle-reviews/2026-11-17-powersync-direct-reload.md) and [persistence review](oracle-reviews/2026-11-17-powersync-direct-persistence.md) |
 | On-demand stream ownership: `db-adapter-conformance/tests/on-demand-streams-oracle.ts` | Real source/live-query Collections across five Node/browser/persisted paths; shared/partial/disjoint incidence, parameter and priority forwarding, failure timing, independent retirement and recovery, empty/throwing mappers, mapper-triggered cleanup and public snapshot-request cancellation before/during/after mapping beside a ready peer. Cold histories remain beside a confirmed-empty distinct-donor prelude; actual SDK callbacks and held receipts establish before-application reach. | [On-demand review](oracle-reviews/2026-11-17-powersync-direct-on-demand.md), [mapper cancellation review](oracle-reviews/2026-11-18-powersync-direct-mapper-abort.md) |
 | Decode admission/refusal: `db-adapter-conformance/tests/decode-refusal-oracle.ts` | Eager and on-demand, actual SDK Node and Chromium; cold initial/live and idle cached startup; valid boolean/Date conversion, ordinary Error and three unprintable thrown-value shapes, changed id at first/middle/last row; ordered coherent source/query readiness, terminal health, every publication, valid startup handler admission, pending-query retirement and owned resource cleanup. Final 334 Node/327 Chromium GREEN; isolated cause/handler mutants rejected and actual early-readiness variant permitted; 72 declared states reached in each campaign. No persistence/reload/mutation or arbitrary remote schedule claim | [Decode review](oracle-reviews/2026-11-17-powersync-direct-decode.md) |
 | Mutation confirmation: `db/tests/mutation-confirmation-oracle.ts`; cancellation: `powersync-direct-collection/tests/mutation-confirmation-cancellation-oracle.ts` | Node and Chromium, eager and retained on-demand queries; CRUD through handlers/manual transactions, response-first/checkpoint-first pending cuts, accepted rows and settlement publications, signal/Collection cleanup cancellation | [Mutation review](oracle-reviews/2026-11-17-powersync-direct-mutation.md) |
 | Persisted startup: `db-adapter-conformance/tests/persisted-startup-oracle.ts` | Controlled persistence, Node SQLite and Chromium worker/OPFS; source/restore order, fallback, immediate public/durable rows, refresh fulfillment, local reopen and source read count | [Persistence review](oracle-reviews/2026-11-17-powersync-direct-persistence.md) |
-| Shared client: `db-adapter-conformance/tests/shared-client-oracle.ts` | Node and Chromium; two source Collections on one table/client, passive cached startup, equal/partial/disjoint row support, either peer cleanup, survivor updates and final acquired-resource release | [Shared-client review](oracle-reviews/2026-11-17-powersync-direct-shared-client.md) |
+| Shared client: `db-adapter-conformance/tests/shared-client-oracle.ts` | Node and Chromium; two source Collections on one table/client, passive cached startup, equal/partial/disjoint row support, scoped rejection and changed errors across requests, healthy-peer update/deletion, pre-checkpoint and changed/unchanged recovery, either peer cleanup and final resource release | [Shared-client review](oracle-reviews/2026-11-17-powersync-direct-shared-client.md) and [request-fixture correction](oracle-reviews/2026-11-23-powersync-request-fixtures.md) |
 
 The on-demand model tracks logical query-to-stream incidence, independently of
 the SDK's lease maps. Its health judgment requires a retained failing stream to
@@ -8987,15 +9006,24 @@ throw causes and coherent readiness orderings, within its stated finite domain.
 A provider-confirmed cache eviction may end dormant coverage;
 it is not evidence that every evicted row was remotely deleted.
 
-**Open SDK event dependency (maintainer decision, 2026-11-17):** same-connection
-recovery remains RED pending a released SDK checkpoint-event API. SDK 0.1.1
-suppresses `ready` to `ready` status notifications and can deliver an unchanged
-or empty checkpoint without a table notification. Trace: complete empty result,
-stream error, healthy empty checkpoint; the source still retains its failure.
-The owner is the eager health oracle above, with the on-demand receiver supplying
-the same boundary where applicable. The maintainer selected an SDK API change
-and explicitly deferred this repair until its release. The tests retain this
-counterexample; polling and relaxed comparisons are not used.
+**Request-fixture correction (2026-11-23):** the earlier deferred SDK-event
+dependency was based on an invalid same-response subscription-error history.
+The service resolves subscription arguments once per HTTP request. A transient
+delivery failure interrupts transport; SDK 0.1.1 already exposes recovery after
+a successor's unchanged empty checkpoint. The eager owner keeps that observation
+through legal transport failure. The shared-client owner checks stream rejection
+and recovery across actual requests. See the
+[correction and evidence](oracle-reviews/2026-11-23-powersync-request-fixtures.md).
+No checkpoint-event release dependency is established by these histories.
+
+The health judgment is independent of the SDK table-row judgment. A healthy
+peer's updates and deletions continue while another scope is rejected. The SDK
+does not identify whether a removed row lost rejected bucket support or was
+deleted under healthy support; selective retention cannot be inferred from
+its public table observation. The existing all-synced-table contract remains
+the row authority. A stronger selective-retention policy requires a separate
+contract decision and sufficient provider information, rather than ignoring
+deletes while unhealthy.
 
 Limits: controlled legal PowerSync protocol over the real installed SDK, rather
 than a deployed PowerSync service. SDK bucket membership, resume tokens and

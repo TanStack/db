@@ -75,11 +75,13 @@ on-demand stream ownership or mutation confirmation. The
 names each owner and observation boundary. Versioned review records linked there
 retain the pre-production results, review corrections and exact replay routes.
 
-The maintainer chose to defer same-connection stream recovery until an SDK
-checkpoint event API is released (2026-11-17). SDK 0.1.1 suppresses unchanged
-`ready` status notifications and can apply an empty checkpoint without a table
-notification. The expanded recovery oracle remains RED for that defect; no
-polling or comparison relaxation substitutes for the missing event.
+The [request-fixture correction](../../docs/contributing/oracle-reviews/2026-11-23-powersync-request-fixtures.md)
+supersedes the earlier SDK checkpoint-event dependency claim. Subscription
+arguments resolve once per HTTP request; changing their errors on one response
+was an invalid receiving premise. Direct now exercises transport interruption
+and changed/unchanged successor checkpoints. The shared-client family separately
+checks request-scoped stream rejection, healthy-peer table changes and recovery.
+Generic result-error coverage remains in the reference and Convex receivers.
 
 ## Eager live-source oracle
 

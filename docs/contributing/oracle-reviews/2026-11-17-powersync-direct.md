@@ -284,3 +284,17 @@ The SDK itself receives controlled legal protocol data. No deployed PowerSync
 service, arbitrary concurrency, every framework scheduler or every storage host
 is established. The explicitly deferred same-connection recovery counterexample
 prevents a claim that the entire stream-health class is closed.
+
+
+## 2026-11-23 correction: request-scoped subscription results
+
+The [request-fixture review](2026-11-23-powersync-request-fixtures.md) supersedes
+this record's same-response subscription-error and SDK checkpoint-event
+dependency claims. The real service resolves subscription arguments once per
+HTTP request. Transient delivery failure interrupts transport, and SDK 0.1.1
+already exposes recovery on an unchanged empty successor checkpoint. Historical
+commands and verdicts above retain their original scope and premises; they do
+not establish a missing SDK event for a legal service history. The corrected
+eager and shared-client receivers preserve recovery and distinct-error checks
+through actual successor requests. Node Map compatibility remains a separate
+SDK concern.

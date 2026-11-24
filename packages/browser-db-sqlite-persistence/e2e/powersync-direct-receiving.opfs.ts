@@ -27,6 +27,13 @@ import {
   retainInitialReceiptCleanup,
 } from '../../powersync-direct-collection/tests/persisted-initial-receipt-driver'
 import { observeDirectSharedClient } from '../../powersync-direct-collection/tests/shared-client-driver'
+import { directConformanceDriver } from '../../powersync-direct-collection/tests/conformance-driver'
+import { observeEagerLiveSourceHistory } from '../../db-adapter-conformance/tests/eager-live-source-framework-oracle'
+import type { EagerSourceCorruption } from '../../db-adapter-conformance/tests/eager-live-source-framework-oracle'
+import type {
+  EagerLiveSourceHistory,
+  EagerLiveSourceReachState,
+} from '../../db-adapter-conformance/src'
 import {
   runDirectMutationConfirmation as receiveMutationConfirmation,
   transportMutationTrace,
@@ -195,6 +202,17 @@ const runDirectDecodeRefusal = (history: DecodeHistory, id: string) =>
   observeDecodeRefusal(directDecodeAdapter, history, id)
 const runDirectSharedClient = (history: SharedClientHistory, id: string) =>
   observeDirectSharedClient(history, id)
+const runDirectEagerSource = (
+  history: EagerLiveSourceHistory,
+  corruption?: EagerSourceCorruption,
+  states?: ReadonlyArray<EagerLiveSourceReachState>,
+) =>
+  observeEagerLiveSourceHistory(
+    directConformanceDriver(),
+    history,
+    corruption,
+    states,
+  )
 
 declare global {
   interface Window {
@@ -207,6 +225,7 @@ declare global {
     runDirectMutationConfirmation: typeof runDirectMutationConfirmation
     runDirectDecodeRefusal: typeof runDirectDecodeRefusal
     runDirectSharedClient: typeof runDirectSharedClient
+    runDirectEagerSource: typeof runDirectEagerSource
   }
 }
 window.runDirectPersistedStartup = runDirectPersistedStartup
@@ -218,3 +237,4 @@ window.runDirectPersistedInitialReceipt = runDirectPersistedInitialReceipt
 window.runDirectMutationConfirmation = runDirectMutationConfirmation
 window.runDirectDecodeRefusal = runDirectDecodeRefusal
 window.runDirectSharedClient = runDirectSharedClient
+window.runDirectEagerSource = runDirectEagerSource

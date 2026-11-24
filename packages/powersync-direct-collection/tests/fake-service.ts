@@ -1,3 +1,6 @@
+import { RequestResolution, resolveStreams } from './protocol-request'
+import type { ResolvedStream } from './protocol-request'
+
 type Row = Record<string, unknown>
 
 // Waiting belongs to the protocol fixture, so the same service can receive
@@ -25,6 +28,7 @@ export class FakeService {
   #errored = false
   #opId = 0
   #replay?: () => void
+  #resolution?: RequestResolution
   /** Runs before responding to a checkpoint request. */
   beforeCheckpointResponse?: () => Promise<void>
 
@@ -40,6 +44,7 @@ export class FakeService {
     }
 
     this.requests.push(body)
+    this.#resolution = new RequestResolution(body.streams)
     const signal = (this.#signal = init!.signal!)
     this.#errored = false
     return new Response(
@@ -109,22 +114,18 @@ export class FakeService {
 
   checkpoint(
     buckets: Array<string>,
-    options: { streams?: Array<unknown>; writeCheckpoint?: string } = {},
+    options: { streams?: Array<ResolvedStream>; writeCheckpoint?: string } = {},
   ) {
     this.#replay = undefined
     const request = this.lastRequest
+    const streams = options.streams ?? resolveStreams(request.streams)
+    this.#resolution!.validate(streams, buckets)
     this.send({
       checkpoint: {
         last_op_id: String(this.#opId + 10),
         write_checkpoint: options.writeCheckpoint,
         buckets: buckets.map((bucket) => ({ bucket, checksum: 0 })),
-        streams:
-          options.streams ??
-          request.streams.subscriptions.map((s: { stream: string }) => ({
-            name: s.stream,
-            is_default: false,
-            errors: [],
-          })),
+        streams,
       },
     })
   }
@@ -166,11 +167,15 @@ export class FakeService {
     bucket: string,
     table: string,
     rows: Record<string, Row>,
-    options?: { writeCheckpoint?: string },
+    options?: { writeCheckpoint?: string; streams?: Array<ResolvedStream> },
   ) {
-    this.checkpoint([bucket], options)
-    for (const [id, row] of Object.entries(rows))
-      this.put(bucket, table, id, row)
+    const supported = this.#resolution!.hasResolvedSubscription(
+      options?.streams ?? resolveStreams(this.lastRequest.streams),
+    )
+    this.checkpoint(supported ? [bucket] : [], options)
+    if (supported)
+      for (const [id, row] of Object.entries(rows))
+        this.put(bucket, table, id, row)
     this.complete()
     this.#replay = () => this.sync(bucket, table, rows, options)
   }

@@ -228,7 +228,7 @@ The status describes the connection, not whether a collection has usable data. U
 
 Errors surface through TanStack DB's collection status and `health` tree. See [Loading and Sync Errors](../guides/error-handling.md#loading-and-sync-errors) for how to display them.
 
-- If the PowerSync Service rejects a stream subscription, for example because of invalid parameters, the error is a `StreamError`. Its `stream` and `messages` fields describe the problem. A collection whose stream fails before it becomes ready moves to the `error` status, and an on-demand query depending on the stream fails to load. A stream error after that is reported as a `failureReason` while the rows stay available.
+- If the PowerSync Service rejects a stream subscription, for example because of invalid parameters, the error is a `StreamError`. Its `stream` and `messages` fields describe the problem. A collection whose stream fails before it becomes ready moves to the `error` status, and an on-demand query depending on the stream fails to load. A stream error after that is reported as a `failureReason` while the collection stays readable. Its rows continue to reflect the client's shared synced table, including updates and removals supplied through other streams.
 - Connection errors after the collection is ready are reported as a `failureReason` as well, and the client keeps retrying with exponential backoff. The `failureReason` clears once sync works again.
 - If `parse` throws, synchronization stops. Before readiness the Collection moves to the `error` status; after readiness it keeps its rows and `ready` status and reports `health.error`. Make sure your backend only produces rows that `parse` accepts.
 

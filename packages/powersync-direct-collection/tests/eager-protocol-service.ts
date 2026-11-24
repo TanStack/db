@@ -4,6 +4,8 @@
  * A staged response is replayed only when the SDK opens another HTTP response.
  * Each response sends a complete checkpoint; source omissions become REMOVE.
  */
+import { RequestResolution } from './protocol-request'
+import type { ResolvedStream } from './protocol-request'
 import type { StartupRow } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 
 export const eagerProtocolTurn = () =>
@@ -32,11 +34,15 @@ export class EagerProtocolService {
   private held = new Map<string, StartupRow>()
   private op = 0
   private plan: ResponsePlan | undefined
+  private resolution?: RequestResolution
 
   constructor(readonly defaultStream = false) {}
 
   readonly fetch: typeof fetch = async (_input, init) => {
     this.requests++
+    this.resolution = new RequestResolution(
+      JSON.parse(String(init?.body)).streams,
+    )
     this.signal = init?.signal ?? undefined
     return new Response(
       new ReadableStream<Uint8Array>(
@@ -129,25 +135,28 @@ export class EagerProtocolService {
     const removes = [...this.held.keys()].filter((id) => !next.has(id))
     const count = removes.length + (plan.kind === `rows` ? next.size : 0)
     const last = String(this.op + count + 10)
+    const streams: Array<ResolvedStream> = [
+      {
+        name: `rows`,
+        is_default: this.defaultStream,
+        errors:
+          plan.kind === `error`
+            ? [
+                {
+                  subscription: this.defaultStream ? `default` : 0,
+                  message: plan.message,
+                },
+              ]
+            : [],
+      },
+    ]
+    const buckets = plan.kind === `error` ? [] : [`rows`]
+    this.resolution!.validate(streams, buckets)
     this.line({
       checkpoint: {
         last_op_id: last,
-        buckets: [{ bucket: `rows`, checksum: 0 }],
-        streams: [
-          {
-            name: `rows`,
-            is_default: this.defaultStream,
-            errors:
-              plan.kind === `error`
-                ? [
-                    {
-                      subscription: this.defaultStream ? `default` : 0,
-                      message: plan.message,
-                    },
-                  ]
-                : [],
-          },
-        ],
+        buckets: buckets.map((bucket) => ({ bucket, checksum: 0 })),
+        streams,
       },
     })
     const operations = [
@@ -177,7 +186,7 @@ export class EagerProtocolService {
         },
       })
     this.line({ checkpoint_complete: { last_op_id: last } })
-    this.held = next
+    this.held = plan.kind === `error` ? new Map() : next
     this.completions++
   }
 }

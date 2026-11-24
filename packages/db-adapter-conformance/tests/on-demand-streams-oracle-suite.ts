@@ -249,6 +249,47 @@ export function registerOnDemandStreamsConformance(
     driver: drive,
     check,
     calibrations: [
+      ...([`unknown`, `missing-connection`] as const).map((fault) => ({
+        name: `query rejection cannot hide ${fault} health`,
+        law: `on-demand stream ownership and settlement`,
+        history: {
+          fixed: `distinct empty donor precedes an applied load failure`,
+        },
+        corrupt: (
+          trace: ReadonlyArray<Observation>,
+          h: OnDemandStreamsHistory,
+        ) =>
+          trace.map((entry) =>
+            entry.checkpoint !== `result`
+              ? entry
+              : {
+                  ...entry,
+                  value: {
+                    ...(entry.value as Result),
+                    cuts: (entry.value as Result).cuts.map((cut) => {
+                      if (cut.name !== `failed-visible-load`) return cut
+                      const expected = onDemandStreamsModel(h).find(
+                        (wanted) => wanted.name === cut.name,
+                      )!
+                      return {
+                        ...cut,
+                        outcomes: {
+                          ...cut.outcomes,
+                          left: `rejected` as const,
+                        },
+                        rejections: { left: expected.rejections!.left![0] },
+                        problems:
+                          fault === `unknown`
+                            ? [...cut.problems, { kind: `other` as const }]
+                            : cut.problems.filter(
+                                (problem) => problem.kind !== `connection`,
+                              ),
+                      }
+                    }),
+                  },
+                },
+          ),
+      })),
       ...([`kind`, `stream`, `messages`] as const).map((field) => ({
         name: `initial stream rejection preserves ${field}`,
         law: `on-demand stream ownership and settlement`,

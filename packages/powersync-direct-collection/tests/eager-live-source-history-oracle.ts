@@ -4,8 +4,8 @@
  * deliveries and live batches together carry all seven JSON value kinds on
  * both paths. A held row loses its note in the first batch. Two outages
  * follow live batches in a later run; the first has a repeated attempt, and
- * a batch ends each one. Distinct delivery errors precede a changed-row
- * recovery, and another precedes an unchanged-row recovery on the same
+ * a batch ends each one. Retried transport failures precede changed-row
+ * recovery, and another precedes unchanged-row recovery on a successor
  * response. Their order varies. Generated coordinates choose keys, titles,
  * values, and recovery order. The shared model owns expected row truth.
  * Every invocation returns fresh rows and arrays.
@@ -57,7 +57,7 @@ export function constructDirectEagerHistory(
   // so this remains a twelve-element history. The independent random campaign
   // still explores every suffix/order in the full shared grammar.
   const unchangedRecovery = [
-    { kind: `delivery-error` as const },
+    { kind: `transient-failure` as const, variant: 0 },
     { kind: `changes` as const, changes: [] },
   ]
   return [
@@ -68,8 +68,8 @@ export function constructDirectEagerHistory(
       rows: kinds.slice(0, 4).map((kind, index) => row(kind, index, true)),
     },
     ...(salt % 2 === 0 ? unchangedRecovery : []),
-    { kind: `delivery-error` },
-    { kind: `delivery-error` },
+    { kind: `transient-failure`, variant: 0 },
+    { kind: `transient-failure`, variant: 0 },
     // Row 0 is held with a note; this batch removes it.
     { kind: `changes`, changes: upserts(0, 3, false) },
     { kind: `transient-failure`, variant: 0 },

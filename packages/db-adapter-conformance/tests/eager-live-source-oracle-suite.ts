@@ -15,6 +15,10 @@ import type {
   EagerLiveSourceReachState,
 } from '../src'
 import type { Observation } from '../../db/tests/oracle-property'
+import type {
+  EagerHistoryResult,
+  EagerSourceCorruption,
+} from './eager-live-source-framework-oracle'
 
 export function eagerLiveSourceCampaign(
   driver: EagerLiveSourceDriver,
@@ -23,6 +27,11 @@ export function eagerLiveSourceCampaign(
     salt: number,
   ) => EagerLiveSourceHistory,
   additionalStates: ReadonlyArray<EagerLiveSourceReachState> = [],
+  receive?: (
+    history: EagerLiveSourceHistory,
+    corruption?: EagerSourceCorruption,
+    states?: ReadonlyArray<EagerLiveSourceReachState>,
+  ) => Promise<EagerHistoryResult>,
 ) {
   const states = [...reachStatesFor(driver), ...additionalStates]
   const required = new WeakMap<
@@ -39,17 +48,19 @@ export function eagerLiveSourceCampaign(
     },
   }))
   const drive =
-    (corruption?: `values` | `delivery-errors`) =>
+    (corruption?: EagerSourceCorruption) =>
     async (
       history: EagerLiveSourceHistory,
       observe: (checkpoint: string, value: unknown) => void,
     ) => {
-      const result = await observeEagerLiveSourceHistory(
-        driver,
-        history,
-        corruption,
-        additionalStates,
-      )
+      const result = await (receive
+        ? receive(history, corruption, additionalStates)
+        : observeEagerLiveSourceHistory(
+            driver,
+            history,
+            corruption,
+            additionalStates,
+          ))
       for (const state of result.reached) observe(`reach`, state)
       observe(`completed`, result)
     }
@@ -62,6 +73,7 @@ export function eagerLiveSourceCampaign(
     }),
     driver: drive(),
     deliveryErrorIdentityDriver: drive(`delivery-errors`),
+    staleHealthDriver: drive(`stale-health`),
     check: (
       _history: EagerLiveSourceHistory,
       trace: ReadonlyArray<Observation>,

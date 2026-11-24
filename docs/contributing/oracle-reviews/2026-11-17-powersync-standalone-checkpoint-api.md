@@ -91,3 +91,17 @@ df4fcf93b5ce0b7ac6d9143767b761eb4cba42bba222b8ca5aae4a44ce4d11d6  .changeset/com
 The existing Direct health oracle remains RED for a stream failure followed by a healthy unchanged or empty checkpoint on the same connection. Its ownership and coverage limits remain with the TanStack eager/on-demand instruments. This SDK proposal does not close that TanStack bug class.
 
 After the API is reviewed and released, update the Direct adapter's dependency and use `subscribeCheckpoint` to recheck the relevant retained leases. Cleanup must unsubscribe and stale sync runs must not publish health. Then rerun the already-reviewed fixed/random histories, exact replays, receiving paths and hostile mutants to establish TanStack GREEN and successful recovery reach. No polling fallback or installed-package patch is introduced while awaiting the release.
+
+
+## 2026-11-23 correction: request-scoped subscription results
+
+The [request-fixture review](2026-11-23-powersync-request-fixtures.md) supersedes
+this record's same-response subscription-error and SDK checkpoint-event
+dependency claims. The real service resolves subscription arguments once per
+HTTP request. Transient delivery failure interrupts transport, and SDK 0.1.1
+already exposes recovery on an unchanged empty successor checkpoint. Historical
+commands and verdicts above retain their original scope and premises; they do
+not establish a missing SDK event for a legal service history. The corrected
+eager and shared-client receivers preserve recovery and distinct-error checks
+through actual successor requests. Node Map compatibility remains a separate
+SDK concern.

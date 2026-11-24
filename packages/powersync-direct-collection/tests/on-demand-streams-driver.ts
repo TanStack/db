@@ -28,6 +28,7 @@ import type {
   StreamRow,
 } from '../../db-adapter-conformance/tests/on-demand-streams-oracle'
 import type { HealthReportCounts } from '../../db-adapter-conformance/tests/health-report-handoff'
+import type { StreamConnectionInput } from '../../db-adapter-conformance/tests/stream-health-oracle'
 
 export function directOnDemandStreamsAdapter({
   wrap,
@@ -64,6 +65,34 @@ export function directOnDemandStreamsAdapter({
         retryDelayMs: 1,
       })
       const requested: Array<StreamOwner> = []
+      const connectionInputs: Array<StreamConnectionInput> = []
+      // Connection health sees whether every requested requirement resolved,
+      // not which healthy subset happened to be replayed or how often. Adjacent
+      // equal inputs are idempotent under that law. Keep their order relative
+      // to interruptions; scope identities remain in the ownership observations.
+      const receiveConnectionInput = (event: StreamConnectionInput) => {
+        if (JSON.stringify(connectionInputs.at(-1)) !== JSON.stringify(event))
+          connectionInputs.push(event)
+      }
+      service.onCheckpoint = (checkpoint) =>
+        receiveConnectionInput({
+          kind: `checkpoint`,
+          hasFailedRequirement: checkpoint.retained.some((stream) =>
+            checkpoint.failed.includes(stream),
+          ),
+        })
+      let ready = () => false
+      const connectionFailures = new Set<unknown>()
+      const listen = client.listen.bind(client)
+      client.listen = (table, listener) =>
+        listen(table, {
+          ...listener,
+          onError: (error) => {
+            connectionFailures.add(error)
+            receiveConnectionInput({ kind: `interrupted`, ready: ready() })
+            listener.onError?.(error)
+          },
+        })
       const relation = ownerSubscriptions(h)
       const mapperFailure = new Error(`mapping-${h.coordinate}`)
       let mapperThrown = false
@@ -145,6 +174,7 @@ export function directOnDemandStreamsAdapter({
         failed: ReadonlyArray<string>,
         version: number,
       ) => {
+        await service.configure(failed, version)
         const before = errors
         const notifications = [...streamLeases].filter((lease) =>
           lease.streams.some((stream) => failed.includes(stream)),
@@ -192,11 +222,13 @@ export function directOnDemandStreamsAdapter({
         ...options,
         sync: {
           ...upstream,
-          sync: (params: Parameters<typeof upstream.sync>[0]) =>
-            upstream.sync({
+          sync: (params: Parameters<typeof upstream.sync>[0]) => {
+            ready = () => params.collection.status === `ready`
+            return upstream.sync({
               ...params,
               commit: (signal) => input.receipt(params.commit(signal)),
-            }),
+            })
+          },
         },
       }
       const wrapped = await wrap?.(receivingOptions, h, id, input)
@@ -205,27 +237,18 @@ export function directOnDemandStreamsAdapter({
         deliver,
         receiveAppliedWork: () => receiveAppliedWork(),
         recover: async (rows) => {
-          await untilOnDemandStream(
-            () => service.live,
-            `remaining owner has an open provider request`,
-          )
-          const before = service.requests.length
-          service.close()
-          await untilOnDemandStream(
-            () => service.requests.length > before && service.live,
-            `SDK reconnects before recovery checkpoint`,
-          )
           await deliver(rows, [], 3)
         },
         requestedOwners: () => requested,
         deliveredErrors: () => errors,
         distinctErrorIdentities: () => identities.size,
         fulfilledProviderWaits: () => fulfilled,
-        errorStream: (cause) =>
+        describeProblem: (cause) =>
           cause instanceof StreamError
-            ? authoredStreamIdentity(cause.stream)
-            : `connection`,
+            ? { kind: `stream`, stream: authoredStreamIdentity(cause.stream) }
+            : { kind: connectionFailures.has(cause) ? `connection` : `other` },
         providerState: () => client.status.state,
+        connectionInputs: () => connectionInputs,
         activeStreams: () =>
           [...streamLeases].flatMap((lease) => lease.streams),
         acquiredLeases: () => acquired,

@@ -28,6 +28,13 @@
  * cuts teach the same ownership law. This legal prehistory lets a later live
  * acquisition receive an error while application is held, even when initial
  * source confirmation legitimately retires a cold acquisition for replay.
+ * Subscription resolution is fixed for each provider request. Rejection,
+ * changed rejection and recovery therefore open actual successor requests.
+ * Scoped stream failures and connection outages are independent: retiring a
+ * query removes its stream claim but cannot heal the shared connection.
+ * Table rows follow successful source support, independently of health. In
+ * this bounded fixture every successful stream supports the authored rows;
+ * all rejected streams leave no bucket in the checkpoint and an empty table.
  *
  * Authority: the receiving adapter's public on-demand/error contract, the
  * glossary's logical subset owner and applied settlement, and the public
@@ -48,6 +55,14 @@
  * restart-durability claim follows from this model's public observations.
  */
 import fc from 'fast-check'
+import {
+  streamConnectionOutage,
+  streamHealthViolations,
+} from './stream-health-oracle'
+import type {
+  StreamConnectionInput,
+  StreamProblem,
+} from './stream-health-oracle'
 
 export type StreamOwner = `left` | `right`
 type Coordinates = { coordinate: number; rowCount: number; value: number }
@@ -299,7 +314,8 @@ export type StreamRejection =
 export type StreamCut = {
   name: string
   outcomes: Partial<Record<StreamOwner, QueryOutcome>>
-  problems: Array<string>
+  problems: Array<StreamProblem>
+  connectionInputs: ReadonlyArray<StreamConnectionInput>
   rows: Partial<Record<StreamOwner, Array<string>>>
   rowValues?: Partial<Record<StreamOwner, Array<number>>>
   queryStatuses?: Partial<Record<StreamOwner, string>>
@@ -411,6 +427,18 @@ function expectedStreamCuts(
     ]
   }
   const failed = [...new Set(failingStreams(h))].sort()
+  // Every row is supported by each authored successful stream. A checkpoint
+  // with all subscriptions rejected has no bucket; that SDK table result is
+  // a separate data event from reporting the errors. Retirement alone sends
+  // no new table result. The shared-table contract owns this row projection.
+  const subscriptions = ownerStreams(h)
+  const required =
+    h.kind === `ownership`
+      ? [...subscriptions.left, ...subscriptions.right]
+      : subscriptions.left
+  const failedRows = required.some((stream) => !failed.includes(stream))
+    ? ids
+    : []
   // The controlled provider authors these error messages at version one.
   // The public StreamError contract preserves their category and coordinates;
   // it does not require a particular Error object identity or Error.name.
@@ -545,7 +573,7 @@ function expectedStreamCuts(
       problems: failed,
       rejectionMayOwnError: true,
       rejections,
-      rows: { left: ids },
+      rows: { left: failedRows },
     }
     const prelude: Array<StreamExpectation> =
       h.timing === `before-application` && h.baseline === `confirmed-empty`
@@ -606,6 +634,7 @@ function expectedStreamCuts(
       name: `failed`,
       outcomes: { left: [`fulfilled`], right: [`fulfilled`] },
       problems: failed,
+      rows: { left: failedRows, right: failedRows },
     },
   ]
   if (h.changeError)
@@ -613,12 +642,13 @@ function expectedStreamCuts(
       name: `changed-error`,
       outcomes: { left: [`fulfilled`], right: [`fulfilled`] },
       problems: failed,
+      rows: { left: failedRows, right: failedRows },
     })
   cuts.push({
     name: `owner-retired`,
     outcomes: { [h.retire]: [`retired`], [live]: [`fulfilled`] },
     problems: retained,
-    rows: { [live]: ids },
+    rows: { [live]: failedRows },
     activeStreams: streams[live],
   })
   if (h.recover)
@@ -877,17 +907,22 @@ export function onDemandStreamsViolations(
       )
         violations.push(`${cut.name}: ${owner} visible rows differ`)
     }
-    const problems = [...new Set(cut.problems)].sort()
     const rejected =
       wanted.rejectionMayOwnError && cut.outcomes.left === `rejected`
-    if (
-      !rejected &&
-      (problems.some((stream) => !wanted.problems.includes(stream)) ||
-        (problems.length === 0) !== (wanted.problems.length === 0))
+    // Rejection may own the stream failure instead of reporting it twice.
+    // It cannot hide an independent connection outage or unrelated cause.
+    violations.push(
+      ...streamHealthViolations(
+        {
+          streams: wanted.problems,
+          connection:
+            cut.name !== `source-cleaned-up` &&
+            streamConnectionOutage(cut.connectionInputs),
+          rejectionOwnsStreams: Boolean(rejected),
+        },
+        cut.problems,
+      ).map((failure) => `${cut.name}: ${failure}`),
     )
-      violations.push(
-        `${cut.name}: failed stream coverage ${JSON.stringify(problems)} differs from ${JSON.stringify(wanted.problems)}`,
-      )
   }
   if (cuts.length !== expected.length)
     violations.push(

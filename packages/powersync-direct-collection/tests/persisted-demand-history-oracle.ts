@@ -10,6 +10,10 @@
  * deadline, uses a zero wait, or receives a real stream rejection before a
  * 60000 ms wait. A checkpoint cannot precede its HTTP request. A pending first
  * load cannot record completion, and no history seeds coverage metadata.
+ * Failed loads vary all-subscription rejection (the sole source bucket leaves
+ * the table) and exact-only rejection (a healthy id donor retains its row).
+ * Both leave the failed exact demand without coverage, including with durable
+ * overlapping rows. Removing this axis would accept coverage from row presence.
  * Further histories supply a first remote checkpoint after reopen. Direct may
  * then replace its cache with the confirmed SDK table, ending older coverage.
  * An exact refresh must lose omitted rows; a disjoint B replacement must not
@@ -24,6 +28,7 @@ export type DirectDemandFirst =
   | `overlap`
   | `incomplete`
   | `failed`
+  | `failed-with-peer`
   | `deleted`
   | `window-covered`
   | `window-replaced`
@@ -46,6 +51,7 @@ export const directDemandHistories: Array<DirectDemandHistory> = (
     `overlap`,
     `incomplete`,
     `failed`,
+    `failed-with-peer`,
     `deleted`,
     `window-covered`,
     `window-replaced`,
@@ -100,6 +106,7 @@ export const directDemandStates = [
   `completed empty first load`,
   `pending exact first load`,
   `failed exact first load`,
+  `failed exact first load retains peer rows`,
   `overlapping first load`,
   `closed and reopened storage`,
   `exact remote refresh omits a saved row`,

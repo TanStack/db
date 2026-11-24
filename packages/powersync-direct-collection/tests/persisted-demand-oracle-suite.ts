@@ -69,7 +69,7 @@ export function registerDirectPersistedDemand(
     law: {
       statement: `An exact on-demand load that reached applied settlement and saved its rows can become ready on those durable rows after SQLite close/reopen when its own wait passes or its upstream fails. Rows from an incomplete, failed, overlapping or never-loaded demand do not certify that demand. A source delete invalidates the saved count and replacing a limited-window row invalidates its saved keys. Direct may replace its saved cache with the current SDK table after the first successful nonempty stream load. That replacement ends old coverage, including overlapping dormant demands. A fresh SDK's initial empty listener, a failed load, and an empty subscription mapper cannot authorize that eviction.`,
       authority: `docs/guides/sqlite-persistence.md#on-demand-collections-offline; docs/collections/powersync-direct-collection.md#on-demand-sync; primary packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-oracle.test.ts and its shared persisted-demand-coverage-model-oracle.ts.`,
-      limits: `${receivingPath} Nine first-run histories crossed with two held-provider waits and one early SDK stream rejection, plus first-remote-checkpoint histories for exact and ordered refresh, disjoint B eviction followed by a failed previously covered A load, and empty subscription mappers. Default single-process coordinator. No cache-claim expiry, deployed service, or multi-tab claim.`,
+      limits: `${receivingPath} Ten first-run histories crossed with two held-provider waits and one early SDK stream rejection, including a rejected exact load with nonempty healthy-donor rows. Additional histories supply exact and ordered refresh, disjoint B eviction followed by a failed previously covered A load, and empty subscription mappers. Default single-process coordinator. No cache-claim expiry, deployed service, or multi-tab claim.`,
     },
     histories: {
       enumerated: directDemandHistories,
@@ -198,6 +198,37 @@ export function registerDirectPersistedDemand(
         : pass
     },
     calibrations: [
+      {
+        name: `a failed exact demand cannot borrow its healthy donor's nonempty rows`,
+        history: { enumerated: `failed-with-peer, held, wait 0` },
+        law: `persisted demand coverage`,
+        corrupt: (trace: ReadonlyArray<Observation>) =>
+          trace.map((item) =>
+            item.checkpoint !== `result`
+              ? item
+              : {
+                  ...item,
+                  value: {
+                    ...(item.value as DirectDemandResult),
+                    cuts: (item.value as DirectDemandResult).cuts.map(
+                      (cut) => ({
+                        ...cut,
+                        preload: `fulfilled`,
+                        record: {
+                          ...cut.record,
+                          queries: {
+                            demand: {
+                              ...cut.record.queries.demand!,
+                              observed: { status: `ready`, rows: cut.durable },
+                            },
+                          },
+                        },
+                      }),
+                    ),
+                  },
+                },
+          ),
+      },
       {
         name: `an unconfirmed reset cannot authorize its own saved-cache eviction`,
         history: { enumerated: `never, held, wait 0` },

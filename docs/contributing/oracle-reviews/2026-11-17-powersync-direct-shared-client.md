@@ -194,3 +194,17 @@ d9c67665a752a8eae9d4a428b488113c89a4af60b771489455a8469780df4fe0  packages/power
 1c4e87e9220997a5c0cac245c2cc9405bf3735a022dd31cef3f98a6b8f969beb  packages/powersync-direct-collection/tests/shared-client-conformance-oracle.property.test.ts
 6c3c64b0107214f90730e756414dc2e234c10533dc1b96ad1db3c255ebb33c21  packages/browser-db-sqlite-persistence/e2e/powersync-direct-shared-client-oracle.browser.test.ts
 ```
+
+
+## 2026-11-23 correction: request-scoped subscription results
+
+The [request-fixture review](2026-11-23-powersync-request-fixtures.md) supersedes
+this record's same-response subscription-error and SDK checkpoint-event
+dependency claims. The real service resolves subscription arguments once per
+HTTP request. Transient delivery failure interrupts transport, and SDK 0.1.1
+already exposes recovery on an unchanged empty successor checkpoint. Historical
+commands and verdicts above retain their original scope and premises; they do
+not establish a missing SDK event for a legal service history. The corrected
+eager and shared-client receivers preserve recovery and distinct-error checks
+through actual successor requests. Node Map compatibility remains a separate
+SDK concern.

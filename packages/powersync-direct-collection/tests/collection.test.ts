@@ -132,7 +132,9 @@ it('can request default streams', async () => {
     include_defaults: true,
     subscriptions: [],
   })
-  service.checkpoint(['a'])
+  service.checkpoint(['a'], {
+    streams: [{ name: 'default-tasks', is_default: true, errors: [] }],
+  })
   service.put('a', 'tasks', '1', { title: 'task' })
   service.complete()
 
@@ -345,7 +347,7 @@ it('reports a stream error once while it persists, and clears it once resolved',
   await ready
 
   const failingCheckpoint = () => {
-    service.checkpoint(['a'], {
+    service.checkpoint([], {
       streams: [
         {
           name: 'tasks',
@@ -371,8 +373,8 @@ it('reports a stream error once while it persists, and clears it once resolved',
   })
   const reported = collection.health.failureReason!.errors
 
-  // The client repeats the error with each checkpoint and reconnect, which
-  // is not a new failure.
+  // Repeating identical fixture descriptions and reconnecting do not create a
+  // new failure. The real service resolves arguments once per connection.
   failingCheckpoint()
   service.close()
   await service.waitForRequest(3)
@@ -442,7 +444,12 @@ it('reports stream errors of loaded subsets until they are unloaded', async () =
   service.sync('a', 'tasks', { '1': { title: 'task', board: 'work' } })
   await loaded
 
-  service.checkpoint(['a'], {
+  // The authored configuration changes on a successor request, not midway
+  // through an existing subscription's fixed argument resolution.
+  const requestCount = service.requests.length
+  service.close()
+  await service.waitForRequest(requestCount + 1)
+  service.checkpoint([], {
     streams: [
       {
         name: 'board',
@@ -457,7 +464,13 @@ it('reports stream errors of loaded subsets until they are unloaded', async () =
   )
 
   await live.cleanup()
-  expect(collection.health.failureReason).toBeNull()
+  expect(
+    collection.health.failureReason?.errors.some(
+      (entry) => entry.cause instanceof StreamError,
+    ),
+  ).toBe(false)
+  // Retiring a query ends its stream problem, not the connection outage.
+  expect(collection.health.failureReason).not.toBeNull()
 })
 
 it('serializes loads of the same subset options, releasing one acquisition', async () => {

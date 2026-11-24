@@ -24,9 +24,9 @@
  * - a retried failure (`retry-policy`) fails the open sync response's body,
  *   as a dropped connection does. The client passes that error to every
  *   table listener and reconnects;
- * - a `delivery-error` is a complete checkpoint reporting a resolved-stream
- *   error after readiness. The next healthy checkpoint on the same response
- *   clears it, even if that checkpoint changes no row;
+ * - subscription argument errors are fixed for one HTTP request. They cannot
+ *   model the shared `delivery-error` action, which may recover on the same
+ *   subscription. Live recovery here uses retried response-body failures;
  * - a provider subscription is a stream lease (`acquireStreams`); its release
  *   is a call of the lease's `release` (LIFE-2, LIFE-10). The separate resource
  *   ledger also records the table and status listeners, whose lifetime the
@@ -174,7 +174,7 @@ class DirectProvider implements ControlledProvider {
 
   fail = async (error: Error) => {
     await this.connected()
-    this.service.checkpoint([BUCKET], {
+    this.service.checkpoint([], {
       streams: [
         {
           name: STREAM,
@@ -188,20 +188,6 @@ class DirectProvider implements ControlledProvider {
   transientFailure = async (error: Error) => {
     await this.connected()
     this.service.error(error)
-  }
-
-  deliveryError = async (error: Error) => {
-    await this.connected()
-    this.service.checkpoint([BUCKET], {
-      streams: [
-        {
-          name: STREAM,
-          is_default: false,
-          errors: [{ subscription: 0, message: error.message }],
-        },
-      ],
-    })
-    this.service.complete()
   }
 
   /** The propagation step: the client read every line, then applied it. */
@@ -223,7 +209,7 @@ function namesFailure(message: string, failure: number): boolean {
 export function directConformanceDriver(): EagerLiveSourceDriver {
   return {
     adapter: `@tanstack/powersync-direct-collection (eager)`,
-    capabilities: new Set([`retry-policy`, `delivery-error`]),
+    capabilities: new Set([`retry-policy`]),
     changeCommits: `per-batch`,
     valueKinds: jsonValueKinds,
     // The client creates the StreamError the adapter reports for a stream

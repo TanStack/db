@@ -147,18 +147,31 @@ export type SourceFifoOrderingObservation = {
   durableRows: Array<Todo>
   status: string
   pendingMarkers: number
+  publicMetadata?: unknown
+  durableMetadata?: unknown
+  durableOrder?: Array<Array<string | number>>
 }
 
 export function expectSourceFifoOrderingObservation(
   actual: SourceFifoOrderingObservation,
   expectedRows: ReadonlyArray<Todo>,
+  checkpoint = `source FIFO settled`,
+  expectedMetadata?: unknown,
+  expectedOrder?: Array<Array<string | number>>,
 ): void {
-  oracleAssertion('existing comparison at 279', () =>
+  oracleAssertion(checkpoint, () =>
     expect(actual).toEqual({
       publicRows: expectedRows,
       durableRows: expectedRows,
       status: `ready`,
       pendingMarkers: 0,
+      ...(expectedOrder === undefined ? {} : { durableOrder: expectedOrder }),
+      ...(expectedMetadata === undefined
+        ? {}
+        : {
+            publicMetadata: expectedMetadata,
+            durableMetadata: expectedMetadata,
+          }),
     }),
   )
 }
@@ -278,7 +291,14 @@ export type GeneratedPersistenceGrammar = {
   witness: GeneratedPersistenceHistory
 }
 
-export const sourceFifoOrderingAxes = [`same-key`, `disjoint`] as const
+export const sourceFifoOrderingAxes = [
+  `same-key`,
+  `disjoint`,
+  `delete-reinsert`,
+  `hydration-delete-reinsert`,
+  `failed-hydration-partial`,
+  `hydration-independent-abort`,
+] as const
 export const abortGraphAxes = [`independent`, `same-key`] as const
 export const ownerIsolationAxes = [`write`, `commit`, `truncate`] as const
 export const openTransactionBoundaryAxes = [
@@ -308,10 +328,14 @@ export const generatedPersistenceGrammars: ReadonlyArray<GeneratedPersistenceGra
       axisContribution: {
         [`same-key`]: `the later source value wins in source order`,
         disjoint: `both unrelated values and receipts survive`,
+        [`delete-reinsert`]: `a later value equal to the public baseline restores a key after its queued deletion`,
+        [`hydration-delete-reinsert`]: `a source commit during hydration cannot overtake an older normal commit`,
+        [`failed-hydration-partial`]: `failed hydration with an older disjoint commit retains unseen fields of a later partial update`,
+        [`hydration-independent-abort`]: `an aborted independent successor keeps the Collection ready and the predecessor intact`,
       },
       titleCount: 2,
       witness: {
-        axes: [`same-key`, `disjoint`],
+        axes: [...sourceFifoOrderingAxes],
         titles: [`older`, `newer`],
       },
     },
@@ -409,7 +433,7 @@ export function fullAxisOrder<Axis extends string>(
 export const generatedTitle = fc.string({ maxLength: generatedTitleMaxLength })
 
 export type SourceFifoOrderingHistory = {
-  relations: Array<`same-key` | `disjoint`>
+  relations: Array<(typeof sourceFifoOrderingAxes)[number]>
   titles: [string, string]
 }
 

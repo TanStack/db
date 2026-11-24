@@ -865,3 +865,17 @@ held cuts remain outer load admission, while unwrapped held cuts reach the
 upstream mapper and provider wait. Reconnect recovery is covered;
 same-connection recovery remains the maintainer's explicit SDK-event dependency
 and is not closed by this GREEN portfolio.
+
+
+## 2026-11-23 correction: request-scoped subscription results
+
+The [request-fixture review](2026-11-23-powersync-request-fixtures.md) supersedes
+this record's same-response subscription-error and SDK checkpoint-event
+dependency claims. The real service resolves subscription arguments once per
+HTTP request. Transient delivery failure interrupts transport, and SDK 0.1.1
+already exposes recovery on an unchanged empty successor checkpoint. Historical
+commands and verdicts above retain their original scope and premises; they do
+not establish a missing SDK event for a legal service history. The corrected
+eager and shared-client receivers preserve recovery and distinct-error checks
+through actual successor requests. Node Map compatibility remains a separate
+SDK concern.

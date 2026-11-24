@@ -2766,7 +2766,7 @@ class PersistedCollectionRuntime<
           await this.runInHydrationScope(async (adapter) => {
             if (this.recoverQueuedAfterLocalLoadFailure) {
               this.recoverQueuedAfterLocalLoadFailure = false
-              await this.recoverBufferedTransactionsAfterLocalLoadFailureUnsafe(
+              await this.applyBufferedTransactionsWithBaselineUnsafe(
                 lifecycleGeneration,
                 adapter,
               )
@@ -3417,7 +3417,25 @@ class PersistedCollectionRuntime<
     if (failure) return Promise.reject(failure.error)
     transaction.admittedStorageCollectionId = this.storageCollectionId
     return this.applyMutex.run(async () => {
-      await this.applyBufferedSyncTransactionUnsafe(transaction)
+      if (transaction.hydrationSequence === undefined) {
+        await this.applyBufferedSyncTransactionUnsafe(transaction)
+      } else {
+        // The read may have failed before installing the partial update's
+        // baseline. Reconstruct it at this transaction's actual FIFO turn,
+        // after every older source write, using the existing replay rule.
+        try {
+          this.throwIfTerminal()
+          await this.runInHydrationScope((adapter) =>
+            this.applyBufferedTransactionsWithBaselineUnsafe(
+              transaction.lifecycleGeneration,
+              adapter,
+              [transaction],
+            ),
+          )
+        } catch (error) {
+          throw this.classifyBufferedTransactionFailure(transaction, error)
+        }
+      }
     })
   }
 
@@ -3997,7 +4015,7 @@ class PersistedCollectionRuntime<
         // FIFO cut instead of treating the snapshot as a successful load.
         this.hydratingGeneration = config.lifecycleGeneration
         try {
-          await this.recoverBufferedTransactionsAfterLocalLoadFailureUnsafe(
+          await this.applyBufferedTransactionsWithBaselineUnsafe(
             config.lifecycleGeneration,
             adapter,
           )
@@ -4026,9 +4044,10 @@ class PersistedCollectionRuntime<
     return true
   }
 
-  private async recoverBufferedTransactionsAfterLocalLoadFailureUnsafe(
+  private async applyBufferedTransactionsWithBaselineUnsafe(
     lifecycleGeneration: number,
     adapter: HydrationPersistenceAdapter,
+    transactions = this.queuedHydrationTransactions,
   ): Promise<void> {
     let snapshotRows:
       Map<TKey, { key: TKey; value: T; metadata?: unknown }> | undefined
@@ -4036,11 +4055,12 @@ class PersistedCollectionRuntime<
     const recoveredPresence = new Map<TKey, RecoveryPresence>()
     let snapshotInvalidatedByTruncate = false
 
-    while (this.queuedHydrationTransactions.length > 0) {
-      const transaction = this.queuedHydrationTransactions.shift()
+    while (transactions.length > 0) {
+      const transaction = transactions.shift()
       if (!transaction) continue
 
       try {
+        this.throwIfTerminal()
         this.throwIfLifecycleReplaced(lifecycleGeneration)
         const baselineRows = new Map<
           TKey,
@@ -4140,10 +4160,10 @@ class PersistedCollectionRuntime<
         }
       } catch (error) {
         transaction.rejectApplied?.(error)
-        for (const abandoned of this.queuedHydrationTransactions) {
+        for (const abandoned of transactions) {
           abandoned.rejectApplied?.(error)
         }
-        this.queuedHydrationTransactions.length = 0
+        transactions.length = 0
         throw error
       }
     }
@@ -6252,7 +6272,13 @@ function createWrappedSyncConfig<
       ) => {
         // A transaction binds to a storage read when it commits (decision 12).
         if (transaction.internal || !runtime.isHydratingNow()) return
-        transaction.queuedBecauseHydrating = true
+        // A commit cannot replay inside a read ahead of an older source
+        // commit already waiting for its ordinary mutex turn. Keep the read
+        // binding so a diverted partial update still receives its baseline.
+        transaction.queuedBecauseHydrating =
+          !pendingPublicationTransactions.some(
+            (older) => !older.queuedBecauseHydrating,
+          )
         transaction.hydrationSequence = runtime.getHydrationSequence()
       }
       const assertHydrationSequenceCurrent = (

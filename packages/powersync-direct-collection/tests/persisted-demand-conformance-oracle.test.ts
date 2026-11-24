@@ -37,6 +37,6 @@ registerDirectPersistedDemand(
       `src/subsets.ts#createSubsetHandlers`,
       `../db-sqlite-persistence-core/src/persisted.ts`,
     ],
-    receivingPath: `Installed PowerSync standalone SDK over controlled HTTP and real disk-backed node:sqlite connections. Node 26 runs the SDK's native iterator API; this does not claim supported older Node compatibility.`,
+    receivingPath: `Installed PowerSync standalone SDK over controlled HTTP and real disk-backed node:sqlite connections on Node 22 with the package's test-only Map shims. Consumer compatibility still needs the separate SDK release.`,
   },
 )

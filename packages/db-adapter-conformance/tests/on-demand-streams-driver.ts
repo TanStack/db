@@ -22,6 +22,10 @@ import {
 import { streamRows } from './on-demand-streams-oracle'
 import type { HealthReportCounts } from './health-report-handoff'
 import type {
+  StreamConnectionInput,
+  StreamProblem,
+} from './stream-health-oracle'
+import type {
   CollectionConfig,
   LoadSubsetOptions,
   SyncAppliedReceipt,
@@ -53,8 +57,9 @@ export type OnDemandStreamsSource = {
   deliveredErrors: () => number
   distinctErrorIdentities: () => number
   fulfilledProviderWaits: () => number
-  errorStream: (cause: unknown) => string
+  describeProblem: (cause: unknown) => StreamProblem
   providerState: () => string
+  connectionInputs: () => ReadonlyArray<StreamConnectionInput>
   activeStreams: () => ReadonlyArray<string>
   acquiredLeases: () => number
   forwardedSubscriptions: () => ReadonlyArray<AuthoredStream>
@@ -187,7 +192,7 @@ export async function observeOnDemandStreams(
   const record = (name: string) => {
     const problems =
       collection.health.failureReason?.errors.map((error) =>
-        provider.errorStream(error.cause),
+        provider.describeProblem(error.cause),
       ) ?? []
     cuts.push({
       name,
@@ -216,7 +221,10 @@ export async function observeOnDemandStreams(
           .filter((owner) => queries[owner])
           .map((owner) => [owner, queries[owner]!.status]),
       ),
-      providerState: provider.providerState(),
+      ...(name === `source-cleaned-up`
+        ? { providerState: provider.providerState() }
+        : {}),
+      connectionInputs: [...provider.connectionInputs()],
       sourceStatus: collection.status,
       sourceError: Boolean(collection.health.error),
       activeStreams: [...provider.activeStreams()],

@@ -146,6 +146,53 @@ describe(`generated persistence durability oracles`, () => {
           ),
       },
       {
+        name: `source FIFO missing restored key`,
+        reject: () =>
+          expectSourceFifoOrderingObservation(
+            {
+              publicRows: [],
+              durableRows: [],
+              status: `ready`,
+              pendingMarkers: 0,
+            },
+            [{ id: `shared`, title: `restored` }],
+          ),
+      },
+      {
+        name: `source FIFO disjoint commits persist in reverse order`,
+        reject: () =>
+          expectSourceFifoOrderingObservation(
+            {
+              publicRows: [],
+              durableRows: [],
+              status: `ready`,
+              pendingMarkers: 0,
+              durableOrder: [[`newer`], [`older`]],
+            },
+            [],
+            `source FIFO order`,
+            undefined,
+            [[`older`], [`newer`]],
+          ),
+      },
+      {
+        name: `source FIFO partial update loses unseen durable fields`,
+        reject: () =>
+          expectSourceFifoOrderingObservation(
+            {
+              publicRows: [{ id: `shared`, title: `patch` }],
+              durableRows: [{ id: `shared`, title: `patch`, detail: `kept` }],
+              status: `ready`,
+              pendingMarkers: 0,
+              publicMetadata: undefined,
+              durableMetadata: { cached: true },
+            },
+            [{ id: `shared`, title: `patch`, detail: `kept` }],
+            `source FIFO baseline`,
+            { cached: true },
+          ),
+      },
+      {
         name: `abort-graph independent sibling inherits the abort`,
         reject: () =>
           expectAbortGraphObservation(
