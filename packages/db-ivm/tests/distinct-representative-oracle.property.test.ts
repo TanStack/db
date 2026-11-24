@@ -10,6 +10,8 @@
  * eight slots and twelve random tail worlds; no external source scheduling.
  */
 import { D2 } from '../src/d2.js'
+import { MultiSet } from '../src/multiset.js'
+import { output as outputOperator } from '../src/operators/output.js'
 import { hash } from '../src/hashing/hash.js'
 import { distinct } from '../src/operators/distinct.js'
 import { oracleProperty } from '../../db/tests/oracle-property.js'
@@ -25,6 +27,7 @@ import {
   checkDistinctCampaign,
   driveDistinctChecked,
 } from './distinct-property-oracle.js'
+import { OracleComparisonMismatch } from './incrementalization-law-oracle.js'
 import type {
   GeneratedHistories,
   OraclePropertyOptions,
@@ -37,6 +40,35 @@ import type {
 import type { Weighted } from './incrementalization-law-oracle.js'
 
 const family = distinctCollisionFamily(hash)
+
+// The visible payload for each selection in the accumulated output.
+function shownRows(
+  output: Weighted<[number, DistinctBucketRow]>,
+): Map<number, string> {
+  const counts = new Map<string, number>()
+  for (const [[key, row], weight] of output) {
+    const id = JSON.stringify([key, row])
+    counts.set(id, (counts.get(id) ?? 0) + weight)
+  }
+  const shown = new Map<number, string>()
+  for (const [id, count] of counts) {
+    if (count === 0) continue
+    const row = (JSON.parse(id) as [number, DistinctBucketRow])[1]
+    shown.set(row.member, JSON.stringify(row))
+  }
+  return shown
+}
+
+// Slots holding each payload.
+function holders(source: Map<number, DistinctBucketRow>) {
+  const slots = new Map<string, Set<number>>()
+  for (const [slot, row] of source) {
+    const id = JSON.stringify(row)
+    if (!slots.has(id)) slots.set(id, new Set())
+    slots.get(id)!.add(slot)
+  }
+  return slots
+}
 
 function drive(worlds: DistinctBucketHistory, split: boolean) {
   const graph = new D2()
@@ -58,9 +90,32 @@ function drive(worlds: DistinctBucketHistory, split: boolean) {
   const output: Weighted<[number, DistinctBucketRow]> = []
   const source = new Map<number, DistinctBucketRow>()
   let previous: Array<DistinctBucketRow> = []
+  let shown = new Map<number, string>()
+  let held = new Map<string, Set<number>>()
   const check = (checkpoint: string) => {
     for (const message of reader.drain()) output.push(...message.getInner())
     checkDistinctRepresentatives(output, [...source.values()], checkpoint)
+    // A shown payload whose every slot still holds it is still supported by
+    // the input it came from, so it stays.
+    const nowShown = shownRows(output)
+    const nowHeld = holders(source)
+    for (const [member, row] of shown) {
+      const before = held.get(row) ?? new Set<number>()
+      const after = nowHeld.get(row) ?? new Set<number>()
+      if (
+        [...before].every((slot) => after.has(slot)) &&
+        nowShown.get(member) !== row
+      )
+        throw new OracleComparisonMismatch(
+          `distinct representative moved while still supported at ${checkpoint}: ${JSON.stringify({ member, before: row, after: nowShown.get(member) })}`,
+          `distinct representative stability`,
+          checkpoint,
+          nowShown.get(member),
+          row,
+        )
+    }
+    shown = nowShown
+    held = nowHeld
   }
   for (const [checkpoint, world] of worlds.entries()) {
     const changes: Weighted<[number, DistinctBucketRow]> = []
@@ -107,7 +162,7 @@ function representativeOptions(split: boolean): CellOptions {
   >()
   return {
     law: {
-      statement: `The full accumulated distinct output has exactly one unit contribution for each supported selection, no negative residues, distinct simultaneous keys, and only payloads a source row still holds.`,
+      statement: `The full accumulated distinct output has exactly one unit contribution for each supported selection, no negative residues, distinct simultaneous keys, and only payloads a source row still holds; a shown payload stays while the inputs that hold it do.`,
       authority: `docs/guides/live-queries.md#distinct; packages/db/src/query/live/ARCHITECTURE.md, Weighted relations and public keys; 2026-10-30 distinct provenance review.`,
       limits: `Four immutable native-collision selections plus an anchor; variants 0..3, at most eight slots and twelve random suffix worlds. Choice among live representatives and cross-build key stability remain unspecified; no external source scheduling.`,
     },
@@ -208,6 +263,73 @@ oracleProperty<
   model: (): ReadonlyArray<string> => [],
   driver: ({ worlds }, observe) => {
     driveDistinctChecked(() => drive(worlds, false), observe)
+  },
+  check: checkDistinctCampaign,
+})
+
+// Rows whose own hashes collide share a support bucket. Retiring the shown one
+// must leave the other supporting the selection, and the output must follow it.
+// The collision is searched with the real digest, as distinctCollisionFamily
+// does for selections.
+function driveSupportCollision() {
+  const [retired, live] = family as Array<[unknown, unknown]>
+  const graph = new D2()
+  const input = graph.newInput<[unknown, unknown]>()
+  const net = new Map<unknown, number>()
+  input.pipe(
+    distinct(() => `one selection`),
+    outputOperator((message) => {
+      for (const [[, row], weight] of message.getInner())
+        net.set(row, (net.get(row) ?? 0) + weight)
+    }),
+  )
+  graph.finalize()
+  // One unit row, drawn from the payloads still live.
+  const check = (checkpoint: string, allowed: Array<unknown>) => {
+    const rows = [...net].filter(([, weight]) => weight !== 0)
+    const ok =
+      allowed.length === 0
+        ? rows.length === 0
+        : rows.length === 1 &&
+          rows[0]![1] === 1 &&
+          allowed.includes(rows[0]![0])
+    if (!ok)
+      throw new OracleComparisonMismatch(
+        `distinct support collision diverged at ${checkpoint}`,
+        `distinct representative contribution`,
+        checkpoint,
+        rows,
+        allowed,
+      )
+  }
+  input.sendData(
+    new MultiSet([
+      [retired!, 1],
+      [live!, 1],
+    ]),
+  )
+  graph.run()
+  check(`both rows`, [retired![1], live![1]])
+  input.sendData(new MultiSet([[retired!, -1]]))
+  graph.run()
+  check(`colliding row retired`, [live![1]])
+  input.sendData(new MultiSet([[live!, -1]]))
+  graph.run()
+  check(`empty`, [])
+}
+
+oracleProperty<{ name: string }, ReadonlyArray<string>>({
+  id: `ivm.distinct-support-collisions`,
+  law: {
+    ...cell0.law,
+    limits: `One verified pair of input rows with the same digest under one selection; no generated histories.`,
+  },
+  owns: [`src/operators/distinct.ts#distinct`],
+  histories: [{ name: `a retired row whose hash collides with a live one` }],
+  label: ({ name }) => name,
+  model: (): ReadonlyArray<string> => [],
+  driver: (_plan, observe) => {
+    driveDistinctChecked(driveSupportCollision, observe)
   },
   check: checkDistinctCampaign,
 })

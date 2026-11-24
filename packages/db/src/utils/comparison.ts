@@ -420,7 +420,7 @@ function holdsValueClass(value: unknown): boolean {
  * Order two values when at least one holds a value class. Query identity hashes
  * plain objects by shape, so this order must not read an object's reference:
  * inside an array, objects without a value class keep the native comparison,
- * and an array sorts after any such object.
+ * and an array sorts after any value that is not an array.
  */
 function compareHoldingValueClass(
   a: unknown,
@@ -449,15 +449,9 @@ function compareHoldingValueClass(
     partners.delete(b)
     return Math.sign(a.length - b.length)
   }
-  if (aIsArray !== bIsArray) {
-    const other = aIsArray ? b : a
-    if (
-      typeof other === `object` &&
-      serializedClassValue(other as object) === undefined
-    ) {
-      return aIsArray ? 1 : -1
-    }
-  }
+  // The sort order already puts an array after a primitive or a value class;
+  // after another object it would read references.
+  if (aIsArray !== bIsArray) return aIsArray ? 1 : -1
   return Math.sign(ascComparator(a, b, VALUE_CLASS_ORDER))
 }
 

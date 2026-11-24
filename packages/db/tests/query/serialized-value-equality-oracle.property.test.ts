@@ -89,6 +89,7 @@
  * semantics, and classes whose `toJSON()` throws or returns a non-JSON value.
  */
 import { fc } from '@fast-check/vitest'
+import { Temporal } from 'temporal-polyfill'
 import { describe, expect, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -112,7 +113,10 @@ import { createEffect } from '../../src/query/effect.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
+import { compileSingleRowExpression } from '../../src/query/compiler/evaluators.js'
+import { getRuntimeReferenceIdentity } from '../../src/query/runtime-reference-identity.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../../src/utils.js'
+import { ascComparator } from '../../src/utils/comparison.js'
 import { oracleProperty } from '../oracle-config.js'
 import {
   forwardAssertionJudgment,
@@ -1708,6 +1712,514 @@ describe(`value classes compare by their serialized value`, () => {
     driver: (plan: { history: History }, observe) =>
       recordAssertionJudgment(property, plan, observe, () =>
         runHistory(plan.history, (state) => observe(`reach`, state)),
+      ),
+    check: forwardAssertionJudgment,
+  })
+})
+
+// Range predicates order a value class by its serialized value. Inside an
+// array, a value class orders element by element: a null sorts first, a value
+// class sorts after a primitive and before any other object, and a nested
+// array sorts after any value that is not an array. Values that hold no
+// value class keep the native operators, including their throws. The model
+// recomputes this order from term specs; it never reads an instance.
+type OrderTerm =
+  | { k: `num`; v: number }
+  | { k: `text`; v: string }
+  | { k: `null` }
+  | { k: `record`; table: Table; id: `a` | `b` }
+  | { k: `shaped`; table: Table; id: `a` | `b`; idFirst: boolean }
+  | { k: `leaf`; shape: number }
+  | { k: `bytes` }
+  | { k: `date`; day: number }
+  | { k: `array`; items: Array<OrderTerm> }
+  // An array whose last element is the array itself.
+  | { k: `loop`; items: Array<OrderTerm> }
+type OrderHistory = { pairs: Array<[OrderTerm, OrderTerm]> }
+
+const orderStates = [
+  // A value class met an object that has none.
+  `class-before-object`,
+  // A value class met a primitive.
+  `primitive-before-class`,
+  // A nested array met an object without a value class.
+  `array-after-object`,
+  // An array pair came up again inside its own comparison.
+  `cycle-closed`,
+  // A null met a non-null element.
+  `null-element`,
+  // Values without a value class used the native operators.
+  `native-order`,
+  // The native operators threw for a Temporal value.
+  `native-throws`,
+  // Two Temporal values compared.
+  `temporal-pair`,
+  // Equal serialized records spelled their keys in different orders.
+  `shaped-key-order`,
+  // A typed array subclass with toJSON() was compared.
+  `typed-array-excluded`,
+  // The sort order compared two plain objects.
+  `objects-sorted-apart`,
+] as const
+type OrderState = (typeof orderStates)[number]
+
+/** A value class whose toJSON() returns a record, keys in either order. */
+class ShapedRef {
+  readonly rank = nextRank++
+  constructor(
+    readonly table: string,
+    readonly id: string,
+    readonly idFirst: boolean,
+  ) {}
+  toJSON() {
+    return this.idFirst
+      ? { id: this.id, table: this.table }
+      : { table: this.table, id: this.id }
+  }
+  valueOf(): number {
+    return this.rank
+  }
+}
+
+/** A typed array subclass with toJSON(): binary data keeps its own rule. */
+class RecordBytes extends Uint8Array {
+  toJSON(): string {
+    return `user:a`
+  }
+}
+
+function materializeTerm(term: OrderTerm): unknown {
+  switch (term.k) {
+    case `num`:
+    case `text`:
+      return term.v
+    case `null`:
+      return null
+    case `record`:
+      return new RecordRef(term.table, term.id)
+    case `shaped`:
+      return new ShapedRef(term.table, term.id, term.idFirst)
+    case `leaf`:
+      return { shape: term.shape }
+    case `bytes`:
+      return new RecordBytes(0)
+    case `date`:
+      return Temporal.PlainDate.from({ year: 2024, month: 1, day: term.day })
+    case `array`:
+      return term.items.map(materializeTerm)
+    case `loop`: {
+      const array: Array<unknown> = term.items.map(materializeTerm)
+      array.push(array)
+      return array
+    }
+  }
+}
+
+class ModelThrows extends Error {}
+
+const isArrayTerm = (term: OrderTerm) => term.k === `array` || term.k === `loop`
+const isClassTerm = (term: OrderTerm) =>
+  term.k === `record` || term.k === `shaped`
+const isObjectTerm = (term: OrderTerm) =>
+  term.k !== `num` && term.k !== `text` && term.k !== `null`
+const elementsOf = (term: OrderTerm): Array<OrderTerm> =>
+  term.k === `loop`
+    ? [...term.items, term]
+    : term.k === `array`
+      ? term.items
+      : []
+const signOf = (value: number) => (value < 0 ? -1 : value > 0 ? 1 : 0)
+// The serialized value, with record keys sorted.
+const serializedTerm = (term: OrderTerm) =>
+  term.k === `record`
+    ? JSON.stringify(`${term.table}:${term.id}`)
+    : term.k === `shaped`
+      ? JSON.stringify({ id: term.id, table: term.table })
+      : undefined
+
+function holdsClass(term: OrderTerm, seen = new Set([term])): boolean {
+  if (isClassTerm(term)) return true
+  for (const element of elementsOf(term)) {
+    if (isClassTerm(element)) return true
+    if (isArrayTerm(element) && !seen.has(element)) {
+      seen.add(element)
+      if (holdsClass(element, seen)) return true
+    }
+  }
+  return false
+}
+
+// What `String(value)` gives: Array.prototype.join prints a null as empty and
+// a cycle back into an array being joined as empty.
+function nativeText(term: OrderTerm, joining: Set<OrderTerm>): string {
+  switch (term.k) {
+    case `num`:
+      return String(term.v)
+    case `text`:
+      return term.v
+    case `leaf`:
+      return `[object Object]`
+    case `date`:
+      return `2024-01-0${term.day}`
+    case `array`:
+    case `loop`: {
+      if (joining.has(term)) return ``
+      joining.add(term)
+      const text = elementsOf(term)
+        .map((element) => nativeText(element, joining))
+        .join(`,`)
+      joining.delete(term)
+      return text
+    }
+    default:
+      // null, typed arrays (empty here) and never a value class.
+      return ``
+  }
+}
+
+// The relational operators: objects become primitives through valueOf, which
+// a Temporal value throws from, then toString.
+function nativeOrder(left: OrderTerm, right: OrderTerm): number {
+  const primitive = (term: OrderTerm): string | number => {
+    if (term.k === `num` || term.k === `text`) return term.v
+    if (term.k === `date`) throw new ModelThrows()
+    return nativeText(term, new Set())
+  }
+  const a = primitive(left)
+  const b = primitive(right)
+  if (typeof a === `string` && typeof b === `string`)
+    return a < b ? -1 : a > b ? 1 : 0
+  const x = Number(a)
+  const y = Number(b)
+  return x < y ? -1 : x > y ? 1 : 0
+}
+
+function modelOrder(
+  left: OrderTerm,
+  right: OrderTerm,
+  reach: (state: OrderState) => void,
+): number {
+  const nonNull = (
+    a: OrderTerm,
+    b: OrderTerm,
+    active: Map<OrderTerm, Set<OrderTerm>>,
+  ): number => {
+    if (a.k === `bytes` || b.k === `bytes`) reach(`typed-array-excluded`)
+    if (a.k === `date` && b.k === `date`) {
+      reach(`temporal-pair`)
+      return signOf(a.day - b.day)
+    }
+    if (holdsClass(a) || holdsClass(b)) return holding(a, b, active)
+    reach(`native-order`)
+    try {
+      return nativeOrder(a, b)
+    } catch (error) {
+      reach(`native-throws`)
+      throw error
+    }
+  }
+  const holding = (
+    a: OrderTerm,
+    b: OrderTerm,
+    active: Map<OrderTerm, Set<OrderTerm>>,
+  ): number => {
+    if (isArrayTerm(a) && isArrayTerm(b)) {
+      let partners = active.get(a)
+      if (partners === undefined) active.set(a, (partners = new Set()))
+      if (partners.has(b)) {
+        reach(`cycle-closed`)
+        return 0
+      }
+      partners.add(b)
+      const aItems = elementsOf(a)
+      const bItems = elementsOf(b)
+      for (
+        let index = 0;
+        index < Math.min(aItems.length, bItems.length);
+        index++
+      ) {
+        const x = aItems[index]!
+        const y = bItems[index]!
+        let result: number
+        if (x.k === `null` || y.k === `null`) {
+          if (x.k !== y.k) reach(`null-element`)
+          result = x.k === y.k ? 0 : x.k === `null` ? -1 : 1
+        } else result = nonNull(x, y, active)
+        if (result !== 0) return result
+      }
+      partners.delete(b)
+      return signOf(aItems.length - bItems.length)
+    }
+    if (isArrayTerm(a) !== isArrayTerm(b)) {
+      if (isObjectTerm(isArrayTerm(a) ? b : a)) reach(`array-after-object`)
+      return isArrayTerm(a) ? 1 : -1
+    }
+    const aText = serializedTerm(a)
+    const bText = serializedTerm(b)
+    if (aText !== undefined && bText !== undefined) {
+      if (a.k === `shaped` && b.k === `shaped` && a.idFirst !== b.idFirst)
+        reach(`shaped-key-order`)
+      return aText < bText ? -1 : aText > bText ? 1 : 0
+    }
+    // Neither is an array and one holds a value class, so it is one.
+    const classSide = aText !== undefined ? a : b
+    const other = classSide === a ? b : a
+    const classFirst = isObjectTerm(other)
+    reach(classFirst ? `class-before-object` : `primitive-before-class`)
+    return (classSide === a) === classFirst ? -1 : 1
+  }
+  return nonNull(left, right, new Map())
+}
+
+// Records over primitive leaves, so a constructed history can be taken back.
+const orderTables = fc.constantFrom<Table>(`user`, `org`)
+const orderIds = fc.constantFrom<`a` | `b`>(`a`, `b`)
+const orderLeaf = fc.oneof(
+  fc.record({
+    k: fc.constant(`num` as const),
+    v: fc.integer({ min: 0, max: 12 }),
+  }),
+  fc.record({
+    k: fc.constant(`text` as const),
+    v: fc.constantFrom(`a`, `b`, `user:a`, `org:a`),
+  }),
+  fc.record({ k: fc.constant(`null` as const) }),
+  fc.record({
+    k: fc.constant(`record` as const),
+    table: orderTables,
+    id: orderIds,
+  }),
+  fc.record({
+    k: fc.constant(`shaped` as const),
+    table: orderTables,
+    id: orderIds,
+    idFirst: fc.boolean(),
+  }),
+  fc.record({
+    k: fc.constant(`leaf` as const),
+    shape: fc.integer({ min: 0, max: 1 }),
+  }),
+  fc.record({ k: fc.constant(`bytes` as const) }),
+  fc.record({
+    k: fc.constant(`date` as const),
+    day: fc.integer({ min: 1, max: 3 }),
+  }),
+)
+const { orderTerm } = fc.letrec<{
+  orderTerm: OrderTerm
+  orderArray: OrderTerm
+  orderLoop: OrderTerm
+}>((tie) => ({
+  orderTerm: fc.oneof(
+    { depthSize: `small` },
+    orderLeaf,
+    tie(`orderArray`),
+    tie(`orderLoop`),
+  ),
+  orderArray: fc.record({
+    k: fc.constant(`array` as const),
+    items: fc.array(tie(`orderTerm`), { maxLength: 3 }),
+  }),
+  orderLoop: fc.record({
+    k: fc.constant(`loop` as const),
+    items: fc.array(tie(`orderTerm`), { maxLength: 2 }),
+  }),
+}))
+const orderOperand = orderTerm.filter((term) => term.k !== `null`)
+const MAX_ORDER_PAIRS = 6
+const orderHistoryArbitrary: fc.Arbitrary<OrderHistory> = fc.record({
+  pairs: fc.array(fc.tuple(orderOperand, orderOperand), {
+    minLength: 1,
+    maxLength: MAX_ORDER_PAIRS,
+  }),
+})
+// A constructed history keeps the generated pairs that still fit.
+const withPairs = (
+  pairs: OrderHistory[`pairs`],
+  generated: OrderHistory,
+): OrderHistory => ({
+  pairs: [...pairs, ...generated.pairs].slice(0, MAX_ORDER_PAIRS),
+})
+
+const orderProperty = `serialized-value.array-order`
+const rangeEvaluators = ([`gt`, `gte`, `lt`, `lte`] as const).map(
+  (name) =>
+    [
+      name,
+      compileSingleRowExpression(
+        new Func(name, [new PropRef([`a`]), new PropRef([`b`])]),
+      ),
+    ] as const,
+)
+const rangeHolds = {
+  gt: (order: number) => order > 0,
+  gte: (order: number) => order >= 0,
+  lt: (order: number) => order < 0,
+  lte: (order: number) => order <= 0,
+}
+
+function identifyObjects(value: unknown, seen = new Set<object>()): void {
+  if (typeof value !== `object` || value === null || seen.has(value)) return
+  seen.add(value)
+  getRuntimeReferenceIdentity(value)
+  if (Array.isArray(value))
+    for (const item of value) identifyObjects(item, seen)
+}
+
+function runOrderHistory(
+  history: OrderHistory,
+  reach: (state: OrderState) => void,
+) {
+  // Each pair, and each left operand against a fresh copy of itself.
+  const pairs = history.pairs.flatMap(([left, right]) => [
+    [left, right] as const,
+    [left, left] as const,
+  ])
+  for (const [position, [left, right]] of pairs.entries()) {
+    let order: number | undefined
+    try {
+      order = modelOrder(left, right, reach)
+    } catch (error) {
+      if (!(error instanceof ModelThrows)) throw error
+    }
+    const row = { a: materializeTerm(left), b: materializeTerm(right) }
+    // The right operand's objects get runtime identities first, so an order
+    // that read references would put a right-hand object first.
+    identifyObjects(row.b)
+    identifyObjects(row.a)
+    if (left.k === `leaf` && right.k === `leaf`) {
+      // Two distinct objects without a value class never share a position.
+      reach(`objects-sorted-apart`)
+      const forward = ascComparator(row.a, row.b, DEFAULT_COMPARE_OPTIONS)
+      const backward = ascComparator(row.b, row.a, DEFAULT_COMPARE_OPTIONS)
+      expect(Math.sign(forward), `pair ${position}: sort order`).not.toBe(0)
+      expect(Math.sign(backward), `pair ${position}: sort order`).toBe(
+        -Math.sign(forward),
+      )
+    }
+    for (const [name, evaluate] of rangeEvaluators) {
+      const label = `pair ${position}: ${name}`
+      if (order === undefined) expect(() => evaluate(row), label).toThrow()
+      else expect(evaluate(row), label).toBe(rangeHolds[name](order))
+    }
+  }
+}
+
+const record = (table: Table, id: `a` | `b`): OrderTerm => ({
+  k: `record`,
+  table,
+  id,
+})
+const array = (...items: Array<OrderTerm>): OrderTerm => ({ k: `array`, items })
+const num = (v: number): OrderTerm => ({ k: `num`, v })
+const leaf: OrderTerm = { k: `leaf`, shape: 0 }
+const date = (day: number): OrderTerm => ({ k: `date`, day })
+
+describe(`value classes order arrays by their serialized value`, () => {
+  oracleProperty({
+    id: orderProperty,
+    law: {
+      statement: `Range predicates over arrays that hold a value class compare element by element: a null first, a primitive before a value class, a value class by its serialized value with record keys sorted and before any other object, and a nested array after any value that is not an array; a pair met again inside its own comparison is equal. A Temporal pair compares as Temporal values, and values that hold no value class, including typed arrays and Temporal values with toJSON(), keep the native operators and their throws. The sort order keeps two distinct plain objects apart.`,
+      authority: `Issue #2459, the "Value classes" section of docs/guides/live-queries.md, and the compareValues contract in packages/db/src/utils/comparison.ts.`,
+      limits: `Numbers 0..12, four texts, records and record-shaped toJSON() classes over two tables and two IDs, one plain object shape, an empty Uint8Array subclass, three PlainDates, null elements, and arrays of up to three terms nested and self-referencing up to fast-check's small depth; one to six operand pairs plus each left operand against a copy. Arrays shared at several depths are covered by fixed tests.`,
+    },
+    owns: [
+      'src/utils/comparison.ts#compareValues',
+      'src/utils/comparison.ts#serializedClassValue',
+    ],
+    histories: {
+      arbitrary: orderHistoryArbitrary,
+      runs: 100,
+      fixedSeeds: [2459],
+      states: orderStates,
+      constructed: [
+        {
+          name: `a value class sits between primitives and other objects`,
+          enters: [
+            `class-before-object`,
+            `primitive-before-class`,
+            `typed-array-excluded`,
+            `native-order`,
+          ],
+          build: (generated): OrderHistory =>
+            withPairs(
+              [
+                [array(record(`user`, `a`)), array(leaf)],
+                [array(num(3)), array(record(`org`, `b`))],
+                [array({ k: `bytes` }), array(num(0))],
+                [array({ k: `bytes` }, record(`user`, `a`)), array(num(0))],
+              ],
+              generated,
+            ),
+        },
+        {
+          name: `nested arrays follow objects, nulls lead and cycles close`,
+          enters: [`array-after-object`, `cycle-closed`, `null-element`],
+          build: (generated): OrderHistory =>
+            withPairs(
+              [
+                [array(array(record(`user`, `a`))), array(leaf)],
+                [
+                  { k: `loop`, items: [record(`user`, `a`)] },
+                  { k: `loop`, items: [record(`user`, `a`)] },
+                ],
+                [
+                  array({ k: `null` }, record(`user`, `b`)),
+                  array(num(1), record(`user`, `b`)),
+                ],
+              ],
+              generated,
+            ),
+        },
+        {
+          name: `values without a value class keep the native operators`,
+          enters: [
+            `native-order`,
+            `native-throws`,
+            `temporal-pair`,
+            `objects-sorted-apart`,
+          ],
+          build: (generated): OrderHistory =>
+            withPairs(
+              [
+                [array(leaf, num(2)), array(leaf, num(10))],
+                [array(array(leaf), num(2)), array(array(leaf), num(10))],
+                [date(1), leaf],
+                [
+                  array(date(1), record(`org`, `a`)),
+                  array(date(2), record(`org`, `a`)),
+                ],
+                [array(date(1)), array(num(5))],
+                [leaf, { k: `leaf`, shape: 1 }],
+              ],
+              generated,
+            ),
+        },
+        {
+          name: `a serialized record ignores its key order`,
+          enters: [`shaped-key-order`],
+          build: (generated): OrderHistory =>
+            withPairs(
+              [
+                [
+                  { k: `shaped`, table: `user`, id: `a`, idFirst: true },
+                  { k: `shaped`, table: `user`, id: `a`, idFirst: false },
+                ],
+                [
+                  array({ k: `shaped`, table: `org`, id: `b`, idFirst: false }),
+                  array(record(`org`, `b`)),
+                ],
+              ],
+              generated,
+            ),
+        },
+      ],
+    },
+    resolve: (history) => ({ history }),
+    model: recordedAssertionJudgment,
+    driver: (plan: { history: OrderHistory }, observe) =>
+      recordAssertionJudgment(orderProperty, plan, observe, () =>
+        runOrderHistory(plan.history, (state) => observe(`reach`, state)),
       ),
     check: forwardAssertionJudgment,
   })

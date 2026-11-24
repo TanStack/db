@@ -1204,7 +1204,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/serialized-value-equality-oracle.property.test.ts`,
     `serialized-value`,
-    `query-equality`,
+    `query-equality array-order`,
   ],
   [
     `trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
@@ -2109,6 +2109,7 @@ const replayTestNames = new Map([
     `ir-identity.union-output-aliases`,
     `ir-identity.reference-queries`,
     `serialized-value.query-equality`,
+    `serialized-value.array-order`,
     `query.public-container-copy`,
     `query-identity.compiled-output`,
     `query-identity.equality-partition`,
