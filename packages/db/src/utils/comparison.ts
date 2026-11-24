@@ -271,7 +271,13 @@ function normalizeBinary(value: Uint8Array): string {
  * and plain records and arrays are not value classes. Record keys
  * in the serialized value are sorted, so key order does not change it.
  */
+// Value classes must not change while a query or row holds them, so each is
+// serialized once. A throwing toJSON() caches nothing and throws again.
+const serializedClassValues = new WeakMap<object, string | undefined>()
+
 export function serializedClassValue(value: object): string | undefined {
+  const cached = serializedClassValues.get(value)
+  if (cached !== undefined) return cached
   // Excluded objects keep their own rules, so their `toJSON` is never read: it
   // can be an accessor that throws.
   if (
@@ -287,7 +293,7 @@ export function serializedClassValue(value: object): string | undefined {
   ) {
     return undefined
   }
-  return JSON.stringify(value, (_key, field: unknown) =>
+  const serialized = JSON.stringify(value, (_key, field: unknown) =>
     isPlainObject(field)
       ? Object.fromEntries(
           Object.keys(field)
@@ -296,6 +302,8 @@ export function serializedClassValue(value: object): string | undefined {
         )
       : field,
   )
+  serializedClassValues.set(value, serialized)
+  return serialized
 }
 
 /**

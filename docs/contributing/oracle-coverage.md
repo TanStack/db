@@ -2489,7 +2489,12 @@ and `lte` over generated arrays that mix value classes, record-shaped
 `toJSON()` classes, plain objects, numbers, text, nulls, PlainDates, a typed
 array subclass and self-referencing arrays against an independent order
 model, including the native operators' throws, with the right operand's
-objects given runtime identities first. The distinct representative oracle
+objects given runtime identities first, and each value class instance
+serialized at most once. A third, fixed property
+(`serialized-value.truncate-replay`) replaces a row's reference with a
+deep-equal instance during a direct subscriber's truncate replay and requires
+the completed replay to drop it from a filter on the old instance while an
+unchanged row stays silent. The distinct representative oracle
 requires a shown payload to stay while the inputs that hold it do, and a fixed
 history retires a row whose hash collides with a live one.
 

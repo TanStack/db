@@ -22,6 +22,7 @@ const windowHistoryDrivers = [
 
 export const properties: ReadonlyArray<string> = [
   // indexes and comparison
+  `serialized-value.truncate-replay`,
   `cursor.scalar-matrix`,
   `cursor.composite-width-matrix`,
   `cursor.leading-boundary-matrix`,
@@ -123,6 +124,11 @@ export const properties: ReadonlyArray<string> = [
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
   // indexes and comparison
+  [
+    `db/tests/query/serialized-value-equality-oracle.property.test.ts`,
+    `serialized-value`,
+    `truncate-replay`,
+  ],
   [
     `db/tests/cursor-oracle.property.test.ts`,
     `cursor`,

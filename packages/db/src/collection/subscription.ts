@@ -850,7 +850,12 @@ export class CollectionSubscription
           key,
           value: previousValue,
         })
-      } else if (!sameRowValue(value, previousValue)) {
+      } else if (
+        !sameRowValue(value, previousValue) ||
+        // A deep-equal replacement can still change the filter's answer.
+        (this.matchesWhere !== undefined &&
+          this.matchesWhere(value) !== this.matchesWhere(previousValue))
+      ) {
         replacement.push({
           type: `update`,
           key,

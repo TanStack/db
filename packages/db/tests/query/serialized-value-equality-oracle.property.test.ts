@@ -123,7 +123,12 @@ import {
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../oracle-assertion-adapter.js'
-import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
+import {
+  flushPromises,
+  mockSyncCollectionOptions,
+  withOracleCleanup,
+} from '../utils.js'
+import { createDeferred } from '../../src/deferred.js'
 
 const property = `serialized-value.query-equality`
 
@@ -1766,12 +1771,17 @@ type OrderState = (typeof orderStates)[number]
 /** A value class whose toJSON() returns a record, keys in either order. */
 class ShapedRef {
   readonly rank = nextRank++
+  #serializations = 0
+  get serializations(): number {
+    return this.#serializations
+  }
   constructor(
     readonly table: string,
     readonly id: string,
     readonly idFirst: boolean,
   ) {}
   toJSON() {
+    this.#serializations++
     return this.idFirst
       ? { id: this.id, table: this.table }
       : { table: this.table, id: this.id }
@@ -2058,6 +2068,18 @@ const rangeHolds = {
   lte: (order: number) => order <= 0,
 }
 
+function shapedRefsIn(
+  value: unknown,
+  seen = new Set<object>(),
+): Array<ShapedRef> {
+  if (typeof value !== `object` || value === null || seen.has(value)) return []
+  seen.add(value)
+  if (value instanceof ShapedRef) return [value]
+  return Array.isArray(value)
+    ? value.flatMap((item) => shapedRefsIn(item, seen))
+    : []
+}
+
 function identifyObjects(value: unknown, seen = new Set<object>()): void {
   if (typeof value !== `object` || value === null || seen.has(value)) return
   seen.add(value)
@@ -2102,6 +2124,12 @@ function runOrderHistory(
       if (order === undefined) expect(() => evaluate(row), label).toThrow()
       else expect(evaluate(row), label).toBe(rangeHolds[name](order))
     }
+    // An immutable value class is serialized once, however often it compares.
+    for (const shaped of shapedRefsIn([row.a, row.b]))
+      expect(
+        shaped.serializations,
+        `pair ${position}: toJSON reads`,
+      ).toBeLessThanOrEqual(1)
   }
 }
 
@@ -2119,7 +2147,7 @@ describe(`value classes order arrays by their serialized value`, () => {
   oracleProperty({
     id: orderProperty,
     law: {
-      statement: `Range predicates over arrays that hold a value class compare element by element: a null first, a primitive before a value class, a value class by its serialized value with record keys sorted and before any other object, and a nested array after any value that is not an array; a pair met again inside its own comparison is equal. A Temporal pair compares as Temporal values, and values that hold no value class, including typed arrays and Temporal values with toJSON(), keep the native operators and their throws. The sort order keeps two distinct plain objects apart.`,
+      statement: `Range predicates over arrays that hold a value class compare element by element: a null first, a primitive before a value class, a value class by its serialized value with record keys sorted and before any other object, and a nested array after any value that is not an array; a pair met again inside its own comparison is equal. A Temporal pair compares as Temporal values, and values that hold no value class, including typed arrays and Temporal values with toJSON(), keep the native operators and their throws. The sort order keeps two distinct plain objects apart, and each value class instance is serialized at most once.`,
       authority: `Issue #2459, the "Value classes" section of docs/guides/live-queries.md, and the compareValues contract in packages/db/src/utils/comparison.ts.`,
       limits: `Numbers 0..12, four texts, records and record-shaped toJSON() classes over two tables and two IDs, one plain object shape, an empty Uint8Array subclass, three PlainDates, null elements, and arrays of up to three terms nested and self-referencing up to fast-check's small depth; one to six operand pairs plus each left operand against a copy. Arrays shared at several depths are covered by fixed tests.`,
     },
@@ -2220,6 +2248,127 @@ describe(`value classes order arrays by their serialized value`, () => {
     driver: (plan: { history: OrderHistory }, observe) =>
       recordAssertionJudgment(orderProperty, plan, observe, () =>
         runOrderHistory(plan.history, (state) => observe(`reach`, state)),
+      ),
+    check: forwardAssertionJudgment,
+  })
+})
+
+// A direct subscriber buffers a truncate replay privately and publishes one
+// diff when it completes. A deep-equal replacement during the replay can still
+// take a row out of a reference filter, so the diff must remove it.
+type ReplayRefRow = { id: string; ref: Map<string, number> }
+type ReplayHistory = { name: string; published: boolean }
+
+async function runReplayHistory(history: ReplayHistory) {
+  const first = new Map([[`k`, 1]])
+  const second = new Map([[`k`, 1]])
+  let begin!: () => void
+  let write!: (message: {
+    type: `insert` | `update`
+    value: ReplayRefRow
+  }) => void
+  let commit!: () => void
+  let truncate!: () => void
+  const replay = createDeferred<void>()
+  let loads = 0
+  const collection = createCollection<ReplayRefRow>({
+    id: `serialized-value-replay-${history.published}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (operations) => {
+        ;({ begin, write, commit, truncate } = operations)
+        operations.markReady()
+        return {
+          loadSubset: () => {
+            loads++
+            if (loads > 1) return replay.promise
+            if (history.published) {
+              begin()
+              write({ type: `insert`, value: { id: `a`, ref: first } })
+              write({ type: `insert`, value: { id: `b`, ref: first } })
+              commit()
+            }
+            return true
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const visible = new Map<string, ReplayRefRow>()
+  const events: Array<string> = []
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        events.push(`${change.type}:${String(change.key)}`)
+        if (change.type === `delete`) visible.delete(String(change.key))
+        else visible.set(String(change.key), change.value)
+      }
+    },
+    {
+      whereExpression: new Func(`eq`, [new PropRef([`ref`]), new Value(first)]),
+    },
+  )
+  try {
+    subscription.requestSnapshot({ optimizedOnly: false })
+    expect([...visible.keys()], `before the truncate`).toEqual(
+      history.published ? [`a`, `b`] : [],
+    )
+    begin()
+    truncate()
+    commit()
+    await flushPromises()
+    // Row b comes back unchanged; row a is replaced by a deep-equal instance.
+    const unchanged = history.published ? first : new Map([[`k`, 1]])
+    begin()
+    write({ type: `insert`, value: { id: `a`, ref: first } })
+    write({ type: `insert`, value: { id: `b`, ref: unchanged } })
+    commit()
+    begin()
+    write({ type: `update`, value: { id: `a`, ref: second } })
+    commit()
+    events.length = 0
+    replay.resolve()
+    await flushPromises()
+    expect(collection.get(`a`)?.ref, `stored instance`).toBe(second)
+    expect([...visible.keys()], `after the replay`).toEqual(
+      history.published ? [`b`] : [],
+    )
+    // Only the row that left the filter is published.
+    expect(events, `replay publication`).toEqual(
+      history.published ? [`delete:a`] : [],
+    )
+  } finally {
+    replay.resolve()
+    await flushPromises()
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+}
+
+const replayProperty = `serialized-value.truncate-replay`
+
+describe(`a truncate replay follows a deep-equal reference replacement`, () => {
+  oracleProperty<ReplayHistory, ReturnType<typeof recordedAssertionJudgment>>({
+    id: replayProperty,
+    law: {
+      statement: `When a direct subscriber's truncate replay completes, a row whose stored reference was replaced by a deep-equal instance during the replay leaves a filter on the old instance, whether or not the row was published before the truncate, and a row that returns unchanged is not published again.`,
+      authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md; CodeRabbit review of PR #2460.`,
+      limits: `One on-demand Collection, one Map-valued reference filter, one replay; the rows are either published before the truncate or first written during the replay, and a second row returns unchanged.`,
+    },
+    owns: [
+      'src/collection/subscription.ts#CollectionSubscription.createStateDiff',
+    ],
+    histories: [
+      { name: `a row published before the truncate`, published: true },
+      { name: `a row first written during the replay`, published: false },
+    ],
+    label: ({ name }) => name,
+    model: recordedAssertionJudgment,
+    driver: (history, observe) =>
+      recordAssertionJudgment(replayProperty, history, observe, () =>
+        runReplayHistory(history),
       ),
     check: forwardAssertionJudgment,
   })
