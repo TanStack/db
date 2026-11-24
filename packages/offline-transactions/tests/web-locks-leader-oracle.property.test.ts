@@ -14,14 +14,16 @@
  * the queue and never leads, even when the lock was already granted to it. A
  * request after a release starts a new acquisition, even in the turn of an
  * earlier one, and a tab that releases while it is told it leads passes the
- * lock to the next waiter after every listener heard the gain. A listener that
+ * lock to the next waiter after every listener heard the gain. If it requests
+ * again in that same listener, the request reports false and queues behind the
+ * waiters already there. A listener that
  * throws is warned about once. A failed lock request reports false, warns
  * once, and leaves the tab idle.
  *
  * History grammar: up to fourteen actions over three tabs: request, two
  * requests in one turn, a request released in the same turn, a request,
- * release and request in one turn, a tab armed to release from, or throw in,
- * its own gain notification, a failed first or queued lock request, release, close, and a
+ * release and request in one turn, a tab armed to release from, release and
+ * request again from, or throw in, its own gain notification, a failed first or queued lock request, release, close, and a
  * close whose next waiter releases before its grant runs. A closed tab takes no further actions. An environment
  * can lack `navigator` or `navigator.locks`.
  *
@@ -77,6 +79,8 @@ const reachStates = [
   `released-on-gain`,
   // A listener threw when told its tab leads, and the others still heard it.
   `listener-threw`,
+  // A listener released and requested again when told its tab leads.
+  `rerequested-on-gain`,
 ] as const
 type ReachState = (typeof reachStates)[number]
 
@@ -87,6 +91,7 @@ type ActionType =
   | `request-release-request`
   | `release-on-gain`
   | `throw-on-gain`
+  | `rerequest-on-gain`
   | `fail-first`
   | `fail-queued`
   | `release`
@@ -117,6 +122,13 @@ class LeadershipModel {
   gainReleases = 0
   // Tabs with a listener that throws when told the tab leads.
   readonly throwing = new Set<number>()
+  // Tabs whose observer releases, then requests again, when told it leads.
+  readonly rerequesting = new Set<number>()
+  // Each tab's expected results for those requests, in order.
+  readonly rerequests: Array<Array<boolean>> = Array.from(
+    { length: TABS },
+    () => [],
+  )
 
   get holder(): number | undefined {
     const index = this.tabs.indexOf(`leader`)
@@ -130,7 +142,15 @@ class LeadershipModel {
     this.notifications[next]!.push(true)
     // A throwing listener is warned about once; the others still hear it.
     if (this.throwing.delete(next)) this.warnings += 1
-    if (this.armed.delete(next)) {
+    if (this.rerequesting.delete(next)) {
+      // The release passes the lock on; the request finds it still held, so
+      // it reports false and queues behind the waiters already there.
+      this.tabs[next] = `waiting`
+      this.notifications[next]!.push(false)
+      this.rerequests[next]!.push(false)
+      this.queue.push(next)
+      this.promoteNext()
+    } else if (this.armed.delete(next)) {
       // Every listener hears the gain, then the release passes the lock on.
       this.gainReleases++
       this.tabs[next] = `idle`
@@ -212,6 +232,7 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.record({
     `request-release-request`,
     `release-on-gain`,
     `throw-on-gain`,
+    `rerequest-on-gain`,
     `fail-first`,
     `fail-queued`,
     `release`,
@@ -420,11 +441,17 @@ async function runHistory(
     const notifications: Array<Array<boolean>> = leaders.map(() => [])
     const armed = new Set<number>()
     const throwing = new Set<number>()
+    const rerequesting = new Set<number>()
+    const rerequests = leaders.map(() => [] as Array<{ value?: boolean }>)
     leaders.forEach((leader, tab) => {
       // Registered first, so a release here runs before later listeners
       // hear the gain.
       leader.onLeadershipChange((isLeader) => {
-        if (isLeader && armed.delete(tab)) leader.releaseLeadership()
+        if (!isLeader) return
+        if (rerequesting.delete(tab)) {
+          leader.releaseLeadership()
+          rerequests[tab]!.push(observed(leader.requestLeadership()))
+        } else if (armed.delete(tab)) leader.releaseLeadership()
       })
       leader.onLeadershipChange((isLeader) => {
         if (isLeader && throwing.delete(tab)) throw new Error(`listener failed`)
@@ -451,6 +478,10 @@ async function runHistory(
         `${label}: queue`,
       ).toEqual(model.queue)
       expect(warn, `${label}: warnings`).toHaveBeenCalledTimes(model.warnings)
+      expect(
+        rerequests.map((outcomes) => outcomes.map((outcome) => outcome.value)),
+        `${label}: requests made on a gain`,
+      ).toEqual(model.rerequests)
     }
 
     for (const [step, action] of history.actions.entries()) {
@@ -462,6 +493,7 @@ async function runHistory(
       const request = () =>
         observed(inTab(tab, () => leader.requestLeadership()))
       const gainReleases = model.gainReleases
+      const rerequestCount = model.rerequests.flat().length
       const warnings = model.warnings
 
       if (type === `request`) {
@@ -510,6 +542,9 @@ async function runHistory(
       } else if (type === `throw-on-gain`) {
         model.throwing.add(tab)
         throwing.add(tab)
+      } else if (type === `rerequest-on-gain`) {
+        model.rerequesting.add(tab)
+        rerequesting.add(tab)
       } else if (type === `fail-first`) {
         if (state !== `idle`) continue
         reach(`first-request-failed`)
@@ -553,6 +588,8 @@ async function runHistory(
         await settle()
       }
       if (model.gainReleases > gainReleases) reach(`released-on-gain`)
+      if (model.rerequests.flat().length > rerequestCount)
+        reach(`rerequested-on-gain`)
       if (
         type !== `fail-first` &&
         type !== `fail-queued` &&
@@ -570,7 +607,7 @@ async function runHistory(
 oracleProperty({
   id: property,
   law: {
-    statement: `Exactly the first waiting tab takes over when the Web Locks leader releases or its context closes, and it is notified once. A tab that finds the lock free leads without a notification, repeated or concurrent requests keep one queue place, a tab that releases never leads afterward, a request after a release starts a new acquisition, a tab that releases while it is told it leads passes the lock on after every listener heard the gain, and a failed lock request reports false and leaves the tab idle.`,
+    statement: `Exactly the first waiting tab takes over when the Web Locks leader releases or its context closes, and it is notified once. A tab that finds the lock free leads without a notification, repeated or concurrent requests keep one queue place, a tab that releases never leads afterward, a request after a release starts a new acquisition, a tab that releases while it is told it leads passes the lock on after every listener heard the gain and, if it requests again there, reports false and queues behind the existing waiters, and a failed lock request reports false and leaves the tab idle.`,
     authority: `Issue #2463, docs/guides/offline-transactions.md "A follower can become the leader after the current leader leaves", and the Web Locks API request order.`,
     limits: `Three tabs and one exclusive lock over a controlled lock manager; up to fourteen actions; no steal or shared mode, and no real browser contexts.`,
   },
@@ -657,6 +694,17 @@ oracleProperty({
             ...contested,
             act(`request`, 2),
             act(`release-on-gain`, 1),
+            act(`release`, 0),
+          ]),
+      },
+      {
+        name: `a tab releases and requests again while told it leads`,
+        enters: [`rerequested-on-gain`, `takeover-after-release`],
+        build: (generated: History): History =>
+          spliced(generated, [
+            ...contested,
+            act(`request`, 2),
+            act(`rerequest-on-gain`, 1),
             act(`release`, 0),
           ]),
       },

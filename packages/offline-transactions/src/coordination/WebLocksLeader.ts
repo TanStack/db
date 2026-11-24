@@ -18,7 +18,9 @@ export class WebLocksLeader extends BaseLeaderElection {
       return false
     }
 
-    if (this.isLeaderState) {
+    // Possession, not the notified state: a release clears the handle at
+    // once, while its notification can still wait behind the gain's.
+    if (this.releaseLock) {
       return true
     }
 
