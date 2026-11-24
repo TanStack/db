@@ -120,9 +120,12 @@ export class TransactionExecutor {
         )
       } catch (error) {
         const storageError = error as Error
+        // A cleanup fault is not the write's outcome. Another tab's writer
+        // waits for a leader that finishes the removal.
         this.offlineExecutor.rejectTransaction(
           transaction.id,
           terminalError ?? storageError,
+          terminalError !== undefined,
         )
         throw storageError
       }
@@ -325,14 +328,15 @@ export class TransactionExecutor {
           }
         }
       }
-      // A follower that wrote this transaction reads its outcome here when
-      // the settlement message never reaches it.
-      if (this.config.followerWrites === `durable`) {
-        await this.outbox.recordOutcome(
+      // A follower that wrote this transaction and misses the settlement
+      // message reads a rejection here; a write with no record completed.
+      if (
+        this.config.followerWrites === `durable` &&
+        transaction.outboxPhase === `rejection-pending`
+      ) {
+        await this.outbox.recordRejection(
           transaction.id,
-          transaction.outboxPhase === `rejection-pending`
-            ? this.getTerminalError(transaction)
-            : undefined,
+          this.getTerminalError(transaction),
         )
       }
       await this.outbox.remove(transaction.id)
@@ -424,6 +428,8 @@ export class TransactionExecutor {
       await Promise.all(
         removedIds.map(async (id) => {
           try {
+            if (this.config.followerWrites === `durable`)
+              await this.outbox.recordRejection(id, error)
             await this.outbox.remove(id)
             this.offlineExecutor.rejectTransaction(id, error)
           } catch (cleanupError) {
@@ -438,15 +444,30 @@ export class TransactionExecutor {
     }
   }
 
-  /** Runs one transaction that a follower tab saved to the shared outbox. */
+  /**
+   * Schedules one transaction that a follower tab saved to the shared outbox.
+   * It rejects only when the read fails.
+   */
   async admitTransaction(id: string): Promise<void> {
-    // A read that the transaction's removal overtakes returns null.
+    // A read that the transaction's removal overtakes returns null. One that
+    // spans a change of leadership is dropped: another leader may have sent
+    // the write, and this term's outbox load already has it if it remains.
+    const term = this.offlineExecutor.leadershipTerm
     const transaction = await this.outbox.getCurrent(id)
-    if (!transaction || !this.offlineExecutor.isOfflineEnabled) return
+    if (
+      !transaction ||
+      !this.offlineExecutor.isOfflineEnabled ||
+      term !== this.offlineExecutor.leadershipTerm
+    )
+      return
     // A duplicate message is harmless: both steps ignore a known transaction.
     this.scheduler.schedule(transaction)
-    this.restoreOptimisticState([transaction])
-    await this.executeAll()
+    if (transaction.outboxPhase !== `rejection-pending`)
+      this.restoreOptimisticState([transaction])
+    // A queue error belongs to its execution, not to this admission.
+    this.executeAll().catch((error) => {
+      console.warn(`Failed to execute transactions:`, error)
+    })
   }
 
   /**

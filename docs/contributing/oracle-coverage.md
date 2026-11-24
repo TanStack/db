@@ -4252,8 +4252,11 @@ The post-merge review added three missing domains to existing owners:
   leader sends a durable write, that a lost settlement (including a rejection)
   is recovered for the same write, that a leader retries a saved write it could
   not read, that a stale admission read cannot send a write twice, that a write
-  made before initialization takes the online path, and which outcome records
-  remain. It does not cover real browser contexts.
+  made before initialization takes the online path, and which rejection
+  records remain. It also covers a failed row removal after a successful send,
+  an undecodable saved row, a follower's failed outbox check, an admission read
+  across a change of leadership, and a `beforeRetry` exclusion whose settlement
+  is lost. It does not cover real browser contexts.
 - Settlement-time drop of optimistic state is owned by the
   [optimistic history model](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts)
   and

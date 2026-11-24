@@ -26,8 +26,12 @@
  * message arrives, close a tab, reopen a tab, reopen a tab and write before it
  * initializes, go online or offline, lose the next settlement, deliver a stale
  * or duplicate message, fail the leader's admission read of a follower's saved
- * write, fail an outbox check's storage read, and return a leader's admission
- * read only after a duplicate message sent and removed its write.
+ * write, fail an outbox check's storage read, return a leader's admission read
+ * only after a duplicate message sent and removed its write, fail the removal
+ * of a sent follower write, announce a saved row the leader cannot decode,
+ * return an admission read after leadership moved away and back while another
+ * leader sent its write, and have the next leader's beforeRetry exclude a
+ * follower's write while its settlement is lost.
  *
  * Production driver: real executors over one shared storage adapter, with a
  * controlled leader election, online detector and BroadcastChannel.
@@ -40,14 +44,18 @@
  * model's outcome and error. A lost settlement is recovered for the same write,
  * by the writer itself if it became leader, or else after one handover.
  *
+ * A failed row removal after a successful send is not the write's outcome:
+ * its writer waits, and the next leader finishes the removal. A row the leader
+ * cannot decode is reported, not dropped, and a follower's failed outbox check
+ * runs again when connectivity changes.
+ *
  * Known omissions: a reloaded follower does not show another tab's pending
- * writes optimistically; outcomes are pruned by age only for a record placed a
- * day old before the tabs open; and no real browser contexts.
+ * writes optimistically; rejection records of writers that never return are
+ * kept; and no real browser contexts.
  */
 import fc from 'fast-check'
 import { expect, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
-import { OutboxManager } from '../src/outbox/OutboxManager'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
@@ -103,6 +111,18 @@ const reachStates = [
   `admission-retried`,
   // An admission read returned after its write was sent and removed.
   `stale-admission-ignored`,
+  // A failed outbox check ran again on connectivity and settled a lost write.
+  `reconcile-retried`,
+  // A sent follower write's removal failed and its writer kept waiting.
+  `removal-failure-not-announced`,
+  // The leader reported a saved row it could not decode.
+  `unreadable-write-reported`,
+  // An admission read spanning a change of leadership was dropped.
+  `stale-admission-across-terms`,
+  // A lost exclusion by beforeRetry still failed its writer.
+  `exclusion-recovered`,
+  // A rejection whose writer had closed kept its record.
+  `orphan-rejection-kept`,
 ] as const
 type ReachState = (typeof reachStates)[number]
 
@@ -123,6 +143,10 @@ type SharedActionType =
   | `fail-admission-read`
   | `fail-outbox-check`
   | `stale-admission-read`
+  | `fail-removal`
+  | `unreadable-added`
+  | `stale-admission-across-terms`
+  | `exclude-on-handover`
 type Action = { type: TabActionType; tab: number } | { type: SharedActionType }
 type Mode = `durable` | `online`
 type History = { mode: Mode; actions: Array<Action> }
@@ -151,6 +175,10 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   { weight: 1, arbitrary: sharedAction(`fail-admission-read`) },
   { weight: 1, arbitrary: sharedAction(`fail-outbox-check`) },
   { weight: 1, arbitrary: sharedAction(`stale-admission-read`) },
+  { weight: 1, arbitrary: sharedAction(`fail-removal`) },
+  { weight: 1, arbitrary: sharedAction(`unreadable-added`) },
+  { weight: 1, arbitrary: sharedAction(`stale-admission-across-terms`) },
+  { weight: 1, arbitrary: sharedAction(`exclude-on-handover`) },
 )
 const historyArbitrary: fc.Arbitrary<History> = fc.record({
   mode: fc.constantFrom<Mode>(`durable`, `durable`, `durable`, `online`),
@@ -170,7 +198,11 @@ const spliced = (
           action.type !== `lose-settlement` &&
           action.type !== `fail-admission-read` &&
           action.type !== `fail-outbox-check` &&
-          action.type !== `stale-admission-read`,
+          action.type !== `stale-admission-read` &&
+          action.type !== `fail-removal` &&
+          action.type !== `unreadable-added` &&
+          action.type !== `stale-admission-across-terms` &&
+          action.type !== `exclude-on-handover`,
       )
       .slice(0, MAX_ACTIONS - prefix.length),
   ],
@@ -276,6 +308,14 @@ class ReadFailingStorage extends FakeStorageAdapter {
     this.heldWrites = null
     for (const release of held) release(fail)
   }
+  failDeletes = 0
+  override async delete(key: string): Promise<void> {
+    if (this.failDeletes > 0 && key.startsWith(`tx:`)) {
+      this.failDeletes -= 1
+      throw new Error(`storage delete failed`)
+    }
+    return super.delete(key)
+  }
   override async set(key: string, value: string): Promise<void> {
     if (this.heldWrites) {
       const held = this.heldWrites
@@ -374,8 +414,15 @@ type Write = {
   session: number
   // Made before its tab initialized, so it took the online path.
   preInit: boolean
-  // The leader's admission read failed and connectivity has not changed since.
-  unadmitted: boolean
+  // The session of the leader whose admission read failed, until
+  // connectivity changes.
+  unadmittedBy?: number
+  // A failed outbox check found this lost write pending.
+  checkFailed: boolean
+  // Its admission read failed at some point in the history.
+  retried?: boolean
+  // The next leader's beforeRetry excluded it.
+  excluded?: boolean
   outcome?: `completed` | `failed`
   error?: unknown
 }
@@ -402,6 +449,8 @@ async function runHistory(
   // Which tab called the server for each write, and which tab led then.
   const sends: Array<{ id: string; sender: number; leader?: number }> = []
   const rejected = new Set<string>()
+  // Writes a new leader's beforeRetry excludes, by write id.
+  const excluded = new Set<string>()
   const expectedWarnings = { admission: 0, check: 0 }
   type Tab = {
     env: ReturnType<typeof createTestOfflineEnvironment>
@@ -437,6 +486,13 @@ async function runHistory(
         ...(durable ? { followerWrites: `durable` } : {}),
         leaderElection: tabElection,
         onlineDetector: online.detector(),
+        beforeRetry: (
+          transactions: Array<{ mutations: Array<{ key: unknown }> }>,
+        ) =>
+          transactions.filter(
+            (transaction) =>
+              !excluded.has(String(transaction.mutations[0]!.key)),
+          ),
         jitter: false,
       } as never,
     })
@@ -485,7 +541,7 @@ async function runHistory(
           undefined,
         )
       }
-      if (leader && !write.unadmitted) {
+      if (leader && write.unadmittedBy !== leader.session) {
         expect(
           leader.env.collection.has(write.id),
           `${label}: leader shows ${write.id}`,
@@ -518,7 +574,7 @@ async function runHistory(
       fromFollower,
       session: tab.session,
       preInit,
-      unadmitted: false,
+      checkFailed: false,
     }
     writes.push(write)
     if (write.rejected) rejected.add(id)
@@ -570,9 +626,6 @@ async function runHistory(
   }
 
   try {
-    // A day-old outcome of a writer that never returned; the first leader
-    // prunes it.
-    if (durable) await storage.set(`outcome:aged`, JSON.stringify({ at: 0 }))
     for (let index = 0; index < TABS; index++) await openTab(index)
     expect(channels.state.created, `channels created`).toBe(durable ? TABS : 0)
 
@@ -644,7 +697,7 @@ async function runHistory(
         case `online`:
           online.set(true)
           await settle()
-          for (const write of writes) write.unadmitted = false
+          for (const write of writes) write.unadmittedBy = undefined
           break
         case `offline`:
           online.set(false)
@@ -675,8 +728,10 @@ async function runHistory(
           reach(`admission-read-failed`)
           storage.failReads = 1
           expectedWarnings.admission += 1
+          const leaderSession = tabs[leaderIndex()]!.session
           const write = await doWrite(follower, `write`)
-          write!.unadmitted = true
+          write!.unadmittedBy = leaderSession
+          write!.retried = true
           break
         }
         case `stale-admission-read`: {
@@ -697,12 +752,113 @@ async function runHistory(
           if (calls.includes(write.id)) reach(`stale-admission-ignored`)
           break
         }
+        case `fail-removal`: {
+          // The leader sends a follower's write, then fails to remove its row.
+          const follower = tabs.findIndex(
+            (tab, index) => tab && index !== leaderIndex(),
+          )
+          if (!durable || !online.online || leaderIndex() < 0 || follower < 0)
+            break
+          storage.failDeletes = 1
+          const write = await doWrite(follower, `write`)
+          if (!write || !calls.includes(write.id)) break
+          expect(write.outcome, `${write.id} waits after a cleanup fault`).toBe(
+            undefined,
+          )
+          reach(`removal-failure-not-announced`)
+          // The faulted leader's executor stops; the next leader finishes the
+          // removal and settles the writer.
+          await closeTab(leaderIndex())
+          break
+        }
+        case `unreadable-added`: {
+          // A saved row this leader cannot decode is reported, not dropped.
+          if (!durable || leaderIndex() < 0) break
+          await storage.set(
+            `tx:unreadable`,
+            JSON.stringify({ id: `unreadable` }),
+          )
+          expectedWarnings.admission += 1
+          channels.inject({ type: `added`, id: `unreadable` })
+          await settle()
+          reach(`unreadable-write-reported`)
+          await storage.delete(`tx:unreadable`)
+          break
+        }
+        case `stale-admission-across-terms`: {
+          // The leader's admission read stalls. Leadership moves away, another
+          // leader sends and removes the write, and leadership comes back
+          // before the read returns.
+          const first = leaderIndex()
+          const writer = tabs.findIndex((tab, index) => tab && index !== first)
+          if (
+            !durable ||
+            !online.online ||
+            first < 0 ||
+            writer < 0 ||
+            tabs.filter(Boolean).length < 3
+          )
+            break
+          storage.holdNextRead()
+          const write = await doWrite(writer, `write`)
+          if (!write) break
+          const original = tabs[first]!.election
+          for (let turn = 0; turn < TABS + 1; turn++) {
+            const holder = election.holder!
+            if (turn > 0 && holder === original) break
+            holder.releaseLeadership()
+            await settle()
+            await holder.requestLeadership()
+            await settle()
+          }
+          storage.releaseRead()
+          await settle()
+          if (calls.includes(write.id)) reach(`stale-admission-across-terms`)
+          break
+        }
+        case `exclude-on-handover`: {
+          // An offline follower write waits; its settlement is lost when the
+          // next leader's beforeRetry excludes it.
+          // The writer stays a follower, so it learns the exclusion only
+          // from the record. In the default mode a follower's write is not
+          // saved, so the leader writes and closes, and no record is kept.
+          const leader = leaderIndex()
+          const next = election.queue[0]
+          const writer = durable
+            ? tabs.findIndex(
+                (tab, index) =>
+                  tab && index !== leader && tab.election !== next,
+              )
+            : leader
+          if (leader < 0 || writer < 0 || tabs.filter(Boolean).length < 3) break
+          online.set(false)
+          const write = await doWrite(writer, `write`)
+          if (!write) break
+          excluded.add(write.id)
+          write.excluded = true
+          write.deliverable = false
+          channels.state.loseSettlement = true
+          await closeTab(leader)
+          channels.state.loseSettlement = false
+          if (write.outcome === `failed`) reach(`exclusion-recovered`)
+          break
+        }
         case `fail-outbox-check`: {
           const sessionsOpen = openSessions()
-          const waiting = writes.some(
-            (write) => isUnsent(write) && sessionsOpen.has(write.session),
+          const pending = writes.filter(
+            (write) =>
+              write.outcome === undefined &&
+              write.deliverable &&
+              !write.preInit &&
+              sessionsOpen.has(write.session),
           )
-          if (!durable || !waiting) break
+          if (!durable || pending.length === 0) break
+          for (const write of pending)
+            if (
+              write.transactionId &&
+              channels.state.lostIds.includes(write.transactionId)
+            )
+              write.checkFailed = true
           reach(`outbox-check-read-failed`)
           storage.failReads = 1
           expectedWarnings.check += 1
@@ -720,6 +876,15 @@ async function runHistory(
     channels.state.loseSettlement = false
     online.set(true)
     await settle()
+    if (
+      writes.some(
+        (write) =>
+          write.checkFailed &&
+          openSessions().has(write.session) &&
+          write.outcome !== undefined,
+      )
+    )
+      reach(`reconcile-retried`)
     const lostWrites = writes.filter(
       (write) =>
         write.transactionId !== undefined &&
@@ -771,6 +936,16 @@ async function runHistory(
     for (let round = 0; round < 8; round++) await settle()
 
     const sessionsOpen = openSessions()
+    if (
+      writes.some(
+        (write) =>
+          durable &&
+          write.rejected &&
+          write.deliverable &&
+          write.outcome === undefined,
+      )
+    )
+      reach(`orphan-rejection-kept`)
     for (const write of writes) {
       if (!durable || !write.fromFollower) continue
       if (!write.rejected) reach(`follower-write-delivered`)
@@ -778,20 +953,19 @@ async function runHistory(
         reach(`follower-write-rejected`)
       }
     }
-    if (writes.some((write) => write.unadmitted && calls.includes(write.id)))
+    if (writes.some((write) => write.retried && calls.includes(write.id)))
       reach(`admission-retried`)
     for (const send of sends) {
       const write = writes.find((candidate) => candidate.id === send.id)!
-      if (write.preInit || !durable) continue
-      // A durable write is sent only by the tab that leads at that moment.
-      expect(send.sender, `${send.id} sent by the leader`).toBe(send.leader)
-    }
-    for (const write of writes) {
-      if (!write.preInit) continue
-      for (const send of sends.filter((candidate) => candidate.id === write.id))
-        expect(send.sender, `${write.id} sent by its own tab`).toBe(
+      if (write.preInit || !durable) {
+        // The online path: the writing tab calls the server itself.
+        expect(send.sender, `${send.id} sent by its own tab`).toBe(
           write.session,
         )
+      } else {
+        // A durable write is sent only by the tab that leads at that moment.
+        expect(send.sender, `${send.id} sent by the leader`).toBe(send.leader)
+      }
     }
     expect([...calls].sort(), `each write reached the server once`).toEqual(
       writes
@@ -801,8 +975,8 @@ async function runHistory(
     )
     const executor = tabs[leaderIndex()]!.env.executor
     expect(await executor.peekOutbox(), `the outbox is empty`).toEqual([])
-    // An outcome record stays only for a sent durable write whose tab closed
-    // before it settled; a tab that settles its write removes the record.
+    // A rejection record stays only for a rejected durable write whose tab
+    // closed before it settled; a completed write leaves no record.
     const outcomes = (await storage.keys())
       .filter((key) => key.startsWith(`outcome:`))
       .map((key) => key.slice(`outcome:`.length))
@@ -813,25 +987,26 @@ async function runHistory(
           (write) =>
             durable &&
             !write.preInit &&
-            write.deliverable &&
+            (write.excluded || (write.deliverable && write.rejected)) &&
             write.outcome === undefined,
         )
         .map((write) => write.transactionId)
         .sort(),
     )
-    // Every recorded outcome carries its age, so a day later all are pruned.
-    await new OutboxManager(storage, {}).pruneOutcomes(
-      Date.now() + 2 * 24 * 60 * 60 * 1000,
-    )
-    expect(
-      (await storage.keys()).filter((key) => key.startsWith(`outcome:`)),
-      `outcome records a day later`,
-    ).toEqual([])
     for (const write of writes) {
       if (!sessionsOpen.has(write.session)) continue
       expect(write.outcome, `${write.id} outcome`).toBe(
         write.rejected || !write.deliverable ? `failed` : `completed`,
       )
+      if (write.excluded) {
+        const error = write.error as Error
+        expect(error, `${write.id} exclusion error`).toBeInstanceOf(
+          NonRetriableError,
+        )
+        expect(error.message, `${write.id} exclusion message`).toBe(
+          `Transaction excluded by beforeRetry`,
+        )
+      }
       if (write.rejected && write.deliverable) {
         const error = write.error as Error
         expect(error, `${write.id} error type`).toBeInstanceOf(
@@ -859,9 +1034,9 @@ const loseSettlement: Action = { type: `lose-settlement` }
 oracleProperty({
   id: property,
   law: {
-    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until the leading tab sends it to the server exactly once while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome, also when the settlement message is lost. A leader that could not read a saved write sends it once connectivity changes. Stale and duplicate messages change nothing. A write made before its tab initializes, and the default mode, keep the online path.`,
+    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until the leading tab sends it to the server exactly once while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome, also when the settlement message is lost. A leader that could not read a saved write sends it once connectivity changes, a row it cannot decode is reported, a failed row removal after a successful send is not reported as the outcome, and a follower's failed outbox check runs again on connectivity. An admission read across a change of leadership schedules nothing, and a write excluded by beforeRetry fails its writer even when the message is lost. Stale and duplicate messages change nothing. A write made before its tab initializes, and the default mode, keep the online path.`,
     authority: `Issue #2464 and the followerWrites option in docs/guides/offline-transactions.md.`,
-    limits: `Three tabs over one storage adapter with controlled election, connectivity and BroadcastChannel; up to twelve actions; no real browser contexts, and no outcome old enough to be pruned.`,
+    limits: `Three tabs over one storage adapter with controlled election, connectivity and BroadcastChannel; up to twelve actions; no real browser contexts; rejection records of writers that never return are kept, and none is ever expired.`,
   },
   owns: [
     `src/OfflineExecutor.ts`,
@@ -875,10 +1050,9 @@ oracleProperty({
     `src/OfflineExecutor.ts#OfflineExecutor.settleFollowerWrite`,
     `src/OfflineExecutor.ts#OfflineExecutor.writesToSharedOutbox`,
     `src/outbox/OutboxManager.ts#OutboxManager.getCurrent`,
-    `src/outbox/OutboxManager.ts#OutboxManager.recordOutcome`,
+    `src/outbox/OutboxManager.ts#OutboxManager.recordRejection`,
     `src/outbox/OutboxManager.ts#OutboxManager.getOutcome`,
     `src/outbox/OutboxManager.ts#OutboxManager.removeOutcome`,
-    `src/outbox/OutboxManager.ts#OutboxManager.pruneOutcomes`,
   ],
   histories: {
     arbitrary: historyArbitrary,
@@ -994,6 +1168,60 @@ oracleProperty({
         build: (): History => ({
           mode: `durable`,
           actions: [{ type: `stale-admission-read` }],
+        }),
+      },
+      {
+        name: `a failed outbox check runs again on connectivity`,
+        enters: [`outbox-check-read-failed`, `reconcile-retried`],
+        build: (): History => ({
+          mode: `durable`,
+          actions: [loseSettlement, write(2), { type: `fail-outbox-check` }],
+        }),
+      },
+      {
+        name: `a cleanup fault is not a follower's outcome`,
+        enters: [`removal-failure-not-announced`],
+        build: (): History => ({
+          mode: `durable`,
+          actions: [{ type: `fail-removal` }],
+        }),
+      },
+      {
+        name: `an unreadable saved row is reported`,
+        enters: [`unreadable-write-reported`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `unreadable-added` }]),
+      },
+      {
+        name: `an admission read across a change of leadership is dropped`,
+        enters: [`stale-admission-across-terms`],
+        build: (): History => ({
+          mode: `durable`,
+          actions: [{ type: `stale-admission-across-terms` }],
+        }),
+      },
+      {
+        name: `a rejection whose writer closed keeps its record`,
+        enters: [`orphan-rejection-kept`],
+        build: (): History => ({
+          mode: `durable`,
+          actions: [offline, { type: `write-rejected`, tab: 1 }, close(1)],
+        }),
+      },
+      {
+        name: `an exclusion in the default mode keeps no record`,
+        enters: [],
+        build: (): History => ({
+          mode: `online`,
+          actions: [{ type: `exclude-on-handover` }],
+        }),
+      },
+      {
+        name: `a lost exclusion still fails its writer`,
+        enters: [`exclusion-recovered`],
+        build: (): History => ({
+          mode: `durable`,
+          actions: [{ type: `exclude-on-handover` }],
         }),
       },
       {

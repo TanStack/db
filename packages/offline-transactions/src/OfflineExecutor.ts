@@ -55,9 +55,6 @@ function outboxMessageError(error: { name: string; message: string }): Error {
   return restored
 }
 
-/** How long a recorded outcome waits for a writer that never returns. */
-const OUTCOME_RETENTION_MS = 24 * 60 * 60 * 1000
-
 /** How many settled ids an executor remembers to reject late waiters. */
 const SETTLED_TRANSACTIONS_REMEMBERED = 1000
 
@@ -106,7 +103,10 @@ export class OfflineExecutor {
   // Coordination mechanism for blocking transactions
   // Follower writes this leader could not read; retried on connectivity.
   private readonly unadmitted = new Set<string>()
+  // A follower's outbox check failed; it runs again on connectivity.
+  private reconcileFailed = false
   private initialized = false
+  private term = 0
   private pendingTransactionPromises: Map<
     string,
     {
@@ -266,7 +266,8 @@ export class OfflineExecutor {
           // A custom elector may repeat the initial result while replay is active.
           if (this.disposed || isLeader === this.isLeaderState) return
           this.isLeaderState = isLeader
-          if (!isLeader) this.executor?.pause()
+          if (isLeader) this.term++
+          else this.executor?.pause()
 
           if (this.config.onLeadershipChange) {
             this.config.onLeadershipChange(isLeader)
@@ -282,6 +283,7 @@ export class OfflineExecutor {
     }
 
     this.unsubscribeOnline = this.onlineDetector.subscribe(() => {
+      if (this.reconcileFailed) this.reconcileFollowerWrites()
       if (this.isOfflineEnabled && this.executor) {
         this.executor.resetRetryDelays()
         this.retryAdmissions()
@@ -401,10 +403,6 @@ export class OfflineExecutor {
       this.outboxChannel.postMessage({
         type: `leader`,
       } satisfies OutboxMessage)
-      // Housekeeping only: a later leader prunes again.
-      this.outbox!.pruneOutcomes(Date.now() - OUTCOME_RETENTION_MS).catch(
-        () => {},
-      )
     }
     this.reconcileFollowerWrites()
 
@@ -447,11 +445,12 @@ export class OfflineExecutor {
 
   private admitFollowerWrite(id: string): void {
     this.unadmitted.delete(id)
+    // Only the leader sends; a later leader loads the row from the outbox.
+    if (!this.isOfflineEnabled) return
     this.executor!.admitTransaction(id).catch((error) => {
       console.warn(`Failed to run follower write:`, error)
-      // The row is still saved. This leader tries again when connectivity
-      // changes, which is harmless if it was scheduled; a later leader loads
-      // it from the outbox.
+      // The row is still saved. This leader reads it again when
+      // connectivity changes.
       this.unadmitted.add(id)
     })
   }
@@ -468,26 +467,37 @@ export class OfflineExecutor {
   }
 
   private reconcileFollowerWrites(): void {
-    this.settleRemovedWrites().catch((error) => {
-      console.warn(`Failed to reconcile follower writes:`, error)
-    })
+    void this.settleRemovedWrites()
   }
 
   // A saved write that left the outbox was settled by a leader whose message
-  // never arrived. The leader recorded the outcome before removing the row; a
-  // row removed with no record, such as by an older leader, completed.
+  // never arrived. The leader recorded a rejection before removing the row; a
+  // row removed with no record completed. A failed read leaves that write
+  // pending, and the check runs again when connectivity changes.
   private async settleRemovedWrites(): Promise<void> {
+    let failed = false
     for (const [id, waiter] of [...this.pendingTransactionPromises]) {
-      if (!(await waiter.saved)) continue
-      if (await this.outbox!.get(id)) continue
-      const error = (await this.outbox!.getOutcome(id))?.error
-      this.settleFollowerWrite(id, error && outboxMessageError(error))
+      try {
+        if (!(await waiter.saved)) continue
+        if (await this.outbox!.get(id)) continue
+        const error = (await this.outbox!.getOutcome(id))?.error
+        this.settleFollowerWrite(id, error && outboxMessageError(error))
+      } catch (error) {
+        failed = true
+        console.warn(`Failed to reconcile follower writes:`, error)
+      }
     }
+    this.reconcileFailed = failed
   }
 
-  private announceSettled(id: string, own: boolean, error?: Error): void {
+  /** Counts later leadership gains, so work begun in an earlier term can tell. */
+  get leadershipTerm(): number {
+    return this.term
+  }
+
+  private announceSettled(id: string, error?: Error, own = false): void {
     if (this.outboxChannel) {
-      // This tab's own write needs no record for another tab.
+      // This tab's own rejected write needs no record for another tab.
       if (own) this.outbox!.removeOutcome(id).catch(() => {})
       this.outboxChannel.postMessage({
         type: `settled`,
@@ -665,21 +675,25 @@ export class OfflineExecutor {
 
   // Method for TransactionExecutor to signal completion
   resolveTransaction(transactionId: string, result: any): void {
-    const own = this.pendingTransactionPromises.has(transactionId)
     try {
       this.settleTransaction(transactionId, result)
     } finally {
-      this.announceSettled(transactionId, own)
+      this.announceSettled(transactionId)
     }
   }
 
-  // Method for TransactionExecutor to signal failure
-  rejectTransaction(transactionId: string, error: Error): void {
+  // Method for TransactionExecutor to signal failure. A local fault that is
+  // not the write's outcome stays unannounced.
+  rejectTransaction(
+    transactionId: string,
+    error: Error,
+    announce = true,
+  ): void {
     const own = this.pendingTransactionPromises.has(transactionId)
     try {
       this.settleTransaction(transactionId, undefined, error)
     } finally {
-      this.announceSettled(transactionId, own, error)
+      if (announce) this.announceSettled(transactionId, error, own)
     }
   }
 

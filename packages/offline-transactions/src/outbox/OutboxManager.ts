@@ -12,11 +12,8 @@ import type { Collection } from '@tanstack/db'
 
 export class OutboxTransactionNotFoundError extends Error {}
 
-/** How a removed transaction settled, kept for a writer in another tab. */
-export type OutboxOutcome = {
-  at: number
-  error?: { name: string; message: string }
-}
+/** A rejected transaction's error, kept for a writer in another tab. */
+export type OutboxOutcome = { error: { name: string; message: string } }
 
 export class OutboxManager {
   private storage: StorageAdapter
@@ -88,13 +85,25 @@ export class OutboxManager {
 
   /**
    * Reads one transaction, or null if it was removed after this read began,
-   * so a stale read cannot bring back a transaction that already settled.
+   * so a stale read cannot bring back a transaction that already settled. A
+   * row this tab cannot decode, such as one saved under a collection key it
+   * does not register, throws instead of reading as absent.
    */
   async getCurrent(id: string): Promise<OfflineTransaction | null> {
     const read = { revision: this.removalRevision }
     this.activeReads.add(read)
     try {
-      const transaction = await this.get(id)
+      const data = await this.storage.get(this.getStorageKey(id))
+      let transaction: OfflineTransaction | null = null
+      if (data) {
+        try {
+          transaction = this.serializer.deserialize(data)
+        } catch (error) {
+          throw new Error(
+            `Cannot read outbox transaction ${id}: ${(error as Error).message}`,
+          )
+        }
+      }
       return (this.removedAtRevision.get(id) ?? 0) <= read.revision
         ? transaction
         : null
@@ -104,11 +113,10 @@ export class OutboxManager {
     }
   }
 
-  /** Records how a transaction settled before its row is removed. */
-  async recordOutcome(id: string, error?: Error): Promise<void> {
+  /** Records a rejection before its row is removed. */
+  async recordRejection(id: string, error: Error): Promise<void> {
     const outcome: OutboxOutcome = {
-      at: Date.now(),
-      ...(error ? { error: { name: error.name, message: error.message } } : {}),
+      error: { name: error.name, message: error.message },
     }
     await this.storage.set(
       `${this.outcomePrefix}${id}`,
@@ -123,16 +131,6 @@ export class OutboxManager {
 
   async removeOutcome(id: string): Promise<void> {
     await this.storage.delete(`${this.outcomePrefix}${id}`)
-  }
-
-  /** Removes outcomes recorded before `before`, whose writers are gone. */
-  async pruneOutcomes(before: number): Promise<void> {
-    for (const key of await this.storage.keys()) {
-      if (!key.startsWith(this.outcomePrefix)) continue
-      const data = await this.storage.get(key)
-      if (data !== null && (JSON.parse(data) as OutboxOutcome).at < before)
-        await this.storage.delete(key)
-    }
   }
 
   async getAll(): Promise<Array<OfflineTransaction>> {

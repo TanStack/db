@@ -132,7 +132,8 @@ export interface OfflineConfig {
   /**
    * How a follower tab sends a write. `'online'` (default) calls the mutation
    * function directly, with no outbox entry. `'durable'` saves the write to the
-   * shared outbox, and the current or next leader sends it. Requires
+   * shared outbox, and the current or next leader sends it. Every tab must
+   * register its collections under the same keys. Requires
    * BroadcastChannel, and falls back to `'online'` without it. A write made
    * before the executor initializes uses the online path.
    */
@@ -167,8 +168,14 @@ export interface LeaderElection {
 
 export interface TransactionSignaler {
   readonly isOfflineEnabled: boolean
+  /** Counts leadership gains; absent for a signaler that never changes. */
+  readonly leadershipTerm?: number
   resolveTransaction: (transactionId: string, result: any) => void
-  rejectTransaction: (transactionId: string, error: Error) => void
+  rejectTransaction: (
+    transactionId: string,
+    error: Error,
+    announce?: boolean,
+  ) => void
   registerRestorationTransaction: (
     offlineTransactionId: string,
     restorationTransaction: Transaction,
