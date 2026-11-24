@@ -6,7 +6,15 @@ import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { Query } from '../../src/query/builder/index.js'
+import {
+  and,
+  createLiveQueryCollection,
+  eq,
+  gte,
+} from '../../src/query/index.js'
+import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
+import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import {
   compareValues,
@@ -14,6 +22,9 @@ import {
   serializedClassValue,
 } from '../../src/utils/comparison.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+
+// A built query is the builder class this entry point takes.
+const poolQuery = (query: unknown) => createPooledLiveQuery(query as never)
 
 class Bound {
   constructor(
@@ -370,6 +381,71 @@ describe(`queries follow a deep-equal row replacement`, () => {
     await effect.dispose()
   })
 
+  it.each([`unordered`, `ordered`] as const)(
+    `keeps another row's update in a %s Effect`,
+    async (variant) => {
+      type Versioned = Row & { version: number }
+      // Deep-equal to any other version under row equality.
+      class PrivateVersion {
+        readonly kind = `version`
+        #version: number
+        constructor(version: number) {
+          this.#version = version
+        }
+        get version() {
+          return this.#version
+        }
+      }
+      const source = createCollection(
+        mockSyncCollectionOptions<Versioned>({
+          id: `effect-scope-${variant}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `a`, ref: new Map(), version: 0 },
+            { id: `b`, ref: `text`, version: 0 },
+          ],
+          autoIndex: `off`,
+        }),
+      )
+      await source.stateWhenReady()
+      const project = (row: { item: Versioned }) => ({
+        id: row.item.id,
+        state: new PrivateVersion(row.item.version),
+      })
+      const seen: Array<[string, number]> = []
+      const effect = createEffect<
+        { id: string; state: PrivateVersion },
+        string
+      >({
+        query: (q) =>
+          variant === `ordered`
+            ? q
+                .from({ item: source })
+                .orderBy(({ item }) => item.id)
+                .limit(2)
+                .fn.select(project)
+            : q.from({ item: source }).fn.select(project),
+        skipInitial: true,
+        onUpdate: (event) =>
+          void seen.push([event.value.id, event.value.state.version]),
+      })
+      await flush()
+      source.utils.begin()
+      source.utils.write({
+        type: `update`,
+        value: { id: `a`, ref: new Map(), version: 0 },
+      })
+      source.utils.write({
+        type: `update`,
+        value: { id: `b`, ref: `text`, version: 1 },
+      })
+      source.utils.commit()
+      await flush()
+      expect(seen).toEqual([[`b`, 1]])
+      await effect.dispose()
+    },
+  )
+
   it(`ends an Effect's row when its join stops matching`, async () => {
     const shared = new Map()
     const left = await sourceOf([{ id: `l`, ref: shared }])
@@ -391,6 +467,110 @@ describe(`queries follow a deep-equal row replacement`, () => {
     await flush()
     expect(seen).toEqual([`exit`])
     await effect.dispose()
+  })
+})
+
+describe(`pooled queries follow a deep-equal row replacement`, () => {
+  type Row = { id: string; ref: object | string }
+  // Deep-equal to any other instance, since its value is private.
+  class Hidden {
+    readonly kind = `hidden`
+    #json: string
+    constructor(json: string) {
+      this.#json = json
+    }
+    toJSON() {
+      return this.#json
+    }
+  }
+  let sources = 0
+  const setup = async (ref: object, where: any) => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `pooled-replacement-${sources++}`,
+        getKey: (row) => row.id,
+        initialData: [{ id: `a`, ref }],
+        autoIndex: `off`,
+      }),
+    )
+    await source.stateWhenReady()
+    const build = () => new Query().from({ item: source }).where(where)
+    const view = poolQuery(build())!
+    const ordinary = createLiveQueryCollection({ query: () => build() as any })
+    await ordinary.preload()
+    const replace = (next: object) => {
+      source.utils.begin()
+      source.utils.write({ type: `update`, value: { id: `a`, ref: next } })
+      source.utils.commit()
+    }
+    const attached = createLiveQueryObserver<Row, string>(view as never)
+    const stop = attached.subscribe(() => {})
+    const detached = createLiveQueryObserver<Row, string>(view as never)
+    const ids = (observer: typeof attached) =>
+      (observer.getSnapshot().data as Array<Row>).map((row) => row.id)
+    const expectRows = (rows: Array<string>) => {
+      expect(ordinary.toArray.map((row) => row.id)).toEqual(rows)
+      expect(ids(attached)).toEqual(rows)
+      expect(ids(detached)).toEqual(rows)
+    }
+    return {
+      replace,
+      expectRows,
+      attached,
+      done: async () => {
+        stop()
+        attached.dispose()
+        detached.dispose()
+        await view.cleanup()
+        await ordinary.cleanup()
+      },
+    }
+  }
+
+  it(`follows a reference residual`, async () => {
+    const shared = new Map()
+    const query = await setup(shared, ({ item }: any) =>
+      and(eq(item.id, `a`), eq(item.ref, shared)),
+    )
+    query.expectRows([`a`])
+    query.replace(new Map())
+    query.expectRows([])
+    query.replace(shared)
+    query.expectRows([`a`])
+    await query.done()
+  })
+
+  it(`follows a value class across a serialized range bound`, async () => {
+    const query = await setup(new Hidden(`m`), ({ item }: any) =>
+      and(eq(item.id, `a`), gte(item.ref, new Hidden(`k`) as never)),
+    )
+    query.expectRows([`a`])
+    query.replace(new Hidden(`c`))
+    query.expectRows([])
+    query.replace(new Hidden(`z`))
+    query.expectRows([`a`])
+    await query.done()
+  })
+
+  it(`follows a value class out of its equality group`, async () => {
+    const query = await setup(new Hidden(`m`), ({ item }: any) =>
+      eq(item.ref, new Hidden(`m`) as never),
+    )
+    query.expectRows([`a`])
+    query.replace(new Hidden(`n`))
+    query.expectRows([])
+    await query.done()
+  })
+
+  it(`keeps its snapshot when the row stays matched`, async () => {
+    const query = await setup(new Map(), ({ item }: any) =>
+      and(eq(item.id, `a`), gte(item.id, `a`)),
+    )
+    const before = query.attached.getSnapshot()
+    query.replace(new Map())
+    expect(query.attached.getSnapshot()).toBe(before)
+    query.expectRows([`a`])
+    await query.done()
   })
 })
 

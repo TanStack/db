@@ -2474,10 +2474,13 @@ shared and distinct object leaves, and a row that holds the capture array
 itself. A constructed history replaces an indexed reference value with a
 deep-equal one before updating its row. Each stored built-in carrier is also a
 reference probe: a filtered subscription, a live query, a functional filter, a
-filter over a projection, a join with a Collection holding the same instance
-and a fresh scan hold exactly the rows that store it after every update. An
-unfiltered subscriber and live query, an ID filter that stays matched and an
-Effect receive a change only when a row's value changed. It does not cover
+filter over a projection, a join with a Collection holding the same instance,
+pooled views with attached and detached observers, and a fresh scan hold exactly
+the rows that store it when each commit returns, and an Effect does once it has
+run. An unfiltered subscriber and live query, ID filters and pooled ID views
+that stay matched, and an Effect receive a change only when a row's value
+changed, and a real update beside a replacement in one batch still reaches an
+Effect. It does not cover
 `inArray` (fixed tests in
 `ir-stable-identity.test.ts`), on-demand or persisted sources, exact-output
 identity, which keeps reference semantics, or throwing `toJSON()` methods.

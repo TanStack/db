@@ -31,7 +31,9 @@
  * filtered on the new instance gains it, one whose filter still matches is told
  * nothing, and a later update must still remove that row from the index. A
  * query reads the new instance too: its joins, functional filters and filters
- * downstream of a projection follow it, and a row it keeps is not republished.
+ * downstream of a projection follow it, as do pooled views, and a row it keeps
+ * is not republished. An Effect's update for one row survives a deep-equal
+ * replacement of another row in the same batch.
  *
  * Why an example can miss the failure: a probe that is the stored instance
  * matches under reference equality too, an index can agree with a scan until
@@ -63,9 +65,12 @@
  * `getStableValueHash` are read for two distinct equal probes. Each stored
  * built-in carrier is also a reference probe: a filtered subscription, a live
  * query, a functional filter, a filter over a projection, and a join with a
- * Collection that holds the same instance. Each row also has a subscription
- * filtered on its ID, which stays matched, and an unfiltered live query and an
- * Effect watch every row. All are read after every update.
+ * Collection that holds the same instance, an Effect, and pooled views with
+ * attached and detached observers. Each row also has a subscription and a
+ * pooled view filtered on its ID, which stay matched, and an unfiltered live
+ * query and an Effect watch every row. Subscriptions and queries are read
+ * straight after each commit, before anything yields, and Effects after they
+ * have run.
  *
  * Refinement check: every read returns exactly the model's keys or pairs, and
  * the identities of equal probes are equal, while a record probe's identity
@@ -89,6 +94,7 @@ import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { Query, getQueryIR } from '../../src/query/builder/index.js'
 import {
+  and,
   createLiveQueryCollection,
   eq,
   gt,
@@ -102,6 +108,8 @@ import {
   getStableValueHash,
 } from '../../src/query/ir-stable-identity.js'
 import { createEffect } from '../../src/query/effect.js'
+import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
+import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../../src/utils.js'
 import { oracleProperty } from '../oracle-config.js'
@@ -113,6 +121,9 @@ import {
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 
 const property = `serialized-value.query-equality`
+
+// A built query is the builder class this entry point takes.
+const poolQuery = (query: unknown) => createPooledLiveQuery(query as never)
 
 const reachStates = [
   // A row matched a probe that is a distinct, equal instance.
@@ -148,6 +159,10 @@ const reachStates = [
   `reference-filter-stayed-matched`,
   // A deep-equal replacement ended a join on a shared instance.
   `shared-reference-join-left`,
+  // A batch held a deep-equal replacement and another row's real update.
+  `effect-update-beside-replacement`,
+  // A deep-equal replacement moved a row in a pooled group's order.
+  `pooled-order-moved`,
 ] as const
 type ReachState = (typeof reachStates)[number]
 
@@ -244,6 +259,20 @@ function withThrowingToJSON<T extends object>(target: T): T {
 }
 
 type Row = { id: string; ref: object | string | null }
+type ScopedRow = Row & { version: number }
+
+// Row equality compares its enumerable field, so two versions are deep-equal.
+// Effect publication equality compares a class by identity and tells them apart.
+class PrivateVersion {
+  readonly kind = `version`
+  #version: number
+  constructor(version: number) {
+    this.#version = version
+  }
+  get version(): number {
+    return this.#version
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Model
@@ -599,6 +628,8 @@ async function runHistory(
       scan: () => Array<string>
       subscribed: Set<string>
       readers: Record<string, () => Array<string>>
+      // Effects run after the commit, so they are read once they have.
+      effectReaders: Record<string, () => Array<string>>
     }
     const referenceProbes: Array<ReferenceProbe> = []
     const projected = createLiveQueryCollection({
@@ -613,7 +644,44 @@ async function runHistory(
 
     // Readers of every row. A deep-equal replacement must reach none of them.
     const stableEvents = new Map<string, Array<string>>()
+    const pooledStableEvents = new Map<string, Array<string>>()
+    const pooledResidualEvents = new Map<string, Array<string>>()
+    const pooledKeptObservers: Array<
+      ReturnType<typeof createLiveQueryObserver<Row, string>>
+    > = []
     for (const key of model.keys()) {
+      const pooledEvents: Array<string> = []
+      pooledStableEvents.set(key, pooledEvents)
+      const pooledStable = poolQuery(
+        new Query()
+          .from({ item: source })
+          .where(({ item }) => eq(item.id, key)),
+      )!
+      cleanup(() => pooledStable.cleanup())
+      const pooledSubscription = pooledStable.subscribeChanges((changes) => {
+        for (const change of changes) pooledEvents.push(change.type)
+      })
+      cleanup(() => pooledSubscription.unsubscribe())
+      // Its residual conjunct always passes, so the row stays matched.
+      const pooledResidual = poolQuery(
+        new Query()
+          .from({ item: source })
+          .where(({ item }) => and(eq(item.id, key), gte(item.id, key))),
+      )!
+      cleanup(() => pooledResidual.cleanup())
+      const residualEvents: Array<string> = []
+      pooledResidualEvents.set(key, residualEvents)
+      const residualSubscription = pooledResidual.subscribeChanges(
+        (changes) => {
+          for (const change of changes) residualEvents.push(change.type)
+        },
+      )
+      cleanup(() => residualSubscription.unsubscribe())
+      for (const view of [pooledStable, pooledResidual]) {
+        const observer = createLiveQueryObserver<Row, string>(view as never)
+        cleanup(() => observer.dispose())
+        pooledKeptObservers.push(observer)
+      }
       const events: Array<string> = []
       stableEvents.set(key, events)
       const stable = source.subscribeChanges(
@@ -756,6 +824,32 @@ async function runHistory(
       await new Promise((resolve) => setTimeout(resolve, 0))
       const idsOf = (query: { toArray: Array<{ id: string }> }) => () =>
         query.toArray.map((row) => row.id).sort()
+      // A pooled view needs an equality to group by, so each row has its own.
+      const pooledObservers = [...model.keys()].flatMap((key) => {
+        const view = poolQuery(
+          new Query()
+            .from({ item: source })
+            .where(({ item }) =>
+              and(eq(item.id, key), eq(item.ref, instance as never)),
+            ),
+        )!
+        cleanup(() => view.cleanup())
+        const attached = createLiveQueryObserver<Row, string>(view as never)
+        cleanup(() => attached.dispose())
+        const stopAttached = attached.subscribe(() => {})
+        cleanup(stopAttached)
+        const detached = createLiveQueryObserver<Row, string>(view as never)
+        cleanup(() => detached.dispose())
+        return [{ attached, detached }]
+      })
+      const pooledIds = (which: `attached` | `detached`) => () =>
+        pooledObservers
+          .flatMap((observers) =>
+            (observers[which].getSnapshot().data as Array<Row>).map(
+              (row) => row.id,
+            ),
+          )
+          .sort()
       referenceProbes.push({
         instance,
         scan: () =>
@@ -770,8 +864,10 @@ async function runHistory(
           'filter over a projection': idsOf(downstream),
           'shared-reference join': idsOf(sharedJoin),
           'ordered query': idsOf(ordered),
-          Effect: () => [...inEffect].sort(),
+          'pooled view, attached': pooledIds(`attached`),
+          'pooled view, detached': pooledIds(`detached`),
         },
+        effectReaders: { Effect: () => [...inEffect].sort() },
       })
     }
     for (const [key, spec] of model) {
@@ -791,14 +887,25 @@ async function runHistory(
         })!
         .map((change) => String(change.key))
 
+    const holdersOf = (instance: object) =>
+      [...stored].filter(([, value]) => value === instance).map(([key]) => key)
+    const checkEffectReaders = (checkpoint: string) => {
+      for (const [position, probe] of referenceProbes.entries()) {
+        for (const [reader, read] of Object.entries(probe.effectReaders)) {
+          expect(
+            read(),
+            `${checkpoint}: reference probe ${position}: ${reader}`,
+          ).toEqual(holdersOf(probe.instance))
+        }
+      }
+    }
+
     const check = (checkpoint: string) => {
       const expectedKeys = modelKeys(model, history.probe)
       const expectedPairs = modelPairs(model, joinModel)
       expect(scanKeys(), `${checkpoint}: scan`).toEqual(expectedKeys)
       for (const [position, probe] of referenceProbes.entries()) {
-        const holders = [...stored]
-          .filter(([, instance]) => instance === probe.instance)
-          .map(([key]) => key)
+        const holders = holdersOf(probe.instance)
         const label = `${checkpoint}: reference probe ${position}`
         expect(probe.scan(), `${label}: scan`).toEqual(holders)
         expect([...probe.subscribed].sort(), `${label}: subscription`).toEqual(
@@ -867,6 +974,7 @@ async function runHistory(
     }
 
     check(`initial load`)
+    checkEffectReaders(`initial load`)
 
     for (const [step, update] of history.updates.entries()) {
       const key = rowKey(update.row % history.rows.length)
@@ -904,6 +1012,11 @@ async function runHistory(
       livePublished.length = 0
       effectEvents.length = 0
       for (const events of stableEvents.values()) events.length = 0
+      for (const events of pooledStableEvents.values()) events.length = 0
+      for (const events of pooledResidualEvents.values()) events.length = 0
+      const keptSnapshots = pooledKeptObservers.map((observer) =>
+        observer.getSnapshot(),
+      )
       source.utils.begin()
       source.utils.write({ type: `update`, value: { id: key, ref: instance } })
       source.utils.commit()
@@ -915,14 +1028,37 @@ async function runHistory(
           !silent && stableKey === key ? [`update`] : [],
         )
       }
+      for (const [stableKey, events] of pooledStableEvents) {
+        expect(
+          events,
+          `update ${step}: pooled ID view on ${stableKey}`,
+        ).toEqual(!silent && stableKey === key ? [`update`] : [])
+      }
+      for (const [stableKey, events] of pooledResidualEvents) {
+        expect(
+          events,
+          `update ${step}: pooled residual view on ${stableKey}`,
+        ).toEqual(!silent && stableKey === key ? [`update`] : [])
+      }
+      if (silent) {
+        for (const [position, observer] of pooledKeptObservers.entries()) {
+          expect(
+            observer.getSnapshot(),
+            `update ${step}: pooled snapshot ${position} kept`,
+          ).toBe(keptSnapshots[position])
+        }
+      }
       expect(livePublished, `update ${step}: unfiltered live query`).toEqual(
         silent ? [] : [`update:${key}`],
       )
+      // Membership is read before anything yields: a reader that catches up a
+      // microtask later is stale for code that runs after the commit.
+      check(`update ${step}`)
       await new Promise((resolve) => setTimeout(resolve, 0))
       expect(effectEvents, `update ${step}: Effect`).toEqual(
         silent ? [] : [`update:${key}`],
       )
-      check(`update ${step}`)
+      checkEffectReaders(`update ${step}`)
     }
 
     // Identity: two distinct, equal probes are one query and one demand,
@@ -1088,6 +1224,124 @@ async function runHistory(
         }
       }
       reach(`shared-array-range`)
+
+      // One batch replaces row a with a deep-equal row and really updates row
+      // b, whose projection holds a class with readable private state.
+      const scoped = createCollection(
+        mockSyncCollectionOptions<ScopedRow>({
+          id: `serialized-value-scoped-${run}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `a`, ref: new Map(), version: 0 },
+            { id: `b`, ref: null, version: 0 },
+          ],
+          autoIndex: `off`,
+        }),
+      )
+      cleanup(() => scoped.cleanup())
+      await scoped.stateWhenReady()
+      const updates: Record<`ordered` | `unordered`, Array<string>> = {
+        ordered: [],
+        unordered: [],
+      }
+      const projection = (row: { item: ScopedRow }) => ({
+        id: row.item.id,
+        state: new PrivateVersion(row.item.version),
+      })
+      for (const variant of [`ordered`, `unordered`] as const) {
+        const scopedEffect = createEffect({
+          id: `serialized-value-scoped-${variant}-${run}`,
+          query: (q) =>
+            variant === `ordered`
+              ? q
+                  .from({ item: scoped })
+                  .orderBy(({ item }) => item.id)
+                  .limit(2)
+                  .fn.select(projection)
+              : q.from({ item: scoped }).fn.select(projection),
+          skipInitial: true,
+          onUpdate: (event) => {
+            updates[variant].push(String(event.key))
+          },
+        })
+        cleanup(() => scopedEffect.dispose())
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      scoped.utils.begin()
+      scoped.utils.write({
+        type: `update`,
+        value: { id: `a`, ref: new Map(), version: 0 },
+      })
+      scoped.utils.write({
+        type: `update`,
+        value: { id: `b`, ref: null, version: 1 },
+      })
+      scoped.utils.commit()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(updates, `Effect updates beside a replacement`).toEqual({
+        ordered: [`b`],
+        unordered: [`b`],
+      })
+      reach(`effect-update-beside-replacement`)
+
+      // Objects order by reference, so a deep-equal replacement can move a row.
+      const firstRef = new Map()
+      const ordering = createCollection(
+        mockSyncCollectionOptions<ScopedRow>({
+          id: `serialized-value-ordering-${run}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `a`, ref: firstRef, version: 0 },
+            { id: `b`, ref: new Map(), version: 0 },
+          ],
+          autoIndex: `off`,
+        }),
+      )
+      cleanup(() => ordering.cleanup())
+      await ordering.stateWhenReady()
+      const orderedByRef = () =>
+        new Query()
+          .from({ item: ordering })
+          .where(({ item }) => eq(item.version, 0))
+          .orderBy(({ item }) => item.ref)
+      const orderedLive = createLiveQueryCollection({
+        id: `serialized-value-ordering-live-${run}`,
+        query: () => orderedByRef() as never,
+      })
+      cleanup(() => orderedLive.cleanup())
+      await orderedLive.preload()
+      const orderedPool = poolQuery(orderedByRef())!
+      cleanup(() => orderedPool.cleanup())
+      const orderedObserver = createLiveQueryObserver<ScopedRow, string>(
+        orderedPool as never,
+      )
+      cleanup(() => orderedObserver.dispose())
+      const orderOf = () =>
+        (orderedObserver.getSnapshot().data as Array<ScopedRow>).map(
+          (row) => row.id,
+        )
+      expect(orderOf(), `pooled order before`).toEqual(
+        orderedLive.toArray.map((row) => (row as ScopedRow).id),
+      )
+      ordering.utils.begin()
+      ordering.utils.write({
+        type: `update`,
+        value: { id: `a`, ref: new Map(), version: 0 },
+      })
+      ordering.utils.commit()
+      // A query built now reads the stored rows in their current order.
+      const orderedFresh = createLiveQueryCollection({
+        id: `serialized-value-ordering-fresh-${run}`,
+        query: () => orderedByRef() as never,
+      })
+      cleanup(() => orderedFresh.cleanup())
+      await orderedFresh.preload()
+      expect(
+        orderedFresh.toArray.map((row) => (row as ScopedRow).id),
+        `fresh order after a replacement`,
+      ).toEqual([`b`, `a`])
+      expect(orderOf(), `pooled order after a replacement`).toEqual([`b`, `a`])
+      reach(`pooled-order-moved`)
     }
   }, cleanups)
 }
@@ -1096,7 +1350,7 @@ describe(`value classes compare by their serialized value`, () => {
   oracleProperty({
     id: property,
     law: {
-      statement: `Query equality, exact index lookup, live-query filters and joins match distinct class instances whose toJSON() values are equal, never a plain value equal to that serialization; query identity and getStableValueHash follow the same relation and separate unequal values. Range predicates order a value class by that serialization, never valueOf(), and order an array the row and the capture share like a copy of it. A Map, Set or ArrayBuffer subclass with toJSON() keeps its built-in rule and never equals a value class, and a plain record or array keeps reference semantics without its toJSON property being read. When a sync write replaces such a value with a deep-equal instance, a filter on either instance, a join, a functional filter and a filter over a projection follow the stored one, and a subscriber, live query or Effect that keeps the row is told nothing.`,
+      statement: `Query equality, exact index lookup, live-query filters and joins match distinct class instances whose toJSON() values are equal, never a plain value equal to that serialization; query identity and getStableValueHash follow the same relation and separate unequal values. Range predicates order a value class by that serialization, never valueOf(), and order an array the row and the capture share like a copy of it. A Map, Set or ArrayBuffer subclass with toJSON() keeps its built-in rule and never equals a value class, and a plain record or array keeps reference semantics without its toJSON property being read. When a sync write replaces such a value with a deep-equal instance, a filter on either instance, a join, a functional filter, a filter over a projection and a pooled view follow the stored one by the time the commit returns, a subscriber, live query or Effect that keeps the row is told nothing, and another row's update in the same batch still reaches an Effect.`,
       authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
       limits: `One toJSON() class over two tables and two IDs, its text look-alike, empty Map, Set and ArrayBuffer subclass look-alikes, plain records and arrays with a throwing toJSON accessor (never probes), and null; up to four source rows, three join rows and three synced updates; range reads use record probes; no inArray, on-demand or persisted sources, or exact-output identity.`,
     },
@@ -1107,6 +1361,8 @@ describe(`value classes compare by their serialized value`, () => {
       'src/collection/state.ts#CollectionStateManager.commitPendingTransactions',
       'src/collection/subscription.ts#CollectionSubscription.visibleChanges',
       'src/query/effect.ts#classifyDelta',
+      'src/query/pooled-live-query.ts#Partition.apply',
+      'src/query/pooled-live-query.ts#PooledLiveQuery.noteReplacement',
       'src/collection/change-events.ts#markSilentReplacement',
       'src/collection/change-events.ts#isSilentReplacement',
       'src/query/ir-stable-identity.ts#getStableValueHash',
@@ -1153,6 +1409,8 @@ describe(`value classes compare by their serialized value`, () => {
             `reference-filter-entered`,
             `reference-filter-stayed-matched`,
             `shared-reference-join-left`,
+            `effect-update-beside-replacement`,
+            `pooled-order-moved`,
           ],
           build: (generated): History => {
             const carriers: ReadonlyArray<Carrier> = [
