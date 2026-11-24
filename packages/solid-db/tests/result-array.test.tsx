@@ -13,7 +13,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { waitFor } from '@solidjs/testing-library'
-import { createMemo, createRoot } from 'solid-js'
+import { createMemo, createRoot, createSignal } from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 
@@ -34,6 +34,7 @@ const publish = (collection: Collection, messages: Array<Message>) => {
   for (const message of messages) collection.utils.write(message)
   collection.utils.commit()
 }
+const order = (query: Array<Row>): string => query.map((row) => row.id).join(``)
 const rows = (): Array<Row> => [
   { id: `a`, title: `a`, position: 0 },
   { id: `b`, title: `b`, position: 1 },
@@ -157,6 +158,8 @@ describe(`the result array`, () => {
           },
           () => delete array[0],
           () => Object.defineProperty(array, `0`, { value: first }),
+          () => Object.preventExtensions(array),
+          () => Object.seal(array),
           () => Object.freeze(array),
           () => array.push({ id: `x`, title: `x`, position: 2 }),
           () => array.sort((one, other) => other.id.localeCompare(one.id)),
@@ -320,6 +323,117 @@ describe(`the result array, enumerated`, () => {
       }
     } finally {
       collection.cleanup()
+    }
+  })
+})
+
+describe(`the result array, reordered`, () => {
+  it(`follows a publication that moves rows without changing their number`, async () => {
+    const collection = collectionOf([
+      { id: `a`, title: `a`, position: 0 },
+      { id: `b`, title: `b`, position: 1 },
+      { id: `c`, title: `c`, position: 2 },
+    ])
+    try {
+      const query = createRoot((dispose) =>
+        Object.assign(
+          useLiveQuery((q) =>
+            q.from({ row: collection }).orderBy(({ row }) => row.position),
+          ),
+          { dispose },
+        ),
+      )
+      try {
+        await waitFor(() => expect(order(query())).toBe(`abc`))
+        const views = [...query()]
+        const reader = createRoot((dispose) => {
+          let runs = 0
+          return {
+            runs: () => runs,
+            order: createMemo(() => {
+              runs++
+              return order(query())
+            }),
+            dispose,
+          }
+        })
+        try {
+          expect(reader.runs()).toBe(1)
+
+          // A change in values that is not a move.
+          publish(collection, [
+            {
+              type: `update`,
+              value: { id: `b`, title: `changed`, position: 1 },
+            },
+          ])
+          await waitFor(() => expect(query()[1]!.title).toBe(`changed`))
+          expect(reader.runs()).toBe(1)
+
+          // A move: the first row goes last, and the views keep their rows.
+          publish(collection, [
+            { type: `update`, value: { id: `a`, title: `a`, position: 3 } },
+          ])
+          await waitFor(() => expect(reader.order()).toBe(`bca`))
+          expect([...query()]).toEqual([views[1], views[2], views[0]])
+
+          // And back.
+          publish(collection, [
+            { type: `update`, value: { id: `a`, title: `a`, position: 0 } },
+          ])
+          await waitFor(() => expect(reader.order()).toBe(`abc`))
+          expect(reader.runs()).toBe(3)
+          expect([...query()]).toEqual(views)
+        } finally {
+          reader.dispose()
+        }
+      } finally {
+        query.dispose()
+        query.collection.cleanup()
+      }
+    } finally {
+      collection.cleanup()
+    }
+  })
+})
+
+describe(`the result array, a replaced Collection`, () => {
+  it(`drops the views of the Collection that left and refills the keyed view`, async () => {
+    const first = collectionOf(rows())
+    const second = collectionOf([
+      { id: `b`, title: `new b`, position: 0 },
+      { id: `d`, title: `d`, position: 1 },
+    ])
+    try {
+      const query = createRoot((dispose) => {
+        const [source, setSource] = createSignal(first)
+        return Object.assign(useLiveQuery(source), { dispose, setSource })
+      })
+      try {
+        await waitFor(() => expect(order(query())).toBe(`ab`))
+        const state = query.state
+        const firstB = query()[1]!
+
+        query.setSource(second)
+        await waitFor(() => expect(order(query())).toBe(`bd`))
+        // The key `b` is in both Collections, and it is another row.
+        expect(query()[0]).not.toBe(firstB)
+        expect(query()[0]!.title).toBe(`new b`)
+        expect([...state.keys()]).toEqual([`b`, `d`])
+        expect(state.get(`b`)).toBe(second.get(`b`))
+        expect(state.get(`a`)).toBeUndefined()
+        expect(query.state).toBe(state)
+        // The view of a row that left serves the row it last had.
+        expect(firstB.title).toBe(`b`)
+      } finally {
+        query.dispose()
+        query.collection.cleanup()
+        first.cleanup()
+        second.cleanup()
+      }
+    } finally {
+      first.cleanup()
+      second.cleanup()
     }
   })
 })
