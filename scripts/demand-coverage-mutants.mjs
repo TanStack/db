@@ -193,8 +193,8 @@ const MUTANTS = [
     find: 'Math.max(0, deadlineAt - Date.now())',
     replace: 'deadlineAt - Date.now()',
     rationale:
-      'timer delay without Math.max (EQUIVALENT: negative delay fires at once)',
-    equivalent: 'setTimeout treats a negative delay as zero',
+      'timer delay without Math.max: Node and the HTML spec clamp a negative delay to zero, so only a runtime the spec does not bind can tell (kept by maintainer ruling M 2026-11-24)',
+    openGap: `pdc-gap-P21`,
   },
   {
     id: 'P22',
