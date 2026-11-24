@@ -387,7 +387,7 @@ export function extractSimpleComparisons(
         if (comparisonOps.includes(arg.name)) {
           const [leftArg, rightArg] = arg.args
           const field = leftArg?.type === `ref` ? leftArg.path : null
-          const value = rightArg?.type === `val` ? rightArg.value : null
+          const value = rightArg ? extractValue(rightArg) : undefined
 
           if (field && value !== undefined) {
             comparisons.push({
@@ -469,7 +469,7 @@ export function extractSimpleComparisons(
 
         // Extract field and value
         const field = leftArg?.type === `ref` ? leftArg.path : null
-        const value = rightArg?.type === `val` ? rightArg.value : null
+        const value = rightArg ? extractValue(rightArg) : undefined
 
         if (field && value !== undefined) {
           comparisons.push({
