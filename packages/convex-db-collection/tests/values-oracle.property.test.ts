@@ -390,7 +390,9 @@ oracleProperty({
           `nested-container`,
           `undefined`,
         ],
-        build: (generated: AssertionHistory<typeof convex_valuesHistory>) => ({
+        build: (
+          generated: AssertionHistory<typeof convex_valuesHistory>,
+        ): AssertionHistory<typeof convex_valuesHistory> => ({
           ...generated,
           kind: `insert` as const,
           before: undefined,
@@ -412,7 +414,9 @@ oracleProperty({
           `nested-container`,
           `undefined`,
         ],
-        build: (generated: AssertionHistory<typeof convex_valuesHistory>) => ({
+        build: (
+          generated: AssertionHistory<typeof convex_valuesHistory>,
+        ): AssertionHistory<typeof convex_valuesHistory> => ({
           ...generated,
           kind: `update` as const,
           before: undefined,
@@ -424,7 +428,9 @@ oracleProperty({
       {
         name: `equal payload update`,
         enters: [`update`, `equal-payload-update`],
-        build: (generated: AssertionHistory<typeof convex_valuesHistory>) => ({
+        build: (
+          generated: AssertionHistory<typeof convex_valuesHistory>,
+        ): AssertionHistory<typeof convex_valuesHistory> => ({
           ...generated,
           kind: `update` as const,
           before: [1n, -0, { bytes: [0] }],
@@ -436,7 +442,9 @@ oracleProperty({
       {
         name: `delete native values`,
         enters: [`delete`],
-        build: (generated: AssertionHistory<typeof convex_valuesHistory>) => ({
+        build: (
+          generated: AssertionHistory<typeof convex_valuesHistory>,
+        ): AssertionHistory<typeof convex_valuesHistory> => ({
           ...generated,
           kind: `delete` as const,
           before: [1n, -0, { bytes: [0] }],
