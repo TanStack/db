@@ -61,7 +61,10 @@ import type {
   EagerGateHistory,
   EagerReloadHistory,
 } from '../../db-adapter-conformance/tests/eager-reload-oracle'
-import type { OnDemandBoundaryHistory, OnDemandStreamsHistory  } from '../../db-adapter-conformance/tests/on-demand-streams-oracle'
+import type {
+  OnDemandBoundaryHistory,
+  OnDemandStreamsHistory,
+} from '../../db-adapter-conformance/tests/on-demand-streams-oracle'
 import type { DirectMutationHistory } from '../../powersync-direct-collection/tests/mutation-confirmation-driver'
 import type { DecodeHistory } from '../../db-adapter-conformance/tests/decode-refusal-oracle'
 import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'

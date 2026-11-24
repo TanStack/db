@@ -188,7 +188,8 @@ export const convexPersistedDemandSource: DemandReceivingFactory = async (
         (a, b) => a.rank - b.rank || a.id.localeCompare(b.id),
       )
       mode = `answered`
-      for (const [queryId, queryOptions] of activeQueries) pending.set(queryId, queryOptions)
+      for (const [queryId, queryOptions] of activeQueries)
+        pending.set(queryId, queryOptions)
       flush()
       await barrier()
     },

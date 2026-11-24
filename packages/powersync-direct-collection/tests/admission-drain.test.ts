@@ -27,7 +27,8 @@ test(`storage admission is distinct from the mapper's progress bound`, async () 
   const receiver = (drainStorage: boolean): OnDemandStreamsAdapter => {
     const adapter = persistedDirectOnDemandStreamsAdapter(() => {
       const host = createStartupHost(`controlled`)
-      const storage: PersistedCollectionPersistence[`adapter`] = host.persistence.adapter
+      const storage: PersistedCollectionPersistence[`adapter`] =
+        host.persistence.adapter
       const original = storage.loadResumeSnapshot.bind(storage)
       let delayed = false
       storage.loadResumeSnapshot = async (
