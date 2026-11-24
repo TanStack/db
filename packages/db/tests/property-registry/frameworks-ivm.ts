@@ -12,7 +12,6 @@ export const properties: ReadonlyArray<string> = [
   `structural-identity.representation-fixed`,
   `structural-identity.independent-values-fixed`,
   `ivm.distinct-representatives-fixed`,
-  `ivm.distinct-support-collisions`,
   `ivm.index-refinement-fixed`,
   // react-db
   `react.convex-lazy-paging`,
@@ -57,7 +56,7 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
     `db-ivm/tests/distinct-representative-oracle.property.test.ts`,
     `ivm`,
-    `distinct-representatives-fixed distinct-support-collisions`,
+    `distinct-representatives-fixed`,
   ],
   [
     `db-ivm/tests/index-refinement-oracle.property.test.ts`,

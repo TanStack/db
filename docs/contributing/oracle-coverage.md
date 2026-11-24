@@ -2490,21 +2490,19 @@ and `lte` over generated arrays that mix value classes, record-shaped
 array subclass and self-referencing arrays against an independent order
 model, including the native operators' throws, with the right operand's
 objects given runtime identities first, and each value class instance
-serialized at most once. A third, fixed property
-(`serialized-value.truncate-replay`) replaces a row's reference with a
-deep-equal instance during a direct subscriber's truncate replay and requires
-the completed replay to drop it from a filter on the old instance while an
-unchanged row stays silent. A fixed property
-(`serialized-value.effect-joined-load`) lets a deep-equal replacement of a
-joined reference load an on-demand source whose provider answers at once: with
-a real update, with a real update beside a deep-equal replacement in one commit,
-or after disposing the Effect. It requires one coherent batch that matches a
-normal opener's, and no error on disposal. Another
-(`serialized-value.pooled-residual-swap`) swaps two rows across a residual
-pooled view in one batch and then really updates one, for attached and detached
-readers. The distinct representative oracle
-requires a shown payload to stay while the inputs that hold it do, and a fixed
-history retires a row whose hash collides with a live one.
+serialized at most once. Three more generated properties use small models.
+`serialized-value.truncate-replay` gives up to three rows a probe reference, a
+deep-equal copy or no row before a direct subscriber's truncate and after its
+replay, and requires the replay to publish exactly the rows that stopped or
+started matching. `serialized-value.effect-joined-load` opens an on-demand
+join load with a deep-equal or normal update; the provider moves one to three
+rows by real updates or deep-equal replacements and may dispose the Effect,
+and the model gives the one batch. `serialized-value.pooled-residual-swap`
+applies batches of moves and real updates to a residual pooled group and
+compares attached and detached readers with the rows that hold the probe. The
+distinct representative oracle requires a shown payload to stay while the
+inputs that hold it do, and `ivm.distinct-support-collisions` adds and removes
+the four inputs of one verified digest family against a multiset model.
 
 The
 [Temporal index order tests](https://github.com/TanStack/db/blob/main/packages/db/tests/temporal-index-order.test.ts)

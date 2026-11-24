@@ -1204,7 +1204,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/serialized-value-equality-oracle.property.test.ts`,
     `serialized-value`,
-    `query-equality array-order`,
+    `query-equality array-order truncate-replay effect-joined-load pooled-residual-swap`,
   ],
   [
     `trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
@@ -1867,7 +1867,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-ivm/tests/distinct-representative-oracle.property.test.ts`,
     `ivm`,
-    `distinct-representatives distinct-representatives-unit-split`,
+    `distinct-representatives distinct-representatives-unit-split distinct-support-collisions`,
   ],
   [
     `db/tests/query/distinct-collision-oracle.test.ts`,
@@ -2110,6 +2110,9 @@ const replayTestNames = new Map([
     `ir-identity.reference-queries`,
     `serialized-value.query-equality`,
     `serialized-value.array-order`,
+    `serialized-value.truncate-replay`,
+    `serialized-value.effect-joined-load`,
+    `serialized-value.pooled-residual-swap`,
     `query.public-container-copy`,
     `query-identity.compiled-output`,
     `query-identity.equality-partition`,
@@ -2343,6 +2346,10 @@ const replayTestNames = new Map([
   [
     `ivm.distinct-representatives-unit-split`,
     `ivm\\.distinct-representatives-unit-split > random seed`,
+  ],
+  [
+    `ivm.distinct-support-collisions`,
+    `ivm\\.distinct-support-collisions > random seed`,
   ],
   [`query.distinct-collisions`, `query\\.distinct-collisions > random seed`],
   [

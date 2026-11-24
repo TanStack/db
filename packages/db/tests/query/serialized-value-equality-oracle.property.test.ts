@@ -2253,26 +2253,62 @@ describe(`value classes order arrays by their serialized value`, () => {
   })
 })
 
-// A direct subscriber buffers a truncate replay privately and publishes one
-// diff when it completes. A deep-equal replacement during the replay can still
-// take a row out of a reference filter, so the diff must remove it.
-type ReplayRefRow = { id: string; ref: Map<string, number> }
-type ReplayHistory = { name: string; published: boolean }
+// Reference-filter histories that cross a truncate replay, a joined load and a
+// pooled residual view. Each grammar varies the rows and their changes; a small
+// model says what the readers show and what they are told.
 
-async function runReplayHistory(history: ReplayHistory) {
-  const first = new Map([[`k`, 1]])
-  const second = new Map([[`k`, 1]])
+// A direct subscriber buffers a truncate replay privately and publishes one
+// diff when it completes. A row's reference may be the probe instance or a
+// deep-equal copy, before the truncate and at the end of the replay; a copy
+// may first arrive as the probe and then be replaced. Model: a filter on the
+// probe instance shows exactly the rows that hold it, and the replay publishes
+// a delete for each row that stopped matching and an insert for each that
+// started, and nothing for a row that still matches.
+type RefState = `absent` | `probe` | `copy`
+type ReplayRowSpec = { before: RefState; after: RefState; viaProbe: boolean }
+type ReplayHistory = { rows: Array<ReplayRowSpec> }
+const replayStates = [
+  // A deep-equal replacement during the replay took a row out of the filter.
+  `replacement-left-filter`,
+  // A row that did not match before the truncate matched after it.
+  `entered-filter`,
+  // A row that matched came back unchanged and published nothing.
+  `unchanged-redelivered`,
+  // A row that matched was not delivered again.
+  `removed`,
+] as const
+type ReplayState = (typeof replayStates)[number]
+
+const replayRefState = fc.constantFrom<RefState>(`absent`, `probe`, `copy`)
+const replayHistoryArbitrary: fc.Arbitrary<ReplayHistory> = fc.record({
+  rows: fc.array(
+    fc.record({
+      before: replayRefState,
+      after: replayRefState,
+      viaProbe: fc.boolean(),
+    }),
+    { minLength: 1, maxLength: 3 },
+  ),
+})
+
+let replayRuns = 0
+
+async function runReplayHistory(
+  history: ReplayHistory,
+  reach: (state: ReplayState) => void,
+) {
+  type ReplayRow = { id: string; ref: Map<string, number> }
+  const probe = new Map([[`k`, 1]])
+  const copy = () => new Map([[`k`, 1]])
+  const ids = history.rows.map((_, index) => `r${index}`)
   let begin!: () => void
-  let write!: (message: {
-    type: `insert` | `update`
-    value: ReplayRefRow
-  }) => void
+  let write!: (message: { type: `insert` | `update`; value: ReplayRow }) => void
   let commit!: () => void
   let truncate!: () => void
   const replay = createDeferred<void>()
   let loads = 0
-  const collection = createCollection<ReplayRefRow>({
-    id: `serialized-value-replay-${history.published}`,
+  const collection = createCollection<ReplayRow>({
+    id: `serialized-value-replay-${replayRuns++}`,
     getKey: ({ id }) => id,
     syncMode: `on-demand`,
     sync: {
@@ -2283,12 +2319,18 @@ async function runReplayHistory(history: ReplayHistory) {
           loadSubset: () => {
             loads++
             if (loads > 1) return replay.promise
-            if (history.published) {
-              begin()
-              write({ type: `insert`, value: { id: `a`, ref: first } })
-              write({ type: `insert`, value: { id: `b`, ref: first } })
-              commit()
+            begin()
+            for (const [index, row] of history.rows.entries()) {
+              if (row.before === `absent`) continue
+              write({
+                type: `insert`,
+                value: {
+                  id: ids[index]!,
+                  ref: row.before === `probe` ? probe : copy(),
+                },
+              })
             }
+            commit()
             return true
           },
           unloadSubset: () => {},
@@ -2296,48 +2338,73 @@ async function runReplayHistory(history: ReplayHistory) {
       },
     },
   })
-  const visible = new Map<string, ReplayRefRow>()
+  const visible = new Set<string>()
   const events: Array<string> = []
   const subscription = collection.subscribeChanges(
     (changes) => {
       for (const change of changes) {
         events.push(`${change.type}:${String(change.key)}`)
         if (change.type === `delete`) visible.delete(String(change.key))
-        else visible.set(String(change.key), change.value)
+        else visible.add(String(change.key))
       }
     },
     {
-      whereExpression: new Func(`eq`, [new PropRef([`ref`]), new Value(first)]),
+      whereExpression: new Func(`eq`, [new PropRef([`ref`]), new Value(probe)]),
     },
   )
+  const matching = (state: (row: ReplayRowSpec) => RefState) =>
+    ids.filter((_, index) => state(history.rows[index]!) === `probe`)
   try {
     subscription.requestSnapshot({ optimizedOnly: false })
-    expect([...visible.keys()], `before the truncate`).toEqual(
-      history.published ? [`a`, `b`] : [],
+    expect([...visible].sort(), `before the truncate`).toEqual(
+      matching((row) => row.before),
     )
     begin()
     truncate()
     commit()
     await flushPromises()
-    // Row b comes back unchanged; row a is replaced by a deep-equal instance.
-    const unchanged = history.published ? first : new Map([[`k`, 1]])
-    begin()
-    write({ type: `insert`, value: { id: `a`, ref: first } })
-    write({ type: `insert`, value: { id: `b`, ref: unchanged } })
-    commit()
-    begin()
-    write({ type: `update`, value: { id: `a`, ref: second } })
-    commit()
+    for (const [index, row] of history.rows.entries()) {
+      if (row.after === `absent`) continue
+      const id = ids[index]!
+      begin()
+      if (row.after === `copy` && row.viaProbe) {
+        write({ type: `insert`, value: { id, ref: probe } })
+        commit()
+        begin()
+        write({ type: `update`, value: { id, ref: copy() } })
+      } else {
+        write({
+          type: `insert`,
+          value: { id, ref: row.after === `probe` ? probe : copy() },
+        })
+      }
+      commit()
+    }
     events.length = 0
     replay.resolve()
     await flushPromises()
-    expect(collection.get(`a`)?.ref, `stored instance`).toBe(second)
-    expect([...visible.keys()], `after the replay`).toEqual(
-      history.published ? [`b`] : [],
+
+    const expectedEvents: Array<string> = []
+    for (const [index, row] of history.rows.entries()) {
+      const id = ids[index]!
+      const was = row.before === `probe`
+      const is = row.after === `probe`
+      if (was && !is) expectedEvents.push(`delete:${id}`)
+      if (!was && is) expectedEvents.push(`insert:${id}`)
+      expect(collection.get(id)?.ref === probe, `${id} holds the probe`).toBe(
+        is,
+      )
+      if (was && row.after === `copy` && row.viaProbe)
+        reach(`replacement-left-filter`)
+      if (!was && is) reach(`entered-filter`)
+      if (was && is) reach(`unchanged-redelivered`)
+      if (was && row.after === `absent`) reach(`removed`)
+    }
+    expect([...visible].sort(), `after the replay`).toEqual(
+      matching((row) => row.after),
     )
-    // Only the row that left the filter is published.
-    expect(events, `replay publication`).toEqual(
-      history.published ? [`delete:a`] : [],
+    expect([...events].sort(), `replay publication`).toEqual(
+      expectedEvents.sort(),
     )
   } finally {
     replay.resolve()
@@ -2349,66 +2416,114 @@ async function runReplayHistory(history: ReplayHistory) {
 
 const replayProperty = `serialized-value.truncate-replay`
 
-describe(`a truncate replay follows a deep-equal reference replacement`, () => {
-  oracleProperty<ReplayHistory, ReturnType<typeof recordedAssertionJudgment>>({
+describe(`a truncate replay follows reference replacements`, () => {
+  oracleProperty({
     id: replayProperty,
     law: {
-      statement: `When a direct subscriber's truncate replay completes, a row whose stored reference was replaced by a deep-equal instance during the replay leaves a filter on the old instance, whether or not the row was published before the truncate, and a row that returns unchanged is not published again.`,
-      authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md; CodeRabbit review of PR #2460.`,
-      limits: `One on-demand Collection, one Map-valued reference filter, one replay; the rows are either published before the truncate or first written during the replay, and a second row returns unchanged.`,
+      statement: `When a direct subscriber's truncate replay completes, a filter on a reference shows exactly the rows that hold that instance, and the replay publishes a delete for each row that stopped matching, including by a deep-equal replacement, an insert for each that started, and nothing for a row that still matches.`,
+      authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
+      limits: `One on-demand Collection with a Map-valued reference filter and one replay; up to three rows, each absent, holding the probe or holding a deep-equal copy before the truncate and after the replay.`,
     },
     owns: [
       'src/collection/subscription.ts#CollectionSubscription.createStateDiff',
     ],
-    histories: [
-      { name: `a row published before the truncate`, published: true },
-      { name: `a row first written during the replay`, published: false },
-    ],
-    label: ({ name }) => name,
+    histories: {
+      arbitrary: replayHistoryArbitrary,
+      runs: 40,
+      fixedSeeds: [2459],
+      states: replayStates,
+      constructed: [
+        {
+          name: `a replacement leaves, a row enters and one stays`,
+          enters: [
+            `replacement-left-filter`,
+            `entered-filter`,
+            `unchanged-redelivered`,
+          ],
+          build: (): ReplayHistory => ({
+            rows: [
+              { before: `probe`, after: `copy`, viaProbe: true },
+              { before: `copy`, after: `probe`, viaProbe: false },
+              { before: `probe`, after: `probe`, viaProbe: false },
+            ],
+          }),
+        },
+        {
+          name: `a matching row is not delivered again`,
+          enters: [`removed`],
+          build: (): ReplayHistory => ({
+            rows: [{ before: `probe`, after: `absent`, viaProbe: false }],
+          }),
+        },
+      ],
+    },
+    resolve: (history) => ({ history }),
     model: recordedAssertionJudgment,
-    driver: (history, observe) =>
-      recordAssertionJudgment(replayProperty, history, observe, () =>
-        runReplayHistory(history),
+    driver: (plan: { history: ReplayHistory }, observe) =>
+      recordAssertionJudgment(replayProperty, plan, observe, () =>
+        runReplayHistory(plan.history, (state) => observe(`reach`, state)),
       ),
     check: forwardAssertionJudgment,
   })
 })
 
-// A deep-equal replacement of a joined reference loads the joined side, and
-// the provider can answer at once while the replacement runs. Its real
-// updates keep their provenance: the Effect reports them even when the
-// selected output is unchanged, as it does when a normal change opened the
-// load. Its deep-equal replacements run in the same batch, so a row they keep
-// matched is never reported as leaving and entering. A provider may dispose
-// the Effect during that pass.
+// A deep-equal replacement of a joined reference, or a normal update, loads
+// the joined side. The provider answers at once with each joined row moved to
+// the new reference, either by a real update or by a deep-equal replacement,
+// and may dispose the Effect first. Model: unless disposed, the Effect
+// publishes one batch with an update for each joined row that a normal change
+// touched: every row after a normal opener, otherwise each really updated row.
+type JoinedChange = `real` | `silent`
 type EffectLoadHistory = {
-  name: string
   opener: `silent` | `normal`
-  // `single`: one real update. `atomic`: one commit with a real update to B
-  // and a deep-equal replacement of C. `dispose`: the provider disposes the
-  // Effect, then answers with one real update.
-  response: `single` | `atomic` | `dispose`
+  rows: Array<JoinedChange>
+  dispose: boolean
 }
+const effectLoadStates = [
+  // A real update arrived beside a deep-equal replacement.
+  `real-beside-replacement`,
+  // A deep-equal replacement opened a load whose rows were all replacements.
+  `replacements-only`,
+  // The provider disposed the Effect during the load.
+  `disposed-during-load`,
+  // A normal update opened the load.
+  `normal-opener`,
+] as const
+type EffectLoadState = (typeof effectLoadStates)[number]
 
-async function runEffectLoadHistory(history: EffectLoadHistory) {
+const effectLoadHistoryArbitrary: fc.Arbitrary<EffectLoadHistory> = fc.record({
+  opener: fc.constantFrom<`silent` | `normal`>(`silent`, `normal`),
+  rows: fc.array(fc.constantFrom<JoinedChange>(`real`, `silent`), {
+    minLength: 1,
+    maxLength: 3,
+  }),
+  dispose: fc.boolean(),
+})
+
+let effectLoadRuns = 0
+
+async function runEffectLoadHistory(
+  history: EffectLoadHistory,
+  reach: (state: EffectLoadState) => void,
+) {
   type Left = { id: string; n: number; ref: Map<string, number> }
   type Right = { id: string; ref: Map<string, number>; version: number }
   const first = new Map([[`k`, 1]])
   const second = new Map([[`k`, 1]])
-  const label = `${history.opener}-${history.response}`
+  const run = effectLoadRuns++
+  const rightIds = history.rows.map((_, index) => `R${index}`)
   const left = createCollection(
     mockSyncCollectionOptions<Left>({
-      id: `serialized-value-effect-load-left-${label}`,
+      id: `serialized-value-effect-load-left-${run}`,
       getKey: (row) => row.id,
       initialData: [{ id: `l`, n: 0, ref: first }],
     }),
   )
-  const rightIds = history.response === `atomic` ? [`B`, `C`] : [`B`]
   let loads = 0
   // The provider reaches the Effect that its own load serves.
   const handle: { effect?: ReturnType<typeof createEffect> } = {}
   const right = createCollection<Right>({
-    id: `serialized-value-effect-load-right-${label}`,
+    id: `serialized-value-effect-load-right-${run}`,
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     autoIndex: `eager`,
@@ -2419,17 +2534,19 @@ async function runEffectLoadHistory(history: EffectLoadHistory) {
         return {
           loadSubset: () => {
             loads++
-            if (loads > 1 && history.response === `dispose`)
-              void handle.effect!.dispose()
+            if (loads > 1 && history.dispose) void handle.effect!.dispose()
             begin()
-            for (const id of rightIds) {
+            for (const [index, id] of rightIds.entries()) {
               write(
                 loads === 1
                   ? { type: `insert`, value: { id, ref: first, version: 0 } }
                   : {
                       type: `update`,
-                      // B really changes; C is replaced by a deep-equal row.
-                      value: { id, ref: second, version: id === `B` ? 1 : 0 },
+                      value: {
+                        id,
+                        ref: second,
+                        version: history.rows[index] === `real` ? 1 : 0,
+                      },
                     },
               )
             }
@@ -2472,14 +2589,29 @@ async function runEffectLoadHistory(history: EffectLoadHistory) {
     expect(() => left.utils.commit(), `opening commit`).not.toThrow()
     await flushPromises()
     expect(loads, `joined loads`).toBe(2)
-    expect(right.get(`B`)?.version, `provider version`).toBe(1)
-    const expected =
-      history.response === `dispose`
-        ? []
-        : history.response === `single` || history.opener === `silent`
-          ? [[`update:B`]]
-          : [[`update:B`, `update:C`]]
-    expect(batches, `Effect after the load`).toEqual(expected)
+    for (const [index, id] of rightIds.entries())
+      expect(right.get(id)?.version, `${id} version`).toBe(
+        history.rows[index] === `real` ? 1 : 0,
+      )
+    const updated = rightIds
+      .filter(
+        (_, index) =>
+          history.opener === `normal` || history.rows[index] === `real`,
+      )
+      .map((id) => `update:${id}`)
+    expect(batches, `Effect after the load`).toEqual(
+      history.dispose || updated.length === 0 ? [] : [updated.sort()],
+    )
+    if (history.dispose) reach(`disposed-during-load`)
+    else if (history.opener === `normal`) reach(`normal-opener`)
+    else if (history.rows.every((change) => change === `silent`))
+      reach(`replacements-only`)
+    if (
+      !history.dispose &&
+      history.rows.includes(`real`) &&
+      history.rows.includes(`silent`)
+    )
+      reach(`real-beside-replacement`)
   } finally {
     await effect.dispose()
   }
@@ -2487,59 +2619,143 @@ async function runEffectLoadHistory(history: EffectLoadHistory) {
 
 const effectLoadProperty = `serialized-value.effect-joined-load`
 
-describe(`an Effect keeps a joined load's update beside a replacement`, () => {
-  oracleProperty<
-    EffectLoadHistory,
-    ReturnType<typeof recordedAssertionJudgment>
-  >({
+describe(`an Effect publishes a joined load with its replacements`, () => {
+  oracleProperty({
     id: effectLoadProperty,
     law: {
-      statement: `A joined source that answers while an Effect applies deep-equal replacements is published in the same batch: its real updates reach the Effect even when the selected output is unchanged, its deep-equal replacements report nothing for a row they keep matched, and the result matches a normal opener's. Disposing the Effect during that pass ends it without an error.`,
-      authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md; review of PR #2460.`,
-      limits: `One eager source and one on-demand source joined by a Map reference; the provider answers the second load synchronously with one real update, with a real update beside a deep-equal replacement in one commit, or after disposing the Effect; a deep-equal or a normal left update opens it.`,
+      statement: `A joined source that answers while an Effect applies deep-equal replacements is published in the same batch: an update reaches the Effect for each joined row that a normal change touched, even when the selected output is unchanged, nothing is reported for a row that deep-equal replacements alone kept matched, and the result matches a normal opener's. Disposing the Effect during that pass ends it without an error.`,
+      authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
+      limits: `One eager source and one on-demand source joined by a Map reference; one to three joined rows, each moved by a real update or a deep-equal replacement in one synchronous response, which may first dispose the Effect; a deep-equal or a normal left update opens the load.`,
     },
     owns: [
       'src/query/effect.ts#EffectPipelineRunner.runGraph',
       'src/query/effect.ts#EffectPipelineRunner.runGraphToQuiescence',
       'src/query/effect.ts#EffectPipelineRunner.handleSourceChanges',
     ],
-    histories: ([`silent`, `normal`] as const).flatMap((opener) =>
-      ([`single`, `atomic`, `dispose`] as const).map((response) => ({
-        name: `a ${opener === `silent` ? `deep-equal replacement` : `normal update`} opens a ${response} response`,
-        opener,
-        response,
-      })),
-    ),
-    label: ({ name }) => name,
+    histories: {
+      arbitrary: effectLoadHistoryArbitrary,
+      runs: 40,
+      fixedSeeds: [2459],
+      states: effectLoadStates,
+      constructed: [
+        {
+          name: `a real update beside a replacement in one response`,
+          enters: [`real-beside-replacement`],
+          build: (): EffectLoadHistory => ({
+            opener: `silent`,
+            rows: [`real`, `silent`],
+            dispose: false,
+          }),
+        },
+        {
+          name: `a response of replacements alone`,
+          enters: [`replacements-only`],
+          build: (): EffectLoadHistory => ({
+            opener: `silent`,
+            rows: [`silent`],
+            dispose: false,
+          }),
+        },
+        {
+          name: `the provider disposes the Effect`,
+          enters: [`disposed-during-load`],
+          build: (): EffectLoadHistory => ({
+            opener: `silent`,
+            rows: [`real`],
+            dispose: true,
+          }),
+        },
+        {
+          name: `a normal update opens the load`,
+          enters: [`normal-opener`, `real-beside-replacement`],
+          build: (): EffectLoadHistory => ({
+            opener: `normal`,
+            rows: [`real`, `silent`],
+            dispose: false,
+          }),
+        },
+      ],
+    },
+    resolve: (history) => ({ history }),
     model: recordedAssertionJudgment,
-    driver: (history, observe) =>
-      recordAssertionJudgment(effectLoadProperty, history, observe, () =>
-        runEffectLoadHistory(history),
+    driver: (plan: { history: EffectLoadHistory }, observe) =>
+      recordAssertionJudgment(effectLoadProperty, plan, observe, () =>
+        runEffectLoadHistory(plan.history, (state) => observe(`reach`, state)),
       ),
     check: forwardAssertionJudgment,
   })
 })
 
-// A residual pooled view rechecks which rows pass when it is read. Two
-// deep-equal replacements in one batch can swap one row out and another in,
-// leaving the count alone, and a real update can change a passing row's value
-// without changing which rows pass. Readers see both.
-async function runPooledSwapHistory() {
+// A pooled view with a residual reference filter rechecks which rows pass
+// when it is read. Batches move rows between the probe instance and deep-equal
+// copies and really update them. Model: after each batch, attached and
+// detached readers show the rows that hold the probe, with their values.
+type PooledRef = `probe` | `copy`
+type PooledOp = { row: number; op: `to-probe` | `to-copy` | `bump` }
+type PooledHistory = {
+  initial: Array<PooledRef>
+  batches: Array<Array<PooledOp>>
+}
+const pooledStates = [
+  // One batch took a row out and put another in.
+  `swap-in-one-batch`,
+  // A real update changed a row the view kept.
+  `real-update-kept`,
+  // A deep-equal replacement put a row into the view.
+  `replacement-entered`,
+  // A deep-equal replacement took a row out of the view.
+  `replacement-left`,
+] as const
+type PooledState = (typeof pooledStates)[number]
+
+const pooledHistoryArbitrary: fc.Arbitrary<PooledHistory> = fc.record({
+  initial: fc.array(fc.constantFrom<PooledRef>(`probe`, `copy`), {
+    minLength: 2,
+    maxLength: 3,
+  }),
+  batches: fc.array(
+    fc.array(
+      fc.record({
+        row: fc.nat({ max: 2 }),
+        op: fc.constantFrom<PooledOp[`op`]>(`to-probe`, `to-copy`, `bump`),
+      }),
+      { minLength: 1, maxLength: 3 },
+    ),
+    { minLength: 1, maxLength: 4 },
+  ),
+})
+
+let pooledRuns = 0
+
+async function runPooledHistory(
+  history: PooledHistory,
+  reach: (state: PooledState) => void,
+) {
   type SwapRow = {
     id: string
     team: string
     n: number
     ref: Map<string, number>
   }
-  const first = new Map([[`k`, 1]])
+  const probe = new Map([[`k`, 1]])
+  const model = history.initial.map((ref, index) => ({
+    id: `p${index}`,
+    ref,
+    n: 0,
+  }))
+  const stored = model.map((row) =>
+    row.ref === `probe` ? probe : new Map([[`k`, 1]]),
+  )
   const source = createCollection(
     mockSyncCollectionOptions<SwapRow>({
-      id: `serialized-value-pooled-swap`,
+      id: `serialized-value-pooled-${pooledRuns++}`,
       getKey: (row) => row.id,
-      initialData: [
-        { id: `a`, team: `t`, n: 0, ref: first },
-        { id: `b`, team: `t`, n: 0, ref: new Map([[`k`, 1]]) },
-      ],
+      initialData: model.map((row, index) => ({
+        id: row.id,
+        team: `t`,
+        n: 0,
+        ref: stored[index]!,
+      })),
       autoIndex: `off`,
     }),
   )
@@ -2548,7 +2764,7 @@ async function runPooledSwapHistory() {
     new Query()
       .from({ item: source })
       .where(({ item }) =>
-        and(eq(item.team, `t`), eq(item.ref, first as never)),
+        and(eq(item.team, `t`), eq(item.ref, probe as never)),
       ),
   )!
   const attached = createLiveQueryObserver<SwapRow, string>(view as never)
@@ -2558,30 +2774,45 @@ async function runPooledSwapHistory() {
     (observer.getSnapshot().data as Array<SwapRow>).map(
       (row) => `${row.id}:${row.n}`,
     )
-  const expectRows = (label: string, expected: Array<string>) => {
-    expect(rows(attached), `${label}: attached`).toEqual(expected)
-    expect(rows(detached), `${label}: detached`).toEqual(expected)
-  }
+  const expected = () =>
+    model
+      .filter((row) => row.ref === `probe`)
+      .map((row) => `${row.id}:${row.n}`)
   try {
-    expectRows(`initial`, [`a:0`])
-    source.utils.begin()
-    source.utils.write({
-      type: `update`,
-      value: { id: `a`, team: `t`, n: 0, ref: new Map([[`k`, 1]]) },
-    })
-    source.utils.write({
-      type: `update`,
-      value: { id: `b`, team: `t`, n: 0, ref: first },
-    })
-    source.utils.commit()
-    expectRows(`swap`, [`b:0`])
-    source.utils.begin()
-    source.utils.write({
-      type: `update`,
-      value: { id: `b`, team: `t`, n: 1, ref: first },
-    })
-    source.utils.commit()
-    expectRows(`real update`, [`b:1`])
+    expect(rows(attached), `initial: attached`).toEqual(expected())
+    expect(rows(detached), `initial: detached`).toEqual(expected())
+    for (const [step, batch] of history.batches.entries()) {
+      // The last operation on a row in a batch is the one that counts.
+      const last = new Map<number, PooledOp[`op`]>()
+      for (const { row, op } of batch) if (row < model.length) last.set(row, op)
+      const before = new Set(expected().map((entry) => entry.split(`:`)[0]))
+      source.utils.begin()
+      for (const [index, op] of last) {
+        const row = model[index]!
+        if (op === `bump`) row.n += 1
+        else {
+          if (op === `to-probe` && row.ref === `copy`)
+            reach(`replacement-entered`)
+          if (op === `to-copy` && row.ref === `probe`) reach(`replacement-left`)
+          row.ref = op === `to-probe` ? `probe` : `copy`
+          stored[index] = op === `to-probe` ? probe : new Map([[`k`, 1]])
+        }
+        if (op === `bump` && row.ref === `probe`) reach(`real-update-kept`)
+        source.utils.write({
+          type: `update`,
+          value: { id: row.id, team: `t`, n: row.n, ref: stored[index]! },
+        })
+      }
+      source.utils.commit()
+      const after = new Set(expected().map((entry) => entry.split(`:`)[0]))
+      if (
+        [...before].some((id) => !after.has(id)) &&
+        [...after].some((id) => !before.has(id))
+      )
+        reach(`swap-in-one-batch`)
+      expect(rows(attached), `batch ${step}: attached`).toEqual(expected())
+      expect(rows(detached), `batch ${step}: detached`).toEqual(expected())
+    }
   } finally {
     stop()
     attached.dispose()
@@ -2594,26 +2825,44 @@ async function runPooledSwapHistory() {
 const pooledSwapProperty = `serialized-value.pooled-residual-swap`
 
 describe(`a residual pooled view rechecks its rows when read`, () => {
-  oracleProperty<
-    { name: string },
-    ReturnType<typeof recordedAssertionJudgment>
-  >({
+  oracleProperty({
     id: pooledSwapProperty,
     law: {
-      statement: `A pooled view with a residual reference filter shows, to attached and detached readers alike, the rows that pass it by the time a commit returns: two deep-equal replacements in one batch that swap one row out and another in change its rows, and a real update to a passing row changes its value.`,
-      authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md; review of PR #2460.`,
-      limits: `One pooled group of two rows with a Map reference filter; one swapping batch and one real update.`,
+      statement: `A pooled view with a residual reference filter shows, to attached and detached readers alike, the rows that hold the filtered instance, with their current values, by the time each commit returns, whether deep-equal replacements move rows in or out, swap them in one batch, or real updates change them.`,
+      authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
+      limits: `One pooled group of two or three rows with a Map reference filter; up to four batches of up to three row operations.`,
     },
     owns: [
       'src/query/pooled-live-query.ts#PooledLiveQuery._stateRevision',
       'src/query/pooled-live-query.ts#Partition.apply',
     ],
-    histories: [{ name: `a swap, then a real update` }],
-    label: ({ name }) => name,
+    histories: {
+      arbitrary: pooledHistoryArbitrary,
+      runs: 40,
+      fixedSeeds: [2459],
+      states: pooledStates,
+      constructed: [
+        {
+          name: `a swap in one batch, then a real update`,
+          enters: [...pooledStates],
+          build: (): PooledHistory => ({
+            initial: [`probe`, `copy`],
+            batches: [
+              [
+                { row: 0, op: `to-copy` },
+                { row: 1, op: `to-probe` },
+              ],
+              [{ row: 1, op: `bump` }],
+            ],
+          }),
+        },
+      ],
+    },
+    resolve: (history) => ({ history }),
     model: recordedAssertionJudgment,
-    driver: (history, observe) =>
-      recordAssertionJudgment(pooledSwapProperty, history, observe, () =>
-        runPooledSwapHistory(),
+    driver: (plan: { history: PooledHistory }, observe) =>
+      recordAssertionJudgment(pooledSwapProperty, plan, observe, () =>
+        runPooledHistory(plan.history, (state) => observe(`reach`, state)),
       ),
     check: forwardAssertionJudgment,
   })

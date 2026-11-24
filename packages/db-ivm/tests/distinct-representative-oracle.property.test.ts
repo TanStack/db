@@ -9,6 +9,7 @@
  * Limits: immutable fixture selections, four colliding members plus an anchor,
  * eight slots and twelve random tail worlds; no external source scheduling.
  */
+import { fc } from '@fast-check/vitest'
 import { D2 } from '../src/d2.js'
 import { MultiSet } from '../src/multiset.js'
 import { output as outputOperator } from '../src/operators/output.js'
@@ -267,12 +268,25 @@ oracleProperty<
   check: checkDistinctCampaign,
 })
 
-// Rows whose own hashes collide share a support bucket. Retiring the shown one
-// must leave the other supporting the selection, and the output must follow it.
-// The collision is searched with the real digest, as distinctCollisionFamily
-// does for selections.
-function driveSupportCollision() {
-  const [retired, live] = family as Array<[unknown, unknown]>
+// Input rows whose own digests collide share a support bucket. The family's
+// four members are whole [key, row] inputs with one digest, found with the
+// real hash, under one selection. Generated worlds add and remove them; the
+// model is the multiset of live inputs. The output must hold one unit row
+// whose payload a live input holds, and keep that payload while every input
+// that held it stays live.
+type CollisionWorlds = Array<Array<number>>
+type CollisionPlan = { worlds: CollisionWorlds; split: boolean }
+const COLLISION_STATES = [
+  `colliding inputs live`,
+  `shown input retired beside a live one`,
+  `emptied`,
+] as const
+
+function driveSupportCollisions(
+  { worlds, split }: CollisionPlan,
+  observe: (checkpoint: string, value: unknown) => void,
+) {
+  const members = family.slice(0, 4) as Array<[unknown, unknown]>
   const graph = new D2()
   const input = graph.newInput<[unknown, unknown]>()
   const net = new Map<unknown, number>()
@@ -284,52 +298,124 @@ function driveSupportCollision() {
     }),
   )
   graph.finalize()
-  // One unit row, drawn from the payloads still live.
-  const check = (checkpoint: string, allowed: Array<unknown>) => {
+  let live: Array<number> = []
+  let shown: unknown
+  let held = new Map<number, number>()
+  // How many of each input are live.
+  const holders = (world: Array<number>) => {
+    const counts = new Map<number, number>()
+    for (const index of world) counts.set(index, (counts.get(index) ?? 0) + 1)
+    return counts
+  }
+  const check = (checkpoint: string, world: Array<number>) => {
     const rows = [...net].filter(([, weight]) => weight !== 0)
-    const ok =
-      allowed.length === 0
+    const payloads = world.map((index) => members[index]![1])
+    const unit =
+      world.length === 0
         ? rows.length === 0
         : rows.length === 1 &&
           rows[0]![1] === 1 &&
-          allowed.includes(rows[0]![0])
-    if (!ok)
+          payloads.includes(rows[0]![0])
+    if (!unit)
       throw new OracleComparisonMismatch(
         `distinct support collision diverged at ${checkpoint}`,
         `distinct representative contribution`,
         checkpoint,
         rows,
-        allowed,
+        payloads,
       )
+    const now = holders(world)
+    const current = rows[0]?.[0]
+    // Every input that held the shown payload is still live, so it stays.
+    const kept =
+      shown !== undefined &&
+      [...held].every(
+        ([index, count]) =>
+          members[index]![1] !== shown || (now.get(index) ?? 0) >= count,
+      )
+    if (kept && current !== shown)
+      throw new OracleComparisonMismatch(
+        `distinct support collision moved while still supported at ${checkpoint}`,
+        `distinct representative stability`,
+        checkpoint,
+        current,
+        shown,
+      )
+    if (shown !== undefined && current !== shown && world.length > 0)
+      observe(`reach`, `shown input retired beside a live one`)
+    if (new Set(world).size > 1) observe(`reach`, `colliding inputs live`)
+    if (world.length === 0 && live.length > 0) observe(`reach`, `emptied`)
+    shown = current
+    held = now
   }
-  input.sendData(
-    new MultiSet([
-      [retired!, 1],
-      [live!, 1],
-    ]),
-  )
-  graph.run()
-  check(`both rows`, [retired![1], live![1]])
-  input.sendData(new MultiSet([[retired!, -1]]))
-  graph.run()
-  check(`colliding row retired`, [live![1]])
-  input.sendData(new MultiSet([[live!, -1]]))
-  graph.run()
-  check(`empty`, [])
+  for (const [checkpoint, world] of worlds.entries()) {
+    const changes: Array<[[unknown, unknown], number]> = [
+      ...live.map(
+        (index) => [members[index]!, -1] as [[unknown, unknown], number],
+      ),
+      ...world.map(
+        (index) => [members[index]!, 1] as [[unknown, unknown], number],
+      ),
+    ]
+    if (split) {
+      const partial = [...live]
+      for (const [change, weight] of changes) {
+        input.sendData(new MultiSet([[change, weight]]))
+        graph.run()
+        const index = members.indexOf(change)
+        if (weight < 0) partial.splice(partial.indexOf(index), 1)
+        else partial.push(index)
+        check(`${checkpoint}/${index}/${weight}`, partial)
+      }
+    } else {
+      input.sendData(new MultiSet(changes))
+      graph.run()
+      check(String(checkpoint), world)
+    }
+    live = world
+  }
 }
 
-oracleProperty<{ name: string }, ReadonlyArray<string>>({
+const collisionWorlds = fc.array(
+  fc.array(fc.integer({ min: 0, max: 3 }), { maxLength: 4 }),
+  { minLength: 1, maxLength: 10 },
+)
+const collisionConstructions = new WeakMap<
+  CollisionPlan,
+  ReadonlyArray<string>
+>()
+
+oracleProperty<CollisionPlan, ReadonlyArray<string>>({
   id: `ivm.distinct-support-collisions`,
   law: {
     ...cell0.law,
-    limits: `One verified pair of input rows with the same digest under one selection; no generated histories.`,
+    limits: `The four inputs of one verified digest family under one selection; up to ten worlds of up to four inputs, delivered at once or one change at a time.`,
   },
   owns: [`src/operators/distinct.ts#distinct`],
-  histories: [{ name: `a retired row whose hash collides with a live one` }],
-  label: ({ name }) => name,
-  model: (): ReadonlyArray<string> => [],
-  driver: (_plan, observe) => {
-    driveDistinctChecked(driveSupportCollision, observe)
+  histories: {
+    arbitrary: fc.record({ worlds: collisionWorlds, split: fc.boolean() }),
+    runs: 100,
+    fixedSeeds: [2309],
+    states: COLLISION_STATES,
+    constructed: [
+      {
+        name: `a shown input is retired beside a colliding live one`,
+        enters: COLLISION_STATES,
+        build: (generated) => {
+          const plan: CollisionPlan = {
+            worlds: [[0, 1], [1], [], ...generated.worlds].slice(0, 10),
+            split: generated.split,
+          }
+          collisionConstructions.set(plan, COLLISION_STATES)
+          return plan
+        },
+      },
+    ],
+  },
+  resolve: (plan) => plan,
+  model: (plan) => collisionConstructions.get(plan) ?? [],
+  driver: (plan, observe) => {
+    driveDistinctChecked(() => driveSupportCollisions(plan, observe), observe)
   },
   check: checkDistinctCampaign,
 })
