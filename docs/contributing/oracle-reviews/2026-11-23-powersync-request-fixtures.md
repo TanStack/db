@@ -353,3 +353,25 @@ its eager fixed/random/other units and remaining files, in both PR and release
 matrices. The assignment check covers all 28 package test scripts. Adapter
 browser CI receives 120 minutes for the full portfolio with the retained five
 construction bases; other browser and host job limits stay unchanged.
+
+### Completed post-integration verification
+
+The Node 22.23.5 reruns preserve the framework's five-base default, both
+campaigns, and all run budgets. They finish with these results:
+
+| Run | Result |
+| --- | --- |
+| Exact `node scripts/ci-tests.mjs test collections-5` command | 3,021 passed across the split eager campaigns and 20 remaining files, no type errors |
+| Direct eager, shared-client, on-demand, persisted on-demand, and saved-demand Chromium receivers | 1,368 passed across five files |
+| Named replay manifest | 70 passed |
+| Guarded native SQLite FIFO replay | One requested history passed, seed 18,530,101, path `0`, unit `random seed: hydration-delete-reinsert construction 1` |
+| Guarded Direct eager Chromium replay | One requested history passed, seed 2,118, path `0`, unit `random seed: generated` |
+
+CI on `ac6b6653a` found two registration omissions and a type-import ordering
+error. Commit `03b29859d42436cb79f4393070c0f31c7f5c4427` names the native FIFO
+and Direct eager Chromium replay owners, supplies their exact random-campaign
+selectors and the Chromium runner configuration, and fixes import ordering.
+Both guarded replays record one execution with the requested property, seed,
+and path. Independent review approves those routes. The 70 manifest checks,
+`pnpm lint:changed`, and pre-commit ESLint pass. These changes do not alter
+production, the oracle laws, generated histories, comparisons, or run budgets.
