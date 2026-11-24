@@ -1474,7 +1474,7 @@ describe(`value classes compare by their serialized value`, () => {
       'src/query/effect.ts#classifyDelta',
       'src/query/pooled-live-query.ts#Partition.apply',
       'src/collection/changes.ts#CollectionChangesManager.enrichChangeWithVirtualProps',
-      'src/query/pooled-live-query.ts#PooledLiveQuery.noteReplacement',
+      'src/query/pooled-live-query.ts#PooledLiveQuery._stateRevision',
       'src/collection/change-events.ts#markSilentReplacement',
       'src/collection/change-events.ts#isSilentReplacement',
       'src/query/ir-stable-identity.ts#getStableValueHash',
