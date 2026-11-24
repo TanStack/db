@@ -11,6 +11,7 @@ import {
 import type {
   ConstructedHistory,
   Observation,
+  ReadonlyHistory,
   Verdict,
 } from '../../oracle-config.js'
 
@@ -275,7 +276,11 @@ const fixedHistories = fixedInInputs.map(({ name, input }) => ({
   },
 }))
 
-const constructionRequirements = new WeakMap<InHistory, ReadonlyArray<string>>()
+// A literal `build` result is read-only (ReadonlyHistory), so the key is too.
+const constructionRequirements = new WeakMap<
+  ReadonlyHistory<InHistory>,
+  ReadonlyArray<string>
+>()
 function constructed(
   builders: ReadonlyArray<ConstructedHistory<InHistory>>,
 ): ReadonlyArray<ConstructedHistory<InHistory>> {
