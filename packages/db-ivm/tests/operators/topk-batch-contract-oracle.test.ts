@@ -223,7 +223,10 @@ type ExpectedTrace = {
 function requireConstructionReach<History>(
   builders: ReadonlyArray<ConstructedHistory<History>>,
 ) {
-  const required = new Map<History, ReadonlyArray<string>>()
+  // A generic history is keyed by identity as `unknown`: a built history may be
+  // the read-only view (ReadonlyHistory<History>), which a generic cannot be
+  // proven to fit.
+  const required = new Map<unknown, ReadonlyArray<string>>()
   return {
     constructed: builders.map((builder) => ({
       ...builder,
