@@ -5,6 +5,7 @@ import { distinct } from '../../src/operators/distinct.js'
 import { output } from '../../src/operators/output.js'
 import { MessageTracker, assertResults } from '../test-utils.js'
 import { hash } from '../../src/hashing/index.js'
+import { distinctCollisionFamily } from '../distinct-incrementalization-oracle.js'
 
 describe(`Operators`, () => {
   describe(`Efficient distinct operation`, () => {
@@ -191,6 +192,38 @@ function testDistinct() {
         [[hash([`key1`, 2]), 2], 1],
         [[hash([`key2`, 1]), 1], 1],
       ],
+    ])
+  })
+
+  test(`moves off a retired row whose hash collides with a live one`, () => {
+    const [retired, live] = distinctCollisionFamily(hash) as Array<
+      [unknown, unknown]
+    >
+    const graph = new D2()
+    const input = graph.newInput<[unknown, unknown]>()
+    const net = new Map<unknown, number>()
+
+    input.pipe(
+      distinct(() => `same selection`),
+      output((message) => {
+        for (const [[, row], weight] of message.getInner())
+          net.set(row, (net.get(row) ?? 0) + weight)
+      }),
+    )
+    graph.finalize()
+
+    input.sendData(
+      new MultiSet([
+        [retired!, 1],
+        [live!, 1],
+      ]),
+    )
+    graph.run()
+    input.sendData(new MultiSet([[retired!, -1]]))
+    graph.run()
+
+    expect([...net].filter(([, weight]) => weight !== 0)).toEqual([
+      [live![1], 1],
     ])
   })
 

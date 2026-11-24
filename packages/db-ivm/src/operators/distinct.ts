@@ -12,14 +12,47 @@ import type { KeyValue } from '../types.js'
 
 type GetValue<T> = T extends KeyValue<unknown, infer V> ? V : never
 
-// Keep the emitted row for its eventual retraction. Input representatives can
-// differ even when the selected identity is equal.
-type DistinctEntry<V> = [
-  identity: unknown,
-  row: KeyValue<number, V>,
-  multiplicity: number,
-  visible: boolean,
-]
+// Inputs supporting one selection. Equal inputs share a count, so a fresh copy
+// retracts its original, while a deep-equal row replacement hashes apart.
+type Support<T> = Map<Hash, Array<[input: T, multiplicity: number]>>
+
+type DistinctEntry<T> = {
+  identity: unknown
+  key: number
+  // The input whose row was emitted, kept for its eventual retraction. Inputs
+  // can differ even when the selected identity is equal.
+  shown: T
+  multiplicity: number
+  visible: boolean
+  support: Support<T>
+}
+
+function addSupport<T>(support: Support<T>, input: T, diff: number): void {
+  const digest = hash(input)
+  let inputs = support.get(digest)
+  if (!inputs) support.set(digest, (inputs = []))
+  const index = inputs.findIndex(([held]) => equalHashValues(held, input))
+  if (index < 0) {
+    inputs.push([input, diff])
+    return
+  }
+  const held = inputs[index]!
+  held[1] += diff
+  if (held[1] !== 0) return
+  inputs.splice(index, 1)
+  if (inputs.length === 0) support.delete(digest)
+}
+
+function isSupported<T>(support: Support<T>, input: T): boolean {
+  return (support.get(hash(input)) ?? []).some(([held]) =>
+    equalHashValues(held, input),
+  )
+}
+
+// A visible selection has a positive total, so at least one input remains.
+function firstSupported<T>(support: Support<T>): T {
+  return support.values().next().value![0]![0]
+}
 
 /**
  * Operator that removes duplicates
@@ -28,7 +61,7 @@ export class DistinctOperator<
   T extends KeyValue<unknown, unknown>,
 > extends UnaryOperator<T, KeyValue<number, GetValue<T>>> {
   #by: (value: T) => unknown
-  #values = new Map<Hash, Array<DistinctEntry<GetValue<T>>>>()
+  #values = new Map<Hash, Array<DistinctEntry<T>>>()
   // Hash digests are unsigned. Negative keys give collisions a separate identity.
   #nextCollisionKey = 0
 
@@ -52,23 +85,23 @@ export class DistinctOperator<
         const hashedValue = hash(identity)
         let bucket = this.#values.get(hashedValue)
         if (!bucket) this.#values.set(hashedValue, (bucket = []))
-        let entry = bucket.find(([candidate]) =>
-          equalHashValues(candidate, identity),
+        let entry = bucket.find((candidate) =>
+          equalHashValues(candidate.identity, identity),
         )
         if (!entry) {
-          entry = [
+          entry = {
             identity,
-            [
-              bucket.length ? --this.#nextCollisionKey : hashedValue,
-              value[1] as GetValue<T>,
-            ],
-            0,
-            false,
-          ]
+            key: bucket.length ? --this.#nextCollisionKey : hashedValue,
+            shown: value,
+            multiplicity: 0,
+            visible: false,
+            support: new Map(),
+          }
           bucket.push(entry)
         }
         updatedBuckets.add(hashedValue)
-        entry[2] += diff
+        entry.multiplicity += diff
+        addSupport(entry.support, value, diff)
       }
     }
 
@@ -80,11 +113,18 @@ export class DistinctOperator<
       const bucket = this.#values.get(hashedValue)!
       let retained = 0
       for (const entry of bucket) {
-        const [, row, multiplicity, wasVisible] = entry
-        const visible = multiplicity > 0
-        if (visible !== wasVisible) result.push([row, visible ? 1 : -1])
-        entry[3] = visible
-        if (multiplicity !== 0) bucket[retained++] = entry
+        const { key, shown: previous, support, visible: wasVisible } = entry
+        const visible = entry.multiplicity > 0
+        // A selection that stays visible must not outlive the row it shows.
+        if (visible && !isSupported(support, previous))
+          entry.shown = firstSupported(support)
+        const replaced = entry.shown !== previous
+        if (wasVisible && (!visible || replaced))
+          result.push([[key, previous[1] as GetValue<T>], -1])
+        if (visible && (!wasVisible || replaced))
+          result.push([[key, entry.shown[1] as GetValue<T>], 1])
+        entry.visible = visible
+        if (entry.multiplicity !== 0) bucket[retained++] = entry
       }
       bucket.length = retained
       if (retained === 0) this.#values.delete(hashedValue)

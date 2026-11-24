@@ -1,4 +1,4 @@
-import { registerOpaqueHash } from '@tanstack/db-ivm'
+import { equalHashValues, registerOpaqueHash } from '@tanstack/db-ivm'
 import { NegativeActiveSubscribersError } from '../errors'
 import { recordPublicationError, withPublicationContext } from '../scheduler.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
@@ -123,11 +123,14 @@ export class CollectionChangesManager<
     change: ChangeMessage<TOutput, TKey>,
   ): ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey> {
     const enriched = this.state.enrichChangeMessage(change)
-    if (!isSilentReplacement(change)) return enriched
+    const silent = isSilentReplacement(change)
     // Query operators merge structurally equal versions of a key, which would
-    // keep the old row. Hashing the new one by reference retires the old one.
-    registerOpaqueHash(enriched.value)
-    return markSilentReplacement(enriched)
+    // keep the old row. That includes a real update between values that hash
+    // alike, such as a class and a plain object with the same fields. Hashing
+    // the new one by reference retires the old one.
+    if (equalHashValues(enriched.previousValue, enriched.value))
+      registerOpaqueHash(enriched.value)
+    return silent ? markSilentReplacement(enriched) : enriched
   }
 
   // Reduce unpublished same-key changes relative to the subscriber's last

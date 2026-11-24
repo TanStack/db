@@ -2480,8 +2480,8 @@ the rows that store it when each commit returns, and an Effect does once it has
 run. An unfiltered subscriber and live query, ID filters and pooled ID views
 that stay matched, and an Effect receive a change only when a row's value
 changed, and a real update beside a replacement in one batch still reaches an
-Effect. It does not cover a `distinct` query's representative instance,
-`inArray` (fixed tests in
+Effect, and a `distinct` query shows an instance some row still holds. It does
+not cover `inArray` (fixed tests in
 `ir-stable-identity.test.ts`), on-demand or persisted sources, exact-output
 identity, which keeps reference semantics, or throwing `toJSON()` methods.
 

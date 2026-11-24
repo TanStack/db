@@ -34,8 +34,17 @@ it(`rejects a representative absent from source inputs`, () => {
     checkDistinctRepresentatives(
       [[[0, { member: 0, variant: 999 }], 1]],
       source,
-      source,
       `fabricated representative`,
+    ),
+  ).toThrow(/distinct representative contribution diverged/)
+})
+
+it(`rejects a representative no source row still holds`, () => {
+  expect(() =>
+    checkDistinctRepresentatives(
+      [[[0, { member: 0, variant: 0 }], 1]],
+      [{ member: 0, variant: 1 }],
+      `retired representative`,
     ),
   ).toThrow(/distinct representative contribution diverged/)
 })

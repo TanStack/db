@@ -654,3 +654,193 @@ describe(`excluded objects with a throwing toJSON accessor`, () => {
     await collection.cleanup()
   })
 })
+
+describe(`distinct shows an instance a row still holds`, () => {
+  class Versioned {
+    #version: number
+    constructor(
+      readonly json: string,
+      version: number,
+    ) {
+      this.#version = version
+    }
+    get version() {
+      return this.#version
+    }
+    toJSON() {
+      return this.json
+    }
+  }
+  type Row = { id: string; at: Versioned }
+  type Source = ReturnType<typeof sourceOf>
+
+  let nextSource = 0
+  const sourceOf = (rows: Array<Row>) =>
+    createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `distinct-instance-${nextSource++}`,
+        getKey: (row) => row.id,
+        initialData: rows,
+      }),
+    )
+  const queries = {
+    unordered: (source: Source) =>
+      createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: source })
+            .select(({ item }) => ({ at: item.at }))
+            .distinct(),
+      }),
+    ordered: (source: Source) =>
+      createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: source })
+            .select(({ item }) => ({ at: item.at }))
+            .distinct()
+            .orderBy(({ item }) => item.at),
+      }),
+  }
+  const write = (
+    source: Source,
+    changes: Array<{ type: `update` | `delete`; value: Row }>,
+  ) => {
+    source.utils.begin()
+    for (const change of changes) source.utils.write(change)
+    source.utils.commit()
+  }
+
+  describe.each([`unordered`, `ordered`] as const)(`%s`, (kind) => {
+    const open = async (rows: Array<Row>) => {
+      const source = sourceOf(rows)
+      const live = queries[kind](source)
+      await live.preload()
+      const changes: Array<unknown> = []
+      const subscription = live.subscribeChanges((batch) => {
+        changes.push(...batch)
+      })
+      return { source, live, changes, subscription }
+    }
+
+    it(`follows the only row in the group`, async () => {
+      const next = new Versioned(`a`, 2)
+      const { source, live, changes, subscription } = await open([
+        { id: `r1`, at: new Versioned(`a`, 1) },
+      ])
+      write(source, [{ type: `update`, value: { id: `r1`, at: next } }])
+      expect(live.toArray).toHaveLength(1)
+      expect(live.toArray[0]!.at).toBe(next)
+      expect(live.toArray[0]!.at.version).toBe(2)
+      expect(changes).toEqual([])
+      subscription.unsubscribe()
+    })
+
+    it(`follows repeated replacements and then retracts`, async () => {
+      const second = new Versioned(`a`, 2)
+      const third = new Versioned(`a`, 3)
+      const { source, live, subscription } = await open([
+        { id: `r1`, at: new Versioned(`a`, 1) },
+      ])
+      write(source, [{ type: `update`, value: { id: `r1`, at: second } }])
+      write(source, [{ type: `update`, value: { id: `r1`, at: third } }])
+      expect(live.toArray[0]!.at).toBe(third)
+      write(source, [{ type: `delete`, value: { id: `r1`, at: third } }])
+      expect(live.toArray).toEqual([])
+      subscription.unsubscribe()
+    })
+
+    it(`follows every row replaced in one batch`, async () => {
+      const old = new Versioned(`a`, 1)
+      const next = new Versioned(`a`, 2)
+      const { source, live, subscription } = await open([
+        { id: `r1`, at: old },
+        { id: `r2`, at: old },
+      ])
+      write(source, [
+        { type: `update`, value: { id: `r1`, at: next } },
+        { type: `update`, value: { id: `r2`, at: next } },
+      ])
+      expect(live.toArray.map((row) => row.at)).toEqual([next])
+      expect(live.toArray[0]!.at).toBe(next)
+      subscription.unsubscribe()
+    })
+
+    it(`leaves a replaced instance while another row stays`, async () => {
+      const old = new Versioned(`a`, 1)
+      const other = new Versioned(`a`, 3)
+      const next = new Versioned(`a`, 2)
+      const { source, live, subscription } = await open([
+        { id: `r1`, at: old },
+        { id: `r2`, at: other },
+      ])
+      const shown = live.toArray[0]!.at
+      const shownId = shown === old ? `r1` : `r2`
+      write(source, [{ type: `update`, value: { id: shownId, at: next } }])
+      expect(live.toArray).toHaveLength(1)
+      expect(live.toArray[0]!.at).not.toBe(shown)
+      expect([old, other, next]).toContain(live.toArray[0]!.at)
+      subscription.unsubscribe()
+    })
+
+    it(`moves to a remaining row when the shown row is deleted`, async () => {
+      const first = new Versioned(`a`, 1)
+      const second = new Versioned(`a`, 2)
+      const rows = [
+        { id: `r1`, at: first },
+        { id: `r2`, at: second },
+      ]
+      const { source, live, subscription } = await open(rows)
+      const shown = live.toArray[0]!.at
+      const removed = rows.find((row) => row.at === shown)!
+      const kept = rows.find((row) => row.at !== shown)!
+      write(source, [{ type: `delete`, value: removed }])
+      expect(live.toArray).toHaveLength(1)
+      expect(live.toArray[0]!.at).toBe(kept.at)
+      write(source, [{ type: `delete`, value: kept }])
+      expect(live.toArray).toEqual([])
+      subscription.unsubscribe()
+    })
+  })
+})
+
+describe(`an update between values that hash alike`, () => {
+  class Labelled {
+    constructor(readonly label: string) {}
+  }
+  type Row = { id: string; value: object }
+
+  it(`reaches an ordered query and a filter over it`, async () => {
+    const before = { label: `a` }
+    const after = new Labelled(`a`)
+    const source = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `hash-alike-update`,
+        getKey: (row) => row.id,
+        initialData: [{ id: `r1`, value: before }],
+      }),
+    )
+    const ordered = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ item: source })
+          .orderBy(({ item }) => item.id)
+          .select(({ item }) => ({ id: item.id, value: item.value })),
+    })
+    const filtered = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ item: ordered })
+          .where(({ item }) => eq(item.value as never, before as never)),
+    })
+    await Promise.all([ordered.preload(), filtered.preload()])
+    expect(filtered.toArray).toHaveLength(1)
+
+    source.utils.begin()
+    source.utils.write({ type: `update`, value: { id: `r1`, value: after } })
+    source.utils.commit()
+
+    expect(ordered.toArray[0]!.value).toBe(after)
+    expect(filtered.toArray).toEqual([])
+  })
+})

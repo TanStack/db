@@ -57,16 +57,10 @@ function drive(worlds: DistinctBucketHistory, split: boolean) {
   graph.finalize()
   const output: Weighted<[number, DistinctBucketRow]> = []
   const source = new Map<number, DistinctBucketRow>()
-  const introduced: Array<DistinctBucketRow> = []
   let previous: Array<DistinctBucketRow> = []
   const check = (checkpoint: string) => {
     for (const message of reader.drain()) output.push(...message.getInner())
-    checkDistinctRepresentatives(
-      output,
-      [...source.values()],
-      introduced,
-      checkpoint,
-    )
+    checkDistinctRepresentatives(output, [...source.values()], checkpoint)
   }
   for (const [checkpoint, world] of worlds.entries()) {
     const changes: Weighted<[number, DistinctBucketRow]> = []
@@ -75,10 +69,7 @@ function drive(worlds: DistinctBucketHistory, split: boolean) {
     for (const [slot, row] of world.entries()) changes.push([[slot, row], 1])
     for (const [[slot, row], weight] of changes) {
       if (weight < 0) source.delete(slot)
-      else {
-        source.set(slot, { ...row })
-        introduced.push({ ...row })
-      }
+      else source.set(slot, { ...row })
       input.sendData([[[slot, { ...row }], weight]])
       if (split) {
         graph.run()
@@ -116,9 +107,9 @@ function representativeOptions(split: boolean): CellOptions {
   >()
   return {
     law: {
-      statement: `The full accumulated distinct output has exactly one unit contribution for each supported selection, no negative residues, distinct simultaneous keys, and only historically introduced source payloads.`,
+      statement: `The full accumulated distinct output has exactly one unit contribution for each supported selection, no negative residues, distinct simultaneous keys, and only payloads a source row still holds.`,
       authority: `docs/guides/live-queries.md#distinct; packages/db/src/query/live/ARCHITECTURE.md, Weighted relations and public keys; 2026-10-30 distinct provenance review.`,
-      limits: `Four immutable native-collision selections plus an anchor; variants 0..3, at most eight slots and twelve random suffix worlds. Representative choice and cross-build key stability remain unspecified; no external source scheduling.`,
+      limits: `Four immutable native-collision selections plus an anchor; variants 0..3, at most eight slots and twelve random suffix worlds. Choice among live representatives and cross-build key stability remain unspecified; no external source scheduling.`,
     },
     histories: {
       arbitrary: distinctBucketRecipe,

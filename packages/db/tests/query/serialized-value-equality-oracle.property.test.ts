@@ -83,9 +83,9 @@
  * filter and the Effect each receive one update when the row's value changed
  * and nothing when it was replaced by a deep-equal row.
  *
- * Known omissions: a `distinct` query keeps its group's first instance, since
- * rows that hash alike have no one right representative, `inArray`, on-demand and
- * persisted sources, exact-output (`select`) identity, which keeps reference
+ * A `distinct` query shows an instance some row still holds.
+ *
+ * Known omissions: `inArray`, on-demand and persisted sources, exact-output (`select`) identity, which keeps reference
  * semantics, and classes whose `toJSON()` throws or returns a non-JSON value.
  */
 import { fc } from '@fast-check/vitest'
@@ -164,6 +164,8 @@ const reachStates = [
   `effect-update-beside-replacement`,
   // A deep-equal replacement moved a row in a pooled group's order.
   `pooled-order-moved`,
+  // A deep-equal replacement retired the instance a `distinct` query showed.
+  `distinct-shown-replaced`,
 ] as const
 type ReachState = (typeof reachStates)[number]
 
@@ -945,6 +947,17 @@ async function runHistory(
         await watchReference(stored.get(key) as object)
     }
 
+    const distinctRefs = createLiveQueryCollection({
+      id: `serialized-value-distinct-${run}`,
+      query: (q) =>
+        q
+          .from({ item: source })
+          .select(({ item }) => ({ ref: item.ref }))
+          .distinct(),
+    })
+    cleanup(() => distinctRefs.cleanup())
+    await distinctRefs.preload()
+
     const orderedKeys = () =>
       source
         .currentStateAsChanges({
@@ -984,6 +997,13 @@ async function runHistory(
         for (const [reader, read] of Object.entries(probe.readers)) {
           expect(read(), `${label}: ${reader}`).toEqual(holders)
         }
+      }
+      const held = new Set<unknown>(stored.values())
+      for (const row of distinctRefs.toArray) {
+        expect(
+          held.has(row.ref),
+          `${checkpoint}: distinct row holds a live instance`,
+        ).toBe(true)
       }
       expectContiguousRuns(orderedKeys(), model, `${checkpoint}: ordered`)
       const recordClasses = [...model.values()]
@@ -1069,6 +1089,14 @@ async function runHistory(
       )
       if (value.kind === `builtin`) await watchReference(instance as object)
       if (silent) reach(`reference-filter-stayed-matched`)
+      const replaced = stored.get(key)
+      if (
+        silent &&
+        typeof replaced === `object` &&
+        replaced !== null &&
+        distinctRefs.toArray.some((row) => row.ref === replaced)
+      )
+        reach(`distinct-shown-replaced`)
       if (silent && watched) {
         reach(`reference-filter-left`)
         reach(`shared-reference-join-left`)
@@ -1424,9 +1452,9 @@ describe(`value classes compare by their serialized value`, () => {
   oracleProperty({
     id: property,
     law: {
-      statement: `Query equality, exact index lookup, live-query filters and joins match distinct class instances whose toJSON() values are equal, never a plain value equal to that serialization; query identity and getStableValueHash follow the same relation and separate unequal values. Range predicates order a value class by that serialization, never valueOf(), and order an array the row and the capture share like a copy of it. A Map, Set or ArrayBuffer subclass with toJSON() keeps its built-in rule and never equals a value class, and a plain record or array keeps reference semantics without its toJSON property being read. When a sync write replaces such a value with a deep-equal instance, a filter on either instance, a join, a functional filter, a filter over a projection or an ordered result and a pooled view follow the stored one by the time the commit returns, an ordered query takes the new instance's position, a subscriber, live query or Effect that keeps the row is told nothing, and another row's update in the same batch still reaches an Effect.`,
+      statement: `Query equality, exact index lookup, live-query filters and joins match distinct class instances whose toJSON() values are equal, never a plain value equal to that serialization; query identity and getStableValueHash follow the same relation and separate unequal values. Range predicates order a value class by that serialization, never valueOf(), and order an array the row and the capture share like a copy of it. A Map, Set or ArrayBuffer subclass with toJSON() keeps its built-in rule and never equals a value class, and a plain record or array keeps reference semantics without its toJSON property being read. When a sync write replaces such a value with a deep-equal instance, a filter on either instance, a join, a functional filter, a filter over a projection or an ordered result and a pooled view follow the stored one by the time the commit returns, an ordered query takes the new instance's position, a distinct query shows an instance some row still holds, a subscriber, live query or Effect that keeps the row is told nothing, and another row's update in the same batch still reaches an Effect.`,
       authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
-      limits: `One toJSON() class over two tables and two IDs, its text look-alike, empty Map, Set and ArrayBuffer subclass look-alikes, plain records and arrays with a throwing toJSON accessor (never probes), and null; up to four source rows, three join rows and three synced updates; range reads use record probes; no distinct representative instances, inArray, on-demand or persisted sources, or exact-output identity.`,
+      limits: `One toJSON() class over two tables and two IDs, its text look-alike, empty Map, Set and ArrayBuffer subclass look-alikes, plain records and arrays with a throwing toJSON accessor (never probes), and null; up to four source rows, three join rows and three synced updates; range reads use record probes; no inArray, on-demand or persisted sources, or exact-output identity.`,
     },
     owns: [
       'src/utils/comparison.ts#normalizeValue',
@@ -1472,6 +1500,37 @@ describe(`value classes compare by their serialized value`, () => {
             unequalBy: `table`,
           },
         },
+        {
+          // Replay: seed -1898981439, path 57:4:3:3:3:3:7:6:6:6:6:6.
+          name: `a plain record updated to a carrier with the same fields`,
+          history: {
+            rows: [
+              {
+                kind: `builtin`,
+                carrier: `PlainRecord`,
+                table: `org`,
+                id: `a`,
+              },
+              { kind: `text`, table: `user`, id: `a` },
+            ],
+            joinRows: [],
+            index: `none`,
+            updates: [
+              {
+                row: 0,
+                value: {
+                  kind: `builtin`,
+                  carrier: `ArrayBuffer`,
+                  table: `org`,
+                  id: `a`,
+                },
+                sameValue: false,
+              },
+            ],
+            probe: { kind: `record`, table: `user`, id: `a` },
+            unequalBy: `table`,
+          },
+        },
       ],
       constructed: [
         {
@@ -1486,6 +1545,7 @@ describe(`value classes compare by their serialized value`, () => {
             `shared-reference-join-left`,
             `effect-update-beside-replacement`,
             `pooled-order-moved`,
+            `distinct-shown-replaced`,
           ],
           build: (generated): History => {
             const carriers: ReadonlyArray<Carrier> = [
