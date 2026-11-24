@@ -41,6 +41,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import fc from 'fast-check'
 import { expect, vi } from 'vitest'
 import { WebLocksLeader } from '../src/coordination/WebLocksLeader'
+import { BroadcastChannelLeader } from '../src/coordination/BroadcastChannelLeader'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
@@ -756,6 +757,97 @@ oracleProperty({
   driver: (plan: { history: History }, observe) =>
     recordAssertionJudgment(property, plan, observe, () =>
       runHistory(plan.history, (state) => observe(`reach`, state)),
+    ),
+  check: forwardAssertionJudgment,
+})
+
+// The BroadcastChannel fallback shares the notification queue. A tab that
+// releases and requests again while told it leads must not lead: its current
+// state is cleared at once, the request starts a new election and reports
+// false, and every listener hears the gain before the loss.
+const reentrantProperty = `offline.leader-reentrant-reacquisition`
+
+async function runBroadcastReacquisition(): Promise<void> {
+  vi.useFakeTimers()
+  // The leader schedules through window, which fake timers leave alone here.
+  const timers = [
+    vi
+      .spyOn(window, `setTimeout`)
+      .mockImplementation(((callback: () => void, delay?: number) =>
+        setTimeout(callback, delay)) as never),
+    vi
+      .spyOn(window, `setInterval`)
+      .mockImplementation(((callback: () => void, delay?: number) =>
+        setInterval(callback, delay)) as never),
+  ]
+  const posted: Array<string> = []
+  class ControlledChannel {
+    constructor(readonly name: string) {}
+    addEventListener() {}
+    removeEventListener() {}
+    postMessage(message: { type: string }) {
+      posted.push(message.type)
+    }
+    close() {}
+  }
+  vi.stubGlobal(`BroadcastChannel`, ControlledChannel)
+  const leader = new BroadcastChannelLeader(`oracle-reentrant`)
+  const heard: Array<boolean> = []
+  let armed = true
+  let outcome: { value?: boolean } = {}
+  let leaderAfterRelease: boolean | undefined
+  let electionsAfterRequest = 0
+  leader.onLeadershipChange((isLeader) => {
+    if (!isLeader || !armed) return
+    armed = false
+    leader.releaseLeadership()
+    outcome = observed(leader.requestLeadership())
+    leaderAfterRelease = leader.isLeader()
+    electionsAfterRequest = posted.filter((type) => type === `election`).length
+  })
+  leader.onLeadershipChange((isLeader) => {
+    heard.push(isLeader)
+  })
+  try {
+    void leader.requestLeadership()
+    // No other tab answers, so the election claims leadership.
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(heard, `listeners heard the gain, then the loss`).toEqual([
+      true,
+      false,
+    ])
+    expect(leaderAfterRelease, `released at once`).toBe(false)
+    expect(electionsAfterRequest, `the request started an election`).toBe(2)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(outcome.value, `the request result`).toBe(false)
+    // Disposing releases again; a tab that is not leading notifies nothing.
+    leader.dispose()
+    expect(heard, `a release while not leading`).toEqual([true, false])
+  } finally {
+    leader.dispose()
+    for (const timer of timers) timer.mockRestore()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  }
+}
+
+oracleProperty<{ name: string }, ReturnType<typeof recordedAssertionJudgment>>({
+  id: reentrantProperty,
+  law: {
+    statement: `A BroadcastChannel leader that releases and requests leadership again inside its own gain notification stops leading at once, starts a new election, reports false, and its listeners hear the gain before the loss; a later release while not leading notifies nothing.`,
+    authority: `Issue #2463, docs/guides/offline-transactions.md "Storage and leadership", and the LeaderElection contract in packages/offline-transactions/src/types.ts.`,
+    limits: `One tab over a controlled channel with fake timers; no peer answers the election.`,
+  },
+  owns: [
+    `src/coordination/BroadcastChannelLeader.ts#BroadcastChannelLeader.requestLeadership`,
+    `src/coordination/LeaderElection.ts`,
+  ],
+  histories: [{ name: `release and request again while told it leads` }],
+  label: ({ name }) => name,
+  model: recordedAssertionJudgment,
+  driver: (history, observe) =>
+    recordAssertionJudgment(reentrantProperty, history, observe, () =>
+      runBroadcastReacquisition(),
     ),
   check: forwardAssertionJudgment,
 })

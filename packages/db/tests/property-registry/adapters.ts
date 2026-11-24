@@ -51,6 +51,7 @@ export const properties: ReadonlyArray<string> = [
   `offline.settlement.restored`,
   `offline.settlement.started-peer`,
   `offline.connectivity-replay`,
+  `offline.leader-reentrant-reacquisition`,
 ]
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -173,5 +174,10 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
     `offline-transactions/tests/connectivity-replay-oracle.test.ts`,
     `offline`,
     `connectivity-replay`,
+  ],
+  [
+    `offline-transactions/tests/web-locks-leader-oracle.property.test.ts`,
+    `offline`,
+    `leader-reentrant-reacquisition`,
   ],
 ]

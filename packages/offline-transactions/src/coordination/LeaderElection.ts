@@ -3,7 +3,8 @@ import type { LeaderElection } from '../types'
 export abstract class BaseLeaderElection implements LeaderElection {
   protected isLeaderState = false
   protected listeners: Set<(isLeader: boolean) => void> = new Set()
-  // Changes a listener causes wait until every listener heard the current one.
+  // The state changes at once; listeners hear changes in order, so one that a
+  // listener causes waits until every listener heard the current one.
   private notifying = false
   private readonly queued: Array<boolean> = []
 
@@ -23,6 +24,8 @@ export abstract class BaseLeaderElection implements LeaderElection {
   }
 
   protected notifyLeadershipChange(isLeader: boolean): void {
+    if (this.isLeaderState === isLeader) return
+    this.isLeaderState = isLeader
     this.queued.push(isLeader)
     if (this.notifying) return
     this.notifying = true
@@ -32,8 +35,6 @@ export abstract class BaseLeaderElection implements LeaderElection {
         next !== undefined;
         next = this.queued.shift()
       ) {
-        if (this.isLeaderState === next) continue
-        this.isLeaderState = next
         for (const listener of this.listeners) {
           try {
             listener(next)
