@@ -2484,6 +2484,14 @@ Effect, and a `distinct` query shows an instance some row still holds. It does
 not cover `inArray` (fixed tests in
 `ir-stable-identity.test.ts`), on-demand or persisted sources, exact-output
 identity, which keeps reference semantics, or throwing `toJSON()` methods.
+Its second property (`serialized-value.array-order`) checks `gt`, `gte`, `lt`
+and `lte` over generated arrays that mix value classes, record-shaped
+`toJSON()` classes, plain objects, numbers, text, nulls, PlainDates, a typed
+array subclass and self-referencing arrays against an independent order
+model, including the native operators' throws, with the right operand's
+objects given runtime identities first. The distinct representative oracle
+requires a shown payload to stay while the inputs that hold it do, and a fixed
+history retires a row whose hash collides with a live one.
 
 The
 [Temporal index order tests](https://github.com/TanStack/db/blob/main/packages/db/tests/temporal-index-order.test.ts)
