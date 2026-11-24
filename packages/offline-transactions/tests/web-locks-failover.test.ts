@@ -120,6 +120,65 @@ describe(`Web Locks failover through the executor`, () => {
     second.executor.dispose()
   })
 
+  it(`a takeover replays even when the leadership callback throws`, async () => {
+    vi.stubGlobal(`navigator`, { locks: createLocks() })
+    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const storage = new FakeStorageAdapter()
+    const first = createTestOfflineEnvironment({
+      storage,
+      config: { leaderElection: new WebLocksLeader(`failover-callback`) },
+      mutationFn: () => {
+        throw new Error(`offline`)
+      },
+    })
+    await first.executor.waitForInit()
+    const transaction = first.executor.createOfflineTransaction({
+      mutationFnName: first.mutationFnName,
+      autoCommit: false,
+    })
+    transaction.mutate(() => {
+      first.collection.insert({
+        id: `pending`,
+        value: `replay me`,
+        completed: false,
+        updatedAt: new Date(),
+      })
+    })
+    void transaction.commit().catch(() => undefined)
+    await waitUntil(
+      async () => (await first.executor.peekOutbox()).length === 1,
+    )
+
+    const replayed: Array<string> = []
+    const second = createTestOfflineEnvironment({
+      storage,
+      config: {
+        leaderElection: new WebLocksLeader(`failover-callback`),
+        onLeadershipChange: (isLeader) => {
+          if (isLeader) throw new Error(`application callback failed`)
+        },
+      },
+      mutationFn: (params) => {
+        for (const mutation of params.transaction.mutations) {
+          replayed.push(String(mutation.key))
+        }
+        second.applyMutations(params.transaction.mutations)
+        return { ok: true, mutations: params.transaction.mutations }
+      },
+    })
+    try {
+      await second.executor.waitForInit()
+      first.executor.dispose()
+      await waitUntil(
+        async () => (await second.executor.peekOutbox()).length === 0,
+      )
+      expect(replayed).toEqual([`pending`])
+    } finally {
+      warn.mockRestore()
+      second.executor.dispose()
+    }
+  })
+
   it(`a disposed waiter leaves the queue`, async () => {
     const locks = createLocks()
     vi.stubGlobal(`navigator`, { locks })

@@ -26,9 +26,13 @@ export class WebLocksLeader extends BaseLeaderElection {
       return false
     }
 
-    this.pendingRequest ??= this.acquireOrWait().finally(() => {
-      this.pendingRequest = null
-    })
+    // Requests share one attempt until a release voids it.
+    if (!this.pendingRequest) {
+      const attempt = this.acquireOrWait().finally(() => {
+        if (this.pendingRequest === attempt) this.pendingRequest = null
+      })
+      this.pendingRequest = attempt
+    }
     return this.pendingRequest
   }
 
@@ -74,8 +78,10 @@ export class WebLocksLeader extends BaseLeaderElection {
         // An abort has no effect once the lock is granted.
         if (this.waiting !== waiting) return
         this.waiting = undefined
+        // Hold first, so a listener that releases on the gain lets go.
+        const held = this.holdLock()
         this.notifyLeadershipChange(true)
-        return this.holdLock()
+        return held
       })
       .catch((error: unknown) => {
         if (waiting.signal.aborted) return
@@ -95,6 +101,7 @@ export class WebLocksLeader extends BaseLeaderElection {
 
   releaseLeadership(): void {
     this.requestGeneration++
+    this.pendingRequest = null
     if (this.waiting) {
       const waiting = this.waiting
       this.waiting = undefined

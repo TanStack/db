@@ -4243,7 +4243,9 @@ The post-merge review added three missing domains to existing owners:
   calibration protect that distinction.
 - [Web Locks leadership](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/web-locks-leader-oracle.property.test.ts)
   checks FIFO takeover across three tabs that request, release and close over a
-  controlled lock manager. It does not cover real browser contexts.
+  controlled lock manager, including a request renewed after a release in one
+  turn and a listener that releases or throws when told its tab leads. It does
+  not cover real browser contexts.
 - [Leadership replay](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/leadership-replay-oracle.property.test.ts)
   holds real storage-read delivery across successful and permanently rejected
   durable removals, with bounded scans, concurrent loads, and unfinished peers.
