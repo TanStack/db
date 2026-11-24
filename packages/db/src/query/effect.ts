@@ -1072,7 +1072,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.isGraphRunning = true
     try {
       this.runGraphToQuiescence()
-      if (!this.isDisposed() && this.pendingSilentChanges.size > 0) {
+      // Replacements run after other changes. Anything either pass brings,
+      // such as a joined load's rows, runs before the batch publishes.
+      while (!this.isDisposed() && this.pendingSilentChanges.size > 0) {
         this.applyingSilentChanges = true
         try {
           const silent = [...this.pendingSilentChanges]
@@ -1106,6 +1108,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   }
 
   private runGraphToQuiescence(): void {
+    // A handler or provider may have disposed the Effect, clearing the graph.
+    if (this.isDisposed()) return
     const graph = this.graph!
     if (!graph.pendingWork()) this.loadMoreIfNeeded()
     // Ordered refill can also dispose the runner between graph steps.

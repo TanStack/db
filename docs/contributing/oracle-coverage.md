@@ -2496,8 +2496,10 @@ deep-equal instance during a direct subscriber's truncate replay and requires
 the completed replay to drop it from a filter on the old instance while an
 unchanged row stays silent. A fixed property
 (`serialized-value.effect-joined-load`) lets a deep-equal replacement of a
-joined reference load an on-demand source whose provider delivers a real update,
-and requires the Effect to report it as it does after a normal opener. Another
+joined reference load an on-demand source whose provider answers at once: with
+a real update, with a real update beside a deep-equal replacement in one commit,
+or after disposing the Effect. It requires one coherent batch that matches a
+normal opener's, and no error on disposal. Another
 (`serialized-value.pooled-residual-swap`) swaps two rows across a residual
 pooled view in one batch and then really updates one, for attached and detached
 readers. The distinct representative oracle

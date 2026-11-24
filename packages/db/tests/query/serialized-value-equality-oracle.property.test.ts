@@ -2375,26 +2375,40 @@ describe(`a truncate replay follows a deep-equal reference replacement`, () => {
 })
 
 // A deep-equal replacement of a joined reference loads the joined side, and
-// the provider can deliver a real update while the replacement runs. That
-// update keeps its provenance: the Effect reports it even when the selected
-// output is unchanged, as it does when a normal change opened the load.
-type EffectLoadHistory = { name: string; opener: `silent` | `normal` }
+// the provider can answer at once while the replacement runs. Its real
+// updates keep their provenance: the Effect reports them even when the
+// selected output is unchanged, as it does when a normal change opened the
+// load. Its deep-equal replacements run in the same batch, so a row they keep
+// matched is never reported as leaving and entering. A provider may dispose
+// the Effect during that pass.
+type EffectLoadHistory = {
+  name: string
+  opener: `silent` | `normal`
+  // `single`: one real update. `atomic`: one commit with a real update to B
+  // and a deep-equal replacement of C. `dispose`: the provider disposes the
+  // Effect, then answers with one real update.
+  response: `single` | `atomic` | `dispose`
+}
 
 async function runEffectLoadHistory(history: EffectLoadHistory) {
   type Left = { id: string; n: number; ref: Map<string, number> }
   type Right = { id: string; ref: Map<string, number>; version: number }
   const first = new Map([[`k`, 1]])
   const second = new Map([[`k`, 1]])
+  const label = `${history.opener}-${history.response}`
   const left = createCollection(
     mockSyncCollectionOptions<Left>({
-      id: `serialized-value-effect-load-left-${history.opener}`,
+      id: `serialized-value-effect-load-left-${label}`,
       getKey: (row) => row.id,
       initialData: [{ id: `l`, n: 0, ref: first }],
     }),
   )
+  const rightIds = history.response === `atomic` ? [`B`, `C`] : [`B`]
   let loads = 0
+  // The provider reaches the Effect that its own load serves.
+  const handle: { effect?: ReturnType<typeof createEffect> } = {}
   const right = createCollection<Right>({
-    id: `serialized-value-effect-load-right-${history.opener}`,
+    id: `serialized-value-effect-load-right-${label}`,
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     autoIndex: `eager`,
@@ -2405,15 +2419,20 @@ async function runEffectLoadHistory(history: EffectLoadHistory) {
         return {
           loadSubset: () => {
             loads++
+            if (loads > 1 && history.response === `dispose`)
+              void handle.effect!.dispose()
             begin()
-            write(
-              loads === 1
-                ? { type: `insert`, value: { id: `r`, ref: first, version: 0 } }
-                : {
-                    type: `update`,
-                    value: { id: `r`, ref: second, version: 1 },
-                  },
-            )
+            for (const id of rightIds) {
+              write(
+                loads === 1
+                  ? { type: `insert`, value: { id, ref: first, version: 0 } }
+                  : {
+                      type: `update`,
+                      // B really changes; C is replaced by a deep-equal row.
+                      value: { id, ref: second, version: id === `B` ? 1 : 0 },
+                    },
+              )
+            }
             commit()
             return true
           },
@@ -2422,37 +2441,45 @@ async function runEffectLoadHistory(history: EffectLoadHistory) {
       },
     },
   })
-  const events: Array<string> = []
-  const effect = createEffect({
+  const batches: Array<Array<string>> = []
+  const effect = (handle.effect = createEffect({
     query: (q) =>
       q
         .from({ l: left })
         .join({ r: right }, ({ l, r }) => eq(l.ref, r.ref), `left`)
         .select(({ l, r }) => ({ id: l.id, rid: r.id })),
-    onEnter: () => {
-      events.push(`enter`)
+    onBatch: (events) => {
+      batches.push(
+        events
+          .map(
+            (event) => `${event.type}:${(event.value as { rid: string }).rid}`,
+          )
+          .sort(),
+      )
     },
-    onUpdate: () => {
-      events.push(`update`)
-    },
-    onExit: () => {
-      events.push(`exit`)
-    },
-  })
+  }))
   try {
     await flushPromises()
-    expect(events, `initial load`).toEqual([`enter`])
-    events.length = 0
+    expect(batches, `initial load`).toEqual([
+      rightIds.map((id) => `enter:${id}`),
+    ])
+    batches.length = 0
     left.utils.begin()
     left.utils.write({
       type: `update`,
       value: { id: `l`, n: history.opener === `silent` ? 0 : 1, ref: second },
     })
-    left.utils.commit()
+    expect(() => left.utils.commit(), `opening commit`).not.toThrow()
     await flushPromises()
     expect(loads, `joined loads`).toBe(2)
-    expect(right.get(`r`)?.version, `provider version`).toBe(1)
-    expect(events, `Effect after the load`).toEqual([`update`])
+    expect(right.get(`B`)?.version, `provider version`).toBe(1)
+    const expected =
+      history.response === `dispose`
+        ? []
+        : history.response === `single` || history.opener === `silent`
+          ? [[`update:B`]]
+          : [[`update:B`, `update:C`]]
+    expect(batches, `Effect after the load`).toEqual(expected)
   } finally {
     await effect.dispose()
   }
@@ -2467,18 +2494,22 @@ describe(`an Effect keeps a joined load's update beside a replacement`, () => {
   >({
     id: effectLoadProperty,
     law: {
-      statement: `A real update that a joined source delivers while an Effect applies deep-equal replacements reaches the Effect, even when the selected output is unchanged, exactly as when a normal change opened the same load.`,
+      statement: `A joined source that answers while an Effect applies deep-equal replacements is published in the same batch: its real updates reach the Effect even when the selected output is unchanged, its deep-equal replacements report nothing for a row they keep matched, and the result matches a normal opener's. Disposing the Effect during that pass ends it without an error.`,
       authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md; review of PR #2460.`,
-      limits: `One eager source and one on-demand source joined by a Map reference; the provider answers the second load synchronously with one real update; a deep-equal or a normal left update opens it.`,
+      limits: `One eager source and one on-demand source joined by a Map reference; the provider answers the second load synchronously with one real update, with a real update beside a deep-equal replacement in one commit, or after disposing the Effect; a deep-equal or a normal left update opens it.`,
     },
     owns: [
       'src/query/effect.ts#EffectPipelineRunner.runGraph',
+      'src/query/effect.ts#EffectPipelineRunner.runGraphToQuiescence',
       'src/query/effect.ts#EffectPipelineRunner.handleSourceChanges',
     ],
-    histories: [
-      { name: `a deep-equal replacement opens the load`, opener: `silent` },
-      { name: `a normal update opens the load`, opener: `normal` },
-    ],
+    histories: ([`silent`, `normal`] as const).flatMap((opener) =>
+      ([`single`, `atomic`, `dispose`] as const).map((response) => ({
+        name: `a ${opener === `silent` ? `deep-equal replacement` : `normal update`} opens a ${response} response`,
+        opener,
+        response,
+      })),
+    ),
     label: ({ name }) => name,
     model: recordedAssertionJudgment,
     driver: (history, observe) =>
