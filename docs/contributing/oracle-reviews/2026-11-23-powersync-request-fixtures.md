@@ -321,3 +321,12 @@ values identify the independently reviewed FIFO source snapshot:
 | `packages/db-sqlite-persistence-core/tests/persisted-source-fifo-oracle.ts` | `3a23b83522e8abbe203541218b237970ff8a34877691a0b10ee9df099a780c20` |
 | `packages/db-sqlite-persistence-core/tests/persisted-source-fifo-sqlite-oracle.test.ts` | `ae334d94c5d8e40b17429c7996e281fba1eae5b312f6de51c115c2eb4122d640` |
 | `packages/db-sqlite-persistence-core/tests/persisted-durability-model-oracle.ts` | `48677c8ece81d11511a0c0256b979da9710140f88e6adccdf7115b26879c62a2` |
+
+## Publication snapshot
+
+The reviewed implementation is commit `06c990597dd15db04cff5b3392b316b72affe663`. Final formatting of three
+oracle modules preserved their parsed emitted JavaScript syntax. The production,
+shared FIFO owner, native receiver, and model hashes above are unchanged.
+All final receiving and size jobs completed. Exact oracle-package archives
+supplied the size baselines with unchanged versions and integrity.
+No dependency-install workaround or private diagnostic artifact is published.
