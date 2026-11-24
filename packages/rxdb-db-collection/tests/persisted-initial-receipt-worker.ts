@@ -2,7 +2,10 @@
 import process from 'node:process'
 import { readFileSync } from 'node:fs'
 import { createStartupHost } from '../../db-adapter-conformance/tests/persisted-startup-host'
-import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'
+import {
+  describeOracleCleanupError,
+  retainOracleCleanupObservation,
+} from '../../db/tests/oracle-cleanup'
 import { observeRxdbPersistedInitialReceipt } from './persisted-initial-receipt-driver'
 import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
 

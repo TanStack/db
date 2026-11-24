@@ -375,3 +375,28 @@ Both guarded replays record one execution with the requested property, seed,
 and path. Independent review approves those routes. The 70 manifest checks,
 `pnpm lint:changed`, and pre-commit ESLint pass. These changes do not alter
 production, the oracle laws, generated histories, comparisons, or run budgets.
+
+### Detached-error recorder imports
+
+CI on `34fb2efe85da8d3f4727b64b0f32a116e77dda7b` exposed a missing
+`describeOracleCleanupError` import in the RxDB receipt worker. Both existing
+`mismatch-and-cleanup` calibrations entered its native rejection listener and
+failed with `ReferenceError` before it could emit its observation. The browser
+entry had the same missing import. Ordinary successful histories never call
+that listener, which explains why those histories passed.
+
+Both entries now import the existing formatter. All 26 files that reference it
+were checked for the same omission. The unchanged receipt oracle passes all
+60 checks across controlled and real Node SQLite hosts on Node 22.23.5. Its
+Chromium worker/OPFS receiver passes all 28 checks. Independent review approves
+the import repairs. No production behavior, expected observation, history
+grammar, comparison, or run budget changes.
+
+The same CI job separately reproduces the documented TrailBase SDK numeric
+decoding defect. Seed 2,118 and path `24:6:6:6:6:4:4:4` reduce to a complete
+snapshot containing `Number.MAX_VALUE`, followed by an empty snapshot. The SDK
+fails before the first ready cut. Fresh seed 493,398,782 and path
+`2:3:2:4:8:8:12` instead expose lost fields after a live SSE update with that
+value. These are semantic failures at READY-3 and FID-1, respectively. They
+remain visible with the complete numeric domain; the receiving tests are not
+relaxed to make CI pass.

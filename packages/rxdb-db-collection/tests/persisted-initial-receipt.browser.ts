@@ -6,7 +6,10 @@ import {
 import { inProcessSeams } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
 import { removeStartupOPFSArtifacts } from '../../browser-db-sqlite-persistence/e2e/persisted-startup-opfs-cleanup'
 import { removeClosedArtifacts } from '../../browser-db-sqlite-persistence/e2e/query-rejected-write-cutoff-cleanup'
-import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'
+import {
+  describeOracleCleanupError,
+  retainOracleCleanupObservation,
+} from '../../db/tests/oracle-cleanup'
 import { observeRxdbPersistedInitialReceipt } from './persisted-initial-receipt-driver'
 import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
 
