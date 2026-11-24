@@ -10,6 +10,14 @@
  *   they may read the replay variables and select a replay from configuration.
  * - `replayWitnessModules`: the module that writes a replay witness, whose
  *   record the standard JSON serializer writes.
+ * - `nonTestPackages`: packages that export no test function or suite. The
+ *   rules classify a callee by the source of its binding, and they never read
+ *   a package under node_modules. `@tanstack/oracles` registers tests only
+ *   through `oracleProperty`, which the rules recognize by its own export;
+ *   its other exports, such as `atOracleCheckpoint`, register nothing.
+ *   `@tanstack/db` is the production package under test, and its exports
+ *   register nothing either. Without these entries, `oracle/no-unit-test`
+ *   reports `unknownTestSource` for a title-shaped call through them.
  */
 export const oracleLintSettings = {
   oracles: {
@@ -19,6 +27,7 @@ export const oracleLintSettings = {
       `packages/db/tests/oracle-property.ts`,
     ],
     replayWitnessModules: [`packages/db/tests/oracle-replay-witness.ts`],
+    nonTestPackages: [`@tanstack/oracles`, `@tanstack/db`],
   },
 }
 

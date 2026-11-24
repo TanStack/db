@@ -495,7 +495,7 @@ export function registerSourceFifoOrderingOracle({
       law: `constructed history reach`,
       corrupt: (trace) => trace.filter((entry) => entry.checkpoint !== `reach`),
       // Framework reach itself rejects every constructed omission. The primary
-      // driver also checks generated builder outputs using measured admission.
+      // driver also checks every built base using measured admission.
     })),
   })
 }

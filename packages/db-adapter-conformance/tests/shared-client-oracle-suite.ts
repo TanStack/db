@@ -24,7 +24,7 @@ export function registerSharedClientConformance(
   let sequence = 0
   const required = new WeakMap<SharedClientHistory, SharedClientState>()
   // Each builder starts with generated values and changes only the premise its
-  // state needs. Fresh identities retain the obligation in generated runs too.
+  // state needs. Fresh identities retain each built base's state obligation.
   const constructed = sharedClientStates.flatMap((state, stateIndex) =>
     Array.from({ length: stateIndex < 9 ? 1 : 5 }, (_, index) => ({
       name: `generated ${state}${index ? ` ${index + 1}` : ``}`,

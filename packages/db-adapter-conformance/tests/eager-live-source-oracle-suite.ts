@@ -1,8 +1,9 @@
 /**
  * Receiving campaigns retain the shared Map/phase model and each original
  * public checkpoint. Five randomized builders enforce minimum-five reach.
- * Their local obligation ledger also checks fresh generated constructions:
- * the pinned framework only associates its seed-derived objects with enters.
+ * Their local obligation ledger checks each fresh constructed base against its
+ * required production states. The framework runs five bases per builder; its
+ * ordinary generated unit draws from the unmodified arbitrary.
  */
 import { eagerLiveSourceHistoryArb, reachStatesFor } from '../src'
 import {

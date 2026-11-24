@@ -1,30 +1,47 @@
 # PR CI
 
-The PR workflow runs eight test jobs independently. Each job builds its selected
-packages and their workspace dependencies before running tests. Builds retain
-pnpm's dependency order; package tests run without that ordering, with at most
-two package processes and two Vitest workers per process.
+The PR workflow runs fourteen test jobs independently. Each job builds its
+selected packages and their workspace dependencies before running tests.
+Builds retain pnpm's dependency order; package tests run without that
+ordering. The DB jobs run one Vitest process with two workers. A package job
+runs its entries as Vitest processes of one worker each, at most four at a
+time, in the order that `scripts/ci-tests.mjs` lists them, with each output
+line prefixed by its entry.
 
 | Group | Scope |
 | --- | --- |
-| `db-1`, `db-2` | Two Vitest file shards of DB, excluding the replay process suite |
+| `db-1`, `db-2` | Two Vitest file shards of DB, excluding the replay process suite and the type oracles |
+| `db-3` | The DB type oracles |
 | `db-replay` | The complete `oracle-replay.test.ts` suite |
 | `ivm-offline` | IVM and offline transactions; explicit test-source typechecks and dependency version checks |
 | `sqlite-core` | SQLite persistence core |
 | `sqlite-adapters` | Browser, Node, Electron, Cloudflare, React Native, Expo, Capacitor, and Tauri persistence |
-| `frameworks` | React, React Router, Solid, Vue, Svelte, and Angular |
-| `collections` | Electric, Query, PowerSync, RxDB, TrailBase, and the shared E2E suite container |
+| `frameworks` | React, React Router, Preact, Solid, Vue, Svelte, and Angular |
+| `collections-1` to `collections-5` | Electric, Query, PowerSync, PowerSync Direct, RxDB, TrailBase, Convex, the adapter conformance package, and the shared E2E suite container |
+| `lint-rules` | The oracles of the repository scripts (`scripts/*.property.test.js`) except lint scope: run budgets and the release and publish scripts. The release workflow does not run this group. |
+| `lint-scope` | The lint hooks' scope oracle, whole: its file-wide reach ledger counts the histories of one process. The release workflow does not run this group. |
 
-`scripts/ci-tests.mjs` owns the package assignments. It rejects an unassigned or
-multiply assigned package test script. When adding a package with tests, assign
-it to a group and keep the workflow matrix in sync if adding a new group.
+`scripts/ci-tests.mjs` owns the package assignments. An entry runs a package's
+remaining test files, one named file, or one part of a named oracle file: its
+fixed-seed units, its random-seed units, or every other test. Each package
+with a test script has exactly one remaining-files entry, so a new test file
+runs without an edit, and a named file runs whole once or in all three parts.
+The script rejects an assignment that breaks these rules. When adding a
+package with tests, assign it to a group and keep the workflow matrices in
+`pr.yml` and `release.yml` in sync if adding a new group.
+
+Every job stays under 10 minutes, and jobs are packed to about 9 minutes.
+Pack by measured file and part times from a recent run: each entry's end line
+gives its time, and the job's last lines list every entry with its time.
+Split an oracle file into its parts when one file outlasts a job's budget, and
+list the longest entries first.
 
 Run a group locally after installing the locked dependencies:
 
 ```sh
 node scripts/ci-tests.mjs check
-node scripts/ci-tests.mjs build db-1
-node scripts/ci-tests.mjs test db-1
+node scripts/ci-tests.mjs build collections-1
+node scripts/ci-tests.mjs test collections-1
 ```
 
 The DB jobs retain coverage and typechecking. They write distinct Vitest blob

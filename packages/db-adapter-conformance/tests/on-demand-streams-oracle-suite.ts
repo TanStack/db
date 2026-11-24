@@ -2,9 +2,9 @@
  * Shared registration for on-demand stream ownership and applied settlement.
  * Every fixed regression and randomized construction uses the same model,
  * public production composition and comparison. Five fresh constructions per
- * state enforce minimum-five reach in each normal campaign. The local ledger
- * also checks generated builder outputs, which the pinned framework does not
- * associate with its seed-derived construction objects.
+ * state enforce required reach in each normal campaign. Each builder runs on
+ * five bases. The local ledger checks every fresh built base against its
+ * required production state; the ordinary generated unit uses the arbitrary.
  */
 import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
 import { observeOnDemandStreams } from './on-demand-streams-driver'

@@ -69,7 +69,17 @@ jobs:
       fail-fast: false
       matrix:
         group:
-          [ivm-offline, sqlite-core, sqlite-adapters, frameworks, collections]
+          [
+            ivm-offline,
+            sqlite-core,
+            sqlite-adapters,
+            frameworks,
+            collections-1,
+            collections-2,
+            collections-3,
+            collections-4,
+            collections-5,
+          ]
     env:
       TEST_GROUP: ${{ matrix.group }}
     steps:

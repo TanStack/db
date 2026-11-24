@@ -176,8 +176,9 @@ new path was also rejected: it crashed an independently aborted transaction.
 The final native oracle rejects both designs, alongside the original defect.
 After repair, both FIFO properties pass their fixed and random campaigns,
 construction reach, per-builder omission controls, and determinism checks.
-All six states reach at least 34 generated/constructed histories per host and
-campaign: 30 constructions and four ordinary histories. Fixed regressions do
+At the pre-integration framework revision, all six states reached 34
+generated/constructed histories per host and campaign: 30 constructions and
+four ordinary histories. Fixed regressions do
 not supply those counts. The run budget remains four, seed 18,530,101.
 
 Independent review of the exact production source and shared/native oracle
@@ -330,3 +331,25 @@ shared FIFO owner, native receiver, and model hashes above are unchanged.
 All final receiving and size jobs completed. Exact oracle-package archives
 supplied the size baselines with unchanged versions and integrity.
 No dependency-install workaround or private diagnostic artifact is published.
+
+## Integration with current main
+
+The follow-up merges `origin/main` at `371e40d48`. The persistence production
+source remains identical to the reviewed repair. Main upgrades the oracle
+framework to `6d05f05`, with five bases per construction and an ordinary
+generated unit drawn only from the arbitrary. All existing run budgets and
+seeds remain. No construction-base override is added for these new properties.
+The primary and real SQLite FIFO properties pass 250 checks with the new
+framework on Node 22. All six states are measured 154 times per host and
+campaign: 30 builders on five bases, plus four ordinary generated histories.
+The original implementation still fails the native restoration comparison.
+The previous generated-unit seed/path coordinates remain historical evidence
+for the earlier framework; the new arbitrary-only generated stream can shift
+those coordinates. Explicit traces and the constructor-first RED remain.
+The Direct CI job and real Chromium receivers are rerun with the new defaults.
+
+The merge keeps main's split CI scheduling. Direct has `collections-5`, with
+its eager fixed/random/other units and remaining files, in both PR and release
+matrices. The assignment check covers all 28 package test scripts. Adapter
+browser CI receives 120 minutes for the full portfolio with the retained five
+construction bases; other browser and host job limits stay unchanged.
