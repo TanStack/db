@@ -12,7 +12,7 @@ import type { SyncAppliedReceipt } from '@tanstack/db'
 import type { PersistedCollectionPersistence } from '../../db-sqlite-persistence-core/src'
 
 type InputKind = `SDK wait` | `source receipt` | `storage`
-type InputCut = `provider` | `applied`
+type InputCut = `admission` | `provider` | `applied`
 type InputDelivery = {
   requestRevision: () => number
   requestOpen: () => boolean
@@ -157,9 +157,9 @@ export function createDirectInputLedger({
       const current = snapshot()
       const marker = `${current.revision}:${delivery?.requestRevision() ?? 0}:${delivery?.additionalRevision?.() ?? 0}`
       quiet =
-        !current.pendingSDK &&
-        (cut === `provider` ||
-          (!current.pendingStorage.length && !current.pendingReceipts)) &&
+        (cut === `admission` || !current.pendingSDK) &&
+        (cut === `provider` || !current.pendingStorage.length) &&
+        (cut !== `applied` || !current.pendingReceipts) &&
         marker === previous
           ? quiet + 1
           : 0

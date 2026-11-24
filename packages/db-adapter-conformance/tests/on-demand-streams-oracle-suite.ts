@@ -11,6 +11,10 @@ import { observeOnDemandStreams } from './on-demand-streams-driver'
 import {
   constructOnDemandStreamsHistory,
   failingStreams,
+  onDemandBoundaryHistoryArb,
+  onDemandBoundaryModel,
+  onDemandBoundarySchedules,
+  onDemandBoundaryViolations,
   onDemandStreamsHistoryArb,
   onDemandStreamsModel,
   onDemandStreamsStates,
@@ -22,10 +26,206 @@ import type {
   OnDemandStreamsResult,
 } from './on-demand-streams-driver'
 import type {
+  OnDemandBoundaryHistory,
+  OnDemandBoundaryObservation,
   OnDemandStreamsHistory,
   OnDemandStreamsState,
   StreamCut,
 } from './on-demand-streams-oracle'
+
+/** Same boundary judgment receives actual Node and Chromium SDK observations. */
+export function registerOnDemandBoundaryConformance(
+  property: string,
+  receive: (
+    h: OnDemandBoundaryHistory,
+    id: string,
+  ) => Promise<OnDemandBoundaryObservation>,
+  { owns }: { owns: ReadonlyArray<string> },
+) {
+  let sequence = 0
+  const required = new WeakMap<OnDemandBoundaryHistory, string>()
+  const constructed = onDemandBoundarySchedules.map((schedule) => ({
+    name: `generated ${schedule}`,
+    enters: [schedule],
+    build: (base: OnDemandBoundaryHistory) => {
+      const built = { ...base, schedule }
+      required.set(built, schedule)
+      return built
+    },
+  }))
+  oracleProperty({
+    id: property,
+    owns,
+    law: {
+      statement: `A current rejected stream retains the service error, including when a secondary unrelated durable receipt rejects. Cleanup-abandoned source receipts reject with AbortError after core has canceled the demand; the obsolete result changes no source health. Accepted complete or partial-priority checkpoint rows survive cancellation, and the raw source load waits for their establishing receipt without waiting for an unrelated later receipt. A storage failure separately crashes the source with its own cause. Releasing an acquisition cancels its pending SDK wait while a healthy peer remains active. Actual standalone SDK rejection callbacks follow acquisition return, also when a subsequent acquisition reuses the cached failure.`,
+      authority: `PowerSync Direct guide On-Demand Sync and Errors; glossary abort/applied receipt/cleanup; query/live/ARCHITECTURE.md Source cancellation and applied settlement; installed standalone-client 0.1.1 supplies callback scheduling as a receiving premise.`,
+      limits: `Two equality demands, real installed SDK and controlled legal HTTP, one accepted receipt held behind a public optimistic transaction and either applied or abandoned by public cleanup; complete-checkpoint cancellation before/after its await continuation; priority-zero partial delivery beside a priority-three peer bucket, with cancellation of a request or pending query, empty delivery or an earlier peer receipt; or actual persistence receipts held and either failed or independently released in order at applyCommittedTx over Node SQLite or Chromium worker/OPFS; or one to three application status reentries followed by acquisition release before or after the successor checkpoint. Retained rows after crash remain diagnostic, without a post-crash read promise. The durable failure is controlled; no actual disk-failure, deployed service or future SDK scheduling claim.`,
+    },
+    histories: {
+      arbitrary: onDemandBoundaryHistoryArb,
+      states: onDemandBoundarySchedules,
+      constructed,
+      runs: 16,
+      fixedSeeds: [2446],
+    },
+    model: onDemandBoundaryModel,
+    driver: async (h, observe) => {
+      const raw = await receive(h, `${property}-${sequence++}`)
+      for (const state of raw.reached) observe(`reach`, state)
+      observe(`request boundary`, raw)
+    },
+    check: (h, trace) => {
+      const raw = trace.find((entry) => entry.checkpoint === `request boundary`)
+        ?.value as OnDemandBoundaryObservation | undefined
+      if (!raw)
+        return violation(
+          `request boundary`,
+          `missing observation`,
+          `request boundary`,
+        )
+      const failures = onDemandBoundaryViolations(h, raw)
+      if (failures.length)
+        return violation(
+          `request boundary`,
+          failures.join(`; `),
+          `request boundary`,
+          { actual: raw, expected: onDemandBoundaryModel(h) },
+        )
+      const state = required.get(h)
+      if (
+        state &&
+        !raw.reached.includes(state as OnDemandBoundaryHistory[`schedule`])
+      )
+        return violation(
+          `reach`,
+          `missing ${state}`,
+          `constructed builder reach`,
+        )
+      return pass
+    },
+    calibrations: [
+      {
+        name: `an abandoned priority receipt must retain the AbortError category`,
+        history: { constructed: `generated priority-cleanup-abort` },
+        law: `request boundary`,
+        corrupt: (trace) =>
+          trace.map((entry) =>
+            entry.checkpoint === `request boundary`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as OnDemandBoundaryObservation),
+                    rawErrorName: `Error`,
+                  },
+                }
+              : entry,
+          ),
+      },
+      {
+        name: `a canceled source cannot omit its own establishing receipt`,
+        history: { constructed: `generated receipt-abort` },
+        law: `request boundary`,
+        corrupt: (trace) =>
+          trace.map((entry) =>
+            entry.checkpoint === `request boundary`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as OnDemandBoundaryObservation),
+                    rawPendingWhileReceiptHeld: false,
+                  },
+                }
+              : entry,
+          ),
+      },
+      {
+        name: `a canceled source cannot wait for the newest unrelated receipt`,
+        history: { constructed: `generated receipt-abort-later-batch` },
+        law: `request boundary`,
+        corrupt: (trace) =>
+          trace.map((entry) =>
+            entry.checkpoint === `request boundary`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as OnDemandBoundaryObservation),
+                    rawOutcomeAtLaterCut: `pending`,
+                  },
+                }
+              : entry,
+          ),
+      },
+      {
+        name: `a released acquisition cannot retain an unsettled SDK wait`,
+        history: { constructed: `generated lease-release-after-checkpoint` },
+        law: `request boundary`,
+        corrupt: (trace) =>
+          trace.map((entry) =>
+            entry.checkpoint === `request boundary`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as OnDemandBoundaryObservation),
+                    pendingWaitsAfterRelease: 1,
+                  },
+                }
+              : entry,
+          ),
+      },
+      {
+        name: `a synchronous rejection callback is distinguishable`,
+        history: { constructed: `generated fresh-rejection` },
+        law: `request boundary`,
+        corrupt: (trace) =>
+          trace.map((entry) =>
+            entry.checkpoint === `request boundary`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as OnDemandBoundaryObservation),
+                    callbacksDuringAcquire: 1,
+                  },
+                }
+              : entry,
+          ),
+      },
+      {
+        name: `a current stream failure cannot become an unrelated receipt error`,
+        history: { constructed: `generated receipt-applied` },
+        law: `request boundary`,
+        corrupt: (trace) =>
+          trace.map((entry) =>
+            entry.checkpoint === `request boundary`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as OnDemandBoundaryObservation),
+                    rawCause: `receipt`,
+                  },
+                }
+              : entry,
+          ),
+      },
+      ...constructed.map((builder) => ({
+        name: `missing ${builder.name}`,
+        history: { constructed: builder.name },
+        law: `constructed builder reach`,
+        corrupt: (trace: ReadonlyArray<Observation>) =>
+          trace.map((entry) =>
+            entry.checkpoint === `request boundary`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as OnDemandBoundaryObservation),
+                    reached: [],
+                  },
+                }
+              : entry,
+          ),
+      })),
+    ],
+  })
+}
 
 type Result = OnDemandStreamsResult & {
   browserErrors?: ReadonlyArray<string>

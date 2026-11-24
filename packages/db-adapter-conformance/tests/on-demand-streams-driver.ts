@@ -62,6 +62,8 @@ export type OnDemandStreamsSource = {
   connectionInputs: () => ReadonlyArray<StreamConnectionInput>
   activeStreams: () => ReadonlyArray<string>
   acquiredLeases: () => number
+  admissionWork?: () => unknown
+  receiveAdmissionWork?: () => Promise<void>
   forwardedSubscriptions: () => ReadonlyArray<AuthoredStream>
   emptyMappingCut: `provider-wait` | `load-admission`
   describeFailure: (cause: unknown) => StreamRejection
@@ -90,11 +92,14 @@ export type OnDemandStreamsResult = {
 export async function untilOnDemandStream(
   predicate: () => boolean,
   premise: string,
+  diagnostic?: () => unknown,
 ): Promise<void> {
   const end = Date.now() + 2_000
   while (!predicate()) {
     if (Date.now() >= end)
-      throw new Error(`On-demand receiving premise not reached: ${premise}`)
+      throw new Error(
+        `On-demand receiving premise not reached: ${premise}${diagnostic ? `; ${JSON.stringify(diagnostic())}` : ``}`,
+      )
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
 }
@@ -297,6 +302,10 @@ export async function observeOnDemandStreams(
       const requestedBeforeStart = provider.requestedOwners().length
       start(`left`)
       if (h.kind === `ownership`) start(`right`)
+      // A real persisted receiver initializes storage before invoking its
+      // source mapper. Drain that actual work separately from SDK waits,
+      // which legitimately need the first provider checkpoint after mapping.
+      await provider.receiveAdmissionWork?.()
       await untilOnDemandStream(
         () =>
           provider
@@ -306,6 +315,21 @@ export async function observeOnDemandStreams(
           (h.kind !== `ownership` ||
             provider.requestedOwners().includes(`right`)),
         `every logical query requested its streams`,
+        () => ({
+          sourceStatus: collection.status,
+          sourceError: collection.health.error?.message,
+          queries: Object.fromEntries(
+            Object.entries(queries).map(([owner, query]) => [
+              owner,
+              query.status,
+            ]),
+          ),
+          requestedOwners: provider.requestedOwners(),
+          admissions: loadAdmissions.map((options) => ({
+            aborted: options.signal?.aborted === true,
+          })),
+          receivingWork: provider.admissionWork?.(),
+        }),
       )
       // Mapper histories keep one ready donor while a second request exercises
       // cached-only settlement or failure/retry. These are public queries; no

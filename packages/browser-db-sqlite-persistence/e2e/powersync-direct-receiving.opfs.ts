@@ -27,6 +27,7 @@ import {
   retainInitialReceiptCleanup,
 } from '../../powersync-direct-collection/tests/persisted-initial-receipt-driver'
 import { observeDirectSharedClient } from '../../powersync-direct-collection/tests/shared-client-driver'
+import { observeDirectRequestBoundary } from '../../powersync-direct-collection/tests/request-boundary-driver'
 import { directConformanceDriver } from '../../powersync-direct-collection/tests/conformance-driver'
 import { observeEagerLiveSourceHistory } from '../../db-adapter-conformance/tests/eager-live-source-framework-oracle'
 import {
@@ -60,7 +61,7 @@ import type {
   EagerGateHistory,
   EagerReloadHistory,
 } from '../../db-adapter-conformance/tests/eager-reload-oracle'
-import type { OnDemandStreamsHistory } from '../../db-adapter-conformance/tests/on-demand-streams-oracle'
+import type { OnDemandBoundaryHistory, OnDemandStreamsHistory  } from '../../db-adapter-conformance/tests/on-demand-streams-oracle'
 import type { DirectMutationHistory } from '../../powersync-direct-collection/tests/mutation-confirmation-driver'
 import type { DecodeHistory } from '../../db-adapter-conformance/tests/decode-refusal-oracle'
 import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
@@ -202,6 +203,40 @@ const runDirectDecodeRefusal = (history: DecodeHistory, id: string) =>
   observeDecodeRefusal(directDecodeAdapter, history, id)
 const runDirectSharedClient = (history: SharedClientHistory, id: string) =>
   observeDirectSharedClient(history, id)
+const runDirectRequestBoundary = (
+  history: OnDemandBoundaryHistory,
+  id: string,
+) => receiveDirectRequestBoundary(history, id)
+async function receiveDirectRequestBoundary(
+  history: OnDemandBoundaryHistory,
+  id: string,
+) {
+  if (
+    history.schedule !== `receipt-durable-failure` &&
+    history.schedule !== `receipt-abort-later-batch`
+  )
+    return observeDirectRequestBoundary(history, id)
+  const databaseName = `ps-direct-boundary-${sequence++}.sqlite`
+  await removeStartupOPFSArtifacts(databaseName)
+  const database = await openBrowserWASQLiteOPFSDatabase({ databaseName })
+  return withOracleCleanup(
+    () =>
+      observeDirectRequestBoundary(
+        history,
+        id,
+        createBrowserWASQLitePersistence({ database }),
+      ),
+    [
+      () => database.close?.(),
+      () =>
+        removeClosedArtifacts(
+          () => removeStartupOPFSArtifacts(databaseName),
+          (cut, value) =>
+            console.info(`powersync-direct.boundary ${cut}`, value),
+        ),
+    ],
+  )
+}
 const runDirectEagerSource = (
   history: EagerLiveSourceHistory,
   corruption?: EagerSourceCorruption,
@@ -225,6 +260,7 @@ declare global {
     runDirectMutationConfirmation: typeof runDirectMutationConfirmation
     runDirectDecodeRefusal: typeof runDirectDecodeRefusal
     runDirectSharedClient: typeof runDirectSharedClient
+    runDirectRequestBoundary: typeof runDirectRequestBoundary
     runDirectEagerSource: typeof runDirectEagerSource
   }
 }
@@ -237,4 +273,5 @@ window.runDirectPersistedInitialReceipt = runDirectPersistedInitialReceipt
 window.runDirectMutationConfirmation = runDirectMutationConfirmation
 window.runDirectDecodeRefusal = runDirectDecodeRefusal
 window.runDirectSharedClient = runDirectSharedClient
+window.runDirectRequestBoundary = runDirectRequestBoundary
 window.runDirectEagerSource = runDirectEagerSource

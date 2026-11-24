@@ -42,6 +42,9 @@ export const convexPersistedDemandSource: DemandReceivingFactory = async (
   let queued = false
   let closed = false
   const pending = new Map<number, PaginationOptions>()
+  // A live Convex query receives later revisions without reacquisition.
+  // Keep the actual SDK's active query arguments after the first answer.
+  const activeQueries = new Map<number, PaginationOptions>()
   const removals: Array<{ type: string; queryId: number }> = []
   const flush = () => {
     if (queued || closed) return
@@ -127,8 +130,10 @@ export const convexPersistedDemandSource: DemandReceivingFactory = async (
         if (change.type === `Add`) {
           requests++
           pending.set(change.queryId, change.args![0]!.paginationOpts)
+          activeQueries.set(change.queryId, change.args![0]!.paginationOpts)
         } else {
           pending.delete(change.queryId)
+          activeQueries.delete(change.queryId)
           removals.push({ type: `QueryRemoved`, queryId: change.queryId })
         }
       }
@@ -183,6 +188,7 @@ export const convexPersistedDemandSource: DemandReceivingFactory = async (
         (a, b) => a.rank - b.rank || a.id.localeCompare(b.id),
       )
       mode = `answered`
+      for (const [queryId, queryOptions] of activeQueries) pending.set(queryId, queryOptions)
       flush()
       await barrier()
     },

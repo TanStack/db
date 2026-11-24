@@ -6,7 +6,7 @@
  * captured independently of those input facts.
  */
 import { Schema, Table, column } from '@powersync/common'
-import { createCollection, eq } from '@tanstack/db'
+import { DbClient, collectionOptions, eq } from '@tanstack/db'
 import { z } from 'zod'
 import { observeDecodeRows } from '../../db-adapter-conformance/tests/decode-refusal-oracle'
 import { untilStartup } from '../../db-adapter-conformance/tests/persisted-startup-driver'
@@ -14,6 +14,7 @@ import { powerSyncCollectionOptions } from '../src'
 import { retainNativeObservation } from './receiving-cleanup'
 import {
   nativeDecodeBatch,
+  nativeDecodeHydrationBatch,
   nativeDecodeKey,
   nativeDecodeRecoveryBatch,
 } from './batch-decode-oracle'
@@ -188,7 +189,33 @@ export async function observeNativeBatchDecode(
       syncBatchSize: h.batchSize,
       onDeserializationError: () => {},
     })
-    const collection = createCollection({ ...options, startSync: false })
+    const admission = { begins: 0, writes: 0, commits: 0 }
+    const client = new DbClient()
+    const collection = client.collection(
+      collectionOptions({
+        ...options,
+        startSync: false,
+        sync: {
+          ...options.sync,
+          sync: (params) =>
+            options.sync.sync({
+              ...params,
+              begin: (beginOptions) => {
+                if (recording) admission.begins++
+                params.begin(beginOptions)
+              },
+              write: (message) => {
+                if (recording) admission.writes++
+                params.write(message)
+              },
+              commit: (signal) => {
+                if (recording) admission.commits++
+                return params.commit(signal)
+              },
+            }),
+        },
+      }),
+    )
     const publications: NativeDecodeObservation['publications'] = []
     const subscription = collection.subscribeChanges(() => {
       if (recording) publications.push(observeDecodeRows(collection.toArray))
@@ -276,6 +303,12 @@ export async function observeNativeBatchDecode(
           String(terminalCause).includes(refusal.message),
         watcherReleases: [...watcherReleases],
         reached,
+        admission: {
+          ...admission,
+          open: collection._state.pendingSyncedTransactions.filter(
+            (transaction) => !transaction.committed,
+          ).length,
+        },
       }
       if (h.outcome !== `valid`) {
         // The original source has already refused. Correct the actual SQLite
@@ -283,6 +316,40 @@ export async function observeNativeBatchDecode(
         // real provider lock/drain cuts supplies opportunity for an improperly
         // live adapter; the expected stopped outcome is never a wait predicate.
         recording = false
+        if (h.hydrateAfterRefusal) {
+          const hydrationPublications: NativeDecodeObservation['publications'] =
+            []
+          const hydrateSubscription = collection.subscribeChanges(
+            () =>
+              hydrationPublications.push(observeDecodeRows(collection.toArray)),
+            { includeInitialState: false },
+          )
+          subscriptions.push(hydrateSubscription)
+          client.applyCollectionChunk({
+            collectionId: id,
+            rows: nativeDecodeHydrationBatch(h).map((row) => ({
+              key: row.id,
+              value: row,
+            })),
+          })
+          observed.hydration = {
+            rows: observeDecodeRows(collection.toArray),
+            publications: hydrationPublications,
+            acceptedBaseline: observeDecodeRows(
+              [...collection._state.acceptedSyncedEntries()].map(
+                ([, row]) => row,
+              ),
+            ),
+            status: collection.status,
+            causeStable: collection.health.error?.cause === terminalCause,
+          }
+          hydrateSubscription.unsubscribe()
+          const order = sourceBatches.flat()
+          const position = order.indexOf(refusalKey)
+          reached.push(
+            `hydration:${h.mode}:${h.phase}:${position === 0 ? `first` : position === order.length - 1 ? `last` : `middle`}`,
+          )
+        }
         refuse = false
         const decodedBefore = decodedRows
         let sourceChanged!: () => void

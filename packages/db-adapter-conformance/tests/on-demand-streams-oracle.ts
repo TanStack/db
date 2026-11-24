@@ -930,3 +930,341 @@ export function onDemandStreamsViolations(
     )
   return violations
 }
+
+/**
+ * Request rejection and cleanup have different authority. A current rejected
+ * stream exposes the service's StreamError. Cleanup aborts a demand before an
+ * abandoned receipt settles, so its later result decides nothing for core.
+ * This small projection records both boundaries without reproducing the
+ * adapter's shared-receipt slot or its catch branches. Callback timing is a
+ * receiving premise of standalone-client 0.1.1, established by actual SDK
+ * callbacks after acquisition returns, including cached rejected streams.
+ * A durable collaborator failure is independent of the already-rejected
+ * request: it owns the source's crash, not that current request's first cause.
+ * Separate lease-release histories retain a healthy peer and repeat one to
+ * three status reentries. They observe actual wait settlement before teardown;
+ * releasing a lease cannot normalize a pending wait out of the observation.
+ * Successful-checkpoint cancellation separately retains its own receipt: an
+ * SDK ready callback can abort before the loader's continuation captures that
+ * receipt. The neighboring schedule aborts after capture. A persisted schedule
+ * applies that receipt while an unrelated later receipt remains held, so the
+ * source cannot substitute either no wait or the newest shared receipt.
+ * Priority histories use real priority-zero partial checkpoint completion
+ * beside a priority-three peer bucket. They cancel a direct request or pending
+ * query before full synchronization. Accepted priority rows keep their applied
+ * obligation. Empty partial delivery and an earlier peer receipt distinguish
+ * the requirement from a blanket rule about every canceled acquisition.
+ * Cancellation promises an AbortError after accepted rows apply, not the
+ * original SDK error object. Its object identity remains diagnostic only.
+ */
+export const onDemandBoundarySchedules = [
+  `fresh-rejection`,
+  `cached-rejection`,
+  `receipt-applied`,
+  `receipt-cleanup`,
+  `receipt-durable-failure`,
+  `lease-release`,
+  `lease-release-after-checkpoint`,
+  `checkpoint-abort`,
+  `receipt-abort`,
+  `receipt-abort-later-batch`,
+  `priority-request-abort`,
+  `priority-query-abort`,
+  `priority-empty-abort`,
+  `priority-peer-receipt-abort`,
+  `priority-cleanup-abort`,
+] as const
+export type OnDemandBoundaryHistory = {
+  coordinate: number
+  rowCount: number
+  schedule: (typeof onDemandBoundarySchedules)[number]
+  statusChanges: number
+}
+export const onDemandBoundaryHistoryArb = fc.record({
+  coordinate: fc.integer({ min: 0, max: 10_000 }),
+  rowCount: fc.integer({ min: 1, max: 3 }),
+  schedule: fc.constantFrom(...onDemandBoundarySchedules),
+  statusChanges: fc.integer({ min: 1, max: 3 }),
+})
+export type OnDemandBoundaryObservation = {
+  browserErrors?: ReadonlyArray<string>
+  callbackCount: number
+  providerStreamError?: boolean
+  providerMessages?: ReadonlyArray<string>
+  callbacksDuringAcquire: number
+  cachedFailureReused: boolean
+  receiptPendingAtFailure: boolean
+  rawPendingAtFailure: boolean
+  coreAbortedAtFailure: boolean
+  receiptOutcome: `absent` | `pending` | `fulfilled` | `rejected`
+  rawOutcome: `pending` | `fulfilled` | `rejected`
+  rawCause: `provider` | `receipt` | `other` | `absent`
+  rawErrorName?: string
+  receiptErrorName?: string
+  coreCause: `provider` | `receipt` | `other` | `absent`
+  coreAbortedAtRawSettlement: boolean
+  coreOutcome: `pending` | `fulfilled` | `rejected`
+  sourceStatus: string
+  sourceFailures: number
+  terminalCause: `durable` | `provider` | `other` | `absent`
+  pendingWaitsAfterRelease?: number
+  maximumPendingForOneLease?: number
+  readyReentries?: number
+  abortedWaitsAfterRelease?: number
+  peerActive?: boolean
+  sourceRows: ReadonlyArray<string>
+  rowsAtRelease?: ReadonlyArray<string>
+  rawPendingWhileReceiptHeld?: boolean
+  requestAbortedWhileReceiptHeld?: boolean
+  checkpointAbortDelivered?: boolean
+  ownReceiptFulfilledAtLaterCut?: boolean
+  laterReceiptPendingAtLaterCut?: boolean
+  rawOutcomeAtLaterCut?: `pending` | `fulfilled` | `rejected`
+  partialReceivedBeforeAbort?: boolean
+  providerWaitPendingBeforeAbort?: boolean
+  peerQueryStatus?: string
+  targetQueryStatusBeforeAbort?: string
+  targetQueryStatusAfterAbort?: string
+  subscriptionStatusAtAbort?: string
+  peerQueryStatusAtAbort?: string
+  peerQueryRows?: ReadonlyArray<string>
+  /** Diagnostic only: cancellation does not promise the SDK error object. */
+  rawPreservedQueuedAbort?: boolean
+  reached: Array<OnDemandBoundaryHistory[`schedule`]>
+}
+// The authored schedule, rather than provider/cache implementation state,
+// chooses whether the demand is still current at its settlement checkpoint.
+export function onDemandBoundaryModel(h: OnDemandBoundaryHistory) {
+  const receipt =
+    h.schedule.startsWith(`receipt-`) ||
+    h.schedule === `checkpoint-abort` ||
+    h.schedule.startsWith(`priority-`)
+  const cleanup = h.schedule === `receipt-cleanup`
+  const durable = h.schedule === `receipt-durable-failure`
+  return {
+    receipt,
+    cleanup,
+    durable,
+    receiptOutcome: receipt
+      ? cleanup || durable
+        ? `rejected`
+        : `fulfilled`
+      : `absent`,
+    sourceStatus: cleanup ? `cleaned-up` : durable ? `crashed` : `ready`,
+  } as const
+}
+export function onDemandBoundaryViolations(
+  h: OnDemandBoundaryHistory,
+  raw: OnDemandBoundaryObservation,
+) {
+  const expected = onDemandBoundaryModel(h)
+  const failures = [...(raw.browserErrors ?? [])]
+  if (h.schedule.startsWith(`priority-`)) {
+    const ownRows =
+      h.schedule === `priority-request-abort` ||
+      h.schedule === `priority-query-abort` ||
+      h.schedule === `priority-cleanup-abort`
+    const cleanup = h.schedule === `priority-cleanup-abort`
+    const heldRows = ownRows || h.schedule === `priority-peer-receipt-abort`
+    if (!raw.partialReceivedBeforeAbort || !raw.providerWaitPendingBeforeAbort)
+      failures.push(
+        `partial priority delivery did not precede cancellation and full synchronization`,
+      )
+    if (
+      raw.receiptPendingAtFailure !== heldRows ||
+      (!raw.requestAbortedWhileReceiptHeld && heldRows)
+    )
+      failures.push(
+        `priority cancellation did not reach the declared accepted-row cut`,
+      )
+    if (ownRows && !raw.rawPendingWhileReceiptHeld)
+      failures.push(
+        `raw aborted priority load settled before its accepted rows applied`,
+      )
+    if (
+      raw.rawOutcome !== `rejected` ||
+      raw.rawErrorName !== `AbortError` ||
+      !raw.coreAbortedAtRawSettlement
+    )
+      failures.push(`priority cancellation lost the source abort outcome`)
+    if (
+      raw.subscriptionStatusAtAbort !== `ready` ||
+      raw.peerQueryStatusAtAbort !== `ready`
+    )
+      failures.push(
+        `aborted priority work still held core readiness or its peer`,
+      )
+    if (
+      raw.peerQueryStatus !== (cleanup ? `cleaned-up` : `ready`) ||
+      raw.sourceStatus !== (cleanup ? `cleaned-up` : `ready`) ||
+      raw.sourceFailures
+    )
+      failures.push(
+        `priority cancellation retired the source or its ready peer`,
+      )
+    if (raw.receiptOutcome !== (cleanup ? `rejected` : `fulfilled`))
+      failures.push(`priority row receipt did not reach its authored outcome`)
+    if (
+      h.schedule === `priority-query-abort` &&
+      (raw.targetQueryStatusBeforeAbort !== `loading` ||
+        raw.targetQueryStatusAfterAbort !== `cleaned-up`)
+    )
+      failures.push(
+        `pending query retirement did not cancel its source acquisition`,
+      )
+    const rows =
+      heldRows && !cleanup
+        ? Array.from({ length: h.rowCount }, (_value, index) => `row-${index}`)
+        : []
+    if (JSON.stringify(raw.sourceRows) !== JSON.stringify(rows))
+      failures.push(`priority cancellation withdrew accepted table rows`)
+    const peerRows = h.schedule === `priority-peer-receipt-abort` ? rows : []
+    if (
+      !cleanup &&
+      JSON.stringify(raw.peerQueryRows) !== JSON.stringify(peerRows)
+    )
+      failures.push(
+        `ready peer did not publish its accepted rows after priority cancellation`,
+      )
+    return failures
+  }
+  if (
+    h.schedule === `checkpoint-abort` ||
+    h.schedule === `receipt-abort` ||
+    h.schedule === `receipt-abort-later-batch`
+  ) {
+    if (!raw.receiptPendingAtFailure || !raw.requestAbortedWhileReceiptHeld)
+      failures.push(`cancellation did not overlap accepted source rows`)
+    if (h.schedule === `checkpoint-abort` && !raw.checkpointAbortDelivered)
+      failures.push(
+        `application checkpoint listener did not cancel the request`,
+      )
+    if (
+      h.schedule !== `receipt-abort-later-batch` &&
+      !raw.rawPendingWhileReceiptHeld
+    )
+      failures.push(
+        `raw aborted source load settled before its accepted rows applied`,
+      )
+    if (
+      h.schedule === `receipt-abort-later-batch` &&
+      (!raw.ownReceiptFulfilledAtLaterCut ||
+        !raw.laterReceiptPendingAtLaterCut ||
+        raw.rawOutcomeAtLaterCut !== `rejected`)
+    )
+      failures.push(
+        `an unrelated later receipt delayed the canceled source load`,
+      )
+    if (
+      raw.rawOutcome !== `rejected` ||
+      raw.rawErrorName !== `AbortError` ||
+      !raw.coreAbortedAtRawSettlement
+    )
+      failures.push(`aborted source load lost its cancellation outcome`)
+    if (
+      raw.receiptOutcome !== `fulfilled` ||
+      raw.sourceStatus !== `ready` ||
+      raw.sourceFailures
+    )
+      failures.push(`aborting a request withdrew an accepted sync obligation`)
+    if (
+      JSON.stringify(raw.sourceRows) !==
+      JSON.stringify(
+        [
+          ...Array.from(
+            { length: h.rowCount },
+            (_value, index) => `row-${index}`,
+          ),
+          ...(h.schedule === `receipt-abort-later-batch`
+            ? [`later-${h.coordinate}`]
+            : []),
+        ].sort(),
+      )
+    )
+      failures.push(`accepted source rows did not survive request cancellation`)
+    return failures
+  }
+  if (!raw.callbackCount || raw.callbacksDuringAcquire)
+    failures.push(`SDK rejection callback did not follow acquisition return`)
+  if (
+    !raw.providerStreamError ||
+    JSON.stringify(raw.providerMessages) !==
+      JSON.stringify([`rejected-${h.coordinate}`])
+  )
+    failures.push(`SDK did not deliver the authored stream rejection`)
+  if (h.schedule.startsWith(`lease-release`)) {
+    if (raw.readyReentries !== h.statusChanges)
+      failures.push(
+        `application status changes did not reach every requested reentry`,
+      )
+    if (raw.pendingWaitsAfterRelease !== 0)
+      failures.push(`released acquisition retained an unsettled SDK wait`)
+    if (!(raw.maximumPendingForOneLease && raw.maximumPendingForOneLease > 0))
+      failures.push(`status reentry never established a pending SDK wait`)
+    if (!raw.peerActive || raw.sourceStatus !== `ready`)
+      failures.push(`one acquisition release retired its healthy peer`)
+    if (
+      raw.rowsAtRelease?.length ||
+      JSON.stringify(raw.sourceRows) !==
+        JSON.stringify([`peer-${h.coordinate}`])
+    )
+      failures.push(`healthy peer did not retain subsequent table delivery`)
+    return failures
+  }
+  if (h.schedule === `cached-rejection` && !raw.cachedFailureReused)
+    failures.push(`cached failed stream did not retain the same provider error`)
+  if (raw.receiptPendingAtFailure !== expected.receipt)
+    failures.push(`request failure did not overlap the declared receipt`)
+  if (raw.coreAbortedAtFailure)
+    failures.push(`request was already obsolete when the service rejected it`)
+  if (raw.receiptOutcome !== expected.receiptOutcome)
+    failures.push(`actual receipt outcome differs from authored schedule`)
+  if (
+    raw.rawOutcome !== `rejected` ||
+    (!expected.cleanup && raw.rawCause !== `provider`)
+  )
+    failures.push(`raw source rejection lost its boundary cause`)
+  // Failure may settle before the later cleanup. A rejected acquisition owes
+  // no result, so the model must not force it to wait for an unrelated receipt.
+  const failedBeforeCleanup =
+    expected.cleanup &&
+    !raw.coreAbortedAtRawSettlement &&
+    raw.rawCause === `provider` &&
+    raw.coreCause === `provider`
+  if (
+    raw.coreAbortedAtRawSettlement !== expected.cleanup &&
+    !failedBeforeCleanup
+  )
+    failures.push(`request currency differs at raw source settlement`)
+  if (
+    expected.cleanup &&
+    !failedBeforeCleanup &&
+    raw.rawErrorName !== `AbortError`
+  )
+    failures.push(`cleanup abandonment did not reject with AbortError`)
+  if (!expected.cleanup && raw.coreOutcome !== `rejected`)
+    failures.push(`current request did not expose its stream rejection`)
+  if (!expected.cleanup && raw.coreCause !== `provider`)
+    failures.push(`current request changed the provider failure cause`)
+  if (
+    raw.sourceStatus !== expected.sourceStatus ||
+    raw.sourceFailures !== (expected.durable ? 1 : 0)
+  )
+    failures.push(
+      `request rejection changed source lifecycle or terminal health`,
+    )
+  if (raw.terminalCause !== (expected.durable ? `durable` : `absent`))
+    failures.push(`terminal source failure lost its own cause`)
+  const expectedRows =
+    h.schedule === `receipt-applied`
+      ? Array.from({ length: h.rowCount }, (_value, index) => `row-${index}`)
+      : []
+  // A crash says this Collection cannot serve reads. Keep its retained rows
+  // diagnostic; this error-provenance law adds no post-crash read contract.
+  if (
+    !expected.durable &&
+    JSON.stringify(raw.sourceRows) !== JSON.stringify(expectedRows)
+  )
+    failures.push(`source rows differ at the request settlement boundary`)
+  return failures
+}

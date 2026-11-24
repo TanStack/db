@@ -21,6 +21,7 @@ async function waitForService(predicate: () => boolean, description: string) {
  * @see {@link https://github.com/powersync-ja/powersync-service/blob/main/docs/specs/sync-protocol.md}
  */
 export class FakeService {
+  partialCompletions = 0
   readonly requests: Array<Record<string, any>> = []
   readonly checkpointRequests: Array<Record<string, any>> = []
   #stream?: ReadableStreamDefaultController<Uint8Array>
@@ -114,7 +115,11 @@ export class FakeService {
 
   checkpoint(
     buckets: Array<string>,
-    options: { streams?: Array<ResolvedStream>; writeCheckpoint?: string } = {},
+    options: {
+      streams?: Array<ResolvedStream>
+      writeCheckpoint?: string
+      priorities?: Readonly<Record<string, number>>
+    } = {},
   ) {
     this.#replay = undefined
     const request = this.lastRequest
@@ -124,7 +129,13 @@ export class FakeService {
       checkpoint: {
         last_op_id: String(this.#opId + 10),
         write_checkpoint: options.writeCheckpoint,
-        buckets: buckets.map((bucket) => ({ bucket, checksum: 0 })),
+        buckets: buckets.map((bucket) => ({
+          bucket,
+          checksum: 0,
+          ...(options.priorities?.[bucket] === undefined
+            ? {}
+            : { priority: options.priorities[bucket] }),
+        })),
         streams,
       },
     })
@@ -160,6 +171,15 @@ export class FakeService {
 
   complete() {
     this.send({ checkpoint_complete: { last_op_id: String(this.#opId + 10) } })
+  }
+  partialComplete(priority: number) {
+    this.partialCompletions++
+    this.send({
+      partial_checkpoint_complete: {
+        priority,
+        last_op_id: String(this.#opId + 10),
+      },
+    })
   }
 
   /** Sends a checkpoint with the given rows in one bucket, followed by a completion line. */

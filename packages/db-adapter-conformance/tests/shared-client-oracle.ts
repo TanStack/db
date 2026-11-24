@@ -15,7 +15,12 @@
  * passive or distinct explicit streams, one retirement and one later complete
  * checkpoint. Active peers additionally compose request-scoped rejection,
  * changed rejection, healthy-peer update/deletion and changed/unchanged
- * recovery. No persistence, mutation, deployed service or subset claim.
+ * recovery. A bounded application status listener may change the requested
+ * streams before a Collection's ready listener runs. Its real SDK wait then
+ * remains pending until the successor checkpoint. Cleanup releases that run's
+ * pending work while a peer keeps syncing; a later checkpoint cannot supply
+ * the missing cleanup cancellation. No persistence, mutation, deployed service
+ * or subset claim.
  */
 import fc from 'fast-check'
 import { startupRows } from './persisted-startup-oracle'
@@ -29,6 +34,7 @@ export type SharedClientHistory = {
   second: number
   next: number
   retire: 0 | 1
+  waitReentry?: `before-cleanup` | `after-checkpoint`
   failure?: {
     stream: 0 | 1
     repeat: boolean
@@ -48,6 +54,17 @@ export const sharedClientHistoryArb: fc.Arbitrary<SharedClientHistory> =
       second: fc.constant(0),
       next: fc.integer({ min: 0, max: 7 }),
       retire: fc.constant(1 as const),
+    }),
+    fc.record({
+      join: fc.constant(`active` as const),
+      first: fc.integer({ min: 1, max: 7 }),
+      second: fc.integer({ min: 1, max: 7 }),
+      next: fc.integer({ min: 0, max: 7 }),
+      retire: fc.constantFrom(0 as const, 1 as const),
+      waitReentry: fc.constantFrom(
+        `before-cleanup` as const,
+        `after-checkpoint` as const,
+      ),
     }),
     fc.record(
       {
@@ -92,6 +109,8 @@ export const sharedClientStates = [
   `failed-owner-retired`,
   `healthy-owner-retired`,
   `recovery-request-open`,
+  `wait-pending-before-cleanup`,
+  `wait-applied-before-cleanup`,
 ] as const
 export type SharedClientState = (typeof sharedClientStates)[number]
 export type SharedClientCut = {
@@ -107,6 +126,12 @@ export type SharedClientResource = {
   owner: number
   kind: string
   releases: number
+}
+export type SharedClientWait = {
+  owner: number
+  signaled: boolean
+  aborted: boolean
+  outcome: `pending` | `fulfilled` | `rejected`
 }
 export type SharedClientObservation = {
   browserErrors?: ReadonlyArray<string>
@@ -125,6 +150,9 @@ export type SharedClientObservation = {
   requestedAtJoin: Array<string>
   requestedAfterRetirement: Array<string>
   finalProviderState: string
+  waitsBeforeCleanup: Array<SharedClientWait>
+  waitsAtCleanup: Array<SharedClientWait>
+  reentered: boolean
   reached: Array<SharedClientState>
 }
 // Authored complete source membership determines all public rows. Both active
@@ -365,6 +393,21 @@ export function sharedClientViolations(
   for (const resource of raw.finalResources)
     if (resource.releases !== 1)
       failures.push(`final resource ${resource.owner}/${resource.kind}`)
+  // A pending SDK wait is run-owned work even after its lease releases. Keep
+  // its actual settlement; ignoring released leases would erase this law.
+  for (const wait of raw.waitsAtCleanup)
+    if (wait.owner === h.retire && wait.outcome === `pending`)
+      failures.push(`cleanup retained an unsettled SDK wait`)
+  if (h.waitReentry && !raw.reentered)
+    failures.push(`application ready-listener reentry did not run`)
+  if (
+    h.waitReentry &&
+    raw.waitsBeforeCleanup.some(
+      (wait) => wait.owner === h.retire && wait.outcome === `pending`,
+    ) !==
+      (h.waitReentry === `before-cleanup`)
+  )
+    failures.push(`SDK wait did not reach the declared pre-cleanup boundary`)
   if (raw.finalProviderState !== `idle`)
     failures.push(`final provider resources`)
   return failures

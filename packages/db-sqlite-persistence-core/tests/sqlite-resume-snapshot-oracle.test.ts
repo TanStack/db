@@ -1,7 +1,7 @@
 import fc from 'fast-check'
 import { describe, expect } from 'vitest'
 import { createCollection } from '@tanstack/db'
-import { oracleProperty } from '../../db/tests/oracle-config'
+import { oracleProperty, violation } from '../../db/tests/oracle-config'
 import {
   forwardAssertionJudgment,
   oracleAssertion,
@@ -15,6 +15,7 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import { runOrdinaryTransactionWorkOracle } from './ordinary-transaction-work-oracle'
+import { checkResumeRowProjection } from './resume-row-projection-oracle'
 import {
   closeDatabasePreservingPrimary,
   createDriver,
@@ -24,6 +25,7 @@ import {
 } from './sqlite-resume-snapshot-support'
 import type { SQLiteDriver } from '../src'
 import type { Collection } from '@tanstack/db'
+import type { Observation } from '../../db/tests/oracle-config'
 
 // Node 22 omits node:sqlite from builtinModules, which Vitest uses to
 // externalize imports in jsdom. Load the real built-in directly.
@@ -460,18 +462,51 @@ describe(`SQLite resume snapshots`, () => {
   // histories reconstruct both row-inclusion options at exact expiry.
   // Holding the real transaction before its claim query makes the second
   // check, rather than the wrapper's later publication guard, the checkpoint.
+  // rowKeys is a materialization hint at the generic adapter boundary. The
+  // concrete SQLite adapter promises exact typed-key projection while the
+  // same atomic read still certifies collection-wide resume facts. Keys below
+  // deliberately differ from value.id. These histories also cross a four-
+  // binding query cap, duplicate keys and includeRows:false precedence.
+  const rowSelections = [
+    `all`,
+    `empty`,
+    `missing`,
+    `one`,
+    `many`,
+    `duplicates`,
+    `mixed`,
+    `own-key`,
+    `over-bindings`,
+    `position-only`,
+    `positive-zero`,
+    `negative-zero`,
+    `zero-pair`,
+  ] as const
+  type RowSelection = (typeof rowSelections)[number]
   type ManagedClaimReadHistory = {
     elapsedMs: number
     includeRows: boolean
     peerDelayMs: number
     rowCount: number
+    rowSelection?: RowSelection
+    typedKeys?: boolean
+    bindingCap?: boolean
+    rowLabel?: string
   }
-  const assertManagedClaimReadHistory = async ({
-    elapsedMs,
-    includeRows,
-    peerDelayMs,
-    rowCount,
-  }: ManagedClaimReadHistory): Promise<void> => {
+  const assertManagedClaimReadHistory = async (
+    {
+      elapsedMs,
+      includeRows,
+      peerDelayMs,
+      rowCount,
+      rowSelection = `all`,
+      typedKeys = false,
+      bindingCap = false,
+      rowLabel = ``,
+    }: ManagedClaimReadHistory,
+    observe?: (checkpoint: string, value: unknown) => void,
+    scanAllThenFilter = false,
+  ): Promise<void> => {
     // The independent model uses half-open claim intervals. The peer's
     // interval starts later, so the first claim may expire while it stays live.
     const startAtMs = 1_000
@@ -494,9 +529,74 @@ describe(`SQLite resume snapshots`, () => {
     )
     const rows = Array.from({ length: rowCount }, (_, index) => ({
       id: `retained-${index}`,
-      title: `Warm peer row ${index}`,
+      title: `Warm peer row ${index}${rowLabel ? `: ${rowLabel}` : ``}`,
     }))
-    const expectedFirstRows = includeRows ? rows : []
+    const keyedRows = rows.map((value, index) => ({
+      key: rowSelection.includes(`zero`)
+        ? index === 0
+          ? 0
+          : index === 1
+            ? -0
+            : `0`
+        : typedKeys
+          ? index === 0
+            ? 1
+            : index === 1
+              ? `1`
+              : `stored-third`
+          : value.id,
+      value,
+      metadata:
+        index === 0
+          ? { cached: true, ...(rowLabel ? { label: rowLabel } : {}) }
+          : index === 1
+            ? null
+            : undefined,
+    }))
+    const storageKeys = keyedRows.map(({ key }) => key)
+    const rowKeys =
+      rowSelection === `positive-zero`
+        ? [0]
+        : rowSelection === `negative-zero`
+          ? [-0]
+          : rowSelection === `zero-pair`
+            ? [0, -0]
+            : rowSelection === `all`
+              ? undefined
+              : rowSelection === `empty`
+                ? []
+                : rowSelection === `missing`
+                  ? [`absent`]
+                  : rowSelection === `duplicates`
+                    ? [
+                        storageKeys[0] ?? `absent`,
+                        storageKeys[1] ?? `absent`,
+                        `absent-a`,
+                        `absent-b`,
+                        storageKeys[0] ?? `absent`,
+                      ]
+                    : rowSelection === `mixed` ||
+                        rowSelection === `position-only`
+                      ? [1, `1`]
+                      : rowSelection === `own-key`
+                        ? [storageKeys[2] ?? `absent`]
+                        : rowSelection === `over-bindings`
+                          ? [
+                              1,
+                              `1`,
+                              ...Array.from(
+                                { length: 8 },
+                                (_, i) => `absent-${i}`,
+                              ),
+                            ]
+                          : rowSelection === `many`
+                            ? storageKeys.slice(0, 2)
+                            : [storageKeys[0] ?? `absent`]
+    const projectionInput = { storedRows: keyedRows, includeRows, rowKeys }
+    // Preserve the inherited fixture assertion on its original path. New
+    // typed-key projections use the shared unordered relation comparison.
+    const legacyRowOrder =
+      rowSelection === `all` && !typedKeys && !bindingCap && rowLabel === ``
 
     const database = new DatabaseSync(`:memory:`)
     let primaryFailure: unknown
@@ -508,6 +608,7 @@ describe(`SQLite resume snapshots`, () => {
     let observeHeldRead = false
     let metadataReads = 0
     let rowReads = 0
+    let materializedRows = 0
     const heldStatements: Array<{
       type: `query` | `run` | `exec`
       sql: string
@@ -517,6 +618,7 @@ describe(`SQLite resume snapshots`, () => {
     let observedStorageId = ``
     const driver: SQLiteDriver = {
       ...baseDriver,
+      ...(bindingCap ? { maxBoundParameters: 8 } : {}),
       transaction: (operation) =>
         baseDriver.transaction(async (transactionDriver) => {
           if (holdTransaction) {
@@ -526,13 +628,49 @@ describe(`SQLite resume snapshots`, () => {
           }
           return operation({
             ...transactionDriver,
-            query: (sql, params) => {
+            // Setup transactions keep the root cap. The judged read receives
+            // a tighter loan, so using only the root cap is distinguishable.
+            ...(bindingCap
+              ? { maxBoundParameters: observeHeldRead ? 4 : 8 }
+              : {}),
+            query: async <T>(sql: string, params?: ReadonlyArray<unknown>) => {
+              const isRowDataRead =
+                observeHeldRead &&
+                sql.includes(rowTable) &&
+                /^\s*SELECT\b/i.test(sql)
               if (observeHeldRead) {
                 heldStatements.push({ type: `query`, sql, params })
                 if (sql.includes(`FROM collection_metadata`)) metadataReads++
                 if (sql.includes(rowTable)) rowReads++
               }
-              return transactionDriver.query(sql, params)
+              // This mutant preserves returned values while retaining the
+              // original full materialization cost beneath the adapter API.
+              const data =
+                isRowDataRead && scanAllThenFilter && rowKeys !== undefined
+                  ? await transactionDriver.query<T>(
+                      `SELECT key, value, metadata, row_version FROM "${rowTable}"`,
+                    )
+                  : await transactionDriver.query<T>(sql, params)
+              if (isRowDataRead)
+                materializedRows += data.filter(
+                  (row) =>
+                    row !== null &&
+                    typeof row === `object` &&
+                    `key` in row &&
+                    `value` in row,
+                ).length
+              if (isRowDataRead && scanAllThenFilter && rowKeys !== undefined) {
+                const encoded = new Set(rowKeys.map(encodePersistedStorageKey))
+                return data.filter(
+                  (row) =>
+                    row !== null &&
+                    typeof row === `object` &&
+                    `key` in row &&
+                    typeof row.key === `string` &&
+                    encoded.has(row.key),
+                )
+              }
+              return data
             },
             run: (sql, params) => {
               if (observeHeldRead) {
@@ -577,10 +715,17 @@ describe(`SQLite resume snapshots`, () => {
           seq: 1,
           rowVersion: 1,
           cacheGenerationClaimId: first.claimId,
-          mutations: rows.map((row) => ({
+          rowMetadataMutations: keyedRows
+            .filter(({ metadata }) => metadata !== undefined)
+            .map(({ key, metadata }) => ({
+              type: `set` as const,
+              key,
+              value: metadata,
+            })),
+          mutations: keyedRows.map(({ key, value }) => ({
             type: `insert` as const,
-            key: row.id,
-            value: row,
+            key,
+            value,
           })),
           collectionMetadataMutations: [
             { type: `set`, key: `resume`, value: resume },
@@ -601,16 +746,20 @@ describe(`SQLite resume snapshots`, () => {
 
       holdTransaction = true
       observeHeldRead = true
+      // A variable keeps the optional proposal structurally assignable before
+      // production knows rowKeys; the unchanged adapter reaches a semantic RED.
+      const readOptions = {
+        includeRows,
+        rowKeys,
+        cacheGenerationClaimId: first.claimId,
+      }
       read = adapter.loadResumeSnapshot(
         {
           kind: `managed`,
           storageCollectionId: storageId,
           claimId: first.claimId,
         },
-        {
-          includeRows,
-          cacheGenerationClaimId: first.claimId,
-        },
+        readOptions,
       )
       void read.catch(() => undefined)
       await reachCheckpoint(
@@ -626,6 +775,8 @@ describe(`SQLite resume snapshots`, () => {
             sql.includes(observedStorageId) ||
             params?.includes(observedStorageId),
         )
+      let successfulSnapshot:
+        Awaited<ReturnType<typeof adapter.loadResumeSnapshot>> | undefined
       if (!firstClaimCanRead) {
         await oracleAssertion(
           `expect(read).rejects.toThrow( 'Persisted cache claim is no longer active', )`,
@@ -657,6 +808,14 @@ describe(`SQLite resume snapshots`, () => {
         )
       } else {
         const snapshot = await read
+        successfulSnapshot = snapshot
+        if (
+          typedKeys &&
+          rowCount === 3 &&
+          bindingCap &&
+          (rowSelection === `position-only` ? !includeRows : includeRows)
+        )
+          observe?.(`reach`, `key projection ${rowSelection}`)
         oracleAssertion(
           `expect(generationStatements()[0]).toMatchObject({ type: 'query' })`,
           () =>
@@ -669,13 +828,34 @@ describe(`SQLite resume snapshots`, () => {
               `cache_generation_claim`,
             ),
         )
-        oracleAssertion(
-          `expect(snapshot.rows.map(({ value }) => value)).toEqual( expectedFirstRows, )`,
-          () =>
-            expect(snapshot.rows.map(({ value }) => value)).toEqual(
-              expectedFirstRows,
-            ),
+        const rowJudgment = checkResumeRowProjection(
+          projectionInput,
+          snapshot,
+          undefined,
+          materializedRows,
         )
+        oracleAssertion(`requested typed storage rows and work`, () =>
+          expect(
+            rowJudgment,
+            rowJudgment.kind === `violation`
+              ? rowJudgment.difference
+              : undefined,
+          ).toEqual({ kind: `pass` }),
+        )
+        if (legacyRowOrder)
+          oracleAssertion(`unfiltered snapshot rows`, () =>
+            expect(snapshot.rows.map(({ value }) => value)).toEqual(
+              includeRows ? rows : [],
+            ),
+          )
+        if (bindingCap)
+          oracleAssertion(`row queries respect the binding cap`, () =>
+            expect(
+              heldStatements
+                .filter(({ sql }) => sql.includes(rowTable))
+                .every(({ params }) => (params?.length ?? 0) <= 4),
+            ).toBe(true),
+          )
         oracleAssertion(
           `expect(snapshot.collectionMetadata).toEqual([ { key: 'resume', value: resume }, ])`,
           () =>
@@ -686,11 +866,11 @@ describe(`SQLite resume snapshots`, () => {
         oracleAssertion(`expect(metadataReads).toBeGreaterThan(0)`, () =>
           expect(metadataReads).toBeGreaterThan(0),
         )
-        if (includeRows) {
+        if (includeRows && (rowKeys === undefined || rowKeys.length > 0)) {
           oracleAssertion(`expect(rowReads).toBeGreaterThan(0)`, () =>
             expect(rowReads).toBeGreaterThan(0),
           )
-        } else {
+        } else if (!includeRows) {
           oracleAssertion(`expect(rowReads).toBe(0)`, () =>
             expect(rowReads).toBe(0),
           )
@@ -707,10 +887,25 @@ describe(`SQLite resume snapshots`, () => {
           cacheGenerationClaimId: warm.claimId,
         },
       )
-      oracleAssertion(
-        `expect(peerSnapshot.rows.map(({ value }) => value)).toEqual(rows)`,
-        () => expect(peerSnapshot.rows.map(({ value }) => value)).toEqual(rows),
-      )
+      if (successfulSnapshot)
+        oracleAssertion(
+          `key projection preserves atomic resume certification`,
+          () =>
+            expect(
+              checkResumeRowProjection(
+                projectionInput,
+                successfulSnapshot,
+                peerSnapshot,
+                materializedRows,
+              ),
+            ).toEqual({ kind: `pass` }),
+        )
+      if (legacyRowOrder)
+        oracleAssertion(
+          `expect(peerSnapshot.rows.map(({ value }) => value)).toEqual(rows)`,
+          () =>
+            expect(peerSnapshot.rows.map(({ value }) => value)).toEqual(rows),
+        )
       oracleAssertion(
         `expect(peerSnapshot.collectionMetadata).toEqual([ { key: 'resume', value: resume }, ])`,
         () =>
@@ -772,29 +967,93 @@ describe(`SQLite resume snapshots`, () => {
     includeRows: fc.boolean(),
     peerDelayMs: fc.integer({ min: 10, max: 80 }),
     rowCount: fc.integer({ min: 0, max: 3 }),
+    rowSelection: fc.constantFrom(...rowSelections),
+    typedKeys: fc.boolean(),
+    bindingCap: fc.boolean(),
+    rowLabel: fc.string({ maxLength: 12 }),
   })
+  const requiredKeySelection = new WeakMap<ManagedClaimReadHistory, string>()
+  const keyedConstructions = rowSelections.flatMap((selection) =>
+    Array.from({ length: 5 }, (_, index) => ({
+      name: `key projection ${selection} construction ${index + 1}`,
+      enters: [`key projection ${selection}`],
+      build: (history: ManagedClaimReadHistory): ManagedClaimReadHistory => {
+        const built = {
+          ...history,
+          rowSelection: selection,
+          typedKeys: true,
+          bindingCap: true,
+          rowCount: 3,
+          // Keep randomized payloads, peer timing and both valid live cuts.
+          elapsedMs: history.elapsedMs < 0 ? history.elapsedMs : -1,
+          includeRows: selection !== `position-only`,
+        }
+        requiredKeySelection.set(built, `key projection ${selection}`)
+        return built
+      },
+    })),
+  )
   oracleProperty({
     id: `sqlite-resume.managed-claim-read`,
     law: {
-      statement: `Managed resume reads use their in-transaction claim expiry and leave a later live peer intact.`,
-      authority: `Existing SQLite resume-snapshot contract and docs/contributing/oracle-coverage.md SQLite persistence owner.`,
-      limits: `The unchanged bounded rows, inclusion and expiry grammar at the held SQLite transaction cut.`,
+      statement: `Managed resume reads use their in-transaction claim expiry, project requested typed storage keys in SQLite without changing atomic resume certification, and leave a later live peer intact.`,
+      authority: `Existing SQLite resume-snapshot contract; additive rowKeys option's specified SQLite projection semantics introduced by this repair; docs/contributing/oracle-coverage.md SQLite persistence owner.`,
+      limits: `Zero-to-three stored rows, typed keys independent of value.id, a four-binding query cap, inclusion and claim expiry at the held SQLite transaction cut. Generic adapters may return extra rows for the hint; this exact projection law belongs to SQLiteCore.`,
     },
     owns: [`src/sqlite-core-adapter.ts`],
     histories: {
       arbitrary: managedClaimReadHistory,
       runs: 30,
       fixedSeeds: [2056],
+      states: rowSelections.map((selection) => `key projection ${selection}`),
+      constructed: keyedConstructions,
     },
     driver: (history: ManagedClaimReadHistory, observe) =>
       recordAssertionJudgment(
         `sqlite-resume.managed-claim-read`,
         history,
         observe,
-        () => assertManagedClaimReadHistory(history),
+        () => assertManagedClaimReadHistory(history, observe),
       ),
     model: recordedAssertionJudgment,
-    check: forwardAssertionJudgment,
+    check: (history, trace, judgment) => {
+      if (judgment.kind !== `pass`) return judgment
+      const state = requiredKeySelection.get(history)
+      if (
+        state &&
+        !trace.some(
+          (entry) => entry.checkpoint === `reach` && entry.value === state,
+        )
+      )
+        return violation(
+          `key projection reach`,
+          `missing ${state}`,
+          `key projection reach`,
+        )
+      return judgment
+    },
+    calibrations: [
+      ...keyedConstructions.map((builder) => ({
+        name: `${builder.name} cannot omit its state`,
+        history: { constructed: builder.name },
+        law: `key projection reach`,
+        corrupt: (trace: ReadonlyArray<Observation>) =>
+          trace.filter((entry) => entry.checkpoint !== `reach`),
+      })),
+      {
+        name: `rejects a full SQL read hidden behind filtered output`,
+        history: { constructed: `key projection one construction 1` },
+        law: `sqlite-resume.managed-claim-read`,
+        difference: `rowKeys query materialized 3 stored rows; expected 1`,
+        driver: (history, observe) =>
+          recordAssertionJudgment(
+            `sqlite-resume.managed-claim-read`,
+            history,
+            observe,
+            () => assertManagedClaimReadHistory(history, observe, true),
+          ),
+      },
+    ],
     timeout: 30000,
   })
 

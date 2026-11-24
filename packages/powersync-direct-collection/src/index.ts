@@ -133,9 +133,9 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
     }) => {
       const controller = new AbortController()
       let replacePending = true
-      // An eager sync run shows no rows until its streams have synced: the
-      // client may still hold rows from an earlier run. A run without streams
-      // has nothing to wait for and shows the rows the client already holds.
+      // An eager run waits for its lease before showing cached rows from an
+      // earlier run. An empty lease settles without remote input. On-demand
+      // readiness instead belongs to each loadSubset promise.
       let synced = onDemand
       let active = true
       let lastApplied: SyncAppliedReceipt = true
@@ -146,7 +146,10 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
       // The connection keeps its first failure. Every distinct stream failure
       // stays open until its lease recovers or releases its final claim.
       let connectionError: Error | undefined
-      const streamErrors = new Map<StreamLease, Set<StreamError>>()
+      const streamErrors = new Map<
+        StreamLease,
+        { errors: Set<StreamError>; signal: AbortSignal }
+      >()
 
       const cleanup = () => {
         if (!active) return
@@ -171,28 +174,36 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
       }
       // A stream error lasts until a reconnect with other parameters, so it
       // fails the first load. After it, the rows stay and it is reported.
-      const onStreamError = (source: StreamLease, error: StreamError) => {
+      const onStreamError = (
+        source: StreamLease,
+        error: StreamError,
+        signal = controller.signal,
+      ) => {
         if (!active) return
         if (collection.status !== 'ready') return stop(error)
-        streamErrors.set(
-          source,
-          new Set([...(streamErrors.get(source) ?? []), error]),
-        )
+        streamErrors.set(source, {
+          errors: new Set([...(streamErrors.get(source)?.errors ?? []), error]),
+          signal,
+        })
         reportError(error)
       }
       const clearStreamError = (source: StreamLease) => {
         const previous = streamErrors.get(source)
         if (!active || !previous) return
         streamErrors.delete(source)
-        for (const error of previous) {
-          if ([...streamErrors.values()].every((errors) => !errors.has(error)))
+        for (const error of previous.errors) {
+          if (
+            [...streamErrors.values()].every(
+              (other) => !other.errors.has(error),
+            )
+          )
             reportHealthy(error)
         }
       }
       // The client enters `ready` when a full checkpoint is applied after
-      // (re)connecting, and each lease's `waitForSync()` then settles at once
-      // with that checkpoint's stream errors. A checkpoint is a successful
-      // delivery for this collection once none of its streams fail.
+      // (re)connecting. An earlier status listener can change requested streams
+      // before this callback runs, so each wait inherits its lease/run signal.
+      // Delivery is healthy once none of this Collection's streams fail.
       const onCheckpointApplied = () => {
         if (!active || client.status.state !== 'ready') return
         const sources = new Set(streamErrors.keys())
@@ -200,10 +211,12 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
         Promise.all(
           [...sources].map((source) => {
             const previous = streamErrors.get(source)
-            return source.waitForSync().then(() => {
-              if (streamErrors.get(source) === previous)
-                clearStreamError(source)
-            })
+            return source
+              .waitForSync(previous?.signal ?? controller.signal)
+              .then(() => {
+                if (streamErrors.get(source) === previous)
+                  clearStreamError(source)
+              })
           }),
         ).then(
           () => {

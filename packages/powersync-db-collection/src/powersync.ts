@@ -493,8 +493,8 @@ function createPowerSyncCollectionConfig<
             beforeCreate: async (context) => {
               // A retained reload uses one snapshot across its source reads.
               // Other initial loads and subset loads keep batch commits. A
-              // transaction begins only once its rows are read, so a batch
-              // that fails leaves none open.
+              // transaction begins only after its SQLite rows are read, so a
+              // failed read opens none.
               const batches: Array<Array<TableType>> = []
               const apply = () => {
                 begin({ snapshot })

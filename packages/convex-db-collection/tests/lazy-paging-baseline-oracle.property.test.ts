@@ -17,7 +17,7 @@
  * Provider callbacks and baseline writes are controlled. No real SDK or storage
  * claim follows from this family; those receiving owners remain separate.
  */
-import { DbClient, createTransaction } from '@tanstack/db'
+import { DbClient, createTransaction, whenSyncAccepted } from '@tanstack/db'
 import fc from 'fast-check'
 import {
   forwardAssertionJudgment,
@@ -30,6 +30,11 @@ import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import { deferredLazyAcceptance } from './lazy-paging-deferred-acceptance'
 import { LazyVersionModel } from './lazy-paging-version-model-oracle'
+import {
+  assertDeferredBaselineRows,
+  deferredBaselineGrammar,
+  deferredBaselineRows,
+} from './lazy-deferred-baseline-oracle'
 import { lazyOracleBaseRuns, receiveBothSdks } from './lazy-paging-campaign'
 import {
   assertLazyCoverage,
@@ -38,6 +43,7 @@ import {
 } from './lazy-paging-model-oracle'
 import type { Observation, Verdict } from '../../db/tests/oracle-property'
 import type { LazyRow } from './lazy-paging-model-oracle'
+import type { DeferredBaselineHistory } from './lazy-deferred-baseline-oracle'
 
 const grammar = fc.record({
   size: fc.integer({ min: 6, max: 10 }),
@@ -354,13 +360,6 @@ oracleProperty({
  * Limits: full acquired source, one controlled durable hold, no commit reentry,
  * and successful acceptance. Real SQLite receiving remains separately owned.
  */
-const deferredGrammar = fc.record({
-  size: fc.integer({ min: 3, max: 8 }),
-  text: fc.string({ maxLength: 8 }),
-  descending: fc.boolean(),
-})
-type DeferredHistory =
-  typeof deferredGrammar extends fc.Arbitrary<infer H> ? H : never
 const deferredStates = [
   `unaccepted callback proposals`,
   `deferred absent-key add update delete reinsert`,
@@ -369,34 +368,18 @@ const deferredStates = [
   `javascript`,
   `react`,
 ]
+const deferredAcceptanceStates = [
+  `all callback proposals deferred together`,
+  `accepted predecessor before next callback`,
+]
 
 async function receiveDeferred(
-  h: DeferredHistory,
+  h: DeferredBaselineHistory,
   kind: `javascript` | `react`,
   wrongFinal = false,
+  wrongAccepted = false,
 ) {
-  const original: Array<LazyRow> = Array.from(
-    { length: h.size },
-    (_, rank) => ({
-      id: `row-${rank}`,
-      rank,
-      text: h.text,
-    }),
-  )
-  const added = { id: `added`, rank: h.size, text: `${h.text}:added` }
-  const updated = { ...added, text: `${h.text}:updated` }
-  const reinserted = { ...added, text: `${h.text}:reinserted` }
-  const revisedOriginal = original.map((row, index) =>
-    index === 0 ? { ...row, text: `${h.text}:restored` } : row,
-  )
-  const revisions = [
-    [...original, added],
-    [...original, updated],
-    original,
-    [...original, reinserted],
-    [...original.slice(1), reinserted],
-    [...revisedOriginal, reinserted],
-  ]
+  const { original, revisions } = deferredBaselineRows(h)
   const deferred = deferredLazyAcceptance()
   const f = lazyFixture(
     original,
@@ -414,6 +397,7 @@ async function receiveDeferred(
   let stopChanges = () => {}
   let load: ReturnType<typeof f.load> | undefined
   let publications = 0
+  let releaseOptimistic = () => {}
   await withTestCleanup(
     async () => {
       load = f.load({})
@@ -421,6 +405,15 @@ async function receiveDeferred(
       await load.complete()
       versions.offer(original)
       versions.observe([...f.source.base.values()])
+      if (h.acceptance === `before-next-callback`) {
+        const hold = new Promise<void>((resolve) => {
+          releaseOptimistic = resolve
+        })
+        const transaction = createTransaction({ mutationFn: () => hold })
+        transaction.mutate(() =>
+          f.source.insert({ id: `optimistic-hold`, rank: 10000, text: `hold` }),
+        )
+      }
       const observing = f.source.subscribeChanges(
         () => {
           publications++
@@ -439,8 +432,62 @@ async function receiveDeferred(
         f.remote.change(rows)
         await f.remote.pump()
         await turns()
+        if (h.acceptance === `before-next-callback`) {
+          if (deferred.pending() !== 1)
+            throw new Error(
+              `lazy accepted premise: expected one deferred proposal`,
+            )
+          deferred.releaseNext()
+          const receipt = f.receipts.at(-1)
+          if (receipt === undefined || receipt === true)
+            throw new Error(
+              `lazy accepted premise: core did not hold application`,
+            )
+          const application = { settled: false }
+          void receipt.then(
+            () => {
+              application.settled = true
+            },
+            () => {
+              application.settled = true
+            },
+          )
+          await whenSyncAccepted(receipt)
+          // This handler-facing wait drains the adapter's acceptance callback.
+          // That same callback deletes both its proposal and acceptance waiter.
+          // It must complete while the applied receipt remains held.
+          await f.source.utils.awaitSync()
+          if (application.settled || deferred.pending() !== 0)
+            throw new Error(
+              `lazy accepted premise: acceptance did not precede visibility`,
+            )
+          try {
+            assertDeferredBaselineRows(
+              [...f.source.base.values()],
+              original,
+              h,
+              `accepted predecessor before application`,
+            )
+            assertDeferredBaselineRows(
+              [...f.source._state.acceptedSyncedEntries()]
+                .map(([, row]) => row)
+                .filter((row) => !wrongAccepted || row.id !== `added`),
+              rows,
+              h,
+              `accepted predecessor baseline`,
+            )
+          } catch (error) {
+            rejectAt(
+              `accepted predecessor baseline`,
+              error instanceof Error ? error : new Error(String(error)),
+            )
+          }
+        }
       }
-      if (deferred.pending() !== revisions.length)
+      if (
+        deferred.pending() !==
+        (h.acceptance === `after-callbacks` ? revisions.length : 0)
+      )
         throw new Error(
           `lazy deferred premise: callbacks did not produce every proposal`,
         )
@@ -450,14 +497,17 @@ async function receiveDeferred(
         `before deferred acceptance`,
       )
       deferred.release()
+      releaseOptimistic()
       await turns()
       if (failures.length)
         rejectAt(`FIFO source publications`, failures[0] as Error)
-      if (publications !== revisions.length)
+      const expectedPublications =
+        h.acceptance === `after-callbacks` ? revisions.length : 1
+      if (publications !== expectedPublications)
         rejectAt(
           `FIFO source publications`,
           new Error(
-            `lazy deferred: ${publications} publications for ${revisions.length} accepted revisions`,
+            `lazy deferred: ${publications} publications, expected ${expectedPublications} for ${revisions.length} accepted revisions`,
           ),
         )
       same(
@@ -469,6 +519,7 @@ async function receiveDeferred(
       )
       same(f.errors.map(String), [], `health after deferred legal answers`)
     },
+    () => releaseOptimistic(),
     () => deferred.release(),
     () => load?.release(),
     () => stopChanges(),
@@ -477,6 +528,11 @@ async function receiveDeferred(
   return deferredStates
     .filter((state) => state !== `javascript` && state !== `react`)
     .concat(kind)
+    .concat(
+      h.acceptance === `after-callbacks`
+        ? deferredAcceptanceStates[0]!
+        : deferredAcceptanceStates[1]!,
+    )
 }
 
 oracleProperty({
@@ -485,29 +541,33 @@ oracleProperty({
   law: {
     statement: `Coherent callback revisions remain legal keyed proposals while earlier proposals await durable handoff, and every accepted proposal applies in FIFO order.`,
     authority: `SyncAppliedReceipt and whenSyncAccepted; docs/contributing/glossary.md accepted and deferred sync transaction; Convex complete acquired range contract.`,
-    limits: `Controlled SDK shapes and persistence-like wrapper, whole acquired source, six successful callback revisions, no reentrant commits or storage claim.`,
+    limits: `Controlled SDK shapes and persistence-like wrapper, whole acquired source, six successful callback revisions, before-next-callback or after-all-callbacks handoff, no reentrant commits or storage claim.`,
   },
   histories: {
-    arbitrary: deferredGrammar,
+    arbitrary: deferredBaselineGrammar,
     runs: lazyOracleBaseRuns(12),
     fixedSeeds: [20261118],
-    states: deferredStates,
-    constructed: [
-      {
-        name: `deferred keyed callback revisions`,
-        enters: deferredStates,
-        build: (generated) => ({ ...generated }),
-      },
-    ],
+    states: [...deferredStates, ...deferredAcceptanceStates],
+    constructed: ([`after-callbacks`, `before-next-callback`] as const).map(
+      (acceptance, index) => ({
+        name: `deferred keyed callback revisions ${acceptance}`,
+        enters: [...deferredStates, deferredAcceptanceStates[index]!],
+        build: (generated: DeferredBaselineHistory) => ({
+          ...generated,
+          acceptance,
+        }),
+      }),
+    ),
   },
-  resolve: (history) => ({ history }),
+  resolve: (history: DeferredBaselineHistory) => ({ history }),
   model: recordedAssertionJudgment,
   check: (plan, trace, judgment) =>
-    withReach(
-      trace,
-      forwardAssertionJudgment(plan, trace, judgment),
-      deferredStates,
-    ),
+    withReach(trace, forwardAssertionJudgment(plan, trace, judgment), [
+      ...deferredStates,
+      plan.history.acceptance === `after-callbacks`
+        ? deferredAcceptanceStates[0]!
+        : deferredAcceptanceStates[1]!,
+    ]),
   driver: async (plan, observe) =>
     recordAssertionJudgment(
       `convex.lazy-deferred-baseline`,
@@ -524,10 +584,27 @@ oracleProperty({
   calibrations: [
     missingReach,
     {
+      name: `rejects an omitted predecessor at accepted settlement`,
+      history: {
+        constructed: `deferred keyed callback revisions before-next-callback`,
+      },
+      law: `convex.lazy-deferred-baseline`,
+      difference: `accepted predecessor baseline`,
+      driver: async (plan: { history: DeferredBaselineHistory }, observe) =>
+        recordAssertionJudgment(
+          `convex.lazy-deferred-baseline`,
+          plan,
+          observe,
+          async () => {
+            await receiveDeferred(plan.history, `javascript`, false, true)
+          },
+        ),
+    },
+    {
       name: `rejects a lost reinserted key after deferred acceptance`,
       law: `convex.lazy-deferred-baseline`,
       difference: `lazy baseline after deferred acceptance`,
-      driver: async (plan: { history: DeferredHistory }, observe) =>
+      driver: async (plan: { history: DeferredBaselineHistory }, observe) =>
         recordAssertionJudgment(
           `convex.lazy-deferred-baseline`,
           plan,

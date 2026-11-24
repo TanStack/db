@@ -29,7 +29,20 @@ export function registerNativeBatchDecode(
       enters: [state],
       build: (h: NativeDecodeHistory) => {
         let built = { ...h }
-        if (state.includes(`:`)) {
+        if (state.startsWith(`hydration:`)) {
+          const [, mode, phase, position] = state.split(`:`)
+          built = {
+            ...built,
+            mode: mode as NativeDecodeHistory['mode'],
+            phase: phase as NativeDecodeHistory['phase'],
+            outcome: h.outcome === `valid` ? `issues` : h.outcome,
+            count: 3,
+            batchSize: 3,
+            refusalIndex:
+              position === `first` ? 0 : position === `middle` ? 1 : 2,
+            hydrateAfterRefusal: true,
+          }
+        } else if (state.includes(`:`)) {
           const [mode, phase, outcome] = state.split(`:`)
           built = {
             ...built,
@@ -74,9 +87,9 @@ export function registerNativeBatchDecode(
     id: property,
     owns,
     law: {
-      statement: `Native decoding admits complete SQLite pages, retains earlier accepted pages after a refusal, preserves legal transformed keys/Date/boolean values, and exposes fatal refusal with watcher release and no same-run resumption. An explicit new sync run can recover valid source rows.`,
-      authority: `Native definitions.ts deserialization fatality, arbitrary output schemas and syncBatchSize streaming contract; glossary publication/loading error/sync error.`,
-      limits: `One native table, initial pages or one live SQL transaction, 1–6 authored rows, eager/on-demand direct subscription, corrected rows and a later subset after fatal refusal, then cleanup/restart. No retained reload, persistence or mutation handler.`,
+      statement: `Native decoding admits complete SQLite pages, retains earlier accepted pages after a refusal, preserves legal transformed keys/Date/boolean values, and exposes fatal refusal with watcher release and no same-run resumption. A refused page grants no authority over late hydration seeds. An explicit new sync run can recover valid source rows.`,
+      authority: `Native definitions.ts deserialization fatality, arbitrary output schemas and syncBatchSize streaming contract; glossary publication/loading error/sync error; docs/guides/ssr.md Initial Data hydration authority.`,
+      limits: `One native table, initial pages or one live SQL transaction, 1–6 authored rows, eager/on-demand direct subscription, optional late hydration after refusal, corrected rows and a later subset after fatal refusal, then cleanup/restart. No retained reload, persistence or mutation handler. Admission counts and accepted baseline are diagnostics; there is no balanced-begin law.`,
     },
     histories: {
       arbitrary: nativeDecodeHistoryArb,
@@ -274,6 +287,42 @@ export function registerNativeBatchDecode(
           ),
       },
       {
+        name: `refused source staging cannot block a late hydration seed`,
+        history: { constructed: `generated hydration:eager:initial:middle 1` },
+        law: `native batch decoding`,
+        difference: `refused page gained authority over a late hydration seed`,
+        corrupt: (trace: ReadonlyArray<Observation>) =>
+          trace.map((item) => {
+            if (item.checkpoint !== `after native source batch`) return item
+            const value = item.value as NativeDecodeObservation
+            return {
+              ...item,
+              value: {
+                ...value,
+                hydration: { ...value.hydration!, rows: value.rows },
+              },
+            }
+          }),
+      },
+      {
+        name: `late hydration must notify existing native subscribers`,
+        history: { constructed: `generated hydration:eager:initial:middle 1` },
+        law: `native batch decoding`,
+        difference: `late hydration did not notify existing subscribers`,
+        corrupt: (trace: ReadonlyArray<Observation>) =>
+          trace.map((item) => {
+            if (item.checkpoint !== `after native source batch`) return item
+            const value = item.value as NativeDecodeObservation
+            return {
+              ...item,
+              value: {
+                ...value,
+                hydration: { ...value.hydration!, publications: [] },
+              },
+            }
+          }),
+      },
+      {
         name: `fatal run cannot fulfill later subset demand`,
         history: { constructed: `generated on-demand:live:issues 1` },
         law: `native batch decoding`,
@@ -314,9 +363,9 @@ export function registerNativeBatchDecode(
             }
           }),
       },
-      ...nativeDecodeStates.map((state) => ({
-        name: `missing generated ${state}`,
-        history: { constructed: `generated ${state} 1` },
+      ...constructed.map(({ name, enters: [state] }) => ({
+        name: `missing ${name}`,
+        history: { constructed: name },
         law: `constructed builder reach`,
         corrupt: (trace: ReadonlyArray<Observation>, h: NativeDecodeHistory) =>
           required.get(h) === state

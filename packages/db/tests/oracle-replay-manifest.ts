@@ -213,6 +213,16 @@ const ownerGroups: ReadonlyArray<
     `javascript react wrapped`,
   ],
   [
+    `convex-db-collection/tests/lazy-persisted-acceptance-oracle.test.ts`,
+    `convex.lazy-persisted-acceptance`,
+    `node-sqlite`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/adapter-persisted-demand-acceptance-oracle.browser.test.ts`,
+    `convex.lazy-persisted-acceptance`,
+    `chromium-opfs`,
+  ],
+  [
     `electric-db-collection/tests/cross-adapter-receipt-oracle.property.test.ts`,
     `adapter.electric.initial-receipt`,
     `controlled node-sqlite`,
@@ -276,6 +286,16 @@ const ownerGroups: ReadonlyArray<
     `rxdb-db-collection/tests/shared-client-oracle.property.test.ts`,
     `adapter.rxdb`,
     `shared-client`,
+  ],
+  [
+    `powersync-direct-collection/tests/request-boundary-conformance-oracle.property.test.ts`,
+    `adapter.powersync-direct`,
+    `request-boundary`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/powersync-direct-request-boundary-oracle.browser.test.ts`,
+    `adapter.powersync-direct.request-boundary`,
+    `chromium`,
   ],
   [
     `query-db-collection/tests/failing-queries-oracle.test.ts`,
@@ -1080,6 +1100,16 @@ const ownerGroups: ReadonlyArray<
     `db-sqlite-persistence-core/tests/persisted-source-fifo-sqlite-oracle.test.ts`,
     `sqlite-persistence.source-fifo-order`,
     `node-sqlite`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/persisted-source-fifo-oracle.browser.test.ts`,
+    `sqlite-persistence.source-fifo-order`,
+    `chromium-opfs`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/resume-row-projection-oracle.browser.test.ts`,
+    `sqlite-resume.row-projection`,
+    `chromium-opfs`,
   ],
   [
     `db/tests/optimistic-transaction-oracle.property.test.ts`,
@@ -2521,6 +2551,8 @@ function directReplayTestName(property: string): string | undefined {
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
   if (
     property === `sqlite-persistence.source-fifo-order.node-sqlite` ||
+    property === `sqlite-persistence.source-fifo-order.chromium-opfs` ||
+    property === `sqlite-resume.row-projection.chromium-opfs` ||
     property.startsWith(`adapter.powersync-direct.`) ||
     property.startsWith(`adapter.convex.eager-`) ||
     property.startsWith(`adapter.convex.initial-receipt.`) ||
@@ -2544,6 +2576,7 @@ function directReplayTestName(property: string): string | undefined {
     property.startsWith(`query-db.select-failures`) ||
     property === `local-only.handler-confirmation` ||
     property.startsWith(`convex.snapshot-projection.`) ||
+    property.startsWith(`convex.lazy-persisted-acceptance.`) ||
     property.startsWith(`trailbase.mutation-events.sdk`) ||
     property.startsWith(`adapter.electric.eager-`) ||
     property.startsWith(`adapter.query.complete-result-reload`) ||
@@ -2712,11 +2745,15 @@ const ownerReplayConfigs = new Map([
     `native-powersync-union-oracle.browser.test.ts`,
     `adapter-persisted-demand-oracle.browser.test.ts`,
     `adapter-persisted-demand-peer-oracle.browser.test.ts`,
+    `adapter-persisted-demand-acceptance-oracle.browser.test.ts`,
+    `persisted-source-fifo-oracle.browser.test.ts`,
+    `resume-row-projection-oracle.browser.test.ts`,
     `native-powersync-batch-decode-oracle.browser.test.ts`,
     `trailbase-mutation-events-oracle.browser.test.ts`,
     `native-powersync-initial-receipt-oracle.browser.test.ts`,
     `query-cross-adapter-oracle.browser.test.ts`,
     `powersync-direct-shared-client-oracle.browser.test.ts`,
+    `powersync-direct-request-boundary-oracle.browser.test.ts`,
     `powersync-direct-eager-oracle.browser.test.ts`,
     `powersync-direct-eager-source-oracle.browser.test.ts`,
     `powersync-direct-persisted-receipt-oracle.browser.test.ts`,

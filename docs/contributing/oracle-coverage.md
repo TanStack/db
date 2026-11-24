@@ -1,5 +1,49 @@
 # Oracle coverage and closeout
 
+## PR #2446 review follow-up, 2026-11-24
+
+The [external review record](oracle-reviews/2026-11-24-pr2446-external-review.md)
+accounts for all ten findings, their prior oracle gaps, rejected repairs,
+receiving paths, controls and limits. It is a bounded review of those laws.
+
+The primary FIFO owner,
+`db-sqlite-persistence-core/tests/persisted-source-fifo-oracle.ts`, now records
+eleven source-order axes through recording storage, Node SQLite and actual
+worker/OPFS. New histories abort at baseline-read return, precede recovery with
+an ordinary sparse update, update several unseen keys, and append a new partial
+transaction while recovery awaits storage. Complete rows, metadata, receipts,
+later use, durable order and secondary execution/cleanup failures remain judged.
+The SQLite snapshot owner and shared `resume-row-projection-oracle.ts` compare
+typed storage-key projections with unchanged whole-cache certification. Actual
+SQL return-cardinality counters reject SELECT-all followed by JavaScript
+filtering. Generic adapters may ignore the optional materialization hint. This
+is no latency or physical query-plan guarantee.
+
+The Direct on-demand and shared-client owners now compose actual SDK callback
+timing, provider error with a rejected durable receipt, ready-listener
+cancellation, partial priority checkpoints, abandoned receipts, later held
+receipts, and pending health-wait release beside a healthy peer. Source cleanup
+and acquisition release use their existing owning signals. Core cancellation
+readiness remains distinct from the raw adapter promise's accepted-baseline
+drain. Exact SDK abort-instance identity is diagnostic. The supplied service
+failure's cause and cancellation's `AbortError` category remain asserted.
+
+Convex's lazy baseline owner now emits a successor after one predecessor's
+acceptance-removal callback while application remains held. Real SDK/SQLite and
+OPFS receivers compare public, accepted and durable rows at every revision.
+Sparse deferred overlays retain tombstones and required omission-authority
+scans. The native PowerSync decoder owner adds refusal crossed with late
+hydration, all-builder missing-state controls and a fresh-row notification
+check. It imposes no balanced-begin law on a terminal refused run.
+
+The receiving fixtures also preserve completed mismatches before later reads,
+artifact scans or cleanup fail. The mapper-admission fixture drains actual
+pending storage work before judging mapper admission. A controlled slow-storage
+witness distinguishes that setup premise from a product failure. Exact causes
+of two historical premise timeouts remain unproven. Runtime compatibility of
+the installed standalone SDK without its existing test-host Map shims remains
+a separate release dependency.
+
 ## RC npm tag policy, 2026-10-29
 
 The maintainer directed RC versions to npm's `latest` tag on 2026-10-29.

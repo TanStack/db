@@ -39,6 +39,7 @@ export function createConvexOptions<
   utils: ConvexCollectionUtils
 } & ([TSchema] extends [never] ? unknown : { schema: TSchema }) {
   const { select, onError, syncMode = `eager`, ...baseConfig } = config
+  const onDemand = syncMode === `on-demand`
   let syncError: unknown
   let readCurrent: (() => Promise<void>) | undefined
 
@@ -127,27 +128,36 @@ export function createConvexOptions<
           }
           next.set(key, row)
         }
-        const baseline =
-          syncMode === `on-demand`
-            ? new Map(collection._state.acceptedSyncedEntries())
-            : previous
-        if (syncMode === `on-demand`)
+        // Keep only deferred effects in the overlay. Accepted rows already
+        // have a keyed projection in core, including held source commits.
+        const baseline = onDemand
+          ? new Map<TKey, TItem | undefined>()
+          : previous
+        if (onDemand)
           for (const proposal of proposals)
-            for (const [key, row] of proposal)
-              if (row === undefined) baseline.delete(key)
-              else baseline.set(key, row)
+            for (const [key, row] of proposal) baseline.set(key, row)
+        const getBaseline = (key: TKey) =>
+          baseline.has(key) || !onDemand
+            ? baseline.get(key)
+            : collection._state.getAcceptedSyncedRow(key)
         const changes = new Map<TKey, TItem | undefined>()
         for (const [key, row] of next)
-          if (!initialized || !previous.has(key) || baseline.get(key) !== row)
+          if (!initialized || !previous.has(key) || getBaseline(key) !== row)
             changes.set(key, row)
-        for (const [key, row] of baseline)
+        const removeMissing = (row: TItem | undefined, key: TKey) => {
           if (
+            row !== undefined &&
             !next.has(key) &&
-            (syncMode !== `on-demand` ||
+            (!onDemand ||
               previous.has(key) ||
               subscription?.isCurrentRowInScope?.(row))
           )
             changes.set(key, undefined)
+        }
+        baseline.forEach(removeMissing)
+        if (onDemand)
+          for (const [key, row] of collection._state.acceptedSyncedEntries())
+            if (!baseline.has(key)) removeMissing(row, key)
         if (initialized && changes.size === 0) {
           previous = next
           syncError = undefined
@@ -156,13 +166,14 @@ export function createConvexOptions<
           return
         }
         begin()
-        const replace = !initialized && syncMode !== `on-demand`
+        const replace = !initialized && !onDemand
         if (replace) truncate()
         for (const [key, row] of changes) {
           if (row === undefined) write({ type: `delete`, key })
           else
             write({
-              type: replace || !baseline.has(key) ? `insert` : `update`,
+              type:
+                replace || getBaseline(key) === undefined ? `insert` : `update`,
               value: row,
             })
         }
@@ -171,7 +182,7 @@ export function createConvexOptions<
         syncError = undefined
         if (ready) reportHealthy()
         // Register before commit: publishing can reenter with a newer result.
-        if (syncMode === `on-demand`) proposals.add(changes)
+        if (onDemand) proposals.add(changes)
         let receipt: ReturnType<typeof commit>
         try {
           receipt = commit()

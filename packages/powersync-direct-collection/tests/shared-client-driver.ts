@@ -23,6 +23,7 @@ import type {
   SharedClientObservation,
   SharedClientResource,
   SharedClientState,
+  SharedClientWait,
 } from '../../db-adapter-conformance/tests/shared-client-oracle'
 import type { StartupRow } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 
@@ -38,6 +39,22 @@ export async function observeDirectSharedClient(
     retryDelayMs: 1,
   })
   const resources: Array<SharedClientResource> = []
+  const waits: Array<SharedClientWait & { signal?: AbortSignal }> = []
+  const snapshotWaits = () =>
+    waits.map(({ signal, ...wait }) => ({
+      ...wait,
+      aborted: signal?.aborted === true,
+    }))
+  let armed = false
+  let reentered = false
+  // Registered before the Collections. This legal application callback changes
+  // the requested generation while the SDK is still notifying ready listeners.
+  const stopApplicationStatus = client.subscribeStatus(() => {
+    if (!armed || client.status.state !== `ready`) return
+    armed = false
+    reentered = true
+    client.acquireStreams([{ name: `application-transient` }]).release()
+  })
   const connectionFailures = new Map<unknown, number>()
   let allocating = -1
   const retain = (kind: string, release: () => void) => {
@@ -74,8 +91,28 @@ export async function observeDirectSharedClient(
   const acquire = client.acquireStreams.bind(client)
   client.acquireStreams = (...args) => {
     const lease = acquire(...args)
+    const owner = allocating
     return {
-      waitForSync: lease.waitForSync.bind(lease),
+      waitForSync: (signal) => {
+        const wait: SharedClientWait & { signal?: AbortSignal } = {
+          owner,
+          signaled: signal !== undefined,
+          aborted: signal?.aborted === true,
+          outcome: `pending`,
+          signal,
+        }
+        waits.push(wait)
+        const actual = lease.waitForSync(signal)
+        void actual.then(
+          () => {
+            wait.outcome = `fulfilled`
+          },
+          () => {
+            wait.outcome = `rejected`
+          },
+        )
+        return actual
+      },
       release: retain(`stream-lease`, lease.release.bind(lease)),
     }
   }
@@ -189,163 +226,200 @@ export async function observeDirectSharedClient(
       `configuration change opened a successor request`,
     )
   }
-  return withOracleCleanup(
-    async () => {
-      const initial = first.preload()
-      await requested([`alpha`])
-      await deliver([h.first, 0], 1, [0])
-      await initial
-      const target = second.preload().then(() => {
-        targetSettled = true
+  return withOracleCleanup(async () => {
+    const initial = first.preload()
+    await requested([`alpha`])
+    await deliver([h.first, 0], 1, [0])
+    await initial
+    const target = second.preload().then(() => {
+      targetSettled = true
+    })
+    // The passive path uses no new response. The active path opens beta but
+    // receives no checkpoint before the joined cut.
+    await requested(h.join === `passive` ? [`alpha`] : [`alpha`, `beta`])
+    await propagate()
+    const joined = snapshot()
+    const requestedAtJoin = streams()
+    await deliver([h.first, h.second], 2, h.join === `passive` ? [0] : [0, 1])
+    await target
+    const both = snapshot()
+    let pendingWaitReached = false
+    let appliedWaitReached = false
+    if (h.waitReentry) {
+      // The first transient forces a fresh ready notification without a
+      // transport error. The application callback then supersedes it before
+      // the adapter's status callback can observe an already-synced lease.
+      const revision = service.requests.length
+      armed = true
+      acquire([{ name: `trigger-transient` }]).release()
+      await untilEagerProtocol(
+        () => service.live && service.requests.length > revision,
+        `trigger opened a successor SDK request`,
+      )
+      await deliver([h.first, h.second], 2, [0, 1])
+      await untilEagerProtocol(
+        () =>
+          reentered &&
+          waits.some(
+            (wait) => wait.owner === h.retire && wait.outcome === `pending`,
+          ),
+        `real SDK wait pending after application status reentry`,
+      )
+      pendingWaitReached = true
+      if (h.waitReentry === `after-checkpoint`) {
+        const heldWaits = waits.filter(
+          (wait) => wait.owner === h.retire && wait.outcome === `pending`,
+        )
+        await requested([`alpha`, `beta`])
+        await deliver([h.first, h.second], 2, [0, 1])
+        appliedWaitReached =
+          heldWaits.length > 0 &&
+          heldWaits.every((wait) => wait.outcome === `fulfilled`)
+      }
+    }
+    let failed: SharedClientCut | undefined
+    let failedAgain: SharedClientCut | undefined
+    let peer: SharedClientCut | undefined
+    let recovered: SharedClientCut | undefined
+    let recoveryPending: SharedClientCut | undefined
+    if (h.failure) {
+      const fault = h.failure
+      const healthy = fault.stream === 0 ? 1 : 0
+      const healthyMask = healthy === 0 ? h.first : h.second
+      const masks = (mask: number): [number, number] =>
+        healthy === 0 ? [mask, 0] : [0, mask]
+      await reconnect()
+      await deliver(masks(healthyMask), 3, [healthy], {
+        stream: fault.stream,
+        version: 3,
       })
-      // The passive path uses no new response. The active path opens beta but
-      // receives no checkpoint before the joined cut.
-      await requested(h.join === `passive` ? [`alpha`] : [`alpha`, `beta`])
-      await propagate()
-      const joined = snapshot()
-      const requestedAtJoin = streams()
-      await deliver([h.first, h.second], 2, h.join === `passive` ? [0] : [0, 1])
-      await target
-      const both = snapshot()
-      let failed: SharedClientCut | undefined
-      let failedAgain: SharedClientCut | undefined
-      let peer: SharedClientCut | undefined
-      let recovered: SharedClientCut | undefined
-      let recoveryPending: SharedClientCut | undefined
-      if (h.failure) {
-        const fault = h.failure
-        const healthy = fault.stream === 0 ? 1 : 0
-        const healthyMask = healthy === 0 ? h.first : h.second
-        const masks = (mask: number): [number, number] =>
-          healthy === 0 ? [mask, 0] : [0, mask]
+      failed = snapshot()
+      if (fault.repeat) {
         await reconnect()
         await deliver(masks(healthyMask), 3, [healthy], {
           stream: fault.stream,
-          version: 3,
+          version: 4,
         })
-        failed = snapshot()
-        if (fault.repeat) {
-          await reconnect()
-          await deliver(masks(healthyMask), 3, [healthy], {
-            stream: fault.stream,
-            version: 4,
-          })
-          failedAgain = snapshot()
-        }
-        const peerMask =
-          fault.peer === `delete`
-            ? healthyMask & (healthyMask - 1)
-            : healthyMask
-        await deliver(masks(peerMask), 4, [healthy], {
-          stream: fault.stream,
-          version: fault.repeat ? 4 : 3,
-        })
-        peer = snapshot()
-        if (fault.recovery !== `none`) {
-          await reconnect()
-          await propagate()
-          recoveryPending = snapshot()
-          await deliver(
-            fault.recovery === `unchanged`
-              ? [peerMask, peerMask]
-              : [h.first, h.second],
-            fault.recovery === `unchanged` ? 4 : 5,
-            [0, 1],
-          )
-          recovered = snapshot()
-        }
+        failedAgain = snapshot()
       }
-      const resourcesBeforeRetirement = structuredClone(resources)
-      await collections[h.retire]!.cleanup()
-      await requested([h.retire === 0 ? `beta` : `alpha`])
-      await propagate()
-      const retired = snapshot()
-      const resourcesAtRetirement = structuredClone(resources)
-      const requestedAfterRetirement = streams()
-      const survivor = h.retire === 0 ? 1 : 0
-      await deliver(
-        survivor === 0 ? [h.next, 0] : [0, h.next],
-        h.failure ? 6 : 3,
-        [survivor],
+      const peerMask =
+        fault.peer === `delete` ? healthyMask & (healthyMask - 1) : healthyMask
+      await deliver(masks(peerMask), 4, [healthy], {
+        stream: fault.stream,
+        version: fault.repeat ? 4 : 3,
+      })
+      peer = snapshot()
+      if (fault.recovery !== `none`) {
+        await reconnect()
+        await propagate()
+        recoveryPending = snapshot()
+        await deliver(
+          fault.recovery === `unchanged`
+            ? [peerMask, peerMask]
+            : [h.first, h.second],
+          fault.recovery === `unchanged` ? 4 : 5,
+          [0, 1],
+        )
+        recovered = snapshot()
+      }
+    }
+    const resourcesBeforeRetirement = structuredClone(resources)
+    const waitsBeforeCleanup = snapshotWaits()
+    await collections[h.retire]!.cleanup()
+    await requested([h.retire === 0 ? `beta` : `alpha`])
+    await propagate()
+    const retired = snapshot()
+    const resourcesAtRetirement = structuredClone(resources)
+    const waitsAtCleanup = snapshotWaits()
+    const requestedAfterRetirement = streams()
+    const survivor = h.retire === 0 ? 1 : 0
+    await deliver(
+      survivor === 0 ? [h.next, 0] : [0, h.next],
+      h.failure ? 6 : 3,
+      [survivor],
+    )
+    const later = snapshot()
+    await collections[survivor]!.cleanup()
+    const reached: Array<SharedClientState> = [
+      h.join === `passive` ? `passive-cached-join` : `active-join`,
+      h.retire === 0 ? `first-retired` : `second-retired`,
+    ]
+    if (h.join === `active`)
+      reached.push(
+        h.first === h.second
+          ? `equal-support`
+          : h.first & h.second
+            ? `partial-support`
+            : `disjoint-support`,
       )
-      const later = snapshot()
-      await collections[survivor]!.cleanup()
-      const reached: Array<SharedClientState> = [
-        h.join === `passive` ? `passive-cached-join` : `active-join`,
-        h.retire === 0 ? `first-retired` : `second-retired`,
-      ]
-      if (h.join === `active`)
+    if (pendingWaitReached && h.waitReentry === `before-cleanup`)
+      reached.push(`wait-pending-before-cleanup`)
+    if (appliedWaitReached) reached.push(`wait-applied-before-cleanup`)
+    if ((h.first | h.second) & ~h.next) reached.push(`later-omission`)
+    if (!h.next) reached.push(`later-empty`)
+    if (h.failure && failed && peer) {
+      const owner = h.failure.stream
+      if (
+        failed.problems[owner].some((p) => p.kind === `stream`) &&
+        failed.problems[owner === 0 ? 1 : 0].length === 0
+      )
+        reached.push(`rejected-scope`)
+      if (
+        failedAgain &&
+        failedAgain.problems[owner].filter((p) => p.kind === `stream`).length >
+          failed.problems[owner].filter((p) => p.kind === `stream`).length
+      )
+        reached.push(`changed-rejection`)
+      if (peer.rows[0].length < failed.rows[0].length)
+        reached.push(`healthy-peer-delete`)
+      if (
+        peer.rows[0].length === failed.rows[0].length &&
+        JSON.stringify(peer.rows[0]) !== JSON.stringify(failed.rows[0])
+      )
+        reached.push(`healthy-peer-update`)
+      if (
+        recovered &&
+        recovered.problems.every((problems) => problems.length === 0)
+      )
         reached.push(
-          h.first === h.second
-            ? `equal-support`
-            : h.first & h.second
-              ? `partial-support`
-              : `disjoint-support`,
+          JSON.stringify(recovered.rows) === JSON.stringify(peer.rows)
+            ? `recovered-unchanged`
+            : `recovered-changed`,
         )
-      if ((h.first | h.second) & ~h.next) reached.push(`later-omission`)
-      if (!h.next) reached.push(`later-empty`)
-      if (h.failure && failed && peer) {
-        const owner = h.failure.stream
-        if (
-          failed.problems[owner].some((p) => p.kind === `stream`) &&
-          failed.problems[owner === 0 ? 1 : 0].length === 0
+      if (
+        recoveryPending?.problems[owner].some(
+          (problem) => problem.kind === `stream`,
         )
-          reached.push(`rejected-scope`)
-        if (
-          failedAgain &&
-          failedAgain.problems[owner].filter((p) => p.kind === `stream`)
-            .length >
-            failed.problems[owner].filter((p) => p.kind === `stream`).length
+      )
+        reached.push(`recovery-request-open`)
+      if (!recovered && retired.statuses[h.retire] === `cleaned-up`)
+        reached.push(
+          h.retire === owner ? `failed-owner-retired` : `healthy-owner-retired`,
         )
-          reached.push(`changed-rejection`)
-        if (peer.rows[0].length < failed.rows[0].length)
-          reached.push(`healthy-peer-delete`)
-        if (
-          peer.rows[0].length === failed.rows[0].length &&
-          JSON.stringify(peer.rows[0]) !== JSON.stringify(failed.rows[0])
-        )
-          reached.push(`healthy-peer-update`)
-        if (
-          recovered &&
-          recovered.problems.every((problems) => problems.length === 0)
-        )
-          reached.push(
-            JSON.stringify(recovered.rows) === JSON.stringify(peer.rows)
-              ? `recovered-unchanged`
-              : `recovered-changed`,
-          )
-        if (
-          recoveryPending?.problems[owner].some(
-            (problem) => problem.kind === `stream`,
-          )
-        )
-          reached.push(`recovery-request-open`)
-        if (!recovered && retired.statuses[h.retire] === `cleaned-up`)
-          reached.push(
-            h.retire === owner
-              ? `failed-owner-retired`
-              : `healthy-owner-retired`,
-          )
-      }
-      return {
-        joined,
-        both,
-        ...(failed ? { failed } : {}),
-        ...(failedAgain ? { failedAgain } : {}),
-        ...(peer ? { peer } : {}),
-        ...(recovered ? { recovered } : {}),
-        ...(recoveryPending ? { recoveryPending } : {}),
-        retired,
-        later,
-        resourcesBeforeRetirement,
-        resourcesAtRetirement,
-        finalResources: structuredClone(resources),
-        requestedAtJoin,
-        requestedAfterRetirement,
-        finalProviderState: client.status.state,
-        reached,
-      }
-    },
-    collections.map((collection) => () => collection.cleanup()),
-  )
+    }
+    return {
+      joined,
+      both,
+      ...(failed ? { failed } : {}),
+      ...(failedAgain ? { failedAgain } : {}),
+      ...(peer ? { peer } : {}),
+      ...(recovered ? { recovered } : {}),
+      ...(recoveryPending ? { recoveryPending } : {}),
+      retired,
+      later,
+      resourcesBeforeRetirement,
+      resourcesAtRetirement,
+      finalResources: structuredClone(resources),
+      requestedAtJoin,
+      requestedAfterRetirement,
+      finalProviderState: client.status.state,
+      waitsBeforeCleanup,
+      waitsAtCleanup,
+      reentered,
+      reached,
+    }
+  }, [
+    ...collections.map((collection) => () => collection.cleanup()),
+    stopApplicationStatus,
+  ])
 }

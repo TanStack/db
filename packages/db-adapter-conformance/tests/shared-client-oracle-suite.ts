@@ -32,7 +32,17 @@ export function registerSharedClientConformance(
       build: (h: SharedClientHistory): SharedClientHistory => {
         const built = { ...h }
         delete built.failure
-        if (stateIndex >= 9) {
+        delete built.waitReentry
+        if (state.startsWith(`wait-`))
+          Object.assign(built, {
+            join: `active`,
+            second: h.second || 1,
+            waitReentry:
+              state === `wait-pending-before-cleanup`
+                ? `before-cleanup`
+                : `after-checkpoint`,
+          })
+        if (stateIndex >= 9 && !state.startsWith(`wait-`)) {
           built.join = `active`
           built.second ||= 1
           built.failure = {
@@ -124,9 +134,9 @@ export function registerSharedClientConformance(
     id: property,
     owns,
     law: {
-      statement: `Same-table source Collections expose the complete synced table, including healthy-peer changes during a scoped rejection. Scoped health retains distinct errors until recovery or release; cleanup preserves the surviving sync run's delivery and resources. Passive cached startup needs no remote checkpoint.`,
+      statement: `Same-table source Collections expose the complete synced table, including healthy-peer changes during a scoped rejection. Scoped health retains distinct errors until recovery or release; cleanup preserves the surviving sync run's delivery and resources, and releases pending SDK waits owned by the retired run. Passive cached startup needs no remote checkpoint.`,
       authority: `PowerSync Direct public table/streams options and docs/collections/powersync-direct-collection.md; glossary cleanup.`,
-      limits: `Two eager Collections, passive or distinct explicit streams, three keys, request-scoped rejection/recovery, one cleanup and a later complete checkpoint over controlled HTTP. No deployed service, persistence, mutations or subsets.`,
+      limits: `Two eager Collections, passive or distinct explicit streams, three keys, request-scoped rejection/recovery or one synchronous application status-listener stream change, one cleanup and a later complete checkpoint over controlled HTTP. No deployed service, persistence, mutations or subsets.`,
     },
     histories: {
       arbitrary: sharedClientHistoryArb,
@@ -149,6 +159,23 @@ export function registerSharedClientConformance(
     },
     check,
     calibrations: [
+      {
+        name: `a retired run cannot keep an unsettled SDK wait`,
+        history: { constructed: `generated wait-applied-before-cleanup` },
+        law: `same-table composition`,
+        corrupt: corrupt((h, raw) => ({
+          ...raw,
+          waitsAtCleanup: [
+            ...raw.waitsAtCleanup,
+            {
+              owner: h.retire,
+              signaled: false,
+              aborted: false,
+              outcome: `pending`,
+            },
+          ],
+        })),
+      },
       {
         name: `an optional reported retry remains until recovery or release`,
         history: { constructed: `generated changed-rejection` },

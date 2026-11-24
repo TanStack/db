@@ -538,6 +538,8 @@ export interface PersistenceAdapter {
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
+      /** Optional materialization hint; adapters may return additional rows. */
+      rowKeys?: ReadonlyArray<string | number>
       cacheGenerationClaimId?: string
     },
   ) => Promise<{
@@ -4049,8 +4051,6 @@ class PersistedCollectionRuntime<
     adapter: HydrationPersistenceAdapter,
     transactions = this.queuedHydrationTransactions,
   ): Promise<void> {
-    let snapshotRows:
-      Map<TKey, { key: TKey; value: T; metadata?: unknown }> | undefined
     type RecoveryPresence = `present` | `absent` | `unknown`
     const recoveredPresence = new Map<TKey, RecoveryPresence>()
     let snapshotInvalidatedByTruncate = false
@@ -4058,6 +4058,10 @@ class PersistedCollectionRuntime<
     while (transactions.length > 0) {
       const transaction = transactions.shift()
       if (!transaction) continue
+      // Recovery can receive another transaction during an awaited read. Each
+      // transaction reads its own complete key projection at its FIFO turn.
+      let snapshotRows:
+        Map<TKey, { key: TKey; value: T; metadata?: unknown }> | undefined
 
       try {
         this.throwIfTerminal()
@@ -4104,6 +4108,11 @@ class PersistedCollectionRuntime<
                       requiredIndexSignatures:
                         this.getRequiredIndexSignatures(),
                       includeRows: true,
+                      rowKeys: Array.from(
+                        transaction.partialUpdateOperationIndexes,
+                        (operationIndex) =>
+                          transaction.operations[operationIndex]!.key,
+                      ),
                       cacheGenerationClaimId:
                         this.cacheGenerationClaim?.claimId,
                     })

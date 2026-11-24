@@ -252,6 +252,10 @@ export function directOnDemandStreamsAdapter({
         activeStreams: () =>
           [...streamLeases].flatMap((lease) => lease.streams),
         acquiredLeases: () => acquired,
+        admissionWork: input.snapshot,
+        receiveAdmissionWork: async () => {
+          await input.drain(`admission`)
+        },
         emptyMappingCut: wrapped?.emptyMappingCut ?? `provider-wait`,
         forwardedSubscriptions: () =>
           service.subscriptions.map((stream) => ({

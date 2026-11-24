@@ -2325,6 +2325,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
+      rowKeys?: ReadonlyArray<string | number>
       cacheGenerationClaimId?: string
     },
   ) {
@@ -2338,6 +2339,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
+      rowKeys?: ReadonlyArray<string | number>
       cacheGenerationClaimId?: string
     },
   ): Promise<{
@@ -2392,9 +2394,35 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         )
       }
 
-      const rows = includeRows
-        ? await this.loadSubsetInternal(tableMapping, {}, transactionDriver)
-        : []
+      let rows: Array<InMemoryRow<string | number, Record<string, unknown>>> =
+        []
+      if (includeRows) {
+        if (ctx?.rowKeys === undefined)
+          rows = await this.loadSubsetInternal(
+            tableMapping,
+            {},
+            transactionDriver,
+          )
+        else {
+          // Encode before deduplication: storage distinguishes numeric/string
+          // keys and signed zero. The transaction driver owns the binding cap.
+          const keys = [...new Set(ctx.rowKeys.map(encodePersistedStorageKey))]
+          const cap =
+            transactionDriver.maxBoundParameters ??
+            this.driver.maxBoundParameters ??
+            999
+          for (const batch of batches(keys, cap))
+            for (const row of decodeStoredSqliteRows(
+              await transactionDriver.query<StoredSqliteRow>(
+                `SELECT key, value, metadata, row_version
+               FROM ${quoteIdentifier(tableMapping.tableName)}
+               WHERE key IN (${batch.map(() => `?`).join(`, `)})`,
+                batch,
+              ),
+            ))
+              rows.push(row)
+        }
+      }
       const { latestRowVersion, keySet, sourceProgressCompatible } =
         await this.readResumeEvidence(collectionId, transactionDriver)
       const collectionMetadataRows = await transactionDriver.query<{

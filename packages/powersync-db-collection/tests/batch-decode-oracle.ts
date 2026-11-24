@@ -22,6 +22,12 @@
  * A fatal refusal remains final for that sync run. Corrected SQLite rows and
  * new subset requests cannot resume it. Cleanup followed by an explicit
  * restart admits a new valid source snapshot and clears the retired error.
+ * A late hydration seed still supplies rows that no accepted source page
+ * wrote. Staging part of a refused page grants no source authority. The
+ * hydration authority law is specified in docs/guides/ssr.md, Initial Data,
+ * and db-client-hydration-authority-oracle.test.ts. Admission counts below
+ * diagnose the adapter's internal staging; balanced begin/commit calls are
+ * not a public law because an open sync transaction may await run retirement.
  * Limits: one table, initial read or one live SQL transaction, 1–6 rows,
  * native schemas, no retained reload, persistence or local mutations.
  */
@@ -40,6 +46,7 @@ export type NativeDecodeHistory = {
   overlap: boolean
   coordinate: number
   epoch: number
+  hydrateAfterRefusal?: boolean
 }
 export const nativeDecodeHistoryArb: fc.Arbitrary<NativeDecodeHistory> = fc
   .record({
@@ -57,10 +64,15 @@ export const nativeDecodeHistoryArb: fc.Arbitrary<NativeDecodeHistory> = fc
     overlap: fc.boolean(),
     coordinate: fc.nat({ max: 100_000 }),
     epoch: fc.integer({ min: 0, max: 2_000_000_000_000 }),
+    hydrateAfterRefusal: fc.boolean(),
   })
   .map(
     (h) => ({ ...h, refusalIndex: h.refusalIndex % h.count }),
-    (h) => h as NativeDecodeHistory,
+    (h) => ({
+      ...(h as NativeDecodeHistory),
+      hydrateAfterRefusal:
+        (h as NativeDecodeHistory).hydrateAfterRefusal ?? false,
+    }),
   )
 
 export function nativeDecodeKey(
@@ -85,6 +97,17 @@ export function nativeDecodeRecoveryBatch(h: NativeDecodeHistory) {
     true,
   )
 }
+/** Changed values and one fresh key expose authority wrongly gained by staging. */
+export function nativeDecodeHydrationBatch(h: NativeDecodeHistory) {
+  return [
+    ...nativeDecodeBatch(h, h.phase === `initial`),
+    nativeDecodeRecoveryBatch(h)[0]!,
+  ].map((row) => ({
+    id: row.id,
+    flag: !row.flag,
+    when: new Date(row.when.getTime() + 30_000),
+  }))
+}
 export type NativeDecodeObservation = {
   cleanupErrors?: ReadonlyArray<string>
   browserErrors?: ReadonlyArray<string>
@@ -100,6 +123,15 @@ export type NativeDecodeObservation = {
   terminalCauseMatches: boolean
   watcherReleases: Array<number>
   reached: Array<string>
+  // Diagnostics only: no public contract requires one begin per provider page.
+  admission: { begins: number; writes: number; commits: number; open: number }
+  hydration?: {
+    rows: Array<DecodeValue>
+    publications: Array<Array<DecodeValue>>
+    acceptedBaseline: Array<DecodeValue>
+    status: string
+    causeStable: boolean
+  }
   continuation?: {
     sameRunRows: Array<DecodeValue>
     sameRunStatus: string
@@ -211,11 +243,30 @@ export function nativeDecodeViolations(
   )
     errors.push(`fatal run retained its change watcher`)
   if (m.stopped) {
+    const expectedAfterHydration = nativeDecodeHydrationModel(
+      h,
+      a.sourceBatches,
+    )
+    if (h.hydrateAfterRefusal) {
+      const hydration = a.hydration
+      if (
+        !hydration ||
+        !same(hydration.rows, expectedAfterHydration) ||
+        hydration.status !== m.status ||
+        !hydration.causeStable ||
+        hydration.publications.some((cut) => !same(cut, expectedAfterHydration))
+      )
+        errors.push(`refused page gained authority over a late hydration seed`)
+      // Every hydration batch adds a fresh key. Existing subscribers must
+      // therefore observe its publication, with no exact callback-count law.
+      if (hydration?.publications.length === 0)
+        errors.push(`late hydration did not notify existing subscribers`)
+    }
     const c = a.continuation
     if (!c) errors.push(`fatal continuation not observed`)
     else {
       if (
-        !same(c.sameRunRows, m.rows) ||
+        !same(c.sameRunRows, expectedAfterHydration) ||
         c.sameRunStatus !== m.status ||
         !c.sameRunTerminalError ||
         !c.sameRunCauseStable ||
@@ -248,6 +299,21 @@ export function nativeDecodeViolations(
   return errors
 }
 
+// Accepted source pages fix their rows. A seed supplies only the other keys;
+// source staging and the decoder's refusal position do not authorize a write.
+export function nativeDecodeHydrationModel(
+  h: NativeDecodeHistory,
+  sourceBatches: ReadonlyArray<ReadonlyArray<string>>,
+) {
+  const rows = new Map(
+    nativeDecodeModel(h, sourceBatches).rows.map((row) => [row.id, row]),
+  )
+  if (h.hydrateAfterRefusal)
+    for (const row of observeDecodeRows(nativeDecodeHydrationBatch(h)))
+      if (!rows.has(row.id)) rows.set(row.id, row)
+  return [...rows.values()].sort((a, b) => a.id.localeCompare(b.id))
+}
+
 export const nativeDecodeStates = [
   ...([`eager`, `on-demand`] as const).flatMap((mode) =>
     ([`initial`, `live`] as const).flatMap((phase) =>
@@ -265,4 +331,11 @@ export const nativeDecodeStates = [
   `corrected-source-after-refusal`,
   `restart-after-refusal`,
   `empty-subset-after-refusal`,
+  ...([`eager`, `on-demand`] as const).flatMap((mode) =>
+    ([`initial`, `live`] as const).flatMap((phase) =>
+      ([`first`, `middle`, `last`] as const).map(
+        (position) => `hydration:${mode}:${phase}:${position}`,
+      ),
+    ),
+  ),
 ] as const

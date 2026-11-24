@@ -17,7 +17,7 @@ export type GetSubscriptions = (
 
 /** Reports stream errors after provider synchronization, by their lease. */
 export interface SubsetErrors {
-  onError: (lease: StreamLease, error: StreamError) => void
+  onError: (lease: StreamLease, error: StreamError, signal: AbortSignal) => void
   /** The lease was released, so its stream errors no longer apply. */
   onRelease: (lease: StreamLease) => void
 }
@@ -67,7 +67,7 @@ export function createSubsetHandlers(
     const streamLease = client.acquireStreams(streams, {
       // A failing load rejects loadSubset instead.
       onError: (error) => {
-        if (acquisition.synced) errors.onError(streamLease, error)
+        if (acquisition.synced) errors.onError(streamLease, error, abort.signal)
       },
     })
     const abort = new AbortController()
@@ -85,18 +85,24 @@ export function createSubsetHandlers(
     return (acquisition.loading = (async () => {
       try {
         await queued
-        abort.signal.throwIfAborted()
         acquisition.synced = true
         // Unlike confirmWrites(), loadSubset promises visible data. Never await
         // this receipt in the stream delivery callback itself.
-        await applied(streams)
+        // A ready listener can cancel after the checkpoint committed rows but
+        // before this continuation. Await those rows without starting a new
+        // snapshot for the canceled acquisition.
+        await applied(abort.signal.aborted ? undefined : streams)
         abort.signal.throwIfAborted()
       } catch (error) {
-        // A shared collection commit cannot be canceled by just one observer.
-        // If it was already queued, let it become visible before settling the
-        // canceled baseline, as required by TanStack's replay contract.
+        // A priority checkpoint can supply rows before full synchronization.
+        // Cancellation still owes their application. A service rejection has
+        // no result, and a fully synced acquisition awaited its receipt above.
+        const pending =
+          abort.signal.aborted && !acquisition.synced ? applied() : true
         release(options, acquisition)
-        await applied()
+        // Receipt failure is reported by the source; preserve this caller's
+        // original rejection, including cancellation.
+        await Promise.resolve(pending).catch(() => undefined)
         throw error
       }
     })())

@@ -298,6 +298,11 @@ export const sourceFifoOrderingAxes = [
   `hydration-delete-reinsert`,
   `failed-hydration-partial`,
   `hydration-independent-abort`,
+  `hydration-baseline-read-abort`,
+  `hydration-loaded-partial`,
+  `failed-hydration-ordinary-partial`,
+  `failed-hydration-multi-key-partial`,
+  `failed-hydration-appended-partial`,
 ] as const
 export const abortGraphAxes = [`independent`, `same-key`] as const
 export const ownerIsolationAxes = [`write`, `commit`, `truncate`] as const
@@ -435,6 +440,7 @@ export const generatedTitle = fc.string({ maxLength: generatedTitleMaxLength })
 export type SourceFifoOrderingHistory = {
   relations: Array<(typeof sourceFifoOrderingAxes)[number]>
   titles: [string, string]
+  unrelatedRowCount: number
 }
 
 export type AbortGraphHistory = {
@@ -464,6 +470,7 @@ export const sourceFifoOrderingHistory: fc.Arbitrary<SourceFifoOrderingHistory> 
   fc.record({
     relations: fullAxisOrder(sourceFifoOrderingAxes),
     titles: fc.tuple(generatedTitle, generatedTitle),
+    unrelatedRowCount: fc.integer({ min: 0, max: 32 }),
   })
 
 export const abortGraphHistory: fc.Arbitrary<AbortGraphHistory> = fc.record({
