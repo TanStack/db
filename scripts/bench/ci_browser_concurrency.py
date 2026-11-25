@@ -307,11 +307,15 @@ def main() -> int:
     args.output.mkdir(parents=True, exist_ok=True)
     metadata = {'base': BASE, 'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                 'cpus': os.cpu_count(), 'platform': platform.platform(),
+                'cpu_models': sorted({line.partition(':')[2].strip()
+                                      for line in Path('/proc/cpuinfo').read_text().splitlines()
+                                      if line.startswith('model name')}),
                 'node': subprocess.check_output(['node', '--version'], text=True).strip(),
                 'memory': Path('/proc/meminfo').read_text().splitlines()[:3],
                 'order': args.order, 'plan': args.plan,
                 'workers': [[asdict(s) for s in q] for q in workers],
                 'limits': ['Random peer histories retain fresh seeds and may vary.',
+                           'Different runners can have different CPU models; compare phase ratios within each host.',
                            'RSS and child-process counts are sampled every second.',
                            'CPU includes background runner work.',
                            'This experiment does not establish full-CI clock time.']}
