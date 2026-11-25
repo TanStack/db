@@ -100,3 +100,8 @@ pnpm exec vitest run tests/reload-sql-recording-oracle.test.ts tests/reload-clas
 pnpm exec vitest run --config vitest.e2e.config.ts tests/reload-class-oracle.electron.e2e.test.ts
 pnpm exec tsc --noEmit
 ```
+
+CI subsequently caught an invalid replay-manifest tuple: an empty suffix added
+a trailing dot to the property ID. Splitting the tuple into its actual prefix
+and suffix repairs registration. The complete `db/tests/oracle-replay.test.ts`
+suite passes 124 tests with no type errors after that mechanical correction.
