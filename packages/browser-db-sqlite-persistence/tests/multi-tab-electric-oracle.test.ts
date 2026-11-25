@@ -47,8 +47,9 @@
  * with test-only exclusive-lock polyfilling on Node 22), and
  * `createBrowserWASQLitePersistence`. A recording `ShapeStream` stands in for
  * the Electric SDK; the test plays the server and delivers each tab's
- * messages. Checkpoints wait for host quiescence: no SQL statement and no
- * coordinator message for several tasks. Observations are each tab's
+ * messages. Checkpoints wait for observed SQL and coordinator calls to settle,
+ * then require no SQL statement or coordinator message for several tasks.
+ * They never wait for the Collection status that the model judges. Observations are each tab's
  * Collection status and public rows, and the position from which a
  * recovered tab's new stream starts.
  *
@@ -114,6 +115,7 @@ import { createBrowserWASQLitePersistence } from '../src/browser-persistence'
 import { requiredBrowserObservations } from './browser-required-observations'
 import { registerBrowserProperty } from './browser-property-registration-oracle'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
+import { createHostQuiescence } from './host-quiescence'
 import { sourceHeadViolation } from './electric-convergence-oracle'
 import type {
   Message,
@@ -276,13 +278,13 @@ function openHost() {
   let observer: ReturnType<typeof createWASQLiteTestDatabase> | undefined
   // Host activity for the quiescence checkpoint, and the number of commit
   // notices, read from the coordinator's own channel.
-  let activity = 0
+  const activity = createHostQuiescence()
   let commitNotices = 0
   let storageCollectionId: string | undefined
   let resetEpoch = 0
   const channel = new BroadcastChannel(`tsdb:coord:${dbName}`)
   channel.onmessage = (event: MessageEvent) => {
-    activity++
+    activity.note()
     const envelope = event.data as {
       senderId?: string
       collectionId?: string
@@ -305,10 +307,10 @@ function openHost() {
       sql: string,
       params: ReadonlyArray<unknown> = [],
     ) => {
-      activity++
+      activity.note()
       for (;;) {
         try {
-          return await execute<TRow>(sql, params)
+          return await activity.track(execute<TRow>(sql, params))
         } catch (error) {
           if ((error as { code?: string }).code !== `SQLITE_BUSY`) throw error
           await nextTask()
@@ -316,6 +318,22 @@ function openHost() {
       }
     }
     const coordinator = new BrowserCollectionCoordinator({ dbName })
+    const trackCall =
+      <TArgs extends Array<unknown>, TResult>(
+        call: (...args: TArgs) => Promise<TResult>,
+      ) =>
+      (...args: TArgs) =>
+        activity.track(call(...args))
+    coordinator.requestApplyCommittedTx = trackCall(
+      coordinator.requestApplyCommittedTx.bind(coordinator),
+    )
+    coordinator.reconcileCommittedTx = trackCall(
+      coordinator.reconcileCommittedTx.bind(coordinator),
+    )
+    coordinator.pullSince = trackCall(coordinator.pullSince.bind(coordinator))
+    coordinator.requestEnsurePersistedIndex = trackCall(
+      coordinator.requestEnsurePersistedIndex.bind(coordinator),
+    )
     // The application's signal, which can stop the stream from outside.
     let external = new AbortController()
     const shapeOptions = {
@@ -415,22 +433,12 @@ function openHost() {
     }
   }
 
-  // The hosts are quiet when five 2 ms tasks pass with no SQL statement and
-  // no coordinator message, within 400 tasks; the bound turns a livelock into
-  // a named failure. Quiet is evidence, not proof, that every notice and
-  // hydration finished, because the public API exposes no completion signal
-  // for peer notices. Its premises are calibrated instead: declared reach
-  // shows the peer commit arrived, and the abandon and readiness mutants fail
-  // only when a hydration ran after that commit.
-  const quiesce = async (label: string) => {
-    let quietTasks = 0
-    for (let task = 0; task < 400 && quietTasks < 5; task++) {
-      const before = activity
-      await new Promise((resolve) => setTimeout(resolve, 2))
-      quietTasks = activity === before ? quietTasks + 1 : 0
-    }
-    if (quietTasks < 5) throw new Error(`hosts did not quiesce: ${label}`)
-  }
+  // A coordinator can retry a retired route after ten otherwise silent seconds.
+  // Drain its observed calls before the existing five-task quiet check. Peer
+  // notices still have no completion API: declared reach and the abandon and
+  // readiness mutants calibrate their receiving premise. Collection status is
+  // always an observation, never a condition that releases this checkpoint.
+  const quiesce = activity.wait
 
   return {
     openTab,
@@ -1952,6 +1960,198 @@ describe(`multi-tab Electric over one persisted database`, () => {
     name: string
     history: GeneratedHistory
   }> = []
+
+  // CI reached a silent coordinator retry after both Collections cleaned up.
+  // Replay the complete shrunk history through the unchanged product model.
+  multiTabFixedHistories.push({
+    name: `waits for a restarted tab commit after its previous leader cleaned up`,
+    history: {
+      tabCount: 2,
+      steps: [
+        {
+          kind: 'server change',
+          key: 3,
+          pick: 0,
+        },
+        {
+          kind: 'advance',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'stop',
+          tab: 0,
+          pick: 3,
+        },
+        {
+          kind: 'catch up',
+          tab: 1,
+          pick: 0,
+        },
+        {
+          kind: 'recover',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'catch up',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'server change',
+          key: 3,
+          pick: 0,
+        },
+        {
+          kind: 'advance',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'stop',
+          tab: 0,
+          pick: 2,
+        },
+        {
+          kind: 'catch up',
+          tab: 1,
+          pick: 0,
+        },
+        {
+          kind: 'recover',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'catch up',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'server change',
+          key: 3,
+          pick: 0,
+        },
+        {
+          kind: 'advance',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'stop',
+          tab: 0,
+          pick: 1,
+        },
+        {
+          kind: 'catch up',
+          tab: 1,
+          pick: 0,
+        },
+        {
+          kind: 'recover',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'catch up',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'server change',
+          key: 3,
+          pick: 0,
+        },
+        {
+          kind: 'advance',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'stop',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'catch up',
+          tab: 1,
+          pick: 0,
+        },
+        {
+          kind: 'recover',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'catch up',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'server change',
+          key: 1,
+          pick: 0,
+        },
+        {
+          kind: 'catch up',
+          tab: 1,
+          pick: 0,
+        },
+        {
+          kind: 'server change',
+          key: 1,
+          pick: 0,
+        },
+        {
+          kind: 'advance',
+          tab: 1,
+          pick: 0,
+        },
+        {
+          kind: 'catch up',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'deploy',
+        },
+        {
+          kind: 'stop',
+          tab: 0,
+          pick: 3,
+        },
+        {
+          kind: 'stop',
+          tab: 0,
+          pick: 3,
+        },
+        {
+          kind: 'peer reset',
+        },
+        {
+          kind: 'catch up',
+          tab: 1,
+          pick: 0,
+        },
+        {
+          kind: 'catch up',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'stop',
+          tab: 0,
+          pick: 0,
+        },
+        {
+          kind: 'server change',
+          key: 1,
+          pick: 0,
+        },
+      ],
+    },
+  })
 
   // Known limit #2267, as a fixed history: the shrunk generated history in which a resumed tab
   // that lags behind its peer receives an update for a row the peer already

@@ -762,6 +762,7 @@ const staticOracleProperties = [
   `adapter.rxdb.persisted-startup`,
   `adapter.powersync.persisted-startup`,
   `browser.multi-tab-reserved-history`,
+  `browser.host-quiescence`,
   `browser.electric-source-prefix`,
   `sqlite-reload.class.electron`,
   `persistence.generation-notice`,

@@ -118,6 +118,7 @@ const config = defineConfig({
         `tests/opfs-page-lifecycle-oracle.test.ts`,
         `tests/opfs-request-order-oracle.test.ts`,
         `tests/opfs-worker-diagnostics-oracle.test.ts`,
+        `tests/host-quiescence-oracle.test.ts`,
       ],
     },
   },
