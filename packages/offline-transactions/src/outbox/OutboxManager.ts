@@ -199,6 +199,36 @@ export class OutboxManager {
     return (await this.storage.keys()).filter((key) => key.startsWith(prefix))
   }
 
+  /**
+   * Persists a decision to reject a saved row, so any later leader's replay
+   * settles it as rejected instead of sending it. A row that already carries
+   * a phase keeps it; one that cannot be read is left as it is.
+   */
+  async markRejected(
+    id: string,
+    error: Error,
+  ): Promise<`marked` | `gone` | `unreadable`> {
+    const data = await this.storage.get(this.getStorageKey(id))
+    if (data === null) return `gone`
+    let transaction: OfflineTransaction
+    try {
+      transaction = this.serializer.deserialize(data)
+    } catch {
+      return `unreadable`
+    }
+    if (transaction.outboxPhase) return `marked`
+    await this.add({
+      ...transaction,
+      outboxPhase: `rejection-pending`,
+      lastError: {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      },
+    })
+    return `marked`
+  }
+
   /** Whether a row is saved, without decoding it. */
   async has(id: string): Promise<boolean> {
     return (await this.storage.get(this.getStorageKey(id))) !== null

@@ -615,6 +615,14 @@ export class OfflineExecutor {
     for (const [owner, id, waiter] of waiters) {
       try {
         if (!(await waiter.saved)) continue
+        // Absence means success only where rejections are recorded, and not
+        // while this runtime still runs the write's call.
+        if (
+          !owner.recordsOutcomes ||
+          owner.scheduler.isRunning(id) ||
+          this.scheduler.isRunning(id)
+        )
+          continue
         const outbox = owner.outbox!
         // A row that cannot be decoded is still there.
         if (await outbox.has(id)) continue
@@ -1018,34 +1026,56 @@ export class OfflineExecutor {
     const error = removedError()
     // Off the queue before any await, so this tab cannot start them
     // meanwhile; the one already running keeps the provider's outcome.
-    const queued = this.scheduler
-      .getAllPendingTransactions()
-      .filter(({ id }) => ids.includes(id))
     const unstarted = new Set(this.scheduler.removePendingTransactions(ids))
+    // A leader's removal yields if it stops leading before its decision is
+    // written; the term only counts gains.
+    const term = this.term
+    const leading = this.isOfflineEnabled
+    const stillLeads = () =>
+      // Leadership can end during the awaits this check follows.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      !leading || (this.isOfflineEnabled && term === this.term)
     const failures: Array<unknown> = []
     // Each id settles by its own deletion.
     await Promise.all(
       ids.map(async (id) => {
         let token: string | undefined
+        let decided = false
         try {
           if (!(await outbox.has(id))) {
             if (this.saving.has(id)) this.saving.set(id, true)
             return
           }
-          // A writer in another tab reads a rejection, or that the call it
-          // cannot see is still running.
-          if (this.recordsOutcomes && !this.ownsWrite(id))
-            token = unstarted.has(id)
-              ? await outbox.recordRejection(id, error)
-              : await outbox.recordPending(id)
+          if (unstarted.has(id)) {
+            if (this.recordsOutcomes && !this.ownsWrite(id))
+              token = await outbox.recordRejection(id, error)
+            // The removal is persisted on the row first, so a later leader's
+            // replay rejects it rather than send it. A row this term has not
+            // marked belongs to the next leader.
+            const mark = await outbox.markRejected(id, error)
+            if (mark === `gone` || !stillLeads()) {
+              if (token !== undefined)
+                await outbox.withdrawOutcome(id, token).catch(() => {})
+              return
+            }
+            decided = mark === `marked`
+          } else if (this.recordsOutcomes && !this.ownsWrite(id)) {
+            // A writer in another tab reads that the call it cannot see is
+            // still running.
+            token = await outbox.recordPending(id)
+          }
           await outbox.remove(id)
         } catch (removalError) {
-          failures.push(removalError)
-          // Its row stays, so it is queued again and its record withdrawn.
-          if (token !== undefined)
-            await outbox.withdrawOutcome(id, token).catch(() => {})
-          this.executor!.requeue(queued.filter((tx) => tx.id === id))
-          return
+          // A persisted decision stands: the queue finishes its deletion.
+          if (!decided) {
+            failures.push(removalError)
+            if (token !== undefined)
+              await outbox.withdrawOutcome(id, token).catch(() => {})
+          }
+          // The row is read again, so a write another leader settled meanwhile
+          // is not queued again.
+          this.executor!.admitTransaction(id).catch(() => {})
+          if (!decided) return
         }
         if (this.saving.has(id)) this.saving.set(id, true)
         if (unstarted.has(id)) this.rejectTransaction(id, error)

@@ -195,6 +195,22 @@ const reachStates = [
   `removal-held-off-reconnect`,
   // A cleanup that failed after its leadership ended was not retried later.
   `stale-cleanup-not-retried`,
+  // An exclusion whose deletion was still pending at a handover stayed an
+  // exclusion under the next leader.
+  `exclusion-decision-survived-handover`,
+  // An exclusion whose decision had not landed at a handover gave way to the
+  // next leader's send.
+  `exclusion-yielded-to-successor`,
+  // A removal decided before a handover was settled by the next leader, and
+  // one not yet decided gave way to the next leader's send.
+  `removal-decision-survived-handover`,
+  `removal-yielded-to-successor`,
+  // A leader's own write removed while its call ran stayed pending across a
+  // handover, then took the server's outcome.
+  `own-running-removal-completed`,
+  `own-running-removal-rejected`,
+  // A durable replacement left a default-mode predecessor's write pending.
+  `default-predecessor-unresolved`,
   // In the default mode, a write another leader rejected stayed pending in
   // its former leader, which cannot tell a rejection from a success.
   `former-leader-write-unresolved`,
@@ -247,6 +263,13 @@ type SharedActionType =
   | `failed-removal-during-save`
   | `remove-before-reconnect`
   | `failed-cleanup-across-terms`
+  | `exclusion-across-handover-mid-delete`
+  | `exclusion-across-handover-mid-mark`
+  | `removal-mark-landed-handover`
+  | `removal-mark-held-handover`
+  | `remove-own-running`
+  | `remove-own-rejected-running`
+  | `replace-default-with-durable`
 type Action = { type: TabActionType; tab: number } | { type: SharedActionType }
 type Mode = `durable` | `online`
 type History = { mode: Mode; actions: Array<Action> }
@@ -301,6 +324,19 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   { weight: 1, arbitrary: sharedAction(`failed-removal-during-save`) },
   { weight: 1, arbitrary: sharedAction(`remove-before-reconnect`) },
   { weight: 1, arbitrary: sharedAction(`failed-cleanup-across-terms`) },
+  {
+    weight: 1,
+    arbitrary: sharedAction(`exclusion-across-handover-mid-delete`),
+  },
+  {
+    weight: 1,
+    arbitrary: sharedAction(`exclusion-across-handover-mid-mark`),
+  },
+  { weight: 1, arbitrary: sharedAction(`removal-mark-landed-handover`) },
+  { weight: 1, arbitrary: sharedAction(`removal-mark-held-handover`) },
+  { weight: 1, arbitrary: sharedAction(`remove-own-running`) },
+  { weight: 1, arbitrary: sharedAction(`remove-own-rejected-running`) },
+  { weight: 1, arbitrary: sharedAction(`replace-default-with-durable`) },
   { weight: 1, arbitrary: sharedAction(`replace-writer`) },
   { weight: 1, arbitrary: sharedAction(`replace-rejected-writer`) },
   { weight: 1, arbitrary: tabAction(`remove-running`) },
@@ -362,6 +398,13 @@ const spliced = (
           action.type !== `failed-removal-during-save` &&
           action.type !== `remove-before-reconnect` &&
           action.type !== `failed-cleanup-across-terms` &&
+          action.type !== `exclusion-across-handover-mid-delete` &&
+          action.type !== `exclusion-across-handover-mid-mark` &&
+          action.type !== `removal-mark-landed-handover` &&
+          action.type !== `removal-mark-held-handover` &&
+          action.type !== `remove-own-running` &&
+          action.type !== `remove-own-rejected-running` &&
+          action.type !== `replace-default-with-durable` &&
           action.type !== `replace-writer` &&
           action.type !== `replace-rejected-writer` &&
           action.type !== `remove-running`,
@@ -515,10 +558,34 @@ class ReadFailingStorage extends FakeStorageAdapter {
     return super.keys()
   }
   failDeletes = 0
+  // The next row deletion waits for release.
+  private heldDelete: { release: () => void } | null | undefined
+  holdNextDelete(): void {
+    this.heldDelete = null
+  }
+  releaseDelete(): void {
+    this.heldDelete?.release()
+    this.heldDelete = undefined
+  }
+  // The next row write fails, or waits for release before it lands.
+  failTxWrites = 0
+  private heldTx: { release: () => void } | null | undefined
+  holdNextTxWrite(): void {
+    this.heldTx = null
+  }
+  releaseTxWrite(): void {
+    this.heldTx?.release()
+    this.heldTx = undefined
+  }
   override async delete(key: string): Promise<void> {
     if (this.failDeletes > 0 && key.startsWith(`tx:`)) {
       this.failDeletes -= 1
       throw new Error(`storage delete failed`)
+    }
+    if (this.heldDelete === null && key.startsWith(`tx:`)) {
+      await new Promise<void>((release) => {
+        this.heldDelete = { release }
+      })
     }
     return super.delete(key)
   }
@@ -536,6 +603,15 @@ class ReadFailingStorage extends FakeStorageAdapter {
         this.failedOutcomeKeys.add(key)
         throw new Error(`storage write failed`)
       }
+    }
+    if (this.failTxWrites > 0 && key.startsWith(`tx:`)) {
+      this.failTxWrites -= 1
+      throw new Error(`storage write failed`)
+    }
+    if (this.heldTx === null && key.startsWith(`tx:`)) {
+      await new Promise<void>((release) => {
+        this.heldTx = { release }
+      })
     }
     if (this.heldAck === null && key.startsWith(`tx:`)) {
       await super.set(key, value)
@@ -741,6 +817,8 @@ async function runHistory(
     collection?: ReturnType<typeof createTestOfflineEnvironment>[`collection`],
     // A replacement may reach the outbox through another adapter.
     tabStorage: StorageAdapter = storage,
+    // A durable tab in a default-mode history.
+    durableTab = durable,
   ) => {
     const tabElection = new TabElection(election, hold, failStart === true)
     const session = ++sessions
@@ -772,7 +850,7 @@ async function runHistory(
         return { ok: true }
       },
       config: {
-        ...(durable ? { followerWrites: `durable` } : {}),
+        ...(durableTab ? { followerWrites: `durable` } : {}),
         leaderElection: tabElection,
         onlineDetector: online.detector(),
         beforeRetry: (
@@ -1877,11 +1955,13 @@ async function runHistory(
           const first = await doWrite(follower, `write`)
           const second = await doWrite(follower, `write`)
           if (!first || !second) break
-          storage.failDeletes = 1
+          // The first removal decision fails to persist.
+          storage.failTxWrites = 1
           await expect(
             tabs[leader]!.env.executor.clearOutbox(),
-            `the clear reports its failed deletion`,
-          ).rejects.toThrow(`storage delete failed`)
+            `the clear reports its failed removal`,
+          ).rejects.toThrow(`storage write failed`)
+          storage.failTxWrites = 0
           await settle()
           // Which deletion failed is the injected fault's effect.
           let kept = 0
@@ -1920,12 +2000,12 @@ async function runHistory(
             storage.releaseAck()
             break
           }
-          storage.failDeletes = 1
+          storage.failTxWrites = 1
           await expect(
             tabs[writer]!.env.executor.removeFromOutbox(write.transactionId!),
             `the failed removal is reported`,
-          ).rejects.toThrow(`storage delete failed`)
-          storage.failDeletes = 0
+          ).rejects.toThrow(`storage write failed`)
+          storage.failTxWrites = 0
           storage.releaseAck()
           await settle()
           expect(calls, `${write.id} still sent`).toContain(write.id)
@@ -2005,6 +2085,238 @@ async function runHistory(
           ).not.toBe(null)
           expect(write.outcome, `${write.id} stays pending`).toBe(undefined)
           reach(`stale-cleanup-not-retried`)
+          break
+        }
+        case `exclusion-across-handover-mid-delete`:
+        case `exclusion-across-handover-mid-mark`: {
+          // The next leader excludes a follower's write and its deletion, or
+          // the write of its decision, stalls; leadership moves to a tab
+          // that would accept the write.
+          const midMark = action.type === `exclusion-across-handover-mid-mark`
+          const leader = leaderIndex()
+          const next = election.queue[0]
+          const writer = tabs.findIndex(
+            (tab, index) => tab && index !== leader && tab.election !== next,
+          )
+          if (
+            !durable ||
+            leader < 0 ||
+            !next ||
+            writer < 0 ||
+            tabs.filter(Boolean).length < 3 ||
+            !(await quiet())
+          )
+            break
+          online.set(false)
+          const write = await doWrite(writer, `write`)
+          if (!write) break
+          excluded.add(write.id)
+          if (midMark) storage.holdNextTxWrite()
+          else storage.holdNextDelete()
+          const original = tabs[leader]!.election
+          original.releaseLeadership()
+          await settle()
+          await original.requestLeadership()
+          excluded.delete(write.id)
+          if (midMark) {
+            // The next leader sends the unmarked row; the stalled decision
+            // then lands and changes nothing.
+            let release!: () => void
+            callGate = new Promise<void>((resolve) => {
+              release = resolve
+            })
+            online.set(true)
+            await settle()
+            next.releaseLeadership()
+            await settle()
+            expect(calls, `${write.id} sent by the next leader`).toContain(
+              write.id,
+            )
+            storage.releaseTxWrite()
+            await settle()
+            expect(write.outcome, `${write.id} waits for that send`).toBe(
+              undefined,
+            )
+            release()
+            await settle()
+            await next.requestLeadership()
+            await settle()
+            expect(write.outcome, `${write.id} completes`).toBe(`completed`)
+            reach(`exclusion-yielded-to-successor`)
+            break
+          }
+          write.excluded = true
+          write.deliverable = false
+          online.set(true)
+          await settle()
+          next.releaseLeadership()
+          await settle()
+          storage.releaseDelete()
+          await settle()
+          await next.requestLeadership()
+          await settle()
+          expect(calls, `${write.id} never sent`).not.toContain(write.id)
+          expect(write.outcome, `${write.id} stays excluded`).toBe(`failed`)
+          reach(`exclusion-decision-survived-handover`)
+          break
+        }
+        case `removal-mark-landed-handover`:
+        case `removal-mark-held-handover`: {
+          // The leader removes a queued follower write and loses leadership
+          // while its removal decision is written: after it landed, or
+          // before.
+          const landed = action.type === `removal-mark-landed-handover`
+          const leader = leaderIndex()
+          const writer = tabs.findIndex((tab, index) => tab && index !== leader)
+          if (
+            !durable ||
+            leader < 0 ||
+            writer < 0 ||
+            tabs.filter(Boolean).length < 2 ||
+            !(await quiet())
+          )
+            break
+          online.set(false)
+          const write = await doWrite(writer, `write`)
+          if (!write) break
+          if (landed) storage.holdNextAck()
+          else storage.holdNextTxWrite()
+          const removal = tabs[leader]!.env.executor.removeFromOutbox(
+            write.transactionId!,
+          )
+          await settle()
+          let release = () => {}
+          if (!landed)
+            callGate = new Promise<void>((resolve) => {
+              release = resolve
+            })
+          online.set(true)
+          const original = tabs[leader]!.election
+          original.releaseLeadership()
+          await settle()
+          if (landed) {
+            storage.releaseAck()
+            await removal
+            await settle()
+            await original.requestLeadership()
+            await settle()
+            write.removed = true
+            write.deliverable = false
+            expect(calls, `${write.id} never sent`).not.toContain(write.id)
+            expect(write.outcome, `${write.id} fails on its removal`).toBe(
+              `failed`,
+            )
+            reach(`removal-decision-survived-handover`)
+            break
+          }
+          expect(calls, `${write.id} sent by the next leader`).toContain(
+            write.id,
+          )
+          storage.releaseTxWrite()
+          await removal
+          await settle()
+          expect(write.outcome, `${write.id} waits for that send`).toBe(
+            undefined,
+          )
+          release()
+          await settle()
+          await original.requestLeadership()
+          await settle()
+          expect(write.outcome, `${write.id} completes`).toBe(`completed`)
+          reach(`removal-yielded-to-successor`)
+          break
+        }
+        case `remove-own-running`:
+        case `remove-own-rejected-running`: {
+          // The leader removes its own write while its call runs, then loses
+          // leadership; the next leader's check runs during the call.
+          const rejectedRun = action.type === `remove-own-rejected-running`
+          const leader = leaderIndex()
+          if (
+            !durable ||
+            !online.online ||
+            leader < 0 ||
+            tabs.filter(Boolean).length < 2 ||
+            !(await quiet())
+          )
+            break
+          let release!: () => void
+          callGate = new Promise<void>((resolve) => {
+            release = resolve
+          })
+          const write = await doWrite(
+            leader,
+            rejectedRun ? `write-rejected` : `write`,
+          )
+          if (!write || !calls.includes(write.id)) {
+            callGate = null
+            release()
+            await settle()
+            break
+          }
+          await tabs[leader]!.env.executor.removeFromOutbox(
+            write.transactionId!,
+          )
+          const original = tabs[leader]!.election
+          original.releaseLeadership()
+          await settle()
+          await original.requestLeadership()
+          await settle()
+          expect(write.outcome, `${write.id} waits during its call`).toBe(
+            undefined,
+          )
+          release()
+          await settle()
+          expect(write.outcome, `${write.id} keeps the server's outcome`).toBe(
+            rejectedRun ? `failed` : `completed`,
+          )
+          reach(
+            rejectedRun
+              ? `own-running-removal-rejected`
+              : `own-running-removal-completed`,
+          )
+          break
+        }
+        case `replace-default-with-durable`: {
+          // In the default mode the leader saves its own write offline,
+          // another leader rejects it, and a durable executor replaces the
+          // writer over the same collection.
+          const leader = leaderIndex()
+          if (
+            durable ||
+            leader < 0 ||
+            tabs.filter(Boolean).length < 2 ||
+            !(await quiet())
+          )
+            break
+          online.set(false)
+          const write = await doWrite(leader, `write-rejected`)
+          if (!write) break
+          const original = tabs[leader]!.election
+          original.releaseLeadership()
+          await settle()
+          await original.requestLeadership()
+          online.set(true)
+          await settle()
+          expect(calls, `${write.id} sent by another leader`).toContain(
+            write.id,
+          )
+          const collection = tabs[leader]!.env.collection
+          await closeTab(leader)
+          await openTab(
+            leader,
+            undefined,
+            undefined,
+            false,
+            collection,
+            storage,
+            true,
+          )
+          // No record tells a rejection from a success.
+          expect(write.outcome, `${write.id} stays pending`).toBe(undefined)
+          reach(`default-predecessor-unresolved`)
+          await closeTab(leader)
+          await openTab(leader)
           break
         }
         case `clear-across-handover`: {
@@ -2264,7 +2576,7 @@ const loseSettlement: Action = { type: `lose-settlement` }
 oracleProperty({
   id: property,
   law: {
-    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until the leading tab sends it to the server exactly once while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome, also when the settlement message is lost. A leader that could not read a saved write sends it once connectivity changes, a row it cannot decode is reported, a failed row removal after a successful send is not reported as the outcome, and a follower's failed outbox check runs again on connectivity. An admission read across a change of leadership schedules nothing, and a write excluded by beforeRetry fails its writer even when the message is lost; if its rejection record fails, the leader retries the cleanup and nothing sends it meanwhile. Removing or clearing an unsent write fails its writer at once, a write removed while it is saved never runs, an outbox load from an earlier leadership term schedules nothing, and a tab that only observes a write leaves its writer's record. A follower's removal goes to the leader, which alone knows whether the call started; an exclusion cleanup stops when its leadership ends; and a replacement executor over the same collections settles its predecessor's saved writes against the outbox they were saved to. A removed write whose call is running stays pending until the call settles, an unreadable saved row keeps its writer waiting, each removal settles by its own deletion, and a cleanup that failed after its term ended is not retried. In the default mode, a write another leader settled stays pending in its former leader, which cannot tell the outcome. Stale and duplicate messages change nothing. A write made before its tab initializes, and the default mode, keep the online path.`,
+    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until the leading tab sends it to the server exactly once while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome, also when the settlement message is lost. A leader that could not read a saved write sends it once connectivity changes, a row it cannot decode is reported, a failed row removal after a successful send is not reported as the outcome, and a follower's failed outbox check runs again on connectivity. An admission read across a change of leadership schedules nothing, and a write excluded by beforeRetry fails its writer even when the message is lost; if its rejection record fails, the leader retries the cleanup and nothing sends it meanwhile. Removing or clearing an unsent write fails its writer at once, a write removed while it is saved never runs, an outbox load from an earlier leadership term schedules nothing, and a tab that only observes a write leaves its writer's record. A follower's removal goes to the leader, which alone knows whether the call started; an exclusion cleanup stops when its leadership ends; and a replacement executor over the same collections settles its predecessor's saved writes against the outbox they were saved to. A removal or exclusion is written to its row before the row goes, so a later leader settles it as decided rather than send it. A removed write whose call is running stays pending until the call settles, also when it is the leader's own; a durable replacement does not read a default-mode predecessor's missing record as success; an unreadable saved row keeps its writer waiting, each removal settles by its own deletion, and a cleanup that failed after its term ended is not retried. In the default mode, a write another leader settled stays pending in its former leader, which cannot tell the outcome. Stale and duplicate messages change nothing. A write made before its tab initializes, and the default mode, keep the online path.`,
     authority: `Issue #2464 and the followerWrites option in docs/guides/offline-transactions.md.`,
     limits: `Three tabs over one storage adapter with controlled election, connectivity and BroadcastChannel; up to twelve actions; no real browser contexts; rejection records of writers that never return are kept, and none is ever expired.`,
   },
@@ -2686,6 +2998,54 @@ oracleProperty({
         enters: [`stale-cleanup-not-retried`],
         build: (generated: History): History =>
           spliced(generated, [{ type: `failed-cleanup-across-terms` }]),
+      },
+      {
+        name: `an exclusion pending deletion at a handover stays an exclusion`,
+        enters: [`exclusion-decision-survived-handover`],
+        build: (generated: History): History =>
+          spliced(generated, [
+            { type: `exclusion-across-handover-mid-delete` },
+          ]),
+      },
+      {
+        name: `an exclusion not yet decided at a handover gives way to the send`,
+        enters: [`exclusion-yielded-to-successor`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `exclusion-across-handover-mid-mark` }]),
+      },
+      {
+        name: `a removal decided before a handover is settled by the next leader`,
+        enters: [`removal-decision-survived-handover`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `removal-mark-landed-handover` }]),
+      },
+      {
+        name: `a removal not yet decided at a handover gives way to the send`,
+        enters: [`removal-yielded-to-successor`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `removal-mark-held-handover` }]),
+      },
+      {
+        name: `a leader's own running write removed keeps the server's outcome`,
+        enters: [`own-running-removal-completed`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `remove-own-running` }]),
+      },
+      {
+        name: `a leader's own running write removed takes the server's rejection`,
+        enters: [`own-running-removal-rejected`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `remove-own-rejected-running` }]),
+      },
+      {
+        name: `a durable replacement leaves a default-mode write pending`,
+        enters: [`default-predecessor-unresolved`],
+        build: (generated: History): History =>
+          spliced(
+            generated,
+            [{ type: `replace-default-with-durable` }],
+            `online`,
+          ),
       },
       {
         name: `a replacement settles its predecessor's completed write`,
