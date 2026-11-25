@@ -55,3 +55,33 @@ sampled aggregate RSS was 3.36 GiB; shared pages can be counted more than once.
 The ten-percent contention assumption is unsupported by this measurement. The
 full schedule needs recalculation and a hosted whole-CI run. These two orders
 measure one browser pair and are not P95 evidence.
+
+
+## Final finer-pair trial
+
+The `finer` plan measures process bins 2 and 15 from the 56-part CP-SAT
+assignment. This is a different workload from the baseline pair, so compare
+serial with parallel within each trial. Each mode selects 819 complete units:
+
+- Queue A: Direct subsets (453), Direct startup ownership (49), FIFO order's
+  fixed campaign (6), claim-boundary's random campaign (31), and native decoding's
+  named eager fixed-seed constructions (30).
+- Queue B: Query cross-adapter (185) and FIFO order's other units (65).
+
+The general generated decoding unit remains in its separate remainder part in
+the full assignment. Each selected unit keeps every construction base and its
+ordinary run budget. The manifest records exact collected totals, selectors
+and a complete executable preflight unit for every part. Both queues include
+parts of the FIFO file, exercising concurrent processes on that file.
+
+Real Vitest collection exposed fast units absent from the timing log. The
+manifest uses the collected inventory. All 2,006 collected units of the four
+split files map exactly once to 25 parts; the other 31 files stay whole in the
+proposed 56-part assignment. This inventory check does not establish execution
+of every proposed selector or the complete CI layout.
+
+Preflight executes one full unit per selected part and all nine cleanup
+controls. Zero-work or impossible selection counts fail before test execution.
+Use `--plan baseline` or `--plan finer`; manual workflow dispatch offers the
+same choices. The branch push runs the final finer plan. Neither plan establishes
+whole-CI completion below twenty minutes on its own.

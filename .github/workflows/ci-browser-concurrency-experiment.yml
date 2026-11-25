@@ -4,6 +4,12 @@ on:
   push:
     branches: [codex/ci-browser-concurrency-experiment]
   workflow_dispatch:
+    inputs:
+      plan:
+        description: Browser pair to measure
+        type: choice
+        options: [baseline, finer]
+        default: finer
 
 permissions:
   contents: read
@@ -22,6 +28,8 @@ jobs:
       max-parallel: 2
       matrix:
         order: [serial-first, parallel-first]
+    env:
+      EXPERIMENT_PLAN: ${{ inputs.plan || 'finer' }}
     steps:
       - name: Checkout unchanged source and experiment
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -45,11 +53,11 @@ jobs:
       - name: Check benchmark accounting
         run: python3 -m unittest discover -s scripts/bench -p ci_browser_concurrency_test.py
       - name: Verify actual oracle selection
-        run: python3 scripts/bench/ci_browser_concurrency.py --order "$EXPERIMENT_ORDER" --preflight --output test-results/ci-browser-concurrency/preflight
+        run: python3 scripts/bench/ci_browser_concurrency.py --plan "$EXPERIMENT_PLAN" --order "$EXPERIMENT_ORDER" --preflight --output test-results/ci-browser-concurrency/preflight
         env:
           EXPERIMENT_ORDER: ${{ matrix.order }}
       - name: Measure complete selections in both modes
-        run: python3 scripts/bench/ci_browser_concurrency.py --order "$EXPERIMENT_ORDER" --output test-results/ci-browser-concurrency
+        run: python3 scripts/bench/ci_browser_concurrency.py --plan "$EXPERIMENT_PLAN" --order "$EXPERIMENT_ORDER" --output test-results/ci-browser-concurrency
         env:
           EXPERIMENT_ORDER: ${{ matrix.order }}
       - name: Publish measurements

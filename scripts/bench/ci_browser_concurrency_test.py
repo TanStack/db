@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from unittest.mock import patch
 
-from ci_browser_concurrency import (Process, Selection, WORKERS, compare,
+from ci_browser_concurrency import (FINER_WORKERS, Process, Selection, WORKERS, compare,
                                     owned_processes, parse_process, validate_report, verify_source)
 
 
@@ -28,6 +28,12 @@ class SelectionTests(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertTrue(validate_report(report, self.selection))
 
+    def test_a_plan_cannot_declare_zero_or_impossible_selected_work(self):
+        for passed, total in [(0, 0), (0, 5), (3, 2)]:
+            with self.subTest(passed=passed, total=total):
+                with self.assertRaises(ValueError):
+                    Selection('invalid', 'source.test.ts', passed, total)
+
     def test_decoder_selector_keeps_fixed_units_and_excludes_other_properties(self):
         pattern = WORKERS[0][0].pattern
         for title in [
@@ -46,6 +52,22 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(sum(s.passed for q in WORKERS for s in q), 790)
         self.assertEqual(len({s.file for q in WORKERS for s in q}), 5)
         self.assertTrue(all(s.passed == s.total for s in WORKERS[1]))
+
+    def test_finer_pair_keeps_complete_units_and_a_preflight_for_every_part(self):
+        selected = [s for q in FINER_WORKERS for s in q]
+        self.assertEqual(sum(s.passed for s in selected), 819)
+        self.assertEqual(len({s.name for s in selected}), 7)
+        self.assertTrue(all(s.preflight_pattern for s in selected))
+
+    def test_shared_fifo_file_parts_select_disjoint_campaigns(self):
+        parts = [s for q in FINER_WORKERS for s in q if 'persisted-source-fifo' in s.file]
+        for title, matches in [
+            ('sqlite-persistence.source-fifo-order.chromium-opfs > fixed seed 18530101: generated', 1),
+            ('sqlite-persistence.source-fifo-order.chromium-opfs > calibration: missing a receipt', 1),
+            ('sqlite-persistence.source-claim-boundary.chromium-opfs > random seed: generated', 1),
+            ('sqlite-persistence.source-fifo-order.chromium-opfs > random seed: generated', 0),
+        ]:
+            self.assertEqual(sum(bool(re.search(s.pattern, title)) for s in parts), matches, title)
 
 
 class ResourceTests(unittest.TestCase):

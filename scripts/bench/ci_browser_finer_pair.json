@@ -1,0 +1,82 @@
+{
+  "id": "finer-pair-2",
+  "source_baseline": "7cd1d0a7128c276cea455d190b894e7942e39fbb",
+  "basis": "Second pair in the OR-Tools56-part assignment: process bins2 and15. Each selected unit keeps its complete existing run budget.",
+  "modeled_process_seconds_with_margin_and_setup": [805, 774],
+  "parts": [
+    [
+      "e2e/powersync-direct-subsets-oracle.browser.test.ts all",
+      "e2e/powersync-direct-startup-ownership-oracle.browser.test.ts all",
+      "e2e/persisted-source-fifo-oracle.browser.test.ts sqlite-persistence.source-fifo-order.chromium-opfs fixed all",
+      "e2e/persisted-source-fifo-oracle.browser.test.ts sqlite-persistence.source-claim-boundary.chromium-opfs random all",
+      "e2e/native-powersync-batch-decode-oracle.browser.test.ts adapter.powersync.batch-decode.chromium fixed eager"
+    ],
+    [
+      "e2e/query-cross-adapter-oracle.browser.test.ts all",
+      "e2e/persisted-source-fifo-oracle.browser.test.ts sqlite-persistence.source-fifo-order.chromium-opfs other all"
+    ]
+  ],
+  "workers": [
+    [
+      {
+        "name": "finer-2-1",
+        "file": "e2e/powersync-direct-subsets-oracle.browser.test.ts",
+        "passed": 453,
+        "total": 453,
+        "pattern": null,
+        "preflight_pattern": "^adapter\\.powersync\\-direct\\.on\\-demand\\-streams\\.chromium\\ >\\ fixed\\ seed\\ 2377:\\ shared\\-error\\-retained\\ construction\\ 1$"
+      },
+      {
+        "name": "finer-2-2",
+        "file": "e2e/powersync-direct-startup-ownership-oracle.browser.test.ts",
+        "passed": 49,
+        "total": 49,
+        "pattern": null,
+        "preflight_pattern": "^adapter\\.powersync\\-direct\\.construction\\.chromium\\ >\\ fixed\\ seed\\ 366:\\ generated\\ table\\-listener$"
+      },
+      {
+        "name": "finer-2-3",
+        "file": "e2e/persisted-source-fifo-oracle.browser.test.ts",
+        "passed": 6,
+        "total": 424,
+        "pattern": "^sqlite\\-persistence\\.source\\-fifo\\-order\\.chromium\\-opfs > fixed seed [^:]+: ",
+        "preflight_pattern": "^sqlite\\-persistence\\.source\\-fifo\\-order\\.chromium\\-opfs\\ >\\ fixed\\ seed\\ 18530101:\\ all\\ FIFO\\ states\\ construction\\ 1$"
+      },
+      {
+        "name": "finer-2-4",
+        "file": "e2e/persisted-source-fifo-oracle.browser.test.ts",
+        "passed": 31,
+        "total": 424,
+        "pattern": "^sqlite\\-persistence\\.source\\-claim\\-boundary\\.chromium\\-opfs > random seed: ",
+        "preflight_pattern": "^sqlite\\-persistence\\.source\\-claim\\-boundary\\.chromium\\-opfs\\ >\\ random\\ seed:\\ live\\ claim\\ cut\\ 1$"
+      },
+      {
+        "name": "finer-2-5",
+        "file": "e2e/native-powersync-batch-decode-oracle.browser.test.ts",
+        "passed": 30,
+        "total": 876,
+        "pattern": "^adapter\\.powersync\\.batch\\-decode\\.chromium > fixed seed [^:]+: generated eager:",
+        "preflight_pattern": "^adapter\\.powersync\\.batch\\-decode\\.chromium\\ >\\ fixed\\ seed\\ 2377:\\ generated\\ eager:initial:valid\\ 1$"
+      }
+    ],
+    [
+      {
+        "name": "finer-15-1",
+        "file": "e2e/query-cross-adapter-oracle.browser.test.ts",
+        "passed": 185,
+        "total": 185,
+        "pattern": null,
+        "preflight_pattern": "^query\\-db\\.select\\-failures\\.chromium\\-opfs\\ >\\ fixed\\ seed\\ 2377:\\ generated\\ persisted:\\ a\\ Query\\ recovers\\ while\\ another's\\ failure\\ stays\\ listed$"
+      },
+      {
+        "name": "finer-15-2",
+        "file": "e2e/persisted-source-fifo-oracle.browser.test.ts",
+        "passed": 65,
+        "total": 424,
+        "pattern": "^sqlite\\-persistence\\.source\\-fifo\\-order\\.chromium\\-opfs > (?!fixed seed |random seed)",
+        "preflight_pattern": "^sqlite\\-persistence\\.source\\-fifo\\-order\\.chromium\\-opfs\\ >\\ calibration:\\ all\\ FIFO\\ states\\ construction\\ 1\\ cannot\\ omit\\ same\\-key$"
+      }
+    ]
+  ],
+  "inventory": "Collected from real Vitest5.1 on Node22 at the frozen source baseline; one complete unit per part executed before CI."
+}

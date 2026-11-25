@@ -31,6 +31,11 @@ class Selection:
     passed: int
     total: int
     pattern: str | None = None
+    preflight_pattern: str | None = None
+
+    def __post_init__(self):
+        if self.passed <= 0 or self.total < self.passed:
+            raise ValueError('A selection requires positive work within its collected total')
 
 
 # The actual first pair in the CP-SAT plan: the longest fixed-seed decoder
@@ -46,6 +51,11 @@ WORKERS = (
         Selection('direct-persisted-demand', 'e2e/powersync-direct-persisted-demand-oracle.browser.test.ts', 50, 50),
     ),
 )
+
+# A second measured pair from the finer assignment. Select complete campaign
+# units; neither this manifest nor a selector divides a unit's history budget.
+FINER_PLAN = json.loads((ROOT / 'scripts/bench/ci_browser_finer_pair.json').read_text())
+FINER_WORKERS = tuple(tuple(Selection(**s) for s in q) for q in FINER_PLAN['workers'])
 
 
 def validate_report(report: dict, selection: Selection) -> list[str]:
@@ -252,7 +262,7 @@ def run_phase(mode: str, directory: Path, workers=WORKERS) -> dict:
     return result
 
 
-def compare(phases: list[dict]) -> dict:
+def compare(phases: list[dict], workers=WORKERS) -> dict:
     by = {p['mode']: p for p in phases}
     serial, parallel = by['serial'], by['parallel']
     worker_ratios = []
@@ -265,7 +275,7 @@ def compare(phases: list[dict]) -> dict:
             'worker_slowdown_factors': worker_ratios,
             'worst_worker_slowdown_factor': max(worker_ratios),
             'peak_sampled_rss_bytes': max(p['peak_sampled_rss_bytes'] for p in phases),
-            'units_per_phase': sum(s.passed for q in WORKERS for s in q)}
+            'units_per_phase': sum(s.passed for q in workers for s in q)}
 
 
 def verify_source() -> None:
@@ -278,7 +288,13 @@ def main() -> int:
     parser.add_argument('--order', required=True, choices=['serial-first', 'parallel-first'])
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--preflight', action='store_true')
+    parser.add_argument('--plan', choices=['baseline', 'finer'], default='baseline')
     args = parser.parse_args()
+    workers = FINER_WORKERS if args.plan == 'finer' else WORKERS
+    if len(workers) != 2 or any(not queue for queue in workers):
+        raise RuntimeError('The benchmark requires two nonempty worker queues')
+    if args.plan == 'finer' and FINER_PLAN['source_baseline'] != BASE:
+        raise RuntimeError('The finer assignment must use the declared source baseline')
     if platform.system() != 'Linux' or os.cpu_count() != 4:
         raise RuntimeError('The CP-SAT experiment requires a four-core Linux hosted runner')
     for key in ['SEED', 'PATH', 'PROPERTY', 'UNIT', 'CALIBRATION']:
@@ -293,7 +309,8 @@ def main() -> int:
                 'cpus': os.cpu_count(), 'platform': platform.platform(),
                 'node': subprocess.check_output(['node', '--version'], text=True).strip(),
                 'memory': Path('/proc/meminfo').read_text().splitlines()[:3],
-                'order': args.order,
+                'order': args.order, 'plan': args.plan,
+                'workers': [[asdict(s) for s in q] for q in workers],
                 'limits': ['Random peer histories retain fresh seeds and may vary.',
                            'RSS and child-process counts are sampled every second.',
                            'CPU includes background runner work.',
@@ -302,20 +319,29 @@ def main() -> int:
         raise RuntimeError('The benchmark must use the repository Node version')
     (args.output / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
     if args.preflight:
-        selected = WORKERS[0][0]
-        selected = Selection('decoder-selection-preflight', selected.file, 1,
-                             selected.total, selected.pattern +
-                             '2377: generated eager:initial:valid 1$')
+        if args.plan == 'finer':
+            selected = []
+            for queue in workers:
+                for s in queue:
+                    if not s.preflight_pattern:
+                        raise RuntimeError(f'Missing actual-unit preflight for {s.name}')
+                    selected.append(Selection(s.name + '-preflight', s.file, 1,
+                                              s.total, s.preflight_pattern))
+        else:
+            s = WORKERS[0][0]
+            selected = [Selection('decoder-selection-preflight', s.file, 1,
+                                  s.total, s.pattern +
+                                  '2377: generated eager:initial:valid 1$')]
         cleanup = Selection('receiver-cleanup-preflight',
                             'tests/opfs-fixture-cleanup.test.ts', 9, 9)
-        result = run_phase('serial', args.output / 'selection', ((selected, cleanup),))
+        result = run_phase('serial', args.output / 'selection', (tuple(selected) + (cleanup,),))
         return 0 if result['ok'] else 1
     order = ['serial', 'parallel'] if args.order == 'serial-first' else ['parallel', 'serial']
-    phases = [run_phase(mode, args.output / mode) for mode in order]
-    summary = compare(phases)
+    phases = [run_phase(mode, args.output / mode, workers) for mode in order]
+    summary = {**compare(phases, workers), 'plan': args.plan}
     (args.output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
     text = ('# Hosted browser concurrency experiment\n\n'
-            f'Order: `{args.order}`. Units per phase: {summary["units_per_phase"]}.\n\n'
+            f'Order: `{args.order}`. Plan: `{args.plan}`. Units per phase: {summary["units_per_phase"]}.\n\n'
             '| Serial seconds | Parallel seconds | Speedup | Worker slowdown | Peak sampled RSS |\n'
             '| ---: | ---: | ---: | --- | ---: |\n'
             f'| {summary["serial_seconds"]:.1f} | {summary["parallel_seconds"]:.1f} | '
