@@ -102,8 +102,16 @@ export function registerHydrationLifecycle(
       return history
     },
   }))
+  const rowLossHistory = hydrationLifecycleHistories.find(
+    (history) =>
+      history.resumeAt === `replacement-ready` && history.replacement !== 0,
+  )!
   oracleProperty({
     id: property,
+    owns: [
+      `src/trailbase.ts#trailBaseCollectionOptions`,
+      `../db-sqlite-persistence-core/src/persisted.ts#persistedCollectionOptions`,
+    ],
     law: {
       statement: `Cleanup retires old source authority: a late list or persisted-hydration continuation preserves the cleaned-up or replacement Collection, its durable rows, and its replacement reader.`,
       authority: `TrailBase tests/ORACLE.md cleanup law; glossary cleanup and sync run; shared persisted-startup complete eager-result law; SQLite guide Render after SQLite restore.`,
@@ -131,10 +139,13 @@ export function registerHydrationLifecycle(
     },
     check: (history, trace, expected) =>
       hydrationLifecycleVerdict(history, trace, expected.required),
+    // Bind the premise before recording. A bad clean run must fail directly,
+    // rather than be skipped while a search replays unrelated histories.
     calibrations: [
       {
         name: `late old work erases replacement rows`,
         law: `retired source authority`,
+        history: { fixed: JSON.stringify(rowLossHistory) },
         corrupt: (trace, history) =>
           history.resumeAt === `replacement-ready` && history.replacement !== 0
             ? trace.map((entry) => {
@@ -153,6 +164,8 @@ export function registerHydrationLifecycle(
       ...builds.map(({ state }) => ({
         name: `missing generated builder state ${state}`,
         law: `constructed builder reach`,
+        history: { constructed: `generated ${state}` },
+        difference: `generated construction omitted ${state}`,
         corrupt: (
           trace: ReadonlyArray<Observation>,
           history: HydrationLifecycleHistory,
