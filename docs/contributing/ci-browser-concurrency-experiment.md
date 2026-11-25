@@ -2,7 +2,7 @@
 
 The CP-SAT analysis of PR #2446 predicts completion below twenty minutes with two independent browser processes per adapter runner. That prediction needs a contention measurement on the actual four-core GitHub host.
 
-The experiment runs on `codex/ci-browser-concurrency-experiment`. Its workflow uses two runners. One measures serial then parallel execution. The other reverses that order to expose cache and phase-order effects. Each runner uses the repository's Node 22 version and locked dependencies. Source and tests must match `14351520d3933582268bda0ce42a260805859f8a`. Both timed modes include the same fixture cleanup repair described below.
+The experiment runs on `codex/ci-browser-concurrency-experiment`. Its workflow uses two runners. One measures serial then parallel execution. The other reverses that order to expose cache and phase-order effects. Each runner uses the repository's Node 22 version and locked dependencies. Source and tests must match `80ceaba64f8c58944f5c3799a1124d9619d2ea52`. Both timed modes include the same fixture cleanup repair described below.
 
 The two process queues are the first pair in the CP-SAT assignment:
 
@@ -27,3 +27,6 @@ The first VM attempt exposed a selector mismatch: the JSON reporter joins names 
 An initial concurrent trial exposed transient OPFS deletion failures after an awaited database close in the Query select-failure and Direct persisted-demand receivers. Their serial controls passed. The receivers now use the existing bounded post-close cleanup helper: retry only an actual `NoModificationAllowedError`, retain retry diagnostics, and propagate other errors or exhaustion. Source behavior and the shared product-law comparisons are unchanged. Failed phases remain invalid timing evidence.
 
 The missing test boundary was deterministic busy-handle injection for these two receivers. Both new Chromium cleanup checks failed against the original receivers. All nine cleanup checks pass after the repair; the eleven existing browser-fidelity controls also pass, including permanent busy failure and preservation of an earlier product mismatch. Command: `pnpm --filter @tanstack/browser-db-sqlite-persistence exec vitest run --config vitest.adapter-oracles.config.ts tests/opfs-fixture-cleanup.test.ts tests/query-rejected-write-cutoff-browser-fidelity.test.ts --maxWorkers=1`. These are fixture calibrations; they do not expand the product-law claim. The timed selections still contain 790 units per phase.
+
+
+A follow-up calibration found that recording native cleanup retries in Query's product trace made the unchanged determinism check reject variable teardown timing. Query now retains retry diagnostics in the browser log, as Direct does. The calibration injects a retry in one run, performs a second run without injection, and requires the complete received Query results to agree. It fails on the contaminated recorder and passes after the separation. The experiment preflight now runs all nine receiver cleanup checks, in addition to the complete decoder construction. Failed or interrupted pilot trials remain excluded from speedup evidence.

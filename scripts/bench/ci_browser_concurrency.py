@@ -21,7 +21,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / 'packages/browser-db-sqlite-persistence'
-BASE = '14351520d3933582268bda0ce42a260805859f8a'
+BASE = '80ceaba64f8c58944f5c3799a1124d9619d2ea52'
 
 
 @dataclass(frozen=True)
@@ -302,7 +302,9 @@ def main() -> int:
         selected = Selection('decoder-selection-preflight', selected.file, 1,
                              selected.total, selected.pattern +
                              '2377: generated eager:initial:valid 1$')
-        result = run_phase('serial', args.output / 'selection', ((selected,),))
+        cleanup = Selection('receiver-cleanup-preflight',
+                            'tests/opfs-fixture-cleanup.test.ts', 9, 9)
+        result = run_phase('serial', args.output / 'selection', ((selected, cleanup),))
         return 0 if result['ok'] else 1
     order = ['serial', 'parallel'] if args.order == 'serial-first' else ['parallel', 'serial']
     phases = [run_phase(mode, args.output / mode) for mode in order]
