@@ -100,6 +100,13 @@ official guarded replay of seed `2377`, path `0:0:0:0` and the first constructed
 unit passes one selected unit (29 skipped), with one witnessed execution and
 three completed runs for that exact property, seed and path.
 
+CI subsequently rejected the new per-input CDP teardown method name because it
+collided with a private-member cache key. The observer now shares the file's
+browser lifetime, and browser closure releases that observer after the framework
+retains the comparisons. This removes redundant per-input observer allocation
+and teardown. The mangle cache itself remains unchanged; `check:mangle` passes
+with 434 names, and full browser-package TypeScript passes.
+
 ## Oracle review and grammar controls
 
 The model is a list of zeros, one per completed history. It does not duplicate

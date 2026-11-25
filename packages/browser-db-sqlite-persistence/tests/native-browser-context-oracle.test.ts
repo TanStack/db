@@ -8,19 +8,23 @@
  */
 import { fc } from '@fast-check/vitest'
 import { afterAll, beforeAll } from 'vitest'
-import { retainOracleCleanupObservation } from '../../db/tests/oracle-cleanup'
 import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
 import { nativeDecodeViolations } from '../../powersync-db-collection/tests/batch-decode-oracle'
 import { startAdapterChromium } from './adapter-chromium-host'
+import type { CDPSession } from '@playwright/test'
 import type { Observation } from '../../db/tests/oracle-property'
 import type { NativeDecodeHistory } from '../../powersync-db-collection/tests/batch-decode-oracle'
 
 let host: Awaited<ReturnType<typeof startAdapterChromium>> | undefined
+// One observer belongs to the file's browser. Closing that browser also ends
+// the observer, after the framework retains each history's comparison result.
+let observer: CDPSession | undefined
 beforeAll(async () => {
   host = await startAdapterChromium({
     entry: `/packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.html`,
     ready: `runNativePowerSyncBatchDecode`,
   })
+  observer = await host.page.context().browser()!.newBrowserCDPSession()
 }, 120_000)
 afterAll(async () => host?.close(), 120_000)
 let sequence = 0
@@ -62,51 +66,47 @@ oracleProperty({
   model: (h) => Array.from({ length: h.histories }, () => 0),
   driver: async (h, observe) => {
     const active = host
-    if (!active) throw new Error(`Native context receiving host did not start`)
-    const browser = active.page.context().browser()!
-    const cdp = await browser.newBrowserCDPSession()
-    const closed = await retainOracleCleanupObservation(async () => {
-      for (let index = 0; index < h.histories; index++) {
-        const input: NativeDecodeHistory = {
-          mode: `eager`,
-          phase: `initial`,
-          outcome: `valid`,
-          count: h.rows,
-          batchSize: h.batchSize,
-          refusalIndex: 0,
-          transformKeys: true,
-          overlap: false,
-          coordinate: h.coordinate,
-          epoch: 3000,
-        }
-        const result = await active.captureFreshHistory((page) =>
-          page.evaluate(
-            ({ input: history, id }) =>
-              window.runNativePowerSyncBatchDecode(history, id),
-            { input, id: `context-resource-${sequence++}` },
-          ),
-        )
-        const { targetInfos } = await cdp.send(`Target.getTargets`)
-        const remaining = targetInfos.filter((target) =>
-          [`worker`, `shared_worker`].includes(target.type),
-        ).length
-        const productErrors = nativeDecodeViolations(input, result)
-        observe(`history`, {
-          remaining,
-          productErrors,
-          cleanupErrors: result.cleanupErrors ?? [],
-          browserErrors: result.browserErrors,
-        })
-        // Actual SQLite page delivery supplies reach; an SDK update that closes
-        // its own worker is allowed and does not invalidate this fixture law.
-        if (result.sourceBatches.some((batch) => batch.length > 0)) {
-          observe(`reach`, `native-history`)
-          if (index > 0) observe(`reach`, `repeated-history`)
-        }
+    const cdp = observer
+    if (!active || !cdp)
+      throw new Error(`Native context receiving host did not start`)
+    for (let index = 0; index < h.histories; index++) {
+      const input: NativeDecodeHistory = {
+        mode: `eager`,
+        phase: `initial`,
+        outcome: `valid`,
+        count: h.rows,
+        batchSize: h.batchSize,
+        refusalIndex: 0,
+        transformKeys: true,
+        overlap: false,
+        coordinate: h.coordinate,
+        epoch: 3000,
       }
-      return { cleanupErrors: [] as ReadonlyArray<string> }
-    }, [() => cdp.detach()])
-    observe(`driver cleanup`, closed.cleanupErrors)
+      const result = await active.captureFreshHistory((page) =>
+        page.evaluate(
+          ({ input: history, id }) =>
+            window.runNativePowerSyncBatchDecode(history, id),
+          { input, id: `context-resource-${sequence++}` },
+        ),
+      )
+      const { targetInfos } = await cdp.send(`Target.getTargets`)
+      const remaining = targetInfos.filter((target) =>
+        [`worker`, `shared_worker`].includes(target.type),
+      ).length
+      const productErrors = nativeDecodeViolations(input, result)
+      observe(`history`, {
+        remaining,
+        productErrors,
+        cleanupErrors: result.cleanupErrors ?? [],
+        browserErrors: result.browserErrors,
+      })
+      // Actual SQLite page delivery supplies reach; an SDK update that closes
+      // its own worker is allowed and does not invalidate this fixture law.
+      if (result.sourceBatches.some((batch) => batch.length > 0)) {
+        observe(`reach`, `native-history`)
+        if (index > 0) observe(`reach`, `repeated-history`)
+      }
+    }
   },
   check: (_h, trace, expected) => {
     const completed = trace
@@ -117,9 +117,6 @@ oracleProperty({
       cleanupErrors: Array<string>
       browserErrors: Array<string>
     }>
-    const driverCleanup = (trace.find(
-      (entry) => entry.checkpoint === `driver cleanup`,
-    )?.value ?? []) as ReadonlyArray<string>
     if (
       completed.length !== expected.length ||
       completed.some(
@@ -135,15 +132,9 @@ oracleProperty({
         `native history retained resources or failed`,
         `history resources`,
         {
-          actual: { completed, driverCleanup },
+          actual: completed,
           expected,
         },
-      )
-    if (driverCleanup.length)
-      return violation(
-        `driver cleanup`,
-        driverCleanup.join(`; `),
-        `history resources`,
       )
     for (const state of states)
       if (
