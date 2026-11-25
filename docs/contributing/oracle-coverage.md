@@ -9261,3 +9261,25 @@ SDK probes with startup-read and durable-write holds did not reach that cut;
 the original reviewer also could not supply a reproduction. A valid schedule
 must establish both premises before the later stream error. This is an open
 evidence question, not a skipped history or a product limitation.
+
+
+## Multi-tab observed-work checkpoint (2026-11-25)
+
+The Browser multi-tab Electric receiver now waits for its observed SQL and
+coordinator calls before its existing quiet-task checkpoint. A retired leader
+route can produce ten silent seconds before a valid retry finishes; silence
+alone had produced a false readiness mismatch. The original CI history remains
+an input to the same product model and public row/status comparison. Existing
+80-run campaigns, two known expected failures and test deadlines remain.
+
+The independent instrument owner is
+[`host-quiescence-oracle.test.ts`](../../packages/browser-db-sqlite-persistence/tests/host-quiescence-oracle.test.ts).
+It judges held original calls, fulfilled/rejected outcomes, and held follow-up
+calls. Five builders enforce both states on five bases per campaign. Original
+quiet and wait-once mutants fail; an omitted product readiness call still fails
+the receiving comparison. The
+[source-specific review](oracle-reviews/2026-11-25-multi-tab-quiescence.md)
+records exact counts, commands, the receiving replay and type-collector setup.
+This proves the observed-work premise on the stated paths. Unobserved work,
+unbounded chains and real browser-process completion remain outside this
+instrument claim; the multi-tab owner's existing peer-notice limits remain.
