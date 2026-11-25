@@ -21,7 +21,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / 'packages/browser-db-sqlite-persistence'
-BASE = '8be91cd7647647438552edacb694f4a171692632'
+BASE = '14351520d3933582268bda0ce42a260805859f8a'
 
 
 @dataclass(frozen=True)
