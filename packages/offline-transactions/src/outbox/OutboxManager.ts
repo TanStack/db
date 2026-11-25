@@ -264,17 +264,37 @@ export class OutboxManager {
     try {
       const keys = await this.storage.keys()
       if (decisions) {
+        // Only a decision whose row is stored is read; one that cannot be
+        // read still blocks its row. One whose row is gone is deleted
+        // unread, whether or not this tab can decode that row.
+        const stored = new Set(
+          keys
+            .filter((key) => key.startsWith(this.keyPrefix))
+            .map((key) => key.slice(this.keyPrefix.length)),
+        )
         for (const key of keys) {
           if (!key.startsWith(this.decisionPrefix)) continue
-          const data = await this.storage.get(key)
-          if (data === null) continue
-          decisions.set(
-            decodeURIComponent(
-              key.slice(this.decisionPrefix.length).split(`:`)[0]!,
-            ),
-            (JSON.parse(data) as { error: { name: string; message: string } })
-              .error,
+          const id = decodeURIComponent(
+            key.slice(this.decisionPrefix.length).split(`:`)[0]!,
           )
+          if (!stored.has(id)) {
+            this.storage.delete(key).catch(() => {})
+            continue
+          }
+          let error = {
+            name: `NonRetriableError`,
+            message: `Transaction rejected by a recorded decision`,
+          }
+          try {
+            const data = await this.storage.get(key)
+            if (data === null) continue
+            error = (
+              JSON.parse(data) as { error: { name: string; message: string } }
+            ).error
+          } catch {
+            // The unread decision still rejects its row.
+          }
+          decisions.set(id, error)
         }
       }
       const transactionKeys = keys.filter((key) =>

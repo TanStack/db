@@ -225,6 +225,20 @@ const reachStates = [
   // A call that finished before its removal's deletion acknowledged left no
   // running marker behind.
   `running-marker-retired`,
+  // A committed decision whose row one leader could not decode survived
+  // that leader's replay.
+  `decision-kept-for-unreadable-row`,
+  // An added message during a new leader's replay waited for it and sent
+  // nothing decided.
+  `admission-waited-for-replay`,
+  // A follower that lost leadership during its replay left its pending
+  // removal with the current leader.
+  `pending-removal-left-to-leader`,
+  // A default-mode removal whose deletion failed reported it and left the
+  // write to send.
+  `default-removal-failure-reported`,
+  // An unreadable decision with no row did not stop a replay.
+  `orphan-decision-ignored`,
   // Removing a write whose call succeeded but whose row stayed completed it.
   `removed-after-success-completed`,
   // A leader's own write removed while its call ran stayed pending across a
@@ -297,6 +311,11 @@ type SharedActionType =
   | `adopted-decision-second-handover`
   | `replaced-twice-during-call`
   | `running-removal-completes-first`
+  | `decision-row-undecodable`
+  | `added-during-replay`
+  | `removal-pending-replay-lost`
+  | `default-removal-delete-fails`
+  | `unreadable-orphan-decision`
   | `remove-own-running`
   | `remove-own-rejected-running`
   | `replace-default-with-durable`
@@ -372,6 +391,11 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   { weight: 1, arbitrary: sharedAction(`adopted-decision-second-handover`) },
   { weight: 1, arbitrary: sharedAction(`replaced-twice-during-call`) },
   { weight: 1, arbitrary: sharedAction(`running-removal-completes-first`) },
+  { weight: 1, arbitrary: sharedAction(`decision-row-undecodable`) },
+  { weight: 1, arbitrary: sharedAction(`added-during-replay`) },
+  { weight: 1, arbitrary: sharedAction(`removal-pending-replay-lost`) },
+  { weight: 1, arbitrary: sharedAction(`default-removal-delete-fails`) },
+  { weight: 1, arbitrary: sharedAction(`unreadable-orphan-decision`) },
   { weight: 1, arbitrary: sharedAction(`remove-own-running`) },
   { weight: 1, arbitrary: sharedAction(`remove-own-rejected-running`) },
   { weight: 1, arbitrary: sharedAction(`replace-default-with-durable`) },
@@ -448,6 +472,11 @@ const spliced = (
           action.type !== `adopted-decision-second-handover` &&
           action.type !== `replaced-twice-during-call` &&
           action.type !== `running-removal-completes-first` &&
+          action.type !== `decision-row-undecodable` &&
+          action.type !== `added-during-replay` &&
+          action.type !== `removal-pending-replay-lost` &&
+          action.type !== `default-removal-delete-fails` &&
+          action.type !== `unreadable-orphan-decision` &&
           action.type !== `remove-own-running` &&
           action.type !== `remove-own-rejected-running` &&
           action.type !== `replace-default-with-durable` &&
@@ -622,6 +651,10 @@ class ReadFailingStorage extends FakeStorageAdapter {
     | undefined
   holdNextDecision(landFirst = false): void {
     this.heldDecision = { landFirst }
+  }
+  // Whether a held decision write reached the gate.
+  decisionHeld(): boolean {
+    return this.heldDecision !== undefined && `release` in this.heldDecision
   }
   releaseDecision(fail = false): void {
     if (this.heldDecision && `release` in this.heldDecision)
@@ -2367,6 +2400,11 @@ async function runHistory(
             done = true
           })
           await settle()
+          expect(storage.decisionHeld(), `the leader's decision stalls`).toBe(
+            true,
+          )
+          expect(done, `the removal waits for that decision`).toBe(false)
+          expect(write.outcome, `${write.id} still pending`).toBe(undefined)
           // The follower misses the next leader's message, so only the reply
           // to its request can send it there.
           channels.state.loseLeader = true
@@ -2379,6 +2417,10 @@ async function runHistory(
           await original.requestLeadership()
           await settle()
           expect(done, `the removal finished under the next leader`).toBe(true)
+          expect(
+            await storage.get(`tx:${write.transactionId}`),
+            `${write.id} removed`,
+          ).toBe(null)
           write.removed = true
           write.deliverable = false
           expect(write.outcome, `${write.id} fails on its removal`).toBe(
@@ -2565,6 +2607,201 @@ async function runHistory(
           await settle()
           expect(write.outcome, `${write.id} completes`).toBe(`completed`)
           reach(`running-marker-retired`)
+          break
+        }
+        case `decision-row-undecodable`: {
+          // A committed removal's deletion fails; the next leader cannot
+          // decode the row, and the leader after it can.
+          const leader = leaderIndex()
+          const writer = tabs.findIndex((tab, index) => tab && index !== leader)
+          if (
+            !durable ||
+            leader < 0 ||
+            writer < 0 ||
+            tabs.filter(Boolean).length < 3 ||
+            !(await quiet())
+          )
+            break
+          online.set(false)
+          const write = await doWrite(writer, `write`)
+          if (!write) break
+          storage.failDeletes = 1
+          await tabs[leader]!.env.executor.removeFromOutbox(
+            write.transactionId!,
+          )
+          write.removed = true
+          write.deliverable = false
+          const key = `tx:${write.transactionId}`
+          const saved = await storage.get(key)
+          if (saved === null) break
+          await storage.set(key, `{not json`)
+          const original = tabs[leader]!.election
+          original.releaseLeadership()
+          await settle()
+          await original.requestLeadership()
+          await storage.set(key, saved)
+          const second = election.holder!
+          second.releaseLeadership()
+          await settle()
+          await second.requestLeadership()
+          online.set(true)
+          await settle()
+          expect(calls, `${write.id} never sent`).not.toContain(write.id)
+          expect(write.outcome, `${write.id} fails on its removal`).toBe(
+            `failed`,
+          )
+          reach(`decision-kept-for-unreadable-row`)
+          break
+        }
+        case `added-during-replay`: {
+          // A committed removal's deletion fails; the next leader's replay
+          // stalls while an added message for the row arrives online.
+          const leader = leaderIndex()
+          const writer = tabs.findIndex((tab, index) => tab && index !== leader)
+          if (
+            !durable ||
+            leader < 0 ||
+            writer < 0 ||
+            tabs.filter(Boolean).length < 3 ||
+            !(await quiet())
+          )
+            break
+          online.set(false)
+          const write = await doWrite(writer, `write`)
+          if (!write) break
+          storage.failDeletes = 1
+          await tabs[leader]!.env.executor.removeFromOutbox(
+            write.transactionId!,
+          )
+          write.removed = true
+          write.deliverable = false
+          storage.holdNextRead()
+          const original = tabs[leader]!.election
+          original.releaseLeadership()
+          await settle()
+          online.set(true)
+          channels.inject({ type: `added`, id: write.transactionId })
+          await settle()
+          expect(calls, `${write.id} not admitted`).not.toContain(write.id)
+          storage.releaseRead()
+          await settle()
+          await original.requestLeadership()
+          await settle()
+          expect(calls, `${write.id} never sent`).not.toContain(write.id)
+          reach(`admission-waited-for-replay`)
+          break
+        }
+        case `removal-pending-replay-lost`: {
+          // The next leader-to-be asks to remove a follower's write and the
+          // request is lost. Its replay stalls when it leads, it loses
+          // leadership, and the tab after it sends the write.
+          const leader = leaderIndex()
+          const next = election.queue[0]
+          const remover = tabs.findIndex((tab) => tab?.election === next)
+          const writer = tabs.findIndex(
+            (tab, index) => tab && index !== leader && index !== remover,
+          )
+          if (
+            !durable ||
+            leader < 0 ||
+            !next ||
+            remover < 0 ||
+            writer < 0 ||
+            !(await quiet())
+          )
+            break
+          online.set(false)
+          const write = await doWrite(writer, `write`)
+          if (!write) break
+          channels.state.loseRemoval = true
+          let done = false
+          void tabs[remover]!.env.executor.removeFromOutbox(
+            write.transactionId!,
+          ).then(() => {
+            done = true
+          })
+          await settle()
+          channels.state.loseRemoval = false
+          storage.holdNextRead()
+          const original = tabs[leader]!.election
+          original.releaseLeadership()
+          await settle()
+          await original.requestLeadership()
+          let release!: () => void
+          callGate = new Promise<void>((resolve) => {
+            release = resolve
+          })
+          online.set(true)
+          // The remover misses the next leader's message, so only its own
+          // replay's continuation can act on the request.
+          channels.state.loseLeader = true
+          next.releaseLeadership()
+          await settle()
+          channels.state.loseLeader = false
+          expect(calls, `${write.id} sent by the tab after`).toContain(write.id)
+          storage.releaseRead()
+          await settle()
+          expect(write.outcome, `${write.id} waits for that send`).toBe(
+            undefined,
+          )
+          release()
+          await settle()
+          await next.requestLeadership()
+          await settle()
+          expect(write.outcome, `${write.id} completes`).toBe(`completed`)
+          expect(done, `the removal finished`).toBe(true)
+          reach(`pending-removal-left-to-leader`)
+          break
+        }
+        case `default-removal-delete-fails`: {
+          // In the default mode the leader removes its own queued write and
+          // the deletion fails.
+          const leader = leaderIndex()
+          if (durable || leader < 0 || !(await quiet())) break
+          online.set(false)
+          const write = await doWrite(leader, `write`)
+          if (!write) break
+          storage.failDeletes = 1
+          await expect(
+            tabs[leader]!.env.executor.removeFromOutbox(write.transactionId!),
+            `the failed removal is reported`,
+          ).rejects.toThrow(`storage delete failed`)
+          expect(write.outcome, `${write.id} still pending`).toBe(undefined)
+          online.set(true)
+          await settle()
+          expect(calls, `${write.id} still sent`).toContain(write.id)
+          reach(`default-removal-failure-reported`)
+          break
+        }
+        case `unreadable-orphan-decision`: {
+          // A decision with no row cannot be read; a follower's write is
+          // queued, and another tab leads and replays.
+          const leader = leaderIndex()
+          const writer = tabs.findIndex((tab, index) => tab && index !== leader)
+          if (
+            !durable ||
+            leader < 0 ||
+            writer < 0 ||
+            tabs.filter(Boolean).length < 2 ||
+            !(await quiet())
+          )
+            break
+          online.set(false)
+          const write = await doWrite(writer, `write`)
+          if (!write) break
+          await storage.set(`decision:orphan:unread`, `{not json`)
+          const original = tabs[leader]!.election
+          original.releaseLeadership()
+          await settle()
+          await original.requestLeadership()
+          online.set(true)
+          await settle()
+          expect(calls, `${write.id} sent after the replay`).toContain(write.id)
+          expect(
+            await storage.get(`decision:orphan:unread`),
+            `the orphan decision is gone`,
+          ).toBe(null)
+          reach(`orphan-decision-ignored`)
           break
         }
         case `remove-deletion-pending`: {
@@ -3454,6 +3691,40 @@ oracleProperty({
         enters: [`running-marker-retired`],
         build: (generated: History): History =>
           spliced(generated, [{ type: `running-removal-completes-first` }]),
+      },
+      {
+        name: `a decision outlives a leader that cannot decode its row`,
+        enters: [`decision-kept-for-unreadable-row`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `decision-row-undecodable` }]),
+      },
+      {
+        name: `an added message during a replay waits for it`,
+        enters: [`admission-waited-for-replay`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `added-during-replay` }]),
+      },
+      {
+        name: `a removal stays with the leader after a lost replay`,
+        enters: [`pending-removal-left-to-leader`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `removal-pending-replay-lost` }]),
+      },
+      {
+        name: `a default-mode removal reports a failed deletion`,
+        enters: [`default-removal-failure-reported`],
+        build: (generated: History): History =>
+          spliced(
+            generated,
+            [{ type: `default-removal-delete-fails` }],
+            `online`,
+          ),
+      },
+      {
+        name: `an unreadable orphan decision does not stop a replay`,
+        enters: [`orphan-decision-ignored`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `unreadable-orphan-decision` }]),
       },
       {
         name: `removing a write whose call succeeded completes it`,

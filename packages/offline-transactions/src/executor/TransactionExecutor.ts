@@ -33,7 +33,13 @@ export class TransactionExecutor {
   private readonly excluding = new Set<string>()
   // Excluded writes whose cleanup failed, with their rejection. Retried on a
   // timer and on connectivity, outside the queue, while this tab leads.
-  private readonly failedCleanups = new Map<string, Error>()
+  // Each with whether its decision is already persisted.
+  private readonly failedCleanups = new Map<
+    string,
+    { error: Error; committed: boolean }
+  >()
+  // The replay of the current term, which admissions wait for.
+  private replay: Promise<void> | null = null
   private cleanupTimer: ReturnType<typeof setTimeout> | null = null
   private cleanupAttempts = 0
   private cleaning = false
@@ -427,11 +433,25 @@ export class TransactionExecutor {
   }
 
   async loadPendingTransactions(): Promise<void> {
+    // An admission waits for this replay, which settles decided rows and
+    // fills `excluding` before any of them can be scheduled.
+    let finish!: () => void
+    const replay = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    this.replay = replay
+    try {
+      await this.loadPending()
+    } finally {
+      if (this.replay === replay) this.replay = null
+      finish()
+    }
+  }
+
+  private async loadPending(): Promise<void> {
     let removedIds: Array<string> = []
     // Rows a former leader decided to reject: settled here, never sent.
     let decided: Array<OfflineTransaction> = []
-    // Decisions whose row is gone.
-    let orphaned: Array<string> = []
     const term = this.offlineExecutor.leadershipTerm
     // Decisions exist only where outcomes are recorded.
     const decisions = new Map<string, { name: string; message: string }>()
@@ -447,9 +467,6 @@ export class TransactionExecutor {
             !transaction.outboxPhase &&
             decisions.has(transaction.id) &&
             !this.scheduler.isRunning(transaction.id),
-        )
-        orphaned = [...decisions.keys()].filter(
-          (id) => !transactions.some((transaction) => transaction.id === id),
         )
         const providerPending = transactions.filter(
           (transaction) =>
@@ -501,8 +518,6 @@ export class TransactionExecutor {
       this.offlineExecutor.recordsOutcomes ? decisions : undefined,
     )
 
-    for (const id of orphaned)
-      void this.outbox.removeDecisions(id).catch(() => {})
     const cleanUp = async (id: string, error: Error, committed: boolean) => {
       if (await this.cleanUpExcluded(id, error, term, committed)) return
       // Retried only while this decision stands: a later term's replay may
@@ -513,7 +528,7 @@ export class TransactionExecutor {
         !this.excluding.has(id)
       )
         return
-      this.failedCleanups.set(id, error)
+      this.failedCleanups.set(id, { error, committed })
       this.scheduleCleanupRetry()
     }
     // A former leader's decision settles without the network, and startup
@@ -605,10 +620,10 @@ export class TransactionExecutor {
     this.cleaning = true
     const term = this.offlineExecutor.leadershipTerm
     try {
-      for (const [id, error] of [...this.failedCleanups]) {
+      for (const [id, { error, committed }] of [...this.failedCleanups]) {
         // A change of leadership drops the rest; the next replay owns them.
         if (!this.failedCleanups.has(id)) continue
-        if (!(await this.cleanUpExcluded(id, error, term))) continue
+        if (!(await this.cleanUpExcluded(id, error, term, committed))) continue
         // Only the term that made the attempt may clear its entry.
         if (term === this.offlineExecutor.leadershipTerm)
           this.failedCleanups.delete(id)
@@ -630,7 +645,7 @@ export class TransactionExecutor {
   retryDecided(id: string, error: Error): void {
     if (!this.offlineExecutor.isOfflineEnabled) return
     this.excluding.add(id)
-    this.failedCleanups.set(id, error)
+    this.failedCleanups.set(id, { error, committed: true })
     this.scheduleCleanupRetry()
   }
 
@@ -649,6 +664,7 @@ export class TransactionExecutor {
     // A read that the transaction's removal overtakes returns null. One that
     // spans a change of leadership is dropped: another leader may have sent
     // the write, and this term's outbox load already has it if it remains.
+    await this.replay
     const term = this.offlineExecutor.leadershipTerm
     const transaction = await this.outbox.getCurrent(id)
     // A row this leader decided to reject, or loaded with a decision, is in

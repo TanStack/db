@@ -446,6 +446,7 @@ export class OfflineExecutor {
       return
     }
 
+    const term = this.term
     // Startup must observe a failed read instead of reporting an empty outbox.
     await this.executor.loadPendingTransactions()
     // Outcomes no writer read within the retention window go.
@@ -463,11 +464,18 @@ export class OfflineExecutor {
       } satisfies OutboxMessage)
     }
     this.reconcileFollowerWrites()
-    // Removals this tab asked a former leader for are now its own to make.
-    for (const [request, removal] of [...this.removals]) {
-      this.removals.delete(request)
-      this.removeOrForward(removal.ids).then(removal.resolve, removal.reject)
-    }
+    // Removals this tab asked a former leader for are now its own to make,
+    // unless it stopped leading during the replay; they then stay with the
+    // current leader.
+     
+    if (this.isOfflineEnabled && term === this.term)
+      for (const [request, removal] of [...this.removals]) {
+        this.removals.delete(request)
+        this.removeOrForward(removal.ids).then(removal.resolve, removal.reject)
+      }
+    else
+      for (const [request, removal] of this.removals)
+        this.postRemoval(request, removal.ids)
 
     // Replay completion is separate from initialization and durable admission.
     this.executor.executeAll().catch((error) => {
@@ -602,6 +610,9 @@ export class OfflineExecutor {
    * transaction and waits for it; an observer does not.
    */
   ownsWrite(id: string): boolean {
+    // One it settled as the writer stays its own, so a later cleanup leaves
+    // no record for it.
+    if (this.ownSettled.has(id)) return true
     return this.settlementOwners(id).some(
       (owner) => owner.pendingTransactionPromises.get(id)?.saved !== undefined,
     )
@@ -849,6 +860,16 @@ export class OfflineExecutor {
     }
   }
 
+  // Ids this executor settled as their writer, oldest first: a record a
+  // later leader writes for one again is still its own to remove.
+  private readonly ownSettled = new Set<string>()
+
+  private rememberOwnSettled(transactionId: string): void {
+    this.ownSettled.add(transactionId)
+    if (this.ownSettled.size > SETTLED_TRANSACTIONS_REMEMBERED)
+      this.ownSettled.delete(this.ownSettled.values().next().value!)
+  }
+
   private rememberSettled(transactionId: string): void {
     this.settledTransactions.add(transactionId)
     if (this.settledTransactions.size > SETTLED_TRANSACTIONS_REMEMBERED)
@@ -933,6 +954,7 @@ export class OfflineExecutor {
     for (const owner of owners) {
       owner.rememberSettled(transactionId)
       const deferred = owner.pendingTransactionPromises.get(transactionId)
+      if (deferred?.saved !== undefined) owner.rememberOwnSettled(transactionId)
       owner.pendingTransactionPromises.delete(transactionId)
       if (error) deferred?.reject(error)
       else deferred?.resolve(result)
@@ -1147,9 +1169,11 @@ export class OfflineExecutor {
             yielded.push(id)
             return
           }
-          committed = true
+          // Only a persisted decision commits a removal; without one, a failed
+          // deletion is reported and the write stays eligible.
+          committed = decision !== undefined
           // No admission runs it while its deletion is pending.
-          this.executor!.exclude(id)
+          if (committed) this.executor!.exclude(id)
           if (records(id)) await outbox.recordRejection(id, error)
           await outbox.remove(id)
           if (decision !== undefined)
