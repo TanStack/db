@@ -31,6 +31,35 @@ const receivers = [
     databaseName: `ps-query-direct-ownership.sqlite`,
     args: [directOwnershipHistories[0]!, `cleanup-calibration`],
   },
+  {
+    name: `Query select failures`,
+    entry: `query-cross-adapter-receiving.opfs.html`,
+    ready: `runQuerySelectFailures`,
+    databaseName: `query-select-0.sqlite`,
+    args: [
+      {
+        persisted: true,
+        index: 28,
+        failureStage: `select`,
+        fetches: [
+          { subset: 1, fails: `shared` },
+          { subset: 1, fails: `fresh` },
+          { subset: 2, fails: `fresh` },
+          { subset: 1, fails: `shared` },
+        ],
+      },
+    ],
+  },
+  {
+    name: `Direct persisted demand`,
+    entry: `powersync-direct-persisted-demand.opfs.html`,
+    ready: `runDirectPersistedDemand`,
+    databaseName: `ps-direct-demand-0.sqlite`,
+    args: [
+      { first: `never`, second: `held`, waitMs: 0 },
+      `cleanup-calibration`,
+    ],
+  },
   ...([`rxdb`, `powersync`] as const).map((adapter) => ({
     name: `${adapter} baseline lifecycle`,
     entry: `persisted-baseline-lifecycle.html`,
@@ -92,6 +121,8 @@ it.each(receivers)(
       expect(result.injected).toBe(1)
       expect(result.first).not.toHaveProperty(`failure`)
       expect(result.second).not.toHaveProperty(`failure`)
+      expect(result.first).not.toHaveProperty(`cleanupErrors.0`)
+      expect(result.second).not.toHaveProperty(`cleanupErrors.0`)
       expect(host.errors).toEqual([])
     }, [() => host.close()])
   },

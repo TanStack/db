@@ -8,6 +8,7 @@ import {
   openBrowserWASQLiteOPFSDatabase,
 } from '../src'
 import { removeStartupOPFSArtifacts } from './persisted-startup-opfs-cleanup'
+import { removeClosedArtifacts } from './query-rejected-write-cutoff-cleanup'
 import type { DirectDemandHistory } from '../../powersync-direct-collection/tests/persisted-demand-history-oracle'
 
 let sequence = 0
@@ -26,7 +27,13 @@ async function runDirectPersistedDemand(
           close: () => database.close?.(),
         }
       }),
-    [() => removeStartupOPFSArtifacts(databaseName)],
+    [
+      () =>
+        removeClosedArtifacts(
+          () => removeStartupOPFSArtifacts(databaseName),
+          (cut, value) => console.info(`direct-demand.opfs ${cut}`, value),
+        ),
+    ],
   )
 }
 declare global {
