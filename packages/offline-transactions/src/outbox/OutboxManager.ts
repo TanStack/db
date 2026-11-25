@@ -202,21 +202,40 @@ export class OutboxManager {
 
   /**
    * Records a decision to reject a saved write, beside its row, which it
-   * never rewrites. A replay settles a row that has one instead of sending
-   * it; a decision whose row is gone means nothing.
+   * never rewrites; returns its token. A replay settles a row that has any
+   * decision instead of sending it; a decision whose row is gone means
+   * nothing. Each recorder has its own key, so one that withdraws its
+   * decision leaves any other tab's, such as a successor's adoption.
    */
-  async recordDecision(id: string, error: Error): Promise<void> {
+  async recordDecision(id: string, error: Error): Promise<string> {
+    const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
     await this.storage.set(
-      `${this.decisionPrefix}${encodeURIComponent(id)}`,
+      `${this.decisionKeyPrefix(id)}${token}`,
       JSON.stringify({
         error: { name: error.name, message: error.message },
         at: Date.now(),
       }),
     )
+    return token
   }
 
-  async removeDecision(id: string): Promise<void> {
-    await this.storage.delete(`${this.decisionPrefix}${encodeURIComponent(id)}`)
+  /** Withdraws one recorder's decision. */
+  async removeDecision(id: string, token: string): Promise<void> {
+    await this.storage.delete(`${this.decisionKeyPrefix(id)}${token}`)
+  }
+
+  /** Removes every decision for a write. */
+  async removeDecisions(id: string): Promise<void> {
+    const prefix = this.decisionKeyPrefix(id)
+    await Promise.all(
+      (await this.storage.keys())
+        .filter((key) => key.startsWith(prefix))
+        .map((key) => this.storage.delete(key)),
+    )
+  }
+
+  private decisionKeyPrefix(id: string): string {
+    return `${this.decisionPrefix}${encodeURIComponent(id)}:`
   }
 
   /** Whether a row is saved, without decoding it. */
@@ -250,7 +269,9 @@ export class OutboxManager {
           const data = await this.storage.get(key)
           if (data === null) continue
           decisions.set(
-            decodeURIComponent(key.slice(this.decisionPrefix.length)),
+            decodeURIComponent(
+              key.slice(this.decisionPrefix.length).split(`:`)[0]!,
+            ),
             (JSON.parse(data) as { error: { name: string; message: string } })
               .error,
           )

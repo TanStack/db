@@ -213,6 +213,18 @@ const reachStates = [
   // A follower's removal that the leader yielded was asked again of the
   // next leader, which made it.
   `follower-removal-asked-again`,
+  // An added message while a committed removal's deletion was pending sent
+  // nothing.
+  `committed-removal-not-admitted`,
+  // A decision a successor adopted survived its first recorder withdrawing
+  // its own, through a second handover.
+  `adopted-decision-survived`,
+  // A write whose call an intermediate replacement issued stayed pending at
+  // a later replacement, then took the server's outcome.
+  `issued-call-across-replacements`,
+  // A call that finished before its removal's deletion acknowledged left no
+  // running marker behind.
+  `running-marker-retired`,
   // Removing a write whose call succeeded but whose row stayed completed it.
   `removed-after-success-completed`,
   // A leader's own write removed while its call ran stayed pending across a
@@ -281,6 +293,10 @@ type SharedActionType =
   | `removal-mark-held-offline`
   | `remove-deletion-pending`
   | `forwarded-removal-yields`
+  | `added-during-committed-removal`
+  | `adopted-decision-second-handover`
+  | `replaced-twice-during-call`
+  | `running-removal-completes-first`
   | `remove-own-running`
   | `remove-own-rejected-running`
   | `replace-default-with-durable`
@@ -352,6 +368,10 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   { weight: 1, arbitrary: sharedAction(`removal-mark-held-offline`) },
   { weight: 1, arbitrary: sharedAction(`remove-deletion-pending`) },
   { weight: 1, arbitrary: sharedAction(`forwarded-removal-yields`) },
+  { weight: 1, arbitrary: sharedAction(`added-during-committed-removal`) },
+  { weight: 1, arbitrary: sharedAction(`adopted-decision-second-handover`) },
+  { weight: 1, arbitrary: sharedAction(`replaced-twice-during-call`) },
+  { weight: 1, arbitrary: sharedAction(`running-removal-completes-first`) },
   { weight: 1, arbitrary: sharedAction(`remove-own-running`) },
   { weight: 1, arbitrary: sharedAction(`remove-own-rejected-running`) },
   { weight: 1, arbitrary: sharedAction(`replace-default-with-durable`) },
@@ -424,6 +444,10 @@ const spliced = (
           action.type !== `removal-mark-held-offline` &&
           action.type !== `remove-deletion-pending` &&
           action.type !== `forwarded-removal-yields` &&
+          action.type !== `added-during-committed-removal` &&
+          action.type !== `adopted-decision-second-handover` &&
+          action.type !== `replaced-twice-during-call` &&
+          action.type !== `running-removal-completes-first` &&
           action.type !== `remove-own-running` &&
           action.type !== `remove-own-rejected-running` &&
           action.type !== `replace-default-with-durable` &&
@@ -2288,11 +2312,13 @@ async function runHistory(
               `${write.id} stays removed`,
             ).toBe(null)
             expect(
-              await storage.get(
-                `decision:${encodeURIComponent(write.transactionId!)}`,
+              (await storage.keys()).filter((key) =>
+                key.startsWith(
+                  `decision:${encodeURIComponent(write.transactionId!)}:`,
+                ),
               ),
               `the stale decision is gone`,
-            ).toBe(null)
+            ).toEqual([])
             expect(write.outcome, `${write.id} stays completed`).toBe(
               `completed`,
             )
@@ -2359,6 +2385,186 @@ async function runHistory(
             `failed`,
           )
           reach(`follower-removal-asked-again`)
+          break
+        }
+        case `added-during-committed-removal`: {
+          // The leader removes a queued follower write; while its deletion
+          // stalls, a duplicate added message arrives online.
+          const leader = leaderIndex()
+          const follower = tabs.findIndex(
+            (tab, index) => tab && index !== leader,
+          )
+          if (!durable || leader < 0 || follower < 0 || !(await quiet())) break
+          online.set(false)
+          const write = await doWrite(follower, `write`)
+          if (!write) break
+          storage.holdNextDelete()
+          const removal = tabs[leader]!.env.executor.removeFromOutbox(
+            write.transactionId!,
+          )
+          await settle()
+          online.set(true)
+          await settle()
+          channels.inject({ type: `added`, id: write.transactionId })
+          await settle()
+          expect(calls, `${write.id} not admitted`).not.toContain(write.id)
+          storage.releaseDelete()
+          await removal
+          await settle()
+          write.removed = true
+          write.deliverable = false
+          expect(write.outcome, `${write.id} fails on its removal`).toBe(
+            `failed`,
+          )
+          reach(`committed-removal-not-admitted`)
+          break
+        }
+        case `adopted-decision-second-handover`: {
+          // The leader's removal decision lands but its acknowledgment
+          // stalls. The next leader adopts it and its deletion stalls. The
+          // first leader then withdraws its own, and leadership moves again.
+          const leader = leaderIndex()
+          const next = election.queue[0]
+          const writer = tabs.findIndex(
+            (tab, index) => tab && index !== leader && tab.election !== next,
+          )
+          if (
+            !durable ||
+            leader < 0 ||
+            !next ||
+            writer < 0 ||
+            tabs.filter(Boolean).length < 3 ||
+            !(await quiet())
+          )
+            break
+          online.set(false)
+          const write = await doWrite(writer, `write`)
+          if (!write) break
+          storage.holdNextDecision(true)
+          storage.holdNextDelete()
+          const removal = tabs[leader]!.env.executor.removeFromOutbox(
+            write.transactionId!,
+          )
+          await settle()
+          const original = tabs[leader]!.election
+          original.releaseLeadership()
+          await settle()
+          await original.requestLeadership()
+          await settle()
+          // The first leader's request to the next one is lost.
+          channels.state.loseRemoval = true
+          storage.releaseDecision()
+          await settle()
+          channels.state.loseRemoval = false
+          online.set(true)
+          next.releaseLeadership()
+          await settle()
+          storage.releaseDelete()
+          await settle()
+          await next.requestLeadership()
+          await removal
+          await settle()
+          write.removed = true
+          write.deliverable = false
+          expect(calls, `${write.id} never sent`).not.toContain(write.id)
+          expect(write.outcome, `${write.id} fails on its removal`).toBe(
+            `failed`,
+          )
+          reach(`adopted-decision-survived`)
+          break
+        }
+        case `replaced-twice-during-call`: {
+          // A follower's executor is replaced; the replacement leads and
+          // issues the write's rejected call; the row is removed and that
+          // replacement is replaced in turn while the call runs.
+          const leader = leaderIndex()
+          const writer = tabs.findIndex((tab, index) => tab && index !== leader)
+          if (
+            !durable ||
+            leader < 0 ||
+            writer < 0 ||
+            tabs.filter(Boolean).length < 2 ||
+            !(await quiet())
+          )
+            break
+          online.set(false)
+          const write = await doWrite(writer, `write-rejected`)
+          if (!write) break
+          const collection = tabs[writer]!.env.collection
+          await closeTab(writer)
+          await openTab(writer, undefined, undefined, false, collection)
+          await rotateTo(tabs[writer]!.election)
+          let release!: () => void
+          callGate = new Promise<void>((resolve) => {
+            release = resolve
+          })
+          online.set(true)
+          await settle()
+          if (!calls.includes(write.id)) {
+            callGate = null
+            release()
+            await settle()
+            break
+          }
+          await tabs[writer]!.env.executor.removeFromOutbox(
+            write.transactionId!,
+          )
+          await closeTab(writer)
+          await openTab(writer, undefined, undefined, false, collection)
+          expect(write.outcome, `${write.id} waits for its issued call`).toBe(
+            undefined,
+          )
+          release()
+          await settle()
+          expect(write.outcome, `${write.id} takes the server's outcome`).toBe(
+            `failed`,
+          )
+          reach(`issued-call-across-replacements`)
+          break
+        }
+        case `running-removal-completes-first`: {
+          // The leader removes a follower's running write; the call finishes
+          // before the removal's deletion acknowledges, and its message is
+          // lost.
+          const leader = leaderIndex()
+          const follower = tabs.findIndex(
+            (tab, index) => tab && index !== leader,
+          )
+          if (
+            !durable ||
+            !online.online ||
+            leader < 0 ||
+            follower < 0 ||
+            !(await quiet())
+          )
+            break
+          let release!: () => void
+          callGate = new Promise<void>((resolve) => {
+            release = resolve
+          })
+          const write = await doWrite(follower, `write`)
+          if (!write || !calls.includes(write.id)) {
+            callGate = null
+            release()
+            await settle()
+            break
+          }
+          storage.holdNextDelete()
+          const removal = tabs[leader]!.env.executor.removeFromOutbox(
+            write.transactionId!,
+          )
+          await settle()
+          channels.state.loseSettlement = true
+          release()
+          await settle()
+          channels.state.loseSettlement = false
+          storage.releaseDelete()
+          await removal
+          await settle()
+          channels.inject({ type: `leader` })
+          await settle()
+          expect(write.outcome, `${write.id} completes`).toBe(`completed`)
+          reach(`running-marker-retired`)
           break
         }
         case `remove-deletion-pending`: {
@@ -2751,7 +2957,7 @@ const loseSettlement: Action = { type: `lose-settlement` }
 oracleProperty({
   id: property,
   law: {
-    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until the leading tab sends it to the server exactly once while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome, also when the settlement message is lost. A leader that could not read a saved write sends it once connectivity changes, a row it cannot decode is reported, a failed row removal after a successful send is not reported as the outcome, and a follower's failed outbox check runs again on connectivity. An admission read across a change of leadership schedules nothing, and a write excluded by beforeRetry fails its writer even when the message is lost; if its rejection record fails, the leader retries the cleanup and nothing sends it meanwhile. Removing or clearing an unsent write fails its writer at once, a write removed while it is saved never runs, an outbox load from an earlier leadership term schedules nothing, and a tab that only observes a write leaves its writer's record. A follower's removal goes to the leader, which alone knows whether the call started; an exclusion cleanup stops when its leadership ends; and a replacement executor over the same collections settles its predecessor's saved writes against the outbox they were saved to. A removal or exclusion is recorded as a decision beside its row before anything else, so a later leader settles the row as decided rather than send it, a decision that lands late never recreates a row, and a writer reads a rejection only once its decision committed. A row whose call already settled keeps that outcome when removed, and a removal that yields at a handover is made by the next leader. A removed write whose call is running stays pending until the call settles, also when it is the leader's own; a durable replacement does not read a default-mode predecessor's missing record as success; an unreadable saved row keeps its writer waiting, each removal settles by its own deletion, and a cleanup that failed after its term ended is not retried. In the default mode, a write another leader settled stays pending in its former leader, which cannot tell the outcome. Stale and duplicate messages change nothing. A write made before its tab initializes, and the default mode, keep the online path.`,
+    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until the leading tab sends it to the server exactly once while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome, also when the settlement message is lost. A leader that could not read a saved write sends it once connectivity changes, a row it cannot decode is reported, a failed row removal after a successful send is not reported as the outcome, and a follower's failed outbox check runs again on connectivity. An admission read across a change of leadership schedules nothing, and a write excluded by beforeRetry fails its writer even when the message is lost; if its rejection record fails, the leader retries the cleanup and nothing sends it meanwhile. Removing or clearing an unsent write fails its writer at once, a write removed while it is saved never runs, an outbox load from an earlier leadership term schedules nothing, and a tab that only observes a write leaves its writer's record. A follower's removal goes to the leader, which alone knows whether the call started; an exclusion cleanup stops when its leadership ends; and a replacement executor over the same collections settles its predecessor's saved writes against the outbox they were saved to. A removal or exclusion is recorded as a decision beside its row before anything else, so a later leader settles the row as decided rather than send it, a decision that lands late never recreates a row, and a writer reads a rejection only once its decision committed. A row whose call already settled keeps that outcome when removed, and a removal that yields at a handover is made by the next leader. A successor's adopted decision outlives the first recorder withdrawing its own, a committed removal keeps the write out of direct admission, a running marker is withdrawn even when the call finishes before the removal's deletion, and a call issued by an intermediate replacement keeps its write pending. A removed write whose call is running stays pending until the call settles, also when it is the leader's own; a durable replacement does not read a default-mode predecessor's missing record as success; an unreadable saved row keeps its writer waiting, each removal settles by its own deletion, and a cleanup that failed after its term ended is not retried. In the default mode, a write another leader settled stays pending in its former leader, which cannot tell the outcome. Stale and duplicate messages change nothing. A write made before its tab initializes, and the default mode, keep the online path.`,
     authority: `Issue #2464 and the followerWrites option in docs/guides/offline-transactions.md.`,
     limits: `Three tabs over one storage adapter with controlled election, connectivity and BroadcastChannel; up to twelve actions; no real browser contexts; rejection records of writers that never return are kept, and none is ever expired.`,
   },
@@ -2783,10 +2989,17 @@ oracleProperty({
     `src/OfflineExecutor.ts#OfflineExecutor.forwardRemoval`,
     `src/OfflineExecutor.ts#OfflineExecutor.relatedExecutors`,
     `src/OfflineExecutor.ts#OfflineExecutor.finishRunningRemoval`,
+    `src/OfflineExecutor.ts#OfflineExecutor.callRunning`,
+    `src/OfflineExecutor.ts#OfflineExecutor.trackIssued`,
+    `src/OfflineExecutor.ts#OfflineExecutor.removeOrForward`,
+    `src/outbox/OutboxManager.ts#OutboxManager.recordDecision`,
+    `src/outbox/OutboxManager.ts#OutboxManager.removeDecision`,
+    `src/outbox/OutboxManager.ts#OutboxManager.removeDecisions`,
+    `src/executor/TransactionExecutor.ts#TransactionExecutor.exclude`,
+    `src/executor/TransactionExecutor.ts#TransactionExecutor.retryDecided`,
     `src/outbox/OutboxManager.ts#OutboxManager.recordPending`,
     `src/outbox/OutboxManager.ts#OutboxManager.recordOutcome`,
     `src/outbox/OutboxManager.ts#OutboxManager.outcomeKeys`,
-    `src/executor/TransactionExecutor.ts#TransactionExecutor.requeue`,
   ],
   histories: {
     arbitrary: historyArbitrary,
@@ -3217,6 +3430,30 @@ oracleProperty({
         enters: [`follower-removal-asked-again`],
         build: (generated: History): History =>
           spliced(generated, [{ type: `forwarded-removal-yields` }]),
+      },
+      {
+        name: `an added message during a committed removal sends nothing`,
+        enters: [`committed-removal-not-admitted`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `added-during-committed-removal` }]),
+      },
+      {
+        name: `an adopted decision survives a second handover`,
+        enters: [`adopted-decision-survived`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `adopted-decision-second-handover` }]),
+      },
+      {
+        name: `an issued call is tracked across two replacements`,
+        enters: [`issued-call-across-replacements`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `replaced-twice-during-call` }]),
+      },
+      {
+        name: `a call finishing before its removal leaves no marker`,
+        enters: [`running-marker-retired`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `running-removal-completes-first` }]),
       },
       {
         name: `removing a write whose call succeeded completes it`,

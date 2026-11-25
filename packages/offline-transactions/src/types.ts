@@ -177,6 +177,8 @@ export interface TransactionSignaler {
    * writer needs a recorded rejection; this tab's own does not.
    */
   ownsWrite?: (transactionId: string) => boolean
+  /** A call for this transaction starts or ends in this executor. */
+  trackIssued?: (transactionId: string, active: boolean) => void
   /** A removed write's call finished: its running marker goes. */
   finishRunningRemoval?: (transactionId: string) => Promise<void>
   resolveTransaction: (transactionId: string, result: any) => void

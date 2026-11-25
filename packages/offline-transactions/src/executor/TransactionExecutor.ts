@@ -97,6 +97,16 @@ export class TransactionExecutor {
   private async executeTransaction(
     transaction: OfflineTransaction,
   ): Promise<void> {
+    // Another executor over the same Collections reads that this call runs.
+    this.offlineExecutor.trackIssued?.(transaction.id, true)
+    try {
+      await this.runTransaction(transaction)
+    } finally {
+      this.offlineExecutor.trackIssued?.(transaction.id, false)
+    }
+  }
+
+  private async runTransaction(transaction: OfflineTransaction): Promise<void> {
     try {
       const terminalError =
         transaction.outboxPhase === `rejection-pending`
@@ -303,7 +313,7 @@ export class TransactionExecutor {
       // This leader accepted and sent the write; a former leader's decision
       // that landed meanwhile must not settle it at a later replay.
       if (this.offlineExecutor.recordsOutcomes)
-        await this.outbox.removeDecision(transaction.id).catch(() => {})
+        await this.outbox.removeDecisions(transaction.id).catch(() => {})
     } catch (persistError) {
       // Public removal can finish while the named mutation function runs.
       // The removed row cannot be retried, but its caller still owns the
@@ -492,7 +502,7 @@ export class TransactionExecutor {
     )
 
     for (const id of orphaned)
-      void this.outbox.removeDecision(id).catch(() => {})
+      void this.outbox.removeDecisions(id).catch(() => {})
     const cleanUp = async (id: string, error: Error, committed: boolean) => {
       if (await this.cleanUpExcluded(id, error, term, committed)) return
       // Retried only while this decision stands: a later term's replay may
@@ -540,10 +550,14 @@ export class TransactionExecutor {
         this.offlineExecutor.isOfflineEnabled &&
         term === this.offlineExecutor.leadershipTerm
       const decides = this.offlineExecutor.recordsOutcomes === true
-      if (!committed && decides) {
-        await this.outbox.recordDecision(id, error)
+      // A decision a former leader made is adopted under this tab's own key,
+      // so it survives that leader withdrawing its own until this cleanup
+      // finishes.
+      let token: string | undefined
+      if (decides) {
+        token = await this.outbox.recordDecision(id, error)
         if (!leads()) {
-          await this.outbox.removeDecision(id).catch(() => {})
+          await this.outbox.removeDecision(id, token).catch(() => {})
           return true
         }
       }
@@ -553,7 +567,8 @@ export class TransactionExecutor {
       // deletion and settlement follow even across a handover.
       if (this.recordsFor(id)) await this.outbox.recordRejection(id, error)
       await this.outbox.remove(id)
-      if (decides) await this.outbox.removeDecision(id).catch(() => {})
+      if (token !== undefined)
+        await this.outbox.removeDecision(id, token).catch(() => {})
       this.excluding.delete(id)
       this.offlineExecutor.rejectTransaction(id, error)
       return true
@@ -606,6 +621,11 @@ export class TransactionExecutor {
     else this.scheduleCleanupRetry()
   }
 
+  /** Keeps a write a committed removal is deleting out of admission. */
+  exclude(id: string): void {
+    this.excluding.add(id)
+  }
+
   /** Finishes a committed removal whose deletion failed, outside the queue. */
   retryDecided(id: string, error: Error): void {
     if (!this.offlineExecutor.isOfflineEnabled) return
@@ -631,6 +651,8 @@ export class TransactionExecutor {
     // the write, and this term's outbox load already has it if it remains.
     const term = this.offlineExecutor.leadershipTerm
     const transaction = await this.outbox.getCurrent(id)
+    // A row this leader decided to reject, or loaded with a decision, is in
+    // `excluding` and is settled, never sent.
     if (
       !transaction ||
       !this.offlineExecutor.isOfflineEnabled ||

@@ -79,6 +79,13 @@ const completionOwners = new WeakMap<
   Set<OfflineExecutor>
 >()
 
+// Executors with a call running, by Collection, so a later replacement can
+// tell a write is still being sent after its row went.
+const callIssuers = new WeakMap<
+  OfflineConfig[`collections`][string],
+  Set<OfflineExecutor>
+>()
+
 /** A replacement may add Collections while retaining every prior registry entry. */
 function retainsCollections(
   configured: OfflineConfig[`collections`],
@@ -125,6 +132,8 @@ export class OfflineExecutor {
   private term = 0
   // Saves in progress; true once removeFromOutbox or clearOutbox removed one.
   private readonly saving = new Map<string, boolean>()
+  // Ids whose call this executor is running.
+  private readonly issued = new Set<string>()
   // Running markers this leader recorded for removed writes, by id.
   private readonly runningRemovals = new Map<string, string>()
   // Removals this follower asked the leader for, by request.
@@ -624,12 +633,7 @@ export class OfflineExecutor {
         if (!(await waiter.saved)) continue
         // Absence means success only where rejections are recorded, and not
         // while this runtime still runs the write's call.
-        if (
-          !owner.recordsOutcomes ||
-          owner.scheduler.isRunning(id) ||
-          this.scheduler.isRunning(id)
-        )
-          continue
+        if (!owner.recordsOutcomes || this.callRunning(id)) continue
         const outbox = owner.outbox!
         // A row that cannot be decoded is still there.
         if (await outbox.has(id)) continue
@@ -961,6 +965,38 @@ export class OfflineExecutor {
     )
   }
 
+  trackIssued(id: string, active: boolean): void {
+    if (active) this.issued.add(id)
+    else this.issued.delete(id)
+    for (const collection of Object.values(this.config.collections)) {
+      let issuers = callIssuers.get(collection)
+      if (!issuers) callIssuers.set(collection, (issuers = new Set()))
+      if (this.issued.size > 0) issuers.add(this)
+      else issuers.delete(this)
+    }
+  }
+
+  /** Whether an executor over these Collections in this runtime runs its call. */
+  private callRunning(id: string): boolean {
+    if (this.issued.has(id)) return true
+    for (const collection of Object.values(this.config.collections)) {
+      for (const issuer of callIssuers.get(collection) ?? [])
+        if (
+          issuer.issued.has(id) &&
+          (retainsCollections(
+            this.config.collections,
+            issuer.config.collections,
+          ) ||
+            retainsCollections(
+              issuer.config.collections,
+              this.config.collections,
+            ))
+        )
+          return true
+    }
+    return false
+  }
+
   /** This executor and those in this runtime whose outcomes it delivers. */
   private relatedExecutors(): Array<OfflineExecutor> {
     const candidates = new Set<OfflineExecutor>([this])
@@ -1069,13 +1105,18 @@ export class OfflineExecutor {
           }
           if (!unstarted.has(id)) {
             // A writer in another tab reads that the call it cannot see is
-            // still running.
+            // still running. The marker is registered before the row goes,
+            // and withdrawn at once if the call already finished.
             const token = records(id)
               ? await outbox.recordPending(id)
               : undefined
+            if (token !== undefined) {
+              if (this.scheduler.isRunning(id))
+                this.runningRemovals.set(id, token)
+              else await outbox.withdrawOutcome(id, token).catch(() => {})
+            }
             await outbox.remove(id)
             if (this.saving.has(id)) this.saving.set(id, true)
-            if (token !== undefined) this.runningRemovals.set(id, token)
             return
           }
           // A row whose call already settled keeps that outcome.
@@ -1097,18 +1138,22 @@ export class OfflineExecutor {
           // does not commit while this tab leads is withdrawn. Without
           // recorded outcomes there are no decisions, and a write the next
           // leader now decides is left to it.
-          if (this.recordsOutcomes) await outbox.recordDecision(id, error)
+          const decision = this.recordsOutcomes
+            ? await outbox.recordDecision(id, error)
+            : undefined
           if (!stillLeads()) {
-            if (this.recordsOutcomes)
-              await outbox.removeDecision(id).catch(() => {})
+            if (decision !== undefined)
+              await outbox.removeDecision(id, decision).catch(() => {})
             yielded.push(id)
             return
           }
           committed = true
+          // No admission runs it while its deletion is pending.
+          this.executor!.exclude(id)
           if (records(id)) await outbox.recordRejection(id, error)
           await outbox.remove(id)
-          if (this.recordsOutcomes)
-            await outbox.removeDecision(id).catch(() => {})
+          if (decision !== undefined)
+            await outbox.removeDecision(id, decision).catch(() => {})
         } catch (removalError) {
           if (!committed) {
             failures.push(removalError)
