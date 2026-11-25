@@ -18,6 +18,11 @@ import {
 const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
+  [
+    `browser-db-sqlite-persistence/tests/host-quiescence-oracle.test.ts`,
+    `browser`,
+    `host-quiescence`,
+  ],
   ...[`query`, `electric`, `powersync`, `trailbase`, `convex`].flatMap(
     (adapter) => [
       [
