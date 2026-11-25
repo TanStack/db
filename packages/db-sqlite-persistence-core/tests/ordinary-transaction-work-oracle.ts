@@ -1110,7 +1110,7 @@ async function assertGeneratedHistory(
 // the durable observation (with each applied position's replay) with the
 // model, bounds row-table rewrites, and reads pullSince from the seed's
 // position: a full reload exactly when the candidate's replay changes exceed
-// the threshold, else the candidate's own delta.
+// the threshold, else the candidate's complete delta, metadata included.
 async function assertReplayThreshold(
   input: ReplayThresholdCase,
   reach: (state: string) => void,
@@ -1166,22 +1166,36 @@ async function assertReplayThreshold(
         }),
       )
     } else {
+      // The returned delta is the candidate's public actions as written:
+      // rows, row metadata sets and clears, and collection metadata.
       oracleAssertion('replay pullSince checkpoint', () =>
         expect(
           pulled.requiresFullReload
             ? pulled
-            : {
-                latestRowVersion: pulled.latestRowVersion,
-                changedKeys: [...pulled.changedKeys].sort(),
-                deltaTxIds: pulled.deltas.map((delta) => delta.txId),
-              },
+            : { ...pulled, changedKeys: [...pulled.changedKeys].sort() },
           'replay pullSince checkpoint',
         ).toEqual({
           latestRowVersion,
+          requiresFullReload: false,
           changedKeys: sortedKeys(
             candidate.mutations.map((mutation) => mutation.key),
           ),
-          deltaTxIds: [candidate.txId],
+          deletedKeys: [],
+          deltas: [
+            {
+              txId: candidate.txId,
+              latestRowVersion,
+              changedRows: candidate.mutations.map((mutation) => ({
+                key: mutation.key,
+                value: clone(mutation.value),
+              })),
+              deletedKeys: [],
+              rowMetadataMutations: clone(candidate.rowMetadataMutations ?? []),
+              collectionMetadataMutations: clone(
+                candidate.collectionMetadataMutations ?? [],
+              ),
+            },
+          ],
         }),
       )
     }
