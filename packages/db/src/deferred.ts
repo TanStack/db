@@ -45,3 +45,24 @@ export function createDeferred<T>(): Deferred<T> {
     isPending: () => isPending,
   }
 }
+
+/** An aborted acquisition stops participating before its transport settles. */
+export function resolveOnAbort<T>(
+  transport: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T | undefined> {
+  if (!signal) return transport
+  return new Promise<T | undefined>((resolve, reject) => {
+    const finish = (value?: T) => {
+      signal.removeEventListener(`abort`, abort)
+      resolve(value)
+    }
+    const abort = () => finish()
+    if (signal.aborted) abort()
+    else signal.addEventListener(`abort`, abort, { once: true })
+    void transport.then(finish, (error: unknown) => {
+      signal.removeEventListener(`abort`, abort)
+      reject(error)
+    })
+  })
+}

@@ -562,6 +562,14 @@ type LaggingSourceStep =
   | `truncate`
   | `settle-and-truncate`
   | `deliver-replay`
+  | `settle-replay`
+  | `obsolete-fulfills`
+  | `obsolete-rejects`
+
+type LaggingSourceReach =
+  | `held replay after same-turn initial fulfillment`
+  | `direct replay settled with aborted initial transport unresolved`
+  | `joined replay settled with aborted initial transport unresolved`
 
 const LAGGING_SOURCE_SHAPES: Record<LaggingSourceShape, LaggingSourceMode> = {
   direct: `on-demand`,
@@ -639,6 +647,27 @@ function sameTurnReplayHistories(): Array<Array<LaggingSourceStep>> {
       step === `settle`
         ? [`settle-and-truncate`, `deliver-replay`, `settle`]
         : [step],
+    ),
+  )
+}
+
+// The original transport can ignore abort indefinitely. Its signal and the
+// newer replay's result, rather than its response, decide initial suppression.
+function abortedInitialHistories(): Array<Array<LaggingSourceStep>> {
+  return [false, true].flatMap((deliverInitial) =>
+    [false, true].flatMap((readyBeforeReplay) =>
+      ([undefined, `obsolete-fulfills`, `obsolete-rejects`] as const).map(
+        (lateOutcome): Array<LaggingSourceStep> => [
+          ...(readyBeforeReplay ? [`source-ready` as const] : []),
+          ...(deliverInitial ? [`deliver` as const] : []),
+          `truncate`,
+          `deliver-replay`,
+          `settle-replay`,
+          ...(readyBeforeReplay ? [] : [`source-ready` as const]),
+          `change`,
+          ...(lateOutcome === undefined ? [] : [lateOutcome]),
+        ],
+      ),
     ),
   )
 }
@@ -785,6 +814,7 @@ function recordLaggingSourceWrite(
 type LaggingPosts = {
   collection: Collection<ProgressivePost>
   acquisitions: Array<Deferred<void>>
+  signals: Array<AbortSignal | undefined>
   write: (post: { id: number; userId: number }) => void
   truncate: () => void
   markReady: () => void
@@ -798,8 +828,10 @@ function createLaggingPosts(
   mode: LaggingSourceMode,
   explicitMode: boolean,
   readyAtStart = false,
+  holdAborted = false,
 ): LaggingPosts {
   const acquisitions: Array<Deferred<void>> = []
+  const signals: Array<AbortSignal | undefined> = []
   let sync:
     | {
         begin: () => void
@@ -822,9 +854,11 @@ function createLaggingPosts(
           loadSubset: ({ signal }) => {
             const acquisition = createDeferred<void>()
             acquisitions.push(acquisition)
-            signal?.addEventListener(`abort`, () =>
-              acquisition.reject(new LoadSubsetOperationAbortedError()),
-            )
+            signals.push(signal)
+            if (!holdAborted)
+              signal?.addEventListener(`abort`, () =>
+                acquisition.reject(new LoadSubsetOperationAbortedError()),
+              )
             return acquisition.promise
           },
         }
@@ -834,6 +868,7 @@ function createLaggingPosts(
   return {
     collection,
     acquisitions,
+    signals,
     write: (post) => {
       sync!.begin()
       sync!.write({ type: `insert`, value: { ...post, title: `selected` } })
@@ -1054,11 +1089,23 @@ function applyLaggingSourceStep(
     facts.posts = []
     facts.disturbed = true
     facts.replayPending = true
-  } else if (step === `settle`) {
-    for (const source of sources)
-      for (const acquisition of source.acquisitions) acquisition.resolve()
+  } else if (step === `settle` || step === `settle-replay`) {
+    for (const source of sources) {
+      source.acquisitions.forEach((acquisition, index) => {
+        if (step === `settle` || !source.signals[index]?.aborted)
+          acquisition.resolve()
+      })
+    }
     facts.settled = true
     facts.replayPending = false
+  } else if (step === `obsolete-fulfills` || step === `obsolete-rejects`) {
+    for (const source of sources) {
+      source.acquisitions.forEach((acquisition, index) => {
+        if (!source.signals[index]?.aborted) return
+        if (step === `obsolete-fulfills`) acquisition.resolve()
+        else acquisition.reject(new Error(`aborted initial transport rejected`))
+      })
+    }
   } else {
     // The twin's source has been ready since its start.
     main.source.markReady()
@@ -1078,7 +1125,8 @@ function applyLaggingSourceStep(
 function createLaggingSourceDriver(
   consumer: LaggingSourceConsumer,
   shape: LaggingSourceShape,
-  reach: () => void,
+  holdAborted: boolean,
+  reach: (state: LaggingSourceReach) => void,
 ): TraceDriver<LaggingSourceStep, LaggingSourceContext> {
   const mode = LAGGING_SOURCE_SHAPES[shape]
   return {
@@ -1113,7 +1161,12 @@ function createLaggingSourceDriver(
         main: startLaggingSourceConsumer(
           consumer,
           shape,
-          createLaggingPosts(mode, shape !== `eager-default`),
+          createLaggingPosts(
+            mode,
+            shape !== `eager-default`,
+            false,
+            holdAborted,
+          ),
           users?.collection,
         ),
         twin:
@@ -1121,7 +1174,7 @@ function createLaggingSourceDriver(
             ? startLaggingSourceConsumer(
                 consumer,
                 shape,
-                createLaggingPosts(mode, true, true),
+                createLaggingPosts(mode, true, true, holdAborted),
                 users?.collection,
               )
             : undefined,
@@ -1157,7 +1210,20 @@ function createLaggingSourceDriver(
           expect(source.acquisitions).toHaveLength(2)
           expect(source.acquisitions[1]!.isPending()).toBe(true)
         }
-        reach()
+        reach(`held replay after same-turn initial fulfillment`)
+      }
+      if (step === `settle-replay`) {
+        for (const source of sources) {
+          expect(source.acquisitions.length).toBeGreaterThan(1)
+          expect(source.signals[0]?.aborted).toBe(true)
+          expect(source.acquisitions[0]?.isPending()).toBe(true)
+          expect(source.acquisitions[1]?.isPending()).toBe(false)
+        }
+        reach(
+          shape === `direct`
+            ? `direct replay settled with aborted initial transport unresolved`
+            : `joined replay settled with aborted initial transport unresolved`,
+        )
       }
       while (
         step === `settle` &&
@@ -1283,11 +1349,16 @@ async function expectLaggingSourceTraceMatches(
   consumer: LaggingSourceConsumer,
   shape: LaggingSourceShape,
   steps: ReadonlyArray<LaggingSourceStep>,
-  reach: () => void,
+  reach: (state: LaggingSourceReach) => void,
 ): Promise<void> {
   await runTrace({
     steps,
-    driver: createLaggingSourceDriver(consumer, shape, reach),
+    driver: createLaggingSourceDriver(
+      consumer,
+      shape,
+      steps.includes(`settle-replay`),
+      reach,
+    ),
     projection: laggingSourceProjection(consumer, shape),
   })
 }
@@ -1312,7 +1383,7 @@ function temporalCampaigns(property: string, fixedSeed: number) {
 const readinessLaw = `Initial preload completes when every reachable demand is covered by a settled request: an empty outer relation does not wait for an undemanded child, and a demanded child loads before readiness.`
 const demandSchedulingLaw = `An obsolete acquisition's settlement cannot add its child row or settle current readiness, in either completion order.`
 const releaseReentryLaw = `A failed adapter release never suppresses the reacquisition of a later demand incarnation.`
-const laggingSourceLaw = `Source Collection readiness gates initial-query readiness only for an eager source; an on-demand source's settled demand is the evidence.`
+const laggingSourceLaw = `Source Collection readiness gates initial-query readiness only for an eager source. An on-demand source reaches readiness when its current demand settles, even while an obsolete aborted transport remains unresolved.`
 
 const readinessFixedHistories = [
   { name: `an empty outer does not wait for an undemanded child`, posts: [] },
@@ -1493,6 +1564,9 @@ describe(`includes temporal oracle`, () => {
           ...(consumer === `effect` && shape === `direct`
             ? sameTurnReplayHistories()
             : []),
+          ...(consumer === `effect` && (shape === `direct` || shape === `join`)
+            ? abortedInitialHistories()
+            : []),
         ].map((steps) => ({
           consumer: consumer as LaggingSourceConsumer,
           shape,
@@ -1518,26 +1592,27 @@ describe(`includes temporal oracle`, () => {
       ],
       histories: {
         enumerated: cells,
-        states: [`held replay after same-turn initial fulfillment`],
+        states: [
+          `held replay after same-turn initial fulfillment`,
+          `direct replay settled with aborted initial transport unresolved`,
+          `joined replay settled with aborted initial transport unresolved`,
+        ],
       },
       label: ({ consumer, shape, history }) =>
         `${consumer} ${shape}: ${history}`,
       resolve: (cell) => ({ ...cell }),
       model: recordedAssertionJudgment,
       driver: async (plan, observe) => {
-        const reach = { entered: false }
+        const reached = new Set<LaggingSourceReach>()
         await recordAssertionJudgment(laggingSourceLaw, plan, observe, () =>
           expectLaggingSourceTraceMatches(
             plan.consumer,
             plan.shape,
             plan.steps,
-            () => {
-              reach.entered = true
-            },
+            (state) => reached.add(state),
           ),
         )
-        if (reach.entered)
-          observe(`reach`, `held replay after same-turn initial fulfillment`)
+        for (const state of reached) observe(`reach`, state)
       },
       check: forwardAssertionJudgment,
     })

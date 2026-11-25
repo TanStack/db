@@ -212,21 +212,36 @@ const joinedReplayHistories: Array<JoinedReplayHistory> = [false, true].flatMap(
   (indexed) => [
     ...joinedReplaySchedules.map((schedule) => ({ ...schedule, indexed })),
     ...joinedReplaySchedules
+      .filter(({ answer, limit }) => answer !== `complete` && limit === 2)
+      .map((schedule) => ({
+        ...schedule,
+        indexed,
+        literalRoot: true,
+        eligible: [1, 2, 3, 4, 6, 7, 11, 18],
+      })),
+    ...joinedReplaySchedules
       .filter(({ answer, holdJoined }) => answer === `refill` && holdJoined)
       .flatMap((schedule) => {
         const rows = schedule.replacement.map(({ id, rank }) => ({
           id: id + 10,
           rank,
         }))
-        const subsequentWrite = { ...rows[0]!, rank: rows.length + 1 }
+        const writes = [
+          { type: `update`, value: { ...rows[0]!, rank: rows.length + 1 } },
+          { type: `delete`, key: rows[0]!.id },
+        ] as const
         const settlements = [`fulfills`, `rejects`] as const
         return settlements.flatMap((outcome) =>
-          settlements.map((obsoleteRefill) => ({
-            ...schedule,
-            indexed,
-            laterReplay: { rows, subsequentWrite, outcome, obsoleteRefill },
-            eligible: [...schedule.eligible, ...rows.map(({ id }) => id)],
-          })),
+          settlements.flatMap((obsoleteRefill) =>
+            (outcome === `fulfills` ? writes : [undefined]).map(
+              (subsequentWrite) => ({
+                ...schedule,
+                indexed,
+                laterReplay: { rows, subsequentWrite, outcome, obsoleteRefill },
+                eligible: [...schedule.eligible, ...rows.map(({ id }) => id)],
+              }),
+            ),
+          ),
         )
       }),
     // Move while the replay is held. The positive windows all need a row
@@ -998,6 +1013,9 @@ describe(`ordered source work oracle`, () => {
         `window move held through joined replay and refill`,
         `collection supersedes an aborted but unresolved refill`,
         `effect supersedes an aborted but unresolved refill`,
+        `collection literal-true refill followed by held repair`,
+        `effect literal-true refill followed by held repair`,
+        `ordinary delete after replay retirement`,
       ],
     },
     label: ({
@@ -1009,8 +1027,9 @@ describe(`ordered source work oracle`, () => {
       holdJoined,
       move,
       laterReplay,
+      literalRoot,
     }) =>
-      `${receiver} ${trigger} ${indexed ? `indexed` : `unindexed`} window ${limit} with ${answer} and ${holdJoined ? `held` : `immediate`} joined demand${move ? ` moved to ${move.offset}+${move.limit}` : ``}${laterReplay ? ` superseded before obsolete refill ${laterReplay.obsoleteRefill} and the new replay ${laterReplay.outcome}` : ``}`,
+      `${receiver} ${trigger} ${indexed ? `indexed` : `unindexed`} window ${limit} with ${answer} and ${holdJoined ? `held` : `immediate`} joined demand${move ? ` moved to ${move.offset}+${move.limit}` : ``}${laterReplay ? ` superseded before obsolete refill ${laterReplay.obsoleteRefill} and the new replay ${laterReplay.outcome}${laterReplay.subsequentWrite ? ` before a new ${laterReplay.subsequentWrite.type}` : ``}` : ``}${literalRoot ? ` after a literal-true root answer` : ``}`,
     model: ({
       initial,
       replacement,
@@ -1037,6 +1056,7 @@ describe(`ordered source work oracle`, () => {
       const next = failed
         ? window(initial)
         : window(laterReplay?.rows ?? replacement, move)
+      const write = laterReplay?.subsequentWrite
       return {
         prior: window(initial),
         next,
@@ -1044,13 +1064,13 @@ describe(`ordered source work oracle`, () => {
         priorWindow,
         nextWindow: failed ? priorWindow : (move ?? priorWindow),
         nextRepair:
-          laterReplay?.outcome === `fulfills`
+          laterReplay && write
             ? window(
-                laterReplay.rows.map((row) =>
-                  row.id === laterReplay.subsequentWrite.id
-                    ? laterReplay.subsequentWrite
-                    : row,
-                ),
+                write.type === `delete`
+                  ? laterReplay.rows.filter(({ id }) => id !== write.key)
+                  : laterReplay.rows.map((row) =>
+                      row.id === write.value.id ? write.value : row,
+                    ),
               )
             : undefined,
         error: failed ? `originating error` : `none`,
@@ -1076,6 +1096,18 @@ describe(`ordered source work oracle`, () => {
           `reach`,
           `${history.receiver} supersedes an aborted but unresolved refill`,
         )
+      }
+      if (trace.firstRefillReturnedTrue && trace.heldRefill) {
+        observe(
+          `reach`,
+          `${history.receiver} literal-true refill followed by held repair`,
+        )
+      }
+      if (
+        history.laterReplay?.subsequentWrite?.type === `delete` &&
+        trace.laterReplay?.nextRepair
+      ) {
+        observe(`reach`, `ordinary delete after replay retirement`)
       }
       observe(`joined replay trace`, trace)
     },
@@ -1114,6 +1146,20 @@ describe(`ordered source work oracle`, () => {
       ]
       if (history.holdJoined)
         comparisons.push([`joined load was held`, trace.joinedDemandHeld, true])
+      if (history.literalRoot) {
+        comparisons.push(
+          [
+            `first refill returned literal true`,
+            trace.firstRefillReturnedTrue,
+            true,
+          ],
+          [
+            `later repair demand is issued`,
+            trace.postReplayRequests.length > 1,
+            true,
+          ],
+        )
+      }
       if (short) {
         comparisons.push(
           [`refill acquisition held`, trace.heldRefill, true],
@@ -1135,9 +1181,32 @@ describe(`ordered source work oracle`, () => {
       if (short)
         comparisons.push([
           `repair refill revalidates its demand`,
-          trace.refillRevalidates,
+          trace.postReplayRequests.length > 0 &&
+            trace.postReplayRequests.every(({ refetch }) => refetch),
           true,
         ])
+      if (!short && !history.move) {
+        // An explicit truncate can invalidate the old repair and require one
+        // current prefix and its tie. Once both are covered, a complete
+        // joined window needs no cursor or larger prefix.
+        const { postReplayRequests } = trace
+        comparisons.push(
+          [
+            `complete window needs no forward refill`,
+            postReplayRequests.filter(
+              ({ cursor, tie, limit }) =>
+                cursor || (!tie && limit !== history.limit),
+            ),
+            [],
+          ],
+          [
+            `complete window reads at most one current prefix and tie`,
+            postReplayRequests.filter(({ tie }) => tie).length <= 1 &&
+              postReplayRequests.filter(({ tie }) => !tie).length <= 1,
+            true,
+          ],
+        )
+      }
       if (history.move) {
         const pending = [
           [`held joined demand`, trace.afterReplayAnswers],

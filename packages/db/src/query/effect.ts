@@ -1,6 +1,6 @@
 import { D2, output } from '@tanstack/db-ivm'
 import { createSourceRecord } from '../utils/source-record.js'
-import { createDeferred } from '../deferred.js'
+import { createDeferred, resolveOnAbort } from '../deferred.js'
 import { reportUncaught, runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
 import { samePublishedValue } from '../utils.js'
@@ -689,10 +689,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           this.onSourceError(normalizeError(error)),
         // subscribeChanges can report a result before it returns the
         // subscription, so read it from the record when a load fails.
-        onLoadSubsetResult: (result) => {
+        onLoadSubsetResult: (result, { signal }) => {
           this.trackInitialLoad(
             result,
             () => this.subscriptions[sourceId]?.pendingTruncateReplacement,
+            signal,
           )
         },
       })
@@ -948,12 +949,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private trackInitialLoad(
     result: true | Promise<unknown>,
     pendingReplacement: () => Promise<void> | undefined,
+    signal?: AbortSignal,
   ): void {
     if (!(result instanceof Promise) || this.reachedReady || this.disposed)
       return
-    this.pendingInitialLoads.add(result)
+    const acquisition = resolveOnAbort(result, signal)
+    this.pendingInitialLoads.add(acquisition)
     const release = () => {
-      if (this.pendingInitialLoads.delete(result) && !this.disposed)
+      if (this.pendingInitialLoads.delete(acquisition) && !this.disposed)
         this.scheduleGraphRun()
     }
     // A load failure disposes the Effect through onLoadSubsetError, so a
@@ -961,7 +964,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // query's tracked rejection does. Any other rejection comes from an
     // obsolete or aborted acquisition, so the hold fails open: it releases
     // unless a truncate replacement takes it over.
-    followHeldAcquisition(result, pendingReplacement, {
+    followHeldAcquisition(acquisition, pendingReplacement, {
       settled: (succeeded) =>
         succeeded ? release() : void Promise.resolve().then(release),
       replaced: (replacement) => {

@@ -27,10 +27,12 @@ export type JoinedReplayHistory = {
   initial: ReadonlyArray<Row>
   replacement: ReadonlyArray<Row>
   eligible: ReadonlyArray<number>
+  literalRoot?: boolean
   move?: { offset: number; limit: number }
   laterReplay?: {
     rows: ReadonlyArray<Row>
-    subsequentWrite: Row
+    subsequentWrite?:
+      { type: `update`; value: Row } | { type: `delete`; key: number }
     outcome: `fulfills` | `rejects`
     obsoleteRefill: `fulfills` | `rejects`
   }
@@ -57,7 +59,13 @@ export type JoinedReplayTrace = {
   joinedDemandHeld: boolean
   rootReadyWhileJoined: boolean
   heldRefill: boolean
-  refillRevalidates: boolean | undefined
+  postReplayRequests: Array<{
+    refetch: boolean
+    cursor: boolean
+    tie: boolean
+    limit: number | undefined
+  }>
+  firstRefillReturnedTrue: boolean
   reportedError: `none` | `originating error` | `different error`
   rowsAtMoveFulfillment?: Array<Row>
   windowAtMoveFulfillment?: JoinedReplayHistory[`move`]
@@ -120,10 +128,11 @@ export async function receiveJoinedReplay(
     laterReplay: 0,
     pendingJoined: 0,
     pendingRefill: 0,
-    refillRevalidates: undefined as boolean | undefined,
+    firstRefillReturnedTrue: false,
     nextRepairBounded: false,
     nextRepairUnbounded: false,
   }
+  const postReplayRequests: JoinedReplayTrace[`postReplayRequests`] = []
   let refillSignal: AbortSignal | undefined
 
   const truncateTo = (rows: ReadonlyArray<Row>) => {
@@ -147,73 +156,97 @@ export async function receiveJoinedReplay(
       sync: (operations) => {
         rootSync = operations
         operations.markReady()
+        const deliver = (
+          options: LoadSubsetOptions,
+        ): ReturnType<Sync<Row>[`commit`]> => {
+          if (options.signal?.aborted) return true
+          const offset = options.cursor ? 0 : (options.offset ?? 0)
+          const page = providerRows
+            .filter((row) => queryMatches(options, row))
+            .sort((left, right) => left.rank - right.rank)
+            .slice(
+              offset,
+              options.limit === undefined ? undefined : offset + options.limit,
+            )
+          operations.begin()
+          for (const value of page) {
+            if (installed.get(value.id) === value) continue
+            operations.write({
+              type: installed.has(value.id) ? `update` : `insert`,
+              value: { ...value },
+            })
+            installed.set(value.id, value)
+          }
+          return operations.commit(options.signal)
+        }
+        const acquire = async (
+          options: LoadSubsetOptions,
+          phase: typeof requests.phase,
+          isReplayDemand: boolean,
+        ) => {
+          if (phase === `after replay`) {
+            requests.nextRepairUnbounded ||=
+              options.orderBy === undefined && options.where === undefined
+            requests.nextRepairBounded ||=
+              options.refetch === true &&
+              options.orderBy !== undefined &&
+              options.limit !== undefined &&
+              options.cursor === undefined
+          }
+          if (phase === `later replay`) {
+            requests.laterReplay++
+            await laterReplay.promise
+          }
+          if (phase === `repair`) {
+            requests.repairStarted ||=
+              options.refetch === true &&
+              options.orderBy !== undefined &&
+              options.limit === history.limit &&
+              options.cursor === undefined
+            if (history.trigger === `explicit`) await repair.promise
+          }
+          if (isReplayDemand) {
+            requests.replay++
+            await replay.promise
+          } else if (phase === `replay` && history.answer !== `complete`) {
+            refillSignal ??= options.signal
+            requests.pendingRefill++
+            await refill.promise
+            requests.pendingRefill--
+            if (
+              history.answer === `refill-rejection` ||
+              history.laterReplay?.obsoleteRefill === `rejects`
+            )
+              throw failure
+          }
+          await deliver(options)
+          if (
+            phase === `later replay` &&
+            history.laterReplay?.outcome === `rejects` &&
+            !options.signal?.aborted
+          )
+            throw laterFailure
+        }
         return {
-          loadSubset: async (options) => {
+          loadSubset: (options) => {
             rootSubscription = options.subscription
             const phase = requests.phase
-            if (phase === `after replay`) {
-              requests.nextRepairUnbounded ||=
-                options.orderBy === undefined && options.where === undefined
-              requests.nextRepairBounded ||=
-                options.refetch === true &&
-                options.orderBy !== undefined &&
-                options.limit !== undefined &&
-                options.cursor === undefined
-            }
-            if (phase === `later replay`) {
-              requests.laterReplay++
-              await laterReplay.promise
-            }
-            if (phase === `repair`) {
-              requests.repairStarted ||=
-                options.refetch === true &&
-                options.orderBy !== undefined &&
-                options.limit === history.limit &&
-                options.cursor === undefined
-              if (history.trigger === `explicit`) await repair.promise
-            }
-            if (phase === `replay` && replay.isPending()) {
-              requests.replay++
-              await replay.promise
-            } else if (phase === `replay` && history.answer !== `complete`) {
-              requests.refillRevalidates ??= options.refetch === true
-              refillSignal ??= options.signal
-              requests.pendingRefill++
-              await refill.promise
-              requests.pendingRefill--
-              if (
-                history.answer === `refill-rejection` ||
-                history.laterReplay?.obsoleteRefill === `rejects`
-              )
-                throw failure
-            }
-            if (options.signal?.aborted) return
-            const offset = options.cursor ? 0 : (options.offset ?? 0)
-            const page = providerRows
-              .filter((row) => queryMatches(options, row))
-              .sort((left, right) => left.rank - right.rank)
-              .slice(
-                offset,
-                options.limit === undefined
-                  ? undefined
-                  : offset + options.limit,
-              )
-            operations.begin()
-            for (const value of page) {
-              if (installed.get(value.id) === value) continue
-              operations.write({
-                type: installed.has(value.id) ? `update` : `insert`,
-                value: { ...value },
+            const isReplayDemand = phase === `replay` && replay.isPending()
+            if (phase === `replay` && !isReplayDemand) {
+              postReplayRequests.push({
+                refetch: options.refetch === true,
+                cursor: options.cursor !== undefined,
+                tie:
+                  options.orderBy === undefined && options.where !== undefined,
+                limit: options.limit,
               })
-              installed.set(value.id, value)
+              if (history.literalRoot && postReplayRequests.length === 1) {
+                const result = deliver(options)
+                requests.firstRefillReturnedTrue = result === true
+                return result
+              }
             }
-            await operations.commit(options.signal)
-            if (
-              phase === `later replay` &&
-              history.laterReplay?.outcome === `rejects` &&
-              !options.signal?.aborted
-            )
-              throw laterFailure
+            return acquire(options, phase, isReplayDemand)
           },
           unloadSubset: () => {
             if (requests.phase === `repair` && history.trigger === `retirement`)
@@ -278,7 +311,10 @@ export async function receiveJoinedReplay(
     history.receiver === `collection`
       ? createLiveQueryCollection(query)
       : undefined
-  const visible = () => snapshot(live?.values() ?? effectRows.values())
+  const visible = () =>
+    live
+      ? live.toArray.map(({ id, rank }) => ({ id, rank }))
+      : snapshot(effectRows.values())
   const subscription = live?.subscribeChanges(() =>
     publications.push(visible()),
   )
@@ -385,15 +421,20 @@ export async function receiveJoinedReplay(
         }
         // A subsequent valid ordering write exposes repair debt that a late
         // aborted rejection could have silently left behind.
-        if (history.laterReplay.outcome === `fulfills`) {
+        const write = history.laterReplay.subsequentWrite
+        if (write) {
           requests.phase = `after replay`
-          const moved = history.laterReplay.subsequentWrite
-          providerRows = providerRows.map((row) =>
-            row.id === moved.id ? moved : row,
-          )
-          installed.set(moved.id, moved)
+          if (write.type === `delete`) {
+            providerRows = providerRows.filter(({ id }) => id !== write.key)
+            installed.delete(write.key)
+          } else {
+            providerRows = providerRows.map((row) =>
+              row.id === write.value.id ? write.value : row,
+            )
+            installed.set(write.value.id, write.value)
+          }
           rootSync.begin()
-          rootSync.write({ type: `update`, value: moved })
+          rootSync.write(write)
           await rootSync.commit()
           await flushPromises()
           laterReplayTrace.nextRepair = {
@@ -421,7 +462,8 @@ export async function receiveJoinedReplay(
         joinedDemandHeld,
         rootReadyWhileJoined,
         heldRefill,
-        refillRevalidates: requests.refillRevalidates,
+        postReplayRequests,
+        firstRefillReturnedTrue: requests.firstRefillReturnedTrue,
         rowsAtMoveFulfillment: move.rowsAtFulfillment,
         windowAtMoveFulfillment: move.windowAtFulfillment,
         laterReplay: laterReplayTrace,

@@ -8828,15 +8828,35 @@ second replay, a later ordering change must still start a bounded repair.
 This catches an obsolete rejection that raises hidden recovery debt while its
 immediate reads and publications remain correct.
 
+The post-replay driver also returns literal `true` for the first root
+answer before holding the next required acquisition. Both receivers retain
+the preceding window at the held cut. The checker records every refill's
+`refetch` flag and reads the Collection's actual ordered array. A complete
+prefix may need one current bounded revalidation and its tie. It must
+issue no larger prefix or forward cursor read. A subsequent source delete
+starts a bounded repair after replay retirement, just as a subsequent rank
+change does.
+
+### Initial Effect acquisition aborted by replay
+
+`includes-temporal.lagging-source` checks both an unordered root and a lazy
+joined source. After truncate, the adapter can leave the aborted initial
+transport unresolved while the replacement's current demands settle.
+The Effect suppresses the initial replay and reports the next ordinary
+matching write, whether the obsolete transport stays pending, fulfills
+later, or rejects later. A ready-at-start twin separates this observation
+from the on-demand source's own readiness status.
+
 ### Effect callback diagnostics
 
 `production-errors.effect-console` invokes the Effect entry and batch
 callbacks with synchronous throws and asynchronous rejections, and runs
 with and without an `onError` callback in development and production.
-Development reports the frozen message and original error when no handler
-owns the failure. Production omits that diagnostic. A throwing handler
-reports its own error through the uncaught channel. The mutation that
-suppresses the development diagnostic fails all four applicable histories.
+With no error handler, the Effect logs the original error and the diagnostic
+for the build mode. Development uses the frozen line and production uses
+code 226. If `onError` throws, the Effect logs the handler's error and the
+original error as two distinct diagnostics. The mutation that selects the
+production line in development fails all four applicable histories.
 
 ## Compiler group reduction boundary
 

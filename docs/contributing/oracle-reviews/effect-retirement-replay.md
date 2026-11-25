@@ -275,3 +275,73 @@ when the current replay succeeds.
 | `tests/query/ordered-work-oracle.property.test.ts` | `3b3875687a51ad0b113db70c374c1d755718acc4` |
 
 Paths in the table are relative to `packages/db`.
+
+## Literal adapter answers and review calibration
+
+The adapter can apply a root refill and return literal `true` while the
+next repair acquisition still needs to run. Atomic window publication
+requires the old complete window to remain visible through that continuation.
+The Collection previously dropped the hold for a literal answer. Its loader
+still returned a pending ordered participant. The subscriber now tracks that
+participant without inspecting how its adapter answered.
+
+The joined-refill property reaches a literal first refill followed by a held
+repair in 16 Collection and 16 Effect histories, across both index settings,
+truncate schedules, joined answer timings, and refill outcomes. On
+`6d5331e51` all 16 Collection histories fail at `held refill reads`.
+The Effect controls pass. The repair passes all 32 and keeps the existing
+asynchronous witnesses green.
+
+The driver records the Collection's array in its public order. Reversing that
+observation fails the prior-window comparison. The driver also records every
+post-replay root acquisition. Changing only the second request's revalidation
+flag fails all 32 literal-answer histories. The completed-prefix control
+allows one bounded prefix and its tie when replay invalidates the old repair.
+Of 32 complete prefixes without a move, 24 made those two reads and eight
+made none. Inserting a larger prefix into the recorded control fails all 32.
+The replay manifest already rejects a property with no named owner. Its
+two new owners passed the final manifest checks.
+
+A later write after successful replay can now also delete the leading row.
+Leaving the retirement flag set after its release pass fails the bounded
+repair comparison in 16 of 32 delete histories. The unmodified flag passes
+all 32. The complete joined-refill property now enumerates 252 histories
+and passes 254 selected checks, including two runner checks.
+
+## Initial demand whose transport ignores abort
+
+[Initial readiness and replay participants](../../../packages/db/src/query/live/ARCHITECTURE.md#replay-participants-and-failure)
+give current demand authority over the first ordinary Effect callback. A
+direct or lazy joined acquisition may be aborted while the adapter keeps its
+transport pending. The Effect must suppress the initial replay and then
+deliver the first ordinary matching write once the current replay settles.
+
+The temporal oracle reaches an aborted, unresolved original and a settled
+replacement in 12 direct and 12 joined histories. It varies an initial
+delivery, the source readiness transition, and the original transport's
+later outcome. The ready-at-start twin uses the same history. On
+`6d5331e51`, all 24 miss the first ordinary callback. Binding the acquisition
+observer to the signal makes both receivers pass, including controls where
+the old transport later rejects. The abort transfers readiness to the
+current replay. Removing the signal handling for either the direct or joined
+path fails all 12 histories for that receiver. The 12 existing same-turn
+fulfillment histories also pass.
+
+Compared with `53770d6b5`, the production package adds 320 gzip and 171
+Brotli bytes. The typical app adds 195 gzip and 161 Brotli bytes. The
+literal-answer fix removes the transport timing flag from the loader's
+receiver contract. Direct and joined initial demand share one signal
+observer and reuse their existing replay and readiness tracking.
+
+| Source | Git blob |
+| --- | --- |
+| `src/deferred.ts` | `aa0116d40d0787592932b4d820d230cced33bde9` |
+| `src/query/effect.ts` | `4d3d0b5f2d3445bb0e9b7c8a90adc47e53adaca2` |
+| `src/query/live/collection-subscriber.ts` | `b7fba9a2a72929b87022e8b8a9e029b46a475723` |
+| `src/query/live/ordered-source-loader.ts` | `94474021096ac8a632644dd38d847f95d4b91b21` |
+| `src/query/live/subset-demand-controller.ts` | `92a24a318c8858545b919f92d403d8dbcb4f7930` |
+| `tests/query/includes-temporal-oracle.test.ts` | `cd52a935af33f85a8ce69f8c8bd2af8f8b770d99` |
+| `tests/query/ordered-joined-replay-driver.ts` | `46bf37e25c7aaaa3466a1cfbda959480c97f1696` |
+| `tests/query/ordered-work-oracle.property.test.ts` | `1308ea9134d2e6cd8b47e57810f9e77a6aa4d0e0` |
+
+Paths in the table are relative to `packages/db`.

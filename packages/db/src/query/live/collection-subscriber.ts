@@ -438,13 +438,11 @@ export class CollectionSubscriber<
       orderByInfo,
       subscription,
       this.alias,
-      (result, holdPublication, settlesAsync, options) => {
+      (result, holdPublication, options) => {
         if (result instanceof Promise) {
           this.collectionConfigBuilder.trackOrderedLoadPromise(
             result,
-            holdPublication &&
-              settlesAsync &&
-              !subscription.hasPendingTruncateReplacement,
+            holdPublication && !subscription.hasPendingTruncateReplacement,
           )
         }
         onLoadSubsetResult(result, options)
