@@ -64,6 +64,7 @@ export const properties: ReadonlyArray<string> = [
   `collection-state.typed-keys`,
   `optimistic-history.publication-cases`,
   `production-errors.classes`,
+  `production-errors.effect-console`,
   `production-errors.sites`,
   `production-errors.generated-docs`,
   // IndexedDB and live-query observers

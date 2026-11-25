@@ -769,6 +769,7 @@ const staticOracleProperties = [
   `load-subset.exact-inflight`,
   `load-subset.rejected-waiter`,
   `ordered-work.consumer-parity`,
+  `ordered-work.joined-replay-refill`,
   `ordered-work.eager-indexed-window`,
   `ordered-work.eager-joined-window`,
   `ordered-work.eager-joined-gap`,

@@ -50,6 +50,8 @@
  *   its negation, and its text is frozen in
  *   `fixtures/development-only-messages.json`. The bundle check proves that
  *   production drops every frozen hint (maintainer decision, 2026-10-08).
+ *   The Effect receiver drives actual callback failures through both build
+ *   modes and checks the console text and the original Error objects.
  *
  * The model is the frozen fixtures and the format above; nothing here reads
  * codes from `src/errors.ts`. The production path is every error class that the
@@ -67,6 +69,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, vi } from 'vitest'
 import * as Errors from '../src/index'
@@ -75,7 +78,8 @@ import { errorSampleArguments } from './error-sample-arguments'
 import { exportedErrorClasses } from './production-error-messages-fixture'
 import { findErrorSites } from './error-sites-oracle'
 import { withErrorDocsFixture } from './generate-error-docs-fixture'
-import { oracleProperty } from './oracle-config.js'
+import { oracleProperty, violation } from './oracle-config.js'
+import { flushPromises } from './utils.js'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
@@ -573,6 +577,114 @@ describe(`production error messages`, () => {
         ),
       check: forwardAssertionJudgment,
     })
+  })
+
+  // The frozen site catalog supplies the development text. The same runtime
+  // console boundary receives the documented code line in production.
+  const effectConsoleSites: Record<string, { template: string }> = JSON.parse(
+    readFileSync(sitesPath, `utf8`),
+  )
+  const effectConsoleHistories = (
+    [`development`, `production`] as const
+  ).flatMap((mode) =>
+    ([`batch`, `entry`] as const).flatMap((handler) =>
+      [false, true].flatMap((asynchronous) =>
+        [false, true].map((onErrorThrows) => ({
+          mode,
+          handler,
+          asynchronous,
+          onErrorThrows,
+        })),
+      ),
+    ),
+  )
+  oracleProperty({
+    id: `production-errors.effect-console`,
+    law: {
+      statement: `An Effect handler failure that reaches console.error reports its original Error with the diagnostic text for the current build mode.`,
+      authority: `Live Queries, Error handling, and docs/errors.md, codes 224 through 226. The production message format is owned by the error message contract.`,
+      limits: `One matching row delivered to an Effect batch or entry handler, with no onError or one that throws synchronously.`,
+    },
+    owns: [`src/query/effect.ts#reportError`, `src/error-message.ts`],
+    histories: effectConsoleHistories,
+    label: ({ mode, handler, asynchronous, onErrorThrows }) =>
+      `${mode} ${asynchronous ? `asynchronous` : `synchronous`} ${handler} failure ${onErrorThrows ? `with an onError failure` : `without onError`}`,
+    model: ({ mode, onErrorThrows }) => {
+      const message = (code: number) =>
+        mode === `development`
+          ? effectConsoleSites[code]!.template
+          : `TanStack DB error ${code}: ${docsUrl}#error-${code}`
+      return onErrorThrows
+        ? [
+            [message(224), `onError failure`],
+            [message(225), `handler failure`],
+          ]
+        : [[message(226), `handler failure`]]
+    },
+    driver: async (history, observe) => {
+      const original = new Error(`handler failed`)
+      const secondary = new Error(`onError failed`)
+      const fail = () => {
+        if (history.asynchronous) return Promise.reject(original)
+        throw original
+      }
+      const rows = Errors.createCollection(
+        Errors.localOnlyCollectionOptions({
+          getKey: (row: { id: number }) => row.id,
+          initialData: [{ id: 1 }],
+        }),
+      )
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      vi.stubEnv(`NODE_ENV`, history.mode)
+      let effect: ReturnType<typeof Errors.createEffect> | undefined
+      try {
+        effect = Errors.createEffect({
+          query: (q) => q.from({ row: rows }),
+          ...(history.handler === `batch`
+            ? { onBatch: fail }
+            : { onEnter: fail }),
+          ...(history.onErrorThrows
+            ? {
+                onError: () => {
+                  throw secondary
+                },
+              }
+            : {}),
+        })
+        await flushPromises()
+        observe(
+          `console diagnostics`,
+          consoleError.mock.calls.map(([message, error]) => [
+            message,
+            error === original
+              ? `handler failure`
+              : error === secondary
+                ? `onError failure`
+                : error,
+          ]),
+        )
+      } finally {
+        await effect?.dispose()
+        await rows.cleanup()
+        consoleError.mockRestore()
+        vi.unstubAllEnvs()
+      }
+    },
+    check: (_history, observations, expected) => {
+      const actual = observations.find(
+        ({ checkpoint }) => checkpoint === `console diagnostics`,
+      )?.value
+      return isDeepStrictEqual(actual, expected)
+        ? { kind: `pass` }
+        : violation(
+            `console diagnostics`,
+            `Effect logged a different diagnostic`,
+            undefined,
+            { actual, expected },
+          )
+    },
   })
 
   oracleProperty({

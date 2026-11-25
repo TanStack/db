@@ -1431,7 +1431,11 @@ publication; it does not report success until its own chosen window is visible.
 A joined demand already pending when the move begins is part of this operation
 if it blocks the ordered continuation. Retiring that demand releases its
 participant; a later failure from the obsolete request cannot fail the move.
-The resumed root page and refill still belong to the operation.
+The resumed root page and refill still belong to the operation. A root
+truncate replay can finish while an ordered repair still owes a joined-filter
+window. The next graph pass checks that window inside the same repair.
+Any root refill it needs inherits the publication hold even when joined
+demand has already settled.
 Window controllers treat `getWindow()` as settled state, not the current lease
 request. An overlapping preload joins its lease's pending window promise rather
 than replacing it with the smaller committed page count. Lease release may also

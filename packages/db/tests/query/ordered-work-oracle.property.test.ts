@@ -16,6 +16,7 @@ import {
   oracleProperty,
   oracleReplayRequested,
   readOracleRunConfig,
+  violation,
 } from '../oracle-config.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
@@ -28,6 +29,7 @@ import {
 } from './ordered-comparison-oracle.js'
 import { receiveOrderedCompilerCacheHistory } from './ordered-compiler-cache-driver.js'
 import { receiveOrderedJoinedPlanHistory } from './ordered-joined-plan-driver.js'
+import { receiveJoinedReplay } from './ordered-joined-replay-driver.js'
 import {
   compareRows,
   expectDistinctRequests,
@@ -72,6 +74,10 @@ import type {
 } from './ordered-work-model-oracle.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { Observation } from '../oracle-config.js'
+import type {
+  JoinedReplayHistory,
+  JoinedReplayTrace,
+} from './ordered-joined-replay-driver.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 /**
@@ -98,6 +104,8 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * buffered change still invalidates its settled prefix before callbacks run.
  * A window move started during existing joined demand waits for its later root
  * refill and publication. Joined demand cannot discard a repair continuation.
+ * A root replay that finishes during joined demand can still owe a refill.
+ * The preceding repair window stays public until that refill settles.
  * The authority is `packages/db/src/query/live/ARCHITECTURE.md`, especially
  * "Ordered requests, continuation, and recovery", "Atomic window publication",
  * and the initial-readiness law. This owner checks the local, controlled
@@ -152,6 +160,81 @@ type ConsumerObservation = {
   errors: Array<string>
   live: boolean
 }
+
+// The joined provider selects keys. The model can compute the complete window
+// from that set and the root provider's rows without any acquisition bookkeeping.
+// A complete replacement prefix checks that the hold ends once its result is
+// proven. Short prefixes force a refill, including an empty one-row window or
+// a partially filled two-row window. An explicit truncate also tests a replay
+// that supersedes the original repair before the repair reaches retirement.
+const joinedReplaySchedules = ([`collection`, `effect`] as const).flatMap(
+  (receiver) =>
+    ([1, 2] as const).flatMap((limit) =>
+      ([`explicit`, `retirement`] as const).flatMap((trigger) =>
+        [true, false].flatMap((holdJoined) =>
+          ([`complete`, `refill`, `refill-rejection`] as const).map(
+            (answer) => ({
+              receiver,
+              limit,
+              trigger,
+              answer,
+              holdJoined,
+              initial: Array.from({ length: 8 }, (_, index) => ({
+                id: index + 1,
+                rank: index + 1,
+              })),
+              replacement: Array.from({ length: 8 }, (_, index) => ({
+                id: index + 11,
+                rank: index + 1,
+              })),
+              eligible: [
+                1,
+                2,
+                3,
+                4,
+                6,
+                7,
+                15,
+                16,
+                ...Array.from(
+                  { length: answer === `complete` ? limit : limit - 1 },
+                  (_, index) => index + 11,
+                ),
+              ],
+            }),
+          ),
+        ),
+      ),
+    ),
+)
+
+const joinedReplayHistories: Array<JoinedReplayHistory> = [false, true].flatMap(
+  (indexed) => [
+    ...joinedReplaySchedules.map((schedule) => ({ ...schedule, indexed })),
+    // Move while the replay is held. The positive windows all need a row
+    // beyond the replayed prefix. A zero limit needs no replacement rows.
+    ...joinedReplaySchedules
+      .filter(
+        ({ receiver, limit, holdJoined }) =>
+          receiver === `collection` && limit === 2 && holdJoined,
+      )
+      .flatMap((schedule) =>
+        (schedule.answer === `complete`
+          ? [{ offset: 0, limit: 0 }]
+          : [
+              { offset: 0, limit: 1 },
+              { offset: 0, limit: 3 },
+              { offset: 1, limit: 2 },
+            ]
+        ).map((move) => ({
+          ...schedule,
+          indexed,
+          move,
+          eligible: [1, 2, 3, 4, 6, 7, 15, 16, 17, 18],
+        })),
+      ),
+  ],
+)
 
 function matchesJoinFilter(row: Row, joinFilter: JoinFilter): boolean {
   return joinFilter === `none` ? !row.eligible : row.eligible
@@ -876,6 +959,176 @@ function orderedWorkJudgment<THistory>(
 }
 
 describe(`ordered source work oracle`, () => {
+  oracleProperty({
+    id: `ordered-work.joined-replay-refill`,
+    law: {
+      statement: `An ordered repair retains the prior public window until the replacement replay and any root refill deferred by joined demand establish the complete window.`,
+      authority: `query/live/ARCHITECTURE.md: Atomic window publication, Ordered requests, continuation, and recovery, and Replay participants and failure.`,
+      limits: `One ascending root source with one lazy joined filter, controlled adapter answers, one truncate replay, and at most one Collection window move.`,
+    },
+    owns: [
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+      'src/query/live/collection-subscriber.ts',
+    ],
+    histories: {
+      enumerated: joinedReplayHistories,
+      states: [
+        `collection held refill after joined replay`,
+        `effect held refill after joined replay`,
+        `window move held through joined replay and refill`,
+      ],
+    },
+    label: ({ receiver, trigger, indexed, limit, answer, holdJoined, move }) =>
+      `${receiver} ${trigger} ${indexed ? `indexed` : `unindexed`} window ${limit} with ${answer} and ${holdJoined ? `held` : `immediate`} joined demand${move ? ` moved to ${move.offset}+${move.limit}` : ``}`,
+    model: ({ initial, replacement, eligible, limit, answer, move }) => {
+      const priorWindow = { offset: 0, limit }
+      const window = (
+        rows: JoinedReplayHistory[`initial`],
+        {
+          offset,
+          limit: width,
+        }: { offset: number; limit: number } = priorWindow,
+      ) =>
+        rows
+          .filter(({ id }) => eligible.includes(id))
+          .sort((left, right) => left.rank - right.rank)
+          .slice(offset, offset + width)
+      const failed = answer === `refill-rejection`
+      return {
+        prior: window(initial),
+        next: failed ? window(initial) : window(replacement, move),
+        priorWindow,
+        nextWindow: failed ? priorWindow : (move ?? priorWindow),
+        error: failed ? `originating error` : `none`,
+      }
+    },
+    driver: async (history, observe) => {
+      const trace = await receiveJoinedReplay(history)
+      if (trace.rootReadyWhileJoined && trace.heldRefill)
+        observe(`reach`, `${history.receiver} held refill after joined replay`)
+      if (
+        trace.heldRefill &&
+        trace.afterReplayAnswers.moveOutcome === `pending` &&
+        trace.waitingForRefill.moveOutcome === `pending`
+      ) {
+        observe(`reach`, `window move held through joined replay and refill`)
+      }
+      observe(`joined replay trace`, trace)
+    },
+    // The replay's raw writes and root subscription readiness establish reach.
+    // The publication comparison keeps the preceding window at every held cut.
+    // The complete-prefix control can publish as soon as joined demand ends.
+    check: (history, observations, expected) => {
+      const trace = observations.find(
+        ({ checkpoint }) => checkpoint === `joined replay trace`,
+      )?.value as JoinedReplayTrace | undefined
+      if (!trace)
+        return violation(`joined replay trace`, `missing receiver observations`)
+
+      const short = history.answer !== `complete`
+      const held: Array<[string, JoinedReplayTrace[`waitingForReplay`]]> = [
+        [`held replay`, trace.waitingForReplay],
+      ]
+      if (history.holdJoined)
+        held.push([`held joined demand`, trace.afterReplayAnswers])
+      if (short) held.push([`held refill`, trace.waitingForRefill])
+      const requiredRefill =
+        trace.waitingForRefill.installed.filter(({ id }) =>
+          history.eligible.includes(id),
+        ).length <
+        (history.move?.offset ?? 0) + (history.move?.limit ?? history.limit)
+      const comparisons: Array<[string, unknown, unknown]> = [
+        [`prior window`, trace.initial, expected.prior],
+        [`bounded repair started`, trace.repairStarted, true],
+        [`replay started`, trace.replayRequests > 0, true],
+        [`raw truncate applied`, trace.waitingForReplay.installed, []],
+        [
+          `replay installed source rows`,
+          trace.afterReplayAnswers.installed.length > 0,
+          true,
+        ],
+      ]
+      if (history.holdJoined)
+        comparisons.push([`joined load was held`, trace.joinedDemandHeld, true])
+      if (short) {
+        comparisons.push(
+          [`refill acquisition held`, trace.heldRefill, true],
+          [`installed replay cannot fill the window`, requiredRefill, true],
+        )
+        if (history.trigger === `retirement` && history.holdJoined)
+          comparisons.push([
+            `root replay settled during joined demand`,
+            trace.rootReadyWhileJoined,
+            true,
+          ])
+      }
+      for (const [name, cut] of held) {
+        comparisons.push(
+          [`${name} reads`, cut.rows, expected.prior],
+          [`${name} publications`, cut.publications, []],
+        )
+      }
+      if (short)
+        comparisons.push([
+          `repair refill revalidates its demand`,
+          trace.refillRevalidates,
+          true,
+        ])
+      if (history.move) {
+        const pending = [
+          [`held joined demand`, trace.afterReplayAnswers],
+          ...(short ? [[`held refill`, trace.waitingForRefill] as const] : []),
+        ] as const
+        for (const [name, cut] of pending) {
+          comparisons.push(
+            [`${name} move outcome`, cut.moveOutcome, `pending`],
+            [`${name} settled options`, cut.window, expected.priorWindow],
+          )
+        }
+        const failed = history.answer === `refill-rejection`
+        comparisons.push(
+          [
+            `settled move outcome`,
+            trace.settled.moveOutcome,
+            failed ? `rejected` : `fulfilled`,
+          ],
+          [`settled move options`, trace.settled.window, expected.nextWindow],
+          [
+            `move fulfillment rows`,
+            trace.rowsAtMoveFulfillment,
+            failed ? undefined : expected.next,
+          ],
+          [
+            `move fulfillment options`,
+            trace.windowAtMoveFulfillment,
+            failed ? undefined : expected.nextWindow,
+          ],
+        )
+      }
+      comparisons.push(
+        [`settled window`, trace.settled.rows, expected.next],
+        [
+          `settled publications`,
+          trace.settled.publications,
+          history.answer === `refill-rejection` ? [] : [expected.next],
+        ],
+        [`refill error identity`, trace.reportedError, expected.error],
+      )
+      for (const [checkpoint, actual, expectedValue] of comparisons) {
+        if (!isDeepStrictEqual(actual, expectedValue))
+          return violation(
+            checkpoint,
+            `the receiver diverged from the complete-window model`,
+            undefined,
+            { actual, expected: expectedValue },
+          )
+      }
+      return { kind: `pass` }
+    },
+  })
+
   async function runOrderTermParity(): Promise<void> {
     const [collection, effect] = await Promise.all([
       observeLaterOrderTermMutation(`collection`),

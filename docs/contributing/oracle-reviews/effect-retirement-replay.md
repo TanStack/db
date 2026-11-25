@@ -127,3 +127,99 @@ The histories, model, and comparison use the same observations.
 
 ESLint and the changed-file oracle lint passed. The rerun on Arca passed
 all 1,031 tests across both files.
+
+## Joined refill after root replay
+
+[Atomic window publication and ordered recovery](../../../packages/db/src/query/live/ARCHITECTURE.md#atomic-window-publication)
+require the preceding complete window to remain public until the replacement
+is ready. The repair also revalidates every demand it issues. A real
+Collection published row 11 while its post-replay refill was pending, then
+published rows 11 and 15 after settlement. The Effect retained rows 1 and 2
+under the same schedule. The existing laws decide both results.
+
+`ordered-work.joined-replay-refill` independently joins and sorts the complete
+provider tables. It compares public reads and publications after the raw
+truncate, after the root replay installs rows while the joined answer is
+held, while a root refill is held, and after that refill settles. A complete
+replacement prefix can publish after the joined answer settles. A short
+prefix must wait for an authoritative refill. A rejected refill keeps the
+preceding result and exposes the same error object. The Collection move
+histories also compare the promise outcome, settled options, and the rows
+visible when the move fulfills.
+
+- **Reach.** The property enumerates 124 histories. The original axes are the
+  consumer, index, width, truncate trigger, joined answer timing, and
+  replacement outcome. The additional Collection histories move to zero, a
+  smaller or wider window, or a different offset. The held joined replay
+  followed by a held root refill is reached in 40 Collection and 16 Effect
+  histories. An active Collection move is pending at both held answers in
+  24 histories.
+- **RED.** With the loader from `53770d6b5`, the command below rejects
+  36 histories at `held refill reads`, including 12 with a window move.
+- **GREEN.** The same command passes 124 histories and two runner checks.
+  The loader stages the joined-window check for the next graph pass, which
+  registers the next acquisition before reentrant graph work can publish
+  it. Replay still retires superseded leases. The production change adds
+  no retained state. Compared with `53770d6b5`, the package changes by
+  +31 gzip and −25 Brotli bytes, and the typical app by +31 gzip and
+  +29 Brotli bytes.
+- **Mutant.** A refill that keeps the publication hold but accepts a cached
+  answer is rejected at `repair refill revalidates its demand` in the
+  unindexed retirement schedule with a held joined answer and width two.
+- **Limits.** One root source, one lazy joined filter, ascending distinct
+  numeric ranks, one truncate replay, controlled adapter answers and at
+  most one Collection move. These histories cover the scheduled graph pass
+  after real replay settlement. The blocked reentrant pass is checked in
+  the controlled request ledger.
+
+```sh
+cd packages/db
+pnpm exec vitest run --coverage.enabled=false --maxWorkers=2 \
+  tests/query/ordered-work-oracle.property.test.ts \
+  -t ordered-work.joined-replay-refill
+```
+
+### Request-ledger calibration
+
+The bounded-work comparison applies independently to each ordering epoch and
+source snapshot. The earlier comparison charged six reads to one chain.
+The first shrunk witness, fixed seed `20261016`, path `0:1:2:2`, shows a
+prefix, tie and refill before truncate and the same three demands against
+the replacement snapshot. The fixed replay now runs through the shared
+comparison. The generated fixed and random campaigns reached authoritative
+reads on both sides of a truncate in 60 and 68 of 10,000 histories. Adding
+one duplicate read to that fixed replay fails at
+`ordered-source-loader-state-oracle.test.ts:2258`.
+
+The blocked-pass comparison uses a successful prefix and tie from the current
+epoch and snapshot to identify a later request that grows the same repair.
+The same request must revalidate. The fixed and random generated campaigns
+reach that comparison in 17 of 200 and 38 of 400 histories. Each constructed
+campaign reaches it on all five bases. On the original loader the five fixed
+bases pass. Dropping the staged continuation on reentry makes all five
+request a larger prefix without revalidation and fail at
+`repair refill after replay retirement`. On the repaired loader the replay
+also stages the joined-window check. Dropping only the staged continuation
+gave the same observed refill on this schedule. Dropping both ways of
+resuming failed the request-authority progress comparison.
+
+### Effect diagnostics
+
+The production error owner runs the real Effect callback error path in
+16 combinations of entry or batch, synchronous throw or asynchronous
+rejection, development or production, and missing or throwing `onError`.
+The comparison freezes the development line and preserves both the
+callback error and the handler's own error identity at their destinations.
+All 16 histories and the runner check pass. The suppression mutation
+`query/effect.ts:M616` fails the four development cases with no error
+handler.
+
+| Source | Git blob |
+| --- | --- |
+| `src/query/live/ordered-source-loader.ts` | `00cc9e0bf1d02a51ce8c640074388603920ab504` |
+| `tests/query/ordered-joined-replay-driver.ts` | `253d741c04f8507814d718ce7787eb6681cec0b5` |
+| `tests/query/ordered-work-oracle.property.test.ts` | `2730bc776db9a95af8221327628a43ea72e8110f` |
+| `tests/query/ordered-source-loader-state-oracle.test.ts` | `4b7102947ec746f28ad5eff44f113992c0360fdf` |
+| `tests/production-error-messages-oracle.test.ts` | `9250650ed7ad3ac61e06b2a9a380a45b72123d85` |
+
+Paths in the table are relative to `packages/db`.

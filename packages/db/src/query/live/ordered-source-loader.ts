@@ -568,7 +568,10 @@ export class OrderedSourceLoader {
 
   settleFullSourceReplay(): void {
     if (this.work.kind === `repair`) {
-      this.finishOrderedPrefixRepair()
+      this.finishOrderedPrefixRepair(
+        undefined,
+        Boolean(this.info.joinedFilterSourceIds?.length),
+      )
       return
     }
     // Replay repaired the retained logical acquisition. A later window retry
@@ -760,10 +763,23 @@ export class OrderedSourceLoader {
       : undefined
   }
 
-  private finishOrderedPrefixRepair(windowOperationGeneration?: number): void {
+  private finishOrderedPrefixRepair(
+    windowOperationGeneration?: number,
+    verifyJoinedWindow = false,
+  ): void {
     if (this.work.kind !== `repair`) return
     const epoch = this.work.epoch
+    if (verifyJoinedWindow && this.active) {
+      // Replay replenished the root acquisitions. Check the joined window
+      // inside the same repair on the next graph pass. That pass can register
+      // a replacement acquisition before a reentrant graph run can publish.
+      this.blockedLoadMore = {
+        ...this.blockedLoadMore,
+        continuesOrderedPrefixRepair: true,
+      }
+    }
     if (this.repairNeedsReplacement()) {
+      if (verifyJoinedWindow) return
       // A later mutation invalidated the source order while this chain was
       // running. Start its replacement before the current participant settles
       // so Collection and Effect publication remain behind one continuous gate.
@@ -784,10 +800,9 @@ export class OrderedSourceLoader {
       const hasSupersededAcquisition = [
         ...this.settledFiniteAcquisitions.values(),
       ].some(({ chain }) => chain !== epoch)
-      // A release callback may synchronously begin truncate replay. Keep the
-      // repair ownership open so replay settlement can finish retiring the
-      // remaining superseded leases without releasing the refreshed prefix.
-      if (!this.active || !hasSupersededAcquisition) {
+      if (!this.active || (!verifyJoinedWindow && !hasSupersededAcquisition)) {
+        // A release can start a replay. Leave enough authority for that
+        // replay to finish retiring older leases without releasing its own.
         this.cancelRepairRetry()
         this.repairRetries = 0
         // Retirement can deliver a newer invalidation or raise the debt to a

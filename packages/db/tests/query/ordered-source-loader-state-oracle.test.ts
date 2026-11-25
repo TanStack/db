@@ -90,7 +90,8 @@ function tieValue(options: RequestOptions): unknown {
  *   belongs to its replay, and one a replay reacquired is absorbed.
  * - **Cost:** once loading is quiet and a bounded repair is available, an
  *   invalidation reads no full source, and it issues at most one chain (in
- *   this fake, a prefix, a tie, and a refill) per ordering epoch move.
+ *   this fake, a prefix, a tie, and a refill) per ordering epoch within
+ *   each source snapshot. A truncate replaces that snapshot.
  * - **Ignored report:** a sync adapter's report that served pages may have
  *   shifted issues no authoritative request before any request settled: a
  *   request in flight still owes an exact result for its own options. The
@@ -573,6 +574,7 @@ type AuthorityObservation = {
   startThrows: number
   startThrowsDuringFailure: number
   costChecks: number
+  costChecksAcrossTruncate: number
   hungRequests: number
   offsetWindows: number
   releaseInvalidations: number
@@ -1145,7 +1147,8 @@ async function checkAuthorityCase(
       | `deferred-refill`
       | `reset-continuation`
       | `release-pass-continuation`
-      | `release-pass-refill-resumed`,
+      | `release-pass-refill-resumed`
+      | `release-pass-refill-revalidation`,
   ) => void,
   observeRejection?: (reason: unknown) => unknown,
   observeRelease: (released: boolean) => boolean = (released) => released,
@@ -1212,6 +1215,7 @@ async function checkAuthorityCase(
   let releaseDuringAnswer = false
   let startThrowsDuringFailure = 0
   let costChecks = 0
+  let costChecksAcrossTruncate = 0
   // The start-throw branch sets the flag, so read it through a call.
   const retryStartThrew = () => startThrewDuringRetry
   let startThrows = 0
@@ -1226,6 +1230,7 @@ async function checkAuthorityCase(
     }
   }
   let releaseViolation: string | undefined
+  let refillAuthorityViolation: string | undefined
   let obsoleteStepViolation: string | undefined
   let restartViolation: string | undefined
   let unexpressibleTieViolation: string | undefined
@@ -1262,7 +1267,9 @@ async function checkAuthorityCase(
   let epochMovesWithContinuation = 0
   let settlingRequest: LedgerRequest | undefined
   let deferredByReleasePass:
-    { epochMoves: number; truncates: number } | undefined
+    | { epochMoves: number; truncates: number; repairPrefixLimit?: number }
+    | undefined
+  let settlingReplay = false
   let unblockedReleasePasses = 0
   const sameDemand = (a: LedgerRequest, b: LedgerRequest) =>
     a.method === b.method &&
@@ -1441,21 +1448,39 @@ async function checkAuthorityCase(
     // reads a demand the chain has not read. Only a staged or blocked
     // continuation issues such a step from a pass; a new start, or a restart
     // inside the chain, would read the chain's first prefix again.
-    if (
+    const afterBlockedReleasePass =
       deferredByReleasePass &&
-      request.chainStep &&
-      ledger.every(
-        (other) =>
-          other === request ||
-          other.chain !== request.chain ||
-          !sameDemand(other, request),
-      ) &&
       settlingRequest === undefined &&
       !settlingChainMember &&
       deferredByReleasePass.epochMoves === epochMoves &&
       deferredByReleasePass.truncates === truncates
-    ) {
-      reached?.(`release-pass-refill-resumed`)
+    if (afterBlockedReleasePass) {
+      // This prefix grows a successful bounded repair whose tie had already
+      // settled at replay retirement. A later graph pass cannot turn that
+      // owed refill into a cacheable acquisition.
+      const prefixLimit = deferredByReleasePass?.repairPrefixLimit
+      if (
+        prefixLimit !== undefined &&
+        options.orderBy !== undefined &&
+        options.where === undefined &&
+        options.minValues === undefined &&
+        (options.limit ?? 0) > prefixLimit
+      ) {
+        reached?.(`release-pass-refill-revalidation`)
+        if (options.refetch !== true)
+          refillAuthorityViolation ??= `request ${request.index} grew the repair prefix after replay retirement without revalidation`
+      }
+      if (
+        request.chainStep &&
+        ledger.every(
+          (other) =>
+            other === request ||
+            other.chain !== request.chain ||
+            !sameDemand(other, request),
+        )
+      ) {
+        reached?.(`release-pass-refill-resumed`)
+      }
     }
     deferredByReleasePass = undefined
     // An issued request consumes an owed continuation. An ordinary page also
@@ -1582,6 +1607,22 @@ async function checkAuthorityCase(
         if (continuationOwed && !selfRelease) {
           reached?.(`release-pass-continuation`)
           deferredByReleasePass = { epochMoves, truncates }
+          const tie = ledger.at(-1)
+          const prefix =
+            currentChain === undefined ? undefined : ledger[currentChain]
+          if (
+            settlingReplay &&
+            !testCase.indexed &&
+            testCase.needsMore &&
+            prefix?.outcome === `ok` &&
+            prefix.issuedTruncates === truncates &&
+            prefix.issuedEpochMoves === epochMoves &&
+            tie?.chain === prefix.index &&
+            tie.outcome === `ok` &&
+            tieValue(tie.options) !== undefined
+          ) {
+            deferredByReleasePass.repairPrefixLimit = prefix.options.limit
+          }
         }
         reentering = true
         reentrantPasses++
@@ -1749,7 +1790,12 @@ async function checkAuthorityCase(
     if (replayCoverage.size > 0) replayAuthority = ledger.length - 0.5
     // Replay settlement is not a graph pass. It can finish retirement while
     // joined work still owns a staged continuation; only a pass consumes it.
-    run(() => loader.settleFullSourceReplay(), false)
+    settlingReplay = true
+    try {
+      run(() => loader.settleFullSourceReplay(), false)
+    } finally {
+      settlingReplay = false
+    }
   }
   let unexpressibleBoundaries = 0
   let joinedDeferrals = 0
@@ -1970,6 +2016,12 @@ async function checkAuthorityCase(
       rejectAt(
         `ordered-source-loader-state-oracle.test.ts:1588`,
         new Error(`release ${checkpoint}: ${releaseViolation}`),
+      )
+    }
+    if (refillAuthorityViolation) {
+      rejectAt(
+        `repair refill after replay retirement`,
+        new Error(refillAuthorityViolation),
       )
     }
     if (resetViolation) {
@@ -2655,7 +2707,6 @@ async function checkAuthorityCase(
       }
       if (!coveredByFullSource && !hungAuthority && !isDisposed()) {
         const before = ledger.length
-        const movesBefore = epochMoves
         loader.invalidateSourceOrdering()
         run(() => loader.loadMore())
         await flush()
@@ -2673,10 +2724,11 @@ async function checkAuthorityCase(
         // not need the full source, with an expressible boundary. An
         // unindexed window that still needs rows grows its prefix instead
         // (ARCHITECTURE.md, "an underfilled unindexed prefix grows"). One
-        // repair is then one chain per ordering epoch move: a prefix, then a
-        // tie and a refill page for each boundary it reaches (ARCHITECTURE.md,
-        // ordered repair). Each boundary is a different installed row, so a
-        // chain issues at most one prefix plus two requests per row.
+        // repair is then one chain per ordering epoch and source snapshot:
+        // a prefix, then a tie and refill per boundary. Truncate replaces the
+        // source snapshot and discards the cursor (ARCHITECTURE.md, Ordered
+        // requests, continuation, and recovery). A chain issues at most one
+        // prefix plus two requests per installed row in each snapshot.
         await drain()
         const repair = ledger.slice(before)
         const boundedRepair =
@@ -2702,40 +2754,45 @@ async function checkAuthorityCase(
               ),
             )
           }
-          const authoritative = repair.filter(
-            (request) => request.authoritative,
-          ).length
-          const chains = epochMoves - movesBefore
-          if (authoritative > chains * (1 + 2 * snapshot().length)) {
-            rejectAt(
-              `ordered-source-loader-state-oracle.test.ts:2240`,
-              new Error(
-                `cost: one invalidation issued ${authoritative} authoritative requests for ${chains} epoch moves`,
-              ),
-            )
-          }
-          // Each boundary is a different read: no chain reads the same
-          // prefix, tie, or page twice.
-          const reads = new Map<string, number>()
-          for (const { authoritative: owed, options } of repair) {
-            if (!owed) continue
+          const readsByAuthority = new Map<string, Set<string>>()
+          const snapshotsRead = new Set<number>()
+          // The fake installs the same number of rows on either side of a
+          // truncate during this drain.
+          const maximum = 1 + 2 * snapshot().length
+          for (const request of repair) {
+            if (!request.authoritative) continue
+            snapshotsRead.add(request.issuedTruncates)
+            const authority = JSON.stringify([
+              request.issuedEpochMoves,
+              request.issuedTruncates,
+            ])
+            const reads = readsByAuthority.get(authority) ?? new Set<string>()
+            readsByAuthority.set(authority, reads)
+            const { options } = request
             const read = JSON.stringify([
               options.limit,
               tieValue(options),
               options.minValues,
             ])
-            reads.set(read, (reads.get(read) ?? 0) + 1)
-          }
-          for (const [read, count] of reads) {
-            if (count > chains) {
+            if (reads.has(read)) {
               rejectAt(
                 `ordered-source-loader-state-oracle.test.ts:2258`,
                 new Error(
-                  `cost: one invalidation repeated the read ${read} ${count} times for ${chains} epoch moves`,
+                  `cost: repeated the read ${read} in one ordering epoch and source snapshot ${authority}`,
+                ),
+              )
+            }
+            reads.add(read)
+            if (reads.size > maximum) {
+              rejectAt(
+                `ordered-source-loader-state-oracle.test.ts:2240`,
+                new Error(
+                  `cost: issued more than ${maximum} authoritative reads in one ordering epoch and source snapshot ${authority}`,
                 ),
               )
             }
           }
+          if (snapshotsRead.size > 1) costChecksAcrossTruncate++
         }
       }
     }
@@ -2796,6 +2853,7 @@ async function checkAuthorityCase(
     startThrows,
     startThrowsDuringFailure,
     costChecks,
+    costChecksAcrossTruncate,
     hungRequests,
     offsetWindows: testCase.offset > 0 && ledger.length > 0 ? 1 : 0,
     releaseInvalidations,
@@ -3456,6 +3514,21 @@ describe(`Ordered source request authority`, () => {
         },
       },
       {
+        name: `a bounded repair whose retirement replaces the source snapshot`,
+        testCase: {
+          ...ordinaryScenario,
+          indexed: true,
+          limit: 1,
+          settledFirst: false,
+          releaseFault: false,
+          syncRepair: false,
+          joined: true,
+          releaseTruncates: true,
+          releaseInvalidates: false,
+          history: [{ type: `joinedBusy` }],
+        },
+      },
+      {
         // Without the settled check, a report before the first page settled
         // forced a full-source read.
         name: `a report before any request settles`,
@@ -3647,6 +3720,7 @@ describe(`Ordered source request authority`, () => {
     // as a step of the same chain that reads a new demand.
     const releasePassState = `release-pass-continuation`
     const resumedState = `release-pass-refill-resumed`
+    const revalidationState = `release-pass-refill-revalidation`
 
     // The pinned runner reads this object at execution. Keep the existing
     // fixed/random asymmetry without adding or widening a campaign.
@@ -3654,14 +3728,14 @@ describe(`Ordered source request authority`, () => {
       arbitrary: handoffCase,
       runs: 400,
       fixedSeeds: [20261029],
-      states: [...states, resumedState],
+      states: [...states, resumedState, revalidationState],
       measured: [releasePassState],
       // Each builder keeps the generated limit, local rows, and release
       // truncate, and fixes only the axes its states need.
       constructed: [
         {
           name: `a release pass during replay retirement while an on-demand refill is deferred`,
-          enters: [`deferred-refill`, resumedState],
+          enters: [`deferred-refill`, resumedState, revalidationState],
           build: (generated: AuthorityCase) =>
             handoffHistory({
               ...handoffAxes(generated),
@@ -3712,7 +3786,7 @@ describe(`Ordered source request authority`, () => {
       law: {
         statement: `preserves repair continuation identity across replay bookkeeping`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
-        limits: `One unindexed loader over a fake subscription, limit 1/2, offset 0, one fixed history shape around a deferred refill, and the request-ledger laws at their checkpoints. A loader that drops a deferred refill during a blocked pass fails only the constructed history's required reach, not a law; elsewhere in the grammar it passes (coverage map, ordered-loader authority, awaiting a maintainer decision).`,
+        limits: `One unindexed loader over a fake subscription, limit 1/2, offset 0, one fixed history shape around a deferred refill, and the request-ledger laws at their checkpoints. The refill revalidation comparison requires a successful prefix and tie in the current replay and ordering epoch.`,
       },
       owns: [
         'src/collection/index.ts#createCollection',
@@ -3746,7 +3820,8 @@ describe(`Ordered source request authority`, () => {
               state === `deferred-refill` ||
               state === `reset-continuation` ||
               state === releasePassState ||
-              state === resumedState
+              state === resumedState ||
+              state === revalidationState
             )
               reached.add(state)
           })
@@ -4349,6 +4424,7 @@ describe(`Ordered source request authority`, () => {
       startThrows: 0,
       startThrowsDuringFailure: 0,
       costChecks: 0,
+      costChecksAcrossTruncate: 0,
       hungRequests: 0,
       offsetWindows: 0,
     }
@@ -4385,6 +4461,7 @@ describe(`Ordered source request authority`, () => {
         startThrows: 0,
         startThrowsDuringFailure: 0,
         costChecks: 0,
+        costChecksAcrossTruncate: 0,
         hungRequests: 0,
         offsetWindows: 0,
       }
@@ -4396,7 +4473,7 @@ describe(`Ordered source request authority`, () => {
       )
         return
       process.stderr.write(
-        `${authorityProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts), unblockedReleasePasses })}\n`,
+        `${authorityProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts), unblockedReleasePasses, costChecksAcrossTruncate: later.costChecksAcrossTruncate })}\n`,
       )
       if (oracleReplayRequested()) return
       for (const state of states)

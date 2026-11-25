@@ -8726,19 +8726,25 @@ premise risk remains undrawn: a fresh start whose prefix returns empty would
 issue a refill prefix from its own settlement and be flagged. The fake never
 returns an empty start prefix there.
 
+The blocked-pass continuation witness now checks revalidation directly. When
+replay retirement runs a blocked pass after the current bounded prefix and
+its tie have succeeded, a later prefix that grows that repair in the same
+ordering epoch and source snapshot must revalidate. The comparison identifies
+the larger demand before it checks `refetch`. The historical `m3` mutant
+dropped the staged continuation and sent a cacheable prefix. On the original
+loader it fails this comparison in the fixed seed's constructed histories.
+Treating every finite request after `continuationOwed` as a refill would
+misclassify ordinary reads.
+
+The request-authority oracle bounds the number and uniqueness of authoritative
+reads per ordering epoch and source snapshot. A truncate discards the cursor
+and can require the same prefix, tie, and refill against replacement rows.
+The cost comparison still rejects a repeated exact read inside either
+snapshot. The shared fixed replay preserves the first generated case that
+read on both sides of a retirement-triggered truncate.
+
 Awaiting maintainer decision. Owner: this oracle.
 
-- `m3`: a blocked pass drops a staged continuation. The refill is later
-  issued as an ordinary page without `refetch: true`, which ARCHITECTURE.md
-  forbids for a repair chain's acquisitions. Only the constructed history's
-  required reach rejects it (fixed seed `20261029`, constructed history over
-  the replay-continuation grammar with `syncRepair=false`, `joined=true`,
-  `releaseReenters=true`, `reset=before-repair`, `answers=2`; history
-  `settle(0, success); settle(0, success); report; truncate; move(-1);
-  joinedBusy; settleNewest; settleNewest`). A candidate law ("a finite
-  request issued while a chain continuation is owed carries `refetch: true`")
-  failed four campaigns on unchanged production, because `continuationOwed`
-  over-approximates.
 - Re-reads after new source input. The one-start-per-epoch law exempts a
   chain step that re-reads its start demand after an optimistic departure, a
   head insert, or a source delete. Production does both: it re-reads the
@@ -8747,12 +8753,10 @@ Awaiting maintainer decision. Owner: this oracle.
   after a head insert. Whether those re-reads are required, or should grow the
   read instead (optimistic headroom, ARCHITECTURE.md), is undecided.
 
-Next witness, restored: check the real subscription receiving path.
+The joined-refill property below checks the real subscription receiving path.
 `collection-subscriber.ts` calls `settleFullSourceReplay()` in the replay's
-`succeed` callback and then schedules a graph run
-(`scheduleGraphRunIfSyncRunCurrent`), so the resumed refill reaches the loader
-through that scheduled run, not through the fake's drain. No executed witness
-covers that path.
+`succeed` callback and then schedules the graph run that resumes the refill.
+The reentrant release-pass comparison above uses the controlled request ledger.
 
 ### Effect publication across truncate replay started by retirement
 
@@ -8772,7 +8776,7 @@ replay's first row is 22. The old Effect released its hold when the repair
 fulfilled, although the repair's unload had started the replay. The Effect
 now transfers the hold to the pending replay on either settlement outcome.
 The Collection receivers exercise the same history and retain their existing
-gate. The joined-refill witness below concerns a later cut. The [review record](oracle-reviews/effect-retirement-replay.md) binds the oracle receipts to the implementation and includes the initial Effect acquisition handoff.
+gate. The joined-refill witness below checks a later cut. The [review record](oracle-reviews/effect-retirement-replay.md) binds the oracle receipts to the implementation and includes the initial Effect acquisition handoff.
 
 On the parent production code, fixed seed `20261029`, path `7:0:1:1`,
 rejects an unheld replay that emits two batches. The held generated case
@@ -8788,22 +8792,41 @@ constructed reach checks.
 
 ### Ordered refill publication after replay settlement, 2026-11-11
 
-Owner: `packages/db/tests/query/ordered-work-oracle.property.test.ts`, whose
-holding provider compares publications while loads are held. When replay
-settlement finishes a repair chain and joined work defers the chain's refill,
-the refill registers its participant with `holdPublication` set to
-`needsOrderingRepair`, which is then false (`ordered-source-loader.ts`, the
-`onResult` call at the end of `requestAndObserve`). Publication can therefore
-open between the replay settlement and the refill's settlement.
-ARCHITECTURE.md, Atomic window publication, requires every page, tie, and
-refill needed to reach the fixed point to publish once, as one operation. The
-request-authority oracle does not observe publication, so it cannot judge
-this. Needed witness: an on-demand, joined, unindexed live-query Collection
-and Effect whose truncate replay settles while joined work defers a repair
-refill. It must show that no publication happens between replay settlement
-and the refill's settlement, and that one publication happens after it. The
-existing in-flight comparison there is weaker than the barrier law (#2131).
-Status: recorded only; not reproduced.
+The `ordered-work.joined-replay-refill` property drives a live-query
+Collection and an Effect through an ordered repair interrupted by a root
+truncate. Its independent model joins and sorts the provider's complete
+tables. The driver reads the raw source, sees root subscription readiness
+while the joined acquisition is held, and holds the next root acquisition.
+Both receivers keep the preceding complete window and emit no public
+replacement until the refill applies. The refill requests revalidation.
+A rejected refill reports its original error and retains the preceding
+window. A replacement prefix that already fills the window publishes when
+joined demand settles.
+
+The grammar enumerates indexed and unindexed sources, limits one and two,
+an explicit truncate or a truncate during acquisition release, a held or
+immediate joined answer, and complete, short successful, and short rejected
+replacements. Its Collection window moves cover closing to zero, shrinking,
+growing, and changing offset while replay is held. The move's promise and
+settled options wait for the new window. On rejection, the promise reports
+the original refill error and leaves the previous options and rows public.
+The grammar reaches root replay settlement while joined demand defers a
+held refill separately for each receiver and checks the active move at
+fulfillment. Authority is
+ARCHITECTURE.md, Atomic window publication and Ordered requests,
+continuation, and recovery. The [versioned review](oracle-reviews/effect-retirement-replay.md#joined-refill-after-root-replay)
+records the parent counterexamples and distinguishes this checkpoint
+from the existing held-replay and initial-readiness checks.
+
+### Effect callback diagnostics
+
+`production-errors.effect-console` invokes the Effect entry and batch
+callbacks with synchronous throws and asynchronous rejections, and runs
+with and without an `onError` callback in development and production.
+Development reports the frozen message and original error when no handler
+owns the failure. Production omits that diagnostic. A throwing handler
+reports its own error through the uncaught channel. The mutation that
+suppresses the development diagnostic fails all four applicable histories.
 
 ## Compiler group reduction boundary
 
