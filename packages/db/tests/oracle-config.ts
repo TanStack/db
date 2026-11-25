@@ -622,6 +622,7 @@ const staticOracleProperties = [
   `persistence.follower-remote-demand`,
   `sqlite-ordinary.write-history`,
   `sqlite-ordinary.independent-work`,
+  `sqlite-ordinary.replay-threshold`,
   `collection-sync.reentrant-drain`,
   `collection-lifecycle.gc-persisting-transaction`,
   `collection-lifecycle.gc-retention-boundaries`,

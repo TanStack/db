@@ -32,6 +32,7 @@ type Fixture = {
     run: number
     transactions: number
     maxParams: number
+    rowWrites: number
   }
   failAfterRowWriteCount: (count: number | undefined) => void
   failRunMatching: (pattern: RegExp | undefined) => void
@@ -51,13 +52,21 @@ function binding(value: unknown): string | number | bigint | null {
 }
 export function fixture(maxBoundParameters: number): Fixture {
   const database = new DatabaseSync(':memory:')
-  const counts = { query: 0, run: 0, transactions: 0, maxParams: 0 }
+  const counts = {
+    query: 0,
+    run: 0,
+    transactions: 0,
+    maxParams: 0,
+    rowWrites: 0,
+  }
   let failAfter: number | undefined
   let rowWriteCount = 0
   let failRunPattern: RegExp | undefined
   let corruptMetadata = false
   const rowWritePattern =
     /INSERT INTO "c_[^"]+" \(key, value, metadata, row_version\)/
+  // Every statement that inserts or rewrites rows of the Collection table.
+  const rowTableWritePattern = /^\s*(?:INSERT INTO|UPDATE) "c_/
   const checkParams = (params: ReadonlyArray<unknown>) => {
     counts.maxParams = Math.max(counts.maxParams, params.length)
     if (params.length > maxBoundParameters) {
@@ -82,6 +91,7 @@ export function fixture(maxBoundParameters: number): Fixture {
     run: async (sql, params = []) => {
       counts.run++
       checkParams(params)
+      if (rowTableWritePattern.test(sql)) counts.rowWrites++
       if (rowWritePattern.test(sql)) {
         rowWriteCount += params.length / 4
         if (failAfter !== undefined && rowWriteCount > failAfter) {
@@ -132,6 +142,7 @@ export function beginMeasuredWrite(host: Fixture): void {
   host.counts.run = 0
   host.counts.transactions = 0
   host.counts.maxParams = 0
+  host.counts.rowWrites = 0
 }
 export function finishMeasuredWrite(
   host: Fixture,
@@ -209,8 +220,11 @@ export type Observation = {
   applied: Array<{
     txId: string
     rowVersion: number
+    replay: AppliedReplay
   }>
 }
+// Whether an applied position still holds a replay that pullSince can return.
+export type AppliedReplay = 'stored' | 'full-reload'
 export function sortedKeys(values: Iterable<string>): Array<string> {
   return [...values].sort()
 }
@@ -247,8 +261,12 @@ export async function observe(
     driver.query<{
       tx_id: string
       row_version: number
+      replay_stored: number
     }>(
-      'SELECT tx_id, row_version FROM applied_tx WHERE collection_id = ? ORDER BY term, seq',
+      `SELECT tx_id, row_version,
+         replay_json IS NOT NULL AND replay_requires_full_reload = 0
+           AS replay_stored
+       FROM applied_tx WHERE collection_id = ? ORDER BY term, seq`,
       [collectionId],
     ),
   ])
@@ -274,6 +292,7 @@ export async function observe(
     applied: applied.map((row) => ({
       txId: row.tx_id,
       rowVersion: row.row_version,
+      replay: row.replay_stored === 1 ? 'stored' : 'full-reload',
     })),
   }
 }
