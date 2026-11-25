@@ -1,0 +1,64 @@
+name: Browser concurrency experiment
+
+on:
+  push:
+    branches: [codex/ci-browser-concurrency-experiment]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: Browser concurrency (${{ matrix.order }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        order: [serial-first, parallel-first]
+    steps:
+      - name: Checkout unchanged source and experiment
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          cache: false
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        working-directory: packages/browser-db-sqlite-persistence
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Check benchmark accounting
+        run: python3 -m unittest discover -s scripts/bench -p ci_browser_concurrency_test.py
+      - name: Measure complete selections in both modes
+        run: python3 scripts/bench/ci_browser_concurrency.py --order "$EXPERIMENT_ORDER" --output test-results/ci-browser-concurrency
+        env:
+          EXPERIMENT_ORDER: ${{ matrix.order }}
+      - name: Publish measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-concurrency-${{ matrix.order }}
+          path: test-results/ci-browser-concurrency/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Show experiment result
+        if: always()
+        run: |
+          if [ -f test-results/ci-browser-concurrency/summary.md ]; then
+            cat test-results/ci-browser-concurrency/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
