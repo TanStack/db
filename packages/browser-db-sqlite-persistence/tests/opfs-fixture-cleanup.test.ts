@@ -123,6 +123,10 @@ it.each(receivers)(
       expect(result.second).not.toHaveProperty(`failure`)
       expect(result.first).not.toHaveProperty(`cleanupErrors.0`)
       expect(result.second).not.toHaveProperty(`cleanupErrors.0`)
+      // Native handle-release timing is a teardown diagnostic. It must not
+      // change the product trace that the oracle checks for determinism.
+      if (ready === `runQuerySelectFailures`)
+        expect(result.first).toEqual(result.second)
       expect(host.errors).toEqual([])
     }, [() => host.close()])
   },

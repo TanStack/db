@@ -44,7 +44,7 @@ const runQuerySelectFailures = (history: FailingQueryHistory) =>
         () =>
           removeClosedArtifacts(
             () => removeStartupOPFSArtifacts(databaseName),
-            observe,
+            (cut, value) => console.info(`query-select.opfs ${cut}`, value),
           ),
       ],
     )
