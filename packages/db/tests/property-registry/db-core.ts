@@ -38,6 +38,7 @@ export const properties: ReadonlyArray<string> = [
   `comparison.non-finite-witnesses`,
   `comparison.signed-infinity-custom`,
   `comparison.temporal-witnesses`,
+  `simple-comparisons.field-value`,
   `index-update.reference-model-fixed`,
   `index-update.nullish-fixed`,
   `index-update.nullish-string-owners`,
@@ -122,6 +123,11 @@ export const properties: ReadonlyArray<string> = [
 
 export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
   // indexes and comparison
+  [
+    `db/tests/query/simple-comparisons-oracle.test.ts`,
+    `simple-comparisons`,
+    `field-value`,
+  ],
   [
     `db/tests/cursor-oracle.property.test.ts`,
     `cursor`,
