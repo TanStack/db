@@ -4,6 +4,7 @@ import {
 } from '../../utils/cursor.js'
 import { normalizeError } from '../../utils/error.js'
 import { reportUncaught, runAllCallbacks } from '../../utils/callbacks.js'
+import { createDeferred } from '../../deferred.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import type {
   CollectionSubscription,
@@ -234,15 +235,16 @@ export class OrderedSourceLoader {
     let hasOptimisticDeparture = false
     for (const change of changes) {
       const previous = sentRows?.get(change.key)
-      // A finished repair holds every row of its prefix, so releasing what it
-      // superseded removes only rows after it, such as a tie only an old tie
-      // request held. Deleting a sent row of the prefix is new source
-      // information.
-      if (change.type === `delete` && this.retiringSupersededAcquisitions) {
-        const order =
-          previous === undefined || this.settledSourceBoundary === undefined
-            ? 1
-            : this.info.comparator(previous, this.settledSourceBoundary)
+      // A settled prefix proves which retirements only evict rows held by
+      // older requests. Replay can retire leases before its next ordered read
+      // establishes a boundary. A sent delete then still invalidates order.
+      if (
+        change.type === `delete` &&
+        this.retiringSupersededAcquisitions &&
+        previous !== undefined &&
+        this.settledSourceBoundary !== undefined
+      ) {
+        const order = this.info.comparator(previous, this.settledSourceBoundary)
         if (
           order > 0 ||
           (order === 0 &&
@@ -353,11 +355,6 @@ export class OrderedSourceLoader {
         windowOperationGeneration !==
           this.failedRequest.windowOperationGeneration)
     if (!mayRetryFailure) return this.pending
-    // A failed full-source read stops owning the source before its lease is
-    // released, so a replay during or after a throwing release cannot count it.
-    if (this.work.kind === `full-source` && this.work.status === `failed`) {
-      this.moveWork({ kind: `idle` }, [`failed`])
-    }
     if (
       (this.failedRequest || this.failedAcquisitions.size > 0) &&
       windowOperationGeneration !== undefined &&
@@ -374,7 +371,7 @@ export class OrderedSourceLoader {
       }
       // Adapter cleanup can synchronously tear down this loader; every later
       // step checks that it is still active.
-      this.releaseOwned(this.failedAcquisitions, () => true)
+      this.releaseFailedAcquisitions()
     }
     if (
       this.work.kind !== `idle` &&
@@ -568,7 +565,10 @@ export class OrderedSourceLoader {
 
   settleFullSourceReplay(): void {
     if (this.work.kind === `repair`) {
-      this.finishOrderedPrefixRepair()
+      this.finishOrderedPrefixRepair(
+        undefined,
+        Boolean(this.info.joinedFilterSourceIds?.length),
+      )
       return
     }
     // Replay repaired the retained logical acquisition. A later window retry
@@ -641,6 +641,7 @@ export class OrderedSourceLoader {
   private releaseOwned<TEntry>(
     owner: Map<ReleaseLoadSubset, TEntry>,
     selected: (release: ReleaseLoadSubset, entry: TEntry) => boolean,
+    beforeRelease?: (entry: TEntry) => void,
   ): void {
     const orderedLoadGeneration = this.orderedLoadGeneration
     const requesting = this.requesting
@@ -660,9 +661,10 @@ export class OrderedSourceLoader {
               `Ordered loader lease was released by another pass`,
             )
           }
+          beforeRelease?.(entry)
           owner.delete(release)
-          // A release that throws never changes a load, a window, or the
-          // loader's state; it is reported uncaught.
+          // Report the callback's failure without changing the release's
+          // ownership result, the load, or the window.
           try {
             release()
           } catch (error) {
@@ -673,6 +675,23 @@ export class OrderedSourceLoader {
     } finally {
       this.requesting = requesting
     }
+  }
+
+  private releaseFailedAcquisitions(): void {
+    // An earlier release can start replay and stop this pass. Keep the
+    // covering demand until the pass actually reaches its own lease.
+    this.releaseOwned(
+      this.failedAcquisitions,
+      () => true,
+      ({ kind }) => {
+        if (
+          kind === `full-source` &&
+          this.work.kind === `full-source` &&
+          this.work.status === `failed`
+        )
+          this.moveWork({ kind: `idle` }, [`failed`])
+      },
+    )
   }
 
   invalidateCursor(): void {
@@ -760,10 +779,23 @@ export class OrderedSourceLoader {
       : undefined
   }
 
-  private finishOrderedPrefixRepair(windowOperationGeneration?: number): void {
+  private finishOrderedPrefixRepair(
+    windowOperationGeneration?: number,
+    verifyJoinedWindow = false,
+  ): void {
     if (this.work.kind !== `repair`) return
     const epoch = this.work.epoch
+    if (verifyJoinedWindow && this.active) {
+      // Replay replenished the root acquisitions. Check the joined window
+      // inside the same repair on the next graph pass. That pass can register
+      // a replacement acquisition before a reentrant graph run can publish.
+      this.blockedLoadMore = {
+        ...this.blockedLoadMore,
+        continuesOrderedPrefixRepair: true,
+      }
+    }
     if (this.repairNeedsReplacement()) {
+      if (verifyJoinedWindow) return
       // A later mutation invalidated the source order while this chain was
       // running. Start its replacement before the current participant settles
       // so Collection and Effect publication remain behind one continuous gate.
@@ -784,11 +816,9 @@ export class OrderedSourceLoader {
       const hasSupersededAcquisition = [
         ...this.settledFiniteAcquisitions.values(),
       ].some(({ chain }) => chain !== epoch)
-      // A release callback may synchronously begin truncate replay. Keep the
-      // repair ownership open so replay settlement can finish retiring the
-      // remaining superseded leases without releasing the refreshed prefix.
-      if (!this.active || !hasSupersededAcquisition) {
-        this.cancelRepairRetry()
+      if (!this.active || (!verifyJoinedWindow && !hasSupersededAcquisition)) {
+        // A release can start a replay. Leave enough authority for that
+        // replay to finish retiring older leases without releasing its own.
         this.repairRetries = 0
         // Retirement can deliver a newer invalidation or raise the debt to a
         // full-source read. Keep that debt for the next pass; otherwise this
@@ -1036,8 +1066,7 @@ export class OrderedSourceLoader {
             this.failedRequest !== failedRequest
           )
             return
-          this.moveWork({ kind: `idle` }, [`idle`, `failed`])
-          this.releaseOwned(this.failedAcquisitions, () => true)
+          this.releaseFailedAcquisitions()
           // Release may dispose or start a new replay; neither belongs to this retry.
           if (
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- release callbacks can dispose the loader
@@ -1395,11 +1424,33 @@ export class OrderedSourceLoader {
         return this.pending
       }
       const transport: Promise<void> = settlesAsync ? result : Promise.resolve()
-      const tracked: Promise<void> = transport.then(
-        () => complete(tracked),
-        (error) => fail(error, tracked),
-      )
+      const participant = createDeferred<void>()
+      const tracked = participant.promise
+      const signal = options.signal
+      // Truncate replay can replace this acquisition before its transport
+      // answers. The retired request must leave the publication gate, and its
+      // later answer must neither complete the chain nor change its debt.
+      const abort = () => {
+        if (this.pending === tracked) this.pending = undefined
+        participant.resolve()
+      }
+      const settle = (apply: () => void) => {
+        signal?.removeEventListener(`abort`, abort)
+        if (signal?.aborted) return
+        try {
+          apply()
+          participant.resolve()
+        } catch (error) {
+          participant.reject(error)
+        }
+      }
       this.pending = tracked
+      if (signal?.aborted) abort()
+      else signal?.addEventListener(`abort`, abort, { once: true })
+      void transport.then(
+        () => settle(() => complete(tracked)),
+        (error) => settle(() => fail(error, tracked)),
+      )
       void tracked.catch(() => {})
       // Register each request separately. The operation tracker observes the
       // next request before this promise settles, so the logical chain remains

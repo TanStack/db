@@ -887,7 +887,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/ordered-work-oracle.property.test.ts`,
     `ordered-work`,
-    `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load eager-proven-report eager-unindexed-refetch`,
+    `consumer-parity joined-replay-refill eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load eager-proven-report eager-unindexed-refetch`,
   ],
   [
     `db/tests/query/load-subset-replay-refinement-oracle.test.ts`,

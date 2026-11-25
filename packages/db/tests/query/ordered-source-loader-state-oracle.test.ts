@@ -24,10 +24,13 @@ import {
   rejectAt,
 } from './ordered-comparison-oracle.js'
 import { checkRetirementProgress } from './ordered-source-loader-state-model-oracle.js'
+import { receiveFullSourceRetryReplay } from './ordered-full-source-replay-driver.js'
 import {
   createDeferred,
   createOrderByInfo,
 } from './ordered-source-loader-support.js'
+import type { DeltaEvent } from '../../src/query/effect.js'
+import type { FullSourceRetryReplayHistory } from './ordered-full-source-replay-driver.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
@@ -89,7 +92,8 @@ function tieValue(options: RequestOptions): unknown {
  *   belongs to its replay, and one a replay reacquired is absorbed.
  * - **Cost:** once loading is quiet and a bounded repair is available, an
  *   invalidation reads no full source, and it issues at most one chain (in
- *   this fake, a prefix, a tie, and a refill) per ordering epoch move.
+ *   this fake, a prefix, a tie, and a refill) per ordering epoch within
+ *   each source snapshot. A truncate replaces that snapshot.
  * - **Ignored report:** a sync adapter's report that served pages may have
  *   shifted issues no authoritative request before any request settled: a
  *   request in flight still owes an exact result for its own options. The
@@ -530,6 +534,7 @@ type AuthorityObservation = {
   // Such failures where the strand law was checkable: no own failure since
   // the last full-source read.
   checkedStrandPremises: number
+  coveringReadHandoffs: number
   // Superseded requests that failed after their repair finished while a
   // newer invalidation's reaction was deferred.
   deferredStrandShapes: number
@@ -572,6 +577,7 @@ type AuthorityObservation = {
   startThrows: number
   startThrowsDuringFailure: number
   costChecks: number
+  costChecksAcrossTruncate: number
   hungRequests: number
   offsetWindows: number
   releaseInvalidations: number
@@ -594,6 +600,7 @@ type RetirementReceiverCase = {
   kind: `collection` | `collection-window` | `effect`
   offset: 0 | 1
   holdReplacement: boolean
+  replacementOutcome: `success` | `failure` | `superseded`
   // The unload moves the repaired prefix, deletes its rows before the
   // boundary, or deletes the boundary row itself: each is new source
   // information. Or it evicts a sent row past the boundary that only a
@@ -602,7 +609,13 @@ type RetirementReceiverCase = {
   // `delete-tie` deletes only a prefix row that ties with the boundary row,
   // which the repair also holds.
   unloadChange:
-    `move` | `delete` | `delete-boundary` | `delete-tie` | `evict` | `evict-tie`
+    | `move`
+    | `delete`
+    | `delete-boundary`
+    | `delete-tie`
+    | `evict`
+    | `evict-tie`
+    | `truncate`
   // A row that ties with the repair's boundary row. Ties order by key
   // (ARCHITECTURE, pooled live queries publish what the live-query Collection
   // would), so row 0 sorts before the boundary row, inside the prefix, and
@@ -617,20 +630,26 @@ type RetirementReceiverCase = {
 // the prior complete snapshot until the newer repair completes. A window move
 // cannot report success until its chosen window is visible (ARCHITECTURE.md,
 // Atomic window publication), so it stays pending behind a held replacement
-// and settles with the moved window installed.
+// and settles with the moved window installed. A newer ordering write
+// supersedes a held answer. The next acquisition starts its own prefix
+// before any tie or refill. If the held answer rejects after applying writes,
+// the raw source can advance and the preceding complete window stays public.
 async function checkRetirementReceiver(
   scenario: RetirementReceiverCase,
   reached: (
     cut:
       | `release`
       | `held-answer`
+      | `failed-after-writes`
+      | `superseded-answer`
       | `delete-release`
       | `delete-held-answer`
       | `delete-boundary-release`
       | `tie-delete-boundary`
       | `delete-tie-release`
       | `evict-release`
-      | `evict-tie-release`,
+      | `evict-tie-release`
+      | `held-replay`,
   ) => void,
 ): Promise<void> {
   type Row = { id: number; rank: number }
@@ -657,11 +676,18 @@ async function checkRetirementReceiver(
   const starts: Array<number> = []
   const publications: Array<{ at: number; rows: Array<Row> }> = []
   const effectRows = new Map<number, Row>()
+  const effectEvents: Array<DeltaEvent<Row, number>> = []
   const replacement = createDeferred()
+  const successor = createDeferred()
+  const replacementError = new Error(`replacement acquisition failed`)
+  const effectErrors: Array<Error> = []
   let heldAnswers = 0
   let clock = 0
   let unloaded: number | undefined
   let invalidation: number | undefined
+  const replay = { started: false }
+  let supersedingInvalidation: number | undefined
+  let firstSuccessorStartsRepair: boolean | undefined
   let armed = false
   let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
   const source = createCollection<Row, number>({
@@ -679,14 +705,16 @@ async function checkRetirementReceiver(
             // A repair reissues the window's whole prefix. A larger refetch
             // prefix is a step of a running chain, such as unindexed growth,
             // so it cannot start the replacement.
-            if (
+            const startsRepair =
               options.refetch === true &&
               options.where === undefined &&
               options.cursor === undefined &&
               (options.limit === scenario.offset + scenario.limit ||
                 options.limit === windowOffset + scenario.limit)
-            )
-              starts.push(at)
+            if (startsRepair) starts.push(at)
+            if (supersedingInvalidation !== undefined) {
+              firstSuccessorStartsRepair ??= startsRepair
+            }
             const deliver = () => {
               if (options.signal?.aborted) return true
               const matching = [...truth.values()]
@@ -720,10 +748,19 @@ async function checkRetirementReceiver(
               }
               return operations.commit()
             }
-            if (invalidation !== undefined && scenario.holdReplacement) {
+            if (
+              (invalidation !== undefined || replay.started) &&
+              scenario.holdReplacement
+            ) {
               heldAnswers++
-              return replacement.promise.then(async () => {
+              const gate =
+                supersedingInvalidation === undefined ? replacement : successor
+              return gate.promise.then(async () => {
+                // An adapter may apply rows before a failed acquisition. That
+                // advances the raw source but does not establish coverage.
                 await deliver()
+                if (scenario.replacementOutcome === `failure`)
+                  throw replacementError
               })
             }
             return scenario.synchronous
@@ -736,6 +773,25 @@ async function checkRetirementReceiver(
             if (!armed || unloaded !== undefined) return
             unloaded = ++clock
             reached(`release`)
+            if (scenario.unloadChange === `truncate`) {
+              // The source discards its installed baseline while the loader
+              // retires superseded acquisitions. The held replay answers
+              // serve a different provider snapshot.
+              replay.started = true
+              const replacementRows = [...truth.values()].map(
+                ({ id, rank }) => ({
+                  id: id + 20,
+                  rank,
+                }),
+              )
+              truth.clear()
+              for (const row of replacementRows) truth.set(row.id, row)
+              installed.clear()
+              operations.begin()
+              operations.truncate()
+              operations.commit()
+              return
+            }
             if (
               scenario.unloadChange !== `move` &&
               scenario.unloadChange !== `evict-tie`
@@ -814,13 +870,22 @@ async function checkRetirementReceiver(
       ? undefined
       : createLiveQueryCollection({ query })
   let move:
-    { at: number; rows: Array<Row> } | `pending` | `rejected` | undefined
+    | {
+        at: number
+        rows: Array<Row>
+        window: { offset: number; limit: number } | undefined
+      }
+    | { error: unknown }
+    | `pending`
+    | undefined
   const visible = () => {
     const rows = (live ? live.toArray : [...effectRows.values()]).map(
       ({ id, rank }) => ({ id, rank }),
     )
     return live ? rows : rows.sort(byOrder)
   }
+  const rawRows = () =>
+    source.toArray.map(({ id, rank }) => ({ id, rank })).sort(byOrder)
   const recordPublication = () => {
     if (armed) publications.push({ at: ++clock, rows: visible() })
   }
@@ -831,7 +896,9 @@ async function checkRetirementReceiver(
     scenario.kind === `effect`
       ? createEffect<Row, number>({
           query,
+          onSourceError: (error) => effectErrors.push(error),
           onBatch: (events) => {
+            if (armed) effectEvents.push(...events)
             for (const event of events) {
               if (event.type === `exit`) effectRows.delete(event.key)
               else effectRows.set(event.key, { ...event.value })
@@ -846,7 +913,7 @@ async function checkRetirementReceiver(
       .slice(offset, offset + scenario.limit)
       .map((row) => ({ ...row }))
   const settleMove = () => {
-    move = { at: ++clock, rows: visible() }
+    move = { at: ++clock, rows: visible(), window: live?.utils.getWindow() }
   }
   try {
     if (live) await live.preload()
@@ -857,6 +924,7 @@ async function checkRetirementReceiver(
       ),
     )
     const prior = visible()
+    const priorWindow = live?.utils.getWindow()
     armed = true
     const moved = { id: 1, rank: 10 }
     truth.set(1, moved)
@@ -872,8 +940,8 @@ async function checkRetirementReceiver(
       if (settled === true) settleMove()
       else {
         move = `pending`
-        void settled.then(settleMove, () => {
-          move = `rejected`
+        void settled.then(settleMove, (error: unknown) => {
+          move = { error }
         })
       }
     }
@@ -885,7 +953,11 @@ async function checkRetirementReceiver(
         `real subscription retirement was reached`,
       ).toBeDefined(),
     )
-    if (scenario.holdReplacement && invalidation !== undefined) {
+    const beforeAnswer = rawRows()
+    if (
+      scenario.holdReplacement &&
+      (invalidation !== undefined || replay.started)
+    ) {
       compareAt(`ordered-source-loader-state-oracle.test.ts:850`, () =>
         expect(
           heldAnswers,
@@ -910,17 +982,89 @@ async function checkRetirementReceiver(
             `pending`,
           ),
         )
+        compareAt(`retirement receiver: window during held replacement`, () =>
+          expect(live?.utils.getWindow()).toEqual(priorWindow),
+        )
       }
       reached(`held-answer`)
+      if (replay.started) {
+        compareAt(`retirement receiver: raw truncate applied`, () =>
+          expect(rawRows()).toEqual([]),
+        )
+        reached(`held-replay`)
+      }
       // Every delete unload owes the replacement this held answer delays.
       if (scenario.unloadChange.startsWith(`delete`)) {
         reached(`delete-held-answer`)
       }
+      if (scenario.replacementOutcome === `superseded`) {
+        // Row 1 is still sent after a moving or deleting unload. Move it to
+        // the head while the successor's prefix answer is held. Its read
+        // started before this write and cannot pay the new invalidation.
+        const updated = { id: 1, rank: 0 }
+        truth.set(1, updated)
+        installed.set(1, updated)
+        supersedingInvalidation = ++clock
+        sync.begin()
+        sync.write({ type: `update`, value: updated })
+        await sync.commit()
+      }
       replacement.resolve()
       await flushPromises()
+      if (supersedingInvalidation !== undefined) {
+        compareAt(
+          `retirement receiver: first acquisition after supersession`,
+          () =>
+            expect(
+              firstSuccessorStartsRepair,
+              `the first acquisition after supersession starts the replacement prefix`,
+            ).toBe(true),
+        )
+        checkRetirementProgress(
+          supersedingInvalidation,
+          starts,
+          publications[0]?.at,
+        )
+        compareAt(`retirement receiver: held successor publication`, () => {
+          expect(visible()).toEqual(prior)
+          expect(publications).toEqual([])
+          if (scenario.kind === `collection-window`) {
+            expect(move).toBe(`pending`)
+            expect(live?.utils.getWindow()).toEqual(priorWindow)
+          }
+        })
+        reached(`superseded-answer`)
+        successor.resolve()
+        await flushPromises()
+      }
     }
     checkRetirementProgress(invalidation, starts, publications[0]?.at)
-    if (invalidation === undefined) {
+    if (scenario.replacementOutcome === `failure`) {
+      compareAt(`retirement receiver: failed replacement publication`, () => {
+        expect(visible()).toEqual(prior)
+        expect(publications).toEqual([])
+      })
+      compareAt(`retirement receiver: failed replacement outcome`, () => {
+        if (effect) {
+          expect(effectErrors).toHaveLength(1)
+          expect(effectErrors[0]).toBe(replacementError)
+          expect(effect.disposed).toBe(true)
+        } else {
+          expect(live?.utils.lastSubsetError).toBe(replacementError)
+          expect(live?.utils.getWindow()).toEqual(priorWindow)
+        }
+        if (scenario.kind === `collection-window`) {
+          expect(
+            move && move !== `pending` && `error` in move && move.error,
+          ).toBe(replacementError)
+        }
+      })
+      if (!isDeepStrictEqual(rawRows(), beforeAnswer)) {
+        reached(`failed-after-writes`)
+      }
+      return
+    }
+    if (invalidation === undefined && !replay.started) {
       compareAt(`ordered-source-loader-state-oracle.test.ts:877`, () =>
         expect(
           starts.filter((at) => at > unloaded!),
@@ -943,12 +1087,43 @@ async function checkRetirementReceiver(
         `one complete replacement publication`,
       ).toEqual(changed ? [expected()] : []),
     )
+    if (effect) {
+      // Derive net callback events from the two complete windows. Key order
+      // within the batch is free, but classification and previous values
+      // are observable even when applying the events produces the right rows.
+      const before = new Map(prior.map((row) => [row.id, row]))
+      const after = new Map(expected().map((row) => [row.id, row]))
+      const changes: Array<DeltaEvent<Row, number>> = []
+      for (const [key, value] of before) {
+        const next = after.get(key)
+        if (!next) changes.push({ type: `exit`, key, value })
+        else if (next.rank !== value.rank)
+          changes.push({
+            type: `update`,
+            key,
+            value: next,
+            previousValue: value,
+          })
+      }
+      for (const [key, value] of after) {
+        if (!before.has(key)) changes.push({ type: `enter`, key, value })
+      }
+      const byKey = (a: DeltaEvent<Row, number>, b: DeltaEvent<Row, number>) =>
+        a.key - b.key
+      compareAt(`retirement receiver: Effect callback deltas`, () =>
+        expect(effectEvents.sort(byKey)).toEqual(changes.sort(byKey)),
+      )
+    }
     if (move !== undefined) {
       compareAt(`ordered-source-loader-state-oracle.test.ts:894`, () =>
         expect(
           move,
           `the window move settles with its chosen window visible`,
-        ).toEqual({ at: expect.any(Number), rows: expected() }),
+        ).toEqual({
+          at: expect.any(Number),
+          rows: expected(),
+          window: { offset: windowOffset, limit: scenario.limit },
+        }),
       )
     }
     compareAt(`ordered-source-loader-state-oracle.test.ts:899`, () =>
@@ -957,6 +1132,7 @@ async function checkRetirementReceiver(
   } finally {
     armed = false
     replacement.resolve()
+    successor.resolve()
     listener?.unsubscribe()
     await effect?.dispose()
     await live?.cleanup()
@@ -974,7 +1150,8 @@ async function checkAuthorityCase(
       | `deferred-refill`
       | `reset-continuation`
       | `release-pass-continuation`
-      | `release-pass-refill-resumed`,
+      | `release-pass-refill-resumed`
+      | `release-pass-refill-revalidation`,
   ) => void,
   observeRejection?: (reason: unknown) => unknown,
   observeRelease: (released: boolean) => boolean = (released) => released,
@@ -1041,11 +1218,13 @@ async function checkAuthorityCase(
   let releaseDuringAnswer = false
   let startThrowsDuringFailure = 0
   let costChecks = 0
+  let costChecksAcrossTruncate = 0
   // The start-throw branch sets the flag, so read it through a call.
   const retryStartThrew = () => startThrewDuringRetry
   let startThrows = 0
   let identityViolation: string | undefined
   let requestErrorChecks = 0
+  let coveringReadHandoffs = 0
   // A request may fail, but the loader's own transition table must never
   // reject a move: that is a broken rule, wherever it surfaces.
   let invariantViolation: string | undefined
@@ -1055,6 +1234,7 @@ async function checkAuthorityCase(
     }
   }
   let releaseViolation: string | undefined
+  let refillAuthorityViolation: string | undefined
   let obsoleteStepViolation: string | undefined
   let restartViolation: string | undefined
   let unexpressibleTieViolation: string | undefined
@@ -1091,7 +1271,9 @@ async function checkAuthorityCase(
   let epochMovesWithContinuation = 0
   let settlingRequest: LedgerRequest | undefined
   let deferredByReleasePass:
-    { epochMoves: number; truncates: number } | undefined
+    | { epochMoves: number; truncates: number; repairPrefixLimit?: number }
+    | undefined
+  let settlingReplay = false
   let unblockedReleasePasses = 0
   const sameDemand = (a: LedgerRequest, b: LedgerRequest) =>
     a.method === b.method &&
@@ -1270,21 +1452,39 @@ async function checkAuthorityCase(
     // reads a demand the chain has not read. Only a staged or blocked
     // continuation issues such a step from a pass; a new start, or a restart
     // inside the chain, would read the chain's first prefix again.
-    if (
+    const afterBlockedReleasePass =
       deferredByReleasePass &&
-      request.chainStep &&
-      ledger.every(
-        (other) =>
-          other === request ||
-          other.chain !== request.chain ||
-          !sameDemand(other, request),
-      ) &&
       settlingRequest === undefined &&
       !settlingChainMember &&
       deferredByReleasePass.epochMoves === epochMoves &&
       deferredByReleasePass.truncates === truncates
-    ) {
-      reached?.(`release-pass-refill-resumed`)
+    if (afterBlockedReleasePass) {
+      // This prefix grows a successful bounded repair whose tie had already
+      // settled at replay retirement. A later graph pass cannot turn that
+      // owed refill into a cacheable acquisition.
+      const prefixLimit = deferredByReleasePass?.repairPrefixLimit
+      if (
+        prefixLimit !== undefined &&
+        options.orderBy !== undefined &&
+        options.where === undefined &&
+        options.minValues === undefined &&
+        (options.limit ?? 0) > prefixLimit
+      ) {
+        reached?.(`release-pass-refill-revalidation`)
+        if (options.refetch !== true)
+          refillAuthorityViolation ??= `request ${request.index} grew the repair prefix after replay retirement without revalidation`
+      }
+      if (
+        request.chainStep &&
+        ledger.every(
+          (other) =>
+            other === request ||
+            other.chain !== request.chain ||
+            !sameDemand(other, request),
+        )
+      ) {
+        reached?.(`release-pass-refill-resumed`)
+      }
     }
     deferredByReleasePass = undefined
     // An issued request consumes an owed continuation. An ordinary page also
@@ -1411,6 +1611,22 @@ async function checkAuthorityCase(
         if (continuationOwed && !selfRelease) {
           reached?.(`release-pass-continuation`)
           deferredByReleasePass = { epochMoves, truncates }
+          const settledTie = ledger.at(-1)
+          const prefix =
+            currentChain === undefined ? undefined : ledger[currentChain]
+          if (
+            settlingReplay &&
+            !testCase.indexed &&
+            testCase.needsMore &&
+            prefix?.outcome === `ok` &&
+            prefix.issuedTruncates === truncates &&
+            prefix.issuedEpochMoves === epochMoves &&
+            settledTie?.chain === prefix.index &&
+            settledTie.outcome === `ok` &&
+            tieValue(settledTie.options) !== undefined
+          ) {
+            deferredByReleasePass.repairPrefixLimit = prefix.options.limit
+          }
         }
         reentering = true
         reentrantPasses++
@@ -1568,7 +1784,10 @@ async function checkAuthorityCase(
     truncatePending = false
     replaySettledAt = ++clock
     for (const request of ledger) {
-      if (!request.released && request.outcome !== `failed`) {
+      if (
+        !request.released &&
+        (request.outcome !== `failed` || request.fullSource)
+      ) {
         request.replayed = true
       }
     }
@@ -1578,7 +1797,12 @@ async function checkAuthorityCase(
     if (replayCoverage.size > 0) replayAuthority = ledger.length - 0.5
     // Replay settlement is not a graph pass. It can finish retirement while
     // joined work still owns a staged continuation; only a pass consumes it.
-    run(() => loader.settleFullSourceReplay(), false)
+    settlingReplay = true
+    try {
+      run(() => loader.settleFullSourceReplay(), false)
+    } finally {
+      settlingReplay = false
+    }
   }
   let unexpressibleBoundaries = 0
   let joinedDeferrals = 0
@@ -1694,6 +1918,27 @@ async function checkAuthorityCase(
     }
     const chainMember = request.authoritative && !request.fullSource
     const before = ledger.length
+    const snapshotAtSettlement = truncates
+    const chain =
+      request.chain === undefined ? undefined : ledger[request.chain]
+    // A superseded finite answer can leave partial writes. When the
+    // current bounded repair settles, it owes a covering read in this
+    // settlement, before a separate graph pass can refine or publish.
+    const owesCoveringRead =
+      ok &&
+      !joinedPending &&
+      !truncatePending &&
+      chain !== undefined &&
+      chain.index === currentChain &&
+      request.issuedTruncates === snapshotAtSettlement &&
+      ledger.some(
+        (older) =>
+          older.index < chain.index &&
+          older.outcome === `failed` &&
+          older.superseded &&
+          older.failedAt > chain.issuedAt &&
+          older.issuedTruncates === snapshotAtSettlement,
+      )
     settlingChainMember = chainMember
     settlingRequest = request
     if (ok) request.deferred.resolve()
@@ -1707,6 +1952,22 @@ async function checkAuthorityCase(
     settlingRequest = undefined
     settlingFailure = false
     answeringRepair = false
+    if (
+      owesCoveringRead &&
+      truncates === snapshotAtSettlement &&
+      !disposed &&
+      !truncatePending
+    ) {
+      coveringReadHandoffs++
+      if (!ledger.slice(before).some(({ fullSource }) => fullSource)) {
+        rejectAt(
+          `covering read at repair settlement`,
+          new Error(
+            `The bounded repair settled without starting the covering read owed by the superseded failure`,
+          ),
+        )
+      }
+    }
     // The chain completed in this settlement when it issued no further step:
     // the release belonged to its completion-time retirement.
     if (releaseDuringAnswer) {
@@ -1799,6 +2060,12 @@ async function checkAuthorityCase(
       rejectAt(
         `ordered-source-loader-state-oracle.test.ts:1588`,
         new Error(`release ${checkpoint}: ${releaseViolation}`),
+      )
+    }
+    if (refillAuthorityViolation) {
+      rejectAt(
+        `repair refill after replay retirement`,
+        new Error(refillAuthorityViolation),
       )
     }
     if (resetViolation) {
@@ -2484,7 +2751,6 @@ async function checkAuthorityCase(
       }
       if (!coveredByFullSource && !hungAuthority && !isDisposed()) {
         const before = ledger.length
-        const movesBefore = epochMoves
         loader.invalidateSourceOrdering()
         run(() => loader.loadMore())
         await flush()
@@ -2502,10 +2768,11 @@ async function checkAuthorityCase(
         // not need the full source, with an expressible boundary. An
         // unindexed window that still needs rows grows its prefix instead
         // (ARCHITECTURE.md, "an underfilled unindexed prefix grows"). One
-        // repair is then one chain per ordering epoch move: a prefix, then a
-        // tie and a refill page for each boundary it reaches (ARCHITECTURE.md,
-        // ordered repair). Each boundary is a different installed row, so a
-        // chain issues at most one prefix plus two requests per row.
+        // repair is then one chain per ordering epoch and source snapshot:
+        // a prefix, then a tie and refill per boundary. Truncate replaces the
+        // source snapshot and discards the cursor (ARCHITECTURE.md, Ordered
+        // requests, continuation, and recovery). A chain issues at most one
+        // prefix plus two requests per installed row in each snapshot.
         await drain()
         const repair = ledger.slice(before)
         const boundedRepair =
@@ -2531,40 +2798,45 @@ async function checkAuthorityCase(
               ),
             )
           }
-          const authoritative = repair.filter(
-            (request) => request.authoritative,
-          ).length
-          const chains = epochMoves - movesBefore
-          if (authoritative > chains * (1 + 2 * snapshot().length)) {
-            rejectAt(
-              `ordered-source-loader-state-oracle.test.ts:2240`,
-              new Error(
-                `cost: one invalidation issued ${authoritative} authoritative requests for ${chains} epoch moves`,
-              ),
-            )
-          }
-          // Each boundary is a different read: no chain reads the same
-          // prefix, tie, or page twice.
-          const reads = new Map<string, number>()
-          for (const { authoritative: owed, options } of repair) {
-            if (!owed) continue
+          const readsByAuthority = new Map<string, Set<string>>()
+          const snapshotsRead = new Set<number>()
+          // The fake installs the same number of rows on either side of a
+          // truncate during this drain.
+          const maximum = 1 + 2 * snapshot().length
+          for (const request of repair) {
+            if (!request.authoritative) continue
+            snapshotsRead.add(request.issuedTruncates)
+            const costScope = JSON.stringify([
+              request.issuedEpochMoves,
+              request.issuedTruncates,
+            ])
+            const reads = readsByAuthority.get(costScope) ?? new Set<string>()
+            readsByAuthority.set(costScope, reads)
+            const { options } = request
             const read = JSON.stringify([
               options.limit,
               tieValue(options),
               options.minValues,
             ])
-            reads.set(read, (reads.get(read) ?? 0) + 1)
-          }
-          for (const [read, count] of reads) {
-            if (count > chains) {
+            if (reads.has(read)) {
               rejectAt(
                 `ordered-source-loader-state-oracle.test.ts:2258`,
                 new Error(
-                  `cost: one invalidation repeated the read ${read} ${count} times for ${chains} epoch moves`,
+                  `cost: repeated the read ${read} in one ordering epoch and source snapshot ${costScope}`,
+                ),
+              )
+            }
+            reads.add(read)
+            if (reads.size > maximum) {
+              rejectAt(
+                `ordered-source-loader-state-oracle.test.ts:2240`,
+                new Error(
+                  `cost: issued more than ${maximum} authoritative reads in one ordering epoch and source snapshot ${costScope}`,
                 ),
               )
             }
           }
+          if (snapshotsRead.size > 1) costChecksAcrossTruncate++
         }
       }
     }
@@ -2593,6 +2865,7 @@ async function checkAuthorityCase(
     ).length,
     supersededFailuresAfterRepair,
     checkedStrandPremises,
+    coveringReadHandoffs,
     staleSettlementsAfterRepair,
     deferredStrandShapes,
     releaseFaults,
@@ -2625,6 +2898,7 @@ async function checkAuthorityCase(
     startThrows,
     startThrowsDuringFailure,
     costChecks,
+    costChecksAcrossTruncate,
     hungRequests,
     offsetWindows: testCase.offset > 0 && ledger.length > 0 ? 1 : 0,
     releaseInvalidations,
@@ -3285,6 +3559,21 @@ describe(`Ordered source request authority`, () => {
         },
       },
       {
+        name: `a bounded repair whose retirement replaces the source snapshot`,
+        testCase: {
+          ...ordinaryScenario,
+          indexed: true,
+          limit: 1,
+          settledFirst: false,
+          releaseFault: false,
+          syncRepair: false,
+          joined: true,
+          releaseTruncates: true,
+          releaseInvalidates: false,
+          history: [{ type: `joinedBusy` }],
+        },
+      },
+      {
         // Without the settled check, a report before the first page settled
         // forced a full-source read.
         name: `a report before any request settles`,
@@ -3476,6 +3765,7 @@ describe(`Ordered source request authority`, () => {
     // as a step of the same chain that reads a new demand.
     const releasePassState = `release-pass-continuation`
     const resumedState = `release-pass-refill-resumed`
+    const revalidationState = `release-pass-refill-revalidation`
 
     // The pinned runner reads this object at execution. Keep the existing
     // fixed/random asymmetry without adding or widening a campaign.
@@ -3483,14 +3773,14 @@ describe(`Ordered source request authority`, () => {
       arbitrary: handoffCase,
       runs: 400,
       fixedSeeds: [20261029],
-      states: [...states, resumedState],
+      states: [...states, resumedState, revalidationState],
       measured: [releasePassState],
       // Each builder keeps the generated limit, local rows, and release
       // truncate, and fixes only the axes its states need.
       constructed: [
         {
           name: `a release pass during replay retirement while an on-demand refill is deferred`,
-          enters: [`deferred-refill`, resumedState],
+          enters: [`deferred-refill`, resumedState, revalidationState],
           build: (generated: AuthorityCase) =>
             handoffHistory({
               ...handoffAxes(generated),
@@ -3541,7 +3831,7 @@ describe(`Ordered source request authority`, () => {
       law: {
         statement: `preserves repair continuation identity across replay bookkeeping`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
-        limits: `One unindexed loader over a fake subscription, limit 1/2, offset 0, one fixed history shape around a deferred refill, and the request-ledger laws at their checkpoints. A loader that drops a deferred refill during a blocked pass fails only the constructed history's required reach, not a law; elsewhere in the grammar it passes (coverage map, ordered-loader authority, awaiting a maintainer decision).`,
+        limits: `One unindexed loader over a fake subscription, limit 1/2, offset 0, one fixed history shape around a deferred refill, and the request-ledger laws at their checkpoints. The refill revalidation comparison requires a successful prefix and tie in the current replay and ordering epoch.`,
       },
       owns: [
         'src/collection/index.ts#createCollection',
@@ -3575,7 +3865,8 @@ describe(`Ordered source request authority`, () => {
               state === `deferred-refill` ||
               state === `reset-continuation` ||
               state === releasePassState ||
-              state === resumedState
+              state === resumedState ||
+              state === revalidationState
             )
               reached.add(state)
           })
@@ -3719,14 +4010,66 @@ describe(`Ordered source request authority`, () => {
   // evicting a row past its boundary, including the boundary's tie, owes none.
   // A tie with the boundary row makes the boundary row and its tie differ
   // only by key. Each
-  // grammar runs 600 histories so held answers and ties stay well above
+  // grammar runs 1200 histories so held answers and ties stay well above
   // their minimum.
   // A Collection window move in the same turn as the ordering write must
   // wait for the replacement before it reports success.
   // Held replacement answers and offsets add timing and source-prefix cuts;
   // every completed history must reach its consumer's adapter callback.
-  // Separate held-answer reach for each consumer requires generated histories
-  // to exercise the prior-snapshot and no-publication comparisons too.
+  // Each consumer reaches a held answer, rejection after applied writes, and
+  // another invalidation while the replacement is held. A failed move keeps
+  // the settled window and exposes the request error. An Effect ends with
+  // that error and no partial callback batch. A superseding invalidation
+  // needs a newer read and keeps the same gate. A truncate from the unload
+  // keeps that gate closed until replay has applied (ARCHITECTURE.md,
+  // Ordered requests, Atomic window publication, and laws 9 and 16).
+  // Deleting the tie needs the before-tie, and evicting it the after-tie. A
+  // delete before the boundary and a before-tie both need a two-row prefix.
+  // A same-turn window move may repair either window's prefix, so it keeps
+  // the unloads independent of that prefix: an ordering move, row 1's
+  // eviction, and a truncate.
+  const normalizeRetirementCase = (
+    drawn: RetirementReceiverCase,
+  ): RetirementReceiverCase => {
+    const generated =
+      drawn.kind === `collection-window`
+        ? {
+            ...drawn,
+            boundaryTie: `none` as const,
+            unloadChange:
+              drawn.unloadChange === `evict` ||
+              drawn.unloadChange === `truncate`
+                ? drawn.unloadChange
+                : (`move` as const),
+          }
+        : drawn
+    const boundaryTie =
+      generated.unloadChange === `delete-tie`
+        ? (`before` as const)
+        : generated.unloadChange === `evict-tie`
+          ? (`after` as const)
+          : generated.boundaryTie
+    const windowOffset =
+      generated.kind === `collection-window`
+        ? 1 - generated.offset
+        : generated.offset
+    const needsTwo =
+      generated.unloadChange === `delete` || boundaryTie === `before`
+    return {
+      ...generated,
+      boundaryTie,
+      replacementOutcome:
+        !generated.holdReplacement ||
+        generated.unloadChange.startsWith(`evict`) ||
+        (generated.unloadChange === `truncate` &&
+          generated.replacementOutcome === `superseded`)
+          ? `success`
+          : generated.replacementOutcome,
+      ...(needsTwo && windowOffset + generated.limit < 2
+        ? { limit: 2 as const }
+        : {}),
+    }
+  }
   const retirementReceiverCase = fc
     .record({
       indexed: fc.boolean(),
@@ -3743,6 +4086,13 @@ describe(`Ordered source request authority`, () => {
         { weight: 2, arbitrary: fc.constant(true) },
         { weight: 1, arbitrary: fc.constant(false) },
       ),
+      replacementOutcome: fc.constantFrom(
+        `failure` as const,
+        `superseded` as const,
+        `failure` as const,
+        `superseded` as const,
+        `success` as const,
+      ),
       // The boundary-row delete also needs a tie to reach its tie state, so
       // it is drawn twice as often as each other unload.
       unloadChange: fc.oneof(
@@ -3752,6 +4102,7 @@ describe(`Ordered source request authority`, () => {
         { weight: 1, arbitrary: fc.constant(`delete-tie` as const) },
         { weight: 1, arbitrary: fc.constant(`evict` as const) },
         { weight: 1, arbitrary: fc.constant(`evict-tie` as const) },
+        { weight: 2, arbitrary: fc.constant(`truncate` as const) },
       ),
       // Ties need the deterministic prefix of the other kinds, so they are
       // drawn more often than no tie.
@@ -3761,41 +4112,13 @@ describe(`Ordered source request authority`, () => {
         { weight: 2, arbitrary: fc.constant(`after` as const) },
       ),
     })
-    // Deleting the tie needs the before-tie, and evicting it the after-tie. A
-    // delete before the boundary and a before-tie both need a two-row prefix.
-    // A same-turn window move may repair either window's prefix, so it keeps
-    // the unloads that do not name that prefix: a move and row 1's eviction.
-    .map((drawn): RetirementReceiverCase => {
-      const generated =
-        drawn.kind === `collection-window`
-          ? {
-              ...drawn,
-              boundaryTie: `none` as const,
-              unloadChange:
-                drawn.unloadChange === `evict`
-                  ? (`evict` as const)
-                  : (`move` as const),
-            }
-          : drawn
-      const boundaryTie =
-        generated.unloadChange === `delete-tie`
-          ? (`before` as const)
-          : generated.unloadChange === `evict-tie`
-            ? (`after` as const)
-            : generated.boundaryTie
-      const windowOffset =
-        generated.kind === `collection-window`
-          ? 1 - generated.offset
-          : generated.offset
-      const needsTwo =
-        generated.unloadChange === `delete` || boundaryTie === `before`
-      return {
-        ...generated,
-        boundaryTie,
-        ...(needsTwo && windowOffset + generated.limit < 2
-          ? { limit: 2 as const }
-          : {}),
-      }
+    .map(normalizeRetirementCase, (value): RetirementReceiverCase => {
+      // Normalized inputs are also draws of the primitive record. Reject a
+      // constructed history that normalization would change.
+      const scenario = value as RetirementReceiverCase
+      if (!isDeepStrictEqual(normalizeRetirementCase(scenario), scenario))
+        throw new Error(`not a legal retirement receiver history`)
+      return scenario
     })
   // A shrink path belongs to one arbitrary and driver. The receiving grammar
   // has its own identity so replay never applies a controlled history's path.
@@ -3811,6 +4134,15 @@ describe(`Ordered source request authority`, () => {
       `collection-held-answer`,
       `collection-window-held-answer`,
       `effect-held-answer`,
+      `collection-failed-after-writes`,
+      `collection-window-failed-after-writes`,
+      `effect-failed-after-writes`,
+      `collection-superseded-answer`,
+      `collection-window-superseded-answer`,
+      `effect-superseded-answer`,
+      `collection-held-replay`,
+      `collection-window-held-replay`,
+      `effect-held-replay`,
       `delete-release`,
       `delete-held-answer`,
       `delete-boundary-release`,
@@ -3843,12 +4175,67 @@ describe(`Ordered source request authority`, () => {
           `${state} history minimum`,
         ).toBeGreaterThanOrEqual(20)
     })
+    // The pinned runner binds every constructed base to its own required
+    // cuts. Generated campaigns still measure the natural overlap separately.
+    const kinds = [`collection`, `collection-window`, `effect`] as const
+    const constructions = [
+      {
+        name: (kind: RetirementReceiverCase[`kind`]) =>
+          `an adapter unload starts a held truncate replay for ${kind}`,
+        unloadChange: `truncate`,
+        replacementOutcome: `success`,
+        cuts: [`release`, `held-answer`, `held-replay`],
+      },
+      {
+        name: (kind: RetirementReceiverCase[`kind`]) =>
+          `a held replacement rejects after applying writes for ${kind}`,
+        unloadChange: `move`,
+        replacementOutcome: `failure`,
+        cuts: [`failed-after-writes`],
+      },
+      {
+        name: (kind: RetirementReceiverCase[`kind`]) =>
+          `a held truncate replay rejects after applying writes for ${kind}`,
+        unloadChange: `truncate`,
+        replacementOutcome: `failure`,
+        cuts: [`held-replay`, `failed-after-writes`],
+      },
+      {
+        name: (kind: RetirementReceiverCase[`kind`]) =>
+          `a newer ordering write supersedes a held answer for ${kind}`,
+        unloadChange: `move`,
+        replacementOutcome: `superseded`,
+        cuts: [`superseded-answer`],
+      },
+    ] as const
+    const constructed = constructions.flatMap(
+      ({ name, unloadChange, replacementOutcome, cuts }) =>
+        kinds.map((kind) => ({
+          name: name(kind),
+          enters: cuts.map((cut) => `${kind}-${cut}` as const),
+          build: (
+            scenario: RetirementReceiverCase,
+          ): RetirementReceiverCase => ({
+            ...scenario,
+            kind,
+            holdReplacement: true,
+            replacementOutcome,
+            boundaryTie: `none`,
+            unloadChange,
+            // A growing window needs rows beyond the old window's coverage.
+            ...(kind === `collection-window` && replacementOutcome === `failure`
+              ? { offset: 0 as const }
+              : {}),
+          }),
+        })),
+    )
+    const required = new Set<State>(constructed.flatMap(({ enters }) => enters))
     oracleProperty({
       id: retirementReceiverProperty,
       law: {
         statement: `repairs retirement invalidation through a real subscription`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
-        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+        limits: `One ascending numeric source, one real Collection or Effect, at most one retirement-triggered replay or one additional ordering invalidation, and controlled adapter answers. No joined demand, network provider, or overlapping sync runs.`,
       },
       owns: [
         'src/collection/index.ts#createCollection',
@@ -3859,33 +4246,36 @@ describe(`Ordered source request authority`, () => {
       ],
       histories: {
         arbitrary: retirementReceiverCase,
-        runs: 600,
+        runs: 1200,
         fixedSeeds: [20261029],
+        states: [...required],
+        measured: states.filter((state) => !required.has(state)),
+        constructed,
+        bases: 20,
       },
       model: (history, observations) =>
         recordedComparison(history, observations),
-      driver: async (history, observe) =>
-        observeComparison(history, observe, async () => {
+      driver: async (scenario, observe) => {
+        const entered = new Set<State>()
+        await observeComparison(scenario, observe, async () => {
           executed++
-          const entered = new Set<State>()
-          const enter = (state: State) => {
-            if (!counts.has(state))
-              throw new Error(`Undeclared loader state: ${state}`)
+          await checkRetirementReceiver(scenario, (cut) => {
+            const state: State =
+              cut === `release` ||
+              cut === `held-answer` ||
+              cut === `failed-after-writes` ||
+              cut === `superseded-answer` ||
+              cut === `held-replay`
+                ? `${scenario.kind}-${cut}`
+                : cut
             if (!entered.has(state)) {
               entered.add(state)
               counts.set(state, counts.get(state)! + 1)
             }
-          }
-          const scenario = history
-
-          await checkRetirementReceiver(scenario, (cut) =>
-            enter(
-              cut === `release` || cut === `held-answer`
-                ? `${scenario.kind}-${cut}`
-                : cut,
-            ),
-          )
-        }),
+          })
+        })
+        for (const state of entered) observe(`reach`, state)
+      },
       check: (_history, _observations, verdict) => verdict,
     })
   })
@@ -3902,6 +4292,8 @@ describe(`Ordered source request authority`, () => {
     [`collection`, `delete-tie`],
     [`collection`, `evict`],
     [`collection`, `evict-tie`],
+    [`collection`, `truncate`],
+    [`effect`, `truncate`],
   ] as const
   // The scenario of one held receiving case, as the old fixed test built it.
   const heldReceiverScenario = ([
@@ -3913,6 +4305,7 @@ describe(`Ordered source request authority`, () => {
     synchronous: false,
     offset: 0,
     holdReplacement: true,
+    replacementOutcome: `success`,
     kind,
     unloadChange,
     boundaryTie:
@@ -3946,6 +4339,90 @@ describe(`Ordered source request authority`, () => {
         checkRetirementReceiver(plan.scenario, () => {}),
       ),
     check: (_plan, _observations, verdict) => verdict,
+  })
+
+  // Either a retained covering demand replays or a new covering demand
+  // replaces the released one. Only one whole-source read is necessary in
+  // either case. Replay recovers the source. The earlier failed window
+  // still retains its public result until an explicit move, whose rows
+  // come from sorting complete provider truth.
+  const fullSourceRetryReplayHistories: Array<FullSourceRetryReplayHistory> = (
+    [2, 3] as const
+  ).flatMap((width) =>
+    ([`superseded finite demand`, `failed full-source demand`] as const).map(
+      (truncateOn) => ({
+        width,
+        truncateOn,
+        initial: Array.from({ length: 8 }, (_, i) => ({
+          id: i + 1,
+          rank: i + 1,
+        })),
+        replacement: Array.from({ length: 8 }, (_, i) => ({
+          id: i + 21,
+          rank: i + 1,
+        })),
+      }),
+    ),
+  )
+  oracleProperty({
+    id: `ordered-loader.full-source-retry-replay`,
+    law: {
+      statement: `A retry-triggered replay takes over a retained covering demand without reading the full source twice. A later explicit window move keeps the recovered source lease and publishes its requested window.`,
+      authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Replay participants and failure.`,
+      limits: `An on-demand unindexed ordered Collection, one retry, one truncate, and held provider answers.`,
+    },
+    owns: [
+      `src/query/live/ordered-source-loader.ts`,
+      `src/query/live/collection-subscriber.ts`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: {
+      enumerated: fullSourceRetryReplayHistories,
+      states: [
+        `truncate on superseded finite demand`,
+        `truncate on failed full-source demand`,
+      ],
+    },
+    label: ({ truncateOn, width }) =>
+      `window width ${width}, truncate on ${truncateOn}`,
+    model: ({ initial, replacement, truncateOn, width }) => {
+      const window = (rows: typeof initial, size: number) =>
+        [...rows]
+          .sort((left, right) => left.rank - right.rank)
+          .slice(0, size)
+          .map(({ id }) => id)
+      const prior = window(initial, 1)
+      return {
+        initial: prior,
+        growthFailedWithOriginal: true,
+        originalFullFailure: true,
+        retryUnloaded: truncateOn,
+        held: { rows: prior, publications: [], fullLoads: 1 },
+        settled: { rows: prior, publications: [], clearedFailure: true },
+        moved: window(replacement, width + 1),
+        loadsAfterReplay: 0,
+        releasedReplayFullDemands: 0,
+        boundedRepair: true,
+      }
+    },
+    driver: async (history, observe) => {
+      const actual = await receiveFullSourceRetryReplay(history)
+      if (actual.retryUnloaded && actual.held.fullLoads > 0)
+        observe(`reach`, `truncate on ${actual.retryUnloaded}`)
+      observe(`retry replay`, actual)
+    },
+    check: (_history, observations, expected) => {
+      const actual = observations.find(
+        ({ checkpoint }) => checkpoint === `retry replay`,
+      )?.value
+      return isDeepStrictEqual(actual, expected)
+        ? { kind: `pass` }
+        : {
+            kind: `violation`,
+            checkpoint: `retry replay`,
+            difference: JSON.stringify({ actual, expected }),
+          }
+    },
   })
 
   // Calibrate the shared no-leak judgment with a retained-lease observation.
@@ -4042,6 +4519,7 @@ describe(`Ordered source request authority`, () => {
       // The ordering epoch moved while a repair continuation was owed: the
       // premise of the no-obsolete-step law.
       `continuation-before-epoch-move`,
+      `superseded failure followed by repair settlement`,
     ] as const
     type State = (typeof states)[number]
     let counts = new Map<State, number>()
@@ -4076,6 +4554,7 @@ describe(`Ordered source request authority`, () => {
       startThrows: 0,
       startThrowsDuringFailure: 0,
       costChecks: 0,
+      costChecksAcrossTruncate: 0,
       hungRequests: 0,
       offsetWindows: 0,
     }
@@ -4112,6 +4591,7 @@ describe(`Ordered source request authority`, () => {
         startThrows: 0,
         startThrowsDuringFailure: 0,
         costChecks: 0,
+        costChecksAcrossTruncate: 0,
         hungRequests: 0,
         offsetWindows: 0,
       }
@@ -4123,7 +4603,7 @@ describe(`Ordered source request authority`, () => {
       )
         return
       process.stderr.write(
-        `${authorityProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts), unblockedReleasePasses })}\n`,
+        `${authorityProperty} ${task.name} ${JSON.stringify({ histories: executed, ...Object.fromEntries(counts), unblockedReleasePasses, costChecksAcrossTruncate: later.costChecksAcrossTruncate })}\n`,
       )
       if (oracleReplayRequested()) return
       for (const state of states)
@@ -4156,7 +4636,7 @@ describe(`Ordered source request authority`, () => {
       law: {
         statement: `holds, retires, and recovers requests under generated settlement orders`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
-        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+        limits: `A controlled subscription records request authority through each step, including whether a covering read starts during repair settlement with no joined or replay hold.`,
       },
       owns: [
         'src/collection/index.ts#createCollection',
@@ -4169,13 +4649,15 @@ describe(`Ordered source request authority`, () => {
         arbitrary: authorityCaseArbitrary,
         runs: 10000,
         fixedSeeds: [20261016],
+        measured: [`superseded failure followed by repair settlement`],
       },
       model: (history, observations) =>
         recordedComparison(history, observations),
-      driver: async (history, observe) =>
-        observeComparison(history, observe, async () => {
+      driver: async (history, observe) => {
+        const coveringReadState = `superseded failure followed by repair settlement`
+        const entered = new Set<State>()
+        await observeComparison(history, observe, async () => {
           executed++
-          const entered = new Set<State>()
           const enter = (state: State) => {
             if (!counts.has(state))
               throw new Error(`Undeclared loader state: ${state}`)
@@ -4205,6 +4687,7 @@ describe(`Ordered source request authority`, () => {
           }
           if (observation.epochMovesWithContinuation > 0)
             enter(`continuation-before-epoch-move`)
+          if (observation.coveringReadHandoffs > 0) enter(coveringReadState)
           if (observation.requestErrorChecks > 0) {
             enter(`current-request-error`)
             if (observation.releaseFaults > 0)
@@ -4223,7 +4706,9 @@ describe(`Ordered source request authority`, () => {
           for (const key of Object.keys(later) as Array<keyof typeof later>) {
             later[key] += observation[key]
           }
-        }),
+        })
+        if (entered.has(coveringReadState)) observe(`reach`, coveringReadState)
+      },
       check: (_history, _observations, verdict) => verdict,
       timeout: 120_000,
     })

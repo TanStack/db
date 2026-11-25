@@ -1073,11 +1073,13 @@ replacement, and clears the loader's completion marker so an explicit retry
 of the window can issue the request again. That explicit retry retires and
 releases the earlier failed acquisition before installing its replacement, so
 a later truncate replays one logical demand rather than both attempts. The
-failed read stops being the loader's source demand before its lease is
-released. A replay that settles during or after a throwing release therefore
-cannot count the released read as complete source coverage. A
-successful authoritative replay clears its source-recovery gate, but it does
-not clear an unrelated failed window operation. A later explicit window move
+failed read stops being the loader's source demand when the retry reaches
+its own lease, before calling its unload. If an earlier unload starts replay,
+the failed read's retained demand participates in that replay and already
+supplies its covering read. A replay that starts from the full-source lease's
+own unload needs a fresh covering read. A successful authoritative replay
+clears its source-recovery gate, but it does not clear an unrelated failed
+window operation. A later explicit window move
 revalidates that physical window before publishing it.
 
 A finite page or tie-boundary request can remain in flight when full-source
@@ -1240,8 +1242,10 @@ timeout. A request the provider never answers keeps its work slot, so an
 authoritative read that never settles holds its repair or recovery until the
 subscription ends; recovery from a provider that stops answering belongs to the
 adapter or the subscription lifecycle.
-A request issued before a cursor reset that later fails still raises the repair
-debt, but it cannot drop work staged after the reset.
+An aborted acquisition ends its ordered participant. Its transport can settle
+later without affecting the loader or holding publication. A request issued
+before a cursor reset that fails without abort can still raise the repair debt,
+but cannot drop work staged after the reset.
 A failed or canceled request, an invalidation before any request has
 settled, or a boundary that cannot be expressed still requires the full-source
 recovery above. A bounded repair failure likewise upgrades its
@@ -1431,7 +1435,11 @@ publication; it does not report success until its own chosen window is visible.
 A joined demand already pending when the move begins is part of this operation
 if it blocks the ordered continuation. Retiring that demand releases its
 participant; a later failure from the obsolete request cannot fail the move.
-The resumed root page and refill still belong to the operation.
+The resumed root page and refill still belong to the operation. A root
+truncate replay can finish while an ordered repair still owes a joined-filter
+window. The next graph pass checks that window inside the same repair.
+Any root refill it needs inherits the publication hold even when joined
+demand has already settled.
 Window controllers treat `getWindow()` as settled state, not the current lease
 request. An overlapping preload joins its lease's pending window promise rather
 than replacing it with the smaller committed page count. Lease release may also
@@ -1511,9 +1519,9 @@ that repair finishes inside the graph run that publishes its window, so no
 callback can observe a partial window and no participant is needed. At flush, equal insert/delete counts are classified against the
 last callback-visible membership and value: absent-to-absent produces no event,
 while present-to-present produces an update only when the value changed.
-If truncate replay aborts an obsolete repair participant, its replacement
-completion inherits the same callback hold; the abort alone does not freeze or
-dispose the still-live Effect. Any unhandled participant failure never exposes
+When a repair participant settles during truncate replay, the pending
+replacement inherits the callback hold. This includes an aborted participant
+and a successful repair whose acquisition release started the replay. Any unhandled participant failure never exposes
 the private intermediate state: source-error handling disposes the Effect and
 clears the retained delta and participants. With `skipInitial`, an asynchronous
 initial ordered chain also stays behind the gate until all initial participants
@@ -1537,6 +1545,11 @@ its logical owner, but an owner whose current acquisition was aborted owes
 the replay nothing. Releasing the owner removes its work from readiness. Work
 started inside the current replay attempt holds publication until it
 settles or aborts.
+
+A reload can replay a live subscription's demand without emitting a
+truncate. An ordered Effect resets its cursor when either replay starts.
+The current replay's completion resumes its ordered loader and schedules
+the graph pass that checks any remaining refill.
 Core installs each tentative acquisition and binds it to the current replay
 attempt before calling adapter code. A reentrant release or newer truncate can
 therefore see and retire the exact work it supersedes; work returned after that

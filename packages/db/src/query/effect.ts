@@ -1,7 +1,7 @@
 import { D2, output } from '@tanstack/db-ivm'
 import { createSourceRecord } from '../utils/source-record.js'
-import { createDeferred } from '../deferred.js'
-import { runAllCallbacks } from '../utils/callbacks.js'
+import { createDeferred, resolveOnAbort } from '../deferred.js'
+import { reportUncaught, runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
 import { samePublishedValue } from '../utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
@@ -410,24 +410,25 @@ interface EffectPipelineRunnerConfig<
 }
 
 /**
- * Report how a held acquisition ends. A truncate replay rejects the
- * acquisition it supersedes and starts a replacement, which inherits the hold.
+ * A pending truncate replay inherits the hold. It can abort the acquisition
+ * or start in an adapter unload as that acquisition finishes successfully.
  */
 function followHeldAcquisition(
   acquisition: Promise<unknown>,
-  replacementAfterFailure: () => Promise<void> | undefined,
+  pendingReplacement: () => Promise<void> | undefined,
   handlers: {
     settled: (succeeded: boolean) => void
     replaced: (replacement: Promise<void>) => void
   },
 ): void {
+  const settle = (succeeded: boolean) => {
+    const replacement = pendingReplacement()
+    if (replacement) handlers.replaced(replacement)
+    else handlers.settled(succeeded)
+  }
   void acquisition.then(
-    () => handlers.settled(true),
-    () => {
-      const replacement = replacementAfterFailure()
-      if (replacement) handlers.replaced(replacement)
-      else handlers.settled(false)
-    },
+    () => settle(true),
+    () => settle(false),
   )
 }
 
@@ -659,6 +660,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
       // Check if this alias has orderBy optimization (cursor-based loading)
       const orderByInfo = this.optimizableOrderByCollections[sourceId]
+      let followOrderedReplay: ((completion: Promise<void>) => void) | undefined
 
       const changeCallback = (
         changes: Array<ChangeMessage<any, string | number>>,
@@ -684,16 +686,15 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           whereExpression,
         ),
         owner: this.dependent,
+        onTruncateReplayStart: (completion) => {
+          // A replay can replace initial demand before its adapter call returns.
+          this.trackInitialLoad(completion)
+          followOrderedReplay?.(completion)
+        },
         onLoadSubsetError: ({ error }) =>
           this.onSourceError(normalizeError(error)),
-        // subscribeChanges can report a result before it returns the
-        // subscription, so read it from the record when a load fails.
-        onLoadSubsetResult: (result) => {
-          this.trackInitialLoad(
-            result,
-            () => this.subscriptions[sourceId]?.pendingTruncateReplacement,
-          )
-        },
+        onLoadSubsetResult: (result, { signal }) =>
+          this.trackInitialLoad(result, signal),
       })
 
       // Store subscription immediately so the join compiler can find it
@@ -748,10 +749,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           subscription,
           alias,
           (result, holdPublication) => {
-            this.trackInitialLoad(
-              result,
-              () => subscription.pendingTruncateReplacement,
-            )
+            this.trackInitialLoad(result)
             const holdsInitialPublication =
               this.skipInitial && !this.initialLoadComplete
             if (holdPublication || holdsInitialPublication) {
@@ -769,6 +767,30 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
             ) ?? false,
         )
         this.orderedLoaders.set(sourceId, loader)
+        let replayCompletion: Promise<void> | undefined
+        followOrderedReplay = (replay) => {
+          loader.resetCursor()
+          if (replay === replayCompletion) return
+          replayCompletion = replay
+          void replay
+            .then(
+              () => {
+                if (this.disposed || replayCompletion !== replay) return
+                replayCompletion = undefined
+                loader.settleFullSourceReplay()
+                this.scheduleGraphRun()
+              },
+              () => {
+                if (replayCompletion === replay) replayCompletion = undefined
+              },
+            )
+            .catch(reportUncaught)
+        }
+        this.unsubscribeCallbacks.add(
+          collection.on(`truncate`, () => {
+            if (!subscription.pendingTruncateReplacement) loader.resetCursor()
+          }),
+        )
         loader.start()
         // The sync adapter reports that served pages may have shifted after
         // its own refetch. Re-establish the window with a bounded repair.
@@ -889,10 +911,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   ): void {
     const update = this.demand.setDemand(subscription, plan, keys)
     if (update.ready instanceof Promise) {
-      this.trackInitialLoad(
-        update.ready,
-        () => subscription.pendingTruncateReplacement,
-      )
+      this.trackInitialLoad(update.ready)
       // Each segment reports its own failure through the subscription. Consume
       // the aggregate rejection so Promise.all does not create a second,
       // detached error channel.
@@ -921,37 +940,30 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     })
   }
 
-  /** Keep the Effect's gate, and `skipInitial` suppression, open until a pending initial load settles. */
+  /** Track work that still controls initial readiness and callback suppression. */
   private trackInitialLoad(
     result: true | Promise<unknown>,
-    replacementAfterFailure: () => Promise<void> | undefined,
+    signal?: AbortSignal,
   ): void {
     if (!(result instanceof Promise) || this.reachedReady || this.disposed)
       return
-    this.pendingInitialLoads.add(result)
+    const acquisition = resolveOnAbort(result, signal)
+    if (this.pendingInitialLoads.has(acquisition)) return
+    this.pendingInitialLoads.add(acquisition)
     const release = () => {
-      if (this.pendingInitialLoads.delete(result) && !this.disposed)
+      if (this.pendingInitialLoads.delete(acquisition) && !this.disposed)
         this.scheduleGraphRun()
     }
-    // A load failure disposes the Effect through onLoadSubsetError, so a
-    // rejection releases one microtask later, after that event, as a live
-    // query's tracked rejection does. Any other rejection comes from an
-    // obsolete or aborted acquisition, so the hold fails open: it releases
-    // unless a truncate replacement takes it over.
-    followHeldAcquisition(result, replacementAfterFailure, {
-      settled: (succeeded) =>
-        succeeded ? release() : void Promise.resolve().then(release),
-      replaced: (replacement) => {
-        this.trackInitialLoad(replacement, replacementAfterFailure)
-        release()
-      },
-    })
+    // The source-error event disposes the Effect on failure. Release one
+    // microtask later to give that event priority. Replay joins the gate at
+    // replay start, before the acquisition it replaces can release.
+    void acquisition.then(release, () => void Promise.resolve().then(release))
   }
 
   /** Hold Effect callback publication across one authoritative repair chain. */
   private trackOrderedPublication(
     promise: Promise<unknown>,
-    replacementAfterFailure: () => Promise<void> | undefined,
+    pendingReplacement: () => Promise<void> | undefined,
   ): void {
     if (this.disposed) return
     if (this.pendingOrderedPublications.size === 0) {
@@ -975,11 +987,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // A failed repair chain fails closed until a fresh chain starts. A
     // replacement settles after replay rows reach this Effect's private D2
     // state, so it takes over the same publication hold.
-    followHeldAcquisition(promise, replacementAfterFailure, {
+    followHeldAcquisition(promise, pendingReplacement, {
       settled: finish,
       replaced: (replacement) => {
         if (this.pendingOrderedPublications.delete(promise) && !this.disposed)
-          this.trackOrderedPublication(replacement, replacementAfterFailure)
+          this.trackOrderedPublication(replacement, pendingReplacement)
       },
     })
   }

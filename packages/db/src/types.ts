@@ -1300,9 +1300,14 @@ export interface SubscribeChangesOptions<
    * Allows the caller to directly track the loading promise for isReady status.
    * @internal
    */
-  onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
+  onLoadSubsetResult?: (
+    result: LoadSubsetRequestResult,
+    options: LoadSubsetOptions,
+  ) => void
   /** Receives subset-load failures scoped to this subscription. @internal */
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
+  /** Receives the current demand replay after truncate or reload. @internal */
+  onTruncateReplayStart?: (completion: Promise<void>) => void
   /** Lets a live-query graph retain its last publication during replay. @internal */
   truncateReplayPublication?: {
     /** `retired`: a reload retired the sync run, and no truncate came. */

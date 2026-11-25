@@ -3,6 +3,7 @@ import { PropRef } from '../ir.js'
 import { createValueIdentity } from '../equality-value-identity.js'
 import { codedMessage, devBuild } from '../../error-message.js'
 import { normalizeError } from '../../utils/error.js'
+import { resolveOnAbort } from '../../deferred.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type {
@@ -353,7 +354,7 @@ function startSegment(
         if (error) throw error
         return undefined
       }
-      segment.ready = result.then(
+      segment.ready = resolveOnAbort(result, options.signal).then(
         () => settle(),
         (error: unknown) => settle({ error }),
       )

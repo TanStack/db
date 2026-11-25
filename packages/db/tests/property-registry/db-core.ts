@@ -64,6 +64,7 @@ export const properties: ReadonlyArray<string> = [
   `collection-state.typed-keys`,
   `optimistic-history.publication-cases`,
   `production-errors.classes`,
+  `production-errors.effect-console`,
   `production-errors.sites`,
   `production-errors.generated-docs`,
   // IndexedDB and live-query observers
@@ -181,7 +182,7 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
     `db/tests/production-error-messages-oracle.test.ts`,
     `production-errors`,
-    `classes sites generated-docs`,
+    `classes effect-console sites generated-docs`,
   ],
   // IndexedDB and live-query observers
   [

@@ -517,6 +517,9 @@ async function expectDemandReactivationRetriesAfterReleaseFailure(
 // treats an aborted lazy-demand load as a failure enters error. Between a
 // truncate and its settlement the replay barrier owns publication, so the
 // model does not judge live-query rows there; the metamorphic twin does.
+// The direct Effect also receives a fulfilled acquisition and a truncate in
+// the same turn, before fulfillment observers run. The replacement's rows
+// belong to initial suppression, while the first later matching write emits.
 //
 // The driver uses real Collections, a live-query preload or `createEffect`,
 // and controlled source writes. Each step is followed by a timer turn. Each
@@ -551,7 +554,29 @@ const isReadConsumer = (consumer: LaggingSourceConsumer): boolean =>
   consumer === `state-when-ready`
 
 type LaggingSourceStep =
-  `deliver` | `settle` | `source-ready` | `change` | `rekey` | `truncate`
+  | `deliver`
+  | `settle`
+  | `source-ready`
+  | `change`
+  | `rekey`
+  | `truncate`
+  | `settle-and-truncate`
+  | `deliver-replay`
+  | `settle-replay`
+  | `reload-pending-replay`
+  | `obsolete-fulfills`
+  | `obsolete-rejects`
+  | `change-after-obsolete`
+
+type LaggingSourceInitialReply = `literal` | `truncate before literal`
+
+type LaggingSourceReach =
+  | `held replay after same-turn initial fulfillment`
+  | `direct replay settled with aborted initial transport unresolved`
+  | `joined replay settled with aborted initial transport unresolved`
+  | `reload settled after replacing a held initial replay`
+  | `direct replay replaces a reentrant literal initial acquisition`
+  | `joined replay replaces a reentrant literal initial acquisition`
 
 const LAGGING_SOURCE_SHAPES: Record<LaggingSourceShape, LaggingSourceMode> = {
   direct: `on-demand`,
@@ -620,9 +645,67 @@ function disturbedHistories(
   ]
 }
 
+// Keep the initial delivery and the source-ready and ordinary-write positions.
+// Replace its settlement with a same-turn truncate, one replay delivery, and
+// the actual settlement that opens the initial gate.
+function sameTurnReplayHistories(): Array<Array<LaggingSourceStep>> {
+  return laggingSourceHistories(`on-demand`).map((history) =>
+    history.flatMap((step) =>
+      step === `settle`
+        ? [`settle-and-truncate`, `deliver-replay`, `settle`]
+        : [step],
+    ),
+  )
+}
+
+// The original transport can ignore abort indefinitely. Its signal and the
+// newer replay's result, rather than its response, decide initial suppression.
+function abortedInitialHistories(): Array<Array<LaggingSourceStep>> {
+  return [false, true].flatMap((deliverInitial) =>
+    [false, true].flatMap((readyBeforeReplay) =>
+      [false, true].flatMap((reloadPendingReplay) =>
+        ([undefined, `obsolete-fulfills`, `obsolete-rejects`] as const).map(
+          (lateOutcome): Array<LaggingSourceStep> => [
+            ...(readyBeforeReplay ? [`source-ready` as const] : []),
+            ...(deliverInitial ? [`deliver` as const] : []),
+            `truncate`,
+            ...(reloadPendingReplay ? [`reload-pending-replay` as const] : []),
+            `deliver-replay`,
+            `settle-replay`,
+            ...(readyBeforeReplay ? [] : [`source-ready` as const]),
+            `change`,
+            ...(lateOutcome === undefined
+              ? []
+              : [lateOutcome, `change-after-obsolete` as const]),
+          ],
+        ),
+      ),
+    ),
+  )
+}
+
+// A literal first result has no transport to keep initial suppression open.
+function literalInitialHistories() {
+  return ([`literal`, `truncate before literal`] as const).flatMap(
+    (initialReply) =>
+      [false, true].map((earlyReady) => {
+        const steps: Array<LaggingSourceStep> = []
+        if (earlyReady) steps.push(`source-ready`)
+        if (initialReply === `truncate before literal`)
+          steps.push(`deliver-replay`, `settle-replay`)
+        steps.push(`change`)
+        if (!earlyReady) steps.push(`source-ready`)
+        return { initialReply, steps }
+      }),
+  )
+}
+
 const INITIAL_POST_ID = 2
 
 const CHANGED_POST_ID = 4
+
+const REPLAY_POST_ID = 6
+const LATE_CHANGE_POST_ID = 8
 
 type LaggingSourceFacts = {
   delivered: boolean
@@ -760,6 +843,7 @@ function recordLaggingSourceWrite(
 type LaggingPosts = {
   collection: Collection<ProgressivePost>
   acquisitions: Array<Deferred<void>>
+  signals: Array<AbortSignal | undefined>
   write: (post: { id: number; userId: number }) => void
   truncate: () => void
   markReady: () => void
@@ -773,8 +857,11 @@ function createLaggingPosts(
   mode: LaggingSourceMode,
   explicitMode: boolean,
   readyAtStart = false,
+  holdAborted = false,
+  initialReply?: LaggingSourceInitialReply,
 ): LaggingPosts {
   const acquisitions: Array<Deferred<void>> = []
+  const signals: Array<AbortSignal | undefined> = []
   let sync:
     | {
         begin: () => void
@@ -795,11 +882,23 @@ function createLaggingPosts(
         if (mode === `eager`) return undefined
         return {
           loadSubset: ({ signal }) => {
+            const first = acquisitions.length === 0
             const acquisition = createDeferred<void>()
             acquisitions.push(acquisition)
-            signal?.addEventListener(`abort`, () =>
-              acquisition.reject(new LoadSubsetOperationAbortedError()),
-            )
+            signals.push(signal)
+            if (first && initialReply !== undefined) {
+              if (initialReply === `truncate before literal`) {
+                begin()
+                truncate()
+                expect(commit()).toBe(true)
+              }
+              acquisition.resolve()
+              return true
+            }
+            if (!holdAborted)
+              signal?.addEventListener(`abort`, () =>
+                acquisition.reject(new LoadSubsetOperationAbortedError()),
+              )
             return acquisition.promise
           },
         }
@@ -809,6 +908,7 @@ function createLaggingPosts(
   return {
     collection,
     acquisitions,
+    signals,
     write: (post) => {
       sync!.begin()
       sync!.write({ type: `insert`, value: { ...post, title: `selected` } })
@@ -999,29 +1099,65 @@ function applyLaggingSourceStep(
   { shape, main, twin, facts, rekeyUsers }: LaggingSourceContext,
 ): void {
   const sources = [main.source, ...(twin ? [twin.source] : [])]
-  if (step === `deliver` || step === `change`) {
-    const post =
-      step === `deliver`
-        ? { id: INITIAL_POST_ID, userId: 2 }
-        : { id: CHANGED_POST_ID, userId: facts.parentId }
+  if (
+    step === `deliver` ||
+    step === `change` ||
+    step === `deliver-replay` ||
+    step === `change-after-obsolete`
+  ) {
+    const post = {
+      id:
+        step === `deliver`
+          ? INITIAL_POST_ID
+          : step === `deliver-replay`
+            ? REPLAY_POST_ID
+            : step === `change-after-obsolete`
+              ? LATE_CHANGE_POST_ID
+              : CHANGED_POST_ID,
+      userId:
+        step === `change` || step === `change-after-obsolete`
+          ? facts.parentId
+          : 2,
+    }
     for (const source of sources) source.write(post)
     if (step === `deliver`) facts.delivered = true
-    else facts.changed = true
+    else if (step === `change`) facts.changed = true
     recordLaggingSourceWrite(shape, facts, post)
   } else if (step === `rekey`) {
     rekeyUsers!()
     facts.parentId = 3
     facts.disturbed = true
-  } else if (step === `truncate`) {
-    for (const source of sources) source.truncate()
+  } else if (step === `truncate` || step === `settle-and-truncate`) {
+    for (const source of sources) {
+      if (step === `settle-and-truncate`) {
+        expect(source.acquisitions).toHaveLength(1)
+        expect(source.acquisitions[0]!.isPending()).toBe(true)
+        source.acquisitions[0]!.resolve()
+      }
+      source.truncate()
+    }
     facts.posts = []
     facts.disturbed = true
     facts.replayPending = true
-  } else if (step === `settle`) {
-    for (const source of sources)
-      for (const acquisition of source.acquisitions) acquisition.resolve()
+  } else if (step === `reload-pending-replay`) {
+    for (const source of sources) void source.collection.reload()
+  } else if (step === `settle` || step === `settle-replay`) {
+    for (const source of sources) {
+      source.acquisitions.forEach((acquisition, index) => {
+        if (step === `settle` || !source.signals[index]?.aborted)
+          acquisition.resolve()
+      })
+    }
     facts.settled = true
     facts.replayPending = false
+  } else if (step === `obsolete-fulfills` || step === `obsolete-rejects`) {
+    for (const source of sources) {
+      source.acquisitions.forEach((acquisition, index) => {
+        if (!source.signals[index]?.aborted) return
+        if (step === `obsolete-fulfills`) acquisition.resolve()
+        else acquisition.reject(new Error(`aborted initial transport rejected`))
+      })
+    }
   } else {
     // The twin's source has been ready since its start.
     main.source.markReady()
@@ -1041,6 +1177,9 @@ function applyLaggingSourceStep(
 function createLaggingSourceDriver(
   consumer: LaggingSourceConsumer,
   shape: LaggingSourceShape,
+  holdAborted: boolean,
+  initialReply: LaggingSourceInitialReply | undefined,
+  reach: (state: LaggingSourceReach) => void,
 ): TraceDriver<LaggingSourceStep, LaggingSourceContext> {
   const mode = LAGGING_SOURCE_SHAPES[shape]
   return {
@@ -1053,6 +1192,14 @@ function createLaggingSourceDriver(
         shape === `eager-default`
           ? undefined
           : createReadyUsers()
+      const createSource = (readyAtStart: boolean) =>
+        createLaggingPosts(
+          mode,
+          shape !== `eager-default`,
+          readyAtStart,
+          holdAborted,
+          initialReply,
+        )
       return {
         shape,
         mode,
@@ -1061,21 +1208,21 @@ function createLaggingSourceDriver(
         facts: {
           delivered: false,
           changed: false,
-          settled: false,
+          settled: initialReply === `literal`,
           sourceReady: false,
-          disturbed: false,
+          disturbed: initialReply === `truncate before literal`,
           parentId: 2,
           posts: [],
           writtenAfterReadiness: [],
           exitsAfterReadiness: 0,
           idsAtReadiness: undefined,
           readOwes: undefined,
-          replayPending: false,
+          replayPending: initialReply === `truncate before literal`,
         },
         main: startLaggingSourceConsumer(
           consumer,
           shape,
-          createLaggingPosts(mode, shape !== `eager-default`),
+          createSource(false),
           users?.collection,
         ),
         twin:
@@ -1083,14 +1230,28 @@ function createLaggingSourceDriver(
             ? startLaggingSourceConsumer(
                 consumer,
                 shape,
-                createLaggingPosts(mode, true, true),
+                createSource(true),
                 users?.collection,
               )
             : undefined,
       }
     },
-    start: async () => {
+    start: async ({ main, twin }) => {
       await flushPromises()
+      if (initialReply === undefined) return
+      const reentered = initialReply === `truncate before literal`
+      for (const { source } of [main, ...(twin ? [twin] : [])]) {
+        expect(source.acquisitions).toHaveLength(reentered ? 2 : 1)
+        expect(source.signals[0]?.aborted).toBe(reentered)
+        expect(source.acquisitions[0]?.isPending()).toBe(false)
+        if (reentered) expect(source.acquisitions[1]?.isPending()).toBe(true)
+      }
+      if (reentered)
+        reach(
+          shape === `direct`
+            ? `direct replay replaces a reentrant literal initial acquisition`
+            : `joined replay replaces a reentrant literal initial acquisition`,
+        )
     },
     apply: async (step, context) => {
       applyLaggingSourceStep(step, context)
@@ -1114,6 +1275,38 @@ function createLaggingSourceDriver(
         context.main.source,
         ...(context.twin ? [context.twin.source] : []),
       ]
+      if (step === `settle-and-truncate`) {
+        for (const source of sources) {
+          expect(source.acquisitions).toHaveLength(2)
+          expect(source.acquisitions[1]!.isPending()).toBe(true)
+        }
+        reach(`held replay after same-turn initial fulfillment`)
+      }
+      if (step === `reload-pending-replay`) {
+        for (const source of sources) {
+          expect(source.signals[1]?.aborted).toBe(true)
+          expect(source.acquisitions[1]?.isPending()).toBe(true)
+          expect(source.acquisitions.at(-1)?.isPending()).toBe(true)
+        }
+      }
+      if (step === `settle-replay`) {
+        for (const source of sources) {
+          expect(source.acquisitions.length).toBeGreaterThan(1)
+          expect(source.signals[0]?.aborted).toBe(true)
+          expect(source.acquisitions[0]?.isPending()).toBe(
+            initialReply === undefined,
+          )
+          expect(source.acquisitions.at(-1)?.isPending()).toBe(false)
+        }
+        if (initialReply === undefined)
+          reach(
+            shape === `direct`
+              ? `direct replay settled with aborted initial transport unresolved`
+              : `joined replay settled with aborted initial transport unresolved`,
+          )
+        if (sources.every(({ signals }) => signals[1]?.aborted))
+          reach(`reload settled after replacing a held initial replay`)
+      }
       while (
         step === `settle` &&
         sources.some((source) =>
@@ -1238,10 +1431,18 @@ async function expectLaggingSourceTraceMatches(
   consumer: LaggingSourceConsumer,
   shape: LaggingSourceShape,
   steps: ReadonlyArray<LaggingSourceStep>,
+  initialReply: LaggingSourceInitialReply | undefined,
+  reach: (state: LaggingSourceReach) => void,
 ): Promise<void> {
   await runTrace({
     steps,
-    driver: createLaggingSourceDriver(consumer, shape),
+    driver: createLaggingSourceDriver(
+      consumer,
+      shape,
+      steps.includes(`settle-replay`),
+      initialReply,
+      reach,
+    ),
     projection: laggingSourceProjection(consumer, shape),
   })
 }
@@ -1266,7 +1467,7 @@ function temporalCampaigns(property: string, fixedSeed: number) {
 const readinessLaw = `Initial preload completes when every reachable demand is covered by a settled request: an empty outer relation does not wait for an undemanded child, and a demanded child loads before readiness.`
 const demandSchedulingLaw = `An obsolete acquisition's settlement cannot add its child row or settle current readiness, in either completion order.`
 const releaseReentryLaw = `A failed adapter release never suppresses the reacquisition of a later demand incarnation.`
-const laggingSourceLaw = `Source Collection readiness gates initial-query readiness only for an eager source; an on-demand source's settled demand is the evidence.`
+const laggingSourceLaw = `Source Collection readiness gates initial-query readiness only for an eager source. An on-demand source reaches readiness when its current demand settles, even while an obsolete aborted transport remains unresolved.`
 
 const readinessFixedHistories = [
   { name: `an empty outer does not wait for an undemanded child`, posts: [] },
@@ -1442,11 +1643,26 @@ describe(`includes temporal oracle`, () => {
     }
     const cells = Object.entries(consumers).flatMap(([consumer, shapes]) =>
       shapes.flatMap((shape) =>
-        disturbedHistories(shape).map((steps) => ({
+        [
+          ...[
+            ...disturbedHistories(shape),
+            ...(consumer === `effect` && shape === `direct`
+              ? sameTurnReplayHistories()
+              : []),
+            ...(consumer === `effect` &&
+            (shape === `direct` || shape === `join`)
+              ? abortedInitialHistories()
+              : []),
+          ].map((steps) => ({ steps, initialReply: undefined })),
+          ...(consumer === `effect` && (shape === `direct` || shape === `join`)
+            ? literalInitialHistories()
+            : []),
+        ].map(({ steps, initialReply }) => ({
           consumer: consumer as LaggingSourceConsumer,
           shape,
           steps,
-          history: steps.join(` → `),
+          initialReply,
+          history: [initialReply, ...steps].filter(Boolean).join(` → `),
         })),
       ),
     )
@@ -1465,19 +1681,34 @@ describe(`includes temporal oracle`, () => {
         `src/query/live/subset-demand-controller.ts`,
         `src/query/query-once.ts#queryOnce`,
       ],
-      histories: cells,
+      histories: {
+        enumerated: cells,
+        states: [
+          `held replay after same-turn initial fulfillment`,
+          `direct replay settled with aborted initial transport unresolved`,
+          `joined replay settled with aborted initial transport unresolved`,
+          `reload settled after replacing a held initial replay`,
+          `direct replay replaces a reentrant literal initial acquisition`,
+          `joined replay replaces a reentrant literal initial acquisition`,
+        ],
+      },
       label: ({ consumer, shape, history }) =>
         `${consumer} ${shape}: ${history}`,
       resolve: (cell) => ({ ...cell }),
       model: recordedAssertionJudgment,
-      driver: (plan, observe) =>
-        recordAssertionJudgment(laggingSourceLaw, plan, observe, () =>
+      driver: async (plan, observe) => {
+        const reached = new Set<LaggingSourceReach>()
+        await recordAssertionJudgment(laggingSourceLaw, plan, observe, () =>
           expectLaggingSourceTraceMatches(
             plan.consumer,
             plan.shape,
             plan.steps,
+            plan.initialReply,
+            (state) => reached.add(state),
           ),
-        ),
+        )
+        for (const state of reached) observe(`reach`, state)
+      },
       check: forwardAssertionJudgment,
     })
   })
