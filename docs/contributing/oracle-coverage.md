@@ -3281,6 +3281,30 @@ serialization, unavailable key evidence after raw loss, concurrent schema
 migration, WAL across processes, and arbitrary longer transaction histories
 remain with their existing owners or need explicit future witnesses.
 
+The same owner bounds what an ordinary transaction stores and rewrites. Its
+model records, for each applied position, whether a replay is `stored` or a
+`full-reload`: a replay is stored exactly when its row, row-metadata and
+collection-metadata actions number at most the default reload threshold of
+128, because `pullSince` answers a full reload above it. A second proposed work
+law bounds statements that insert or update Collection-table rows to one per
+chunk of keys that the transaction leaves written, plus one per chunk of the
+other row-metadata keys, so a row's later metadata is part of its one write.
+Both laws apply at every existing fixed, independent-key and generated-history
+checkpoint. The fixed cases add 128 and 129 replay changes. The generated
+`sqlite-ordinary.replay-threshold` campaigns (24 runs, seed 20261125) write
+56–72 rows with later metadata sets and clears over fresh or seeded rows, with
+optional collection metadata and stray metadata keys at 100/999 caps, and
+compare the durable observation and `pullSince` from the seed's position.
+Constructed histories enter exactly 128 and 129 changes. On `55e8692a7` the
+extended owner fails 34 of 137 tests at the durable and row-rewrite
+checkpoints; with the repair it passes 137. Mutants that store replays at the
+threshold or above it, keep the second metadata pass, swap or drop the later
+metadata in the row insert, or skip serializing superseded inline metadata
+each fail the owner. The laws do not cover a custom threshold, truncate
+replacement, concurrent owners, or OPFS latency; a manual Chromium OPFS
+benchmark, not an owner, measured a 50,000-row insert at 1.8 s instead of
+3.1 s.
+
 The same owner checks the optional source-progress bridge with an independent
 path-of-edges model. A discontinuity stays incompatible across matching and
 empty commits; a repeated endpoint is idempotent; a full replacement repairs
@@ -4457,7 +4481,7 @@ becomes a declared state of its owner and leaves the ordinary file.
 | ordered histories that promote retained rows, at least 10 (seed 1741) | `packages/db-ivm/tests/incrementalization-law-calibration.test.ts` | `incrementalization-law-oracle.property.test.ts` |
 | cancelled NaN-prefixed values, more than 10 (seed 20260930) | `packages/db-ivm/tests/index-refinement-grammar.test.ts` | `index-refinement-oracle.property.test.ts` |
 | tail-order ablation (seed 165905, 12 runs) | `packages/browser-db-sqlite-persistence/tests/shared-driver-fairness-grammar.test.ts` | `shared-driver-fairness-oracle.test.ts` |
-| bounded action-history axes and independent-key work shapes (seeds 1992, 31992) | `packages/db-sqlite-persistence-core/tests/ordinary-transaction-work-calibration.test.ts` | `ordinary-transaction-work-oracle.ts` (registered by `sqlite-resume-snapshot-oracle.test.ts`) |
+| bounded action-history axes, independent-key work shapes and replay-threshold counts (seeds 1992, 31992, 20261125) | `packages/db-sqlite-persistence-core/tests/ordinary-transaction-work-calibration.test.ts` | `ordinary-transaction-work-oracle.ts` (registered by `sqlite-resume-snapshot-oracle.test.ts`) |
 | the #2139 known-defect census (seed 2128, 12 runs) | `packages/db-sqlite-persistence-core/tests/persisted-known-defects.test.ts` | `persisted-oracle.test.ts` |
 | retained generated grammar and axis ablations | `packages/node-db-sqlite-persistence/tests/expression-index-grammar.test.ts` | `expression-index-oracle.test.ts` |
 | the fixed recovery corpus's deletion and reload combinations (seed 1659) | `packages/electric-db-collection/tests/electric-recovery-publication-grammar.test.ts` | `electric-recovery-oracle.test.ts` |
