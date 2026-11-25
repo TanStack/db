@@ -50,7 +50,6 @@ The `trailBaseCollectionOptions` function accepts the following options:
 
 ### Optional Options
 
-- `schema`: [Standard Schema](https://standardschema.dev) compatible schema (e.g., Zod, Effect) for client-side validation
 - `parse`: Object mapping field names to parsing functions that transform data coming from TrailBase
 - `serialize`: Object mapping field names to serialization functions that transform data going to TrailBase
 
@@ -73,12 +72,11 @@ type Todo = {
   completed: boolean
 }
 
-const todosCollection = createCollection<SelectTodo, Todo>(
-  trailBaseCollectionOptions({
+const todosCollection = createCollection(
+  trailBaseCollectionOptions<Todo, SelectTodo>({
     id: 'todos',
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
-    schema: todoSchema,
     // Transform TrailBase data to application format
     parse: {
       created_at: (ts) => new Date(ts * 1000),
@@ -133,21 +131,12 @@ backend request.
 ## Complete Example
 
 ```typescript
-import { createCollection } from '@tanstack/react-db'
+import { createCollection, useLiveQuery } from '@tanstack/react-db'
 import { not } from '@tanstack/db'
 import { trailBaseCollectionOptions } from '@tanstack/trailbase-db-collection'
 import { initClient } from 'trailbase'
-import { z } from 'zod'
 
 const trailBaseClient = initClient(`https://your-trailbase-instance.com`)
-
-// Define schema
-const todoSchema = z.object({
-  id: z.string(),
-  text: z.string(),
-  completed: z.boolean(),
-  created_at: z.date(),
-})
 
 type SelectTodo = {
   id: string
@@ -156,15 +145,14 @@ type SelectTodo = {
   created_at: number
 }
 
-type Todo = z.infer<typeof todoSchema>
+type Todo = Omit<SelectTodo, 'created_at'> & { created_at: Date }
 
 // Create collection
-export const todosCollection = createCollection<SelectTodo, Todo>(
-  trailBaseCollectionOptions({
+export const todosCollection = createCollection(
+  trailBaseCollectionOptions<Todo, SelectTodo>({
     id: 'todos',
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
-    schema: todoSchema,
     parse: {
       created_at: (ts) => new Date(ts * 1000),
     },

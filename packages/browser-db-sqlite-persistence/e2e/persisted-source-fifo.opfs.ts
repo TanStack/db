@@ -1,5 +1,6 @@
-import { runSourceClaimHistory } from '../../db-sqlite-persistence-core/tests/persisted-source-claim-driver'
 /** Worker/OPFS supplies storage; the shared FIFO driver records every cut. */
+import { runSourcePublicationHistory } from '../../db-sqlite-persistence-core/tests/persisted-source-publication-driver'
+import { runSourceClaimHistory } from '../../db-sqlite-persistence-core/tests/persisted-source-claim-driver'
 import {
   eagerStorageTarget,
   managedStorageTarget,
@@ -19,6 +20,10 @@ import {
   startupOPFSArtifacts,
 } from './persisted-startup-opfs-cleanup'
 import { removeClosedArtifacts } from './query-rejected-write-cutoff-cleanup'
+import type {
+  SourcePublicationFault,
+  SourcePublicationHistory,
+} from '../../db-sqlite-persistence-core/tests/persisted-source-publication-driver'
 import type { SourceClaimHistory } from '../../db-sqlite-persistence-core/tests/persisted-source-claim-driver'
 import type { OpenSourceFifoStore } from '../../db-sqlite-persistence-core/tests/persisted-source-fifo-driver'
 import type { SourceFifoOrderingHistory } from '../../db-sqlite-persistence-core/tests/persisted-durability-model-oracle'
@@ -233,4 +238,11 @@ Object.assign(window, { runResumeRowProjections })
 Object.assign(window, {
   runPersistedSourceClaim: (history: SourceClaimHistory) =>
     runSourceClaimHistory(history, openOPFS),
+})
+
+Object.assign(window, {
+  runPersistedSourcePublication: (
+    history: SourcePublicationHistory,
+    fault?: SourcePublicationFault,
+  ) => runSourcePublicationHistory(history, openOPFS, fault),
 })

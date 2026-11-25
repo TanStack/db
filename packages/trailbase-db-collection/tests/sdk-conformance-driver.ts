@@ -16,7 +16,9 @@ import type {
 type Row = { id: number; title: string; note: string | null; value: unknown }
 const record = (row: ConformanceRow) => toSqlRow(row) as Row
 
-export function trailBaseSdkConformanceDriver(): EagerLiveSourceDriver {
+export function trailBaseSdkConformanceDriver(
+  includeKnownSdkDefects = false,
+): EagerLiveSourceDriver {
   return {
     adapter: `@tanstack/trailbase-db-collection (real SDK HTTP/SSE)`,
     capabilities: new Set([
@@ -26,6 +28,12 @@ export function trailBaseSdkConformanceDriver(): EagerLiveSourceDriver {
     changeCommits: `per-change`,
     duplicateInsert: `replace`,
     valueKinds: jsonValueKinds,
+    // Explicit maintainer allowance, 2026-11-24: keep the installed SDK's
+    // exponent-integer JSON defect open. The ordinary known-defect receiver
+    // retains this exact input and the unchanged shared comparison. All seven
+    // kinds and every campaign/construction budget remain active here.
+    excludesValue: (_kind, value) =>
+      !includeKnownSdkDefects && value === Number.MAX_VALUE,
     create() {
       const service = new TrailBaseSdkService<Row>()
       service.holdLists = true

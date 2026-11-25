@@ -26,6 +26,7 @@ import {
 import {
   registerSourceClaimBoundaryOracle,
   registerSourceFifoOrderingOracle,
+  registerSourcePublicationOracle,
 } from './persisted-source-fifo-oracle'
 import {
   assertGenerationNoticeHistory,
@@ -6223,5 +6224,10 @@ describe(`persistedCollectionOptions`, () => {
 
 registerSourceClaimBoundaryOracle({
   property: `sqlite-persistence.source-claim-boundary.recording`,
+  owns: [`src/persisted.ts`],
+})
+
+registerSourcePublicationOracle({
+  property: `sqlite-persistence.source-publication.recording`,
   owns: [`src/persisted.ts`],
 })

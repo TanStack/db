@@ -449,7 +449,7 @@ export function registerOnDemandStreamsConformance(
     driver: drive,
     check,
     calibrations: [
-      ...([`unknown`, `missing-connection`] as const).map((fault) => ({
+      ...([`unknown`, `stale-connection`] as const).map((fault) => ({
         name: `query rejection cannot hide ${fault} health`,
         law: `on-demand stream ownership and settlement`,
         history: {
@@ -481,9 +481,10 @@ export function registerOnDemandStreamsConformance(
                         problems:
                           fault === `unknown`
                             ? [...cut.problems, { kind: `other` as const }]
-                            : cut.problems.filter(
-                                (problem) => problem.kind !== `connection`,
-                              ),
+                            : [
+                                ...cut.problems,
+                                { kind: `connection` as const },
+                              ],
                       }
                     }),
                   },

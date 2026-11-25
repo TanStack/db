@@ -4,11 +4,13 @@ import { afterAll, beforeAll } from 'vitest'
 import {
   registerSourceClaimBoundaryOracle,
   registerSourceFifoOrderingOracle,
+  registerSourcePublicationOracle,
 } from '../../db-sqlite-persistence-core/tests/persisted-source-fifo-oracle'
 import {
   captureBrowserHistory,
   startAdapterChromium,
 } from '../tests/adapter-chromium-host'
+import type { SourcePublicationObservation } from '../../db-sqlite-persistence-core/tests/persisted-source-publication-driver'
 import type {
   SourceClaimHistory,
   SourceClaimObservation,
@@ -80,6 +82,31 @@ registerSourceClaimBoundaryOracle({
           ).runPersistedSourceClaim(input),
         }),
         history,
+      ),
+    )
+    return { ...observed.result, browserErrors: observed.browserErrors }
+  },
+})
+
+registerSourcePublicationOracle({
+  property: `sqlite-persistence.source-publication.chromium-opfs`,
+  owns: [`../db-sqlite-persistence-core/src/persisted.ts`],
+  run: async (history, fault) => {
+    const host = browser
+    if (!host) throw new Error(`Chromium publication host did not start`)
+    const observed = await captureBrowserHistory(host, () =>
+      host.page.evaluate(
+        async ({ history: input, fault: selected }) => ({
+          result: await (
+            window as unknown as {
+              runPersistedSourcePublication: (
+                h: typeof input,
+                fault?: typeof selected,
+              ) => Promise<SourcePublicationObservation>
+            }
+          ).runPersistedSourcePublication(input, selected),
+        }),
+        { history, fault },
       ),
     )
     return { ...observed.result, browserErrors: observed.browserErrors }

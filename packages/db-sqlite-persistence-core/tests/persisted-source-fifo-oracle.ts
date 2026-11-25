@@ -14,12 +14,14 @@
  * writes. Cancellation also crosses the baseline snapshot's awaited return,
  * before acceptance. Unrelated durable rows vary independently; their read
  * cardinality is recorded as work evidence, without imposing a work budget.
- * They do not judge optimistic holds, dependent aborts, truncation,
- * multi-tab coordination or native mobile hosts.
+ * The read-crossing histories exclude optimistic holds, dependent aborts and
+ * truncation. The idle-publication family below crosses a local hold, truncate
+ * and post-commit abort. Neither family judges multi-tab or mobile hosts.
  */
 import { expect } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
+import { runSourcePublicationHistory } from './persisted-source-publication-driver'
 import { runSourceClaimHistory } from './persisted-source-claim-driver'
 import { createRecordingAdapter } from './persisted-support'
 import {
@@ -28,6 +30,11 @@ import {
   sourceFifoOrderingHistory,
 } from './persisted-durability-model-oracle'
 import { runSourceFifoHistory } from './persisted-source-fifo-driver'
+import type {
+  SourcePublicationFault,
+  SourcePublicationHistory,
+  SourcePublicationObservation,
+} from './persisted-source-publication-driver'
 import type {
   SourceClaimHistory,
   SourceClaimObservation,
@@ -899,6 +906,264 @@ export function registerSourceClaimBoundaryOracle({
                   value: {
                     ...(entry.value as SourceClaimObservation),
                     status: `crashed`,
+                  },
+                }
+              : entry,
+          ),
+      },
+    ],
+  })
+}
+
+/**
+ * An idle eager source has no cache claim to renew. Its commit enters core in
+ * the calling turn, before durability: a later abort cannot revoke acceptance.
+ * An optimistic hold delays ordinary publication, while preserving acceptance.
+ * Truncate applies at once beneath optimism (optimistic-history-oracle.ts).
+ * Authority: README Source replay ordering; the primary persisted owner above.
+ * This adds the previously absent commit-return cut to the FIFO owner. The
+ * independent map transformation has no mutex, cache claim or renewal branches.
+ */
+export function registerSourcePublicationOracle({
+  property,
+  owns,
+  open = openRecordingStore,
+  run,
+}: {
+  property: string
+  owns: ReadonlyArray<string>
+  open?: OpenSourceFifoStore
+  run?: (
+    h: SourcePublicationHistory,
+    fault?: SourcePublicationFault,
+  ) => Promise<SourcePublicationObservation>
+}): void {
+  const operations = [`insert`, `update`, `delete`, `truncate`] as const
+  const states = operations.flatMap((operation) =>
+    [false, true].map((held) => `${operation}:${held ? `held` : `visible`}`),
+  )
+  states.push(`post-commit-abort`, `post-commit-live`)
+  const required = new WeakMap<
+    SourcePublicationHistory,
+    ReadonlyArray<string>
+  >()
+  const arbitrary = fc.record({
+    operation: fc.constantFrom(...operations),
+    held: fc.boolean(),
+    abort: fc.boolean(),
+    title: fc.string({ maxLength: 12 }),
+  })
+  const constructed = [
+    ...operations.flatMap((operation) =>
+      [false, true].flatMap((held) =>
+        Array.from({ length: 5 }, (_, i) => ({
+          name: `${operation}:${held ? `held` : `visible`} construction ${i + 1}`,
+          enters: [`${operation}:${held ? `held` : `visible`}`],
+          build: (h: SourcePublicationHistory) => {
+            const built = { ...h, operation, held }
+            required.set(built, [`${operation}:${held ? `held` : `visible`}`])
+            return built
+          },
+        })),
+      ),
+    ),
+    ...[false, true].flatMap((abort) =>
+      Array.from({ length: 5 }, (_, i) => ({
+        name: `${abort ? `post-commit-abort` : `post-commit-live`} construction ${i + 1}`,
+        enters: [
+          abort ? `post-commit-abort` : `post-commit-live`,
+          `update:held`,
+        ],
+        build: (h: SourcePublicationHistory) => {
+          const built = {
+            ...h,
+            operation: `update` as const,
+            held: true,
+            abort,
+          }
+          required.set(built, [
+            abort ? `post-commit-abort` : `post-commit-live`,
+            `update:held`,
+          ])
+          return built
+        },
+      })),
+    ),
+  ]
+  const drive =
+    (fault?: SourcePublicationFault) =>
+    async (
+      { history }: { history: SourcePublicationHistory },
+      observe: (checkpoint: string, value: unknown) => void,
+    ) => {
+      const result = await (run
+        ? run(history, fault)
+        : runSourcePublicationHistory(history, open, fault))
+      const { reached, ...observation } = result
+      observe(`result`, {
+        ...observation,
+        browserErrors: result.browserErrors ?? [],
+      })
+      for (const state of reached) observe(`reach`, state)
+    }
+  oracleProperty({
+    id: property,
+    owns,
+    law: {
+      statement: `An idle source without a cache claim enters core synchronously. Its accepted transaction survives a later abort and becomes durable; ordinary writes wait behind optimism, while truncate applies beneath it.`,
+      authority: `README.md Source replay ordering and sync-present durability; persisted-oracle.test.ts accepted source transaction contract.`,
+      limits: `Eager idle writer, one source transaction after startup, CRUD/truncate, optional local optimistic hold and post-commit abort. No queued predecessor, cache claim or concurrent storage read.`,
+    },
+    histories: {
+      arbitrary,
+      runs: 4,
+      fixedSeeds: [2446],
+      states,
+      constructed,
+    },
+    resolve: (history) => ({ history }),
+    model: ({ history: h }) => {
+      const before = [
+        { id: `peer`, title: `peer` },
+        { id: `shared`, title: `before` },
+      ]
+      const source = new Map(before.map((row) => [row.id, row]))
+      if (h.operation === `truncate`) source.clear()
+      else if (h.operation === `delete`) source.delete(`shared`)
+      else {
+        const id = h.operation === `insert` ? `new` : `shared`
+        source.set(id, { id, title: h.title })
+      }
+      const final = [...source.values()].sort((a, b) =>
+        a.id.localeCompare(b.id),
+      )
+      const immediate = h.held
+        ? [
+            ...(h.operation === `truncate` ? final : before),
+            { id: `local`, title: `optimistic` },
+          ].sort((a, b) => a.id.localeCompare(b.id))
+        : final
+      return {
+        afterCommit: immediate,
+        afterAbort: immediate,
+        final,
+        durable: final,
+        outcome: `fulfilled`,
+        status: `ready`,
+        cleanupErrors: [],
+        browserErrors: [],
+        executionErrors: [],
+      }
+    },
+    driver: drive(),
+    check: (plan, trace, expected) => {
+      const actual = trace.find((entry) => entry.checkpoint === `result`)
+        ?.value as Omit<SourcePublicationObservation, `reached`> | undefined
+      if (!actual || actual.afterCommit === null || actual.afterAbort === null)
+        return violation(
+          `execution`,
+          `source commit was not observed`,
+          `source publication execution`,
+          { actual, expected },
+        )
+      try {
+        expect(actual.afterCommit).toEqual(expected.afterCommit)
+        expect(actual.afterAbort).toEqual(expected.afterAbort)
+      } catch (error) {
+        return violation(
+          `commit return`,
+          String(error),
+          `synchronous source acceptance`,
+          { actual, expected },
+        )
+      }
+      try {
+        expect(actual.outcome).toBe(expected.outcome)
+      } catch (error) {
+        return violation(
+          `accepted completion`,
+          String(error),
+          `accepted source completion`,
+          { actual, expected },
+        )
+      }
+      if (actual.executionErrors.length)
+        return violation(
+          `execution`,
+          actual.executionErrors.join(`; `),
+          `source publication execution`,
+          { actual, expected },
+        )
+      try {
+        expect(actual).toEqual(expected)
+      } catch (error) {
+        return violation(
+          `source final state`,
+          String(error),
+          `source publication result`,
+          { actual, expected },
+        )
+      }
+      for (const state of required.get(plan.history) ?? [])
+        if (
+          !trace.some(
+            (entry) => entry.checkpoint === `reach` && entry.value === state,
+          )
+        )
+          return violation(
+            `reach`,
+            `missing ${state}`,
+            `source publication reach`,
+          )
+      return pass
+    },
+    calibrations: [
+      ...constructed.flatMap((builder) =>
+        builder.enters.map((state) => ({
+          name: `${builder.name} cannot omit ${state}`,
+          law: `source publication reach`,
+          history: { constructed: builder.name },
+          corrupt: (trace: ReadonlyArray<Observation>) =>
+            trace.filter(
+              (entry) => entry.checkpoint !== `reach` || entry.value !== state,
+            ),
+        })),
+      ),
+      {
+        name: `later read failure retains a completed commit-return mismatch`,
+        law: `synchronous source acceptance`,
+        history: { constructed: `insert:visible construction 1` },
+        driver: drive(`corrupt-commit-then-read-fails`),
+      },
+      {
+        name: `accepted held commit cannot reject after a later abort`,
+        law: `accepted source completion`,
+        history: { constructed: `post-commit-abort construction 1` },
+        corrupt: (trace: ReadonlyArray<Observation>) =>
+          trace.map((entry) =>
+            entry.checkpoint === `result`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as SourcePublicationObservation),
+                    outcome: `AbortError`,
+                  },
+                }
+              : entry,
+          ),
+      },
+      {
+        name: `commit-return publication cannot disappear`,
+        law: `synchronous source acceptance`,
+        history: { constructed: `insert:visible construction 1` },
+        corrupt: (trace: ReadonlyArray<Observation>) =>
+          trace.map((entry) =>
+            entry.checkpoint === `result`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as SourcePublicationObservation),
+                    afterCommit: [],
                   },
                 }
               : entry,

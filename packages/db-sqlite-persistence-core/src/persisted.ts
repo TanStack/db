@@ -4530,11 +4530,14 @@ class PersistedCollectionRuntime<
     applied: boolean
     hydrationFailure?: { reason: unknown }
   }> {
+    // An idle source without a cache claim enters core in this turn. Only a
+    // managed claim can require asynchronous renewal before application.
     if (
-      !(await this.admitBufferedSyncTransactionUnsafe(
-        transaction,
-        scopedAdapter,
-      )) ||
+      (this.cacheGenerationClaim &&
+        !(await this.admitBufferedSyncTransactionUnsafe(
+          transaction,
+          scopedAdapter,
+        ))) ||
       !this.isBufferedSyncTransactionCurrent(transaction)
     )
       return { applied: false }

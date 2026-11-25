@@ -1,5 +1,37 @@
 # Oracle coverage and closeout
 
+## PR #2446 accepted limits and CI follow-up, 2026-11-24
+
+The maintainer explicitly accepted leaving the reported gaps open and authorized
+merge once CI passes on 2026-11-24. The Convex exhausted-empty SDK/storage
+witness, persisted Direct loading-plus-synced hypothesis, concurrent TrailBase
+handlers and unexercised receiving hosts retain their existing owners and
+limits. Standalone SDK Node 22 portability and Neon terminal confirmation
+remain external dependency findings; this decision supplies no new guarantee.
+
+The installed TrailBase SDK 0.14.3 treats `Number.MAX_VALUE` as an unsafe integer
+and calls `BigInt` on its valid exponent-form JSON token. The maintainer accepts
+this external defect pending an upstream release. The real SDK eager receiver
+now uses the existing `excludesValue` boundary only for that exact value;
+controlled RecordApi campaigns retain the complete original domain. All seven
+value kinds, 600 generated histories per campaign and five constructions stay.
+`trailbase-db-collection/tests/sdk-numeric-known-defects.test.ts` retains the
+exact parser error and snapshot/SSE counterexamples through the unchanged eager
+model, driver and comparison, with defect delivery explicitly enabled. A fixed
+SDK makes those known-defect signatures fail, requiring removal of the narrow
+exclusion. No SDK source is patched. This is an accepted coverage limit, not a
+claim that the value is invalid or that its defect is repaired.
+
+CI also found that the claim-authority repair delayed an idle source with no
+cache claim. The primary FIFO owner's `source-publication` family adds the
+commit-return cut across insert/update/delete/truncate, a local optimistic hold,
+and post-commit abort, with public and durable comparisons on recording
+storage, Node SQLite and Chromium/OPFS. The independent map follows the primary
+optimistic owner's rule that truncate applies at once beneath an active hold.
+Managed claim renewal still awaits authority and rechecks at application.
+The complete source/RED/GREEN/control record is in
+[the CI follow-up](oracle-reviews/2026-11-24-pr2446-ci-followup.md).
+
 ## PR #2446 review follow-up, 2026-11-24
 
 The [external review record](oracle-reviews/2026-11-24-pr2446-external-review.md)
@@ -9016,8 +9048,8 @@ Per-adapter review records name exact generated histories, host witnesses,
 observation cuts, source/test hashes and remaining gaps. This portfolio does
 not establish deployed-provider behavior, arbitrary concurrent writes, every
 schema/value domain or every framework's scheduling. Known SDK dependencies
-remain open: Direct unchanged-checkpoint recovery, standalone SDK portability
-on maintained Node versions, TrailBase exponent-number JSON decoding, and
+remain open: standalone SDK portability on maintained Node versions,
+TrailBase exponent-number JSON decoding, and
 Neon's already-applied evidence after terminal closure. Their versioned review
 records retain the counterexamples and upstream proposals; installed SDKs are
 not patched to make receiving comparisons pass.

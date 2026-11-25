@@ -1113,6 +1113,21 @@ const ownerGroups: ReadonlyArray<
   ],
   [
     `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
+    `sqlite-persistence.source-publication`,
+    `recording`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-source-fifo-sqlite-oracle.test.ts`,
+    `sqlite-persistence.source-publication`,
+    `node-sqlite`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/persisted-source-fifo-oracle.browser.test.ts`,
+    `sqlite-persistence.source-publication`,
+    `chromium-opfs`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
     `sqlite-persistence.source-claim-boundary`,
     `recording`,
   ],
@@ -2575,6 +2590,7 @@ function directReplayTestName(property: string): string | undefined {
   if (enumeratedProperties.has(property))
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
   if (
+    property.startsWith(`sqlite-persistence.source-publication.`) ||
     property.startsWith(`sqlite-persistence.source-claim-boundary.`) ||
     property === `sqlite-persistence.source-fifo-order.node-sqlite` ||
     property === `sqlite-persistence.source-fifo-order.chromium-opfs` ||

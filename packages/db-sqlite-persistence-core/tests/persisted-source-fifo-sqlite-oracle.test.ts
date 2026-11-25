@@ -10,6 +10,7 @@ import {
 import {
   registerSourceClaimBoundaryOracle,
   registerSourceFifoOrderingOracle,
+  registerSourcePublicationOracle,
 } from './persisted-source-fifo-oracle'
 import { createMetadataSQLiteDriver } from './sync-metadata-sqlite-driver'
 import type { OpenSourceFifoStore } from './persisted-source-fifo-oracle'
@@ -94,5 +95,11 @@ describe(`source FIFO over SQLite`, () =>
 registerSourceClaimBoundaryOracle({
   property: `sqlite-persistence.source-claim-boundary.node-sqlite`,
   owns: [`src/persisted.ts`, `src/sqlite-core-adapter.ts`],
+  open: openSQLite,
+})
+
+registerSourcePublicationOracle({
+  property: `sqlite-persistence.source-publication.node-sqlite`,
+  owns: [`src/persisted.ts`],
   open: openSQLite,
 })

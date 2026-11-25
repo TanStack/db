@@ -359,17 +359,14 @@ it('reports a stream error once while it persists, and clears it once resolved',
     service.complete()
   }
 
-  // A checkpoint that fails this collection's stream does not end the
-  // connection outage either.
+  // The full checkpoint heals the connection; the refused stream keeps its
+  // own cause until recovery or release.
   service.close()
   await service.waitForRequest(2)
   failingCheckpoint()
   await vi.waitFor(() => {
     const errors = collection.health.failureReason?.errors ?? []
-    expect(errors.map((e) => e.cause)).toEqual([
-      expect.objectContaining({ message: 'Sync stream ended; reconnecting' }),
-      expect.any(StreamError),
-    ])
+    expect(errors.map((e) => e.cause)).toEqual([expect.any(StreamError)])
   })
   const reported = collection.health.failureReason!.errors
 
@@ -464,13 +461,9 @@ it('reports stream errors of loaded subsets until they are unloaded', async () =
   )
 
   await live.cleanup()
-  expect(
-    collection.health.failureReason?.errors.some(
-      (entry) => entry.cause instanceof StreamError,
-    ),
-  ).toBe(false)
-  // Retiring a query ends its stream problem, not the connection outage.
-  expect(collection.health.failureReason).not.toBeNull()
+  // Reconnection already healed the outage, and retiring the query clears
+  // its remaining stream problem.
+  expect(collection.health.failureReason).toBeNull()
 })
 
 it('serializes loads of the same subset options, releasing one acquisition', async () => {

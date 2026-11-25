@@ -337,6 +337,11 @@ export const generatedPersistenceGrammars: ReadonlyArray<GeneratedPersistenceGra
         [`hydration-delete-reinsert`]: `a source commit during hydration cannot overtake an older normal commit`,
         [`failed-hydration-partial`]: `failed hydration with an older disjoint commit retains unseen fields of a later partial update`,
         [`hydration-independent-abort`]: `an aborted independent successor keeps the Collection ready and the predecessor intact`,
+        [`hydration-baseline-read-abort`]: `cancellation during the awaited baseline read rejects before acceptance`,
+        [`hydration-loaded-partial`]: `a complete restored row remains complete under a partial source update`,
+        [`failed-hydration-ordinary-partial`]: `an earlier ordinary partial update establishes the later recovery baseline`,
+        [`failed-hydration-multi-key-partial`]: `one transaction reconstructs every unseen partial-update key`,
+        [`failed-hydration-appended-partial`]: `a transaction appended during recovery receives its own FIFO baseline`,
       },
       titleCount: 2,
       witness: {
