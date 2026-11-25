@@ -38,8 +38,8 @@ afterEach(() => {
 it(`prunes outcome records older than seven days when a tab leads`, async () => {
   const storage = new FakeStorageAdapter()
   const now = Date.now()
-  await storage.set(`outcome:old`, record(`old`, now - 9 * DAY))
-  await storage.set(`outcome:recent`, record(`recent`, now - 6 * DAY))
+  await storage.set(`outcome:old:a`, record(`old`, now - 9 * DAY))
+  await storage.set(`outcome:recent:a`, record(`recent`, now - 6 * DAY))
   const env = createTestOfflineEnvironment({
     storage,
     config: { followerWrites: `durable`, onlineDetector: offline() },
@@ -47,9 +47,9 @@ it(`prunes outcome records older than seven days when a tab leads`, async () => 
   try {
     await env.waitForLeader()
     await vi.waitFor(async () => {
-      expect(await storage.get(`outcome:old`)).toBe(null)
+      expect(await storage.get(`outcome:old:a`)).toBe(null)
     })
-    expect(await storage.get(`outcome:recent`)).toBe(
+    expect(await storage.get(`outcome:recent:a`)).toBe(
       record(`recent`, now - 6 * DAY),
     )
   } finally {

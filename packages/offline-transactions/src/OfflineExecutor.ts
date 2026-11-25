@@ -123,6 +123,8 @@ export class OfflineExecutor {
   private term = 0
   // Saves in progress; true once removeFromOutbox or clearOutbox removed one.
   private readonly saving = new Map<string, boolean>()
+  // Running markers this leader recorded for removed writes, by id.
+  private readonly runningRemovals = new Map<string, string>()
   // Removals this follower asked the leader for, by request.
   private readonly removals = new Map<
     string,
@@ -540,10 +542,18 @@ export class OfflineExecutor {
   }
 
   private forwardRemoval(ids: Array<string>): Promise<void> {
-    for (const id of ids) if (this.saving.has(id)) this.saving.set(id, true)
     const request = safeRandomUUID()
     return new Promise<void>((resolve, reject) => {
-      this.removals.set(request, { ids, resolve, reject })
+      this.removals.set(request, {
+        ids,
+        // Only a confirmed removal stops a save of this tab that lands late.
+        resolve: () => {
+          for (const id of ids)
+            if (this.saving.has(id)) this.saving.set(id, true)
+          resolve()
+        },
+        reject,
+      })
       this.postRemoval(request, ids)
     })
   }
@@ -595,20 +605,28 @@ export class OfflineExecutor {
     if (!this.recordsOutcomes) return
     const sweep = ++this.sweeps
     let failed = false
-    // A predecessor this executor settles may have left saved writes.
-    const waiters = this.relatedExecutors().flatMap((owner) => [
-      ...owner.pendingTransactionPromises,
-    ])
-    for (const [id, waiter] of waiters) {
+    // A predecessor this executor settles may have left saved writes; each is
+    // checked against the outbox its executor saved it to.
+    const waiters = this.relatedExecutors().flatMap((owner) =>
+      [...owner.pendingTransactionPromises].map(
+        ([id, waiter]) => [owner, id, waiter] as const,
+      ),
+    )
+    for (const [owner, id, waiter] of waiters) {
       try {
         if (!(await waiter.saved)) continue
-        if (await this.outbox!.get(id)) continue
-        const error = (await this.outbox!.getOutcome(id))?.error
+        const outbox = owner.outbox!
+        // A row that cannot be decoded is still there.
+        if (await outbox.has(id)) continue
+        const outcome = await outbox.getOutcome(id)
+        // Its call is still running after a removal.
+        if (outcome?.pending) continue
+        const error = outcome?.error
         // A record older than the retention window may have been pruned, so
         // no record cannot mean success.
         if (!error && Date.now() - waiter.savedAt! > OUTCOME_RETENTION_MS)
           continue
-        this.settleFollowerWrite(id, error && outboxMessageError(error))
+        owner.settleFollowerWrite(id, error && outboxMessageError(error))
       } catch (error) {
         failed = true
         console.warn(`Failed to reconcile follower writes:`, error)
@@ -998,28 +1016,51 @@ export class OfflineExecutor {
   private async removeSaved(ids: Array<string>): Promise<void> {
     const outbox = this.outbox!
     const error = removedError()
-    const present = new Set(
-      (
-        await Promise.all(
-          ids.map(async (id) => ((await outbox.has(id)) ? id : null)),
-        )
-      ).filter((id): id is string => id !== null),
-    )
+    // Off the queue before any await, so this tab cannot start them
+    // meanwhile; the one already running keeps the provider's outcome.
+    const queued = this.scheduler
+      .getAllPendingTransactions()
+      .filter(({ id }) => ids.includes(id))
+    const unstarted = new Set(this.scheduler.removePendingTransactions(ids))
+    const failures: Array<unknown> = []
+    // Each id settles by its own deletion.
     await Promise.all(
-      [...present].map(async (id) => {
-        if (
-          this.recordsOutcomes &&
-          !this.ownsWrite(id) &&
-          !this.scheduler.isRunning(id)
-        )
-          await outbox.recordRejection(id, error)
+      ids.map(async (id) => {
+        let token: string | undefined
+        try {
+          if (!(await outbox.has(id))) {
+            if (this.saving.has(id)) this.saving.set(id, true)
+            return
+          }
+          // A writer in another tab reads a rejection, or that the call it
+          // cannot see is still running.
+          if (this.recordsOutcomes && !this.ownsWrite(id))
+            token = unstarted.has(id)
+              ? await outbox.recordRejection(id, error)
+              : await outbox.recordPending(id)
+          await outbox.remove(id)
+        } catch (removalError) {
+          failures.push(removalError)
+          // Its row stays, so it is queued again and its record withdrawn.
+          if (token !== undefined)
+            await outbox.withdrawOutcome(id, token).catch(() => {})
+          this.executor!.requeue(queued.filter((tx) => tx.id === id))
+          return
+        }
+        if (this.saving.has(id)) this.saving.set(id, true)
+        if (unstarted.has(id)) this.rejectTransaction(id, error)
+        else if (token !== undefined) this.runningRemovals.set(id, token)
       }),
     )
-    await outbox.removeMany(ids)
-    for (const id of ids) if (this.saving.has(id)) this.saving.set(id, true)
-    // A removed transaction that has not started does not run.
-    for (const id of this.scheduler.removePendingTransactions(ids))
-      if (present.has(id)) this.rejectTransaction(id, error)
+    if (failures.length > 0) throw failures[0]
+  }
+
+  /** Withdraws the running marker of a removed write whose call finished. */
+  async finishRunningRemoval(id: string): Promise<void> {
+    const token = this.runningRemovals.get(id)
+    if (token === undefined) return
+    this.runningRemovals.delete(id)
+    await this.outbox!.withdrawOutcome(id, token).catch(() => {})
   }
 
   async peekOutbox(): Promise<Array<OfflineTransaction>> {
@@ -1033,10 +1074,11 @@ export class OfflineExecutor {
     if (!this.outbox || !this.executor) {
       return
     }
+    // Only the ids it removes leave the queue; a write saved after the
+    // snapshot stays queued.
     const ids = await this.outbox.ids()
     if (this.forwardsRemovals) await this.forwardRemoval(ids)
     else await this.removeSaved(ids)
-    this.executor.clear()
   }
 
   getPendingCount(): number {

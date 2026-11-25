@@ -12,13 +12,16 @@ import type { Collection } from '@tanstack/db'
 
 export class OutboxTransactionNotFoundError extends Error {}
 
-/** A rejected transaction's error, kept for a writer in another tab. */
+/**
+ * A write's outcome, kept for a writer in another tab: a rejection, or a
+ * marker that the write's call is still running after its row was removed.
+ * Each recording has its own key, so a recorder withdraws only its own.
+ */
 export type OutboxOutcome = {
-  error: { name: string; message: string }
+  error?: { name: string; message: string }
+  pending?: true
   // When it was recorded, so an outcome no writer reads can be pruned.
   at: number
-  // Who recorded it, so that recorder can withdraw only its own record.
-  by?: string
 }
 
 /**
@@ -127,33 +130,51 @@ export class OutboxManager {
 
   /** Records a rejection before its row is removed; returns its token. */
   async recordRejection(id: string, error: Error): Promise<string> {
-    const by = `${Date.now()}:${Math.random()}`
-    const outcome: OutboxOutcome = {
+    return this.recordOutcome(id, {
       error: { name: error.name, message: error.message },
       at: Date.now(),
-      by,
-    }
+    })
+  }
+
+  /** Records that a removed write's call is still running. */
+  async recordPending(id: string): Promise<string> {
+    return this.recordOutcome(id, { pending: true, at: Date.now() })
+  }
+
+  private async recordOutcome(
+    id: string,
+    outcome: OutboxOutcome,
+  ): Promise<string> {
+    const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
     await this.storage.set(
-      `${this.outcomePrefix}${id}`,
+      `${this.outcomeKeyPrefix(id)}${token}`,
       JSON.stringify(outcome),
     )
-    return by
+    return token
   }
 
-  /** Removes the record only if the recording with token `by` made it. */
-  async withdrawOutcome(id: string, by: string): Promise<void> {
-    const data = await this.storage.get(`${this.outcomePrefix}${id}`)
-    if (data !== null && (JSON.parse(data) as OutboxOutcome).by === by)
-      await this.storage.delete(`${this.outcomePrefix}${id}`)
+  /** Removes one recording, leaving any another recorder made. */
+  async withdrawOutcome(id: string, token: string): Promise<void> {
+    await this.storage.delete(`${this.outcomeKeyPrefix(id)}${token}`)
   }
 
+  /** A rejection if any recording holds one, else a running marker. */
   async getOutcome(id: string): Promise<OutboxOutcome | null> {
-    const data = await this.storage.get(`${this.outcomePrefix}${id}`)
-    return data === null ? null : (JSON.parse(data) as OutboxOutcome)
+    let found: OutboxOutcome | null = null
+    for (const key of await this.outcomeKeys(id)) {
+      const data = await this.storage.get(key)
+      if (data === null) continue
+      const outcome = JSON.parse(data) as OutboxOutcome
+      if (outcome.error) return outcome
+      found = outcome
+    }
+    return found
   }
 
   async removeOutcome(id: string): Promise<void> {
-    await this.storage.delete(`${this.outcomePrefix}${id}`)
+    await Promise.all(
+      (await this.outcomeKeys(id)).map((key) => this.storage.delete(key)),
+    )
   }
 
   /** Removes outcome records made before `before`. */
@@ -166,6 +187,16 @@ export class OutboxManager {
       if (data !== null && (JSON.parse(data) as OutboxOutcome).at < before)
         await this.storage.delete(key)
     }
+  }
+
+  // An encoded id contains no `:`, so one id's prefix never matches another.
+  private outcomeKeyPrefix(id: string): string {
+    return `${this.outcomePrefix}${encodeURIComponent(id)}:`
+  }
+
+  private async outcomeKeys(id: string): Promise<Array<string>> {
+    const prefix = this.outcomeKeyPrefix(id)
+    return (await this.storage.keys()).filter((key) => key.startsWith(prefix))
   }
 
   /** Whether a row is saved, without decoding it. */

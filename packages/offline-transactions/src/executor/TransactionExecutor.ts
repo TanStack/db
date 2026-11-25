@@ -372,6 +372,7 @@ export class TransactionExecutor {
         }
       }
       await this.outbox.remove(transaction.id)
+      await this.offlineExecutor.finishRunningRemoval?.(transaction.id)
       this.scheduler.markCompleted(transaction)
       return true
     } catch (error) {
@@ -470,7 +471,14 @@ export class TransactionExecutor {
       await Promise.all(
         removedIds.map(async (id) => {
           if (await this.cleanUpExcluded(id, error, term)) return
-          // Until the retry succeeds, no admission runs it.
+          // Retried only while this decision stands: a later term's replay
+          // may have accepted the write. Until then no admission runs it.
+          if (
+            !this.offlineExecutor.isOfflineEnabled ||
+            term !== this.offlineExecutor.leadershipTerm ||
+            !this.excluding.has(id)
+          )
+            return
           this.failedCleanups.set(id, error)
           this.scheduleCleanupRetry()
         }),
@@ -489,15 +497,13 @@ export class TransactionExecutor {
         ? await this.outbox.recordRejection(id, error)
         : undefined
       // A later leader decides the write once this term ends: this tab
-      // neither removes it nor settles it. While the row remains, that
-      // leader has not settled it, so this tab withdraws its own record. A
-      // row already gone was rejected by that leader, whose record this one
-      // may have replaced, or completed before this record landed.
+      // neither removes it nor settles it, and withdraws its own record,
+      // which leaves any record that leader made.
       if (
         !this.offlineExecutor.isOfflineEnabled ||
         term !== this.offlineExecutor.leadershipTerm
       ) {
-        if (recorded !== undefined && (await this.outbox.has(id)))
+        if (recorded !== undefined)
           await this.outbox.withdrawOutcome(id, recorded).catch(() => {})
         return true
       }
@@ -551,6 +557,13 @@ export class TransactionExecutor {
     // A change of leadership or a disposal emptied the map.
     if (this.failedCleanups.size === 0) this.cleanupAttempts = 0
     else this.scheduleCleanupRetry()
+  }
+
+  /** Queues writes again whose removal failed. */
+  requeue(transactions: Array<OfflineTransaction>): void {
+    if (!this.offlineExecutor.isOfflineEnabled) return
+    for (const transaction of transactions) this.scheduler.schedule(transaction)
+    this.scheduleNextRetry()
   }
 
   private dropFailedCleanups(): void {
