@@ -397,3 +397,82 @@ package, and 244 gzip and 294 Brotli bytes to the typical app, compared with
 `53770d6b5`. The reload path reuses the existing replay completion and cursor
 reset. The literal-answer hold keeps the prior timing gate for source-only
 repairs.
+
+## Initial literal result and replay replacement
+
+The initial readiness and replay participant laws give current demand
+authority over Effect initial callback suppression. A truncate can start
+inside the adapter before its first call returns literal `true`. That
+response creates no promise to hand off, so the Effect joins the initial hold
+at replay start. The same rule applies when reload replaces a held initial
+replay.
+
+The temporal oracle crosses direct and lazy joined demand with earlier and
+later source Collection readiness. All four reentrant histories reach an
+aborted first acquisition and an independently held replay. On
+`e53fd625a`, all four report the replay row at replay settlement. Four
+literal responses without a truncate pass. After the fix the callbacks
+exclude the replay row and include the next ordinary write. Removing the
+replay-start hold reproduces the four failures and fails 12 reload
+supersession histories.
+
+The existing aborted-transport histories now also replace the first held
+replay with reload in 24 histories. After an obsolete fulfillment or
+rejection, 32 histories deliver a distinct matching write and compare its
+callback through the same model. Suppressing that write in the driver fails
+all 32 histories.
+
+## Provider delete during replay retirement
+
+The ordered repair law requires a qualifying deletion during retirement to
+invalidate the proof of the repaired prefix. The joined publication law
+keeps the previous result until the replacement is complete. A reset can
+leave no settled boundary when the adapter's unload issues a real source
+delete. The loader can ignore a sent delete as an eviction only if its
+settled prefix proves that the row lies outside that prefix.
+
+The receiving oracle installs a background tail during replay. It crosses
+both receivers, both index modes, widths one and two, and deletion of each
+prefix position. The controls install the same tail without a deletion.
+On `e53fd625a`, all six Collection deletion histories publish the wrong
+window at the held-refill checkpoint. For width one they show row 18
+instead of retaining the preceding window and then publishing row 13. The
+Effect cells exercise the delete with a new boundary already established.
+After repair, each receiver reaches six retirement deletes with the tail
+installed. The new prefix read is held, remains bounded, and publishes
+one complete result on settlement. The joined property passes 304 histories
+and two runner checks. Restoring the pre-fix delete classification fails the
+same six Collection histories.
+
+The short, finite-rank refill controls also judge whether an acquisition is
+unbounded and unkeyed. An injected full-source request fails all 184 selected
+short histories. Twenty complete controls in the same calibration pass.
+
+The initial witness covers an unordered direct or lazy joined Effect and one
+reentrant truncate. The retirement-delete witness covers a controlled
+on-demand provider with one ascending numeric order, an independent
+background write and one later delete inside an unload. It measures the
+ordered Collection array and Effect callbacks, and the shape of root
+acquisitions after deletion.
+
+## Covering read before the next graph pass
+
+The request-authority oracle checks a superseded finite acquisition that
+fails after a bounded repair starts. Its partial writes require a full-source
+read. This comparison checks the repair settlement before any later graph
+command so a final drain cannot conceal a delayed handoff. It judges
+histories with no joined or replay hold and skips the cut when the settlement
+itself disposes the loader or starts a replay.
+
+The fixed campaign reaches the cut in 146 of 10,000 histories. The recorded
+random campaign reaches it in 136 of 10,000 histories. Removing just the
+full-source start in the repair handoff fails the fixed campaign at
+`covering read at repair settlement`. The control uses the same request
+ledger and unchanged production. The full authority owner passes all 126
+tests.
+
+The follow-up production bundle adds 364 gzip and 271 Brotli bytes against
+`53770d6b5`. The typical app adds 242 gzip and 205 Brotli bytes. Against
+`e53fd625a`, the typical app is 2 gzip and 89 Brotli bytes smaller. The
+Effect now takes the initial hold from replay's existing notification and
+drops the duplicate pending-replacement lookup on each acquisition.

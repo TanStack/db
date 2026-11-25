@@ -230,6 +230,27 @@ const joinedReplayHistories: Array<JoinedReplayHistory> = [false, true].flatMap(
         eligible: [1, 2, 3, 4, 6, 7, 11, 18],
       })),
     ...joinedReplaySchedules
+      .filter(
+        ({ trigger, answer, holdJoined }) =>
+          trigger === `retirement` && answer === `complete` && holdJoined,
+      )
+      .flatMap((schedule) => {
+        const { replacement, limit } = schedule
+        const backgroundKey = replacement.at(-1)!.id
+        return [
+          undefined,
+          ...replacement.slice(0, limit).map(({ id }) => id),
+        ].map((deleteKey) => ({
+          ...schedule,
+          indexed,
+          eligible: [
+            ...schedule.eligible,
+            ...replacement.slice(limit + 1).map(({ id }) => id),
+          ],
+          retirementWrite: { backgroundKey, deleteKey },
+        }))
+      }),
+    ...joinedReplaySchedules
       .filter(({ answer, holdJoined }) => answer === `refill` && holdJoined)
       .flatMap((schedule) => {
         const rows = schedule.replacement.map(({ id, rank }) => ({
@@ -1028,6 +1049,8 @@ describe(`ordered source work oracle`, () => {
         `ordinary delete after replay retirement`,
         `collection held refill after reload replay`,
         `effect held refill after reload replay`,
+        `collection retirement deletes a replayed prefix with a locally installed tail`,
+        `effect retirement deletes a replayed prefix with a locally installed tail`,
       ],
     },
     label: ({
@@ -1040,8 +1063,9 @@ describe(`ordered source work oracle`, () => {
       move,
       laterReplay,
       literalRoot,
+      retirementWrite,
     }) =>
-      `${receiver} ${trigger} ${indexed ? `indexed` : `unindexed`} window ${limit} with ${answer} and ${holdJoined ? `held` : `immediate`} joined demand${move ? ` moved to ${move.offset}+${move.limit}` : ``}${laterReplay ? ` superseded before obsolete refill ${laterReplay.obsoleteRefill} and the new replay ${laterReplay.outcome}${laterReplay.subsequentWrite ? ` before a new ${laterReplay.subsequentWrite.type}` : ``}` : ``}${literalRoot ? ` after a literal-true root answer` : ``}`,
+      `${receiver} ${trigger} ${indexed ? `indexed` : `unindexed`} window ${limit} with ${answer} and ${holdJoined ? `held` : `immediate`} joined demand${move ? ` moved to ${move.offset}+${move.limit}` : ``}${laterReplay ? ` superseded before obsolete refill ${laterReplay.obsoleteRefill} and the new replay ${laterReplay.outcome}${laterReplay.subsequentWrite ? ` before a new ${laterReplay.subsequentWrite.type}` : ``}` : ``}${literalRoot ? ` after a literal-true root answer` : ``}${retirementWrite ? (retirementWrite.deleteKey === undefined ? ` with a background tail` : ` deleting replayed prefix key ${retirementWrite.deleteKey}`) : ``}`,
     model: ({
       initial,
       replacement,
@@ -1050,6 +1074,7 @@ describe(`ordered source work oracle`, () => {
       answer,
       move,
       laterReplay,
+      retirementWrite,
     }) => {
       const priorWindow = { offset: 0, limit }
       const window = (
@@ -1067,7 +1092,11 @@ describe(`ordered source work oracle`, () => {
         answer === `refill-rejection` || laterReplay?.outcome === `rejects`
       const next = failed
         ? window(initial)
-        : window(laterReplay?.rows ?? replacement, move)
+        : window(
+            laterReplay?.rows ??
+              replacement.filter(({ id }) => id !== retirementWrite?.deleteKey),
+            move,
+          )
       const write = laterReplay?.subsequentWrite
       return {
         prior: window(initial),
@@ -1124,6 +1153,17 @@ describe(`ordered source work oracle`, () => {
       if (history.trigger === `reload` && trace.heldRefill) {
         observe(`reach`, `${history.receiver} held refill after reload replay`)
       }
+      if (
+        trace.retirementDelete?.applied &&
+        trace.retirementDelete.before.some(
+          ({ id }) => id === history.retirementWrite?.backgroundKey,
+        )
+      ) {
+        observe(
+          `reach`,
+          `${history.receiver} retirement deletes a replayed prefix with a locally installed tail`,
+        )
+      }
       observe(`joined replay trace`, trace)
     },
     // The replay's raw writes and root subscription readiness establish reach.
@@ -1142,7 +1182,9 @@ describe(`ordered source work oracle`, () => {
       ]
       if (history.holdJoined)
         held.push([`held joined demand`, trace.afterReplayAnswers])
-      if (short) held.push([`held refill`, trace.waitingForRefill])
+      const deletedPrefixKey = history.retirementWrite?.deleteKey
+      if (short || deletedPrefixKey !== undefined)
+        held.push([`held refill`, trace.waitingForRefill])
       const requiredRefill =
         trace.waitingForRefill.installed.filter(({ id }) =>
           history.eligible.includes(id),
@@ -1209,14 +1251,56 @@ describe(`ordered source work oracle`, () => {
           [`${name} publications`, cut.publications, []],
         )
       }
-      if (short)
-        comparisons.push([
-          `repair refill revalidates its demand`,
-          trace.postReplayRequests.length > 0 &&
-            trace.postReplayRequests.every(({ refetch }) => refetch),
-          true,
-        ])
-      if (!short && !history.move) {
+      if (short) {
+        comparisons.push(
+          [
+            `repair refill revalidates its demand`,
+            trace.postReplayRequests.length > 0 &&
+              trace.postReplayRequests.every(({ refetch }) => refetch),
+            true,
+          ],
+          [
+            `short window refills without a full-source read`,
+            trace.postReplayRequests.filter(
+              ({ cursor, tie, limit }) =>
+                !cursor && !tie && limit === undefined,
+            ),
+            [],
+          ],
+        )
+      }
+      if (deletedPrefixKey !== undefined) {
+        const deleted = trace.retirementDelete
+        const newRequests = trace.postReplayRequests.slice(
+          deleted?.requestIndex,
+        )
+        comparisons.push(
+          [
+            `retirement deletes an installed prefix row`,
+            deleted?.applied &&
+              deleted.before.some(({ id }) => id === deletedPrefixKey),
+            true,
+          ],
+          [
+            `retirement deletion revalidates an ordered prefix`,
+            newRequests.some(
+              ({ refetch, cursor, tie, limit }) =>
+                refetch && !cursor && !tie && limit !== undefined,
+            ),
+            true,
+          ],
+          [
+            `retirement deletion avoids a full-source read`,
+            newRequests.filter(
+              ({ cursor, tie, limit }) =>
+                !cursor && !tie && limit === undefined,
+            ),
+            [],
+          ],
+          [`retirement deletion holds its repair`, trace.heldRefill, true],
+        )
+      }
+      if (!short && !history.move && deletedPrefixKey === undefined) {
         // An explicit truncate can invalidate the old repair and require one
         // current prefix and its tie. Once both are covered, a complete
         // joined window needs no cursor or larger prefix.

@@ -235,15 +235,16 @@ export class OrderedSourceLoader {
     let hasOptimisticDeparture = false
     for (const change of changes) {
       const previous = sentRows?.get(change.key)
-      // A finished repair holds every row of its prefix, so releasing what it
-      // superseded removes only rows after it, such as a tie only an old tie
-      // request held. Deleting a sent row of the prefix is new source
-      // information.
-      if (change.type === `delete` && this.retiringSupersededAcquisitions) {
-        const order =
-          previous === undefined || this.settledSourceBoundary === undefined
-            ? 1
-            : this.info.comparator(previous, this.settledSourceBoundary)
+      // A settled prefix proves which retirements only evict rows held by
+      // older requests. Replay can retire leases before its next ordered read
+      // establishes a boundary. A sent delete then still invalidates order.
+      if (
+        change.type === `delete` &&
+        this.retiringSupersededAcquisitions &&
+        previous !== undefined &&
+        this.settledSourceBoundary !== undefined
+      ) {
+        const order = this.info.comparator(previous, this.settledSourceBoundary)
         if (
           order > 0 ||
           (order === 0 &&

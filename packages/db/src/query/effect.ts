@@ -686,20 +686,15 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           whereExpression,
         ),
         owner: this.dependent,
-        onTruncateReplayStart: orderByInfo
-          ? (completion) => followOrderedReplay?.(completion)
-          : undefined,
+        onTruncateReplayStart: (completion) => {
+          // A replay can replace initial demand before its adapter call returns.
+          this.trackInitialLoad(completion)
+          followOrderedReplay?.(completion)
+        },
         onLoadSubsetError: ({ error }) =>
           this.onSourceError(normalizeError(error)),
-        // subscribeChanges can report a result before it returns the
-        // subscription, so read it from the record when a load fails.
-        onLoadSubsetResult: (result, { signal }) => {
-          this.trackInitialLoad(
-            result,
-            () => this.subscriptions[sourceId]?.pendingTruncateReplacement,
-            signal,
-          )
-        },
+        onLoadSubsetResult: (result, { signal }) =>
+          this.trackInitialLoad(result, signal),
       })
 
       // Store subscription immediately so the join compiler can find it
@@ -754,10 +749,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           subscription,
           alias,
           (result, holdPublication) => {
-            this.trackInitialLoad(
-              result,
-              () => subscription.pendingTruncateReplacement,
-            )
+            this.trackInitialLoad(result)
             const holdsInitialPublication =
               this.skipInitial && !this.initialLoadComplete
             if (holdPublication || holdsInitialPublication) {
@@ -919,10 +911,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   ): void {
     const update = this.demand.setDemand(subscription, plan, keys)
     if (update.ready instanceof Promise) {
-      this.trackInitialLoad(
-        update.ready,
-        () => subscription.pendingTruncateReplacement,
-      )
+      this.trackInitialLoad(update.ready)
       // Each segment reports its own failure through the subscription. Consume
       // the aggregate rejection so Promise.all does not create a second,
       // detached error channel.
@@ -951,33 +940,24 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     })
   }
 
-  /** Keep the Effect's gate, and `skipInitial` suppression, open until a pending initial load settles. */
+  /** Track work that still controls initial readiness and callback suppression. */
   private trackInitialLoad(
     result: true | Promise<unknown>,
-    pendingReplacement: () => Promise<void> | undefined,
     signal?: AbortSignal,
   ): void {
     if (!(result instanceof Promise) || this.reachedReady || this.disposed)
       return
     const acquisition = resolveOnAbort(result, signal)
+    if (this.pendingInitialLoads.has(acquisition)) return
     this.pendingInitialLoads.add(acquisition)
     const release = () => {
       if (this.pendingInitialLoads.delete(acquisition) && !this.disposed)
         this.scheduleGraphRun()
     }
-    // A load failure disposes the Effect through onLoadSubsetError, so a
-    // rejection releases one microtask later, after that event, as a live
-    // query's tracked rejection does. Any other rejection comes from an
-    // obsolete or aborted acquisition, so the hold fails open: it releases
-    // unless a truncate replacement takes it over.
-    followHeldAcquisition(acquisition, pendingReplacement, {
-      settled: (succeeded) =>
-        succeeded ? release() : void Promise.resolve().then(release),
-      replaced: (replacement) => {
-        this.trackInitialLoad(replacement, pendingReplacement)
-        release()
-      },
-    })
+    // The source-error event disposes the Effect on failure. Release one
+    // microtask later to give that event priority. Replay joins the gate at
+    // replay start, before the acquisition it replaces can release.
+    void acquisition.then(release, () => void Promise.resolve().then(release))
   }
 
   /** Hold Effect callback publication across one authoritative repair chain. */

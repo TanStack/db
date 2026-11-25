@@ -28,6 +28,7 @@ export type JoinedReplayHistory = {
   replacement: ReadonlyArray<Row>
   eligible: ReadonlyArray<number>
   literalRoot?: boolean
+  retirementWrite?: { backgroundKey: number; deleteKey?: number }
   move?: { offset: number; limit: number }
   laterReplay?: {
     rows: ReadonlyArray<Row>
@@ -66,6 +67,11 @@ export type JoinedReplayTrace = {
     limit: number | undefined
   }>
   firstRefillReturnedTrue: boolean
+  retirementDelete?: {
+    before: Array<Row>
+    applied: boolean
+    requestIndex: number
+  }
   reportedError: `none` | `originating error` | `different error`
   rowsAtMoveFulfillment?: Array<Row>
   windowAtMoveFulfillment?: JoinedReplayHistory[`move`]
@@ -136,6 +142,7 @@ export async function receiveJoinedReplay(
   const postReplayRequests: JoinedReplayTrace[`postReplayRequests`] = []
   let refillSignal: AbortSignal | undefined
   let replacedReloadRows = false
+  let retirementDelete: JoinedReplayTrace[`retirementDelete`]
 
   const truncateTo = (rows: ReadonlyArray<Row>) => {
     providerRows = rows
@@ -222,7 +229,10 @@ export async function receiveJoinedReplay(
           if (isReplayDemand) {
             requests.replay++
             await replay.promise
-          } else if (phase === `replay` && history.answer !== `complete`) {
+          } else if (
+            phase === `replay` &&
+            (history.answer !== `complete` || retirementDelete?.applied)
+          ) {
             refillSignal ??= options.signal
             requests.pendingRefill++
             await refill.promise
@@ -263,6 +273,27 @@ export async function receiveJoinedReplay(
             return acquire(options, phase, isReplayDemand)
           },
           unloadSubset: () => {
+            const key = history.retirementWrite?.deleteKey
+            if (
+              key !== undefined &&
+              retirementDelete === undefined &&
+              requests.phase === `replay` &&
+              !replay.isPending() &&
+              installed.has(key)
+            ) {
+              // This provider delete is independent of the lease it unloads.
+              const deleted = {
+                before: snapshot(source.values()),
+                applied: true,
+                requestIndex: postReplayRequests.length,
+              }
+              retirementDelete = deleted
+              providerRows = providerRows.filter(({ id }) => id !== key)
+              installed.delete(key)
+              operations.begin()
+              operations.write({ type: `delete`, key })
+              deleted.applied = operations.commit() === true
+            }
             if (requests.phase === `repair` && history.trigger === `retirement`)
               void startReplay()
           },
@@ -409,6 +440,16 @@ export async function receiveJoinedReplay(
           })
       }
 
+      if (history.retirementWrite) {
+        // An ordinary sync write can install a row served to other demand.
+        const row = providerRows.find(
+          ({ id }) => id === history.retirementWrite!.backgroundKey,
+        )!
+        installed.set(row.id, row)
+        rootSync.begin()
+        rootSync.write({ type: `insert`, value: { ...row } })
+        await rootSync.commit()
+      }
       replay.resolve()
       await flushPromises()
       const afterReplayAnswers = cut()
@@ -490,6 +531,7 @@ export async function receiveJoinedReplay(
         heldRefill,
         postReplayRequests,
         firstRefillReturnedTrue: requests.firstRefillReturnedTrue,
+        retirementDelete,
         rowsAtMoveFulfillment: move.rowsAtFulfillment,
         windowAtMoveFulfillment: move.windowAtFulfillment,
         laterReplay: laterReplayTrace,

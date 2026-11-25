@@ -8842,7 +8842,22 @@ The driver also calls the source's public `reload()` during a held repair.
 Reload leaves the old rows in the source until the new adapter applies its
 writes. With the replacement prefix deliberately short, both receivers must
 start a refill after the replay and keep the preceding window until it
-settles. Explicit truncate remains a control in the same property.
+settles. Explicit truncate remains a control in the same property. The
+short-window histories reject an unbounded, unkeyed root read while their finite
+provider ranks still permit a bounded refill.
+
+A replay started by lease retirement can itself retire a lease before the
+loader establishes a new boundary. The receiving oracle delivers a provider
+delete from that unload, after replay rows and an unrelated tail write have
+applied. A joined filter rejects the next local rank, so the installed tail can
+conceal a missing earlier provider match. Both receivers keep their previous
+public window while a bounded replacement prefix is held and publish the
+complete replacement when it settles. The driver crosses indexed and
+unindexed sources, one- and two-row windows, and first and last prefix deletes.
+The background-write control keeps the prefix intact. The request-authority
+oracle also reads the request ledger at bounded repair settlement, before a
+later graph pass. A superseded finite rejection requires a covering read at
+that cut when no joined demand or replay holds the chain.
 
 ### Initial Effect acquisition aborted by replay
 
@@ -8851,8 +8866,16 @@ joined source. After truncate, the adapter can leave the aborted initial
 transport unresolved while the replacement's current demands settle.
 The Effect suppresses the initial replay and reports the next ordinary
 matching write, whether the obsolete transport stays pending, fulfills
-later, or rejects later. A ready-at-start twin separates this observation
-from the on-demand source's own readiness status.
+later, or rejects later. The late settlement histories also issue a second
+matching write after the obsolete transport settles. A source reload can
+replace the still-held first replay as well.
+
+The same owner checks a direct and a lazy joined adapter that start a truncate
+before returning literal `true` from their first load. There is no pending
+initial transport to inherit. The current replay still owns suppression and
+the first ordinary write after it must enter. The controls return literal
+`true` without starting a truncate. A ready-at-start twin separates these
+observations from the on-demand source's own readiness status.
 
 ### Effect callback diagnostics
 

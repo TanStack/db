@@ -532,6 +532,7 @@ type AuthorityObservation = {
   // Such failures where the strand law was checkable: no own failure since
   // the last full-source read.
   checkedStrandPremises: number
+  coveringReadHandoffs: number
   // Superseded requests that failed after their repair finished while a
   // newer invalidation's reaction was deferred.
   deferredStrandShapes: number
@@ -1221,6 +1222,7 @@ async function checkAuthorityCase(
   let startThrows = 0
   let identityViolation: string | undefined
   let requestErrorChecks = 0
+  let coveringReadHandoffs = 0
   // A request may fail, but the loader's own transition table must never
   // reject a move: that is a broken rule, wherever it surfaces.
   let invariantViolation: string | undefined
@@ -1911,6 +1913,27 @@ async function checkAuthorityCase(
     }
     const chainMember = request.authoritative && !request.fullSource
     const before = ledger.length
+    const snapshotAtSettlement = truncates
+    const chain =
+      request.chain === undefined ? undefined : ledger[request.chain]
+    // A superseded finite answer can leave partial writes. When the
+    // current bounded repair settles, it owes a covering read in this
+    // settlement, before a separate graph pass can refine or publish.
+    const owesCoveringRead =
+      ok &&
+      !joinedPending &&
+      !truncatePending &&
+      chain !== undefined &&
+      chain.index === currentChain &&
+      request.issuedTruncates === snapshotAtSettlement &&
+      ledger.some(
+        (older) =>
+          older.index < chain.index &&
+          older.outcome === `failed` &&
+          older.superseded &&
+          older.failedAt > chain.issuedAt &&
+          older.issuedTruncates === snapshotAtSettlement,
+      )
     settlingChainMember = chainMember
     settlingRequest = request
     if (ok) request.deferred.resolve()
@@ -1924,6 +1947,22 @@ async function checkAuthorityCase(
     settlingRequest = undefined
     settlingFailure = false
     answeringRepair = false
+    if (
+      owesCoveringRead &&
+      truncates === snapshotAtSettlement &&
+      !disposed &&
+      !truncatePending
+    ) {
+      coveringReadHandoffs++
+      if (!ledger.slice(before).some(({ fullSource }) => fullSource)) {
+        rejectAt(
+          `covering read at repair settlement`,
+          new Error(
+            `The bounded repair settled without starting the covering read owed by the superseded failure`,
+          ),
+        )
+      }
+    }
     // The chain completed in this settlement when it issued no further step:
     // the release belonged to its completion-time retirement.
     if (releaseDuringAnswer) {
@@ -2821,6 +2860,7 @@ async function checkAuthorityCase(
     ).length,
     supersededFailuresAfterRepair,
     checkedStrandPremises,
+    coveringReadHandoffs,
     staleSettlementsAfterRepair,
     deferredStrandShapes,
     releaseFaults,
@@ -4390,6 +4430,7 @@ describe(`Ordered source request authority`, () => {
       // The ordering epoch moved while a repair continuation was owed: the
       // premise of the no-obsolete-step law.
       `continuation-before-epoch-move`,
+      `superseded failure followed by repair settlement`,
     ] as const
     type State = (typeof states)[number]
     let counts = new Map<State, number>()
@@ -4506,7 +4547,7 @@ describe(`Ordered source request authority`, () => {
       law: {
         statement: `holds, retires, and recovers requests under generated settlement orders`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
-        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+        limits: `A controlled subscription records request authority through each step, including whether a covering read starts during repair settlement with no joined or replay hold.`,
       },
       owns: [
         'src/collection/index.ts#createCollection',
@@ -4519,11 +4560,14 @@ describe(`Ordered source request authority`, () => {
         arbitrary: authorityCaseArbitrary,
         runs: 10000,
         fixedSeeds: [20261016],
+        measured: [`superseded failure followed by repair settlement`],
       },
       model: (history, observations) =>
         recordedComparison(history, observations),
-      driver: async (history, observe) =>
-        observeComparison(history, observe, async () => {
+      driver: async (history, observe) => {
+        const coveringReadState = `superseded failure followed by repair settlement`
+        let reachedCoveringRead = false
+        await observeComparison(history, observe, async () => {
           executed++
           const entered = new Set<State>()
           const enter = (state: State) => {
@@ -4555,6 +4599,10 @@ describe(`Ordered source request authority`, () => {
           }
           if (observation.epochMovesWithContinuation > 0)
             enter(`continuation-before-epoch-move`)
+          if (observation.coveringReadHandoffs > 0) {
+            reachedCoveringRead = true
+            enter(coveringReadState)
+          }
           if (observation.requestErrorChecks > 0) {
             enter(`current-request-error`)
             if (observation.releaseFaults > 0)
@@ -4573,7 +4621,9 @@ describe(`Ordered source request authority`, () => {
           for (const key of Object.keys(later) as Array<keyof typeof later>) {
             later[key] += observation[key]
           }
-        }),
+        })
+        if (reachedCoveringRead) observe(`reach`, coveringReadState)
+      },
       check: (_history, _observations, verdict) => verdict,
       timeout: 120_000,
     })
