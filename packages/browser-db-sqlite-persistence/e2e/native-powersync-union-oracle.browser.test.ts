@@ -2,10 +2,7 @@
 /** Actual Chromium SQLite receives the same generated predicate-union law. */
 import { afterAll, beforeAll } from 'vitest'
 import { registerDemandUnion } from '../../powersync-db-collection/tests/demand-union-oracle-suite'
-import {
-  captureBrowserHistory,
-  startAdapterChromium,
-} from '../tests/adapter-chromium-host'
+import { startAdapterChromium } from '../tests/adapter-chromium-host'
 
 let browser: Awaited<ReturnType<typeof startAdapterChromium>> | undefined
 beforeAll(async () => {
@@ -23,8 +20,8 @@ registerDemandUnion(
     const host = browser
     if (!host)
       throw new Error(`Native Chromium union receiving host did not start`)
-    return captureBrowserHistory(host, () =>
-      host.page.evaluate(
+    return host.captureFreshHistory((page) =>
+      page.evaluate(
         ({ history: input, id: key }) =>
           window.runNativePowerSyncUnion(input, key),
         { history, id },

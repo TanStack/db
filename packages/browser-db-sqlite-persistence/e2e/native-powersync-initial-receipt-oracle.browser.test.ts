@@ -6,10 +6,7 @@
  */
 import { afterAll, beforeAll } from 'vitest'
 import { registerInitialReceiptConformance } from '../../powersync-direct-collection/tests/initial-receipt-oracle-suite'
-import {
-  captureBrowserHistory,
-  startAdapterChromium,
-} from '../tests/adapter-chromium-host'
+import { startAdapterChromium } from '../tests/adapter-chromium-host'
 import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
 
 let browser: Awaited<ReturnType<typeof startAdapterChromium>> | undefined
@@ -31,8 +28,8 @@ const receive = async (
   const host = browser
   if (!host)
     throw new Error(`Chromium native receipt receiving host did not start`)
-  const result = await captureBrowserHistory(host, () =>
-    host.page.evaluate(
+  const result = await host.captureFreshHistory((page) =>
+    page.evaluate(
       ({ history: input, id, fault }) =>
         window.runNativePowerSyncInitialReceipt(input, id, fault),
       {

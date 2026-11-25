@@ -4,8 +4,24 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createServer } from 'vite'
 import { chromium } from '@playwright/test'
-import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
+import {
+  retainOracleCleanupObservation,
+  withOracleCleanup,
+} from '../../db/tests/oracle-cleanup'
 import type { PluginOption } from 'vite'
+import type { Page } from '@playwright/test'
+
+function assertBrowserStartup(errors: ReadonlyArray<string>) {
+  if (!errors.length) return
+  const failures = errors.map((message) => new Error(message))
+  throw new AggregateError(
+    failures,
+    `Browser startup failed: ${errors.join(`; `)}`,
+    {
+      cause: failures[0],
+    },
+  )
+}
 
 export async function startAdapterChromium({
   entry = `/packages/browser-db-sqlite-persistence/e2e/trailbase-lifecycle.html`,
@@ -82,20 +98,31 @@ export async function startAdapterChromium({
     if (!address || typeof address === `string`) throw new Error(`No Vite port`)
     await page.goto(`http://127.0.0.1:${address.port}${entry}`)
     await page.waitForFunction((name) => name in window, ready)
-    if (errors.length) {
-      const failures = errors.map((message) => new Error(message))
-      throw new AggregateError(
-        failures,
-        `Browser startup failed: ${errors.join(`; `)}`,
-        {
-          cause: failures[0],
-        },
-      )
-    }
+    assertBrowserStartup(errors)
     return {
       page,
       errors,
       watchedPaths: () => server!.watcher.getWatched(),
+      async captureFreshHistory<
+        T extends { cleanupErrors?: ReadonlyArray<string> },
+      >(record: (page: Page) => Promise<T>) {
+        // Default SDK SharedWorkers can outlive database.close(). Independent
+        // histories must release their document, including after setup fails.
+        const historyContext = await browser!.newContext()
+        const historyHost = { errors: [] as Array<string> }
+        return captureBrowserHistory(historyHost, () =>
+          retainOracleCleanupObservation(async () => {
+            const freshPage = await historyContext.newPage()
+            freshPage.on(`pageerror`, (error) =>
+              historyHost.errors.push(error.message),
+            )
+            await freshPage.goto(page.url())
+            await freshPage.waitForFunction((name) => name in window, ready)
+            assertBrowserStartup(historyHost.errors)
+            return record(freshPage)
+          }, [() => historyContext.close()]),
+        )
+      },
       async close() {
         await withOracleCleanup(
           () => browser!.close(),

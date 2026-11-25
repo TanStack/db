@@ -597,6 +597,11 @@ const ownerGroups: ReadonlyArray<
     `sql-recording`,
   ],
   [
+    `browser-db-sqlite-persistence/tests/native-browser-context-oracle.test.ts`,
+    `adapter-browser`,
+    `native-context`,
+  ],
+  [
     `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
     `persistence`,
     `crossed-leadership-index`,

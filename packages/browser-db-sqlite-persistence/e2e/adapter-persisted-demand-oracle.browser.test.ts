@@ -6,6 +6,7 @@ import {
   captureBrowserHistory,
   startAdapterChromium,
 } from '../tests/adapter-chromium-host'
+import type { Page } from '@playwright/test'
 
 let browser: Awaited<ReturnType<typeof startAdapterChromium>> | undefined
 beforeAll(async () => {
@@ -30,13 +31,15 @@ for (const [property, name] of Object.entries(profiles)) {
     async (history, id) => {
       const active = browser
       if (!active) throw new Error(`Receiving browser did not start`)
-      return captureBrowserHistory(active, () =>
-        active.page.evaluate(
+      const record = (page: Page) =>
+        page.evaluate(
           ({ name: adapter, history: input, id: collectionId }) =>
             window.runAdapterPersistedDemand(adapter, input, collectionId),
           { name, history, id },
-        ),
-      )
+        )
+      return name === `powersync`
+        ? active.captureFreshHistory(record)
+        : captureBrowserHistory(active, () => record(active.page))
     },
     {
       owns: [

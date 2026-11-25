@@ -9213,6 +9213,22 @@ failure's exact cause remains unconfirmed. Calling renderer preload before a
 grant does not prove that its managed claim already reached the main process;
 this follow-up establishes no stronger admission premise.
 
+### Native browser receiving context ownership
+
+`browser-db-sqlite-persistence/tests/native-browser-context-oracle.test.ts`
+owns bounded worker release between independent native receiving histories.
+An independent zero-worker model checks actual Chromium targets after complete
+SQLite histories; the shared native decoder judgment still checks their values.
+Two declared states have five builders and explicitly bound missing-state
+controls. The original shared-page helper fails, while fresh contexts preserve
+the default SDK path and release its SharedWorkers. Decoder/mutation, hook,
+receipt, union and native saved-demand receivers use one context per complete
+history. Their within-history restarts and storage reopens remain intact.
+The [evidence record](oracle-reviews/2026-11-24-native-browser-contexts.md)
+separates the proven resource accumulation from the unconfirmed cause of CI
+runner shutdowns. Limits: a dedicated browser, bounded completed native decoder
+histories, no claim about arbitrary SDK or hosted-runner resource behavior.
+
 ### External review at c366c65d3
 
 The [review evaluation](oracle-reviews/2026-11-24-pr2446-c366-review.md)

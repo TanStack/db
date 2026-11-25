@@ -2,10 +2,7 @@
 /** Real browser SQLite receives the same generated native hook lifecycle law. */
 import { afterAll, beforeAll } from 'vitest'
 import { registerPowerSyncHooks } from '../../powersync-db-collection/tests/hook-lifecycle-oracle-suite'
-import {
-  captureBrowserHistory,
-  startAdapterChromium,
-} from '../tests/adapter-chromium-host'
+import { startAdapterChromium } from '../tests/adapter-chromium-host'
 
 let browser: Awaited<ReturnType<typeof startAdapterChromium>> | undefined
 beforeAll(async () => {
@@ -24,8 +21,8 @@ registerPowerSyncHooks(
     const host = browser
     if (!host)
       throw new Error(`Native Chromium hook receiving host did not start`)
-    const observed = await captureBrowserHistory(host, () =>
-      host.page.evaluate(
+    const observed = await host.captureFreshHistory((page) =>
+      page.evaluate(
         ({ history: input, id: key }) =>
           window.runNativePowerSyncHooks(input, key),
         { history, id },

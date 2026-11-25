@@ -97,3 +97,80 @@ it.each(receivers)(
   },
   120_000,
 )
+
+it.each([`completed`, `record`, `startup`] as const)(
+  `preserves the %s history result when context teardown fails`,
+  async (phase) => {
+    const host = await startAdapterChromium({
+      entry: `/packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.html`,
+      ready: `runNativePowerSyncBatchDecode`,
+    })
+    const browser = host.page.context().browser()!
+    const newContext = browser.newContext.bind(browser)
+    const primary = new Error(`injected ${phase} failure`)
+    const cleanup = new Error(`injected context close failure`)
+    let closed = 0
+    browser.newContext = async (options) => {
+      const context = await newContext(options)
+      const close = context.close.bind(context)
+      if (phase === `startup`) {
+        const newPage = context.newPage.bind(context)
+        context.newPage = async () => {
+          const page = await newPage()
+          page.goto = () => Promise.reject(primary)
+          return page
+        }
+      }
+      context.close = async () => {
+        if (phase === `completed`) {
+          const page = context.pages()[0]!
+          const event = page.waitForEvent(`pageerror`)
+          await page.evaluate(() => {
+            setTimeout(() => {
+              throw new Error(`context teardown page error`)
+            }, 0)
+          })
+          await event
+        }
+        await close()
+        closed++
+        throw cleanup
+      }
+      return context
+    }
+    await withOracleCleanup(async () => {
+      const operation = () =>
+        host.captureFreshHistory(() =>
+          phase === `record`
+            ? Promise.reject(primary)
+            : Promise.resolve({
+                marker: `completed mismatch`,
+                cleanupErrors: [],
+              }),
+        )
+      if (phase === `completed`) {
+        const result = await operation()
+        expect(result.marker).toBe(`completed mismatch`)
+        expect(result.cleanupErrors.join(` `)).toContain(cleanup.message)
+        expect(result.browserErrors).toContain(`context teardown page error`)
+      } else {
+        let failure: unknown
+        try {
+          await operation()
+        } catch (error) {
+          failure = error
+        }
+        expect(failure).toBeInstanceOf(AggregateError)
+        expect((failure as AggregateError).cause).toBe(primary)
+        expect((failure as AggregateError).errors).toEqual([primary, cleanup])
+      }
+      expect(closed).toBe(1)
+    }, [
+      () => {
+        browser.newContext = newContext
+      },
+      () => host.close(),
+    ])
+  },
+  120_000,
+)

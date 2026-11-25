@@ -594,6 +594,7 @@ const staticOracleProperties = [
   `adapter.powersync.demand-union.chromium`,
   `adapter.powersync.batch-decode`,
   `adapter.powersync.batch-decode.chromium`,
+  `adapter-browser.native-context`,
   `adapter.powersync.batch-decode.mutations`,
   `adapter.powersync.batch-decode.mutations.chromium`,
   `adapter.electric.initial-receipt.controlled`,
