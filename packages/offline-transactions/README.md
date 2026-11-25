@@ -138,6 +138,7 @@ interface OfflineConfig {
   onUnknownMutationFn?: (name: string, tx: OfflineTransaction) => void
   onLeadershipChange?: (isLeader: boolean) => void
   onlineDetector?: OnlineDetector
+  followerWrites?: 'online' | 'durable'
 }
 ```
 
@@ -217,14 +218,14 @@ mutation function after restart; an unmarked row may replay.
 
 #### Properties
 
-- `isOfflineEnabled: boolean` - Whether this tab can persist offline transactions
+- `isOfflineEnabled: boolean` - Whether this tab leads and processes the outbox. With `followerWrites: 'durable'`, an initialized follower can also save writes while this is `false`
 
 #### Methods
 
 - `createOfflineTransaction(options)` - Create a manual offline transaction
 - `waitForTransactionCompletion(id)` - Wait for a specific transaction to complete. Call it before the transaction settles: a waiter for a transaction that this executor recently settled (one of its last 1,000) rejects. A waiter for an older settled id keeps waiting. A waiter for an id the executor does not know yet keeps waiting, because another tab can still queue that transaction.
-- `removeFromOutbox(id)` - Manually remove transaction from outbox. A removed transaction that has not started does not run, and with `followerWrites: 'durable'` its writer's transaction fails
-- `clearOutbox()` - Manually remove all outbox transactions
+- `removeFromOutbox(id)` - Manually remove transaction from outbox. A removed transaction that has not started does not run, and its writer's transaction fails, also in another tab with `followerWrites: 'durable'`
+- `clearOutbox()` - Manually remove all outbox transactions, with the same effect on each
 - `peekOutbox()` - View all pending transactions
 - `dispose()` - Stop new processing and release executor resources. Pending durable transactions and optimistic state on surviving Collections remain live.
 

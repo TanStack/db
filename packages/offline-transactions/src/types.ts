@@ -170,6 +170,13 @@ export interface TransactionSignaler {
   readonly isOfflineEnabled: boolean
   /** Counts leadership gains; absent for a signaler that never changes. */
   readonly leadershipTerm?: number
+  /** Rejections are recorded for writers in other tabs. */
+  readonly recordsOutcomes?: boolean
+  /**
+   * Whether this tab made the transaction and waits for it. Another tab's
+   * writer needs a recorded rejection; this tab's own does not.
+   */
+  ownsWrite?: (transactionId: string) => boolean
   resolveTransaction: (transactionId: string, result: any) => void
   rejectTransaction: (
     transactionId: string,

@@ -31,6 +31,12 @@ export class TransactionExecutor {
   private fatalError: Error | null = null
   // Writes beforeRetry excluded whose rejection cleanup has not finished.
   private readonly excluding = new Set<string>()
+  // Excluded writes whose cleanup failed, with their rejection. Retried on a
+  // timer and on connectivity, outside the queue, while this tab leads.
+  private readonly failedCleanups = new Map<string, Error>()
+  private cleanupTimer: ReturnType<typeof setTimeout> | null = null
+  private cleanupAttempts = 0
+  private cleaning = false
 
   constructor(
     scheduler: KeyScheduler,
@@ -337,11 +343,11 @@ export class TransactionExecutor {
           }
         }
       }
-      // A follower that wrote this transaction and misses the settlement
-      // message reads a rejection here; a write with no record completed.
+      // A writer in another tab that misses the settlement message reads a
+      // rejection here; a write with no record completed.
       if (
-        this.config.followerWrites === `durable` &&
-        transaction.outboxPhase === `rejection-pending`
+        transaction.outboxPhase === `rejection-pending` &&
+        this.recordsFor(transaction.id)
       ) {
         try {
           await this.outbox.recordRejection(
@@ -407,9 +413,13 @@ export class TransactionExecutor {
 
   async loadPendingTransactions(): Promise<void> {
     let removedIds: Array<string> = []
+    const term = this.offlineExecutor.leadershipTerm
     await this.outbox.withAll((transactions) => {
       const { isOfflineEnabled } = this.offlineExecutor
-      if (!isOfflineEnabled) return
+      // A read that spans a change of leadership is stale: another leader
+      // may have sent its rows, and this term's own load reads them again.
+      if (!isOfflineEnabled || term !== this.offlineExecutor.leadershipTerm)
+        return
       const providerPending = transactions.filter(
         (transaction) => !transaction.outboxPhase,
       )
@@ -459,24 +469,75 @@ export class TransactionExecutor {
       const error = new NonRetriableError(`Transaction excluded by beforeRetry`)
       await Promise.all(
         removedIds.map(async (id) => {
-          try {
-            if (this.config.followerWrites === `durable`)
-              await this.outbox.recordRejection(id, error)
-            await this.outbox.remove(id)
-            this.excluding.delete(id)
-            this.offlineExecutor.rejectTransaction(id, error)
-          } catch (cleanupError) {
-            // The row stays for a later replay to decide; until then no
-            // admission runs it.
-            console.warn(
-              `Failed to remove transaction excluded by beforeRetry:`,
-              id,
-              cleanupError,
-            )
-          }
+          if (await this.cleanUpExcluded(id, error)) return
+          // Until the retry succeeds, no admission runs it.
+          this.failedCleanups.set(id, error)
+          this.scheduleCleanupRetry()
         }),
       )
     }
+  }
+
+  /** Records and removes one excluded write; false when that failed. */
+  private async cleanUpExcluded(id: string, error: Error): Promise<boolean> {
+    try {
+      if (this.recordsFor(id)) await this.outbox.recordRejection(id, error)
+      await this.outbox.remove(id)
+      this.excluding.delete(id)
+      this.offlineExecutor.rejectTransaction(id, error)
+      return true
+    } catch (cleanupError) {
+      console.warn(
+        `Failed to remove transaction excluded by beforeRetry:`,
+        id,
+        cleanupError,
+      )
+      return false
+    }
+  }
+
+  // Only a writer in another tab, which shares the channel, reads a record.
+  private recordsFor(id: string): boolean {
+    return (
+      this.offlineExecutor.recordsOutcomes === true &&
+      !this.offlineExecutor.ownsWrite?.(id)
+    )
+  }
+
+  private scheduleCleanupRetry(): void {
+    if (this.cleanupTimer || this.failedCleanups.size === 0) return
+    this.cleanupTimer = setTimeout(() => {
+      this.cleanupTimer = null
+      this.cleanupAttempts++
+      void this.retryFailedCleanups()
+    }, this.retryPolicy.calculateDelay(this.cleanupAttempts))
+  }
+
+  /** Retries the cleanups of excluded writes, without calling the provider. */
+  async retryFailedCleanups(): Promise<void> {
+    if (this.cleaning || !this.offlineExecutor.isOfflineEnabled) return
+    this.cleaning = true
+    try {
+      for (const [id, error] of [...this.failedCleanups]) {
+        // A change of leadership drops the rest; the next replay owns them.
+        if (!this.failedCleanups.has(id)) continue
+        if (!(await this.cleanUpExcluded(id, error))) continue
+        // A change of leadership during the attempt already dropped it.
+        this.failedCleanups.delete(id)
+      }
+    } finally {
+      this.cleaning = false
+    }
+    // A change of leadership or a disposal emptied the map.
+    if (this.failedCleanups.size === 0) this.cleanupAttempts = 0
+    else this.scheduleCleanupRetry()
+  }
+
+  private dropFailedCleanups(): void {
+    this.failedCleanups.clear()
+    this.cleanupAttempts = 0
+    if (this.cleanupTimer) clearTimeout(this.cleanupTimer)
+    this.cleanupTimer = null
   }
 
   /**
@@ -563,11 +624,13 @@ export class TransactionExecutor {
   clear(): void {
     this.scheduler.clear()
     this.clearRetryTimer()
+    this.dropFailedCleanups()
   }
 
   pause(): void {
     // Retain queued work and let the issued call finish its acknowledgment.
     this.clearRetryTimer()
+    this.dropFailedCleanups()
   }
 
   /**
@@ -579,6 +642,8 @@ export class TransactionExecutor {
       this.scheduler.getAllPendingTransactions().map(({ id }) => id),
     )
     this.clearRetryTimer()
+    // The next leader's replay excludes these writes again.
+    this.dropFailedCleanups()
   }
 
   getPendingCount(): number {

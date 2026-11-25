@@ -8,7 +8,7 @@ import { IndexedDBAdapter } from './storage/IndexedDBAdapter'
 import { LocalStorageAdapter } from './storage/LocalStorageAdapter'
 
 // Core components
-import { OutboxManager } from './outbox/OutboxManager'
+import { OUTCOME_RETENTION_MS, OutboxManager } from './outbox/OutboxManager'
 import { KeyScheduler } from './executor/KeyScheduler'
 import { TransactionExecutor } from './executor/TransactionExecutor'
 
@@ -53,6 +53,10 @@ function outboxMessageError(error: { name: string; message: string }): Error {
       : new Error(error.message)
   restored.name = error.name
   return restored
+}
+
+function removedError(): Error {
+  return new NonRetriableError(`Transaction removed from the outbox`)
 }
 
 /** How many settled ids an executor remembers to reject late waiters. */
@@ -110,14 +114,17 @@ export class OfflineExecutor {
   private outboxChannelName: string | null = null
   private initialized = false
   private term = 0
+  // Saves in progress; true once removeFromOutbox or clearOutbox removed one.
+  private readonly saving = new Map<string, boolean>()
   private pendingTransactionPromises: Map<
     string,
     {
       promise: Promise<any>
       resolve: (result: any) => void
       reject: (error: Error) => void
-      // Set once a follower's save starts; resolves to whether it succeeded.
+      // Set once this tab's save starts; resolves to whether it succeeded.
       saved?: Promise<boolean>
+      savedAt?: number
     }
   > = new Map()
 
@@ -291,6 +298,7 @@ export class OfflineExecutor {
       if (this.isOfflineEnabled && this.executor) {
         this.executor.resetRetryDelays()
         this.retryAdmissions()
+        void this.executor.retryFailedCleanups()
 
         if (this.scheduler.getPendingCount() > 0) {
           const barrierPromise = this.executor.executeAll()
@@ -391,6 +399,10 @@ export class OfflineExecutor {
     } catch (error) {
       console.warn(`Failed to initialize offline executor:`, error)
       // A failed start releases what it opened, without waiting for dispose().
+      this.unsubscribeOnline?.()
+      this.unsubscribeOnline = null
+      this.unsubscribeLeadership?.()
+      this.unsubscribeLeadership = null
       this.outboxChannel?.close()
       this.outboxChannel = null
       this.leaderElection?.releaseLeadership()
@@ -405,6 +417,13 @@ export class OfflineExecutor {
 
     // Startup must observe a failed read instead of reporting an empty outbox.
     await this.executor.loadPendingTransactions()
+    // Outcomes no writer read within the retention window go.
+    if (this.recordsOutcomes)
+      this.outbox!.pruneOutcomes(Date.now() - OUTCOME_RETENTION_MS).catch(
+        (error) => {
+          console.warn(`Failed to prune outcome records:`, error)
+        },
+      )
 
     // A leader that closed can leave a removed row with an undelivered outcome.
     if (this.outboxChannel) {
@@ -468,9 +487,19 @@ export class OfflineExecutor {
 
   // Every tab hears a settlement; only the writer removes its outcome record.
   private settleFollowerWrite(id: string, error?: Error): void {
-    const own = this.pendingTransactionPromises.has(id)
+    const own = this.ownsWrite(id)
     this.settleTransaction(id, undefined, error)
     if (own) this.outbox!.removeOutcome(id).catch(() => {})
+  }
+
+  /**
+   * This executor, or one in this runtime that it settles, saved the
+   * transaction and waits for it; an observer does not.
+   */
+  ownsWrite(id: string): boolean {
+    return this.settlementOwners(id).some(
+      (owner) => owner.pendingTransactionPromises.get(id)?.saved !== undefined,
+    )
   }
 
   private reconcileFollowerWrites(): void {
@@ -482,6 +511,9 @@ export class OfflineExecutor {
   // row removed with no record completed. A failed read leaves that write
   // pending, and the check runs again when connectivity changes.
   private async settleRemovedWrites(): Promise<void> {
+    // Without recorded outcomes a missing row could be either outcome, so the
+    // waiter keeps waiting for this tab's own settlement.
+    if (!this.recordsOutcomes) return
     const sweep = ++this.sweeps
     let failed = false
     for (const [id, waiter] of [...this.pendingTransactionPromises]) {
@@ -489,6 +521,10 @@ export class OfflineExecutor {
         if (!(await waiter.saved)) continue
         if (await this.outbox!.get(id)) continue
         const error = (await this.outbox!.getOutcome(id))?.error
+        // A record older than the retention window may have been pruned, so
+        // no record cannot mean success.
+        if (!error && Date.now() - waiter.savedAt! > OUTCOME_RETENTION_MS)
+          continue
         this.settleFollowerWrite(id, error && outboxMessageError(error))
       } catch (error) {
         failed = true
@@ -496,6 +532,11 @@ export class OfflineExecutor {
       }
     }
     if (sweep === this.sweeps) this.reconcileFailed = failed
+  }
+
+  /** Rejections are recorded for writers in other tabs. */
+  get recordsOutcomes(): boolean {
+    return this.outboxChannelName !== null
   }
 
   /** Counts later leadership gains, so work begun in an earlier term can tell. */
@@ -522,9 +563,10 @@ export class OfflineExecutor {
     error: Error | undefined,
     own: boolean,
   ): void {
+    // This tab's own rejected write needs no record for another tab.
+    if (own && this.recordsOutcomes)
+      this.outbox?.removeOutcome(id).catch(() => {})
     if (this.outboxChannel) {
-      // This tab's own rejected write needs no record for another tab.
-      if (own) this.outbox!.removeOutcome(id).catch(() => {})
       this.outboxChannel.postMessage({
         type: `settled`,
         id,
@@ -642,11 +684,27 @@ export class OfflineExecutor {
         this.executor.assertHealthy()
       const saved = this.outbox.add(transaction)
       // The transaction registered this waiter before it asked to persist.
-      this.pendingTransactionPromises.get(transaction.id)!.saved = saved.then(
+      const waiter = this.pendingTransactionPromises.get(transaction.id)!
+      waiter.savedAt = Date.now()
+      waiter.saved = saved.then(
         () => true,
         () => false,
       )
-      await saved
+      this.saving.set(transaction.id, false)
+      let removed: boolean | undefined
+      try {
+        await saved
+      } finally {
+        removed = this.saving.get(transaction.id)
+        this.saving.delete(transaction.id)
+      }
+      if (removed) {
+        // Removed while it was saved: a row that landed after the removal
+        // goes too, and the write never runs.
+        await this.outbox.remove(transaction.id)
+        this.rejectTransaction(transaction.id, removedError())
+        return
+      }
       if (!this.isOfflineEnabled) {
         this.announceAdded(transaction.id)
         return
@@ -722,7 +780,7 @@ export class OfflineExecutor {
     error: Error,
     announce = true,
   ): void {
-    const own = this.pendingTransactionPromises.has(transactionId)
+    const own = this.ownsWrite(transactionId)
     try {
       this.settleTransaction(transactionId, undefined, error)
     } finally {
@@ -748,28 +806,8 @@ export class OfflineExecutor {
     result: unknown,
     error?: Error,
   ): void {
-    const candidates = new Set<OfflineExecutor>([this])
-    for (const collection of Object.values(this.config.collections)) {
-      for (const owner of completionOwners.get(collection) ?? [])
-        candidates.add(owner)
-    }
     // Select every recipient before publication can reenter this executor.
-    const owners = [...candidates].filter(
-      (owner) =>
-        owner === this ||
-        ((owner.pendingTransactionPromises.has(transactionId) ||
-          owner.restorationTransactions.has(transactionId)) &&
-          // Either executor may deliver the outcome: a retired issued call or
-          // its successor's replay. An ancillary overlap alone is insufficient.
-          (retainsCollections(
-            this.config.collections,
-            owner.config.collections,
-          ) ||
-            retainsCollections(
-              owner.config.collections,
-              this.config.collections,
-            ))),
-    )
+    const owners = this.settlementOwners(transactionId)
 
     const cleanupErrors: Array<unknown> = []
     for (const owner of owners) {
@@ -795,6 +833,31 @@ export class OfflineExecutor {
       }
     }
     if (cleanupErrors.length > 0) throw cleanupErrors[0]
+  }
+
+  /** The executors in this runtime that receive this transaction's outcome. */
+  private settlementOwners(transactionId: string): Array<OfflineExecutor> {
+    const candidates = new Set<OfflineExecutor>([this])
+    for (const collection of Object.values(this.config.collections)) {
+      for (const owner of completionOwners.get(collection) ?? [])
+        candidates.add(owner)
+    }
+    return [...candidates].filter(
+      (owner) =>
+        owner === this ||
+        ((owner.pendingTransactionPromises.has(transactionId) ||
+          owner.restorationTransactions.has(transactionId)) &&
+          // Either executor may deliver the outcome: a retired issued call or
+          // its successor's replay. An ancillary overlap alone is insufficient.
+          (retainsCollections(
+            this.config.collections,
+            owner.config.collections,
+          ) ||
+            retainsCollections(
+              owner.config.collections,
+              this.config.collections,
+            ))),
+    )
   }
 
   // Method for TransactionExecutor to register restoration transactions
@@ -838,16 +901,39 @@ export class OfflineExecutor {
     if (!this.outbox) {
       return
     }
-    // A follower that saved this write and has not heard an outcome must not
-    // read the removal as success.
-    if (this.outboxChannelName !== null && (await this.outbox.get(id)))
-      await this.outbox.recordRejection(
-        id,
-        new NonRetriableError(`Transaction removed from the outbox`),
-      )
-    await this.outbox.remove(id)
+    await this.removeSaved([id])
+  }
+
+  /**
+   * Removes saved transactions. A write that has not started fails with a
+   * removal error, which a writer in another tab also reads from its record;
+   * a started call keeps the provider's outcome.
+   */
+  private async removeSaved(ids: Array<string>): Promise<void> {
+    const outbox = this.outbox!
+    const error = removedError()
+    const present = new Set(
+      (
+        await Promise.all(
+          ids.map(async (id) => ((await outbox.has(id)) ? id : null)),
+        )
+      ).filter((id): id is string => id !== null),
+    )
+    await Promise.all(
+      [...present].map(async (id) => {
+        if (
+          this.recordsOutcomes &&
+          !this.ownsWrite(id) &&
+          !this.scheduler.isRunning(id)
+        )
+          await outbox.recordRejection(id, error)
+      }),
+    )
+    await outbox.removeMany(ids)
+    for (const id of ids) if (this.saving.has(id)) this.saving.set(id, true)
     // A removed transaction that has not started does not run.
-    this.scheduler.removePendingTransactions([id])
+    for (const id of this.scheduler.removePendingTransactions(ids))
+      if (present.has(id)) this.rejectTransaction(id, error)
   }
 
   async peekOutbox(): Promise<Array<OfflineTransaction>> {
@@ -861,7 +947,7 @@ export class OfflineExecutor {
     if (!this.outbox || !this.executor) {
       return
     }
-    await this.outbox.clear()
+    await this.removeSaved(await this.outbox.ids())
     this.executor.clear()
   }
 

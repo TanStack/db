@@ -13,7 +13,17 @@ import type { Collection } from '@tanstack/db'
 export class OutboxTransactionNotFoundError extends Error {}
 
 /** A rejected transaction's error, kept for a writer in another tab. */
-export type OutboxOutcome = { error: { name: string; message: string } }
+export type OutboxOutcome = {
+  error: { name: string; message: string }
+  // When it was recorded, so an outcome no writer reads can be pruned.
+  at: number
+}
+
+/**
+ * How long an outcome record outlives its row. A writer that saved its write
+ * longer ago than this cannot read a missing record as success.
+ */
+export const OUTCOME_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 
 export class OutboxManager {
   private storage: StorageAdapter
@@ -117,6 +127,7 @@ export class OutboxManager {
   async recordRejection(id: string, error: Error): Promise<void> {
     const outcome: OutboxOutcome = {
       error: { name: error.name, message: error.message },
+      at: Date.now(),
     }
     await this.storage.set(
       `${this.outcomePrefix}${id}`,
@@ -131,6 +142,30 @@ export class OutboxManager {
 
   async removeOutcome(id: string): Promise<void> {
     await this.storage.delete(`${this.outcomePrefix}${id}`)
+  }
+
+  /** Removes outcome records made before `before`. */
+  async pruneOutcomes(before: number): Promise<void> {
+    const keys = (await this.storage.keys()).filter((key) =>
+      key.startsWith(this.outcomePrefix),
+    )
+    for (const key of keys) {
+      const data = await this.storage.get(key)
+      if (data !== null && (JSON.parse(data) as OutboxOutcome).at < before)
+        await this.storage.delete(key)
+    }
+  }
+
+  /** Whether a row is saved, without decoding it. */
+  async has(id: string): Promise<boolean> {
+    return (await this.storage.get(this.getStorageKey(id))) !== null
+  }
+
+  /** Ids of the saved transactions, without reading them. */
+  async ids(): Promise<Array<string>> {
+    return (await this.storage.keys())
+      .filter((key) => key.startsWith(this.keyPrefix))
+      .map((key) => key.slice(this.keyPrefix.length))
   }
 
   async getAll(): Promise<Array<OfflineTransaction>> {
