@@ -105,3 +105,29 @@ CI subsequently caught an invalid replay-manifest tuple: an empty suffix added
 a trailing dot to the property ID. Splitting the tuple into its actual prefix
 and suffix repairs registration. The complete `db/tests/oracle-replay.test.ts`
 suite passes 124 tests with no type errors after that mechanical correction.
+
+## Adapter receiver runner shutdown
+
+CI on `3c11391ff` passed all 31 other checks, including actual desktop Electron,
+the Node 22 matrix and the aggregate Test gate. The adapter-browser runner
+received an external shutdown signal after 65 minutes. Its log still showed
+generated native PowerSync decoder histories progressing immediately before
+shutdown, with no assertion failure. The aggregate E2E gate correctly failed.
+This is infrastructure evidence, not a semantic GREEN result or an identified
+library defect. Earlier attempts also recorded runner failures.
+
+The E2E workflow now partitions the same receiver command with Vitest's
+`--shard=1/4` through `--shard=4/4`. All four matrix jobs remain dependencies
+of the aggregate E2E gate. Each shard gets a separate runner and artifact name.
+The file selection, models, comparisons, campaigns, construction counts and
+budgets are unchanged. No library production code changes.
+
+An actual Vitest CLI discovery run selected the full 34-file receiver portfolio
+exactly once across the four shards (9, 9, 8 and 8 files). The witness used a
+nonmatching test-name filter and compared the four JSON reports' `testResults`
+against the unsharded file inventory. It proves partition completeness only:
+the 5,918 discovered tests were deliberately skipped in that local witness.
+`vitest list --filesOnly` ignores the shard flag in this installed version, so
+the initial list-only attempt supplies no partition evidence. Workflow YAML
+parsing and formatting also pass. CI must still supply each shard's semantic
+result before merge.
